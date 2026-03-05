@@ -48,22 +48,35 @@ const TopicFormPage = () => {
     try {
       const selectedChar = characters.find(c => c.id === selectedCharacterId);
       
+      const authorName = selectedChar
+        ? selectedChar.name
+        : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User');
+
       const topicData = {
         category_id: categoryId,
         title,
         description,
         author_id: user.uid,
-        author_name: selectedChar ? selectedChar.name : (profile?.email?.split('@')[0] || 'User'),
-        author_avatar: selectedChar ? selectedChar.avatar_url : (user?.photoURL || ''),
+        author_name: authorName,
+        author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || user?.photoURL || ''),
+        author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
+        author_role_id: profile?.role_id || 'player',
         is_character: !!selectedChar
       };
 
       const firstPostData = {
         content,
         author_id: user.uid,
-        author_name: topicData.author_name,
+        author_name: authorName,
         author_avatar: topicData.author_avatar,
-        is_character: topicData.is_character
+        author_status_line: topicData.author_status_line,
+        author_role_id: topicData.author_role_id,
+        is_character: topicData.is_character,
+        character_title: selectedChar?.title || '',
+        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
+        show_footer: selectedChar
+          ? (selectedChar.show_footer !== false)
+          : (profile?.settings?.show_footer !== false)
       };
 
       await createTopic(topicData, firstPostData);
@@ -138,7 +151,7 @@ const TopicFormPage = () => {
                 onChange={(e) => setSelectedCharacterId(e.target.value)}
                 className="bg-light"
               >
-                <option value="">User: {profile?.email?.split('@')[0] || t('nav.profile')}</option>
+                <option value="">User: {profile?.nickname || profile?.email?.split('@')[0] || t('nav.profile')}</option>
                 {characters.map(char => (
                   <option key={char.id} value={char.id}>
                     Character: {char.name}

@@ -19,7 +19,7 @@ const ProfilePage = () => {
   // Form State for User Account
   const [accountFormData, setAccountFormData] = useState({
     nickname: '',
-    status: '',
+    status_line: '',
     avatar_url: '',
     theme: 'dark',
     language: 'en',
@@ -56,7 +56,7 @@ const ProfilePage = () => {
     if (profile && profile.uid === uid) {
       setAccountFormData({
         nickname: profile.nickname || profile.displayName || '',
-        status: profile.status || '',
+        status_line: profile.status_line || '',
         avatar_url: profile.avatar_url || profile.photoURL || '',
         theme: profile.settings?.theme || 'dark',
         language: profile.settings?.language || 'en',
@@ -108,7 +108,7 @@ const ProfilePage = () => {
     try {
       const updates = {
         nickname: accountFormData.nickname,
-        status: accountFormData.status,
+        status_line: accountFormData.status_line,
         avatar_url: accountFormData.avatar_url,
         settings: {
           theme: accountFormData.theme,
@@ -172,7 +172,7 @@ const ProfilePage = () => {
                   }}
                 />
                 <h4 className="mb-1">{profile?.nickname || 'No Nickname'}</h4>
-                <p className="text-muted small mb-0">{profile?.status || 'No status set'}</p>
+                <p className="text-muted small mb-0">{profile?.status_line || 'No status set'}</p>
               </div>
 
               <div className="mb-3 text-start border-top pt-3">
@@ -280,11 +280,11 @@ const ProfilePage = () => {
                         />
                       </Form.Group>
                       <Form.Group className="mb-3">
-                        <Form.Label className="fw-bold">{t('profile.status')}</Form.Label>
+                        <Form.Label className="fw-bold">{t('profile.status_line')}</Form.Label>
                         <Form.Control 
                           type="text" 
-                          value={accountFormData.status}
-                          onChange={(e) => setAccountFormData({...accountFormData, status: e.target.value})}
+                          value={accountFormData.status_line}
+                          onChange={(e) => setAccountFormData({...accountFormData, status_line: e.target.value})}
                           placeholder="What's on your mind?"
                         />
                       </Form.Group>
