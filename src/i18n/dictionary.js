@@ -60,8 +60,8 @@ export const translations = {
       add_character: "Add Character",
       edit_character: "Edit Character",
       delete_character: "Delete Character",
-      character_name: "Character Name",
-      character_title: "Title (e.g. High Elf Ranger)",
+      character_name: "Name",
+      character_status: "Decorative Status",
       avatar_url: "Avatar URL",
       nickname: "Nickname",
       status_line: "Status Message",
@@ -77,7 +77,16 @@ export const translations = {
       account_role: "Account Role",
       tab_characters: "Characters",
       tab_profile: "Public Profile",
-      tab_settings: "Settings & Signature"
+      tab_settings: "Settings & Signature",
+      upload_file: "Upload File",
+      by_url: "By URL",
+      error_only_images: "Only image files are allowed.",
+      error_file_size: "File must be smaller than 2 MB.",
+      error_upload_failed: "Upload failed. Please try again.",
+      posts_count: "Posts",
+      reputation: "Reputation",
+      view_profile: "Profile",
+      pm: "PM"
     }
   },
   ru: {
@@ -141,8 +150,8 @@ export const translations = {
       add_character: "Создать персонажа",
       edit_character: "Редактировать",
       delete_character: "Удалить",
-      character_name: "Имя персонажа",
-      character_title: "Титул (напр. Лесной эльф)",
+      character_name: "Имя",
+      character_status: "Декоративный статус",
       avatar_url: "Ссылка на аватар",
       nickname: "Никнейм",
       status_line: "Статус",
@@ -158,7 +167,16 @@ export const translations = {
       account_role: "Роль аккаунта",
       tab_characters: "Персонажи",
       tab_profile: "Публичный профиль",
-      tab_settings: "Настройки и подпись"
+      tab_settings: "Настройки и подпись",
+      upload_file: "Загрузить файл",
+      by_url: "По ссылке",
+      error_only_images: "Разрешены только изображения.",
+      error_file_size: "Файл должен быть меньше 2 МБ.",
+      error_upload_failed: "Ошибка загрузки. Попробуйте ещё раз.",
+      posts_count: "Сообщений",
+      reputation: "Репутация",
+      view_profile: "Профиль",
+      pm: "ЛС"
     }
   }
 };

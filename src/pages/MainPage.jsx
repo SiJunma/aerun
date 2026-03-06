@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Badge, Container } from 'react-bootstrap';
+import { Card, Table, Container } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { subscribeToCategories } from '../api/forum';
+import { formatDistanceToNow } from 'date-fns';
+import { ru, enUS } from 'date-fns/locale';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
@@ -12,6 +14,16 @@ const MainPage = () => {
     const unsubscribe = subscribeToCategories(setCategories);
     return () => unsubscribe();
   }, []);
+
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '—';
+    try {
+      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+      return formatDistanceToNow(date, { addSuffix: true, locale: lang === 'ru' ? ru : enUS });
+    } catch {
+      return '—';
+    }
+  };
 
   return (
     <Container className="py-4">
@@ -42,18 +54,43 @@ const MainPage = () => {
                 <td className="text-center align-middle">{cat.topics_count || 0}</td>
                 <td className="text-center align-middle">{cat.posts_count || 0}</td>
                 <td className="align-middle">
-                  {cat.lastPost ? (
-                    <div className="small">
-                      <Link to={`/topic/${cat.lastPost.topicId}`} className="d-block mb-1 fw-bold text-decoration-none transition-hover">
-                        {cat.lastPost.topicTitle}
-                      </Link>
-                      <div className="text-muted">
-                        by <span className="text-secondary">{cat.lastPost.author}</span>
-                        <br />
-                        {cat.lastPost.timestamp}
+                  {cat.last_post_topic_id ? (() => {
+                    const lastVisitKey = `lastVisit_${cat.last_post_topic_id}`;
+                    const lastVisit = localStorage.getItem(lastVisitKey);
+                    const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
+                    const hasUnread = !lastVisit || lastPostMs > parseInt(lastVisit, 10);
+                    return (
+                      <div className="small">
+                        <Link
+                          to={`/topic/${cat.last_post_topic_id}`}
+                          className="d-block fw-semibold text-decoration-none text-truncate mb-1"
+                          style={{ maxWidth: 200 }}
+                        >
+                          {cat.last_post_topic_title || '—'}
+                        </Link>
+                        <Link
+                          to={`/topic/${cat.last_post_topic_id}?goLast=1`}
+                          className="text-decoration-none d-flex align-items-center gap-1 text-muted"
+                        >
+                          {hasUnread && (
+                            <span
+                              title={lang === 'ru' ? 'Новые сообщения' : 'New posts'}
+                              style={{
+                                display: 'inline-block',
+                                width: 7, height: 7,
+                                borderRadius: '50%',
+                                background: 'var(--bs-warning)',
+                                flexShrink: 0
+                              }}
+                            />
+                          )}
+                          <span>{cat.last_post_author || '—'}</span>
+                          <span>·</span>
+                          <span>{formatTime(cat.last_post_at)}</span>
+                        </Link>
                       </div>
-                    </div>
-                  ) : (
+                    );
+                  })() : (
                     <span className="text-muted small">{t('forum.no_posts')}</span>
                   )}
                 </td>

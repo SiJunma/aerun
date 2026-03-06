@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { Container, Card, Table, Button, Breadcrumb, Badge } from 'react-bootstrap';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { Container, Card, Table, Button, Breadcrumb, Badge, Pagination } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToTopics, subscribeToCategories } from '../api/forum';
@@ -11,9 +11,13 @@ const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
   const { profile } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const ITEMS_PER_PAGE = 20;
+  const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   useEffect(() => {
     const unsubCat = subscribeToCategories((cats) => {
@@ -48,6 +52,17 @@ const CategoryPage = () => {
   };
 
   const categoryTitle = category ? resolveText(category.title) : '...';
+
+  // Pagination logic
+  const totalPages = Math.ceil(topics.length / ITEMS_PER_PAGE);
+  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
+  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
+  const currentTopics = topics.slice(indexOfFirstItem, indexOfLastItem);
+
+  const handlePageChange = (page) => {
+    setSearchParams({ page });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
     <Container className="py-4">
@@ -90,79 +105,99 @@ const CategoryPage = () => {
             </Button>
           </div>
         ) : (
-          <Table hover responsive className="mb-0 align-middle">
-            <thead>
-              <tr>
-                <th style={{ width: '50%' }}>{t('forum.topic')}</th>
-                <th className="text-center">{t('forum.replies')}</th>
-                <th className="text-center">{t('forum.views')}</th>
-                <th>{t('forum.last_post')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topics.map(topic => (
-                <tr key={topic.id}>
-                  <td>
-                    <Link
-                      to={`/topic/${topic.id}`}
-                      className="fw-bold d-block text-decoration-none h6 mb-1"
-                    >
-                      {topic.title}
-                    </Link>
-                    {topic.description && (
-                      <div className="text-muted small mb-1 text-truncate" style={{ maxWidth: 480 }}>
-                        {topic.description}
-                      </div>
-                    )}
-                    <small className="text-muted">
-                      {t('forum.author')}:{' '}
-                      <span className="text-primary">{topic.author_name}</span>
-                      {' · '}
-                      <span>{formatTime(topic.created_at)}</span>
-                    </small>
-                  </td>
-                  <td className="text-center">
-                    {/* posts_count includes first post; replies = posts_count - 1 */}
-                    {Math.max(0, (topic.posts_count || 1) - 1)}
-                  </td>
-                  <td className="text-center">{topic.views || 0}</td>
-                  <td>
-                    {topic.last_post_at ? (() => {
-                      const lastVisitKey = `lastVisit_${topic.id}`;
-                      const lastVisit = localStorage.getItem(lastVisitKey);
-                      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
-                      const hasUnread = !lastVisit || lastPostMs > parseInt(lastVisit, 10);
-                      return (
-                        <Link
-                          to={`/topic/${topic.id}?goLast=1`}
-                          className="text-decoration-none d-block small"
-                        >
-                          <div className="d-flex align-items-center gap-1 fw-semibold text-primary text-truncate" style={{ maxWidth: 160 }}>
-                            {hasUnread && (
-                              <span
-                                title={lang === 'ru' ? 'Новые сообщения' : 'New posts'}
-                                style={{
-                                  display: 'inline-block',
-                                  width: 7, height: 7,
-                                  borderRadius: '50%',
-                                  background: 'var(--bs-warning)',
-                                  flexShrink: 0
-                                }}
-                              />
-                            )}
-                            {topic.last_post_author || topic.author_name}
-                          </div>
-                          <div className="text-muted">{formatTime(topic.last_post_at)}</div>
-                        </Link>
-                      );
-                    })() : (
-                      <span className="text-muted small">—</span>
-                    )}
-                  </td>
+          <>
+            <Table hover responsive className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th style={{ width: '50%' }}>{t('forum.topic')}</th>
+                  <th className="text-center">{t('forum.replies')}</th>
+                  <th className="text-center">{t('forum.views')}</th>
+                  <th>{t('forum.last_post')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {currentTopics.map(topic => (
+                  <tr key={topic.id}>
+                    <td>
+                      <Link
+                        to={`/topic/${topic.id}`}
+                        className="fw-bold d-block text-decoration-none h6 mb-1"
+                      >
+                        {topic.title}
+                      </Link>
+                      {topic.description && (
+                        <div className="text-muted small mb-1 text-truncate" style={{ maxWidth: 480 }}>
+                          {topic.description}
+                        </div>
+                      )}
+                      <small className="text-muted">
+                        {t('forum.author')}:{' '}
+                        <span className="text-primary">{topic.author_name}</span>
+                        {' · '}
+                        <span>{formatTime(topic.created_at)}</span>
+                      </small>
+                    </td>
+                    <td className="text-center">
+                      {Math.max(0, (topic.posts_count || 1) - 1)}
+                    </td>
+                    <td className="text-center">{topic.views || 0}</td>
+                    <td>
+                      {topic.last_post_at ? (() => {
+                        const lastVisitKey = `lastVisit_${topic.id}`;
+                        const lastVisit = localStorage.getItem(lastVisitKey);
+                        const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
+                        const hasUnread = !lastVisit || lastPostMs > parseInt(lastVisit, 10);
+                        return (
+                          <Link
+                            to={`/topic/${topic.id}?goLast=1`}
+                            className="text-decoration-none d-block small"
+                          >
+                            <div className="d-flex align-items-center gap-1 fw-semibold text-primary text-truncate" style={{ maxWidth: 160 }}>
+                              {hasUnread && (
+                                <span
+                                  title={lang === 'ru' ? 'Новые сообщения' : 'New posts'}
+                                  style={{
+                                    display: 'inline-block',
+                                    width: 7, height: 7,
+                                    borderRadius: '50%',
+                                    background: 'var(--bs-warning)',
+                                    flexShrink: 0
+                                  }}
+                                />
+                              )}
+                              {topic.last_post_author || topic.author_name}
+                            </div>
+                            <div className="text-muted">{formatTime(topic.last_post_at)}</div>
+                          </Link>
+                        );
+                      })() : (
+                        <span className="text-muted small">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            {totalPages > 1 && (
+              <div className="p-3 d-flex justify-content-center border-top">
+                <Pagination className="mb-0">
+                  <Pagination.First onClick={() => handlePageChange(1)} disabled={currentPage === 1} />
+                  <Pagination.Prev onClick={() => handlePageChange(Math.max(1, currentPage - 1))} disabled={currentPage === 1} />
+                  {[...Array(totalPages)].map((_, i) => (
+                    <Pagination.Item
+                      key={i + 1}
+                      active={i + 1 === currentPage}
+                      onClick={() => handlePageChange(i + 1)}
+                    >
+                      {i + 1}
+                    </Pagination.Item>
+                  ))}
+                  <Pagination.Next onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} />
+                  <Pagination.Last onClick={() => handlePageChange(totalPages)} disabled={currentPage === totalPages} />
+                </Pagination>
+              </div>
+            )}
+          </>
         )}
       </Card>
 

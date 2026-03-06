@@ -1,11 +1,11 @@
 import { db } from '../../firebase';
-import { 
-  collection, 
-  addDoc, 
-  doc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
+import {
+  collection,
+  addDoc,
+  doc,
+  onSnapshot,
+  query,
+  orderBy,
   where,
   serverTimestamp,
   runTransaction,
@@ -193,9 +193,10 @@ export const createPost = async (postData) => {
 };
 
 // Edit a post
-export const updatePost = async (postId, content) => {
+export const updatePost = async (postId, content, metadata = {}) => {
   await updateDoc(doc(db, 'posts', postId), {
     content,
+    ...metadata,
     edited_at: serverTimestamp()
   });
 };
@@ -244,5 +245,25 @@ export const deletePost = async (post) => {
         });
       }
     }
+  });
+};
+// ── Users ─────────────────────────────────────────────────────────────────────
+
+export const updateUser = async (uid, userData) => {
+  await updateDoc(doc(db, 'users', uid), {
+    ...userData,
+    updated_at: serverTimestamp()
+  });
+};
+
+export const subscribeToUser = (uid, callback) => {
+  return onSnapshot(doc(db, 'users', uid), (snapshot) => {
+    callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+  });
+};
+export const subscribeToAllUsers = (callback) => {
+  const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
   });
 };

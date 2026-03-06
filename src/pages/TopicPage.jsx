@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal } from 'react-bootstrap';
+import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories } from '../api/forum';
+import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser } from '../api/forum';
 import { subscribeToCharacters } from '../api/character';
+import ConfirmModal from '../components/common/ConfirmModal';
 import { formatDistanceToNow } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -12,6 +13,7 @@ const TopicPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
   const { profile, user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
   const [characters, setCharacters] = useState([]);
@@ -19,6 +21,7 @@ const TopicPage = () => {
   const [category, setCategory] = useState(null);
   const [posts, setPosts] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [authorStats, setAuthorStats] = useState({}); // { uid: { post_count: N } }
 
   // Edit state
   const [editingPostId, setEditingPostId] = useState(null);
@@ -29,8 +32,9 @@ const TopicPage = () => {
 
   const replyRef = useRef(null);
   const scrolledRef = useRef(false); // prevent double-scroll
-  const [searchParams] = useSearchParams();
   const goLast = searchParams.get('goLast') === '1';
+  const ITEMS_PER_PAGE = 20;
+  const currentPage = parseInt(searchParams.get('page') || '1', 10);
   const MAX_CHARS = 5000;
   const LAST_VISIT_KEY = `lastVisit_${id}`;
 
@@ -44,9 +48,6 @@ const TopicPage = () => {
       localStorage.setItem(LAST_VISIT_KEY, visitTime.toString());
       unsubPosts();
       unsubTopic();
-      if (user) {
-        subscribeToCharacters(user.uid, () => {}).call;
-      }
     };
   }, [id]);
 
@@ -56,6 +57,13 @@ const TopicPage = () => {
     const unsub = subscribeToCharacters(user.uid, setCharacters);
     return () => unsub();
   }, [user]);
+
+  // Set initial selectedCharacterId from profile
+  useEffect(() => {
+    if (profile?.last_selected_character_id !== undefined && !selectedCharacterId) {
+      setSelectedCharacterId(profile.last_selected_character_id || '');
+    }
+  }, [profile?.last_selected_character_id]);
 
   useEffect(() => {
     if (topic?.category_id) {
@@ -67,34 +75,59 @@ const TopicPage = () => {
     }
   }, [topic?.category_id]);
 
+  // Subscribe to author stats for each unique author in posts
+  useEffect(() => {
+    if (posts.length === 0) return;
+    const uniqueAuthorIds = [...new Set(posts.map(p => p.author_id))];
+    const unsubs = uniqueAuthorIds.map(uid => {
+      return subscribeToUser(uid, (data) => {
+        if (data) {
+          setAuthorStats(prev => ({ ...prev, [uid]: data }));
+        }
+      });
+    });
+    return () => unsubs.forEach(unsub => unsub());
+  }, [posts.length > 0 ? [...new Set(posts.map(p => p.author_id))].join(',') : '']);
+
   // Scroll to first unread post (or last post if ?goLast=1)
   useEffect(() => {
     if (posts.length === 0 || scrolledRef.current) return;
-    scrolledRef.current = true;
 
     let targetId;
+    let targetPage = currentPage;
+
     if (goLast) {
-      // Scroll to last post
+      targetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
+      if (currentPage !== targetPage) {
+        setSearchParams({ page: targetPage, goLast: '1' });
+        return;
+      }
       targetId = `post-${posts[posts.length - 1].id}`;
     } else {
-      // Find first post newer than last visit
       const lastVisit = parseInt(localStorage.getItem(LAST_VISIT_KEY) || '0', 10);
-      const firstUnread = posts.find(p => {
+      const unreadIndex = posts.findIndex(p => {
         const ms = p.created_at?.toMillis?.() ?? 0;
         return ms > lastVisit;
       });
-      if (firstUnread) {
-        targetId = `post-${firstUnread.id}`;
+
+      if (unreadIndex !== -1) {
+        targetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
+        if (currentPage !== targetPage) {
+          setSearchParams({ page: targetPage });
+          return;
+        }
+        targetId = `post-${posts[unreadIndex].id}`;
       }
     }
 
     if (targetId) {
+      scrolledRef.current = true;
       setTimeout(() => {
         const el = document.getElementById(targetId);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 150);
+      }, 500);
     }
-  }, [posts]);
+  }, [posts.length, goLast, currentPage]);
 
   const formatTime = (timestamp) => {
     if (!timestamp) return '...';
@@ -104,6 +137,71 @@ const TopicPage = () => {
     } catch {
       return '...';
     }
+  };
+
+  const getLiveAuthorName = (post) => {
+    if (post.author_id === user?.uid) {
+      if (post.is_character) {
+        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
+        return char?.name || post.author_name;
+      }
+      return profile?.nickname || post.author_name;
+    }
+    return authorStats[post.author_id]?.nickname || post.author_name;
+  };
+
+  const getLiveOwnerName = (post) => {
+    if (post.author_id === user?.uid) {
+      return profile?.nickname || post.owner_name;
+    }
+    return authorStats[post.author_id]?.nickname || post.owner_name;
+  };
+
+  const getLiveAuthorAvatar = (post) => {
+    if (post.author_id === user?.uid) {
+      if (post.is_character) {
+        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
+        return char?.avatar_url || post.author_avatar;
+      }
+      return profile?.avatar_url || post.author_avatar;
+    }
+    return authorStats[post.author_id]?.avatar_url || post.author_avatar;
+  };
+
+  const getLiveAuthorStatus = (post) => {
+    if (post.author_id === user?.uid) {
+      if (post.is_character) {
+        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
+        return char ? (char.status_line || '') : (post.author_status_line || '');
+      }
+      return profile ? (profile.status_line || '') : (post.author_status_line || '');
+    }
+    const stats = authorStats[post.author_id];
+    return (stats && stats.nickname) ? (stats.status_line || '') : (post.author_status_line || '');
+  };
+
+  const getLiveAuthorSignature = (post) => {
+    if (post.author_id === user?.uid) {
+      if (post.is_character) {
+        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
+        return char ? (char.signature || '') : (post.author_signature || '');
+      }
+      return profile?.settings?.signature || post.author_signature || '';
+    }
+    const stats = authorStats[post.author_id];
+    return (stats && stats.nickname) ? (stats.settings?.signature || '') : (post.author_signature || '');
+  };
+
+  const getLiveShowFooter = (post) => {
+    if (post.author_id === user?.uid) {
+      if (post.is_character) {
+        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
+        return char ? (char.show_footer !== false) : (post.show_footer !== false);
+      }
+      return (profile?.settings?.show_footer !== false);
+    }
+    const stats = authorStats[post.author_id];
+    return (stats && stats.nickname) ? (stats.settings?.show_footer !== false) : (post.show_footer !== false);
   };
 
   const resolveText = (field) =>
@@ -128,11 +226,12 @@ const TopicPage = () => {
         author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
         author_role_id: profile?.role_id || 'player',
         is_character: !!selectedChar,
-        character_title: selectedChar?.title || '',
+        author_character_id: selectedCharacterId || null,
         author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
         show_footer: selectedChar
           ? (selectedChar.show_footer !== false)
-          : (profile?.settings?.show_footer !== false)
+          : (profile?.settings?.show_footer !== false),
+        owner_name: profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'
       };
 
       await createPost(postData);
@@ -154,7 +253,25 @@ const TopicPage = () => {
   const handleSaveEdit = async (postId) => {
     if (!editContent.trim()) return;
     try {
-      await updatePost(postId, editContent.trim());
+      // Find the post to get is_character and author_character_id
+      const post = posts.find(p => p.id === postId);
+      let metadata = {};
+
+      if (post && post.author_id === user?.uid) {
+        const selectedChar = post.is_character
+          ? characters.find(c => c.id === post.author_character_id || c.name === post.author_name)
+          : null;
+
+        metadata = {
+          author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || 'User'),
+          author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || user?.photoURL || ''),
+          author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
+          author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
+          show_footer: selectedChar ? (selectedChar.show_footer !== false) : (profile?.settings?.show_footer !== false)
+        };
+      }
+
+      await updatePost(postId, editContent.trim(), metadata);
       setEditingPostId(null);
       setEditContent('');
     } catch (err) {
@@ -197,6 +314,38 @@ const TopicPage = () => {
 
   const categoryTitle = category ? resolveText(category.title) : '...';
 
+  // Pagination logic
+  const totalPages = Math.ceil(posts.length / ITEMS_PER_PAGE);
+  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
+  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
+  const currentPosts = posts.slice(indexOfFirstItem, indexOfLastItem);
+
+  const handlePageChange = (page) => {
+    setSearchParams({ page });
+    window.scrollTo({ top: 0 });
+  };
+
+  const renderPagination = () => {
+    if (totalPages <= 1) return null;
+    return (
+      <Pagination className="mb-0">
+        <Pagination.First onClick={() => handlePageChange(1)} disabled={currentPage === 1} />
+        <Pagination.Prev onClick={() => handlePageChange(Math.max(1, currentPage - 1))} disabled={currentPage === 1} />
+        {[...Array(totalPages)].map((_, i) => (
+          <Pagination.Item
+            key={i + 1}
+            active={i + 1 === currentPage}
+            onClick={() => handlePageChange(i + 1)}
+          >
+            {i + 1}
+          </Pagination.Item>
+        ))}
+        <Pagination.Next onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} />
+        <Pagination.Last onClick={() => handlePageChange(totalPages)} disabled={currentPage === totalPages} />
+      </Pagination>
+    );
+  };
+
   return (
     <Container className="py-4">
       <Breadcrumb className="mb-4">
@@ -210,162 +359,212 @@ const TopicPage = () => {
       </Breadcrumb>
 
       {/* Topic header */}
-      <div className="mb-4">
-        <h2 className="mb-1">{topic.title}</h2>
-        {topic.description && (
-          <p className="text-muted mb-2">{topic.description}</p>
-        )}
-        <div className="d-flex gap-3 small text-muted">
-          <span>
-            {lang === 'ru' ? 'Автор' : 'Author'}:{' '}
-            <span className="text-primary fw-semibold">{topic.author_name}</span>
-          </span>
-          <span>·</span>
-          <span>
-            {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
-            <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
-          </span>
-          <span>·</span>
-          <span>
-            {lang === 'ru' ? 'Просмотры' : 'Views'}:{' '}
-            <strong>{topic.views || 0}</strong>
-          </span>
-          <span>·</span>
-          <span>{formatTime(topic.created_at)}</span>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h2 className="mb-1">{topic.title}</h2>
+          {topic.description && (
+            <p className="text-muted mb-2">{topic.description}</p>
+          )}
+          <div className="d-flex gap-3 small text-muted">
+            <span>
+              {lang === 'ru' ? 'Автор' : 'Author'}:{' '}
+              <span className="text-primary fw-semibold">{topic.author_name}</span>
+            </span>
+            <span>·</span>
+            <span>
+              {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
+              <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
+            </span>
+            <span>·</span>
+            <span>
+              {lang === 'ru' ? 'Просмотры' : 'Views'}:{' '}
+              <strong>{topic.views || 0}</strong>
+            </span>
+            <span>·</span>
+            <span>{formatTime(topic.created_at)}</span>
+          </div>
+        </div>
+        <div>
+          {renderPagination()}
         </div>
       </div>
 
       {/* Posts */}
-      {posts.map((post, index) => (
-        <Card key={post.id} id={`post-${post.id}`} className="mb-4 shadow-sm border-0 post-card">
-          <Card.Body className="p-0">
-            <Row className="g-0">
-              {/* Author sidebar */}
-              <Col md={3} lg={2} className="author-sidebar border-end p-3 text-center d-flex flex-column align-items-center">
-                <Image
-                  src={post.author_avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.author_name)}&background=random`}
-                  rounded
-                  fluid
-                  className="mb-2 shadow-sm"
-                  style={{ width: '90px', height: '90px', objectFit: 'cover' }}
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    e.target.onerror = null;
-                    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(post.author_name || '?')}&background=444&color=fff`;
-                  }}
-                />
-                <div className="fw-bold mb-0 text-break" style={{ fontSize: '0.95rem' }}>
-                  {post.author_name}
-                </div>
-                {/* Decorative status line */}
-                {post.author_status_line && (
-                  <div className="text-primary small mb-1" style={{ fontStyle: 'italic' }}>
-                    {post.author_status_line}
+      <div className="posts-container">
+        {currentPosts.map((post, index) => (
+          <Card key={post.id} id={`post-${post.id}`} className="mb-4 shadow-sm border-0 post-card">
+            <Card.Body className="p-0">
+              <Row className="g-0">
+                {/* Author sidebar */}
+                <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 text-center d-flex flex-column align-items-center">
+                  {/* 1. Nickname */}
+                  <div className="fw-bold mt-2 mb-1 text-break" style={{ fontSize: '0.95rem' }}>
+                    {getLiveAuthorName(post)}
                   </div>
-                )}
-                {/* Role / character badge */}
-                {post.is_character && post.character_title ? (
-                  <Badge bg="info" text="dark" className="mb-1 mt-1 opacity-90" style={{ fontSize: '0.7rem' }}>
-                    {post.character_title}
-                  </Badge>
-                ) : (
-                  <div className="mt-1">{getRoleBadge(post)}</div>
-                )}
-                {post.is_character && (
-                  <div className="text-muted mt-1" style={{ fontSize: '0.7rem', opacity: 0.6 }}>
-                    {lang === 'ru' ? 'персонаж' : 'character'}
+
+                  {/* 2. Status */}
+                  {getLiveAuthorStatus(post) && (
+                    <div className="text-primary small mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                      {getLiveAuthorStatus(post)}
+                    </div>
+                  )}
+
+                  {/* 3. Avatar */}
+                  <Image
+                    src={getLiveAuthorAvatar(post) || `https://ui-avatars.com/api/?name=${encodeURIComponent(getLiveAuthorName(post))}&background=random`}
+                    rounded
+                    fluid
+                    className="mb-2 shadow-sm"
+                    style={{ width: '90px', height: '90px', objectFit: 'cover' }}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getLiveAuthorName(post) || '?')}&background=444&color=fff`;
+                    }}
+                  />
+
+                  {/* 4. Posts Count */}
+                  <div className="text-muted small mt-1">
+                    {t('profile.posts_count')}: <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
                   </div>
-                )}
-                {/* Post number */}
-                <div className="text-muted mt-auto" style={{ fontSize: '0.7rem', opacity: 0.5 }}>
-                  #{index + 1}
-                </div>
-              </Col>
 
-              {/* Post content */}
-              <Col md={9} lg={10} className="p-4 d-flex flex-column">
-                <div className="d-flex justify-content-between align-items-center mb-3">
-                  <small className="text-muted">
-                    {formatTime(post.created_at)}
-                    {post.edited_at && (
-                      <span className="ms-2 opacity-50">
-                        ({lang === 'ru' ? 'ред.' : 'edited'} {formatTime(post.edited_at)})
-                      </span>
-                    )}
-                  </small>
+                  {/* 5. Reputation */}
+                  <div className="text-muted small">
+                    {t('profile.reputation')}: <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
+                  </div>
 
-                  <div className="d-flex gap-1">
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="text-decoration-none text-muted p-1"
-                      onClick={() => {
-                        setReplyContent(`> ${post.author_name} написал(а):\n> ${post.content.split('\n').join('\n> ')}\n\n`);
-                        replyRef.current?.scrollIntoView({ behavior: 'smooth' });
-                      }}
-                    >
-                      {lang === 'ru' ? 'Цитата' : 'Quote'}
-                    </Button>
+                  {/* 6. Role/Mask */}
+                  {!post.is_character && (
+                    <div className="mt-2 text-center w-100">{getRoleBadge(post)}</div>
+                  )}
+                  {post.is_character && (
+                    <div className="text-muted mt-1 small opacity-75">
+                      {lang === 'ru' ? 'персонаж' : 'character'}
+                      {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
+                    </div>
+                  )}
+                </Col>
 
+                {/* Content Area */}
+                <Col md={9} lg={10} className="d-flex flex-column" style={{ minHeight: '100%' }}>
+                  {/* Header Strip: Time, # */}
+                  <div className="post-header-strip px-4 py-1 d-flex justify-content-between align-items-center">
+                    <small className="text-muted">
+                      {formatTime(post.created_at)}
+                      {post.edited_at && (
+                        <span className="ms-2 opacity-50">
+                          ({lang === 'ru' ? 'ред.' : 'edited'} {formatTime(post.edited_at)})
+                        </span>
+                      )}
+                    </small>
+                    <div className="text-muted small opacity-50 fw-bold">#{index + indexOfFirstItem + 1}</div>
+                  </div>
+
+                  {/* Body Area */}
+                  <div className="px-4 py-2 flex-grow-1 d-flex flex-column">
+                    <div className="flex-grow-1">
+                      {editingPostId === post.id ? (
+                        <div>
+                          <Form.Control
+                            as="textarea"
+                            rows={6}
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            className="mb-2"
+                          />
+                          <div className="d-flex gap-2">
+                            <Button size="sm" variant="primary" onClick={() => handleSaveEdit(post.id)}>
+                              {lang === 'ru' ? 'Сохранить' : 'Save'}
+                            </Button>
+                            <Button size="sm" variant="outline-secondary" onClick={() => setEditingPostId(null)}>
+                              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="post-content" style={{ whiteSpace: 'pre-line' }}>
+                          {post.content}
+                        </div>
+                      )}
+
+                      {/* Signature */}
+                      {getLiveShowFooter(post) && getLiveAuthorSignature(post) && (
+                        <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
+                          {getLiveAuthorSignature(post)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Reputation */}
+                    <div className="mt-3 d-flex justify-content-end align-items-center gap-2">
+                      <div className="reputation-controls d-flex align-items-center">
+                        <strong className="me-2" style={{ color: 'var(--accent-color)' }}>{authorStats[post.author_id]?.reputation || 0}</strong>
+                        {post.author_id !== profile?.uid && (
+                          <>
+                            <Button variant="outline-danger" className="rep-btn" onClick={() => { }}>−</Button>
+                            <Button variant="outline-success" className="rep-btn" onClick={() => { }}>+</Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+
+              {/* Classic Footer Strip (Combined) */}
+              <div className="post-footer-strip">
+                <Row className="g-0 align-items-center">
+                  <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 d-flex gap-3 justify-content-center">
+                    <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none">
+                      {t('profile.view_profile')}
+                    </Link>
+                    <Link to="#" className="footer-link text-decoration-none" onClick={(e) => e.preventDefault()}>
+                      {t('profile.pm')}
+                    </Link>
+                  </Col>
+                  <Col md={9} lg={10} className="px-4 py-2 d-flex justify-content-end gap-3">
                     {canManagePost(post) && (
                       <>
                         <Button
                           variant="link"
                           size="sm"
-                          className="text-decoration-none text-muted p-1"
-                          onClick={() => handleStartEdit(post)}
-                        >
-                          {lang === 'ru' ? 'Изменить' : 'Edit'}
-                        </Button>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="text-decoration-none text-danger p-1"
+                          className="footer-link p-0"
                           onClick={() => setDeletingPost(post)}
                         >
                           {lang === 'ru' ? 'Удалить' : 'Delete'}
                         </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="footer-link p-0"
+                          onClick={() => handleStartEdit(post)}
+                        >
+                          {lang === 'ru' ? 'Редактировать' : 'Edit'}
+                        </Button>
                       </>
                     )}
-                  </div>
-                </div>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="footer-link p-0"
+                      onClick={() => {
+                        setReplyContent(`> ${post.author_name} написал(а):\n> ${post.content.split('\n').join('\n> ')}\n\n`);
+                        replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                    >
+                      {lang === 'ru' ? 'Цитировать' : 'Quote'}
+                    </Button>
+                  </Col>
+                </Row>
+              </div>
+            </Card.Body>
+          </Card>
+        ))}
+      </div>
 
-                {/* Content or edit form */}
-                {editingPostId === post.id ? (
-                  <div>
-                    <Form.Control
-                      as="textarea"
-                      rows={6}
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      className="mb-2"
-                    />
-                    <div className="d-flex gap-2">
-                      <Button size="sm" variant="primary" onClick={() => handleSaveEdit(post.id)}>
-                        {lang === 'ru' ? 'Сохранить' : 'Save'}
-                      </Button>
-                      <Button size="sm" variant="outline-secondary" onClick={() => setEditingPostId(null)}>
-                        {lang === 'ru' ? 'Отмена' : 'Cancel'}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="post-content flex-grow-1" style={{ whiteSpace: 'pre-line' }}>
-                    {post.content}
-                  </div>
-                )}
-
-                {/* Signature */}
-                {post.show_footer && post.author_signature && (
-                  <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
-                    {post.author_signature}
-                  </div>
-                )}
-              </Col>
-            </Row>
-          </Card.Body>
-        </Card>
-      ))}
+      <div className="d-flex justify-content-center mt-4 mb-4">
+        {renderPagination()}
+      </div>
 
       {/* Reply form */}
       <div className="mt-5" ref={replyRef}>
@@ -379,8 +578,14 @@ const TopicPage = () => {
                 <Form.Select
                   size="sm"
                   value={selectedCharacterId}
-                  onChange={(e) => setSelectedCharacterId(e.target.value)}
-                  className="bg-light mb-2 w-auto"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedCharacterId(val);
+                    if (user) {
+                      updateUser(user.uid, { last_selected_character_id: val });
+                    }
+                  }}
+                  className="mb-2 w-auto"
                 >
                   <option value="">
                     {lang === 'ru' ? 'Как пользователь' : 'Post as User'}:{' '}
@@ -431,25 +636,18 @@ const TopicPage = () => {
       </div>
 
       {/* Delete confirm modal */}
-      <Modal show={!!deletingPost} onHide={() => setDeletingPost(null)} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>{lang === 'ru' ? 'Удалить пост?' : 'Delete post?'}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {lang === 'ru'
-            ? 'Это действие необратимо. Пост будет удалён навсегда.'
-            : 'This action cannot be undone. The post will be permanently deleted.'}
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="outline-secondary" onClick={() => setDeletingPost(null)}>
-            {lang === 'ru' ? 'Отмена' : 'Cancel'}
-          </Button>
-          <Button variant="danger" onClick={handleDeletePost}>
-            {lang === 'ru' ? 'Удалить' : 'Delete'}
-          </Button>
-        </Modal.Footer>
-      </Modal>
-    </Container>
+      <ConfirmModal
+        show={!!deletingPost}
+        onHide={() => setDeletingPost(null)}
+        onConfirm={handleDeletePost}
+        title={lang === 'ru' ? 'Удалить пост?' : 'Delete post?'}
+        message={lang === 'ru'
+          ? 'Это действие необратимо. Пост будет удалён навсегда.'
+          : 'This action cannot be undone. The post will be permanently deleted.'}
+        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+        cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+      />
+    </Container >
   );
 };
 
