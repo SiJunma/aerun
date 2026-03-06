@@ -501,6 +501,74 @@ a:hover {
   font-size: 1.05rem;
 }
 
+/* Markdown Styling in Posts */
+.post-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  margin: 1rem 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.post-content blockquote {
+  border: 1px dashed var(--border-color) !important;
+  padding: 1rem 1.25rem;
+  margin: 1.25rem 0;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  font-style: normal;
+  opacity: 1;
+}
+
+[data-theme='dark'] .post-content blockquote {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme='neutral'] .post-content blockquote {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.post-content blockquote p {
+  margin-bottom: 1rem;
+}
+
+.post-content u {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+.post-content ul,
+.post-content ol {
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+}
+
+.editor-toolbar {
+  background-color: var(--input-bg) !important;
+  border-color: var(--input-border) !important;
+}
+
+.editor-toolbar .btn-light {
+  background-color: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--text-color) !important;
+  padding: 0.25rem 0.6rem !important;
+  font-size: 0.85rem !important;
+}
+
+.editor-toolbar .btn-light:hover {
+  background-color: rgba(var(--primary-color-rgb, 13, 110, 253), 0.1) !important;
+  border-color: var(--primary-color) !important;
+  color: var(--primary-color) !important;
+}
+
+.editor-toolbar .vr {
+  background-color: var(--border-color);
+  opacity: 0.5;
+}
+
 /* Admin Styling */
 .nav-tabs .nav-link {
   color: var(--text-color);

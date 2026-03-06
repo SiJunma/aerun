@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role_id == 'admin';
+    }
+
+    function isActive() {
+      return isSignedIn() && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active' || isAdmin());
+    }
+
+    // --- Users ---
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isActive();
+      allow create: if isOwner(userId);
+      // Allow user to edit their own profile, or allowing anyone to increment post_count/reputation via transactions
+      allow update: if isOwner(userId) || isAdmin() || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasAny(['post_count', 'reputation']));
+    }
+
+    // --- Characters ---
+    match /characters/{charId} {
+      allow read: if isActive();
+      allow create: if isActive() && request.resource.data.owner_id == request.auth.uid;
+      allow update, delete: if isActive() && (resource.data.owner_id == request.auth.uid || isAdmin());
+    }
+
+    // --- Categories ---
+    match /categories/{catId} {
+      allow read: if isActive();
+      allow create, delete: if isAdmin();
+      // Allow updates to counters and last post info from any active user (via post creation transactions)
+      allow update: if isAdmin() || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_topic_id', 'last_post_topic_title']));
+    }
+
+    // --- Topics ---
+    match /topics/{topicId} {
+      allow read: if isActive();
+      allow create: if isActive();
+      // Allow author to edit, or any user to update views and counters
+      allow update: if isAdmin() || (isActive() && (resource.data.author_id == request.auth.uid || request.resource.data.diff(resource.data).affectedKeys().hasAny(['views', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id'])));
+      allow delete: if isAdmin() || (isActive() && resource.data.author_id == request.auth.uid);
+    }
+
+    // --- Posts ---
+    match /posts/{postId} {
+      allow read: if isActive();
+      allow create: if isActive();
+      allow update, delete: if isAdmin() || (isActive() && resource.data.author_id == request.auth.uid);
+    }
+    
+    // --- Global Stats ---
+    match /global_stats/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+  }
+}

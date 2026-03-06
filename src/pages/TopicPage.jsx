@@ -8,6 +8,10 @@ import { subscribeToCharacters } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import { formatDistanceToNow } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 
 const TopicPage = () => {
   const { id } = useParams();
@@ -60,7 +64,7 @@ const TopicPage = () => {
 
   // Set initial selectedCharacterId from profile
   useEffect(() => {
-    if (profile?.last_selected_character_id !== undefined && !selectedCharacterId) {
+    if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
       setSelectedCharacterId(profile.last_selected_character_id || '');
     }
   }, [profile?.last_selected_character_id]);
@@ -128,6 +132,20 @@ const TopicPage = () => {
       }, 500);
     }
   }, [posts.length, goLast, currentPage]);
+
+  const Toolbar = ({ target = 'reply' }) => (
+    <div className="d-flex gap-2 mb-2 p-2 border rounded bg-light editor-toolbar">
+      <Button variant="light" size="sm" onClick={() => insertText('**', '**', false, target)} title="Bold"><strong>B</strong></Button>
+      <Button variant="light" size="sm" onClick={() => insertText('*', '*', false, target)} title="Italic"><em>I</em></Button>
+      <Button variant="light" size="sm" onClick={() => insertText('<u>', '</u>', false, target)} title="Underline"><u>U</u></Button>
+      <Button variant="light" size="sm" onClick={() => insertText('~~', '~~', false, target)} title="Strikethrough"><del>S</del></Button>
+      <div className="vr mx-1"></div>
+      <Button variant="light" size="sm" onClick={() => insertText('[TEXT](URL)', '', true, target)} title="Link">Link</Button>
+      <Button variant="light" size="sm" onClick={() => insertText('![alt](URL)', '', true, target)} title="Image">Img</Button>
+      <div className="vr mx-1"></div>
+      <Button variant="light" size="sm" onClick={() => insertText('', '', 'quote', target)} title="Quote">Quote</Button>
+    </div>
+  );
 
   const formatTime = (timestamp) => {
     if (!timestamp) return '...';
@@ -209,6 +227,45 @@ const TopicPage = () => {
       ? (lang === 'ru' ? field.ru : field.en) || ''
       : field || '';
 
+  const insertText = (before, after = '', isLink = false, target = 'reply') => {
+    const fieldId = target === 'reply' ? 'replyContent' : 'editContent';
+    const textarea = document.getElementById(fieldId);
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selected = text.substring(start, end);
+
+    let replacement = '';
+    if (isLink === 'quote') {
+      const author = prompt(lang === 'ru' ? 'Кто это написал?' : 'Who wrote this?', '');
+      const label = author ? (lang === 'ru' ? `**${author}** написал(а):` : `**${author}** wrote:`) : '';
+      if (label) {
+        replacement = `> ${label}\n>\n> ${selected || '...'}`;
+      } else {
+        replacement = `> ${selected || '...'}`;
+      }
+    } else if (isLink) {
+      const url = prompt(lang === 'ru' ? 'Введите URL:' : 'Enter URL:', 'https://');
+      if (!url) return;
+      replacement = before.replace('URL', url).replace('TEXT', selected || 'text');
+    } else {
+      replacement = before + selected + after;
+    }
+
+    const newValue = text.substring(0, start) + replacement + text.substring(end);
+    if (target === 'reply') setReplyContent(newValue);
+    else setEditContent(newValue);
+
+    // Set focus back and adjust selection
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = start + replacement.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
   const handleReply = async (e) => {
     e.preventDefault();
     if (!replyContent.trim() || submitting) return;
@@ -236,7 +293,6 @@ const TopicPage = () => {
 
       await createPost(postData);
       setReplyContent('');
-      setSelectedCharacterId('');
     } catch (err) {
       console.error(err);
       alert('Error posting reply');
@@ -465,7 +521,9 @@ const TopicPage = () => {
                     <div className="flex-grow-1">
                       {editingPostId === post.id ? (
                         <div>
+                          <Toolbar target="edit" />
                           <Form.Control
+                            id="editContent"
                             as="textarea"
                             rows={6}
                             value={editContent}
@@ -482,8 +540,13 @@ const TopicPage = () => {
                           </div>
                         </div>
                       ) : (
-                        <div className="post-content" style={{ whiteSpace: 'pre-line' }}>
-                          {post.content}
+                        <div className="post-content">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                          >
+                            {post.content}
+                          </ReactMarkdown>
                         </div>
                       )}
 
@@ -548,7 +611,17 @@ const TopicPage = () => {
                       size="sm"
                       className="footer-link p-0"
                       onClick={() => {
-                        setReplyContent(`> ${post.author_name} написал(а):\n> ${post.content.split('\n').join('\n> ')}\n\n`);
+                        const selectedText = window.getSelection().toString().trim();
+                        const author = getLiveAuthorName(post);
+                        const content = selectedText || post.content;
+                        const label = lang === 'ru' ? `**${author}** написал(а):` : `**${author}** wrote:`;
+
+                        // New boxed layout with paragraph break
+                        const quote = `> ${label}\n>\n> ${content.split('\n').join('\n> ')}\n\n`;
+
+                        setReplyContent(prev => prev + quote);
+                        // Clean selection after quoting
+                        window.getSelection().removeAllRanges();
                         replyRef.current?.scrollIntoView({ behavior: 'smooth' });
                       }}
                     >
@@ -599,6 +672,7 @@ const TopicPage = () => {
                 </Form.Select>
               </Form.Group>
               <Form.Group className="mb-3" controlId="replyContent">
+                <Toolbar target="reply" />
                 <Form.Control
                   as="textarea"
                   rows={5}
