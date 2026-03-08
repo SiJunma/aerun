@@ -1,23 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Toast, ToastContainer } from 'react-bootstrap';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Toast, ToastContainer, Badge, OverlayTrigger, Tooltip, Spinner } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save } from 'lucide-react';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
-import { subscribeToUser } from '../api/forum';
+import { subscribeToUser, checkNicknameExists } from '../api/forum';
 import ConfirmModal from '../components/common/ConfirmModal';
 import AvatarUploader from '../components/common/AvatarUploader';
+import { voteOnProfile, subscribeToReputationLogs } from '../api/reputation';
+import { format } from 'date-fns';
+import { ru, enUS } from 'date-fns/locale';
 
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
-  const { profile, updateProfile } = useAuth();
+  const { profile, updateProfile, recordActivity } = useAuth();
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingChar, setEditingChar] = useState(null);
-  const [activeTab, setActiveTab] = useState('characters');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'characters';
+  const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
+  const [savingAccount, setSavingAccount] = useState(false);
 
   // Form State for User Account
   const [accountFormData, setAccountFormData] = useState({
@@ -26,9 +33,17 @@ const ProfilePage = () => {
     avatar_url: '',
     theme: 'dark',
     language: 'en',
-    show_footer: true,
-    signature: ''
+    signature: '',
+    rep_show_history: true,
+    rep_show_comments: true
   });
+
+  // Reputation Voting State
+  const [showRepModal, setShowRepModal] = useState(false);
+  const [repValue, setRepValue] = useState(1);
+  const [repComment, setRepComment] = useState('');
+  const [submittingRep, setSubmittingRep] = useState(false);
+  const [repLogs, setRepLogs] = useState([]);
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -49,16 +64,17 @@ const ProfilePage = () => {
     name: '',
     status_line: '',
     avatar_url: '',
-    signature: '',
-    show_footer: true
+    signature: ''
   });
 
   useEffect(() => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
     const unsubProfile = subscribeToUser(uid, setViewedProfile);
+    const unsubRep = subscribeToReputationLogs(uid, setRepLogs);
     return () => {
       unsubscribe();
       unsubProfile();
+      unsubRep();
     };
   }, [uid]);
 
@@ -71,8 +87,9 @@ const ProfilePage = () => {
         avatar_url: profile.avatar_url || profile.photoURL || '',
         theme: profile.settings?.theme || 'dark',
         language: profile.settings?.language || 'en',
-        show_footer: profile.settings?.show_footer !== false,
-        signature: profile.settings?.signature || ''
+        signature: profile.settings?.signature || '',
+        rep_show_history: profile.settings?.rep_show_history !== false,
+        rep_show_comments: profile.settings?.rep_show_comments !== false
       });
     }
   }, [profile, uid]);
@@ -84,8 +101,7 @@ const ProfilePage = () => {
         name: char.name,
         status_line: char.status_line || '',
         avatar_url: char.avatar_url,
-        signature: char.signature || '',
-        show_footer: char.show_footer !== false
+        signature: char.signature || ''
       });
     } else {
       setEditingChar(null);
@@ -93,8 +109,7 @@ const ProfilePage = () => {
         name: '',
         status_line: '',
         avatar_url: '',
-        signature: '',
-        show_footer: true
+        signature: ''
       });
     }
     setShowModal(true);
@@ -102,6 +117,7 @@ const ProfilePage = () => {
 
   const handleSaveCharacter = async () => {
     if (!formData.name) return;
+    recordActivity();
     try {
       if (editingChar) {
         await updateCharacter(uid, editingChar.id, formData);
@@ -116,27 +132,65 @@ const ProfilePage = () => {
   };
 
   const handleSaveAccount = async () => {
+    recordActivity();
+    setSavingAccount(true);
+
     try {
+      const trimmedNickname = accountFormData.nickname?.trim();
+      if (!trimmedNickname) {
+        setSavingAccount(false);
+        return;
+      }
+
+      // Check for uniqueness if the nickname has actually changed
+      if (trimmedNickname !== profile.nickname) {
+        const isTaken = await checkNicknameExists(trimmedNickname, uid);
+        if (isTaken) {
+          showToast(t('common.error_nickname_taken') || (lang === 'ru' ? 'Этот никнейм уже занят.' : 'This nickname is already taken.'), 'danger');
+          setSavingAccount(false);
+          return;
+        }
+      }
+
       const updates = {
-        nickname: accountFormData.nickname,
-        status_line: accountFormData.status_line,
+        nickname: trimmedNickname,
+        status_line: accountFormData.status_line?.trim() || '',
         avatar_url: accountFormData.avatar_url,
         settings: {
           theme: accountFormData.theme,
           language: accountFormData.language,
-          show_footer: accountFormData.show_footer,
-          signature: accountFormData.signature
+          signature: accountFormData.signature,
+          rep_show_history: accountFormData.rep_show_history ?? true,
+          rep_show_comments: accountFormData.rep_show_comments ?? true
         }
       };
       await updateProfile(updates);
-      // Sync local language immediately
       if (accountFormData.language !== lang) {
         setLang(accountFormData.language);
       }
-      showToast(lang === 'ru' ? 'Профиль обновлён!' : 'Profile updated successfully!');
+      showToast(lang === 'ru' ? 'Вам удалось обновить профиль' : 'Profile updated successfully!');
     } catch (err) {
       console.error(err);
       showToast(lang === 'ru' ? 'Не удалось обновить профиль' : 'Failed to update profile', 'danger');
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  const handleRepVote = async () => {
+    if (!profile || profile.uid === uid || profile.role_id === 'spectator') return;
+    setSubmittingRep(true);
+    try {
+      await voteOnProfile(profile.uid, uid, repValue, repComment);
+      setRepComment('');
+      setShowRepModal(false);
+      showToast(t('profile.rep_success'));
+      recordActivity();
+    } catch (err) {
+      console.error(err);
+      showToast(err.message, 'danger');
+    } finally {
+      setSubmittingRep(false);
     }
   };
 
@@ -165,7 +219,7 @@ const ProfilePage = () => {
 
       <Row>
         <Col lg={4} className="mb-4">
-          <Card className="shadow-sm border-0">
+          <Card className="shadow-sm border-0 bg-card">
             <Card.Header className="py-3">
               <h5 className="mb-0">{t('profile.info')}</h5>
             </Card.Header>
@@ -193,12 +247,26 @@ const ProfilePage = () => {
                   <span className="text-muted d-block small mb-1">{t('profile.posts_count')}</span>
                   <div className="fw-bold fs-5">{viewedProfile?.post_count || 0}</div>
                 </div>
+                <div className="text-end">
+                  <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
+                  <div className="d-flex align-items-center gap-2">
+                    <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
+                    {profile?.uid !== uid && profile?.role_id !== 'spectator' && (
+                      <div className="d-flex gap-1">
+                        <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
+                        <Button size="sm" variant="outline-success" className="py-0 px-2" onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div className="mb-3 text-start border-top pt-3">
-                <span className="text-muted d-block small mb-1">Email</span>
-                <div className="fw-bold text-truncate">{viewedProfile?.email}</div>
-              </div>
+              {(profile?.uid === uid || profile?.role_id === 'admin') && (
+                <div className="mb-3 text-start border-top pt-3">
+                  <span className="text-muted d-block small mb-1">{t('common.email')}</span>
+                  <div className="fw-bold text-truncate">{viewedProfile?.email}</div>
+                </div>
+              )}
               <div className="mb-0 text-start">
                 <span className="text-muted d-block small mb-1 fw-bold text-uppercase" style={{ fontSize: '0.65rem', letterSpacing: '0.1em' }}>
                   {t('profile.account_role')}
@@ -217,64 +285,184 @@ const ProfilePage = () => {
             className="mb-4 premium-tabs"
           >
             <Tab eventKey="characters" title={t('profile.tab_characters')}>
-              <Card className="shadow-sm border-0">
-                <Card.Header className="py-3 d-flex justify-content-between align-items-center bg-white">
-                  <h5 className="mb-0">{t('profile.characters')}</h5>
-                  <Button variant="primary" size="sm" onClick={() => handleOpenModal()}>
-                    + {t('profile.add_character')}
-                  </Button>
+              <Card className="shadow-sm border-0 bg-card">
+                <Card.Header className="py-3 d-flex justify-content-between align-items-center">
+                  <h5 className="mb-0">{profile?.uid === uid ? t('profile.characters') : t('profile.characters_other')}</h5>
+                  {profile?.uid === uid && profile?.role_id !== 'spectator' && (
+                    <Button variant="primary" size="sm" onClick={() => handleOpenModal()}>
+                      + {t('profile.add_character')}
+                    </Button>
+                  )}
                 </Card.Header>
                 <Card.Body className="p-0">
                   {characters.length === 0 ? (
                     <div className="p-5 text-center text-muted">
-                      <p className="mb-0">{t('profile.no_characters')}</p>
+                      <p className="mb-0">{profile?.uid === uid ? t('profile.no_characters') : t('profile.no_characters_other')}</p>
                     </div>
                   ) : (
-                    <Table hover responsive className="mb-0 overflow-hidden">
-                      <thead>
-                        <tr>
-                          <th style={{ width: '80px' }}></th>
-                          <th>{t('profile.character_name')}</th>
-                          <th className="text-end">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {characters.map(char => (
-                          <tr key={char.id} className="align-middle">
-                            <td>
+                    <Row className="g-3 p-3">
+                      {characters.map(char => (
+                        <Col key={char.id} xs={12} md={6}>
+                          <Card className="h-100 border shadow-sm modal-inner-card">
+                            <Card.Body className="d-flex align-items-center gap-3 p-3">
                               <Image
                                 src={char.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(char.name)}&background=random`}
                                 roundedCircle
-                                style={{ width: '40px', height: '40px', objectFit: 'cover' }}
+                                style={{ width: '64px', height: '64px', objectFit: 'cover' }}
+                                className="border border-2 border-accent shadow-sm"
                                 onError={(e) => {
                                   e.target.onerror = null;
                                   e.target.src = 'https://ui-avatars.com/api/?name=?&background=666&color=fff';
                                 }}
                               />
-                            </td>
-                            <td className="fw-bold">{char.name}</td>
-                            <td className="text-end">
-                              <Button
-                                variant="link"
-                                size="sm"
-                                className="text-decoration-none me-2"
-                                onClick={() => handleOpenModal(char)}
-                              >
-                                {t('profile.edit_character')}
-                              </Button>
-                              <Button
-                                variant="link"
-                                size="sm"
-                                className="text-decoration-none text-danger"
-                                onClick={() => handleDelete(char.id)}
-                              >
-                                {t('profile.delete_character')}
-                              </Button>
-                            </td>
+                              <div className="flex-grow-1 min-w-0">
+                                <h6 className="mb-1 fw-bold text-truncate">{char.name}</h6>
+                                {char.status_line ? (
+                                  <p className="text-muted small mb-0 text-truncate" style={{ fontStyle: 'italic', opacity: 0.8 }}>
+                                    {char.status_line}
+                                  </p>
+                                ) : (
+                                  <p className="text-muted small mb-0 opacity-50">
+                                    {lang === 'ru' ? 'Нет статуса' : 'No status'}
+                                  </p>
+                                )}
+                              </div>
+                              {profile?.uid === uid && (
+                                <div className="d-flex flex-column gap-1 align-items-end">
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="text-decoration-none p-0 text-primary small fw-bold"
+                                    onClick={() => handleOpenModal(char)}
+                                  >
+                                    {t('profile.edit_character')}
+                                  </Button>
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="text-decoration-none p-0 text-danger small"
+                                    onClick={() => handleDelete(char.id)}
+                                  >
+                                    {t('profile.delete_character')}
+                                  </Button>
+                                </div>
+                              )}
+                            </Card.Body>
+                          </Card>
+                        </Col>
+                      ))}
+                    </Row>
+                  )}
+                </Card.Body>
+              </Card>
+            </Tab>
+
+            <Tab eventKey="reputation" title={t('profile.tab_reputation')}>
+              <Card className="shadow-sm border-0 bg-card">
+                <Card.Header className="py-3">
+                  <h5 className="mb-0">{t('profile.tab_reputation')}</h5>
+                </Card.Header>
+                <Card.Body className="p-0">
+                  {viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid ? (
+                    <div className="p-5 text-center text-muted">
+                      <p className="mb-0">{t('profile.rep_history_hidden')}</p>
+                    </div>
+                  ) : repLogs.length === 0 ? (
+                    <div className="p-5 text-center text-muted">
+                      <p className="mb-0">{t('forum.no_posts')}</p>
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <Table hover className="mb-0">
+                        <thead>
+                          <tr>
+                            <th className="px-4">{t('profile.rep_date')}</th>
+                            <th className="text-center" title={lang === 'ru' ? 'Тип голоса' : 'Vote Type'}>
+                              <div className="small fw-bold text-uppercase opacity-50">Type</div>
+                            </th>
+                            <th>{t('profile.rep_from')}</th>
+                            <th className="text-center">{t('profile.rep_value')}</th>
+                            <th>{t('profile.rep_comment')}</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </Table>
+                        </thead>
+                        <tbody>
+                          {repLogs.map(log => (
+                            <tr key={log.id}>
+                              <td className="px-4 py-3 small text-muted">
+                                {log.created_at ? format(log.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
+                              </td>
+                              <td className="py-3 text-center">
+                                <OverlayTrigger
+                                  placement="top"
+                                  overlay={
+                                    <Tooltip>
+                                      {log.post_id || log.topic_id ? (
+                                        <>
+                                          <div className="fw-bold">{lang === 'ru' ? 'Голос за сообщение' : 'Post vote'}</div>
+                                          {log.topic_title && <div className="small opacity-75 mt-1">{log.topic_title}</div>}
+                                          {log.post_number && <div className="small opacity-75">#{log.post_number}</div>}
+                                        </>
+                                      ) : (
+                                        lang === 'ru' ? 'Голос за профиль' : 'Profile vote'
+                                      )}
+                                    </Tooltip>
+                                  }
+                                >
+                                  <div className="d-inline-block">
+                                    {log.post_id || log.topic_id ? (
+                                      <MessageSquare size={16} className="text-primary opacity-75" />
+                                    ) : (
+                                      <User size={16} className="text-accent opacity-75" />
+                                    )}
+                                  </div>
+                                </OverlayTrigger>
+                              </td>
+                              <td className="py-3">
+                                <Link to={`/profile/${log.voter_id}`} className="text-decoration-none fw-semibold">
+                                  {log.voter_nickname || 'User'}
+                                </Link>
+                              </td>
+                              <td className="py-3 text-center">
+                                <OverlayTrigger
+                                  placement="top"
+                                  overlay={
+                                    <Tooltip>
+                                      {log.topic_id ? (
+                                        <>
+                                          {log.topic_title && <div className="fw-bold mb-1">{log.topic_title}</div>}
+                                          {log.post_number && <div className="small opacity-75 mb-1">#{log.post_number}</div>}
+                                          <div>{lang === 'ru' ? 'Перейти к сообщению' : 'Go to post'}</div>
+                                        </>
+                                      ) : (
+                                        lang === 'ru' ? 'Голос за профиль' : 'Profile vote'
+                                      )}
+                                    </Tooltip>
+                                  }
+                                >
+                                  <Badge
+                                    bg={log.value > 0 ? 'success' : 'danger'}
+                                    as={log.topic_id ? Link : 'span'}
+                                    to={log.topic_id ? `/topic/${log.topic_id}${log.post_id ? `#post-${log.post_id}` : ''}` : undefined}
+                                    className={log.topic_id ? 'text-decoration-none d-inline-flex align-items-center gap-1' : 'd-inline-flex align-items-center gap-1'}
+                                    style={{ cursor: log.topic_id ? 'pointer' : 'default', padding: '0.4em 0.6em' }}
+                                  >
+                                    {log.value > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                    <span>{log.value > 0 ? `+${log.value}` : log.value}</span>
+                                  </Badge>
+                                </OverlayTrigger>
+                              </td>
+                              <td className="py-3">
+                                {viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid ? (
+                                  <span className="text-muted small italic">{t('profile.rep_comments_hidden')}</span>
+                                ) : (
+                                  log.comment || '—'
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </Table>
+                    </div>
                   )}
                 </Card.Body>
               </Card>
@@ -282,7 +470,7 @@ const ProfilePage = () => {
 
             {profile?.uid === uid && (
               <Tab eventKey="account" title={t('profile.tab_profile')}>
-                <Card className="shadow-sm border-0">
+                <Card className="shadow-sm border-0 bg-card">
                   <Card.Header className="py-3">
                     <h5 className="mb-0">{t('profile.tab_profile')}</h5>
                   </Card.Header>
@@ -297,30 +485,66 @@ const ProfilePage = () => {
                           placeholder="Display Name"
                         />
                       </Form.Group>
-                      <Form.Group className="mb-3">
-                        <div className="d-flex justify-content-between align-items-center mb-1">
-                          <Form.Label className="fw-bold mb-0">{t('profile.status_line')}</Form.Label>
-                          <small className="text-muted">{(accountFormData.status_line || '').length}/100</small>
-                        </div>
-                        <Form.Control
-                          type="text"
-                          value={accountFormData.status_line}
-                          onChange={(e) => setAccountFormData({ ...accountFormData, status_line: e.target.value })}
-                          placeholder="What's on your mind?"
-                          maxLength={100}
-                        />
-                      </Form.Group>
+                      {profile?.role_id !== 'spectator' && (
+                        <Form.Group className="mb-3">
+                          <div className="d-flex justify-content-between align-items-center mb-1">
+                            <Form.Label className="fw-bold mb-0">{t('profile.status_line')}</Form.Label>
+                            <small className="text-muted">{(accountFormData.status_line || '').length}/30</small>
+                          </div>
+                          <Form.Control
+                            type="text"
+                            value={accountFormData.status_line}
+                            onChange={(e) => setAccountFormData({ ...accountFormData, status_line: e.target.value })}
+                            placeholder="What's on your mind?"
+                            maxLength={30}
+                          />
+                        </Form.Group>
+                      )}
                       <Form.Group className="mb-3">
                         <AvatarUploader
-                          label={t('profile.avatar_url')}
+                          label={t('profile.avatar')}
                           value={accountFormData.avatar_url}
                           onChange={(url) => setAccountFormData({ ...accountFormData, avatar_url: url })}
                           storagePath={`users/${uid}/avatar`}
                           size={100}
                         />
                       </Form.Group>
-                      <Button variant="primary" onClick={handleSaveAccount} className="px-4">
-                        {t('common.save')}
+
+                      {profile?.role_id !== 'spectator' && (
+                        <>
+                          <hr className="my-4" />
+                          <Form.Group className="mb-4">
+                            <Form.Label className="fw-bold text-primary small text-uppercase" style={{ letterSpacing: '0.05em' }}>
+                              {t('profile.signature')}
+                            </Form.Label>
+                            <Form.Control
+                              as="textarea"
+                              rows={3}
+                              value={accountFormData.signature}
+                              onChange={(e) => setAccountFormData({ ...accountFormData, signature: e.target.value })}
+                              placeholder={t('profile.signature_help')}
+                            />
+                          </Form.Group>
+                        </>
+                      )}
+
+                      <Button
+                        variant="primary"
+                        onClick={handleSaveAccount}
+                        className="px-4 d-flex align-items-center gap-2"
+                        disabled={savingAccount}
+                      >
+                        {savingAccount ? (
+                          <>
+                            <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                            {t('common.loading')}
+                          </>
+                        ) : (
+                          <>
+                            <Save size={18} />
+                            {t('common.save')}
+                          </>
+                        )}
                       </Button>
                     </Form>
                   </Card.Body>
@@ -330,7 +554,7 @@ const ProfilePage = () => {
 
             {profile?.uid === uid && (
               <Tab eventKey="settings" title={t('profile.tab_settings')}>
-                <Card className="shadow-sm border-0">
+                <Card className="shadow-sm border-0 bg-card">
                   <Card.Header className="py-3">
                     <h5 className="mb-0">{t('profile.tab_settings')}</h5>
                   </Card.Header>
@@ -364,29 +588,28 @@ const ProfilePage = () => {
                         </Col>
                       </Row>
 
-                      <hr className="my-4" />
-
-                      <Form.Group className="mb-3">
-                        <Form.Label className="fw-bold text-primary small text-uppercase" style={{ letterSpacing: '0.05em' }}>
-                          {t('profile.signature')}
-                        </Form.Label>
-                        <Form.Control
-                          as="textarea"
-                          rows={3}
-                          value={accountFormData.signature}
-                          onChange={(e) => setAccountFormData({ ...accountFormData, signature: e.target.value })}
-                          placeholder={t('profile.signature_help')}
-                        />
-                      </Form.Group>
-
-                      <Form.Check
-                        type="switch"
-                        id="show-footer-tab-switch"
-                        label={t('profile.show_footer')}
-                        className="fw-bold mb-4"
-                        checked={accountFormData.show_footer}
-                        onChange={(e) => setAccountFormData({ ...accountFormData, show_footer: e.target.checked })}
-                      />
+                      {profile?.role_id !== 'spectator' && (
+                        <>
+                          <hr className="my-4" />
+                          <h6 className="mb-3 text-primary uppercase small fw-bold">Reputation Privacy</h6>
+                          <Form.Check
+                            type="switch"
+                            id="rep-history-switch"
+                            label={t('profile.rep_privacy_show_history')}
+                            className="mb-2"
+                            checked={accountFormData.rep_show_history}
+                            onChange={(e) => setAccountFormData({ ...accountFormData, rep_show_history: e.target.checked })}
+                          />
+                          <Form.Check
+                            type="switch"
+                            id="rep-comments-switch"
+                            label={t('profile.rep_privacy_show_comments')}
+                            className="mb-4"
+                            checked={accountFormData.rep_show_comments}
+                            onChange={(e) => setAccountFormData({ ...accountFormData, rep_show_comments: e.target.checked })}
+                          />
+                        </>
+                      )}
 
                       <Button variant="primary" onClick={handleSaveAccount} className="px-4">
                         {t('common.save')}
@@ -400,7 +623,6 @@ const ProfilePage = () => {
         </Col>
       </Row>
 
-      {/* Character Modal (Remains for creating/editing characters) */}
       <Modal
         show={showModal}
         onHide={() => setShowModal(false)}
@@ -426,20 +648,20 @@ const ProfilePage = () => {
             <Form.Group className="mb-3" controlId="charStatus">
               <div className="d-flex justify-content-between align-items-center mb-1">
                 <Form.Label className="fw-bold mb-0">{t('profile.character_status')}</Form.Label>
-                <small className="text-muted">{(formData.status_line || '').length}/100</small>
+                <small className="text-muted">{(formData.status_line || '').length}/30</small>
               </div>
               <Form.Control
                 type="text"
                 value={formData.status_line}
                 onChange={(e) => setFormData({ ...formData, status_line: e.target.value })}
                 placeholder="e.g. Hunting orcs..."
-                maxLength={100}
+                maxLength={30}
               />
             </Form.Group>
 
             <Form.Group className="mb-3" controlId="charAvatar">
               <AvatarUploader
-                label={t('profile.avatar_url')}
+                label={t('profile.avatar')}
                 value={formData.avatar_url}
                 onChange={(url) => setFormData({ ...formData, avatar_url: url })}
                 storagePath={`users/${uid}/characters/${editingChar?.id || 'new'}_avatar`}
@@ -458,15 +680,6 @@ const ProfilePage = () => {
                 className="bg-light"
               />
             </Form.Group>
-
-            <Form.Check
-              type="switch"
-              id="char-show-footer-switch"
-              label={t('profile.show_footer')}
-              className="fw-bold"
-              checked={formData.show_footer}
-              onChange={(e) => setFormData({ ...formData, show_footer: e.target.checked })}
-            />
           </Form>
         </Modal.Body>
         <Modal.Footer className="border-0">
@@ -475,6 +688,38 @@ const ProfilePage = () => {
           </Button>
           <Button variant="primary" onClick={handleSaveCharacter}>
             {editingChar ? t('common.save') : t('profile.add_character')}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal show={showRepModal} onHide={() => setShowRepModal(false)} centered className="premium-modal">
+        <Modal.Header closeButton className="border-0">
+          <Modal.Title className="fw-bold">{t('profile.rep_give')}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="p-4">
+          <div className="text-center mb-4">
+            <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
+              {repValue > 0 ? `+${repValue}` : repValue}
+            </Badge>
+          </div>
+          <Form.Group>
+            <Form.Label className="fw-bold">{t('profile.rep_comment_placeholder')}</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={3}
+              value={repComment}
+              onChange={(e) => setRepComment(e.target.value)}
+              placeholder="..."
+              className="bg-light"
+            />
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer className="border-0">
+          <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
+            {submittingRep ? t('common.loading') : t('common.confirm')}
           </Button>
         </Modal.Footer>
       </Modal>

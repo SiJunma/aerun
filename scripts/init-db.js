@@ -1,3 +1,4 @@
+/* global process */
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, collection, addDoc } from 'firebase/firestore';
 import fs from 'fs';

@@ -1,12 +1,11 @@
 import { db } from '../../firebase';
-import { 
-  collection, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
   onSnapshot,
-  query,
   serverTimestamp
 } from 'firebase/firestore';
 

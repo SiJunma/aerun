@@ -2,15 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table, Button, Breadcrumb, Badge, Pagination } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
-import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToTopics, subscribeToCategories } from '../api/forum';
-import { formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { profile } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -45,7 +43,7 @@ const CategoryPage = () => {
     if (!timestamp) return '—';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return formatDistanceToNow(date, { addSuffix: true, locale: lang === 'ru' ? ru : enUS });
+      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
     } catch {
       return '—';
     }

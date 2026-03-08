@@ -4,14 +4,15 @@ import { Container, Card, Form, Button, Breadcrumb } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCharacters } from '../api/character';
-import { subscribeToCategories, createTopic } from '../api/forum';
+import { subscribeToCategories, createTopic, updateUser } from '../api/forum';
+import RichEditor from '../components/common/RichEditor';
 
 const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
   const { profile, user } = useAuth();
-  
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('');
@@ -37,7 +38,7 @@ const TopicFormPage = () => {
   const LIMITS = {
     title: 100,
     description: 200,
-    content: 5000
+    content: 15000
   };
 
   const handleSubmit = async (e) => {
@@ -47,7 +48,7 @@ const TopicFormPage = () => {
     setSubmitting(true);
     try {
       const selectedChar = characters.find(c => c.id === selectedCharacterId);
-      
+
       const authorName = selectedChar
         ? selectedChar.name
         : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User');
@@ -73,10 +74,7 @@ const TopicFormPage = () => {
         author_role_id: topicData.author_role_id,
         is_character: topicData.is_character,
         character_title: selectedChar?.title || '',
-        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
-        show_footer: selectedChar
-          ? (selectedChar.show_footer !== false)
-          : (profile?.settings?.show_footer !== false)
+        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || '')
       };
 
       await createTopic(topicData, firstPostData);
@@ -102,7 +100,7 @@ const TopicFormPage = () => {
         </Breadcrumb.Item>
         <Breadcrumb.Item active>{t('forum.create_topic')}</Breadcrumb.Item>
       </Breadcrumb>
- 
+
       <Card className="shadow-sm border-0">
         <Card.Header className="py-3">
           <h4 className="mb-0">{t('forum.create_topic')}</h4>
@@ -111,9 +109,9 @@ const TopicFormPage = () => {
           <Form onSubmit={handleSubmit}>
             <Form.Group className="mb-4" controlId="topicTitle">
               <Form.Label className="fw-bold h6">Topic Title / Заголовок темы</Form.Label>
-              <Form.Control 
-                type="text" 
-                placeholder="Enter topic title..." 
+              <Form.Control
+                type="text"
+                placeholder="Enter topic title..."
                 className="form-control-lg"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -126,12 +124,12 @@ const TopicFormPage = () => {
                 </small>
               </div>
             </Form.Group>
- 
+
             <Form.Group className="mb-4" controlId="topicDesc">
               <Form.Label className="fw-bold h6">{t('forum.short_description')}</Form.Label>
-              <Form.Control 
-                type="text" 
-                placeholder="Briefly describe what this topic is about..." 
+              <Form.Control
+                type="text"
+                placeholder="Briefly describe what this topic is about..."
                 className="bg-light"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -143,12 +141,18 @@ const TopicFormPage = () => {
                 </small>
               </div>
             </Form.Group>
- 
+
             <Form.Group className="mb-4" controlId="postAs">
               <Form.Label className="fw-bold h6">{t('forum.post_as')}</Form.Label>
-              <Form.Select 
+              <Form.Select
                 value={selectedCharacterId}
-                onChange={(e) => setSelectedCharacterId(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedCharacterId(val);
+                  if (user) {
+                    updateUser(user.uid, { last_selected_character_id: val });
+                  }
+                }}
                 className="bg-light"
               >
                 <option value="">User: {profile?.nickname || profile?.email?.split('@')[0] || t('nav.profile')}</option>
@@ -159,32 +163,23 @@ const TopicFormPage = () => {
                 ))}
               </Form.Select>
             </Form.Group>
- 
-            <Form.Group className="mb-4" controlId="topicContent">
-              <Form.Label className="fw-bold h6">Content / Содержание</Form.Label>
-              <Form.Control 
-                as="textarea" 
-                rows={10} 
-                placeholder="Write your message here..." 
-                className="bg-light"
+
+            <Form.Group className="mb-4">
+              <Form.Label className="fw-bold h6">{lang === 'ru' ? 'Содержание' : 'Content'}</Form.Label>
+              <RichEditor
+                id="topicContent"
+                placeholder={lang === 'ru' ? 'Напишите ваше сообщение здесь...' : 'Write your message here...'}
+                rows={10}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 maxLength={LIMITS.content}
-                required
+                disabled={submitting}
               />
-              <div className="d-flex justify-content-between mt-2">
-                <Form.Text className="text-muted">
-                  Markdown is supported.
-                </Form.Text>
-                <Form.Text className={`${content.length >= LIMITS.content ? 'text-danger' : 'text-muted'} fw-bold`}>
-                  {content.length} / {LIMITS.content}
-                </Form.Text>
-              </div>
             </Form.Group>
- 
+
             <div className="d-flex justify-content-end gap-2">
-              <Button 
-                variant="outline-secondary" 
+              <Button
+                variant="outline-secondary"
                 disabled={submitting}
                 onClick={() => navigate(`/category/${categoryId}`)}
               >

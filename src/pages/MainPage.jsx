@@ -3,7 +3,7 @@ import { Card, Table, Container } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { subscribeToCategories } from '../api/forum';
-import { formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
 const MainPage = () => {
@@ -19,7 +19,7 @@ const MainPage = () => {
     if (!timestamp) return '—';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return formatDistanceToNow(date, { addSuffix: true, locale: lang === 'ru' ? ru : enUS });
+      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
     } catch {
       return '—';
     }

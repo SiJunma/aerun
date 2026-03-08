@@ -2,7 +2,15 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 
-const ProtectedRoute = ({ children, requireActive = true }) => {
+/**
+ * ProtectedRoute — Role-Based Access Control wrapper.
+ *
+ * Props:
+ *  requireActive  {boolean} – if true, pending/banned users are bounced (default: true)
+ *  requireAdmin   {boolean} – if true, only role_id='admin' may enter (default: false)
+ *  requirePosting {boolean} – if true, spectators are bounced (cannot post/create, default: false)
+ */
+const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false }) => {
   const { user, profile, loading } = useAuth();
   const location = useLocation();
 
@@ -16,16 +24,29 @@ const ProtectedRoute = ({ children, requireActive = true }) => {
     );
   }
 
+  // Not logged in at all → /login
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Banned → /banned (always checked first when logged in)
+  if (profile?.status === 'banned') {
+    return <Navigate to="/banned" replace />;
+  }
+
+  // Pending (not yet approved) → /pending
   if (requireActive && profile?.status === 'pending') {
     return <Navigate to="/pending" replace />;
   }
 
-  if (profile?.status === 'banned') {
-    return <Navigate to="/banned" replace />;
+  // Admin-only route: kick non-admins back home
+  if (requireAdmin && profile?.role_id !== 'admin') {
+    return <Navigate to="/" replace />;
+  }
+
+  // Posting-required route: spectators cannot post, create topics, etc.
+  if (requirePosting && profile?.role_id === 'spectator') {
+    return <Navigate to="/" replace />;
   }
 
   return children;

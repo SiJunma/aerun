@@ -29,9 +29,10 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label }) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate — images only, max 2 MB
-    if (!file.type.startsWith('image/')) {
-      setError(t('profile.error_only_images'));
+    // Validate — PNG/JPG/WebP only, max 2 MB
+    const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setError('Only PNG, JPG, and WebP images are allowed.');
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
@@ -69,6 +70,13 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label }) => {
   };
 
   const handleUrlConfirm = () => {
+    const lower = urlInput.toLowerCase().split('?')[0]; // strip query params
+    const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
+    if (!ALLOWED_EXTENSIONS.some(ext => lower.endsWith(ext))) {
+      setError('Only PNG, JPG, and WebP URLs are allowed.');
+      return;
+    }
+    setError('');
     onChange(urlInput);
     setMode('preview');
   };
@@ -145,7 +153,7 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label }) => {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/png, image/jpeg, image/webp"
         style={{ display: 'none' }}
         onChange={handleFileChange}
       />

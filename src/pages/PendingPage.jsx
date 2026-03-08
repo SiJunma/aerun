@@ -4,9 +4,9 @@ import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
 const PendingPage = () => {
-  const { logout } = useAuth();
+  const { logout, profile } = useAuth();
   const { translations } = useI18n(); // Access raw translations if needed, or just force key
-  
+
   // Force English for this page as requested
   const t = (path) => {
     const keys = path.split('.');
@@ -16,6 +16,12 @@ const PendingPage = () => {
     }
     return result || path;
   };
+
+  React.useEffect(() => {
+    if (profile && profile.status === 'active') {
+      window.location.href = '/';
+    }
+  }, [profile]);
 
   return (
     <Container className="d-flex align-items-center justify-content-center vh-100">

@@ -1,22 +1,51 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination } from 'react-bootstrap';
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser } from '../api/forum';
 import { subscribeToCharacters } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
-import { formatDistanceToNow } from 'date-fns';
+import RichEditor from '../components/common/RichEditor';
+import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
+import BBCode from '../components/common/BBCode';
+import { Award } from 'lucide-react';
+import { voteOnPost, getVotesInTopic } from '../api/reputation';
+
+const AvatarImage = ({ src, fallbackName, size = 90 }) => {
+  const [error, setError] = useState(false);
+  const finalSrc = error || !src
+    ? `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName || '?')}&background=random`
+    : src;
+
+  return (
+    <Image
+      src={finalSrc}
+      rounded
+      fluid
+      className="mb-2 shadow-sm"
+      style={{ width: `${size}px`, height: `${size}px`, objectFit: 'cover' }}
+      referrerPolicy="no-referrer"
+      onError={(e) => {
+        if (!error) {
+          setError(true);
+        } else {
+          // If even the fallback fails, remove the onError handler to stop the loop
+          e.target.onerror = null;
+          // As a last-resort fallback, use a hardcoded generic avatar that is guaranteed to load 
+          // (or just a blank data URI to prevent broken image icons)
+          e.target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90" viewBox="0 0 90 90"><rect width="90" height="90" fill="%23ccc"/><text x="45" y="45" font-family="Arial" font-size="30" fill="%23fff" text-anchor="middle" dy=".3em">?</text></svg>';
+        }
+      }}
+    />
+  );
+};
 
 const TopicPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { profile, user } = useAuth();
+  const { profile, user, recordActivity } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
@@ -34,12 +63,25 @@ const TopicPage = () => {
   // Delete confirmation state
   const [deletingPost, setDeletingPost] = useState(null);
 
+  // Reputation state
+  const [myVotes, setMyVotes] = useState({}); // { postId: value }
+  const [votingPostId, setVotingPostId] = useState(null);
+  const [showRepModal, setShowRepModal] = useState(false);
+  const [repValue, setRepValue] = useState(1);
+  const [repComment, setRepComment] = useState('');
+  const [submittingRep, setSubmittingRep] = useState(false);
+  const [repTargetPost, setRepTargetPost] = useState(null);
+  const [repTargetPostNumber, setRepTargetPostNumber] = useState(null);
+  const [activeRepPostId, setActiveRepPostId] = useState(null);
+  const [showVoteInfoModal, setShowVoteInfoModal] = useState(false);
+  const [selectedVote, setSelectedVote] = useState(null);
+
   const replyRef = useRef(null);
   const scrolledRef = useRef(false); // prevent double-scroll
   const goLast = searchParams.get('goLast') === '1';
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
-  const MAX_CHARS = 5000;
+  const MAX_CHARS = 15000;
   const LAST_VISIT_KEY = `lastVisit_${id}`;
 
   useEffect(() => {
@@ -53,20 +95,26 @@ const TopicPage = () => {
       unsubPosts();
       unsubTopic();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // Subscribe to characters separately so we can unsubscribe properly
   useEffect(() => {
     if (!user) return;
     const unsub = subscribeToCharacters(user.uid, setCharacters);
+
+    // Fetch my votes in this topic
+    getVotesInTopic(user.uid, id).then(setMyVotes).catch(console.error);
+
     return () => unsub();
-  }, [user]);
+  }, [user, id]);
 
   // Set initial selectedCharacterId from profile
   useEffect(() => {
     if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
       setSelectedCharacterId(profile.last_selected_character_id || '');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.last_selected_character_id]);
 
   useEffect(() => {
@@ -78,6 +126,24 @@ const TopicPage = () => {
       return () => unsubCat();
     }
   }, [topic?.category_id]);
+
+  // Draft Auto-save
+  const DRAFT_KEY = `reply_draft_${id}`;
+
+  useEffect(() => {
+    const savedDraft = localStorage.getItem(DRAFT_KEY);
+    if (savedDraft) {
+      setReplyContent(savedDraft);
+    }
+  }, [id, DRAFT_KEY]);
+
+  useEffect(() => {
+    if (replyContent) {
+      localStorage.setItem(DRAFT_KEY, replyContent);
+    } else {
+      localStorage.removeItem(DRAFT_KEY);
+    }
+  }, [replyContent, DRAFT_KEY]);
 
   // Subscribe to author stats for each unique author in posts
   useEffect(() => {
@@ -91,16 +157,35 @@ const TopicPage = () => {
       });
     });
     return () => unsubs.forEach(unsub => unsub());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts.length > 0 ? [...new Set(posts.map(p => p.author_id))].join(',') : '']);
 
-  // Scroll to first unread post (or last post if ?goLast=1)
+  // Toast notification
+  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
+  const showToast = (message, variant = 'success') => {
+    setToast({ show: true, message, variant });
+  };
+
+  // Scroll to first unread post (or last post if ?goLast=1, or specific post if #post-ID)
   useEffect(() => {
     if (posts.length === 0 || scrolledRef.current) return;
 
     let targetId;
     let targetPage = currentPage;
+    const hash = window.location.hash;
 
-    if (goLast) {
+    if (hash && hash.startsWith('#post-')) {
+      const postId = hash.replace('#post-', '');
+      const postIndex = posts.findIndex(p => p.id === postId);
+      if (postIndex !== -1) {
+        targetPage = Math.ceil((postIndex + 1) / ITEMS_PER_PAGE);
+        if (currentPage !== targetPage) {
+          setSearchParams({ page: targetPage });
+          return;
+        }
+        targetId = hash.substring(1); // remove #
+      }
+    } else if (goLast) {
       targetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
       if (currentPage !== targetPage) {
         setSearchParams({ page: targetPage, goLast: '1' });
@@ -131,27 +216,12 @@ const TopicPage = () => {
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 500);
     }
-  }, [posts.length, goLast, currentPage]);
-
-  const Toolbar = ({ target = 'reply' }) => (
-    <div className="d-flex gap-2 mb-2 p-2 border rounded bg-light editor-toolbar">
-      <Button variant="light" size="sm" onClick={() => insertText('**', '**', false, target)} title="Bold"><strong>B</strong></Button>
-      <Button variant="light" size="sm" onClick={() => insertText('*', '*', false, target)} title="Italic"><em>I</em></Button>
-      <Button variant="light" size="sm" onClick={() => insertText('<u>', '</u>', false, target)} title="Underline"><u>U</u></Button>
-      <Button variant="light" size="sm" onClick={() => insertText('~~', '~~', false, target)} title="Strikethrough"><del>S</del></Button>
-      <div className="vr mx-1"></div>
-      <Button variant="light" size="sm" onClick={() => insertText('[TEXT](URL)', '', true, target)} title="Link">Link</Button>
-      <Button variant="light" size="sm" onClick={() => insertText('![alt](URL)', '', true, target)} title="Image">Img</Button>
-      <div className="vr mx-1"></div>
-      <Button variant="light" size="sm" onClick={() => insertText('', '', 'quote', target)} title="Quote">Quote</Button>
-    </div>
-  );
-
-  const formatTime = (timestamp) => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts.length, goLast, currentPage]); const formatTime = (timestamp) => {
     if (!timestamp) return '...';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return formatDistanceToNow(date, { addSuffix: true, locale: lang === 'ru' ? ru : enUS });
+      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
     } catch {
       return '...';
     }
@@ -210,66 +280,58 @@ const TopicPage = () => {
     return (stats && stats.nickname) ? (stats.settings?.signature || '') : (post.author_signature || '');
   };
 
-  const getLiveShowFooter = (post) => {
-    if (post.author_id === user?.uid) {
-      if (post.is_character) {
-        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
-        return char ? (char.show_footer !== false) : (post.show_footer !== false);
-      }
-      return (profile?.settings?.show_footer !== false);
-    }
-    const stats = authorStats[post.author_id];
-    return (stats && stats.nickname) ? (stats.settings?.show_footer !== false) : (post.show_footer !== false);
-  };
-
   const resolveText = (field) =>
     typeof field === 'object' && field !== null
       ? (lang === 'ru' ? field.ru : field.en) || ''
       : field || '';
 
-  const insertText = (before, after = '', isLink = false, target = 'reply') => {
-    const fieldId = target === 'reply' ? 'replyContent' : 'editContent';
-    const textarea = document.getElementById(fieldId);
-    if (!textarea) return;
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-    const selected = text.substring(start, end);
+  const handleOpenVoteModal = (post, value, postNumber) => {
+    if (!user || profile?.role_id === 'spectator') return;
+    if (post.author_id === user.uid) return;
+    if (myVotes[post.id]) return;
 
-    let replacement = '';
-    if (isLink === 'quote') {
-      const author = prompt(lang === 'ru' ? 'Кто это написал?' : 'Who wrote this?', '');
-      const label = author ? (lang === 'ru' ? `**${author}** написал(а):` : `**${author}** wrote:`) : '';
-      if (label) {
-        replacement = `> ${label}\n>\n> ${selected || '...'}`;
-      } else {
-        replacement = `> ${selected || '...'}`;
-      }
-    } else if (isLink) {
-      const url = prompt(lang === 'ru' ? 'Введите URL:' : 'Enter URL:', 'https://');
-      if (!url) return;
-      replacement = before.replace('URL', url).replace('TEXT', selected || 'text');
-    } else {
-      replacement = before + selected + after;
+    setRepTargetPost(post);
+    setRepValue(value);
+    setRepTargetPostNumber(postNumber);
+    setRepComment('');
+    setShowRepModal(true);
+  };
+
+  const handleRepVote = async () => {
+    if (!repTargetPost || !user) return;
+    setSubmittingRep(true);
+    try {
+      await voteOnPost(user.uid, repTargetPost.author_id, repTargetPost.id, id, repValue, repComment, topic?.title, repTargetPostNumber);
+      setMyVotes(prev => ({
+        ...prev,
+        [repTargetPost.id]: {
+          value: repValue,
+          comment: repComment,
+          voter_nickname: profile?.nickname || user.displayName || 'User',
+          topic_title: topic?.title || '',
+          post_number: repTargetPostNumber,
+          created_at: { toDate: () => new Date() }
+        }
+      }));
+      recordActivity();
+      setShowRepModal(false);
+      showToast(lang === 'ru' ? 'Репутация изменена!' : 'Reputation updated!');
+    } catch (error) {
+      console.error('Voting error:', error);
+      showToast(error.message, 'danger');
+    } finally {
+      setSubmittingRep(false);
+      setRepTargetPost(null);
+      setRepTargetPostNumber(null);
     }
-
-    const newValue = text.substring(0, start) + replacement + text.substring(end);
-    if (target === 'reply') setReplyContent(newValue);
-    else setEditContent(newValue);
-
-    // Set focus back and adjust selection
-    setTimeout(() => {
-      textarea.focus();
-      const newCursorPos = start + replacement.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-    }, 0);
   };
 
   const handleReply = async (e) => {
     e.preventDefault();
     if (!replyContent.trim() || submitting) return;
 
+    recordActivity(); // posting = user is active
     setSubmitting(true);
     try {
       const selectedChar = characters.find(c => c.id === selectedCharacterId);
@@ -285,9 +347,6 @@ const TopicPage = () => {
         is_character: !!selectedChar,
         author_character_id: selectedCharacterId || null,
         author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
-        show_footer: selectedChar
-          ? (selectedChar.show_footer !== false)
-          : (profile?.settings?.show_footer !== false),
         owner_name: profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'
       };
 
@@ -309,25 +368,7 @@ const TopicPage = () => {
   const handleSaveEdit = async (postId) => {
     if (!editContent.trim()) return;
     try {
-      // Find the post to get is_character and author_character_id
-      const post = posts.find(p => p.id === postId);
-      let metadata = {};
-
-      if (post && post.author_id === user?.uid) {
-        const selectedChar = post.is_character
-          ? characters.find(c => c.id === post.author_character_id || c.name === post.author_name)
-          : null;
-
-        metadata = {
-          author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || 'User'),
-          author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || user?.photoURL || ''),
-          author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-          author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
-          show_footer: selectedChar ? (selectedChar.show_footer !== false) : (profile?.settings?.show_footer !== false)
-        };
-      }
-
-      await updatePost(postId, editContent.trim(), metadata);
+      await updatePost(postId, editContent.trim(), {});
       setEditingPostId(null);
       setEditContent('');
     } catch (err) {
@@ -466,17 +507,9 @@ const TopicPage = () => {
                   )}
 
                   {/* 3. Avatar */}
-                  <Image
-                    src={getLiveAuthorAvatar(post) || `https://ui-avatars.com/api/?name=${encodeURIComponent(getLiveAuthorName(post))}&background=random`}
-                    rounded
-                    fluid
-                    className="mb-2 shadow-sm"
-                    style={{ width: '90px', height: '90px', objectFit: 'cover' }}
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      e.target.onerror = null;
-                      e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(getLiveAuthorName(post) || '?')}&background=444&color=fff`;
-                    }}
+                  <AvatarImage
+                    src={getLiveAuthorAvatar(post)}
+                    fallbackName={getLiveAuthorName(post)}
                   />
 
                   {/* 4. Posts Count */}
@@ -506,7 +539,20 @@ const TopicPage = () => {
                   {/* Header Strip: Time, # */}
                   <div className="post-header-strip px-4 py-1 d-flex justify-content-between align-items-center">
                     <small className="text-muted">
-                      {formatTime(post.created_at)}
+                      <a
+                        href={`#post-${post.id}`}
+                        className="text-decoration-none text-muted hover-link"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const url = `${window.location.origin}${window.location.pathname}${window.location.search}#post-${post.id}`;
+                          navigator.clipboard.writeText(url);
+                          showToast(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
+                          // Also navigate for classic behavior
+                          window.location.hash = `post-${post.id}`;
+                        }}
+                      >
+                        {formatTime(post.created_at)}
+                      </a>
                       {post.edited_at && (
                         <span className="ms-2 opacity-50">
                           ({lang === 'ru' ? 'ред.' : 'edited'} {formatTime(post.edited_at)})
@@ -521,15 +567,15 @@ const TopicPage = () => {
                     <div className="flex-grow-1">
                       {editingPostId === post.id ? (
                         <div>
-                          <Toolbar target="edit" />
-                          <Form.Control
-                            id="editContent"
-                            as="textarea"
-                            rows={6}
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            className="mb-2"
-                          />
+                          <div className="mb-2">
+                            <RichEditor
+                              id="editContent"
+                              value={editContent}
+                              onChange={(e) => setEditContent(e.target.value)}
+                              rows={6}
+                              maxLength={MAX_CHARS}
+                            />
+                          </div>
                           <div className="d-flex gap-2">
                             <Button size="sm" variant="primary" onClick={() => handleSaveEdit(post.id)}>
                               {lang === 'ru' ? 'Сохранить' : 'Save'}
@@ -541,34 +587,77 @@ const TopicPage = () => {
                         </div>
                       ) : (
                         <div className="post-content">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            rehypePlugins={[rehypeRaw, rehypeSanitize]}
-                          >
-                            {post.content}
-                          </ReactMarkdown>
+                          <BBCode>{post.content}</BBCode>
                         </div>
                       )}
 
                       {/* Signature */}
-                      {getLiveShowFooter(post) && getLiveAuthorSignature(post) && (
+                      {getLiveAuthorSignature(post) && (
                         <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
-                          {getLiveAuthorSignature(post)}
+                          <BBCode>{getLiveAuthorSignature(post)}</BBCode>
                         </div>
                       )}
                     </div>
 
-                    {/* Reputation */}
-                    <div className="mt-3 d-flex justify-content-end align-items-center gap-2">
-                      <div className="reputation-controls d-flex align-items-center">
-                        <strong className="me-2" style={{ color: 'var(--accent-color)' }}>{authorStats[post.author_id]?.reputation || 0}</strong>
-                        {post.author_id !== profile?.uid && (
-                          <>
-                            <Button variant="outline-danger" className="rep-btn" onClick={() => { }}>−</Button>
-                            <Button variant="outline-success" className="rep-btn" onClick={() => { }}>+</Button>
-                          </>
+                    {/* Reputation / Voting Buttons */}
+                    <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
+                      <div
+                        className={`text-muted small d-flex align-items-center gap-1 ${post.author_id !== profile?.uid && profile?.role_id !== 'spectator' ? 'rep-trigger' : ''}`}
+                        title={post.author_id !== profile?.uid && profile?.role_id !== 'spectator'
+                          ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
+                          : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
+                        onClick={() => {
+                          if (post.author_id === profile?.uid || profile?.role_id === 'spectator') return;
+
+                          if (myVotes[post.id]) {
+                            setSelectedVote(myVotes[post.id]);
+                            setShowVoteInfoModal(true);
+                          } else {
+                            setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
+                          }
+                        }}
+                      >
+                        <Award size={14} className="text-accent" />
+                        <strong>{post.reputation || 0}</strong>
+                        {myVotes[post.id] && (
+                          <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
+                            ({myVotes[post.id].value > 0 ? '+1' : '-1'})
+                          </span>
                         )}
                       </div>
+
+                      {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && (
+                        <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
+                          {profile?.role_id !== 'spectator' && (
+                            <div className="d-flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline-danger"
+                                className="py-0 px-2 voting-btn"
+                                disabled={votingPostId === post.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenVoteModal(post, -1, index + indexOfFirstItem + 1);
+                                }}
+                              >
+                                −
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline-success"
+                                className="py-0 px-2 voting-btn"
+                                disabled={votingPostId === post.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
+                                }}
+                              >
+                                +
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </Col>
@@ -614,10 +703,10 @@ const TopicPage = () => {
                         const selectedText = window.getSelection().toString().trim();
                         const author = getLiveAuthorName(post);
                         const content = selectedText || post.content;
-                        const label = lang === 'ru' ? `**${author}** написал(а):` : `**${author}** wrote:`;
+                        const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
 
-                        // New boxed layout with paragraph break
-                        const quote = `> ${label}\n>\n> ${content.split('\n').join('\n> ')}\n\n`;
+                        // BBCode Quote layout without extra trailing newlines to prevent gaps
+                        const quote = `[quote]${label}\n${content}[/quote]\n`;
 
                         setReplyContent(prev => prev + quote);
                         // Clean selection after quoting
@@ -639,67 +728,70 @@ const TopicPage = () => {
         {renderPagination()}
       </div>
 
-      {/* Reply form */}
-      <div className="mt-5" ref={replyRef}>
-        <Card className="shadow-sm border-0">
-          <Card.Header className="bg-dark text-white py-3">
-            <h5 className="mb-0">{t('forum.create_post')}</h5>
-          </Card.Header>
-          <Card.Body className="p-4">
-            <Form onSubmit={handleReply}>
-              <Form.Group className="mb-3" controlId="postAs">
-                <Form.Select
-                  size="sm"
-                  value={selectedCharacterId}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedCharacterId(val);
-                    if (user) {
-                      updateUser(user.uid, { last_selected_character_id: val });
-                    }
-                  }}
-                  className="mb-2 w-auto"
-                >
-                  <option value="">
-                    {lang === 'ru' ? 'Как пользователь' : 'Post as User'}:{' '}
-                    {profile?.nickname || profile?.email?.split('@')[0]}
-                  </option>
-                  {characters.map(char => (
-                    <option key={char.id} value={char.id}>
-                      {lang === 'ru' ? 'Как персонаж' : 'As Character'}: {char.name}
+      {/* Reply form — hidden for spectators */}
+      {profile?.role_id !== 'spectator' ? (
+        <div className="mt-5" ref={replyRef}>
+          <Card className="shadow-sm border-0">
+            <Card.Header className="bg-dark text-white py-3">
+              <h5 className="mb-0">{t('forum.create_post')}</h5>
+            </Card.Header>
+            <Card.Body className="p-4">
+              <Form onSubmit={handleReply}>
+                <Form.Group className="mb-3" controlId="postAs">
+                  <Form.Select
+                    size="sm"
+                    value={selectedCharacterId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedCharacterId(val);
+                      if (user) {
+                        updateUser(user.uid, { last_selected_character_id: val });
+                      }
+                    }}
+                    className="mb-2 w-auto"
+                  >
+                    <option value="">
+                      {lang === 'ru' ? 'Как пользователь' : 'Post as User'}:{' '}
+                      {profile?.nickname || profile?.email?.split('@')[0]}
                     </option>
-                  ))}
-                </Form.Select>
-              </Form.Group>
-              <Form.Group className="mb-3" controlId="replyContent">
-                <Toolbar target="reply" />
-                <Form.Control
-                  as="textarea"
-                  rows={5}
-                  placeholder={lang === 'ru' ? 'Написать ответ...' : 'Write your reply...'}
-                  value={replyContent}
-                  onChange={(e) => setReplyContent(e.target.value)}
-                  maxLength={MAX_CHARS}
-                  disabled={submitting}
-                  required
-                />
-                <div className="text-end mt-1">
-                  <small className={`${replyContent.length >= MAX_CHARS ? 'text-danger' : 'text-muted'} fw-bold`}>
-                    {replyContent.length} / {MAX_CHARS}
-                  </small>
+                    {characters.map(char => (
+                      <option key={char.id} value={char.id}>
+                        {lang === 'ru' ? 'Как персонаж' : 'As Character'}: {char.name}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <RichEditor
+                    id="replyContent"
+                    placeholder={lang === 'ru' ? 'Написать ответ...' : 'Write your reply...'}
+                    rows={6}
+                    value={replyContent}
+                    onChange={(e) => setReplyContent(e.target.value)}
+                    maxLength={MAX_CHARS}
+                    disabled={submitting}
+                  />
+                </Form.Group>
+                <div className="d-flex justify-content-end">
+                  <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
+                    {submitting
+                      ? (lang === 'ru' ? 'Отправка...' : 'Posting...')
+                      : t('forum.create_post')}
+                  </Button>
                 </div>
-              </Form.Group>
-              <div className="d-flex justify-content-end">
-                <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
-                  {submitting
-                    ? (lang === 'ru' ? 'Отправка...' : 'Posting...')
-                    : t('forum.create_post')}
-                </Button>
-              </div>
-            </Form>
-          </Card.Body>
-        </Card>
-      </div>
+              </Form>
+            </Card.Body>
+          </Card>
+        </div>
+      ) : (
+        <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
+          <span className="opacity-75">
+            {lang === 'ru'
+              ? '👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.'
+              : '👁 Spectator mode — you can read but cannot post replies.'}
+          </span>
+        </div>
+      )}
 
       <div className="d-flex justify-content-between mt-4">
         {category && (
@@ -709,7 +801,7 @@ const TopicPage = () => {
         )}
       </div>
 
-      {/* Delete confirm modal */}
+      {/* Modals */}
       <ConfirmModal
         show={!!deletingPost}
         onHide={() => setDeletingPost(null)}
@@ -721,6 +813,103 @@ const TopicPage = () => {
         confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
         cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
       />
+
+      <Modal show={showRepModal} onHide={() => setShowRepModal(false)} centered className="premium-modal">
+        <Modal.Header closeButton className="border-0">
+          <Modal.Title className="fw-bold">{t('profile.rep_give')}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="p-4 px-5">
+          <div className="text-center mb-4">
+            <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
+              {repValue > 0 ? `+${repValue}` : repValue}
+            </Badge>
+            <div className="mt-3 text-muted small px-3">
+              {lang === 'ru'
+                ? 'Этот голос изменит репутацию данного поста и будет зачислен в общую репутацию (карму) автора.'
+                : 'This vote will change the reputation of this post and contribute to the author\'s total reputation (karma).'}
+            </div>
+          </div>
+          <Form.Group>
+            <Form.Label className="fw-bold small">{lang === 'ru' ? 'Комментарий (опционально)' : 'Leave a comment (optional)'}</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={3}
+              value={repComment}
+              onChange={(e) => setRepComment(e.target.value)}
+              placeholder=""
+              className="modal-section-themed"
+            />
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer className="border-0">
+          <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
+            {submittingRep ? t('common.loading') : t('common.confirm')}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Vote Info Modal */}
+      <Modal show={showVoteInfoModal} onHide={() => setShowVoteInfoModal(false)} centered className="premium-modal shadow-lg">
+        <Modal.Header closeButton className="border-0">
+          <Modal.Title className="fw-bold small text-uppercase letter-spacing-1">
+            {lang === 'ru' ? 'Информация о вашем голосе' : 'Your Vote Information'}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="p-4">
+          {selectedVote && (
+            <div className="d-flex flex-column gap-3">
+              <div className="d-flex justify-content-between align-items-center modal-inner-card p-3">
+                <div>
+                  <div className="small text-muted">{lang === 'ru' ? 'Ваш голос' : 'Your vote'}</div>
+                  <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-5 mt-1">
+                    {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
+                  </Badge>
+                </div>
+                <div className="text-end">
+                  <div className="small text-muted">{lang === 'ru' ? 'Дата' : 'Date'}</div>
+                  <div className="fw-bold">{formatTime(selectedVote.created_at)}</div>
+                </div>
+              </div>
+
+              <div>
+                <div className="small text-muted mb-2">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
+                <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
+                  {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
+                </div>
+              </div>
+
+              <div className="small text-muted opacity-75 italic text-center mt-2">
+                {lang === 'ru'
+                  ? 'Этот голос зачислен автору поста.'
+                  : 'This vote has been contributed to the post author.'}
+              </div>
+            </div>
+          )}
+        </Modal.Body>
+        <Modal.Footer className="border-0 pt-0">
+          <Button variant="outline-secondary" className="w-100" onClick={() => setShowVoteInfoModal(false)}>
+            {t('common.close')}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100 }}>
+        <Toast
+          bg={toast.variant}
+          show={toast.show}
+          onClose={() => setToast(t => ({ ...t, show: false }))}
+          delay={3500}
+          autohide
+        >
+          <Toast.Body className="d-flex align-items-center gap-2 text-white fw-semibold">
+            <span>{toast.variant === 'success' ? '✓' : '✕'}</span>
+            <span>{toast.message}</span>
+          </Toast.Body>
+        </Toast>
+      </ToastContainer>
     </Container >
   );
 };

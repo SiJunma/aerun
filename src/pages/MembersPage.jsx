@@ -4,7 +4,7 @@ import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock } from
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { subscribeToAllUsers } from '../api/forum';
-import { formatDistanceToNow, format } from 'date-fns';
+import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
 const MembersPage = () => {
@@ -23,7 +23,7 @@ const MembersPage = () => {
     if (!timestamp) return '...';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return format(date, 'd MMM yyyy', { locale: lang === 'ru' ? ru : enUS });
+      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
     } catch {
       return '...';
     }
@@ -33,11 +33,7 @@ const MembersPage = () => {
     if (!timestamp) return '...';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      const today = new Date();
-      if (date.toDateString() === today.toDateString()) {
-        return lang === 'ru' ? 'Сегодня' : 'Today';
-      }
-      return format(date, 'd MMM yyyy', { locale: lang === 'ru' ? ru : enUS });
+      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
     } catch {
       return '...';
     }

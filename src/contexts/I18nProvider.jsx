@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { translations } from '../i18n/dictionary';
 import { useAuth } from './AuthProvider';
@@ -30,13 +31,13 @@ export const I18nProvider = ({ children }) => {
   const t = (path) => {
     const keys = path.split('.');
     let result = translations[lang];
-    
+
     for (const key of keys) {
       if (result) {
         result = result[key];
       }
     }
-    
+
     // Fallback to English if translation missing in current language
     if (!result && lang !== 'en') {
       let fallback = translations['en'];

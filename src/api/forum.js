@@ -11,7 +11,8 @@ import {
   runTransaction,
   updateDoc,
   deleteDoc,
-  increment
+  increment,
+  getDocs
 } from 'firebase/firestore';
 
 // ── Categories ──────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ export const createTopic = async (topicData, firstPostData) => {
     transaction.set(topicRef, {
       ...topicData,
       views: 0,
+      reputation: 0,
       last_post_at: serverTimestamp(),
       last_post_author: topicData.author_name,
       last_post_author_id: topicData.author_id,
@@ -115,6 +117,7 @@ export const createTopic = async (topicData, firstPostData) => {
     transaction.set(postRef, {
       ...firstPostData,
       topic_id: topicRef.id,
+      reputation: 0,
       created_at: serverTimestamp()
     });
 
@@ -167,6 +170,7 @@ export const createPost = async (postData) => {
 
     transaction.set(postRef, {
       ...postData,
+      reputation: 0,
       created_at: serverTimestamp()
     });
 
@@ -266,4 +270,18 @@ export const subscribeToAllUsers = (callback) => {
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
   });
+};
+
+export const checkNicknameExists = async (nickname, excludeUid = null) => {
+  if (!nickname) return false;
+
+  // We need to do a case-insensitive check, but Firestore doesn't support that directly easily
+  // For exact match:
+  const q = query(collection(db, 'users'), where('nickname', '==', nickname));
+  const querySnapshot = await getDocs(q);
+
+  // If excluding a uid (e.g. self)
+  const matchingDocs = querySnapshot.docs.filter(doc => doc.id !== excludeUid);
+
+  return matchingDocs.length > 0;
 };

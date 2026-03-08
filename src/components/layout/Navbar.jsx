@@ -7,7 +7,7 @@ import { User, Settings, LogOut } from 'lucide-react';
 
 const Navigation = () => {
   const { user, profile, logout } = useAuth();
-  const { t, lang, setLang } = useI18n();
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -22,7 +22,6 @@ const Navigation = () => {
         <Navbar.Toggle aria-controls="basic-navbar-nav" />
         <Navbar.Collapse id="basic-navbar-nav">
           <Nav className="me-auto">
-            <Nav.Link as={Link} to="/">{t('nav.home')}</Nav.Link>
             <Nav.Link as={Link} to="/members">{t('nav.members')}</Nav.Link>
           </Nav>
           <Nav className="align-items-center">
@@ -68,7 +67,10 @@ const Navigation = () => {
                 </NavDropdown.Item>
               </NavDropdown>
             ) : (
-              <Nav.Link as={Link} to="/login">Login</Nav.Link>
+              <>
+                <Nav.Link as={Link} to="/login" className="me-2 fw-semibold">Login</Nav.Link>
+                <Link to="/register" className="btn btn-primary btn-sm rounded-pill px-3">Register</Link>
+              </>
             )}
           </Nav>
         </Navbar.Collapse>
