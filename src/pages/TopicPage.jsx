@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic } from '../api/forum';
+import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics } from '../api/forum';
 import { subscribeToCharacters } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -825,7 +825,7 @@ const TopicPage = () => {
                     </Link>
                   </Col>
                   <Col md={9} lg={10} className="px-4 py-2 d-flex justify-content-end gap-3">
-                    {canManagePost(post) && (
+                    {canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
                       <>
                         <Button
                           variant="link"
@@ -845,27 +845,29 @@ const TopicPage = () => {
                         </Button>
                       </>
                     )}
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="footer-link p-0"
-                      onClick={() => {
-                        const selectedText = window.getSelection().toString().trim();
-                        const author = getLiveAuthorName(post) || 'User';
-                        const content = selectedText || post.content;
-                        const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
+                    {(!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="footer-link p-0"
+                        onClick={() => {
+                          const selectedText = window.getSelection().toString().trim();
+                          const author = getLiveAuthorName(post) || 'User';
+                          const content = selectedText || post.content;
+                          const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
 
-                        // BBCode Quote layout without extra trailing newlines to prevent gaps
-                        const quote = `[quote]${label}\n${content}[/quote]\n`;
+                          // BBCode Quote layout without extra trailing newlines to prevent gaps
+                          const quote = `[quote]${label}\n${content}[/quote]\n`;
 
-                        setReplyContent(prev => prev + quote);
-                        // Clean selection after quoting
-                        window.getSelection().removeAllRanges();
-                        replyRef.current?.scrollIntoView({ behavior: 'smooth' });
-                      }}
-                    >
-                      {lang === 'ru' ? 'Цитировать' : 'Quote'}
-                    </Button>
+                          setReplyContent(prev => prev + quote);
+                          // Clean selection after quoting
+                          window.getSelection().removeAllRanges();
+                          replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                      >
+                        {lang === 'ru' ? 'Цитировать' : 'Quote'}
+                      </Button>
+                    )}
                   </Col>
                 </Row>
               </div>
@@ -1002,7 +1004,6 @@ const TopicPage = () => {
         onHide={() => setShowDeleteTopicModal(false)}
         onConfirm={async () => {
           const catId = topic.category_id;
-          const { deleteTopics } = await import('../api/forum');
           await deleteTopics([id]);
           navigate(catId ? `/category/${catId}` : '/');
         }}
