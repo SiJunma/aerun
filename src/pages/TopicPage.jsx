@@ -243,6 +243,18 @@ const TopicPage = () => {
     return authorStats[post.author_id]?.nickname || post.owner_name;
   };
 
+  const getLiveAuthorName = (post) => {
+    if (post.author_id === user?.uid) {
+      if (post.is_character) {
+        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
+        return char?.name || post.author_name;
+      }
+      return profile?.nickname || post.author_name;
+    }
+    if (post.is_character) return post.author_name;
+    return authorStats[post.author_id]?.nickname || post.author_name;
+  };
+
   const getLiveAuthorAvatar = (post) => {
     if (post.author_id === user?.uid) {
       if (post.is_character) {
@@ -839,7 +851,7 @@ const TopicPage = () => {
                       className="footer-link p-0"
                       onClick={() => {
                         const selectedText = window.getSelection().toString().trim();
-                        const author = post.character_name || post.author_nickname || (post.author_email ? post.author_email.split('@')[0] : 'User');
+                        const author = getLiveAuthorName(post) || 'User';
                         const content = selectedText || post.content;
                         const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
 
