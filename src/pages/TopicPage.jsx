@@ -545,6 +545,7 @@ const TopicPage = () => {
                   {/* 2. Status */}
                   {getLiveAuthorStatus(post) && (
                     <div className="text-primary small mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                      {getLiveAuthorStatus(post)}
                     </div>
                   )}
 
