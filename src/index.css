@@ -1123,3 +1123,24 @@ a:hover {
 [data-theme='neutral'] .bs-tooltip-top .tooltip-arrow::before {
   border-top-color: #2c241a !important;
 }
+/* New Post Highlighting */
+.post-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.highlight-new-post {
+  animation: highlight-fade 2s ease-out;
+}
+
+@keyframes highlight-fade {
+  0% {
+    background-color: rgba(255, 193, 7, 0.2);
+    box-shadow: 0 0 15px rgba(255, 193, 7, 0.4);
+    transform: scale(1.01);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+    transform: scale(1);
+  }
+}

@@ -20,6 +20,9 @@ const TopicFormPage = () => {
   const [characters, setCharacters] = useState([]);
   const [category, setCategory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+
+  const DRAFT_KEY = `topic_draft_${categoryId}`;
 
   useEffect(() => {
     if (user) {
@@ -28,12 +31,42 @@ const TopicFormPage = () => {
         const found = cats.find(c => c.id === categoryId);
         if (found) setCategory(found);
       });
+
+      // Load draft once on mount
+      if (!draftLoaded) {
+        try {
+          const savedDraft = localStorage.getItem(DRAFT_KEY);
+          if (savedDraft) {
+            const { title: dTitle, description: dDesc, content: dContent } = JSON.parse(savedDraft);
+            if (dTitle) setTitle(dTitle);
+            if (dDesc) setDescription(dDesc);
+            if (dContent) setContent(dContent);
+          }
+        } catch (e) {
+          console.error('Error loading draft', e);
+        }
+        setDraftLoaded(true);
+      }
+
       return () => {
         unsubChars();
         unsubCats();
       };
     }
-  }, [user, categoryId]);
+  }, [user, categoryId, draftLoaded, DRAFT_KEY]);
+
+  // Save draft whenever fields change
+  useEffect(() => {
+    if (draftLoaded) {
+      if (title.trim() || description.trim() || content.trim()) {
+        const draft = { title, description, content };
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } else {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    }
+  }, [title, description, content, draftLoaded, DRAFT_KEY]);
+
 
   const LIMITS = {
     title: 100,
@@ -79,7 +112,10 @@ const TopicFormPage = () => {
         author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || '')
       };
 
-      await createTopic(topicData, firstPostData);
+      const newTopicId = await createTopic(topicData, firstPostData);
+      localStorage.removeItem(DRAFT_KEY);
+      // Mark as read immediately
+      localStorage.setItem(`lastVisit_${newTopicId}`, Date.now().toString());
       navigate(`/category/${categoryId}`);
     } catch (err) {
       console.error(err);

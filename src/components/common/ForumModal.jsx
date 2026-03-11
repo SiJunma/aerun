@@ -31,7 +31,6 @@ const ForumModal = ({
       size={size}
       className={className}
       backdropClassName={backdropClassName}
-      unmountOnExit={true}
       enforceFocus={false}
       restoreFocus={false}
       {...props}

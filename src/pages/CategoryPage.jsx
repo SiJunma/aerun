@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table, Button, Breadcrumb, Badge, Pagination } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
+import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToTopics, subscribeToCategories, subscribeToUser } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumPagination from '../components/common/ForumPagination';
@@ -11,6 +12,7 @@ import { ru, enUS } from 'date-fns/locale';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -151,7 +153,7 @@ const CategoryPage = () => {
                         const lastVisitKey = `lastVisit_${topic.id}`;
                         const lastVisit = localStorage.getItem(lastVisitKey);
                         const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
-                        const hasUnread = !lastVisit || lastPostMs > parseInt(lastVisit, 10);
+                        const hasUnread = topic.last_post_author_id !== user?.uid && (!lastVisit || lastPostMs > parseInt(lastVisit, 10));
                         return (
                           <Link
                             to={`/topic/${topic.id}?goLast=1`}

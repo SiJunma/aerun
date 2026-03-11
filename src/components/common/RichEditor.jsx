@@ -123,6 +123,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const text = textarea.value;
+    const currentScrollTop = textarea.scrollTop;
     const selected = text.substring(start, end);
 
     let replacement = '';
@@ -171,6 +172,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       textarea.focus();
       const newCursorPos = start + replacement.length;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
+      textarea.scrollTop = currentScrollTop;
     }, 0);
   };
 
@@ -188,6 +190,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
       const text = latestValueRef.current;
+      const currentScrollTop = textarea.scrollTop;
       const selected = text.substring(start, end);
       const { url, text: linkText } = capturedLinkData;
       if (!url) return;
@@ -208,6 +211,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       textarea.focus();
       const newCursorPos = start + replacement.length;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
+      textarea.scrollTop = currentScrollTop;
     }, 0);
   };
 
@@ -225,6 +229,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
       const text = latestValueRef.current;
+      const currentScrollTop = textarea.scrollTop;
       const url = capturedImageData.url;
       const prefix = capturedImageData.alt.trim() ? `[img=${capturedImageData.alt.trim()}]` : '[img]';
       const suffix = '[/img]';
@@ -245,6 +250,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       textarea.focus();
       const newCursorPos = start + replacement.length;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
+      textarea.scrollTop = currentScrollTop;
     }, 0);
   };
 

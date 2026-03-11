@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Table, Container } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
+import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCategories } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import { format } from 'date-fns';
@@ -9,6 +10,7 @@ import { ru, enUS } from 'date-fns/locale';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
+  const { user } = useAuth();
   const [categories, setCategories] = useState([]);
 
   useEffect(() => {
@@ -59,7 +61,7 @@ const MainPage = () => {
                     const lastVisitKey = `lastVisit_${cat.last_post_topic_id}`;
                     const lastVisit = localStorage.getItem(lastVisitKey);
                     const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
-                    const hasUnread = !lastVisit || lastPostMs > parseInt(lastVisit, 10);
+                    const hasUnread = cat.last_post_author_id !== user?.uid && (!lastVisit || lastPostMs > parseInt(lastVisit, 10));
                     return (
                       <div className="small">
                         <Link

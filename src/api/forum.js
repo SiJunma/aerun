@@ -99,8 +99,9 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
 
 // Create new topic + first post atomically
 export const createTopic = async (topicData, firstPostData) => {
+  const topicRef = doc(collection(db, 'topics'));
+  
   await runTransaction(db, async (transaction) => {
-    const topicRef = doc(collection(db, 'topics'));
     const postRef = doc(collection(db, 'posts'));
     const categoryRef = doc(db, 'categories', topicData.category_id);
     const userRef = doc(db, 'users', topicData.author_id);
@@ -140,6 +141,8 @@ export const createTopic = async (topicData, firstPostData) => {
     // Increment the author's post_count
     transaction.update(userRef, { post_count: increment(1) });
   });
+
+  return topicRef.id;
 };
 
 // ── Posts ─────────────────────────────────────────────────────────────────────
@@ -166,8 +169,9 @@ export const subscribeToPosts = (topicId, callback) => {
 
 // Reply to a topic
 export const createPost = async (postData) => {
+  const postRef = doc(collection(db, 'posts'));
+  
   await runTransaction(db, async (transaction) => {
-    const postRef = doc(collection(db, 'posts'));
     const topicRef = doc(db, 'topics', postData.topic_id);
     const userRef = doc(db, 'users', postData.author_id);
 
@@ -206,6 +210,8 @@ export const createPost = async (postData) => {
     // Increment the author's post_count
     transaction.update(userRef, { post_count: increment(1) });
   });
+
+  return postRef.id;
 };
 
 // Edit a post

@@ -347,8 +347,30 @@ const TopicPage = () => {
         owner_name: profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'
       };
 
-      await createPost(postData);
+      const newPostId = await createPost(postData);
+      // Mark as read immediately
+      localStorage.setItem(LAST_VISIT_KEY, Date.now().toString());
       setReplyContent('');
+      
+      // Calculate where the new post will be (it's always the last one)
+      const newTotalPosts = posts.length + 1;
+      const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE);
+      
+      if (targetPage !== currentPage) {
+        setSearchParams({ page: targetPage });
+      }
+
+      // We need to wait for the DOM to update. Since setPosts is triggered by a Firestore subscription,
+      // it might take a moment. We'll use a small timeout or wait for the posts to update.
+      setTimeout(() => {
+        const element = document.getElementById(`post-${newPostId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.classList.add('highlight-new-post');
+          setTimeout(() => element.classList.remove('highlight-new-post'), 2000);
+        }
+      }, 500);
+
     } catch (err) {
       console.error(err);
       alert('Error posting reply');
