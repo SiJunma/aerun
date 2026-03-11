@@ -233,7 +233,7 @@ const CategoryPage = () => {
                   )}
                   <th style={{ width: '50%' }}>{t('forum.topic')}</th>
                   <th className="text-center">{t('forum.replies')}</th>
-                  <th className="text-center">{t('forum.views')}</th>
+                  {/* <th className="text-center">{t('forum.views')}</th> */}
                   <th>{t('forum.last_post')}</th>
                 </tr>
               </thead>
@@ -288,7 +288,7 @@ const CategoryPage = () => {
                     <td className="text-center">
                       {Math.max(0, (topic.posts_count || 1) - 1)}
                     </td>
-                    <td className="text-center">{topic.views || 0}</td>
+                    {/* <td className="text-center">{topic.views || 0}</td> */}
                     <td>
                       {topic.last_post_at ? (() => {
                         const lastVisitKey = `lastVisit_${topic.id}`;

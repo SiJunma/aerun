@@ -569,11 +569,11 @@ const TopicPage = () => {
               {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
               <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
             </span>
-            <span>·</span>
+            {/* <span>·</span>
             <span>
               {lang === 'ru' ? 'Просмотры' : 'Views'}:{' '}
               <strong>{topic.views || 0}</strong>
-            </span>
+            </span> */}
             <span>·</span>
             <span>{formatTime(topic.created_at)}</span>
           </div>
