@@ -7,6 +7,7 @@ import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save }
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { subscribeToUser, checkNicknameExists } from '../api/forum';
 import ConfirmModal from '../components/common/ConfirmModal';
+import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, subscribeToReputationLogs } from '../api/reputation';
 import { format } from 'date-fns';
@@ -118,16 +119,18 @@ const ProfilePage = () => {
   const handleSaveCharacter = async () => {
     if (!formData.name) return;
     recordActivity();
+    // Close modal first to avoid "stuck" transitions when subscription updates fire
+    setShowModal(false);
     try {
       if (editingChar) {
         await updateCharacter(uid, editingChar.id, formData);
       } else {
         await addCharacter(uid, formData);
       }
-      setShowModal(false);
     } catch (err) {
       console.error(err);
       showToast(lang === 'ru' ? 'Не удалось сохранить персонажа' : 'Failed to save character', 'danger');
+      // If failed, we might want to re-open it, but usually a toast is enough
     }
   };
 
@@ -180,10 +183,10 @@ const ProfilePage = () => {
   const handleRepVote = async () => {
     if (!profile || profile.uid === uid || profile.role_id === 'spectator') return;
     setSubmittingRep(true);
+    setShowRepModal(false); // Close first
     try {
       await voteOnProfile(profile.uid, uid, repValue, repComment);
       setRepComment('');
-      setShowRepModal(false);
       showToast(t('profile.rep_success'));
       recordActivity();
     } catch (err) {
@@ -623,106 +626,102 @@ const ProfilePage = () => {
         </Col>
       </Row>
 
-      <Modal
+      <ForumModal
         show={showModal}
         onHide={() => setShowModal(false)}
-        centered
-        className="premium-modal"
-        backdropClassName="confirm-modal-backdrop"
+        title={editingChar ? t('profile.edit_character') : t('profile.add_character')}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowModal(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="primary" onClick={handleSaveCharacter}>
+              {editingChar ? t('common.save') : t('profile.add_character')}
+            </Button>
+          </>
+        }
       >
-        <Modal.Header closeButton className="border-0">
-          <Modal.Title className="fw-bold">{editingChar ? t('profile.edit_character') : t('profile.add_character')}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="p-4">
-          <Form>
-            <Form.Group className="mb-3" controlId="charName">
-              <Form.Label className="fw-bold">{t('profile.character_name')}</Form.Label>
-              <Form.Control
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g. Aragorn"
-              />
-            </Form.Group>
+        <Form>
+          <Form.Group className="mb-3" controlId="charName">
+            <Form.Label className="fw-bold">{t('profile.character_name')}</Form.Label>
+            <Form.Control
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="e.g. Aragorn"
+            />
+          </Form.Group>
 
-            <Form.Group className="mb-3" controlId="charStatus">
-              <div className="d-flex justify-content-between align-items-center mb-1">
-                <Form.Label className="fw-bold mb-0">{t('profile.character_status')}</Form.Label>
-                <small className="text-muted">{(formData.status_line || '').length}/30</small>
-              </div>
-              <Form.Control
-                type="text"
-                value={formData.status_line}
-                onChange={(e) => setFormData({ ...formData, status_line: e.target.value })}
-                placeholder="e.g. Hunting orcs..."
-                maxLength={30}
-              />
-            </Form.Group>
+          <Form.Group className="mb-3" controlId="charStatus">
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <Form.Label className="fw-bold mb-0">{t('profile.character_status')}</Form.Label>
+              <small className="text-muted">{(formData.status_line || '').length}/30</small>
+            </div>
+            <Form.Control
+              type="text"
+              value={formData.status_line}
+              onChange={(e) => setFormData({ ...formData, status_line: e.target.value })}
+              placeholder="e.g. Hunting orcs..."
+              maxLength={30}
+            />
+          </Form.Group>
 
-            <Form.Group className="mb-3" controlId="charAvatar">
-              <AvatarUploader
-                label={t('profile.avatar')}
-                value={formData.avatar_url}
-                onChange={(url) => setFormData({ ...formData, avatar_url: url })}
-                storagePath={`users/${uid}/characters/${editingChar?.id || 'new'}_avatar`}
-                size={80}
-              />
-            </Form.Group>
+          <Form.Group className="mb-3" controlId="charAvatar">
+            <AvatarUploader
+              label={t('profile.avatar')}
+              value={formData.avatar_url}
+              onChange={(url) => setFormData({ ...formData, avatar_url: url })}
+              storagePath={`users/${uid}/characters/${editingChar?.id || 'new'}_avatar`}
+              size={80}
+            />
+          </Form.Group>
 
-            <Form.Group className="mb-3" controlId="charSignature">
-              <Form.Label className="fw-bold text-primary small uppercase">{t('profile.signature')}</Form.Label>
-              <Form.Control
-                as="textarea"
-                rows={3}
-                value={formData.signature}
-                onChange={(e) => setFormData({ ...formData, signature: e.target.value })}
-                placeholder={t('profile.signature_help')}
-                className="bg-light"
-              />
-            </Form.Group>
-          </Form>
-        </Modal.Body>
-        <Modal.Footer className="border-0">
-          <Button variant="outline-secondary" onClick={() => setShowModal(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button variant="primary" onClick={handleSaveCharacter}>
-            {editingChar ? t('common.save') : t('profile.add_character')}
-          </Button>
-        </Modal.Footer>
-      </Modal>
-
-      <Modal show={showRepModal} onHide={() => setShowRepModal(false)} centered className="premium-modal">
-        <Modal.Header closeButton className="border-0">
-          <Modal.Title className="fw-bold">{t('profile.rep_give')}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="p-4">
-          <div className="text-center mb-4">
-            <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
-              {repValue > 0 ? `+${repValue}` : repValue}
-            </Badge>
-          </div>
-          <Form.Group>
-            <Form.Label className="fw-bold">{t('profile.rep_comment_placeholder')}</Form.Label>
+          <Form.Group className="mb-3" controlId="charSignature">
+            <Form.Label className="fw-bold text-primary small uppercase">{t('profile.signature')}</Form.Label>
             <Form.Control
               as="textarea"
               rows={3}
-              value={repComment}
-              onChange={(e) => setRepComment(e.target.value)}
-              placeholder="..."
+              value={formData.signature}
+              onChange={(e) => setFormData({ ...formData, signature: e.target.value })}
+              placeholder={t('profile.signature_help')}
               className="bg-light"
             />
           </Form.Group>
-        </Modal.Body>
-        <Modal.Footer className="border-0">
-          <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
-            {submittingRep ? t('common.loading') : t('common.confirm')}
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        </Form>
+      </ForumModal>
+
+      <ForumModal
+        show={showRepModal}
+        onHide={() => setShowRepModal(false)}
+        title={t('profile.rep_give')}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
+              {submittingRep ? t('common.loading') : t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <div className="text-center mb-4">
+          <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
+            {repValue > 0 ? `+${repValue}` : repValue}
+          </Badge>
+        </div>
+        <Form.Group>
+          <Form.Label className="fw-bold">{t('profile.rep_comment_placeholder')}</Form.Label>
+          <Form.Control
+            as="textarea"
+            rows={3}
+            value={repComment}
+            onChange={(e) => setRepComment(e.target.value)}
+            placeholder="..."
+            className="bg-light"
+          />
+        </Form.Group>
+      </ForumModal>
 
       <ConfirmModal
         show={confirmState.show}

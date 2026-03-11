@@ -3,15 +3,18 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser } from '../api/forum';
+import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic } from '../api/forum';
 import { subscribeToCharacters } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
+import ForumModal from '../components/common/ForumModal';
 import RichEditor from '../components/common/RichEditor';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
 import { Award } from 'lucide-react';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
+import ForumPagination from '../components/common/ForumPagination';
+import ForumAuthorName from '../components/common/ForumAuthorName';
 
 const AvatarImage = ({ src, fallbackName, size = 90 }) => {
   const [error, setError] = useState(false);
@@ -59,6 +62,10 @@ const TopicPage = () => {
   // Edit state
   const [editingPostId, setEditingPostId] = useState(null);
   const [editContent, setEditContent] = useState('');
+  // Extra fields when editing the first post (topic title/description)
+  const [editTopicTitle, setEditTopicTitle] = useState('');
+  const [editTopicDescription, setEditTopicDescription] = useState('');
+  const [editingFirstPost, setEditingFirstPost] = useState(false);
 
   // Delete confirmation state
   const [deletingPost, setDeletingPost] = useState(null);
@@ -227,17 +234,6 @@ const TopicPage = () => {
     }
   };
 
-  const getLiveAuthorName = (post) => {
-    if (post.author_id === user?.uid) {
-      if (post.is_character) {
-        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
-        return char?.name || post.author_name;
-      }
-      return profile?.nickname || post.author_name;
-    }
-    return authorStats[post.author_id]?.nickname || post.author_name;
-  };
-
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
@@ -301,6 +297,7 @@ const TopicPage = () => {
   const handleRepVote = async () => {
     if (!repTargetPost || !user) return;
     setSubmittingRep(true);
+    setShowRepModal(false); // Close first
     try {
       await voteOnPost(user.uid, repTargetPost.author_id, repTargetPost.id, id, repValue, repComment, topic?.title, repTargetPostNumber);
       setMyVotes(prev => ({
@@ -315,7 +312,6 @@ const TopicPage = () => {
         }
       }));
       recordActivity();
-      setShowRepModal(false);
       showToast(lang === 'ru' ? 'Репутация изменена!' : 'Reputation updated!');
     } catch (error) {
       console.error('Voting error:', error);
@@ -360,17 +356,31 @@ const TopicPage = () => {
     }
   };
 
-  const handleStartEdit = (post) => {
+  const handleStartEdit = (post, isFirst = false) => {
     setEditingPostId(post.id);
     setEditContent(post.content);
+    setEditingFirstPost(isFirst);
+    if (isFirst && topic) {
+      setEditTopicTitle(topic.title || '');
+      setEditTopicDescription(topic.description || '');
+    }
   };
 
   const handleSaveEdit = async (postId) => {
     if (!editContent.trim()) return;
     try {
       await updatePost(postId, editContent.trim(), {});
+      if (editingFirstPost && topic) {
+        await updateTopic(topic.id, {
+          title: editTopicTitle.trim() || topic.title,
+          description: editTopicDescription.trim()
+        });
+      }
       setEditingPostId(null);
       setEditContent('');
+      setEditingFirstPost(false);
+      setEditTopicTitle('');
+      setEditTopicDescription('');
     } catch (err) {
       console.error(err);
       alert('Error editing post');
@@ -422,27 +432,6 @@ const TopicPage = () => {
     window.scrollTo({ top: 0 });
   };
 
-  const renderPagination = () => {
-    if (totalPages <= 1) return null;
-    return (
-      <Pagination className="mb-0">
-        <Pagination.First onClick={() => handlePageChange(1)} disabled={currentPage === 1} />
-        <Pagination.Prev onClick={() => handlePageChange(Math.max(1, currentPage - 1))} disabled={currentPage === 1} />
-        {[...Array(totalPages)].map((_, i) => (
-          <Pagination.Item
-            key={i + 1}
-            active={i + 1 === currentPage}
-            onClick={() => handlePageChange(i + 1)}
-          >
-            {i + 1}
-          </Pagination.Item>
-        ))}
-        <Pagination.Next onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} />
-        <Pagination.Last onClick={() => handlePageChange(totalPages)} disabled={currentPage === totalPages} />
-      </Pagination>
-    );
-  };
-
   return (
     <Container className="py-4">
       <Breadcrumb className="mb-4">
@@ -456,16 +445,22 @@ const TopicPage = () => {
       </Breadcrumb>
 
       {/* Topic header */}
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <div>
-          <h2 className="mb-1">{topic.title}</h2>
-          {topic.description && (
-            <p className="text-muted mb-2">{topic.description}</p>
-          )}
-          <div className="d-flex gap-3 small text-muted">
+      <div className="mb-3">
+        <h1 className="h2 mb-1">{topic.title}</h1>
+        {topic.description && (
+          <p className="text-muted mb-2">{topic.description}</p>
+        )}
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
             <span>
-              {lang === 'ru' ? 'Автор' : 'Author'}:{' '}
-              <span className="text-primary fw-semibold">{topic.author_name}</span>
+              {t('forum.author')}:{' '}
+              <ForumAuthorName
+                userId={topic.author_id}
+                characterId={topic.author_character_id}
+                isCharacter={!!topic.is_character}
+                fallbackName={topic.author_name}
+                className="fw-semibold text-primary"
+              />
             </span>
             <span>·</span>
             <span>
@@ -480,11 +475,19 @@ const TopicPage = () => {
             <span>·</span>
             <span>{formatTime(topic.created_at)}</span>
           </div>
-        </div>
-        <div>
-          {renderPagination()}
+
+          {totalPages > 1 && (
+            <div className="ms-auto ms-sm-0">
+              <ForumPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
+            </div>
+          )}
         </div>
       </div>
+      <div className="mb-3" /> {/* Reduced divider spacing */}
 
       {/* Posts */}
       <div className="posts-container">
@@ -495,21 +498,25 @@ const TopicPage = () => {
                 {/* Author sidebar */}
                 <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 text-center d-flex flex-column align-items-center">
                   {/* 1. Nickname */}
-                  <div className="fw-bold mt-2 mb-1 text-break" style={{ fontSize: '0.95rem' }}>
-                    {getLiveAuthorName(post)}
+                  <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
+                    <ForumAuthorName
+                      userId={post.author_id}
+                      characterId={post.author_character_id}
+                      isCharacter={!!post.is_character}
+                      fallbackName={post.author_name}
+                    />
                   </div>
 
                   {/* 2. Status */}
                   {getLiveAuthorStatus(post) && (
                     <div className="text-primary small mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
-                      {getLiveAuthorStatus(post)}
                     </div>
                   )}
 
                   {/* 3. Avatar */}
                   <AvatarImage
                     src={getLiveAuthorAvatar(post)}
-                    fallbackName={getLiveAuthorName(post)}
+                    fallbackName={post.author_name}
                   />
 
                   {/* 4. Posts Count */}
@@ -567,6 +574,34 @@ const TopicPage = () => {
                     <div className="flex-grow-1">
                       {editingPostId === post.id ? (
                         <div>
+                          {editingFirstPost && (
+                            <div className="mb-3">
+                              <Form.Group className="mb-2">
+                                <Form.Label className="fw-semibold small">
+                                  {lang === 'ru' ? 'Название темы' : 'Topic Title'}
+                                </Form.Label>
+                                <Form.Control
+                                  type="text"
+                                  value={editTopicTitle}
+                                  onChange={e => setEditTopicTitle(e.target.value)}
+                                  maxLength={100}
+                                  required
+                                />
+                              </Form.Group>
+                              <Form.Group>
+                                <Form.Label className="fw-semibold small">
+                                  {lang === 'ru' ? 'Описание темы' : 'Topic Description'}
+                                </Form.Label>
+                                <Form.Control
+                                  type="text"
+                                  value={editTopicDescription}
+                                  onChange={e => setEditTopicDescription(e.target.value)}
+                                  maxLength={200}
+                                  placeholder={lang === 'ru' ? 'Краткое описание...' : 'Short description...'}
+                                />
+                              </Form.Group>
+                            </div>
+                          )}
                           <div className="mb-2">
                             <RichEditor
                               id="editContent"
@@ -689,7 +724,7 @@ const TopicPage = () => {
                           variant="link"
                           size="sm"
                           className="footer-link p-0"
-                          onClick={() => handleStartEdit(post)}
+                          onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
                         >
                           {lang === 'ru' ? 'Редактировать' : 'Edit'}
                         </Button>
@@ -724,81 +759,100 @@ const TopicPage = () => {
         ))}
       </div>
 
-      <div className="d-flex justify-content-center mt-4 mb-4">
-        {renderPagination()}
+      <div className="d-flex justify-content-center p-3">
+        <ForumPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          centered
+        />
       </div>
 
       {/* Reply form — hidden for spectators */}
-      {profile?.role_id !== 'spectator' ? (
-        <div className="mt-5" ref={replyRef}>
-          <Card className="shadow-sm border-0">
-            <Card.Header className="bg-dark text-white py-3">
-              <h5 className="mb-0">{t('forum.create_post')}</h5>
-            </Card.Header>
-            <Card.Body className="p-4">
-              <Form onSubmit={handleReply}>
-                <Form.Group className="mb-3" controlId="postAs">
-                  <Form.Select
-                    size="sm"
-                    value={selectedCharacterId}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedCharacterId(val);
-                      if (user) {
-                        updateUser(user.uid, { last_selected_character_id: val });
-                      }
-                    }}
-                    className="mb-2 w-auto"
-                  >
-                    <option value="">
-                      {lang === 'ru' ? 'Как пользователь' : 'Post as User'}:{' '}
-                      {profile?.nickname || profile?.email?.split('@')[0]}
-                    </option>
-                    {characters.map(char => (
-                      <option key={char.id} value={char.id}>
-                        {lang === 'ru' ? 'Как персонаж' : 'As Character'}: {char.name}
+      {
+        profile?.role_id !== 'spectator' ? (
+          <div className="mt-5" ref={replyRef}>
+            <Card className="shadow-sm border-0">
+              <Card.Header className="bg-dark text-white py-3">
+                <h5 className="mb-0">{t('forum.create_post')}</h5>
+              </Card.Header>
+              <Card.Body className="p-4">
+                <Form onSubmit={handleReply}>
+                  <Form.Group className="mb-3" controlId="postAs">
+                    <Form.Select
+                      size="sm"
+                      value={selectedCharacterId}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedCharacterId(val);
+                        if (user) {
+                          updateUser(user.uid, { last_selected_character_id: val });
+                        }
+                      }}
+                      className="mb-2 w-auto"
+                    >
+                      <option value="">
+                        {lang === 'ru' ? 'Как пользователь' : 'Post as User'}:{' '}
+                        {profile?.nickname || profile?.email?.split('@')[0]}
                       </option>
-                    ))}
-                  </Form.Select>
-                </Form.Group>
-                <Form.Group className="mb-3">
-                  <RichEditor
-                    id="replyContent"
-                    placeholder={lang === 'ru' ? 'Написать ответ...' : 'Write your reply...'}
-                    rows={6}
-                    value={replyContent}
-                    onChange={(e) => setReplyContent(e.target.value)}
-                    maxLength={MAX_CHARS}
-                    disabled={submitting}
-                  />
-                </Form.Group>
-                <div className="d-flex justify-content-end">
-                  <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
-                    {submitting
-                      ? (lang === 'ru' ? 'Отправка...' : 'Posting...')
-                      : t('forum.create_post')}
-                  </Button>
-                </div>
-              </Form>
-            </Card.Body>
-          </Card>
-        </div>
-      ) : (
-        <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
-          <span className="opacity-75">
-            {lang === 'ru'
-              ? '👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.'
-              : '👁 Spectator mode — you can read but cannot post replies.'}
-          </span>
-        </div>
-      )}
+                      {characters.map(char => (
+                        <option key={char.id} value={char.id}>
+                          {lang === 'ru' ? 'Как персонаж' : 'As Character'}: {char.name}
+                        </option>
+                      ))}
+                    </Form.Select>
+                  </Form.Group>
+                  <Form.Group className="mb-3">
+                    <RichEditor
+                      id="replyContent"
+                      placeholder={lang === 'ru' ? 'Написать ответ...' : 'Write your reply...'}
+                      rows={6}
+                      value={replyContent}
+                      onChange={(e) => setReplyContent(e.target.value)}
+                      maxLength={MAX_CHARS}
+                      disabled={submitting}
+                    />
+                  </Form.Group>
+                  <div className="d-flex justify-content-end">
+                    <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
+                      {submitting
+                        ? (lang === 'ru' ? 'Отправка...' : 'Posting...')
+                        : t('forum.create_post')}
+                    </Button>
+                  </div>
+                </Form>
+              </Card.Body>
+            </Card>
+          </div>
+        ) : (
+          <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
+            <span className="opacity-75">
+              {lang === 'ru'
+                ? '👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.'
+                : '👁 Spectator mode — you can read but cannot post replies.'}
+            </span>
+          </div>
+        )
+      }
 
-      <div className="d-flex justify-content-between mt-4">
-        {category && (
-          <Link to={`/category/${category.id}`} className="btn btn-outline-secondary">
-            &larr; {t('forum.back_to_categories')}
-          </Link>
-        )}
+      <div className="mt-4">
+        <Breadcrumb className="mb-3">
+          <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/' }}>{t('nav.home')}</Breadcrumb.Item>
+          {category && (
+            <Breadcrumb.Item linkAs={Link} linkProps={{ to: `/category/${category.id}` }}>
+              {categoryTitle}
+            </Breadcrumb.Item>
+          )}
+          <Breadcrumb.Item active>{topic.title}</Breadcrumb.Item>
+        </Breadcrumb>
+
+        <div className="d-flex justify-content-between">
+          {category && (
+            <Link to={`/category/${category.id}`} className="btn btn-outline-secondary">
+              &larr; {t('forum.back_to_categories')}
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Modals */}
@@ -814,87 +868,85 @@ const TopicPage = () => {
         cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
       />
 
-      <Modal show={showRepModal} onHide={() => setShowRepModal(false)} centered className="premium-modal">
-        <Modal.Header closeButton className="border-0">
-          <Modal.Title className="fw-bold">{t('profile.rep_give')}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="p-4 px-5">
-          <div className="text-center mb-4">
-            <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
-              {repValue > 0 ? `+${repValue}` : repValue}
-            </Badge>
-            <div className="mt-3 text-muted small px-3">
-              {lang === 'ru'
-                ? 'Этот голос изменит репутацию данного поста и будет зачислен в общую репутацию (карму) автора.'
-                : 'This vote will change the reputation of this post and contribute to the author\'s total reputation (karma).'}
-            </div>
+      <ForumModal
+        show={showRepModal}
+        onHide={() => setShowRepModal(false)}
+        title={t('profile.rep_give')}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
+              {submittingRep ? t('common.loading') : t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <div className="text-center mb-4">
+          <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
+            {repValue > 0 ? `+${repValue}` : repValue}
+          </Badge>
+          <div className="mt-3 text-muted small px-3">
+            {lang === 'ru'
+              ? 'Этот голос изменит репутацию данного поста и будет зачислен в общую репутацию (карму) автора.'
+              : 'This vote will change the reputation of this post and contribute to the author\'s total reputation (karma).'}
           </div>
-          <Form.Group>
-            <Form.Label className="fw-bold small">{lang === 'ru' ? 'Комментарий (опционально)' : 'Leave a comment (optional)'}</Form.Label>
-            <Form.Control
-              as="textarea"
-              rows={3}
-              value={repComment}
-              onChange={(e) => setRepComment(e.target.value)}
-              placeholder=""
-              className="modal-section-themed"
-            />
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer className="border-0">
-          <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
-            {submittingRep ? t('common.loading') : t('common.confirm')}
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        </div>
+        <Form.Group>
+          <Form.Label className="fw-bold small">{lang === 'ru' ? 'Комментарий (опционально)' : 'Leave a comment (optional)'}</Form.Label>
+          <Form.Control
+            as="textarea"
+            rows={3}
+            value={repComment}
+            onChange={(e) => setRepComment(e.target.value)}
+            placeholder=""
+            className="modal-section-themed"
+          />
+        </Form.Group>
+      </ForumModal>
 
-      {/* Vote Info Modal */}
-      <Modal show={showVoteInfoModal} onHide={() => setShowVoteInfoModal(false)} centered className="premium-modal shadow-lg">
-        <Modal.Header closeButton className="border-0">
-          <Modal.Title className="fw-bold small text-uppercase letter-spacing-1">
-            {lang === 'ru' ? 'Информация о вашем голосе' : 'Your Vote Information'}
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="p-4">
-          {selectedVote && (
-            <div className="d-flex flex-column gap-3">
-              <div className="d-flex justify-content-between align-items-center modal-inner-card p-3">
-                <div>
-                  <div className="small text-muted">{lang === 'ru' ? 'Ваш голос' : 'Your vote'}</div>
-                  <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-5 mt-1">
-                    {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
-                  </Badge>
-                </div>
-                <div className="text-end">
-                  <div className="small text-muted">{lang === 'ru' ? 'Дата' : 'Date'}</div>
-                  <div className="fw-bold">{formatTime(selectedVote.created_at)}</div>
-                </div>
-              </div>
-
-              <div>
-                <div className="small text-muted mb-2">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
-                <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
-                  {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
-                </div>
-              </div>
-
-              <div className="small text-muted opacity-75 italic text-center mt-2">
-                {lang === 'ru'
-                  ? 'Этот голос зачислен автору поста.'
-                  : 'This vote has been contributed to the post author.'}
-              </div>
-            </div>
-          )}
-        </Modal.Body>
-        <Modal.Footer className="border-0 pt-0">
+      <ForumModal
+        show={showVoteInfoModal}
+        onHide={() => setShowVoteInfoModal(false)}
+        title={lang === 'ru' ? 'Информация о вашем голосе' : 'Your Vote Information'}
+        className="premium-modal shadow-lg"
+        footer={
           <Button variant="outline-secondary" className="w-100" onClick={() => setShowVoteInfoModal(false)}>
             {t('common.close')}
           </Button>
-        </Modal.Footer>
-      </Modal>
+        }
+      >
+        {selectedVote && (
+          <div className="d-flex flex-column gap-3">
+            <div className="d-flex justify-content-between align-items-center modal-inner-card p-3">
+              <div>
+                <div className="small text-muted">{lang === 'ru' ? 'Ваш голос' : 'Your vote'}</div>
+                <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-5 mt-1">
+                  {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
+                </Badge>
+              </div>
+              <div className="text-end">
+                <div className="small text-muted">{lang === 'ru' ? 'Дата' : 'Date'}</div>
+                <div className="fw-bold">{formatTime(selectedVote.created_at)}</div>
+              </div>
+            </div>
+
+            <div>
+              <div className="small text-muted mb-2">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
+              <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
+                {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
+              </div>
+            </div>
+
+            <div className="small text-muted opacity-75 italic text-center mt-2">
+              {lang === 'ru'
+                ? 'Этот голос зачислен автору поста.'
+                : 'This vote has been contributed to the post author.'}
+            </div>
+          </div>
+        )}
+      </ForumModal>
 
       <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100 }}>
         <Toast

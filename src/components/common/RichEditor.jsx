@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Button, Form, Modal } from 'react-bootstrap';
+import { Button, Form } from 'react-bootstrap';
+import ForumModal from './ForumModal';
 import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 
@@ -24,19 +25,26 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
   // Track the last time a new history snapshot was taken
   const lastHistoryPushTime = useRef(Date.now());
 
+  // Flag: set to true when we ourselves triggered an onChange (modal inserts, toolbar actions).
+  // Prevents the useEffect below from mistakenly resetting history on our own updates.
+  const isInternalUpdate = useRef(false);
+
   // Reset history ONLY if the value is completely replaced from outside (e.g., form reset after submit, or initial load),
   // and it's fundamentally different from our current history tip.
   useEffect(() => {
     // Prevent infinite loop: if value is empty/undefined and we just cleared it, or if it matches current tip, do nothing.
     if (value === undefined || value === null) return;
 
+    // Skip if this change was triggered by us internally (toolbar / modal inserts).
+    if (isInternalUpdate.current) {
+      isInternalUpdate.current = false;
+      return;
+    }
+
     // Check if the current value matches the tip of our local history
     const currentTip = history[historyIndex] || '';
     if (value !== currentTip) {
-      // Is this a completely new external string? Or just a stray render?
-      // We only reset history if the external value changed significantly (e.g., cleared, or loaded a new draft)
-      // If the difference is just 1 character, it might be a typed character that didn't sync instantly.
-      // But usually `value` is bound tightly. Let's just do a hard reset to be safe.
+      // External change (e.g. form reset, loaded draft) — hard-reset history.
       setHistory([value]);
       setHistoryIndex(0);
       lastHistoryPushTime.current = Date.now();
@@ -155,6 +163,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
     setHistoryIndex(newHistory.length - 1);
     lastHistoryPushTime.current = Date.now(); // Reset debounce timer
 
+    isInternalUpdate.current = true;
     onChange({ target: { value: newValue } });
 
     // Set focus back and adjust selection
@@ -167,38 +176,76 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
 
   const handleLinkSubmit = (e) => {
     e.preventDefault();
-    insertText('', '', 'link');
+    // Capture modal state before closing so it's available in the deferred callback
+    const capturedLinkData = { ...linkData };
+    // 1. Close modal first — let Bootstrap remove the overlay from the DOM
     setShowLinkModal(false);
     setLinkData({ text: '', url: 'https://' });
-  };
-
-  const handleImageSubmit = (e) => {
-    e.preventDefault();
-    // We actually want to insert the URL directly inside the tags.
-    // Let's do a custom insert to put the URL inside.
-    const textarea = textareaRef.current;
-    if (textarea) {
+    // 2. Insert text on the next tick, after the modal has been removed
+    setTimeout(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
-      const text = textarea.value;
-      const url = imageData.url;
-      const prefix = imageData.alt.trim() ? `[img=${imageData.alt.trim()}]` : '[img]';
-      const suffix = '[/img]';
-      const replacement = prefix + url + suffix;
-
+      const text = latestValueRef.current;
+      const selected = text.substring(start, end);
+      const { url, text: linkText } = capturedLinkData;
+      if (!url) return;
+      const replacement = `[url=${url}]${linkText || selected || 'link'}[/url]`;
       const newValue = text.substring(0, start) + replacement + text.substring(end);
 
       let newHistory = history.slice(0, historyIndex + 1);
+      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
       newHistory.push(newValue);
       if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
       setHistory(newHistory);
       setHistoryIndex(newHistory.length - 1);
       lastHistoryPushTime.current = Date.now();
-      onChange({ target: { value: newValue } });
-    }
 
+      isInternalUpdate.current = true;
+      onChange({ target: { value: newValue } });
+
+      textarea.focus();
+      const newCursorPos = start + replacement.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
+  const handleImageSubmit = (e) => {
+    e.preventDefault();
+    // Capture modal state before closing
+    const capturedImageData = { ...imageData };
+    // 1. Close modal first — let Bootstrap remove the overlay from the DOM
     setShowImageModal(false);
     setImageData({ alt: '', url: 'https://' });
+    // 2. Insert text on the next tick, after the modal has been removed
+    setTimeout(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = latestValueRef.current;
+      const url = capturedImageData.url;
+      const prefix = capturedImageData.alt.trim() ? `[img=${capturedImageData.alt.trim()}]` : '[img]';
+      const suffix = '[/img]';
+      const replacement = prefix + url + suffix;
+      const newValue = text.substring(0, start) + replacement + text.substring(end);
+
+      let newHistory = history.slice(0, historyIndex + 1);
+      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
+      newHistory.push(newValue);
+      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+      lastHistoryPushTime.current = Date.now();
+
+      isInternalUpdate.current = true;
+      onChange({ target: { value: newValue } });
+
+      textarea.focus();
+      const newCursorPos = start + replacement.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
   };
 
   return (
@@ -280,73 +327,79 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
         )}
       </div>
 
-      {/* Link Modal */}
-      <Modal show={showLinkModal} onHide={() => setShowLinkModal(false)} animation={false} centered className="premium-modal">
-        <Modal.Header closeButton>
-          <Modal.Title>{lang === 'ru' ? 'Вставить ссылку' : 'Insert Link'}</Modal.Title>
-        </Modal.Header>
-        <Form onSubmit={handleLinkSubmit}>
-          <Modal.Body>
-            <Form.Group className="mb-3">
-              <Form.Label>{lang === 'ru' ? 'Текст ссылки' : 'Link Text'}</Form.Label>
-              <Form.Control
-                type="text"
-                value={linkData.text}
-                onChange={e => setLinkData({ ...linkData, text: e.target.value })}
-                placeholder={lang === 'ru' ? 'Текст...' : 'Text...'}
-              />
-            </Form.Group>
-            <Form.Group>
-              <Form.Label>URL</Form.Label>
-              <Form.Control
-                type="url"
-                value={linkData.url}
-                onChange={e => setLinkData({ ...linkData, url: e.target.value })}
-                required
-                autoFocus
-              />
-            </Form.Group>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="outline-secondary" onClick={() => setShowLinkModal(false)}>{lang === 'ru' ? 'Отмена' : 'Cancel'}</Button>
-            <Button variant="primary" type="submit">{lang === 'ru' ? 'Вставить' : 'Insert'}</Button>
-          </Modal.Footer>
-        </Form>
-      </Modal>
+      <ForumModal
+        show={showLinkModal}
+        onHide={() => setShowLinkModal(false)}
+        title={lang === 'ru' ? 'Вставить ссылку' : 'Insert Link'}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowLinkModal(false)}>
+              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+            </Button>
+            <Button variant="primary" onClick={handleLinkSubmit}>
+              {lang === 'ru' ? 'Вставить' : 'Insert'}
+            </Button>
+          </>
+        }
+      >
+        <Form.Group className="mb-3">
+          <Form.Label>{lang === 'ru' ? 'Текст ссылки' : 'Link Text'}</Form.Label>
+          <Form.Control
+            type="text"
+            value={linkData.text}
+            onChange={e => setLinkData({ ...linkData, text: e.target.value })}
+            placeholder={lang === 'ru' ? 'Текст...' : 'Text...'}
+          />
+        </Form.Group>
+        <Form.Group>
+          <Form.Label>URL</Form.Label>
+          <Form.Control
+            type="url"
+            value={linkData.url}
+            onChange={e => setLinkData({ ...linkData, url: e.target.value })}
+            required
+            autoFocus
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleLinkSubmit(e); } }}
+          />
+        </Form.Group>
+      </ForumModal>
 
-      {/* Image Modal */}
-      <Modal show={showImageModal} onHide={() => setShowImageModal(false)} animation={false} centered className="premium-modal">
-        <Modal.Header closeButton>
-          <Modal.Title>{lang === 'ru' ? 'Вставить изображение' : 'Insert Image'}</Modal.Title>
-        </Modal.Header>
-        <Form onSubmit={handleImageSubmit}>
-          <Modal.Body>
-            <Form.Group className="mb-3">
-              <Form.Label>{lang === 'ru' ? 'Описание (alt)' : 'Description (alt)'}</Form.Label>
-              <Form.Control
-                type="text"
-                value={imageData.alt}
-                onChange={e => setImageData({ ...imageData, alt: e.target.value })}
-                placeholder={lang === 'ru' ? 'Описание...' : 'Description...'}
-              />
-            </Form.Group>
-            <Form.Group>
-              <Form.Label>{lang === 'ru' ? 'Ссылка на изображение' : 'Image URL'}</Form.Label>
-              <Form.Control
-                type="url"
-                value={imageData.url}
-                onChange={e => setImageData({ ...imageData, url: e.target.value })}
-                required
-                autoFocus
-              />
-            </Form.Group>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="outline-secondary" onClick={() => setShowImageModal(false)}>{lang === 'ru' ? 'Отмена' : 'Cancel'}</Button>
-            <Button variant="primary" type="submit">{lang === 'ru' ? 'Вставить' : 'Insert'}</Button>
-          </Modal.Footer>
-        </Form>
-      </Modal>
+      <ForumModal
+        show={showImageModal}
+        onHide={() => setShowImageModal(false)}
+        title={lang === 'ru' ? 'Вставить изображение' : 'Insert Image'}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowImageModal(false)}>
+              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+            </Button>
+            <Button variant="primary" onClick={handleImageSubmit}>
+              {lang === 'ru' ? 'Вставить' : 'Insert'}
+            </Button>
+          </>
+        }
+      >
+        <Form.Group className="mb-3">
+          <Form.Label>{lang === 'ru' ? 'Описание (alt)' : 'Description (alt)'}</Form.Label>
+          <Form.Control
+            type="text"
+            value={imageData.alt}
+            onChange={e => setImageData({ ...imageData, alt: e.target.value })}
+            placeholder={lang === 'ru' ? 'Описание...' : 'Description...'}
+          />
+        </Form.Group>
+        <Form.Group>
+          <Form.Label>{lang === 'ru' ? 'Ссылка на изображение' : 'Image URL'}</Form.Label>
+          <Form.Control
+            type="url"
+            value={imageData.url}
+            onChange={e => setImageData({ ...imageData, url: e.target.value })}
+            required
+            autoFocus
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleImageSubmit(e); } }}
+          />
+        </Form.Group>
+      </ForumModal>
     </div>
   );
 };

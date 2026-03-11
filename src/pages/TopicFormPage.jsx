@@ -62,7 +62,8 @@ const TopicFormPage = () => {
         author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || user?.photoURL || ''),
         author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
         author_role_id: profile?.role_id || 'player',
-        is_character: !!selectedChar
+        is_character: !!selectedChar,
+        author_character_id: selectedCharacterId || null
       };
 
       const firstPostData = {
@@ -73,6 +74,7 @@ const TopicFormPage = () => {
         author_status_line: topicData.author_status_line,
         author_role_id: topicData.author_role_id,
         is_character: topicData.is_character,
+        author_character_id: topicData.author_character_id,
         character_title: selectedChar?.title || '',
         author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || '')
       };
@@ -107,42 +109,42 @@ const TopicFormPage = () => {
         </Card.Header>
         <Card.Body className="p-4">
           <Form onSubmit={handleSubmit}>
-            <Form.Group className="mb-4" controlId="topicTitle">
-              <Form.Label className="fw-bold h6">Topic Title / Заголовок темы</Form.Label>
+            <Form.Group className="mb-3" controlId="topicTitle">
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <Form.Label className="fw-bold h6 mb-0">{t('forum.topic_title')}</Form.Label>
+                <small className={`${title.length >= LIMITS.title ? 'text-danger' : 'text-muted'}`}>
+                  {title.length} / {LIMITS.title}
+                </small>
+              </div>
               <Form.Control
                 type="text"
                 placeholder="Enter topic title..."
-                className="form-control-lg"
+                className=""
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 maxLength={LIMITS.title}
                 required
               />
-              <div className="text-end mt-1">
-                <small className={`${title.length >= LIMITS.title ? 'text-danger' : 'text-muted'}`}>
-                  {title.length} / {LIMITS.title}
-                </small>
-              </div>
             </Form.Group>
 
-            <Form.Group className="mb-4" controlId="topicDesc">
-              <Form.Label className="fw-bold h6">{t('forum.short_description')}</Form.Label>
-              <Form.Control
-                type="text"
-                placeholder="Briefly describe what this topic is about..."
-                className="bg-light"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                maxLength={LIMITS.description}
-              />
-              <div className="text-end mt-1">
+            <Form.Group className="mb-3" controlId="topicDesc">
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <Form.Label className="fw-bold h6 mb-0">{t('forum.short_description')}</Form.Label>
                 <small className={`${description.length >= LIMITS.description ? 'text-danger' : 'text-muted'}`}>
                   {description.length} / {LIMITS.description}
                 </small>
               </div>
+              <Form.Control
+                type="text"
+                placeholder="Briefly describe what this topic is about..."
+                className=""
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={LIMITS.description}
+              />
             </Form.Group>
 
-            <Form.Group className="mb-4" controlId="postAs">
+            <Form.Group className="mb-3" controlId="postAs">
               <Form.Label className="fw-bold h6">{t('forum.post_as')}</Form.Label>
               <Form.Select
                 value={selectedCharacterId}
@@ -153,7 +155,7 @@ const TopicFormPage = () => {
                     updateUser(user.uid, { last_selected_character_id: val });
                   }
                 }}
-                className="bg-light"
+                className=""
               >
                 <option value="">User: {profile?.nickname || profile?.email?.split('@')[0] || t('nav.profile')}</option>
                 {characters.map(char => (
@@ -164,7 +166,7 @@ const TopicFormPage = () => {
               </Form.Select>
             </Form.Group>
 
-            <Form.Group className="mb-4">
+            <Form.Group className="mb-3">
               <Form.Label className="fw-bold h6">{lang === 'ru' ? 'Содержание' : 'Content'}</Form.Label>
               <RichEditor
                 id="topicContent"

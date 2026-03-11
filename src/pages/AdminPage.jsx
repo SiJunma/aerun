@@ -3,7 +3,8 @@ import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge } from 'reac
 import { useI18n } from '../contexts/I18nProvider';
 import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
-import { Modal, InputGroup } from 'react-bootstrap';
+import { InputGroup } from 'react-bootstrap';
+import ForumModal from '../components/common/ForumModal';
 import { UserCheck, UserMinus, UserX, PlusCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -88,13 +89,13 @@ const AdminPage = () => {
   const handleSaveCategory = async () => {
     if (!catForm.title) return;
     setSaving(true);
+    setShowCatModal(false); // Close first
     try {
       if (editingCat) {
         await updateCategory(editingCat.id, catForm);
       } else {
         await addCategory(catForm);
       }
-      setShowCatModal(false);
     } catch (err) {
       console.error(err);
       alert('Error saving category');
@@ -440,52 +441,48 @@ const AdminPage = () => {
         </Card.Body>
       </Card>
 
-      <Modal
+      <ForumModal
         show={showCatModal}
         onHide={() => setShowCatModal(false)}
-        centered
-        className="premium-modal"
+        title={editingCat ? 'Edit Category' : 'Add Category'}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowCatModal(false)}>Cancel</Button>
+            <Button variant="primary" onClick={handleSaveCategory} disabled={saving}>
+              {saving ? 'Saving...' : 'Save Category'}
+            </Button>
+          </>
+        }
         backdropClassName="confirm-modal-backdrop"
       >
-        <Modal.Header closeButton className="border-0">
-          <Modal.Title className="fw-bold">{editingCat ? 'Edit Category' : 'Add Category'}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="p-4">
-          <Form>
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">Title (EN)</Form.Label>
-              <Form.Control
-                type="text"
-                value={catForm.title}
-                onChange={(e) => setCatForm({ ...catForm, title: e.target.value })}
-              />
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">Description (EN)</Form.Label>
-              <Form.Control
-                as="textarea"
-                rows={2}
-                value={catForm.description}
-                onChange={(e) => setCatForm({ ...catForm, description: e.target.value })}
-              />
-            </Form.Group>
-            <Form.Group className="mb-0">
-              <Form.Label className="fw-bold">Display Order</Form.Label>
-              <Form.Control
-                type="number"
-                value={catForm.order}
-                onChange={(e) => setCatForm({ ...catForm, order: parseInt(e.target.value) })}
-              />
-            </Form.Group>
-          </Form>
-        </Modal.Body>
-        <Modal.Footer className="border-0">
-          <Button variant="outline-secondary" onClick={() => setShowCatModal(false)}>Cancel</Button>
-          <Button variant="primary" onClick={handleSaveCategory} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Category'}
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        <Form>
+          <Form.Group className="mb-3">
+            <Form.Label className="fw-bold">Title (EN)</Form.Label>
+            <Form.Control
+              type="text"
+              value={catForm.title}
+              onChange={(e) => setCatForm({ ...catForm, title: e.target.value })}
+            />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label className="fw-bold">Description (EN)</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={2}
+              value={catForm.description}
+              onChange={(e) => setCatForm({ ...catForm, description: e.target.value })}
+            />
+          </Form.Group>
+          <Form.Group className="mb-0">
+            <Form.Label className="fw-bold">Display Order</Form.Label>
+            <Form.Control
+              type="number"
+              value={catForm.order}
+              onChange={(e) => setCatForm({ ...catForm, order: parseInt(e.target.value) })}
+            />
+          </Form.Group>
+        </Form>
+      </ForumModal>
     </>
   );
 

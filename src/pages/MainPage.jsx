@@ -3,6 +3,7 @@ import { Card, Table, Container } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { subscribeToCategories } from '../api/forum';
+import ForumAuthorName from '../components/common/ForumAuthorName';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -84,7 +85,12 @@ const MainPage = () => {
                               }}
                             />
                           )}
-                          <span>{cat.last_post_author || '—'}</span>
+                          <ForumAuthorName
+                            userId={cat.last_post_author_id}
+                            characterId={cat.last_post_author_character_id}
+                            isCharacter={!!cat.last_post_is_character}
+                            fallbackName={cat.last_post_author}
+                          />
                           <span>·</span>
                           <span>{formatTime(cat.last_post_at)}</span>
                         </Link>

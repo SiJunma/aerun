@@ -12,7 +12,9 @@ import {
   updateDoc,
   deleteDoc,
   increment,
-  getDocs
+  getDocs,
+  limit,
+  getDoc
 } from 'firebase/firestore';
 
 // ── Categories ──────────────────────────────────────────────────────────────
@@ -110,6 +112,8 @@ export const createTopic = async (topicData, firstPostData) => {
       last_post_at: serverTimestamp(),
       last_post_author: topicData.author_name,
       last_post_author_id: topicData.author_id,
+      last_post_is_character: topicData.is_character || false,
+      last_post_author_character_id: topicData.author_character_id || null,
       created_at: serverTimestamp(),
       posts_count: 1
     });
@@ -126,8 +130,11 @@ export const createTopic = async (topicData, firstPostData) => {
       posts_count: increment(1),
       last_post_at: serverTimestamp(),
       last_post_author: topicData.author_name,
+      last_post_author_id: topicData.author_id,
       last_post_topic_id: topicRef.id,
-      last_post_topic_title: topicData.title
+      last_post_topic_title: topicData.title,
+      last_post_is_character: topicData.is_character || false,
+      last_post_author_character_id: topicData.author_character_id || null
     });
 
     // Increment the author's post_count
@@ -178,6 +185,8 @@ export const createPost = async (postData) => {
       last_post_at: serverTimestamp(),
       last_post_author: postData.author_name,
       last_post_author_id: postData.author_id,
+      last_post_is_character: postData.is_character || false,
+      last_post_author_character_id: postData.author_character_id || null,
       posts_count: increment(1)
     });
 
@@ -186,8 +195,11 @@ export const createPost = async (postData) => {
         posts_count: increment(1),
         last_post_at: serverTimestamp(),
         last_post_author: postData.author_name,
+        last_post_author_id: postData.author_id,
         last_post_topic_id: postData.topic_id,
-        last_post_topic_title: topicSnap.data().title
+        last_post_topic_title: topicSnap.data().title,
+        last_post_is_character: postData.is_character || false,
+        last_post_author_character_id: postData.author_character_id || null
       });
     }
 
@@ -205,34 +217,65 @@ export const updatePost = async (postId, content, metadata = {}) => {
   });
 };
 
-// Delete a post — if it's the last post, deletes the topic too
-export const deletePost = async (post) => {
-  await runTransaction(db, async (transaction) => {
-    const postRef = doc(db, 'posts', post.id);
-    const topicRef = doc(db, 'topics', post.topic_id);
-    const userRef = doc(db, 'users', post.author_id);
+// Update topic fields (title, description, etc.)
+export const updateTopic = async (topicId, data) => {
+  const topicRef = doc(db, 'topics', topicId);
+  await updateDoc(topicRef, {
+    ...data,
+    updated_at: serverTimestamp()
+  });
 
+  // If title was updated, check if it needs to be synced to the category denormalized field
+  if (data.title) {
+    try {
+      const topicSnap = await getDoc(topicRef);
+      if (topicSnap.exists()) {
+        const topicData = topicSnap.data();
+        const categoryId = topicData.category_id;
+        if (categoryId) {
+          const categoryRef = doc(db, 'categories', categoryId);
+          const categorySnap = await getDoc(categoryRef);
+          if (categorySnap.exists() && categorySnap.data().last_post_topic_id === topicId) {
+            await updateDoc(categoryRef, {
+              last_post_topic_title: data.title
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[updateTopic sync]', err);
+    }
+  }
+};
+
+// Delete a post — if it's the last post, deletes the topic too;
+// otherwise recalculates last_post_* fields on the topic and category.
+export const deletePost = async (post) => {
+  const postRef = doc(db, 'posts', post.id);
+  const topicRef = doc(db, 'topics', post.topic_id);
+  const userRef = doc(db, 'users', post.author_id);
+
+  // Step 1: transactionally delete the post and update counters
+  let topicData = null;
+  let categoryId = null;
+  let isLastPost = false;
+
+  await runTransaction(db, async (transaction) => {
     const topicSnap = await transaction.get(topicRef);
     if (!topicSnap.exists()) {
-      // Topic already gone, just delete the post
       transaction.delete(postRef);
       return;
     }
 
-    const topicData = topicSnap.data();
-    const categoryId = topicData.category_id;
-    const isLastPost = (topicData.posts_count ?? 1) <= 1;
+    topicData = topicSnap.data();
+    categoryId = topicData.category_id;
+    isLastPost = (topicData.posts_count ?? 1) <= 1;
 
-    // Always delete the post itself
     transaction.delete(postRef);
-
-    // Decrement author post_count
     transaction.update(userRef, { post_count: increment(-1) });
 
     if (isLastPost) {
-      // Delete the whole topic too
       transaction.delete(topicRef);
-
       if (categoryId) {
         transaction.update(doc(db, 'categories', categoryId), {
           topics_count: increment(-1),
@@ -240,9 +283,7 @@ export const deletePost = async (post) => {
         });
       }
     } else {
-      // Just decrement counters
       transaction.update(topicRef, { posts_count: increment(-1) });
-
       if (categoryId) {
         transaction.update(doc(db, 'categories', categoryId), {
           posts_count: increment(-1)
@@ -250,6 +291,91 @@ export const deletePost = async (post) => {
       }
     }
   });
+
+  // Step 2: if topic still exists, recalculate last_post_* from remaining posts
+  if (!isLastPost && topicData && categoryId) {
+    // Find new last post in the topic
+    const remainingQ = query(
+      collection(db, 'posts'),
+      where('topic_id', '==', post.topic_id),
+      orderBy('created_at', 'desc'),
+      limit(1)
+    );
+    const remainingSnap = await getDocs(remainingQ);
+
+    if (!remainingSnap.empty) {
+      const newLastPost = remainingSnap.docs[0].data();
+      const newLastAt = newLastPost.created_at;
+      const newLastAuthor = newLastPost.author_name;
+      const newLastAuthorId = newLastPost.author_id;
+      const newIsChar = newLastPost.is_character || false;
+      const newCharId = newLastPost.author_character_id || null;
+
+      // Update topic's denormalized last_post fields
+      await updateDoc(topicRef, {
+        last_post_at: newLastAt,
+        last_post_author: newLastAuthor,
+        last_post_author_id: newLastAuthorId,
+        last_post_is_character: newIsChar,
+        last_post_author_character_id: newCharId
+      });
+
+      // Find the most-recent topic in the category to update category's last_post fields
+      const catTopicsQ = query(
+        collection(db, 'topics'),
+        where('category_id', '==', categoryId),
+        orderBy('last_post_at', 'desc'),
+        limit(1)
+      );
+      const catTopicsSnap = await getDocs(catTopicsQ);
+
+      if (!catTopicsSnap.empty) {
+        const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
+        await updateDoc(doc(db, 'categories', categoryId), {
+          last_post_at: latestTopic.last_post_at,
+          last_post_author: latestTopic.last_post_author,
+          last_post_author_id: latestTopic.last_post_author_id,
+          last_post_topic_id: latestTopic.id,
+          last_post_topic_title: latestTopic.title,
+          last_post_is_character: latestTopic.last_post_is_character || false,
+          last_post_author_character_id: latestTopic.last_post_author_character_id || null
+        });
+      }
+    }
+  } else if (isLastPost && categoryId) {
+    // Topic was deleted — recalculate category's last_post from remaining topics
+    const catTopicsQ = query(
+      collection(db, 'topics'),
+      where('category_id', '==', categoryId),
+      orderBy('last_post_at', 'desc'),
+      limit(1)
+    );
+    const catTopicsSnap = await getDocs(catTopicsQ);
+
+    if (!catTopicsSnap.empty) {
+      const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
+      await updateDoc(doc(db, 'categories', categoryId), {
+        last_post_at: latestTopic.last_post_at,
+        last_post_author: latestTopic.last_post_author,
+        last_post_author_id: latestTopic.last_post_author_id,
+        last_post_topic_id: latestTopic.id,
+        last_post_topic_title: latestTopic.title,
+        last_post_is_character: latestTopic.last_post_is_character || false,
+        last_post_author_character_id: latestTopic.last_post_author_character_id || null
+      });
+    } else {
+      // No topics left in category
+      await updateDoc(doc(db, 'categories', categoryId), {
+        last_post_at: null,
+        last_post_author: null,
+        last_post_author_id: null,
+        last_post_topic_id: null,
+        last_post_topic_title: null,
+        last_post_is_character: null,
+        last_post_author_character_id: null
+      });
+    }
+  }
 };
 // ── Users ─────────────────────────────────────────────────────────────────────
 

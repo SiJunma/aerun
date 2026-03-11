@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table, Button, Breadcrumb, Badge, Pagination } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
-import { subscribeToTopics, subscribeToCategories } from '../api/forum';
+import { subscribeToTopics, subscribeToCategories, subscribeToUser } from '../api/forum';
+import ForumAuthorName from '../components/common/ForumAuthorName';
+import ForumPagination from '../components/common/ForumPagination';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -128,11 +130,16 @@ const CategoryPage = () => {
                           {topic.description}
                         </div>
                       )}
-                      <small className="text-muted">
-                        {t('forum.author')}:{' '}
-                        <span className="text-primary">{topic.author_name}</span>
-                        {' · '}
-                        <span>{formatTime(topic.created_at)}</span>
+                      <small className="text-muted d-flex align-items-center gap-1">
+                        <ForumAuthorName
+                          userId={topic.author_id}
+                          characterId={topic.author_character_id}
+                          isCharacter={!!topic.is_character}
+                          fallbackName={topic.author_name}
+                          className="fw-semibold text-secondary"
+                        />
+                        <span>·</span>
+                        {formatTime(topic.created_at)}
                       </small>
                     </td>
                     <td className="text-center">
@@ -163,7 +170,12 @@ const CategoryPage = () => {
                                   }}
                                 />
                               )}
-                              {topic.last_post_author || topic.author_name}
+                              <ForumAuthorName
+                                userId={topic.last_post_author_id}
+                                characterId={topic.last_post_author_character_id}
+                                isCharacter={!!topic.last_post_is_character}
+                                fallbackName={topic.last_post_author || topic.author_name}
+                              />
                             </div>
                             <div className="text-muted">{formatTime(topic.last_post_at)}</div>
                           </Link>
@@ -178,21 +190,11 @@ const CategoryPage = () => {
             </Table>
             {totalPages > 1 && (
               <div className="p-3 d-flex justify-content-center border-top">
-                <Pagination className="mb-0">
-                  <Pagination.First onClick={() => handlePageChange(1)} disabled={currentPage === 1} />
-                  <Pagination.Prev onClick={() => handlePageChange(Math.max(1, currentPage - 1))} disabled={currentPage === 1} />
-                  {[...Array(totalPages)].map((_, i) => (
-                    <Pagination.Item
-                      key={i + 1}
-                      active={i + 1 === currentPage}
-                      onClick={() => handlePageChange(i + 1)}
-                    >
-                      {i + 1}
-                    </Pagination.Item>
-                  ))}
-                  <Pagination.Next onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} />
-                  <Pagination.Last onClick={() => handlePageChange(totalPages)} disabled={currentPage === totalPages} />
-                </Pagination>
+                <ForumPagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                />
               </div>
             )}
           </>

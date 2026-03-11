@@ -20,6 +20,17 @@ export const subscribeToCharacters = (uid, callback) => {
   });
 };
 
+export const subscribeToCharacter = (uid, charId, callback) => {
+  const docRef = doc(db, 'users', uid, 'characters', charId);
+  return onSnapshot(docRef, (snapshot) => {
+    if (snapshot.exists()) {
+      callback({ id: snapshot.id, ...snapshot.data() });
+    } else {
+      callback(null);
+    }
+  });
+};
+
 export const addCharacter = async (uid, characterData) => {
   const colRef = collection(db, 'users', uid, 'characters');
   await addDoc(colRef, {
