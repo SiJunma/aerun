@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge } from 'react-bootstrap';
+import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
@@ -21,6 +21,7 @@ const AdminPage = () => {
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
   const [catForm, setCatForm] = useState({ title: '', description: '', order: 0 });
+  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -62,10 +63,10 @@ const AdminPage = () => {
     setSaving(true);
     try {
       await updateGlobalSettings(settings);
-      alert('Settings saved successfully!');
+      setToast({ show: true, message: 'Settings saved successfully!', variant: 'success' });
     } catch (err) {
       console.error(err);
-      alert('Error saving settings');
+      setToast({ show: true, message: 'Error saving settings', variant: 'danger' });
     } finally {
       setSaving(false);
     }
@@ -96,9 +97,10 @@ const AdminPage = () => {
       } else {
         await addCategory(catForm);
       }
+      setToast({ show: true, message: 'Category saved successfully!', variant: 'success' });
     } catch (err) {
       console.error(err);
-      alert('Error saving category');
+      setToast({ show: true, message: 'Error saving category', variant: 'danger' });
     } finally {
       setSaving(false);
     }
@@ -112,9 +114,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteCategory(id);
+          setToast({ show: true, message: 'Category deleted', variant: 'success' });
         } catch (err) {
           console.error(err);
-          alert('Error deleting category');
+          setToast({ show: true, message: 'Error deleting category', variant: 'danger' });
         }
       }
     });
@@ -128,8 +131,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await rejectUser(uid);
+          setToast({ show: true, message: 'User rejected', variant: 'success' });
         } catch (err) {
           console.error(err);
+          setToast({ show: true, message: 'Error rejecting user', variant: 'danger' });
         }
       }
     });
@@ -138,8 +143,10 @@ const AdminPage = () => {
   const handleApproveUser = async (uid) => {
     try {
       await approveUser(uid);
+      setToast({ show: true, message: 'User approved', variant: 'success' });
     } catch (err) {
       console.error(err);
+      setToast({ show: true, message: 'Error approving user', variant: 'danger' });
     }
   };
 
@@ -151,8 +158,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await banUser(uid);
+          setToast({ show: true, message: 'User banned', variant: 'success' });
         } catch (err) {
           console.error(err);
+          setToast({ show: true, message: 'Error banning user', variant: 'danger' });
         }
       }
     });
@@ -161,15 +170,17 @@ const AdminPage = () => {
   const handleRoleChange = async (uid, roleId) => {
     try {
       await updateUserRole(uid, roleId);
+      setToast({ show: true, message: 'User role updated', variant: 'success' });
     } catch (err) {
       console.error(err);
+      setToast({ show: true, message: 'Error updating user role', variant: 'danger' });
     }
   };
 
   // Mock roles and permissions
   const availableRoles = [
     { id: 'admin', name: 'Administrator', color: 'danger', permissions: ['all'] },
-    { id: 'mod', name: 'Moderator', color: 'info', permissions: ['moderate_posts', 'ban_users'] },
+    { id: 'moderator', name: 'Moderator', color: 'info', permissions: ['moderate_posts', 'ban_users'] },
     { id: 'player', name: 'Player', color: 'primary', permissions: ['create_topics', 'post_replies', 'use_masks'] },
     { id: 'spectator', name: 'Spectator', color: 'secondary', permissions: ['view_content'] }
   ];
@@ -312,17 +323,22 @@ const AdminPage = () => {
                 </div>
               </td>
               <td>
-                <Form.Select
-                  size="sm"
-                  value={u.role_id || 'player'}
-                  className="w-75 bg-light"
-                  onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                  disabled={u.id === currentUser.uid}
-                >
-                  {availableRoles.map(r => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
-                  ))}
-                </Form.Select>
+                {(u.id === currentUser.uid || u.email === import.meta.env.VITE_ADMIN_EMAIL) ? (
+                  <Badge bg="danger" className="px-3" style={{ fontSize: '0.85rem' }}>
+                    {availableRoles.find(r => r.id === 'admin')?.name || 'Administrator'}
+                  </Badge>
+                ) : (
+                  <Form.Select
+                    size="sm"
+                    value={u.role_id || 'player'}
+                    className="w-75 bg-light shadow-sm"
+                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                  >
+                    {availableRoles.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </Form.Select>
+                )}
               </td>
               <td>
                 {u.status === 'active' && <Badge bg="success">Active</Badge>}
@@ -330,7 +346,7 @@ const AdminPage = () => {
                 {u.status === 'banned' && <Badge bg="danger">Banned</Badge>}
               </td>
               <td className="text-end">
-                {u.id !== currentUser.uid && (
+                {u.id !== currentUser.uid && u.email !== import.meta.env.VITE_ADMIN_EMAIL && (
                   <>
                     {u.status === 'pending' && (
                       <>
@@ -352,6 +368,9 @@ const AdminPage = () => {
                       </Button>
                     )}
                   </>
+                )}
+                {(u.id === currentUser.uid || u.email === import.meta.env.VITE_ADMIN_EMAIL) && (
+                  <Badge bg="secondary" className="opacity-50">Protected</Badge>
                 )}
               </td>
             </tr>
@@ -517,6 +536,21 @@ const AdminPage = () => {
         title={confirmState.title}
         message={confirmState.message}
       />
+
+      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100 }}>
+        <Toast
+          bg={toast.variant}
+          show={toast.show}
+          onClose={() => setToast(t => ({ ...t, show: false }))}
+          delay={3500}
+          autohide
+        >
+          <Toast.Body className="d-flex align-items-center gap-2 text-white fw-semibold">
+            <span>{toast.variant === 'success' ? '✓' : '✕'}</span>
+            <span>{toast.message}</span>
+          </Toast.Body>
+        </Toast>
+      </ToastContainer>
     </Container>
   );
 };
