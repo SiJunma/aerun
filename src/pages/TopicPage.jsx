@@ -251,6 +251,7 @@ const TopicPage = () => {
       }
       return profile?.avatar_url || post.author_avatar;
     }
+    if (post.is_character) return post.author_avatar;
     return authorStats[post.author_id]?.avatar_url || post.author_avatar;
   };
 
@@ -262,6 +263,7 @@ const TopicPage = () => {
       }
       return profile ? (profile.status_line || '') : (post.author_status_line || '');
     }
+    if (post.is_character) return post.author_status_line || '';
     const stats = authorStats[post.author_id];
     return (stats && stats.nickname) ? (stats.status_line || '') : (post.author_status_line || '');
   };
@@ -274,6 +276,7 @@ const TopicPage = () => {
       }
       return profile?.settings?.signature || post.author_signature || '';
     }
+    if (post.is_character) return post.author_signature || '';
     const stats = authorStats[post.author_id];
     return (stats && stats.nickname) ? (stats.settings?.signature || '') : (post.author_signature || '');
   };
