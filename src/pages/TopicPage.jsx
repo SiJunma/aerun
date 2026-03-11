@@ -298,9 +298,9 @@ const TopicPage = () => {
   const handleRepVote = async () => {
     if (!repTargetPost || !user) return;
     setSubmittingRep(true);
-    setShowRepModal(false); // Close first
     try {
       await voteOnPost(user.uid, repTargetPost.author_id, repTargetPost.id, id, repValue, repComment, topic?.title, repTargetPostNumber);
+      setShowRepModal(false); // Close AFTER success
       setMyVotes(prev => ({
         ...prev,
         [repTargetPost.id]: {

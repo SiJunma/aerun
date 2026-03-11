@@ -261,7 +261,15 @@ export const deletePost = async (post) => {
   const topicRef = doc(db, 'topics', post.topic_id);
   const userRef = doc(db, 'users', post.author_id);
 
-  // Step 1: transactionally delete the post and update counters
+  // Step 1: Find reputation logs for this post to revert reputation
+  const logsQuery = query(collection(db, 'reputation_logs'), where('post_id', '==', post.id));
+  const logsSnap = await getDocs(logsQuery);
+  let totalRepChange = 0;
+  logsSnap.forEach(ld => {
+    totalRepChange += (ld.data().value || 0);
+  });
+
+  // Step 2: transactionally delete the post and update counters
   let topicData = null;
   let categoryId = null;
   let isLastPost = false;
@@ -278,7 +286,15 @@ export const deletePost = async (post) => {
     isLastPost = (topicData.posts_count ?? 1) <= 1;
 
     transaction.delete(postRef);
-    transaction.update(userRef, { post_count: increment(-1) });
+    transaction.update(userRef, { 
+      post_count: increment(-1),
+      reputation: increment(-totalRepChange)
+    });
+
+    // Delete associated reputation logs
+    logsSnap.forEach(logDoc => {
+      transaction.delete(logDoc.ref);
+    });
 
     if (isLastPost) {
       transaction.delete(topicRef);

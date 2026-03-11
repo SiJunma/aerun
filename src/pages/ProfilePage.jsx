@@ -191,9 +191,9 @@ const ProfilePage = () => {
   const handleRepVote = async () => {
     if (!profile || profile.uid === uid || profile.role_id === 'spectator') return;
     setSubmittingRep(true);
-    setShowRepModal(false); // Close first
     try {
       await voteOnProfile(profile.uid, uid, repValue, repComment);
+      setShowRepModal(false); // Close AFTER success
       setMyVote({ value: repValue, comment: repComment });
       setRepComment('');
       showToast(t('profile.rep_success'));

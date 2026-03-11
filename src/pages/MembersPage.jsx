@@ -59,25 +59,43 @@ const MembersPage = () => {
     }
   };
 
+  const ROLE_PRIORITY = {
+    'admin': 100,
+    'moderator': 80,
+    'player': 60,
+    'banned': 40,
+    'pending': 20
+  };
+
   const sortedAndFilteredUsers = useMemo(() => {
     let result = users.filter(u =>
-      u.nickname?.toLowerCase().includes(search.toLowerCase()) ||
-      u.email?.toLowerCase().includes(search.toLowerCase())
+      u.nickname?.toLowerCase().includes(search.toLowerCase())
     );
 
     result.sort((a, b) => {
-      let aVal = a[sortField];
-      let bVal = b[sortField];
+      let aVal, bVal;
 
-      // Handle nested or complex fields if necessary
-      if (sortField === 'created_at' || sortField === 'last_seen' || sortField === 'updated_at') {
+      if (sortField === 'role_id') {
+        aVal = ROLE_PRIORITY[a.role_id] || 60;
+        bVal = ROLE_PRIORITY[b.role_id] || 60;
+      } else if (sortField === 'created_at' || sortField === 'last_seen' || sortField === 'updated_at') {
         aVal = a[sortField]?.toMillis?.() || 0;
         bVal = b[sortField]?.toMillis?.() || 0;
+      } else {
+        aVal = a[sortField];
+        bVal = b[sortField];
+
+        if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+        if (typeof bVal === 'string') bVal = bVal.toLowerCase();
       }
 
       if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
       if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
-      return 0;
+      
+      // Secondary sort by nickname to keep list stable
+      const nameA = (a.nickname || '').toLowerCase();
+      const nameB = (b.nickname || '').toLowerCase();
+      return nameA.localeCompare(nameB);
     });
 
     return result;
@@ -88,13 +106,20 @@ const MembersPage = () => {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      setSortOrder('asc');
+      // Default to desc for count/date fields, asc for text
+      if (['post_count', 'reputation', 'created_at', 'last_seen', 'role_id'].includes(field)) {
+        setSortOrder('desc');
+      } else {
+        setSortOrder('asc');
+      }
     }
   };
 
   const getRoleBadge = (role) => {
     if (role === 'admin') return <Badge bg="danger">Admin</Badge>;
     if (role === 'moderator') return <Badge bg="warning" text="dark">Moderator</Badge>;
+    if (role === 'banned') return <Badge bg="dark">Banned</Badge>;
+    if (role === 'pending') return <Badge bg="info">Pending</Badge>;
     return <Badge bg="secondary">Member</Badge>;
   };
 
@@ -155,10 +180,16 @@ const MembersPage = () => {
                 >
                   <option value="nickname-asc">{lang === 'ru' ? 'Имя (A-Z)' : 'Name (A-Z)'}</option>
                   <option value="nickname-desc">{lang === 'ru' ? 'Имя (Z-A)' : 'Name (Z-A)'}</option>
+                  <option value="role_id-desc">{lang === 'ru' ? 'Ранг (по убыванию)' : 'Rank (Desc)'}</option>
+                  <option value="role_id-asc">{lang === 'ru' ? 'Ранг (по возрастанию)' : 'Rank (Asc)'}</option>
                   <option value="post_count-desc">{lang === 'ru' ? 'Больше постов' : 'Most Posts'}</option>
+                  <option value="post_count-asc">{lang === 'ru' ? 'Меньше постов' : 'Fewest Posts'}</option>
                   <option value="reputation-desc">{lang === 'ru' ? 'Выше репутация' : 'Highest Rep'}</option>
-                  <option value="created_at-desc">{lang === 'ru' ? 'Новые участники' : 'Newest'}</option>
-                  <option value="created_at-asc">{lang === 'ru' ? 'Старые участники' : 'Oldest'}</option>
+                  <option value="reputation-asc">{lang === 'ru' ? 'Ниже репутация' : 'Lowest Rep'}</option>
+                  <option value="last_seen-desc">{lang === 'ru' ? 'Сначала активные' : 'Recently Active'}</option>
+                  <option value="last_seen-asc">{lang === 'ru' ? 'Сначала неактивные' : 'Least Recently Active'}</option>
+                  <option value="created_at-desc">{lang === 'ru' ? 'Сначала новые' : 'Newest First'}</option>
+                  <option value="created_at-asc">{lang === 'ru' ? 'Сначала старые' : 'Oldest First'}</option>
                 </Form.Select>
               </div>
             </Col>
@@ -170,28 +201,38 @@ const MembersPage = () => {
         <Table className={`align-middle mb-0 border-0 ${isStacked ? 'members-table-stacked' : ''}`}>
           <thead className="small text-muted text-uppercase fw-bold members-table-head">
             <tr>
-              <th className="py-3 ps-4" style={{ width: '30%', border: 'none' }}>{lang === 'ru' ? 'Участник' : 'Member'}</th>
-              <th className="py-3" style={{ width: '15%', border: 'none' }}>{lang === 'ru' ? 'Роль' : 'Role'}</th>
+              <th className="py-3 ps-4" style={{ width: '30%', border: 'none' }}>
+                <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('nickname')}>
+                  {lang === 'ru' ? 'Участник' : 'Member'}
+                  <ArrowUpDown size={12} />
+                </div>
+              </th>
               <th className="py-3" style={{ width: '15%', border: 'none' }}>
-                <div className="d-flex align-items-center gap-1 cursor-pointer" onClick={() => handleSort('created_at')}>
+                <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('role_id')}>
+                  {lang === 'ru' ? 'Роль' : 'Role'}
+                  <ArrowUpDown size={12} />
+                </div>
+              </th>
+              <th className="py-3" style={{ width: '15%', border: 'none' }}>
+                <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('created_at')}>
                   {lang === 'ru' ? 'Регистрация' : 'Joined'}
                   <ArrowUpDown size={12} />
                 </div>
               </th>
               <th className="py-3" style={{ width: '20%', border: 'none' }}>
-                <div className="d-flex align-items-center gap-1 cursor-pointer" onClick={() => handleSort('last_seen')}>
+                <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('last_seen')}>
                   {lang === 'ru' ? 'Активность' : 'Last Seen'}
                   <ArrowUpDown size={12} />
                 </div>
               </th>
               <th className="py-3 text-center" style={{ width: '10%', border: 'none' }}>
-                <div className="d-flex align-items-center justify-content-center gap-1 cursor-pointer" onClick={() => handleSort('post_count')}>
+                <div className="d-flex align-items-center justify-content-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('post_count')}>
                   <MessageSquare size={14} />
                   <ArrowUpDown size={12} />
                 </div>
               </th>
               <th className="py-3 text-center pe-4" style={{ width: '10%', border: 'none' }}>
-                <div className="d-flex align-items-center justify-content-center gap-1 cursor-pointer" onClick={() => handleSort('reputation')}>
+                <div className="d-flex align-items-center justify-content-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('reputation')}>
                   <Award size={14} />
                   <ArrowUpDown size={12} />
                 </div>
