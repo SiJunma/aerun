@@ -1203,3 +1203,23 @@ a:hover {
   letter-spacing: 0.2em;
   opacity: 0.5;
 }
+
+/* Custom Banned Badge */
+.badge-banned {
+  background-color: #212529 !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+[data-theme='dark'] .badge-banned {
+  background-color: #020617 !important;
+  color: #ffffff !important;
+  border: 1px solid #334155 !important;
+}
+
+[data-theme='neutral'] .badge-banned {
+  background-color: #1a150f !important;
+  color: #d2ccba !important;
+  border: 1px solid #3c3836 !important;
+}

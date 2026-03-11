@@ -115,7 +115,9 @@ const MembersPage = () => {
     }
   };
 
-  const getRoleBadge = (role) => {
+  const getRoleBadge = (u) => {
+    if (u.status === 'banned') return <Badge className="badge-banned">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
+    const role = u.role_id;
     if (role === 'admin') return <Badge bg="danger">Admin</Badge>;
     if (role === 'moderator') return <Badge bg="warning" text="dark">Moderator</Badge>;
     if (role === 'banned') return <Badge bg="dark">Banned</Badge>;
@@ -266,7 +268,7 @@ const MembersPage = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="border-0" data-label={lang === 'ru' ? 'Роль' : 'Role'}>{getRoleBadge(u.role_id)}</td>
+                  <td className="border-0" data-label={lang === 'ru' ? 'Роль' : 'Role'}>{getRoleBadge(u)}</td>
                   <td className="small text-muted border-0" data-label={lang === 'ru' ? 'Регистрация' : 'Joined'}>
                     <div className="d-flex align-items-center gap-1">
                       <Calendar size={14} className="flex-shrink-0" />

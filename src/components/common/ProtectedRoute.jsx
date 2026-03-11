@@ -42,14 +42,22 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
     }
   }
 
-  // Banned → /banned (always checked first when logged in)
+  // Banned status handling
   if (profile?.status === 'banned') {
-    return <Navigate to="/banned" replace />;
+    if (location.pathname !== '/banned') {
+      return <Navigate to="/banned" replace />;
+    }
+  } else if (location.pathname === '/banned') {
+    return <Navigate to="/" replace />;
   }
 
-  // Pending (not yet approved) → /pending
-  if (requireActive && profile?.status === 'pending') {
-    return <Navigate to="/pending" replace />;
+  // Pending status handling
+  if (profile?.status === 'pending') {
+    if (requireActive && location.pathname !== '/pending') {
+      return <Navigate to="/pending" replace />;
+    }
+  } else if (location.pathname === '/pending') {
+    return <Navigate to="/" replace />;
   }
 
   // Admin-only route: kick non-admins back home

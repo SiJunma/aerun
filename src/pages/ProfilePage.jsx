@@ -291,7 +291,11 @@ const ProfilePage = () => {
                 <span className="text-muted d-block small mb-1 fw-bold text-uppercase" style={{ fontSize: '0.65rem', letterSpacing: '0.1em' }}>
                   {t('profile.account_role')}
                 </span>
-                <div className="role-badge">{viewedProfile?.role_id?.toUpperCase()}</div>
+                {viewedProfile?.status === 'banned' ? (
+                  <div className="role-badge badge-banned px-3 py-1 mt-1">{lang === 'ru' ? 'ЗАБАНЕН' : 'BANNED'}</div>
+                ) : (
+                  <div className="role-badge">{viewedProfile?.role_id?.toUpperCase()}</div>
+                )}
               </div>
             </Card.Body>
           </Card>
