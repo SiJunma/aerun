@@ -26,6 +26,7 @@ const TICK_MS = 2 * 60 * 1000;
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Ref holding the timestamp of the last recorded activity
@@ -82,6 +83,13 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
+    // Global Settings Listener
+    const unsubGlobalSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
+      if (docSnap.exists()) {
+        setSettings(docSnap.data());
+      }
+    });
+
     let profileUnsub;
     let lastSeenInterval;
 
@@ -91,6 +99,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true); // Ensure we're in loading state while processing auth change
       if (firebaseUser) {
         setUser(firebaseUser);
         const userDocRef = doc(db, 'users', firebaseUser.uid);
@@ -175,6 +184,7 @@ export const AuthProvider = ({ children }) => {
     });
 
     return () => {
+      unsubGlobalSettings();
       unsubscribe();
       if (profileUnsub) profileUnsub();
       clearInterval(lastSeenInterval);
@@ -184,6 +194,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user,
     profile,
+    settings,
     loading,
     loginWithGoogle,
     logout,

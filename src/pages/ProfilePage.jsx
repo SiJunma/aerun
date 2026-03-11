@@ -748,7 +748,7 @@ const ProfilePage = () => {
         message={confirmState.message}
       />
 
-      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100 }}>
+      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100, position: 'fixed' }}>
         <Toast
           bg={toast.variant}
           show={toast.show}

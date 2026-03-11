@@ -1,13 +1,13 @@
 import React from 'react';
-import { Navbar, Nav, Container, NavDropdown, Image } from 'react-bootstrap';
+import { Navbar, Nav, Container, NavDropdown, Image, Badge } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { User, Settings, LogOut } from 'lucide-react';
 
 const Navigation = () => {
-  const { user, profile, logout } = useAuth();
-  const { t } = useI18n();
+  const { user, profile, settings, logout } = useAuth();
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -16,15 +16,26 @@ const Navigation = () => {
   };
 
   return (
-    <Navbar bg="dark" variant="dark" expand="lg" sticky="top" className="mb-0">
+    <Navbar bg="dark" variant="dark" expand="lg" sticky="top" className="mb-0 shadow-sm border-bottom border-secondary border-opacity-25">
       <Container>
         <Navbar.Brand as={Link} to="/">{t('common.app_name')}</Navbar.Brand>
         <Navbar.Toggle aria-controls="basic-navbar-nav" />
         <Navbar.Collapse id="basic-navbar-nav">
           <Nav className="me-auto">
             <Nav.Link as={Link} to="/members">{t('nav.members')}</Nav.Link>
+            {profile?.role_id === 'admin' && (
+              <Nav.Link as={Link} to="/admin" className="text-warning fw-semibold">
+                {t('nav.admin')}
+              </Nav.Link>
+            )}
           </Nav>
-          <Nav className="align-items-center">
+          <Nav className="align-items-center gap-3">
+            {settings?.maintenanceMode && profile?.role_id === 'admin' && (
+              <Badge bg="warning" text="dark" className="d-flex align-items-center gap-1 shadow-sm px-2 py-1" style={{ fontSize: '0.75rem', letterSpacing: '0.5px' }}>
+                <div className="bg-dark rounded-circle me-1" style={{ width: '6px', height: '6px', animation: 'pulse 1.5s infinite' }}></div>
+                {lang === 'ru' ? 'ТЕХРАБОТЫ' : 'MAINTENANCE'}
+              </Badge>
+            )}
 
             {user ? (
               <NavDropdown
@@ -51,15 +62,6 @@ const Navigation = () => {
                   <User size={16} />
                   {t('nav.profile')}
                 </NavDropdown.Item>
-                {profile?.role_id === 'admin' && (
-                  <>
-                    <NavDropdown.Divider />
-                    <NavDropdown.Item as={Link} to="/admin" className="d-flex align-items-center gap-2">
-                      <Settings size={16} />
-                      {t('nav.admin')}
-                    </NavDropdown.Item>
-                  </>
-                )}
                 <NavDropdown.Divider />
                 <NavDropdown.Item onClick={handleLogout} className="d-flex align-items-center gap-2 text-danger">
                   <LogOut size={16} />

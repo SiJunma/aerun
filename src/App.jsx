@@ -13,6 +13,7 @@ import TopicPage from './pages/TopicPage';
 import ProfilePage from './pages/ProfilePage';
 import MembersPage from './pages/MembersPage';
 import AdminPage from './pages/AdminPage';
+import MaintenancePage from './pages/MaintenancePage';
 import { useAuth } from './contexts/AuthProvider';
 
 /**
@@ -38,6 +39,7 @@ const App = () => {
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/maintenance" element={<MaintenancePage />} />
         <Route path="/pending" element={<ProtectedRoute requireActive={false}><PendingPage /></ProtectedRoute>} />
         <Route path="/banned" element={<ProtectedRoute requireActive={false}><BannedPage /></ProtectedRoute>} />
 

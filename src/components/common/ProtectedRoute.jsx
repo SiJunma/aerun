@@ -11,10 +11,10 @@ import { useAuth } from '../../contexts/AuthProvider';
  *  requirePosting {boolean} – if true, spectators are bounced (cannot post/create, default: false)
  */
 const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false }) => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, settings, loading } = useAuth();
   const location = useLocation();
 
-  if (loading) {
+  if (loading || !settings) {
     return (
       <div className="d-flex justify-content-center align-items-center vh-100">
         <div className="spinner-border text-primary" role="status">
@@ -27,6 +27,25 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   // Not logged in at all → /login
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Maintenance mode check: redirect non-admins to /maintenance
+  // We MUST wait for profile to exist if user is logged in, to avoid race conditions 
+  // where profile is null for a split second and the system thinks it's a non-admin.
+  if (settings.maintenanceMode && location.pathname !== '/maintenance') {
+    if (!profile) {
+      return (
+        <div className="d-flex justify-content-center align-items-center vh-100">
+          <div className="spinner-border text-primary" role="status">
+            <span className="visually-hidden">Loading Profile...</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (profile.role_id !== 'admin') {
+      return <Navigate to="/maintenance" replace />;
+    }
   }
 
   // Banned → /banned (always checked first when logged in)
