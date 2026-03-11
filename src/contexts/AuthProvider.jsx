@@ -13,6 +13,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
+import LoadingPreloader from '../components/common/LoadingPreloader';
 
 const AuthContext = createContext();
 
@@ -98,6 +99,16 @@ export const AuthProvider = ({ children }) => {
         .catch((e) => console.warn('[last_seen update]', e));
     };
 
+    // Buffer to prevent preloader "flash" on fast loads
+    const startLoadTime = Date.now();
+    const minDisplayTime = 800;
+
+    const finishLoading = () => {
+      const elapsed = Date.now() - startLoadTime;
+      const remaining = Math.max(0, minDisplayTime - elapsed);
+      setTimeout(() => setLoading(false), remaining);
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true); // Ensure we're in loading state while processing auth change
       if (firebaseUser) {
@@ -153,10 +164,10 @@ export const AuthProvider = ({ children }) => {
             } else {
               setProfile(null);
             }
-            setLoading(false);
+            finishLoading();
           }, (error) => {
             console.error('Firestore profile listener error:', error);
-            setLoading(false);
+            finishLoading();
           });
 
           // Periodic tick: only push last_seen if user was active recently
@@ -171,13 +182,13 @@ export const AuthProvider = ({ children }) => {
 
         } catch (error) {
           console.error('Error initializing user data:', error);
-          setLoading(false);
+          finishLoading();
         }
 
       } else {
         setUser(null);
         setProfile(null);
-        setLoading(false);
+        finishLoading();
         if (profileUnsub) profileUnsub();
         clearInterval(lastSeenInterval);
       }
@@ -205,7 +216,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {loading ? <LoadingPreloader /> : children}
     </AuthContext.Provider>
   );
 };

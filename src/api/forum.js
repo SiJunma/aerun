@@ -498,17 +498,23 @@ export const deleteTopics = async (topicIds) => {
       if (!catTopicsSnap.empty) {
         const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
         await updateDoc(catRef, {
-          last_post_at: latestTopic.last_post_at,
-          last_post_author: latestTopic.last_post_author,
-          last_post_topic_id: latestTopic.id,
-          last_post_topic_title: latestTopic.title
+          last_post_at: latestTopic.last_post_at || null,
+          last_post_author: latestTopic.last_post_author || null,
+          last_post_author_id: latestTopic.last_post_author_id || null,
+          last_post_topic_id: latestTopic.id || null,
+          last_post_topic_title: latestTopic.title || null,
+          last_post_is_character: latestTopic.last_post_is_character || false,
+          last_post_author_character_id: latestTopic.last_post_author_character_id || null
         });
       } else {
         await updateDoc(catRef, {
           last_post_at: null,
           last_post_author: null,
+          last_post_author_id: null,
           last_post_topic_id: null,
-          last_post_topic_title: null
+          last_post_topic_title: null,
+          last_post_is_character: null,
+          last_post_author_character_id: null
         });
       }
     }
@@ -562,13 +568,24 @@ export const moveTopics = async (topicIds, targetCategoryId) => {
       if (!snap.empty) {
         const top = snap.docs[0].data();
         await updateDoc(ref, {
-          last_post_at: top.last_post_at,
-          last_post_author: top.last_post_author,
-          last_post_topic_id: snap.docs[0].id,
-          last_post_topic_title: top.title
+          last_post_at: top.last_post_at || null,
+          last_post_author: top.last_post_author || null,
+          last_post_author_id: top.last_post_author_id || null,
+          last_post_topic_id: snap.docs[0].id || null,
+          last_post_topic_title: top.title || null,
+          last_post_is_character: top.last_post_is_character || false,
+          last_post_author_character_id: top.last_post_author_character_id || null
         });
       } else {
-        await updateDoc(ref, { last_post_at: null, last_post_author: null, last_post_topic_id: null, last_post_topic_title: null });
+        await updateDoc(ref, { 
+          last_post_at: null, 
+          last_post_author: null, 
+          last_post_author_id: null,
+          last_post_topic_id: null, 
+          last_post_topic_title: null,
+          last_post_is_character: null,
+          last_post_author_character_id: null
+        });
       }
     };
 

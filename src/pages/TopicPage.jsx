@@ -836,7 +836,7 @@ const TopicPage = () => {
                       className="footer-link p-0"
                       onClick={() => {
                         const selectedText = window.getSelection().toString().trim();
-                        const author = getLiveAuthorName(post);
+                        const author = post.character_name || post.author_nickname || (post.author_email ? post.author_email.split('@')[0] : 'User');
                         const content = selectedText || post.content;
                         const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
 

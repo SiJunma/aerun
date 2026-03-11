@@ -15,13 +15,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   const location = useLocation();
 
   if (loading || !settings) {
-    return (
-      <div className="d-flex justify-content-center align-items-center vh-100">
-        <div className="spinner-border text-primary" role="status">
-          <span className="visually-hidden">Loading...</span>
-        </div>
-      </div>
-    );
+    return null; // AuthProvider handles the global preloader
   }
 
   // Not logged in at all → /login
