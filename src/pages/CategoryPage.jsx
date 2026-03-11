@@ -1,25 +1,43 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table, Button, Breadcrumb, Badge, Pagination } from 'react-bootstrap';
+import { Container, Card, Table, Button, Breadcrumb, Form, Toast, ToastContainer } from 'react-bootstrap';
+import { Pin, Lock, Trash2, Move, Settings, CheckSquare, XSquare } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToTopics, subscribeToCategories, subscribeToUser } from '../api/forum';
+import { 
+  subscribeToTopics, 
+  subscribeToCategories, 
+  batchUpdateTopics, 
+  deleteTopics,
+  moveTopics
+} from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumPagination from '../components/common/ForumPagination';
+import MoveTopicsModal from '../components/modals/MoveTopicsModal';
+import ConfirmModal from '../components/common/ConfirmModal';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Management State
+  const [isManaging, setIsManaging] = useState(false);
+  const [selectedTopicIds, setSelectedTopicIds] = useState([]);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
+
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
+
+  const isStaff = profile?.role_id === 'admin' || profile?.role_id === 'moderator';
 
   useEffect(() => {
     const unsubCat = subscribeToCategories((cats) => {
@@ -66,8 +84,86 @@ const CategoryPage = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Management Handlers
+  const toggleSelect = (topicId) => {
+    setSelectedTopicIds(prev => 
+      prev.includes(topicId) ? prev.filter(id => id !== topicId) : [...prev, topicId]
+    );
+  };
+
+  const selectAll = () => {
+    if (selectedTopicIds.length === currentTopics.length) {
+      setSelectedTopicIds([]);
+    } else {
+      setSelectedTopicIds(currentTopics.map(t => t.id));
+    }
+  };
+
+  const handleBatchPin = async (pinned) => {
+    if (selectedTopicIds.length === 0) return;
+    try {
+      await batchUpdateTopics(selectedTopicIds, { is_pinned: pinned });
+      setToast({
+        show: true,
+        message: lang === 'ru' 
+          ? (pinned ? 'Темы закреплены' : 'Темы откреплены') 
+          : (pinned ? 'Topics pinned' : 'Topics unpinned'),
+        variant: 'success'
+      });
+    } catch (error) {
+      setToast({ show: true, message: error.message, variant: 'danger' });
+    }
+  };
+
+  const handleBatchLock = async (locked) => {
+    if (selectedTopicIds.length === 0) return;
+    try {
+      await batchUpdateTopics(selectedTopicIds, { is_locked: locked });
+      setToast({
+        show: true,
+        message: lang === 'ru' 
+          ? (locked ? 'Темы закрыты' : 'Темы открыты') 
+          : (locked ? 'Topics locked' : 'Topics unlocked'),
+        variant: 'success'
+      });
+    } catch (error) {
+      setToast({ show: true, message: error.message, variant: 'danger' });
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedTopicIds.length === 0) return;
+    try {
+      await deleteTopics(selectedTopicIds);
+      setToast({
+        show: true,
+        message: lang === 'ru' ? 'Темы удалены' : 'Topics deleted',
+        variant: 'success'
+      });
+      setSelectedTopicIds([]);
+    } catch (error) {
+      setToast({ show: true, message: error.message, variant: 'danger' });
+    }
+  };
+
+  const handleConfirmMove = async (targetCatId) => {
+    if (selectedTopicIds.length === 0) return;
+    try {
+      await moveTopics(selectedTopicIds, targetCatId);
+      setToast({
+        show: true,
+        message: lang === 'ru' ? 'Темы перенесены' : 'Topics moved',
+        variant: 'success'
+      });
+      setSelectedTopicIds([]);
+      setIsManaging(false);
+    } catch (error) {
+      setToast({ show: true, message: error.message, variant: 'danger' });
+    }
+  };
+
   return (
-    <Container className="py-4">
+    <Container className="py-4 position-relative">
       <Breadcrumb className="mb-4">
         <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/' }}>{t('nav.home')}</Breadcrumb.Item>
         <Breadcrumb.Item active>{categoryTitle}</Breadcrumb.Item>
@@ -80,9 +176,24 @@ const CategoryPage = () => {
             <p className="text-muted mb-0 small">{resolveText(category.description)}</p>
           )}
         </div>
-        <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
-          {t('forum.create_topic')}
-        </Button>
+        <div className="d-flex gap-2">
+          {isStaff && (
+            <Button 
+              variant={isManaging ? "secondary" : "outline-primary"}
+              onClick={() => {
+                setIsManaging(!isManaging);
+                setSelectedTopicIds([]);
+              }}
+              className="d-flex align-items-center gap-2"
+            >
+              <Settings size={18} />
+              {lang === 'ru' ? (isManaging ? 'Готово' : 'Управление') : (isManaging ? 'Done' : 'Manage')}
+            </Button>
+          )}
+          <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
+            {t('forum.create_topic')}
+          </Button>
+        </div>
       </div>
 
       <Card className="shadow-sm border-0">
@@ -111,6 +222,15 @@ const CategoryPage = () => {
             <Table hover responsive className="mb-0 align-middle">
               <thead>
                 <tr>
+                  {isManaging && (
+                    <th style={{ width: '40px' }}>
+                      <Form.Check 
+                        type="checkbox"
+                        checked={selectedTopicIds.length === currentTopics.length && currentTopics.length > 0}
+                        onChange={selectAll}
+                      />
+                    </th>
+                  )}
                   <th style={{ width: '50%' }}>{t('forum.topic')}</th>
                   <th className="text-center">{t('forum.replies')}</th>
                   <th className="text-center">{t('forum.views')}</th>
@@ -119,30 +239,51 @@ const CategoryPage = () => {
               </thead>
               <tbody>
                 {currentTopics.map(topic => (
-                  <tr key={topic.id}>
-                    <td>
-                      <Link
-                        to={`/topic/${topic.id}`}
-                        className="fw-bold d-block text-decoration-none h6 mb-1"
-                      >
-                        {topic.title}
-                      </Link>
-                      {topic.description && (
-                        <div className="text-muted small mb-1 text-truncate" style={{ maxWidth: 480 }}>
-                          {topic.description}
-                        </div>
-                      )}
-                      <small className="text-muted d-flex align-items-center gap-1">
-                        <ForumAuthorName
-                          userId={topic.author_id}
-                          characterId={topic.author_character_id}
-                          isCharacter={!!topic.is_character}
-                          fallbackName={topic.author_name}
-                          className="fw-semibold text-secondary"
+                  <tr key={topic.id} className={selectedTopicIds.includes(topic.id) ? 'table-active' : ''}>
+                    {isManaging && (
+                      <td>
+                        <Form.Check 
+                          type="checkbox"
+                          checked={selectedTopicIds.includes(topic.id)}
+                          onChange={() => toggleSelect(topic.id)}
                         />
-                        <span>·</span>
-                        {formatTime(topic.created_at)}
-                      </small>
+                      </td>
+                    )}
+                    <td>
+                      <div className="d-flex align-items-start gap-2">
+                        <div className="flex-grow-1">
+                          <div className="d-flex align-items-center gap-2 mb-1">
+                            {topic.is_pinned && (
+                              <Pin size={14} className="topic-indicator topic-pinned" fill="currentColor" />
+                            )}
+                            {topic.is_locked && (
+                              <Lock size={14} className="topic-indicator topic-locked" />
+                            )}
+                            <Link
+                              to={`/topic/${topic.id}`}
+                              className="fw-bold d-block text-decoration-none h6 mb-0"
+                            >
+                              {topic.title}
+                            </Link>
+                          </div>
+                          {topic.description && (
+                            <div className="text-muted small mb-1 text-truncate" style={{ maxWidth: 480 }}>
+                              {topic.description}
+                            </div>
+                          )}
+                          <small className="text-muted d-flex align-items-center gap-1">
+                            <ForumAuthorName
+                              userId={topic.author_id}
+                              characterId={topic.author_character_id}
+                              isCharacter={!!topic.is_character}
+                              fallbackName={topic.author_name}
+                              className="fw-semibold text-secondary"
+                            />
+                            <span>·</span>
+                            {formatTime(topic.created_at)}
+                          </small>
+                        </div>
+                      </div>
                     </td>
                     <td className="text-center">
                       {Math.max(0, (topic.posts_count || 1) - 1)}
@@ -203,11 +344,73 @@ const CategoryPage = () => {
         )}
       </Card>
 
+      {/* Management Toolbar */}
+      {isManaging && selectedTopicIds.length > 0 && (
+        <div className="management-toolbar user-select-none">
+          <div className="me-2 small fw-bold">
+            {lang === 'ru' ? `Выбрано: ${selectedTopicIds.length}` : `Selected: ${selectedTopicIds.length}`}
+          </div>
+          <div className="vr d-none d-md-block mx-2"></div>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(true)}>
+            <Pin size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрепить' : 'Pin'}</span>
+          </Button>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(false)}>
+            <XSquare size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открепить' : 'Unpin'}</span>
+          </Button>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(true)}>
+            <Lock size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрыть' : 'Lock'}</span>
+          </Button>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(false)}>
+            <CheckSquare size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открыть' : 'Unlock'}</span>
+          </Button>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowMoveModal(true)}>
+            <Move size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Перенести' : 'Move'}</span>
+          </Button>
+          <Button variant="danger" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowDeleteModal(true)}>
+            <Trash2 size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Удалить' : 'Delete'}</span>
+          </Button>
+        </div>
+      )}
+
+      <ConfirmModal 
+        show={showDeleteModal}
+        onHide={() => setShowDeleteModal(false)}
+        onConfirm={handleBatchDelete}
+        title={lang === 'ru' ? 'Удалить темы?' : 'Delete topics?'}
+        message={lang === 'ru' 
+          ? `Вы уверены, что хотите навсегда удалить выбранные темы (${selectedTopicIds.length})? Это действие нельзя отменить.` 
+          : `Are you sure you want to permanently delete the selected topics (${selectedTopicIds.length})? This action cannot be undone.`
+        }
+        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+      />
+
+      <MoveTopicsModal 
+        show={showMoveModal}
+        onHide={() => setShowMoveModal(false)}
+        onConfirm={handleConfirmMove}
+        topicCount={selectedTopicIds.length}
+      />
+
       <div className="mt-4">
         <Link to="/" className="btn btn-outline-secondary">
           &larr; {t('forum.back_to_categories')}
         </Link>
       </div>
+
+      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100 }}>
+        <Toast
+          bg={toast.variant}
+          show={toast.show}
+          onClose={() => setToast(t => ({ ...t, show: false }))}
+          delay={3500}
+          autohide
+        >
+          <Toast.Body className="d-flex align-items-center gap-2 text-white fw-semibold">
+            <span>{toast.variant === 'success' ? '✓' : '✕'}</span>
+            <span>{toast.message}</span>
+          </Toast.Body>
+        </Toast>
+      </ToastContainer>
     </Container>
   );
 };

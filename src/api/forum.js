@@ -59,6 +59,11 @@ export const subscribeToTopics = (categoryId, callback) => {
       const topics = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       // Sort by last activity desc, fall back to created_at
       topics.sort((a, b) => {
+        // First sort by pin status
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+
+        // Then by last activity desc
         const aTime = a.last_post_at?.toMillis?.() ?? a.created_at?.toMillis?.() ?? 0;
         const bTime = b.last_post_at?.toMillis?.() ?? b.created_at?.toMillis?.() ?? 0;
         return bTime - aTime;
@@ -432,4 +437,142 @@ export const checkNicknameExists = async (nickname, excludeUid = null) => {
   const matchingDocs = querySnapshot.docs.filter(doc => doc.id !== excludeUid);
 
   return matchingDocs.length > 0;
+};
+// Batch update topic fields (is_pinned, is_locked)
+export const batchUpdateTopics = async (topicIds, data) => {
+  const batch = db.batch ? db.batch() : null; // Firestore batch is better if available, but we can use transactions or simple updates
+  // Since we might need to update multiple docs, let's use a simple loop or a transaction if they are few.
+  // Actually, standard updateDoc is fine for multiple independent calls, or we can use writeBatch.
+  
+  const promises = topicIds.map(id => updateDoc(doc(db, 'topics', id), {
+    ...data,
+    updated_at: serverTimestamp()
+  }));
+  await Promise.all(promises);
+};
+
+// Delete multiple topics and their posts atomically
+export const deleteTopics = async (topicIds) => {
+  for (const topicId of topicIds) {
+    const topicRef = doc(db, 'topics', topicId);
+    const topicSnap = await getDoc(topicRef);
+    if (!topicSnap.exists()) continue;
+
+    const topicData = topicSnap.data();
+    const categoryId = topicData.category_id;
+    const postsCount = topicData.posts_count || 0;
+
+    await runTransaction(db, async (transaction) => {
+      // 1. Delete all posts in topic
+      const postsQ = query(collection(db, 'posts'), where('topic_id', '==', topicId));
+      const postsSnap = await getDocs(postsQ);
+      postsSnap.forEach(pDoc => transaction.delete(pDoc.ref));
+
+      // 2. Delete topic
+      transaction.delete(topicRef);
+
+      // 3. Update Category counters
+      if (categoryId) {
+        const catRef = doc(db, 'categories', categoryId);
+        transaction.update(catRef, {
+          topics_count: increment(-1),
+          posts_count: increment(-postsCount)
+        });
+      }
+      
+      // Note: We don't bother reverting reputation here as it's a "hard delete" of a topic,
+      // usually done by admins. If we wanted to be perfectly clean, we'd loop logs too.
+    });
+    
+    // Recalculate Category last_post if needed
+    if (categoryId) {
+      const catTopicsQ = query(
+        collection(db, 'topics'),
+        where('category_id', '==', categoryId),
+        orderBy('last_post_at', 'desc'),
+        limit(1)
+      );
+      const catTopicsSnap = await getDocs(catTopicsQ);
+      const catRef = doc(db, 'categories', categoryId);
+      
+      if (!catTopicsSnap.empty) {
+        const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
+        await updateDoc(catRef, {
+          last_post_at: latestTopic.last_post_at,
+          last_post_author: latestTopic.last_post_author,
+          last_post_topic_id: latestTopic.id,
+          last_post_topic_title: latestTopic.title
+        });
+      } else {
+        await updateDoc(catRef, {
+          last_post_at: null,
+          last_post_author: null,
+          last_post_topic_id: null,
+          last_post_topic_title: null
+        });
+      }
+    }
+  }
+};
+
+// Move topics to another category
+export const moveTopics = async (topicIds, targetCategoryId) => {
+  const targetCatRef = doc(db, 'categories', targetCategoryId);
+  const targetCatSnap = await getDoc(targetCatRef);
+  if (!targetCatSnap.exists()) throw new Error('Target category not found');
+
+  for (const topicId of topicIds) {
+    const topicRef = doc(db, 'topics', topicId);
+    const topicSnap = await getDoc(topicRef);
+    if (!topicSnap.exists()) continue;
+
+    const topicData = topicSnap.data();
+    const sourceCategoryId = topicData.category_id;
+    const postsCount = topicData.posts_count || 0;
+
+    if (sourceCategoryId === targetCategoryId) continue;
+
+    await runTransaction(db, async (transaction) => {
+      // 1. Update Topic's category_id
+      transaction.update(topicRef, { 
+        category_id: targetCategoryId,
+        updated_at: serverTimestamp()
+      });
+
+      // 2. Update Source Category counters
+      if (sourceCategoryId) {
+        transaction.update(doc(db, 'categories', sourceCategoryId), {
+          topics_count: increment(-1),
+          posts_count: increment(-postsCount)
+        });
+      }
+
+      // 3. Update Target Category counters
+      transaction.update(targetCatRef, {
+        topics_count: increment(1),
+        posts_count: increment(postsCount)
+      });
+    });
+
+    // Recalculate last_post for both categories (simplified: just trigger update logic)
+    const updateCatLastPost = async (catId) => {
+      const q = query(collection(db, 'topics'), where('category_id', '==', catId), orderBy('last_post_at', 'desc'), limit(1));
+      const snap = await getDocs(q);
+      const ref = doc(db, 'categories', catId);
+      if (!snap.empty) {
+        const top = snap.docs[0].data();
+        await updateDoc(ref, {
+          last_post_at: top.last_post_at,
+          last_post_author: top.last_post_author,
+          last_post_topic_id: snap.docs[0].id,
+          last_post_topic_title: top.title
+        });
+      } else {
+        await updateDoc(ref, { last_post_at: null, last_post_author: null, last_post_topic_id: null, last_post_topic_title: null });
+      }
+    };
+
+    if (sourceCategoryId) await updateCatLastPost(sourceCategoryId);
+    await updateCatLastPost(targetCategoryId);
+  }
 };

@@ -11,7 +11,7 @@ import RichEditor from '../components/common/RichEditor';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
-import { Award } from 'lucide-react';
+import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff } from 'lucide-react';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumAuthorName from '../components/common/ForumAuthorName';
@@ -70,6 +70,7 @@ const TopicPage = () => {
 
   // Delete confirmation state
   const [deletingPost, setDeletingPost] = useState(null);
+  const [showDeleteTopicModal, setShowDeleteTopicModal] = useState(false);
 
   // Reputation state
   const [myVotes, setMyVotes] = useState({}); // { postId: value }
@@ -481,9 +482,72 @@ const TopicPage = () => {
 
       {/* Topic header */}
       <div className="mb-3">
-        <h1 className="h2 mb-1">{topic.title}</h1>
+        <div className="d-flex align-items-center gap-2 mb-1">
+          {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
+          {topic.is_locked && <Lock size={20} className="topic-indicator topic-locked" />}
+          <h1 className="h2 mb-0">{topic.title}</h1>
+        </div>
         {topic.description && (
           <p className="text-muted mb-2">{topic.description}</p>
+        )}
+        
+        {/* Admin/Mod Controls */}
+        {(profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+          <div className="d-flex gap-2 mb-3 mt-2">
+            <Button 
+              variant="outline-secondary" 
+              size="sm" 
+              className="d-flex align-items-center gap-1"
+              onClick={async () => {
+                try {
+                  await updateTopic(id, { is_pinned: !topic.is_pinned });
+                  setToast({
+                    show: true,
+                    message: lang === 'ru' 
+                      ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
+                      : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned'),
+                    variant: 'success'
+                  });
+                } catch (error) {
+                  setToast({ show: true, message: error.message, variant: 'danger' });
+                }
+              }}
+            >
+              <Pin size={14} />
+              {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
+            </Button>
+            <Button 
+              variant="outline-secondary" 
+              size="sm" 
+              className="d-flex align-items-center gap-1"
+              onClick={async () => {
+                try {
+                  await updateTopic(id, { is_locked: !topic.is_locked });
+                  setToast({
+                    show: true,
+                    message: lang === 'ru' 
+                      ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
+                      : (topic.is_locked ? 'Topic unlocked' : 'Topic locked'),
+                    variant: 'success'
+                  });
+                } catch (error) {
+                  setToast({ show: true, message: error.message, variant: 'danger' });
+                }
+              }}
+            >
+              <Lock size={14} />
+              {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
+            </Button>
+            <Button 
+              variant="outline-danger" 
+              size="sm" 
+              className="d-flex align-items-center gap-1"
+              onClick={() => setShowDeleteTopicModal(true)}
+            >
+              <Trash2 size={14} />
+              {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
+            </Button>
+          </div>
         )}
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
@@ -804,9 +868,31 @@ const TopicPage = () => {
         />
       </div>
 
-      {/* Reply form — hidden for spectators */}
+      {/* Reply form — hidden for spectators and closed topics */}
       {
-        profile?.role_id !== 'spectator' ? (
+        profile?.role_id === 'spectator' ? (
+          <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
+            <span className="opacity-75">
+              {lang === 'ru'
+                ? '👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.'
+                : '👁 Spectator mode — you can read but cannot post replies.'}
+            </span>
+          </div>
+        ) : topic.is_locked && profile?.role_id !== 'admin' && profile?.role_id !== 'moderator' ? (
+          <div className="mt-5 p-5 text-center text-muted border rounded bg-light bg-opacity-10" ref={replyRef}>
+            <div className="mb-3">
+              <MessageSquareOff size={48} className="opacity-25" />
+            </div>
+            <h5 className="mb-2">
+              {lang === 'ru' ? 'Тема закрыта' : 'Topic Locked'}
+            </h5>
+            <p className="small mb-0 opacity-75">
+              {lang === 'ru' 
+                ? 'Эта тема была закрыта модератором. Публикация новых сообщений невозможна.' 
+                : 'This topic has been locked by a moderator. New replies are not allowed.'}
+            </p>
+          </div>
+        ) : (
           <div className="mt-5" ref={replyRef}>
             <Card className="shadow-sm border-0">
               <Card.Header className="bg-dark text-white py-3">
@@ -860,14 +946,6 @@ const TopicPage = () => {
               </Card.Body>
             </Card>
           </div>
-        ) : (
-          <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
-            <span className="opacity-75">
-              {lang === 'ru'
-                ? '👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.'
-                : '👁 Spectator mode — you can read but cannot post replies.'}
-            </span>
-          </div>
         )
       }
 
@@ -901,6 +979,23 @@ const TopicPage = () => {
           ? 'Это действие необратимо. Пост будет удалён навсегда.'
           : 'This action cannot be undone. The post will be permanently deleted.'}
         confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+        cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+      />
+
+      <ConfirmModal
+        show={showDeleteTopicModal}
+        onHide={() => setShowDeleteTopicModal(false)}
+        onConfirm={async () => {
+          const catId = topic.category_id;
+          const { deleteTopics } = await import('../api/forum');
+          await deleteTopics([id]);
+          navigate(catId ? `/category/${catId}` : '/');
+        }}
+        title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}
+        message={lang === 'ru'
+          ? 'Это действие удалит саму тему и все сообщения в ней навсегда. Вы уверены?'
+          : 'This action will permanently delete the topic and all its posts. Are you sure?'}
+        confirmText={lang === 'ru' ? 'Удалить полностью' : 'Delete permanently'}
         cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
       />
 
