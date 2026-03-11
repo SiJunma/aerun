@@ -3,16 +3,36 @@ import { Container, Table, Form, InputGroup, Image, Badge, Row, Col, Card } from
 import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
+import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/forum';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
 const MembersPage = () => {
   const { t, lang } = useI18n();
+  const { profile, updateSettings } = useAuth();
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('nickname');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'desc'
+  
+  // Use profile setting with a fallback to local state for instant UI update
+  const [isStacked, setIsStacked] = useState(profile?.settings?.member_view_style === 'stacked');
+
+  // Keep local state in sync if profile changes (e.g., from another tab)
+  useEffect(() => {
+    if (profile?.settings?.member_view_style) {
+      setIsStacked(profile.settings.member_view_style === 'stacked');
+    }
+  }, [profile?.settings?.member_view_style]);
+
+  const handleToggleStacked = async (checked) => {
+    const newStyle = checked ? 'stacked' : 'table';
+    setIsStacked(checked);
+    if (updateSettings) {
+      await updateSettings({ member_view_style: newStyle });
+    }
+  };
 
   useEffect(() => {
     const unsub = subscribeToAllUsers(setUsers);
@@ -110,32 +130,44 @@ const MembersPage = () => {
                 />
               </InputGroup>
             </Col>
-            <Col md={5} className="text-md-end">
-              <span className="text-muted small me-2">{lang === 'ru' ? 'Сортировка:' : 'Sort by:'}</span>
-              <Form.Select
-                size="sm"
-                className="d-inline-block w-auto shadow-sm"
-                value={`${sortField}-${sortOrder}`}
-                onChange={(e) => {
-                  const [field, order] = e.target.value.split('-');
-                  setSortField(field);
-                  setSortOrder(order);
-                }}
-              >
-                <option value="nickname-asc">{lang === 'ru' ? 'Имя (A-Z)' : 'Name (A-Z)'}</option>
-                <option value="nickname-desc">{lang === 'ru' ? 'Имя (Z-A)' : 'Name (Z-A)'}</option>
-                <option value="post_count-desc">{lang === 'ru' ? 'Больше постов' : 'Most Posts'}</option>
-                <option value="reputation-desc">{lang === 'ru' ? 'Выше репутация' : 'Highest Rep'}</option>
-                <option value="created_at-desc">{lang === 'ru' ? 'Новые участники' : 'Newest'}</option>
-                <option value="created_at-asc">{lang === 'ru' ? 'Старые участники' : 'Oldest'}</option>
-              </Form.Select>
+            <Col md={5} className="d-flex align-items-center justify-content-lg-end gap-3 flex-wrap">
+              <div className="d-lg-none d-flex align-items-center gap-2 border-end pe-3 me-1">
+                <Form.Check
+                  type="switch"
+                  id="stack-toggle"
+                  label={isStacked ? t('forum.table_view') : t('forum.stacked_view')}
+                  checked={isStacked}
+                  onChange={(e) => handleToggleStacked(e.target.checked)}
+                  className="small fw-bold text-muted mb-0"
+                />
+              </div>
+              <div className="d-flex align-items-center gap-2">
+                <span className="text-muted small me-1">{lang === 'ru' ? 'Сортировка:' : 'Sort by:'}</span>
+                <Form.Select
+                  size="sm"
+                  className="d-inline-block w-auto shadow-sm"
+                  value={`${sortField}-${sortOrder}`}
+                  onChange={(e) => {
+                    const [field, order] = e.target.value.split('-');
+                    setSortField(field);
+                    setSortOrder(order);
+                  }}
+                >
+                  <option value="nickname-asc">{lang === 'ru' ? 'Имя (A-Z)' : 'Name (A-Z)'}</option>
+                  <option value="nickname-desc">{lang === 'ru' ? 'Имя (Z-A)' : 'Name (Z-A)'}</option>
+                  <option value="post_count-desc">{lang === 'ru' ? 'Больше постов' : 'Most Posts'}</option>
+                  <option value="reputation-desc">{lang === 'ru' ? 'Выше репутация' : 'Highest Rep'}</option>
+                  <option value="created_at-desc">{lang === 'ru' ? 'Новые участники' : 'Newest'}</option>
+                  <option value="created_at-asc">{lang === 'ru' ? 'Старые участники' : 'Oldest'}</option>
+                </Form.Select>
+              </div>
             </Col>
           </Row>
         </Card.Body>
       </Card>
 
-      <div className="table-responsive rounded shadow-sm overflow-hidden members-table-container">
-        <Table className="align-middle mb-0 border-0">
+      <div className={`table-responsive rounded shadow-sm ${isStacked ? 'members-table-stacked-container' : 'members-table-container'}`}>
+        <Table className={`align-middle mb-0 border-0 ${isStacked ? 'members-table-stacked' : ''}`}>
           <thead className="small text-muted text-uppercase fw-bold members-table-head">
             <tr>
               <th className="py-3 ps-4" style={{ width: '30%', border: 'none' }}>{lang === 'ru' ? 'Участник' : 'Member'}</th>
@@ -170,7 +202,7 @@ const MembersPage = () => {
             {sortedAndFilteredUsers.length > 0 ? (
               sortedAndFilteredUsers.map(u => (
                 <tr key={u.id} className="align-middle members-table-row">
-                  <td className="ps-4 py-3 border-0">
+                  <td className="ps-4 py-3 border-0" data-label={lang === 'ru' ? 'Участник' : 'Member'}>
                     <div className="d-flex align-items-center gap-3">
                       <Image
                         src={u.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nickname || 'U')}&background=random`}
@@ -193,21 +225,21 @@ const MembersPage = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="border-0">{getRoleBadge(u.role_id)}</td>
-                  <td className="small text-muted border-0">
+                  <td className="border-0" data-label={lang === 'ru' ? 'Роль' : 'Role'}>{getRoleBadge(u.role_id)}</td>
+                  <td className="small text-muted border-0" data-label={lang === 'ru' ? 'Регистрация' : 'Joined'}>
                     <div className="d-flex align-items-center gap-1">
-                      <Calendar size={14} />
+                      <Calendar size={14} className="flex-shrink-0" />
                       {formatDate(u.created_at || u.registered_at || u.joined_at)}
                     </div>
                   </td>
-                  <td className="small text-muted border-0">
+                  <td className="small text-muted border-0" data-label={lang === 'ru' ? 'Активность' : 'Last Seen'}>
                     <div className="d-flex align-items-center gap-1">
-                      <Clock size={14} />
+                      <Clock size={14} className="flex-shrink-0" />
                       {formatLastSeen(u.last_seen || u.updated_at || u.created_at)}
                     </div>
                   </td>
-                  <td className="text-center fw-semibold text-primary border-0">{u.post_count || 0}</td>
-                  <td className="text-center pe-4 border-0">
+                  <td className="text-center fw-semibold text-primary border-0" data-label={lang === 'ru' ? 'Посты' : 'Posts'}>{u.post_count || 0}</td>
+                  <td className="text-center pe-4 border-0" data-label={lang === 'ru' ? 'Репутация' : 'Rep'}>
                     <Badge bg="light" text="dark" className="border">
                       {u.reputation || 0}
                     </Badge>

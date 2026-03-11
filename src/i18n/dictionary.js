@@ -65,6 +65,8 @@ export const translations = {
       create_post: "Post Reply",
       post_as: "Post as...",
       select_character: "Select a character",
+      stacked_view: "Stacked View",
+      table_view: "Table View",
     },
     profile: {
       info: "Account Info",
@@ -183,6 +185,8 @@ export const translations = {
       create_post: "Ответить",
       post_as: "Опубликовать как...",
       select_character: "Выберите персонажа",
+      stacked_view: "В виде карточек",
+      table_view: "В виде таблицы",
     },
     profile: {
       info: "Данные аккаунта",

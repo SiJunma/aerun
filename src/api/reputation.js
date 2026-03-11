@@ -98,17 +98,22 @@ export const getVotesInTopic = async (voterUid, topicId) => {
 /**
  * voteOnProfile
  * Allows a user to vote on another's profile with a comment.
+ * Uses a deterministic ID to enforce 1-vote limit per profile.
  */
 export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
+  const voteId = `${voterUid}_user_${targetUid}`;
+  const logRef = doc(db, 'reputation_logs', voteId);
   const voterRef = doc(db, 'users', voterUid);
   const userRef = doc(db, 'users', targetUid);
-  // Profile votes don't have a 1-vote limit per profile generally, 
-  // but we record them as unique entries with auto-IDs.
-  const logRef = doc(collection(db, 'reputation_logs'));
 
   await runTransaction(db, async (transaction) => {
+    const logDoc = await transaction.get(logRef);
+    if (logDoc.exists()) {
+      throw new Error('Already voted on this profile.');
+    }
+
     const voterDoc = await transaction.get(voterRef);
     const voterNickname = voterDoc.exists() ? voterDoc.data().nickname : 'User';
 
@@ -123,6 +128,7 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
       target_id: targetUid,
       value: value,
       comment: comment || '',
+      post_id: null,
       created_at: serverTimestamp()
     });
 
@@ -130,6 +136,19 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
       reputation: currentRep + value
     });
   });
+};
+
+/**
+ * getProfileVote
+ * Checks if a user has already voted for a specific profile.
+ */
+export const getProfileVote = async (voterUid, targetUid) => {
+  const voteId = `${voterUid}_user_${targetUid}`;
+  const logDoc = await getDoc(doc(db, 'reputation_logs', voteId));
+  if (logDoc.exists()) {
+    return { id: logDoc.id, ...logDoc.data() };
+  }
+  return null;
 };
 
 /**

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -47,6 +47,7 @@ const AvatarImage = ({ src, fallbackName, size = 90 }) => {
 
 const TopicPage = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { t, lang } = useI18n();
   const { profile, user, recordActivity } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -389,9 +390,21 @@ const TopicPage = () => {
 
   const handleDeletePost = async () => {
     if (!deletingPost) return;
+    const isOnlyPost = posts.length === 1;
+    const categoryId = topic?.category_id;
+    
     try {
       await deletePost(deletingPost);
       setDeletingPost(null);
+      
+      if (isOnlyPost) {
+        // Topic was deleted because it was the last post
+        if (categoryId) {
+          navigate(`/category/${categoryId}`);
+        } else {
+          navigate('/');
+        }
+      }
     } catch (err) {
       console.error(err);
       alert('Error deleting post');

@@ -115,7 +115,8 @@ export const AuthProvider = ({ children }) => {
               last_seen: serverTimestamp(),
               settings: {
                 theme: 'dark',
-                language: 'en'
+                language: 'en',
+                member_view_style: 'table'
               }
             };
             await setDoc(userDocRef, newUser);

@@ -275,8 +275,136 @@ a:hover {
   filter: brightness(1.1);
 }
 
+.members-table-container td,
+.members-table-stacked-container td {
+  white-space: nowrap !important;
+}
+
+.members-table-container td .d-flex,
+.members-table-stacked-container td .d-flex {
+  flex-wrap: nowrap !important;
+}
+
+.members-table-container td svg,
+.members-table-stacked-container td svg {
+  flex-shrink: 0 !important;
+}
+
 .btn-link:hover {
   color: var(--primary-color) !important;
+}
+
+/* Stackable Table for Mobile */
+@media (max-width: 991.98px) {
+  .members-table-stacked-container {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  table.members-table-stacked {
+    display: block !important;
+    width: 100% !important;
+    background-color: transparent !important;
+    background: transparent !important;
+    border: none !important;
+  }
+
+  .members-table-stacked thead {
+    display: none;
+  }
+
+  .members-table-stacked tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .members-table-stacked tr {
+    display: block;
+    width: 100%;
+    margin-bottom: 1.5rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color) !important;
+    border-radius: 1rem;
+    padding: 0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 10, 0.1);
+    overflow: hidden;
+  }
+
+  [data-theme='dark'] .members-table-stacked tr {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .members-table-stacked td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: right;
+    width: 100% !important;
+    padding: 0.75rem 1rem !important;
+    border-bottom: 1px solid rgba(var(--primary-rgb), 0.05) !important;
+  }
+
+  .members-table-stacked td:last-child {
+    border-bottom: none !important;
+  }
+
+  .members-table-stacked td::before {
+    content: attr(data-label);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    color: var(--secondary-color);
+    text-align: left;
+    margin-right: 1.5rem;
+    opacity: 0.8;
+    flex-shrink: 0;
+  }
+
+  .members-table-stacked td>div,
+  .members-table-stacked td>.d-flex {
+    display: flex !important;
+    align-items: center !important;
+    white-space: nowrap !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-end;
+    flex-grow: 1;
+    overflow: hidden;
+  }
+
+  /* Reset for first child to maintain its layout */
+  .members-table-stacked td:first-child>div,
+  .members-table-stacked td:first-child>.d-flex {
+    justify-content: flex-start !important;
+    white-space: normal !important;
+  }
+
+  .members-table-stacked td svg {
+    flex-shrink: 0;
+    margin-right: 0.5rem;
+  }
+
+  /* Special case for the name/avatar cell */
+  .members-table-stacked td:first-child {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+    background: rgba(var(--primary-rgb), 0.05);
+    border-radius: 0.5rem 0.5rem 0 0;
+    margin: -1px;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color) !important;
+  }
+
+  .members-table-stacked td:first-child::before {
+    margin-bottom: 0.5rem;
+  }
+
+  .members-table-stacked td:first-child .d-flex {
+    width: 100%;
+  }
 }
 
 .btn {

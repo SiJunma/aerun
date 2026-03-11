@@ -9,7 +9,7 @@ import { subscribeToUser, checkNicknameExists } from '../api/forum';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
-import { voteOnProfile, subscribeToReputationLogs } from '../api/reputation';
+import { voteOnProfile, subscribeToReputationLogs, getProfileVote } from '../api/reputation';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -45,6 +45,7 @@ const ProfilePage = () => {
   const [repComment, setRepComment] = useState('');
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
+  const [myVote, setMyVote] = useState(null);
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -72,12 +73,19 @@ const ProfilePage = () => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
     const unsubProfile = subscribeToUser(uid, setViewedProfile);
     const unsubRep = subscribeToReputationLogs(uid, setRepLogs);
+    
+    if (profile && profile.uid !== uid) {
+      getProfileVote(profile.uid, uid).then(setMyVote).catch(console.error);
+    } else {
+      setMyVote(null);
+    }
+
     return () => {
       unsubscribe();
       unsubProfile();
       unsubRep();
     };
-  }, [uid]);
+  }, [uid, profile?.uid]);
 
   // Sync form data with profile (only if viewing own profile)
   useEffect(() => {
@@ -186,6 +194,7 @@ const ProfilePage = () => {
     setShowRepModal(false); // Close first
     try {
       await voteOnProfile(profile.uid, uid, repValue, repComment);
+      setMyVote({ value: repValue, comment: repComment });
       setRepComment('');
       showToast(t('profile.rep_success'));
       recordActivity();
@@ -252,12 +261,20 @@ const ProfilePage = () => {
                 </div>
                 <div className="text-end">
                   <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
-                  <div className="d-flex align-items-center gap-2">
+                  <div className="d-flex align-items-center justify-content-end gap-2">
                     <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
                     {profile?.uid !== uid && profile?.role_id !== 'spectator' && (
-                      <div className="d-flex gap-1">
-                        <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
-                        <Button size="sm" variant="outline-success" className="py-0 px-2" onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
+                      <div className="d-flex gap-1 align-items-center">
+                        {!myVote ? (
+                          <>
+                            <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
+                            <Button size="sm" variant="outline-success" className="py-0 px-2" onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
+                          </>
+                        ) : (
+                          <Badge bg={myVote.value > 0 ? 'success' : 'danger'} className="ms-1" style={{ opacity: 0.8 }}>
+                            {myVote.value > 0 ? `+${myVote.value}` : myVote.value}
+                          </Badge>
+                        )}
                       </div>
                     )}
                   </div>
