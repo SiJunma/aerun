@@ -190,9 +190,11 @@ const CategoryPage = () => {
               {lang === 'ru' ? (isManaging ? 'Готово' : 'Управление') : (isManaging ? 'Done' : 'Manage')}
             </Button>
           )}
-          <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
-            {t('forum.create_topic')}
-          </Button>
+          {profile?.role_id !== 'spectator' && (
+            <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
+              {t('forum.create_topic')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -213,9 +215,11 @@ const CategoryPage = () => {
                 ? 'Будь первым — создай тему!'
                 : 'Be the first to start a discussion!'}
             </p>
-            <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
-              {t('forum.create_topic')}
-            </Button>
+            {profile?.role_id !== 'spectator' && (
+              <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
+                {t('forum.create_topic')}
+              </Button>
+            )}
           </div>
         ) : (
           <>

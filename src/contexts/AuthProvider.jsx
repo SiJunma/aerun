@@ -10,7 +10,12 @@ import {
   getDoc,
   setDoc,
   onSnapshot,
-  serverTimestamp
+  serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  limit
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
@@ -121,14 +126,55 @@ export const AuthProvider = ({ children }) => {
           const isAdmin = firebaseUser.email === import.meta.env.VITE_ADMIN_EMAIL;
 
           if (!userDoc.exists()) {
+            // Fetch fresh global settings specifically for the registration check
+            const globalSettingsSnap = await getDoc(doc(db, 'settings', 'global'));
+            const globalSettings = globalSettingsSnap.exists() ? globalSettingsSnap.data() : null;
+            
+            const registrationEnabled = globalSettings?.registrationEnabled !== false;
+            
+            // 1. Check if registration is allowed (admin is always allowed)
+            if (!registrationEnabled && !isAdmin) {
+              console.warn('[Registration] Blocked: registration is disabled.');
+              sessionStorage.setItem('auth_error', 'registration_disabled');
+              await signOut(auth);
+              finishLoading();
+              return;
+            }
+
+            // 2. Prevent Bypass: Check if user came from /register (admin is always allowed)
+            const isRegistering = sessionStorage.getItem('is_registering') === 'true';
+            if (!isRegistering && !isAdmin) {
+              console.warn('[Registration] Blocked: attempt to bypass registration page.');
+              sessionStorage.setItem('auth_error', 'need_registration');
+              await signOut(auth);
+              finishLoading();
+              return;
+            }
+
             const pendingNickname = sessionStorage.getItem('pending_nickname');
             const pendingMessage = sessionStorage.getItem('pending_message');
             const defaultNickname = firebaseUser.displayName || firebaseUser.email.split('@')[0];
+            const chosenNickname = pendingNickname || defaultNickname;
+
+            // 3. Final Nickname Uniqueness Check (Data Level)
+            const q = query(
+              collection(db, 'users'), 
+              where('nickname', '==', chosenNickname.trim()),
+              limit(1)
+            );
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              console.warn('[Registration] Blocked: nickname already taken:', chosenNickname);
+              sessionStorage.setItem('auth_error', 'nickname_taken_at_registration');
+              await signOut(auth);
+              finishLoading();
+              return;
+            }
 
             const newUser = {
               uid: firebaseUser.uid,
               email: firebaseUser.email,
-              nickname: pendingNickname || defaultNickname,
+              nickname: chosenNickname.trim(),
               avatar_url: firebaseUser.photoURL || '',
               status_line: 'Hello, I am new here!',
               role_id: isAdmin ? 'admin' : 'player',
@@ -143,8 +189,11 @@ export const AuthProvider = ({ children }) => {
               }
             };
             await setDoc(userDocRef, newUser);
+            
+            // Cleanup session
             sessionStorage.removeItem('pending_nickname');
             sessionStorage.removeItem('pending_message');
+            sessionStorage.removeItem('is_registering');
 
             // Fire admin-broadcast notification for new (non-admin) registrations
             if (!isAdmin) {

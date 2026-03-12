@@ -5,10 +5,26 @@ import { Navigate, useLocation, Link } from 'react-router-dom';
 import { Container, Button, Card } from 'react-bootstrap';
 
 const LoginPage = () => {
-  const { user, loginWithGoogle } = useAuth();
+  const { user, loginWithGoogle, settings } = useAuth();
   const { t } = useI18n();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
+  const [authError, setAuthError] = React.useState(null);
+
+  React.useEffect(() => {
+    const error = sessionStorage.getItem('auth_error');
+    if (error === 'registration_disabled') {
+      setAuthError(t('auth.error_registration_disabled'));
+    } else if (error === 'need_registration') {
+      setAuthError(t('auth.error_registration_needed'));
+    } else if (error === 'nickname_taken_at_registration') {
+      setAuthError(t('auth.error_nickname_taken_at_registration'));
+    }
+
+    if (error) {
+      sessionStorage.removeItem('auth_error');
+    }
+  }, [t]);
 
   if (user) {
     return <Navigate to={from} replace />;
@@ -16,6 +32,7 @@ const LoginPage = () => {
 
   const handleLogin = async () => {
     try {
+      setAuthError(null);
       sessionStorage.removeItem('pending_nickname');
       await loginWithGoogle();
     } catch (error) {
@@ -29,6 +46,12 @@ const LoginPage = () => {
         <Card.Body className="text-center">
           <h1 className="mb-4">{t('auth.login_title')}</h1>
           <p className="text-muted mb-4">{t('auth.login_subtitle')}</p>
+
+          {authError && (
+            <div className="alert alert-warning py-2 small mb-4 fw-bold">
+              {authError}
+            </div>
+          )}
 
           <Button
             variant="outline-primary"
@@ -44,10 +67,12 @@ const LoginPage = () => {
             {t('auth.sign_in_google')}
           </Button>
 
-          <div className="mt-4 text-center small">
-            <span className="text-muted">{t('auth.dont_have_account')}</span>
-            <Link to="/register" className="text-decoration-none fw-bold">{t('auth.register_link')}</Link>
-          </div>
+          {settings?.registrationEnabled !== false && (
+            <div className="mt-4 text-center small">
+              <span className="text-muted">{t('auth.dont_have_account')}</span>
+              <Link to="/register" className="text-decoration-none fw-bold">{t('auth.register_link')}</Link>
+            </div>
+          )}
         </Card.Body>
       </Card>
     </Container>

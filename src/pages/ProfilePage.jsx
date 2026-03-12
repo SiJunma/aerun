@@ -22,9 +22,13 @@ const ProfilePage = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingChar, setEditingChar] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'characters';
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
+
+  const isLimitedProfile = viewedProfile?.status === 'pending' || viewedProfile?.role_id === 'spectator';
+  const hasTabs = !isLimitedProfile || profile?.uid === uid;
+  const activeTab = searchParams.get('tab') || (!isLimitedProfile ? 'characters' : (profile?.uid === uid ? 'account' : ''));
+
   const [savingAccount, setSavingAccount] = useState(false);
 
   // Form State for User Account
@@ -229,8 +233,8 @@ const ProfilePage = () => {
         </Col>
       </Row>
 
-      <Row>
-        <Col lg={4} className="mb-4">
+      <Row className={!hasTabs ? "justify-content-center" : ""}>
+        <Col lg={hasTabs ? 4 : 5} className="mb-4">
           <Card className="shadow-sm border-0 bg-card">
             <Card.Header className="py-3">
               <h5 className="mb-0">{t('profile.info')}</h5>
@@ -254,32 +258,34 @@ const ProfilePage = () => {
                 </p>
               </div>
 
-              <div className="mb-3 text-start border-top pt-3 d-flex justify-content-between align-items-center">
-                <div>
-                  <span className="text-muted d-block small mb-1">{t('profile.posts_count')}</span>
-                  <div className="fw-bold fs-5">{viewedProfile?.post_count || 0}</div>
-                </div>
-                <div className="text-end">
-                  <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
-                  <div className="d-flex align-items-center justify-content-end gap-2">
-                    <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
-                    {profile?.uid !== uid && profile?.role_id !== 'spectator' && (
-                      <div className="d-flex gap-1 align-items-center">
-                        {!myVote ? (
-                          <>
-                            <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
-                            <Button size="sm" variant="outline-success" className="py-0 px-2" onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
-                          </>
-                        ) : (
-                          <Badge bg={myVote.value > 0 ? 'success' : 'danger'} className="ms-1" style={{ opacity: 0.8 }}>
-                            {myVote.value > 0 ? `+${myVote.value}` : myVote.value}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
+              {!isLimitedProfile && (
+                <div className="mb-3 text-start border-top pt-3 d-flex justify-content-between align-items-center">
+                  <div>
+                    <span className="text-muted d-block small mb-1">{t('profile.posts_count')}</span>
+                    <div className="fw-bold fs-5">{viewedProfile?.post_count || 0}</div>
+                  </div>
+                  <div className="text-end">
+                    <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
+                    <div className="d-flex align-items-center justify-content-end gap-2">
+                      <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
+                      {profile?.uid !== uid && profile?.role_id !== 'spectator' && (
+                        <div className="d-flex gap-1 align-items-center">
+                          {!myVote ? (
+                            <>
+                              <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
+                              <Button size="sm" variant="outline-success" className="py-0 px-2" onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
+                            </>
+                          ) : (
+                            <Badge bg={myVote.value > 0 ? 'success' : 'danger'} className="ms-1" style={{ opacity: 0.8 }}>
+                              {myVote.value > 0 ? `+${myVote.value}` : myVote.value}
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {(profile?.uid === uid || profile?.role_id === 'admin') && (
                 <div className="mb-3 text-start border-top pt-3">
@@ -293,6 +299,8 @@ const ProfilePage = () => {
                 </span>
                 {viewedProfile?.status === 'banned' ? (
                   <div className="role-badge badge-banned px-3 py-1 mt-1">{lang === 'ru' ? 'ЗАБАНЕН' : 'BANNED'}</div>
+                ) : viewedProfile?.status === 'pending' ? (
+                  <div className="role-badge bg-info px-3 py-1 mt-1 text-white border-0">{lang === 'ru' ? 'ОЖИДАЕТ' : 'PENDING'}</div>
                 ) : (
                   <div className="role-badge">{viewedProfile?.role_id?.toUpperCase()}</div>
                 )}
@@ -301,14 +309,16 @@ const ProfilePage = () => {
           </Card>
         </Col>
 
-        <Col lg={8}>
-          <Tabs
-            activeKey={activeTab}
-            onSelect={(k) => setActiveTab(k)}
-            id="profile-tabs"
-            className="mb-4 premium-tabs"
-          >
-            <Tab eventKey="characters" title={t('profile.tab_characters')}>
+        {hasTabs && (
+          <Col lg={8}>
+            <Tabs
+              activeKey={activeTab}
+              onSelect={(k) => setActiveTab(k)}
+              id="profile-tabs"
+              className="mb-4 premium-tabs"
+            >
+              {!isLimitedProfile && (
+                <Tab eventKey="characters" title={t('profile.tab_characters')}>
               <Card className="shadow-sm border-0 bg-card">
                 <Card.Header className="py-3 d-flex justify-content-between align-items-center">
                   <h5 className="mb-0">{profile?.uid === uid ? t('profile.characters') : t('profile.characters_other')}</h5>
@@ -379,9 +389,11 @@ const ProfilePage = () => {
                   )}
                 </Card.Body>
               </Card>
-            </Tab>
+                </Tab>
+              )}
 
-            <Tab eventKey="reputation" title={t('profile.tab_reputation')}>
+              {!isLimitedProfile && (
+                <Tab eventKey="reputation" title={t('profile.tab_reputation')}>
               <Card className="shadow-sm border-0 bg-card">
                 <Card.Header className="py-3">
                   <h5 className="mb-0">{t('profile.tab_reputation')}</h5>
@@ -490,9 +502,10 @@ const ProfilePage = () => {
                   )}
                 </Card.Body>
               </Card>
-            </Tab>
+                </Tab>
+              )}
 
-            {profile?.uid === uid && (
+              {profile?.uid === uid && (
               <Tab eventKey="account" title={t('profile.tab_profile')}>
                 <Card className="shadow-sm border-0 bg-card">
                   <Card.Header className="py-3">
@@ -642,9 +655,10 @@ const ProfilePage = () => {
                   </Card.Body>
                 </Card>
               </Tab>
-            )}
-          </Tabs>
-        </Col>
+              )}
+            </Tabs>
+          </Col>
+        )}
       </Row>
 
       <ForumModal

@@ -489,7 +489,11 @@ export const checkNicknameExists = async (nickname, excludeUid = null) => {
 
   // We need to do a case-insensitive check, but Firestore doesn't support that directly easily
   // For exact match:
-  const q = query(collection(db, 'users'), where('nickname', '==', nickname));
+  const q = query(
+    collection(db, 'users'), 
+    where('nickname', '==', nickname),
+    limit(1)
+  );
   const querySnapshot = await getDocs(q);
 
   // If excluding a uid (e.g. self)

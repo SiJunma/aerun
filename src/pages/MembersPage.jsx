@@ -76,8 +76,8 @@ const MembersPage = () => {
       let aVal, bVal;
 
       if (sortField === 'role_id') {
-        aVal = ROLE_PRIORITY[a.role_id] || 60;
-        bVal = ROLE_PRIORITY[b.role_id] || 60;
+        aVal = a.status === 'banned' ? 40 : (a.status === 'pending' ? 20 : (ROLE_PRIORITY[a.role_id] || 60));
+        bVal = b.status === 'banned' ? 40 : (b.status === 'pending' ? 20 : (ROLE_PRIORITY[b.role_id] || 60));
       } else if (sortField === 'created_at' || sortField === 'last_seen' || sortField === 'updated_at') {
         aVal = a[sortField]?.toMillis?.() || 0;
         bVal = b[sortField]?.toMillis?.() || 0;
@@ -117,11 +117,11 @@ const MembersPage = () => {
 
   const getRoleBadge = (u) => {
     if (u.status === 'banned') return <Badge className="badge-banned">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
+    if (u.status === 'pending') return <Badge bg="info">Pending</Badge>;
     const role = u.role_id;
     if (role === 'admin') return <Badge bg="danger">Admin</Badge>;
     if (role === 'moderator') return <Badge bg="warning" text="dark">Moderator</Badge>;
-    if (role === 'banned') return <Badge bg="dark">Banned</Badge>;
-    if (role === 'pending') return <Badge bg="info">Pending</Badge>;
+    if (role === 'spectator') return <Badge bg="light" text="dark" className="border opacity-75">{lang === 'ru' ? 'Наблюдатель' : 'Spectator'}</Badge>;
     return <Badge bg="secondary">Member</Badge>;
   };
 

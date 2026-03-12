@@ -353,10 +353,10 @@ const AdminPage = () => {
                   <>
                     {u.status === 'pending' && (
                       <>
-                        <Button variant="outline-success" size="sm" className="me-2 fw-bold" onClick={() => handleApproveUser(u.id)}>
+                        <Button variant="success" size="sm" className="me-2 fw-bold text-white" onClick={() => handleApproveUser(u.id)}>
                           <UserCheck size={14} className="me-1" /> Approve
                         </Button>
-                        <Button variant="outline-dark" size="sm" className="me-2 fw-bold" onClick={() => handleRejectUser(u.id)}>
+                        <Button variant="danger" size="sm" className="me-2 fw-bold text-white" onClick={() => handleRejectUser(u.id)}>
                           <UserX size={14} className="me-1" /> Reject
                         </Button>
                       </>

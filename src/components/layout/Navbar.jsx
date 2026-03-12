@@ -69,8 +69,8 @@ const Navigation = () => {
               </Badge>
             )}
 
-            {/* Notifications bell — all users */}
-            {user && (
+            {/* Notifications bell — not for spectators */}
+            {user && profile?.role_id !== 'spectator' && (
               <Nav.Link
                 as={Link}
                 to="/notifications"
@@ -125,7 +125,9 @@ const Navigation = () => {
             ) : (
               <>
                 <Nav.Link as={Link} to="/login" className="me-2 fw-semibold">Login</Nav.Link>
-                <Link to="/register" className="btn btn-primary btn-sm rounded-pill px-3">Register</Link>
+                {settings?.registrationEnabled !== false && (
+                  <Link to="/register" className="btn btn-primary btn-sm rounded-pill px-3">Register</Link>
+                )}
               </>
             )}
           </Nav>

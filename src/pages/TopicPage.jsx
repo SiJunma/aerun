@@ -572,7 +572,7 @@ const TopicPage = () => {
         {/* Admin/Mod Controls Dropdown relocated above pagination */}
         <div className="d-flex justify-content-between align-items-end flex-wrap gap-2">
           <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
-            {user && (
+            {user && profile?.role_id !== 'spectator' && (
               <Button
                 variant={isSubscribed ? "primary" : "outline-primary"}
                 size="sm"
@@ -901,9 +901,11 @@ const TopicPage = () => {
                     <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none">
                       {t('profile.view_profile')}
                     </Link>
-                    <Link to="#" className="footer-link text-decoration-none" onClick={(e) => e.preventDefault()}>
-                      {t('profile.pm')}
-                    </Link>
+                    {profile?.role_id !== 'spectator' && (
+                      <Link to="#" className="footer-link text-decoration-none" onClick={(e) => e.preventDefault()}>
+                        {t('profile.pm')}
+                      </Link>
+                    )}
                   </Col>
                   <Col md={9} lg={10} className="px-4 py-2 d-flex justify-content-end gap-3">
                     {canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
@@ -926,7 +928,7 @@ const TopicPage = () => {
                         </Button>
                       </>
                     )}
-                    {(!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+                    {profile?.role_id !== 'spectator' && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
                       <Button
                         variant="link"
                         size="sm"

@@ -36,11 +36,14 @@ service cloud.firestore {
 
     // --- Users ---
     match /users/{userId} {
-      allow read: if isOwner(userId) || isActive();
+      // Allow read for owner, active members, any signed-in user (for registration check),
+      // or anyone performing a limited query (checking if a nickname exists).
+      allow read: if isOwner(userId) || isActive() || isSignedIn() || (request.query.limit == 1);
       allow create: if isOwner(userId);
       // User can edit own profile; admin can edit anyone; any active user can bump post_count/reputation
       allow update: if isOwner(userId) || isAdmin()
         || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['post_count', 'reputation', 'last_seen', 'last_selected_character_id']));
+      allow delete: if isAdmin(); // Added to allow rejecting pending users
     }
 
     // --- Characters ---

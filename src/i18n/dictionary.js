@@ -38,7 +38,12 @@ export const translations = {
       admin_message: "Message to the moderator (optional)",
       admin_message_to: "Message to {name} (optional)",
       admin_message_placeholder: "Who are you, where did you hear about the forum, and what do you plan to do here?",
-      admin_message_help: "This message will only be seen by the moderator."
+      admin_message_help: "This message will only be seen by the moderator.",
+      registration_disabled_title: "Registration Closed",
+      registration_disabled_message: "New user registration is currently disabled by the administrator.",
+      error_registration_disabled: "New user registration is currently disabled.",
+      error_registration_needed: "Please register first to create an account.",
+      error_nickname_taken_at_registration: "This nickname was taken while you were signing up. Please try another.",
     },
     gatekeeper: {
       pending_title: "Access Restricted",
@@ -190,7 +195,12 @@ export const translations = {
       admin_message: "Сообщение модератору (необязательно)",
       admin_message_to: "Сообщение для {name} (необязательно)",
       admin_message_placeholder: "Расскажи, кто ты, откуда узнал о форуме и чем планируешь заниматься.",
-      admin_message_help: "Это сообщение увидит только модератор."
+      admin_message_help: "Это сообщение увидит только модератор.",
+      registration_disabled_title: "Регистрация закрыта",
+      registration_disabled_message: "Регистрация новых пользователей временно отключена администратором.",
+      error_registration_disabled: "Регистрация новых пользователей в данный момент отключена.",
+      error_registration_needed: "Пожалуйста, сначала пройдите регистрацию, чтобы создать аккаунт.",
+      error_nickname_taken_at_registration: "Этот никнейм был занят кем-то другим, пока вы регистрировались. Попробуйте другой.",
     },
     gatekeeper: {
       pending_title: "Доступ ограничен",
