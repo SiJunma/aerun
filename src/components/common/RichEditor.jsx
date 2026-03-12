@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Button, Form } from 'react-bootstrap';
+import { Button, Form, Dropdown } from 'react-bootstrap';
 import ForumModal from './ForumModal';
-import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, Type, Columns } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 
-const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength }) => {
+const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus }) => {
   const { t, lang } = useI18n();
   const textareaRef = useRef(null);
 
@@ -50,6 +50,23 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       lastHistoryPushTime.current = Date.now();
     }
   }, [value]); // REMOVED history and historyIndex from dependencies to prevent infinite loops
+
+  // Handle autoFocus
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      const textarea = textareaRef.current;
+      // Focus and put cursor at the end
+      textarea.focus();
+      const length = textarea.value.length;
+      textarea.setSelectionRange(length, length);
+      
+      // Ensure it's scrolled into view if it was rendered far away
+      // using a small timeout to let the parent layout settle if needed
+      setTimeout(() => {
+        textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    }
+  }, [autoFocus]);
 
   const addToHistory = (newValue, forceNewSnapshot = true) => {
     let newHistory = history.slice(0, historyIndex + 1);
@@ -143,6 +160,15 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       }
     } else if (isLink === 'quote') {
       replacement = `[quote]${selected || '...'}[/quote]`;
+      if (start !== 0 && text[start - 1] !== '\n') {
+        replacement = '\n' + replacement;
+      }
+    } else if (isLink === 'color') {
+      replacement = `[color=${before}]${selected || (lang === 'ru' ? 'цвет' : 'color')}[/color]`;
+    } else if (isLink === 'size') {
+      replacement = `[size=${before}]${selected || (lang === 'ru' ? 'размер' : 'size')}[/size]`;
+    } else if (isLink === 'columns') {
+      replacement = `[columns]\n[col]${selected || '...'}[/col]\n[col]...[/col]\n[/columns]\n`;
       if (start !== 0 && text[start - 1] !== '\n') {
         replacement = '\n' + replacement;
       }
@@ -287,6 +313,65 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
 
         <div className="vr mx-1"></div>
 
+        {/* Color Picker */}
+        <Dropdown className="d-inline-block">
+          <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={lang === 'ru' ? 'Цвет текста' : 'Text Color'}>
+            <Palette size={16} />
+          </Dropdown.Toggle>
+          <Dropdown.Menu className="color-picker-menu p-2 shadow-sm border-0" style={{ minWidth: '160px', borderRadius: '12px' }}>
+            <div className="d-flex flex-wrap gap-1 justify-content-center">
+              {[
+                '#000000', '#444444', '#666666', '#999999', '#cccccc', '#ffffff',
+                '#ff0000', '#ff9900', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#9900ff', '#ff00ff',
+                '#f4cccc', '#fce5cd', '#fff2cc', '#d9ead3', '#d0e0e3', '#cfe2f3', '#d9d2e9', '#ead1dc',
+                '#ea9999', '#f9cb9c', '#ffe599', '#b6d7a8', '#a2c4c9', '#9fc5e8', '#b4a7d6', '#d5a6bd',
+                '#e06666', '#f6b26b', '#ffd966', '#93c47d', '#76a5af', '#6fa8dc', '#8e7cc3', '#c27ba0',
+              ].map(color => (
+                <button
+                  key={color}
+                  type="button"
+                  className="color-swatch border rounded-circle"
+                  style={{ 
+                    backgroundColor: color, 
+                    width: '20px', 
+                    height: '20px', 
+                    border: '1px solid rgba(0,0,0,0.1)',
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                  onClick={() => insertText(color, '', 'color')}
+                  title={color}
+                />
+              ))}
+            </div>
+          </Dropdown.Menu>
+        </Dropdown>
+
+        {/* Size Selector */}
+        <Dropdown className="d-inline-block">
+          <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={lang === 'ru' ? 'Размер текста' : 'Text Size'}>
+            <Type size={16} />
+          </Dropdown.Toggle>
+          <Dropdown.Menu className="size-picker-menu shadow-sm border-0" style={{ borderRadius: '12px' }}>
+            {[
+              { label: '50%', value: '50%' },
+              { label: '85%', value: '85%' },
+              { label: '100%', value: '100%' },
+              { label: '120%', value: '120%' },
+              { label: '150%', value: '150%' },
+              { label: '200%', value: '200%' },
+            ].map(size => (
+              <Dropdown.Item key={size.value} onClick={() => insertText(size.value, '', 'size')} className="small py-1 px-3">
+                <span style={{ fontSize: size.value }}>{size.label}</span>
+              </Dropdown.Item>
+            ))}
+          </Dropdown.Menu>
+        </Dropdown>
+
+        <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'columns')} title={lang === 'ru' ? 'Колонки' : 'Columns'}><Columns size={16} /></Button>
+
+        <div className="vr mx-1"></div>
+
         <Button
           variant="light"
           size="sm"
@@ -319,6 +404,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
         onChange={handleTextChange}
         onKeyDown={handleKeyDown}
         maxLength={maxLength}
+        autoFocus={autoFocus}
         className="form-control"
       />
 

@@ -749,6 +749,51 @@ a:hover {
   opacity: 0.5;
 }
 
+.editor-dropdown-toggle.no-caret::after {
+  display: none !important;
+}
+
+.color-swatch {
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.25);
+  z-index: 1;
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 5px rgba(0,0,0,0.2);
+}
+
+.size-picker-menu .dropdown-item:hover {
+  background-color: rgba(var(--primary-color-rgb, 13, 110, 253), 0.1) !important;
+  color: var(--primary-color) !important;
+}
+
+/* BBCode Columns */
+.bbcode-columns {
+  display: flex;
+  gap: 1.0rem;
+  margin: 1rem 0;
+  width: 100%;
+}
+
+.bbcode-col {
+  flex: 1;
+  min-width: 0; /* flexbox fix for word-wrap */
+}
+
+@media (max-width: 768px) {
+  .bbcode-columns:not(.stacked-forced) {
+    flex-direction: column;
+    gap: 1rem;
+  }
+}
+
+.bbcode-columns.stacked-forced .bbcode-col {
+  flex: 1 1 100% !important;
+  max-width: 100% !important;
+}
+
 /* Admin Styling */
 .nav-tabs .nav-link {
   color: var(--text-color);

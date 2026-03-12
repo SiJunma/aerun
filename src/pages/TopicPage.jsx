@@ -806,6 +806,7 @@ const TopicPage = () => {
                               onChange={(e) => setEditContent(e.target.value)}
                               rows={6}
                               maxLength={MAX_CHARS}
+                              autoFocus={true}
                             />
                           </div>
                           <div className="d-flex gap-2">
