@@ -50,13 +50,13 @@ const App = () => {
         <Route path="/topic/:id" element={<ProtectedRoute><Layout><TopicPage /></Layout></ProtectedRoute>} />
         <Route path="/members" element={<ProtectedRoute><Layout><MembersPage /></Layout></ProtectedRoute>} />
         <Route path="/profile/:uid" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
 
         {/* Posting-required Routes (spectators blocked) */}
         <Route path="/category/:categoryId/new-topic" element={<ProtectedRoute requirePosting><Layout><TopicFormPage /></Layout></ProtectedRoute>} />
 
         {/* Admin-only Routes */}
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Layout><AdminPage /></Layout></ProtectedRoute>} />
-        <Route path="/notifications" element={<ProtectedRoute requireAdmin><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
 
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />

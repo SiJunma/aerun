@@ -520,9 +520,10 @@ const TopicPage = () => {
     if (isBanned) return <Badge className="badge-banned mb-2 opacity-90">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
 
     const role = post.author_role_id;
-    if (role === 'admin') return <Badge bg="danger" className="mb-2 opacity-90">Admin</Badge>;
-    if (role === 'moderator') return <Badge bg="warning" text="dark" className="mb-2 opacity-90">Moderator</Badge>;
-    return <Badge bg="secondary" className="mb-2 opacity-75">Member</Badge>;
+    if (role === 'admin') return <Badge bg="danger" className="mb-2 opacity-90">{lang === 'ru' ? 'Админ' : 'Admin'}</Badge>;
+    if (role === 'moderator') return <Badge bg="warning" text="dark" className="mb-2 opacity-90">{lang === 'ru' ? 'Модератор' : 'Moderator'}</Badge>;
+    if (role === 'spectator') return <Badge bg="light" text="dark" className="mb-2 border opacity-75">{lang === 'ru' ? 'Наблюдатель' : 'Spectator'}</Badge>;
+    return <Badge bg="secondary" className="mb-2 opacity-75">{lang === 'ru' ? 'Участник' : 'Member'}</Badge>;
   };
 
   if (!topic) {

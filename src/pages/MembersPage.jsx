@@ -117,12 +117,12 @@ const MembersPage = () => {
 
   const getRoleBadge = (u) => {
     if (u.status === 'banned') return <Badge className="badge-banned">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
-    if (u.status === 'pending') return <Badge bg="info">Pending</Badge>;
+    if (u.status === 'pending') return <Badge bg="info">{lang === 'ru' ? 'Ожидает' : 'Pending'}</Badge>;
     const role = u.role_id;
-    if (role === 'admin') return <Badge bg="danger">Admin</Badge>;
-    if (role === 'moderator') return <Badge bg="warning" text="dark">Moderator</Badge>;
+    if (role === 'admin') return <Badge bg="danger">{lang === 'ru' ? 'Админ' : 'Admin'}</Badge>;
+    if (role === 'moderator') return <Badge bg="warning" text="dark">{lang === 'ru' ? 'Модератор' : 'Moderator'}</Badge>;
     if (role === 'spectator') return <Badge bg="light" text="dark" className="border opacity-75">{lang === 'ru' ? 'Наблюдатель' : 'Spectator'}</Badge>;
-    return <Badge bg="secondary">Member</Badge>;
+    return <Badge bg="secondary">{lang === 'ru' ? 'Участник' : 'Member'}</Badge>;
   };
 
   return (
