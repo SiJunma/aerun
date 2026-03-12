@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
+import { createNotification } from '../api/notifications';
 
 const AuthContext = createContext();
 
@@ -89,7 +90,7 @@ export const AuthProvider = ({ children }) => {
       if (docSnap.exists()) {
         setSettings(docSnap.data());
       }
-    });
+    }, (err) => console.error('[GlobalSettings Listener]', err));
 
     let profileUnsub;
     let lastSeenInterval;
@@ -121,6 +122,7 @@ export const AuthProvider = ({ children }) => {
 
           if (!userDoc.exists()) {
             const pendingNickname = sessionStorage.getItem('pending_nickname');
+            const pendingMessage = sessionStorage.getItem('pending_message');
             const defaultNickname = firebaseUser.displayName || firebaseUser.email.split('@')[0];
 
             const newUser = {
@@ -133,6 +135,7 @@ export const AuthProvider = ({ children }) => {
               status: isAdmin ? 'active' : 'pending',
               created_at: serverTimestamp(),
               last_seen: serverTimestamp(),
+              ...(pendingMessage ? { admin_message: pendingMessage } : {}),
               settings: {
                 theme: 'dark',
                 language: 'en',
@@ -141,6 +144,17 @@ export const AuthProvider = ({ children }) => {
             };
             await setDoc(userDocRef, newUser);
             sessionStorage.removeItem('pending_nickname');
+            sessionStorage.removeItem('pending_message');
+
+            // Fire admin-broadcast notification for new (non-admin) registrations
+            if (!isAdmin) {
+              createNotification('new_registration', {
+                uid: firebaseUser.uid,
+                nickname: pendingNickname || defaultNickname,
+                email: firebaseUser.email,
+                admin_message: pendingMessage || null
+              }).catch(err => console.warn('[notification]', err));
+            }
           } else {
             // Login counts as activity — update immediately
             lastActivityRef.current = Date.now();
@@ -160,6 +174,12 @@ export const AuthProvider = ({ children }) => {
                 await setDoc(userDocRef, updates, { merge: true });
               } else {
                 setProfile({ id: docSnap.id, ...data });
+                // Keep public settings/global in sync with admin's current nickname
+                // so RegisterPage can display it without requiring auth
+                if (isAdmin && data.nickname && data.nickname !== settings?.adminNickname) {
+                  setDoc(doc(db, 'settings', 'global'), { adminNickname: data.nickname }, { merge: true })
+                    .catch(err => console.warn('[adminNickname sync]', err));
+                }
               }
             } else {
               setProfile(null);

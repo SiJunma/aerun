@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
+import { useSearchParams } from 'react-router-dom';
 import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
 import { InputGroup } from 'react-bootstrap';
@@ -12,7 +13,9 @@ import ConfirmModal from '../components/common/ConfirmModal';
 const AdminPage = () => {
   const { t } = useI18n();
   const { user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState('settings');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'settings';
+  const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
   const [users, setUsers] = useState([]);

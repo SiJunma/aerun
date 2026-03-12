@@ -33,7 +33,12 @@ export const translations = {
       dont_have_account: "Don't have an account? ",
       already_have_account: "Already have an account? ",
       register_link: "Register here",
-      login_link: "Log in here"
+      login_link: "Log in here",
+      error_nickname_taken: "This nickname is already taken.",
+      admin_message: "Message to the moderator (optional)",
+      admin_message_to: "Message to {name} (optional)",
+      admin_message_placeholder: "Who are you, where did you hear about the forum, and what do you plan to do here?",
+      admin_message_help: "This message will only be seen by the moderator."
     },
     gatekeeper: {
       pending_title: "Access Restricted",
@@ -117,6 +122,25 @@ export const translations = {
       rep_privacy_show_comments: "Show comments in my public reputation history",
       rep_error_self: "You cannot vote for yourself.",
       rep_success: "Reputation updated!",
+    },
+    notifications: {
+      title: "Notifications",
+      tab_active: "Active",
+      tab_archived: "Archive",
+      no_notifications: "No notifications yet",
+      archive_empty: "Archive is empty",
+      we_will_notify: "We'll notify you when something important happens.",
+      archive_all: "Archive All",
+      mark_as_read: "Mark as Read",
+      archive: "Archive",
+      archived_toast: "Moved to archive",
+      archived_all_toast: "All notifications archived",
+      marked_read_toast: "Marked as read",
+      manage_users: "Manage Users →",
+      new_badge: "New",
+      types: {
+        new_registration: "New Registration"
+      }
     }
   },
   ru: {
@@ -153,7 +177,12 @@ export const translations = {
       dont_have_account: "Нет аккаунта? ",
       already_have_account: "Уже есть аккаунт? ",
       register_link: "Зарегистрироваться",
-      login_link: "Войти здесь"
+      login_link: "Войти здесь",
+      error_nickname_taken: "Этот никнейм уже занят.",
+      admin_message: "Сообщение модератору (необязательно)",
+      admin_message_to: "Сообщение для {name} (необязательно)",
+      admin_message_placeholder: "Расскажи, кто ты, откуда узнал о форуме и чем планируешь заниматься.",
+      admin_message_help: "Это сообщение увидит только модератор."
     },
     gatekeeper: {
       pending_title: "Доступ ограничен",
@@ -237,6 +266,25 @@ export const translations = {
       rep_privacy_show_comments: "Показывать комментарии в публичной истории репутации",
       rep_error_self: "Вы не можете голосовать за себя.",
       rep_success: "Репутация обновлена!",
+    },
+    notifications: {
+      title: "Уведомления",
+      tab_active: "Активные",
+      tab_archived: "Архив",
+      no_notifications: "Уведомлений пока нет",
+      archive_empty: "Архив пуст",
+      we_will_notify: "Мы сообщим вам, когда произойдет что-то важное.",
+      archive_all: "Архивировать все",
+      mark_as_read: "Прочитать",
+      archive: "В архив",
+      archived_toast: "Отправлено в архив",
+      archived_all_toast: "Все уведомления архивированы",
+      marked_read_toast: "Отмечено как прочитанное",
+      manage_users: "К управлению пользователями →",
+      new_badge: "Новое",
+      types: {
+        new_registration: "Новая регистрация"
+      }
     }
   }
 };

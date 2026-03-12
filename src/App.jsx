@@ -14,6 +14,7 @@ import ProfilePage from './pages/ProfilePage';
 import MembersPage from './pages/MembersPage';
 import AdminPage from './pages/AdminPage';
 import MaintenancePage from './pages/MaintenancePage';
+import NotificationsPage from './pages/NotificationsPage';
 import { useAuth } from './contexts/AuthProvider';
 
 /**
@@ -55,6 +56,7 @@ const App = () => {
 
         {/* Admin-only Routes */}
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Layout><AdminPage /></Layout></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute requireAdmin><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
 
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />

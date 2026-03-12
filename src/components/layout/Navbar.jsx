@@ -3,12 +3,25 @@ import { Navbar, Nav, Container, NavDropdown, Image, Badge } from 'react-bootstr
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
-import { User, Settings, LogOut } from 'lucide-react';
+import { User, LogOut, Bell } from 'lucide-react';
+import { subscribeToAdminNotifications } from '../../api/notifications';
 
 const Navigation = () => {
   const { user, profile, settings, logout } = useAuth();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
+  const [unreadCount, setUnreadCount] = React.useState(0);
+
+  const isAdmin = profile?.role_id === 'admin';
+
+  // Subscribe to admin notifications only when logged in as admin
+  React.useEffect(() => {
+    if (!isAdmin) return;
+    const unsub = subscribeToAdminNotifications((notifs) => {
+      setUnreadCount(notifs.filter(n => !n.read).length);
+    });
+    return unsub;
+  }, [isAdmin]);
 
   const handleLogout = async () => {
     await logout();
@@ -23,18 +36,40 @@ const Navigation = () => {
         <Navbar.Collapse id="basic-navbar-nav">
           <Nav className="me-auto">
             <Nav.Link as={Link} to="/members">{t('nav.members')}</Nav.Link>
-            {profile?.role_id === 'admin' && (
+            {isAdmin && (
               <Nav.Link as={Link} to="/admin" className="text-warning fw-semibold">
                 {t('nav.admin')}
               </Nav.Link>
             )}
           </Nav>
           <Nav className="align-items-center gap-3">
-            {settings?.maintenanceMode && profile?.role_id === 'admin' && (
+            {settings?.maintenanceMode && isAdmin && (
               <Badge bg="warning" text="dark" className="d-flex align-items-center gap-1 shadow-sm px-2 py-1" style={{ fontSize: '0.75rem', letterSpacing: '0.5px' }}>
                 <div className="bg-dark rounded-circle me-1" style={{ width: '6px', height: '6px', animation: 'pulse 1.5s infinite' }}></div>
                 {lang === 'ru' ? 'ТЕХРАБОТЫ' : 'MAINTENANCE'}
               </Badge>
+            )}
+
+            {/* Notifications bell — admin only */}
+            {isAdmin && (
+              <Nav.Link
+                as={Link}
+                to="/notifications"
+                className="position-relative p-1 d-flex align-items-center"
+                title={lang === 'ru' ? 'Уведомления' : 'Notifications'}
+              >
+                <Bell size={20} />
+                {unreadCount > 0 && (
+                  <Badge
+                    bg="danger"
+                    pill
+                    className="position-absolute"
+                    style={{ top: '-4px', right: '-6px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Badge>
+                )}
+              </Nav.Link>
             )}
 
             {user ? (

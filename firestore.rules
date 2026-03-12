@@ -119,5 +119,19 @@ service cloud.firestore {
       // Logs are immutable except for admins
       allow update, delete: if isAdmin();
     }
+
+    // --- Notifications ---
+    // Any signed-in user can create (new registrants don't have 'active' status yet).
+    // Personal notifications (recipient_uid = own uid) are readable by that user.
+    // Admin-broadcast notifications (recipient_uid = null) are readable/manageable by admin only.
+    match /notifications/{notifId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin()
+        || (isActive() && resource.data.recipient_uid == request.auth.uid);
+      allow update: if isAdmin()
+        || (isActive() && resource.data.recipient_uid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']));
+      allow delete: if isAdmin();
+    }
   }
 }
