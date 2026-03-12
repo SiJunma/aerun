@@ -389,6 +389,7 @@ const CategoryPage = () => {
         onHide={() => setShowMoveModal(false)}
         onConfirm={handleConfirmMove}
         topicCount={selectedTopicIds.length}
+        excludeCategoryId={id}
       />
 
       <div className="mt-4">

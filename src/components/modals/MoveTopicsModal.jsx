@@ -4,16 +4,21 @@ import ForumModal from '../common/ForumModal';
 import { subscribeToCategories } from '../../api/forum';
 import { useI18n } from '../../contexts/I18nProvider';
 
-const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount }) => {
+const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryId }) => {
   const { t, lang } = useI18n();
   const [categories, setCategories] = useState([]);
   const [targetId, setTargetId] = useState('');
 
   useEffect(() => {
     if (show) {
-      return subscribeToCategories(setCategories);
+      return subscribeToCategories((cats) => {
+        const filtered = excludeCategoryId 
+          ? cats.filter(cat => cat.id !== excludeCategoryId)
+          : cats;
+        setCategories(filtered);
+      });
     }
-  }, [show]);
+  }, [show, excludeCategoryId]);
 
   const resolveText = (field) =>
     typeof field === 'object' && field !== null

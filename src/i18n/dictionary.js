@@ -72,6 +72,9 @@ export const translations = {
       select_character: "Select a character",
       stacked_view: "Stacked View",
       table_view: "Table View",
+      manage_topic: "Manage Topic",
+      move_topic: "Move Topic",
+      move_to: "Move to...",
     },
     profile: {
       info: "Account Info",
@@ -221,6 +224,9 @@ export const translations = {
       select_character: "Выберите персонажа",
       stacked_view: "В виде карточек",
       table_view: "В виде таблицы",
+      manage_topic: "Управление темой",
+      move_topic: "Перенести тему",
+      move_to: "Перенести в...",
     },
     profile: {
       info: "Данные аккаунта",

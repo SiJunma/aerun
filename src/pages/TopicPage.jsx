@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer } from 'react-bootstrap';
+import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics } from '../api/forum';
+import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics } from '../api/forum';
 import { subscribeToCharacters } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
+import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import RichEditor from '../components/common/RichEditor';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
-import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff } from 'lucide-react';
+import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff, ArrowRightLeft } from 'lucide-react';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
@@ -91,6 +92,9 @@ const TopicPage = () => {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [togglingSub, setTogglingSub] = useState(false);
 
+  // Move Topic state
+  const [showMoveModal, setShowMoveModal] = useState(false);
+
   const replyRef = useRef(null);
   const scrolledRef = useRef(false); // prevent double-scroll
   const goLast = searchParams.get('goLast') === '1';
@@ -140,13 +144,13 @@ const TopicPage = () => {
   }, [profile?.last_selected_character_id]);
 
   useEffect(() => {
-    if (topic?.category_id) {
-      const unsubCat = subscribeToCategories((cats) => {
+    const unsubCat = subscribeToCategories((cats) => {
+      if (topic?.category_id) {
         const found = cats.find(c => c.id === topic.category_id);
         if (found) setCategory(found);
-      });
-      return () => unsubCat();
-    }
+      }
+    });
+    return () => unsubCat();
   }, [topic?.category_id]);
 
   // Draft Auto-save
@@ -383,6 +387,17 @@ const TopicPage = () => {
     }
   };
 
+  const handleMoveTopic = async (targetCategoryId) => {
+    try {
+      await moveTopics([id], targetCategoryId);
+      showToast(lang === 'ru' ? 'Тема перенесена!' : 'Topic moved!');
+      setShowMoveModal(false);
+      navigate(`/category/${targetCategoryId}`);
+    } catch (err) {
+      showToast(err.message, 'danger');
+    }
+  };
+
   const handleReply = async (e) => {
     e.preventDefault();
     if (!replyContent.trim() || submitting) return;
@@ -554,65 +569,8 @@ const TopicPage = () => {
           <p className="text-muted mb-2">{topic.description}</p>
         )}
         
-        {/* Admin/Mod Controls */}
-        {(profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
-          <div className="d-flex gap-2 mb-3 mt-2">
-            <Button 
-              variant="outline-secondary" 
-              size="sm" 
-              className="d-flex align-items-center gap-1"
-              onClick={async () => {
-                try {
-                  await updateTopic(id, { is_pinned: !topic.is_pinned });
-                  setToast({
-                    show: true,
-                    message: lang === 'ru' 
-                      ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
-                      : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned'),
-                    variant: 'success'
-                  });
-                } catch (error) {
-                  setToast({ show: true, message: error.message, variant: 'danger' });
-                }
-              }}
-            >
-              <Pin size={14} />
-              {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
-            </Button>
-            <Button 
-              variant="outline-secondary" 
-              size="sm" 
-              className="d-flex align-items-center gap-1"
-              onClick={async () => {
-                try {
-                  await updateTopic(id, { is_locked: !topic.is_locked });
-                  setToast({
-                    show: true,
-                    message: lang === 'ru' 
-                      ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
-                      : (topic.is_locked ? 'Topic unlocked' : 'Topic locked'),
-                    variant: 'success'
-                  });
-                } catch (error) {
-                  setToast({ show: true, message: error.message, variant: 'danger' });
-                }
-              }}
-            >
-              <Lock size={14} />
-              {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
-            </Button>
-            <Button 
-              variant="outline-danger" 
-              size="sm" 
-              className="d-flex align-items-center gap-1"
-              onClick={() => setShowDeleteTopicModal(true)}
-            >
-              <Trash2 size={14} />
-              {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
-            </Button>
-          </div>
-        )}
-        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        {/* Admin/Mod Controls Dropdown relocated above pagination */}
+        <div className="d-flex justify-content-between align-items-end flex-wrap gap-2">
           <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
             {user && (
               <Button
@@ -641,27 +599,90 @@ const TopicPage = () => {
               {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
               <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
             </span>
-            {/* <span>·</span>
-            <span>
-              {lang === 'ru' ? 'Просмотры' : 'Views'}:{' '}
-              <strong>{topic.views || 0}</strong>
-            </span> */}
             <span>·</span>
             <span>{formatTime(topic.created_at)}</span>
+
+            {/* Admin Management Dropdown moved here */}
+            {(profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+              <Dropdown className="ms-1">
+                <Dropdown.Toggle 
+                  variant="outline-secondary" 
+                  size="sm" 
+                  id="admin-topic-controls"
+                  className="d-flex align-items-center gap-1 border-0"
+                  style={{ background: 'transparent', padding: '0 4px' }}
+                >
+                  <Settings size={14} />
+                  <span className="small">{t('forum.manage_topic')}</span>
+                </Dropdown.Toggle>
+
+                <Dropdown.Menu className="shadow-sm border-0">
+                  <Dropdown.Item 
+                    onClick={async () => {
+                      try {
+                        await updateTopic(id, { is_pinned: !topic.is_pinned });
+                        showToast(lang === 'ru' 
+                          ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
+                          : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
+                        );
+                      } catch (error) {
+                        showToast(error.message, 'danger');
+                      }
+                    }}
+                    className="d-flex align-items-center gap-2"
+                  >
+                    <Pin size={14} />
+                    {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
+                  </Dropdown.Item>
+                  <Dropdown.Item 
+                    onClick={async () => {
+                      try {
+                        await updateTopic(id, { is_locked: !topic.is_locked });
+                        showToast(lang === 'ru' 
+                          ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
+                          : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
+                        );
+                      } catch (error) {
+                        showToast(error.message, 'danger');
+                      }
+                    }}
+                    className="d-flex align-items-center gap-2"
+                  >
+                    <Lock size={14} />
+                    {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
+                  </Dropdown.Item>
+                  <Dropdown.Item 
+                    onClick={() => setShowMoveModal(true)}
+                    className="d-flex align-items-center gap-2"
+                  >
+                    <ArrowRightLeft size={14} />
+                    {t('forum.move_topic')}
+                  </Dropdown.Item>
+                  <Dropdown.Divider />
+                  <Dropdown.Item 
+                    onClick={() => setShowDeleteTopicModal(true)}
+                    className="d-flex align-items-center gap-2 text-danger"
+                  >
+                    <Trash2 size={14} />
+                    {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
+                  </Dropdown.Item>
+                </Dropdown.Menu>
+              </Dropdown>
+            )}
           </div>
 
-          {totalPages > 1 && (
-            <div className="ms-auto ms-sm-0">
+          <div className="ms-auto d-flex flex-column align-items-end gap-2">
+
+            {totalPages > 1 && (
               <ForumPagination
                 currentPage={currentPage}
                 totalPages={totalPages}
                 onPageChange={handlePageChange}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
-      <div className="mb-3" /> {/* Reduced divider spacing */}
 
       {/* Posts */}
       <div className="posts-container">
@@ -1075,6 +1096,15 @@ const TopicPage = () => {
         cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
       />
 
+      {/* Move Topic Modal */}
+      <MoveTopicsModal
+        show={showMoveModal}
+        onHide={() => setShowMoveModal(false)}
+        onConfirm={handleMoveTopic}
+        topicCount={1}
+        excludeCategoryId={topic?.category_id}
+      />
+
       <ForumModal
         show={showRepModal}
         onHide={() => setShowRepModal(false)}
@@ -1169,7 +1199,7 @@ const TopicPage = () => {
           </Toast.Body>
         </Toast>
       </ToastContainer>
-    </Container >
+    </Container>
   );
 };
 
