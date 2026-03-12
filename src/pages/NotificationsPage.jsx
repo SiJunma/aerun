@@ -261,7 +261,11 @@ const NotificationsPage = () => {
                     </div>
                   )}
                   <div className="mt-3 d-flex align-items-center">
-                    <Link to="/admin?tab=users" className="text-decoration-none small fw-bold text-primary">
+                    <Link 
+                      to="/admin?tab=users" 
+                      className="text-decoration-none small fw-bold text-primary"
+                      onClick={() => !n.read && handleMarkRead(null, n.id)}
+                    >
                       {t('notifications.manage_users')}
                     </Link>
 
