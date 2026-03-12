@@ -16,6 +16,14 @@ import {
   limit,
   getDoc
 } from 'firebase/firestore';
+import { getTopicSubscribers } from './subscriptions';
+import { 
+  createNotification, 
+  getUnreadTopicNotification, 
+  updateNotificationPayload,
+  handleTopicDeletionNotifications,
+  handlePostDeletionNotifications
+} from './notifications';
 
 // ── Categories ──────────────────────────────────────────────────────────────
 
@@ -216,6 +224,44 @@ export const createPost = async (postData) => {
     transaction.update(userRef, { post_count: increment(1) });
   });
 
+  // ── Trigger Notifications (Background) ──
+  (async () => {
+    try {
+      const subscribers = await getTopicSubscribers(postData.topic_id);
+      const filteredSubscribers = subscribers.filter(uid => uid !== postData.author_id);
+      
+      if (filteredSubscribers.length === 0) return;
+
+      const topicSnap = await getDoc(doc(db, 'topics', postData.topic_id));
+      const topicTitle = topicSnap.exists() ? topicSnap.data().title : 'Unknown Topic';
+
+      for (const recipientUid of filteredSubscribers) {
+        // Check for existing unread notification for this topic
+        const existing = await getUnreadTopicNotification(recipientUid, postData.topic_id);
+        
+        if (existing) {
+          // Merge: increment post_count, update created_at to bring to top
+          await updateNotificationPayload(existing.id, {
+            ...existing.payload,
+            post_count: (existing.payload?.post_count || 1) + 1,
+            last_post_id: postRef.id
+          }, true); // true = update created_at
+        } else {
+          // Create new
+          await createNotification('topic_reply', {
+            topic_id: postData.topic_id,
+            topic_title: topicTitle,
+            first_post_id: postRef.id,
+            last_post_id: postRef.id,
+            post_count: 1
+          }, recipientUid);
+        }
+      }
+    } catch (err) {
+      console.error('[createPost notifications error]', err);
+    }
+  })();
+
   return postRef.id;
 };
 
@@ -403,6 +449,19 @@ export const deletePost = async (post) => {
       });
     }
   }
+
+  // ── Handle Notifications (Background) ──
+  (async () => {
+    try {
+      if (isLastPost) {
+        await handleTopicDeletionNotifications(post.topic_id);
+      } else {
+        await handlePostDeletionNotifications(post.topic_id, post.id);
+      }
+    } catch (err) {
+      console.error('[deletePost notification cleanup error]', err);
+    }
+  })();
 };
 // ── Users ─────────────────────────────────────────────────────────────────────
 
@@ -518,6 +577,15 @@ export const deleteTopics = async (topicIds) => {
         });
       }
     }
+
+    // ── Handle Notifications (Background) ──
+    (async () => {
+      try {
+        await handleTopicDeletionNotifications(topicId);
+      } catch (err) {
+        console.error('[deleteTopics notification cleanup error]', err);
+      }
+    })();
   }
 };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -11,8 +11,9 @@ import RichEditor from '../components/common/RichEditor';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
-import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff } from 'lucide-react';
+import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff } from 'lucide-react';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
+import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 
@@ -48,6 +49,7 @@ const AvatarImage = ({ src, fallbackName, size = 90 }) => {
 const TopicPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { hash } = useLocation();
   const { t, lang } = useI18n();
   const { profile, user, recordActivity } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -84,6 +86,10 @@ const TopicPage = () => {
   const [activeRepPostId, setActiveRepPostId] = useState(null);
   const [showVoteInfoModal, setShowVoteInfoModal] = useState(false);
   const [selectedVote, setSelectedVote] = useState(null);
+  
+  // Subscription state
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [togglingSub, setTogglingSub] = useState(false);
 
   const replyRef = useRef(null);
   const scrolledRef = useRef(false); // prevent double-scroll
@@ -115,6 +121,13 @@ const TopicPage = () => {
     // Fetch my votes in this topic
     getVotesInTopic(user.uid, id).then(setMyVotes).catch(console.error);
 
+    return () => unsub();
+  }, [user, id]);
+
+  // Handle Topic Subscription
+  useEffect(() => {
+    if (!user || !id) return;
+    const unsub = subscribeToTopicStatus(id, user.uid, setIsSubscribed);
     return () => unsub();
   }, [user, id]);
 
@@ -176,23 +189,28 @@ const TopicPage = () => {
   };
 
   // Scroll to first unread post (or last post if ?goLast=1, or specific post if #post-ID)
+  const lastTargetRef = useRef('');
   useEffect(() => {
-    if (posts.length === 0 || scrolledRef.current) return;
+    if (posts.length === 0) return;
 
     let targetId;
     let targetPage = currentPage;
-    const hash = window.location.hash;
+    const currentHash = hash;
 
-    if (hash && hash.startsWith('#post-')) {
-      const postId = hash.replace('#post-', '');
+    if (currentHash && currentHash.startsWith('#post-')) {
+      const postId = currentHash.replace('#post-', '');
       const postIndex = posts.findIndex(p => p.id === postId);
       if (postIndex !== -1) {
         targetPage = Math.ceil((postIndex + 1) / ITEMS_PER_PAGE);
         if (currentPage !== targetPage) {
-          setSearchParams({ page: targetPage });
+          // Navigating while preserving hash
+          navigate({
+            search: `?page=${targetPage}${goLast ? '&goLast=0' : ''}`,
+            hash: currentHash
+          });
           return;
         }
-        targetId = hash.substring(1); // remove #
+        targetId = currentHash.substring(1); // remove #
       }
     } else if (goLast) {
       targetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
@@ -200,7 +218,7 @@ const TopicPage = () => {
         setSearchParams({ page: targetPage, goLast: '1' });
         return;
       }
-      targetId = `post-${posts[posts.length - 1].id}`;
+      targetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
     } else {
       const lastVisit = parseInt(localStorage.getItem(LAST_VISIT_KEY) || '0', 10);
       const unreadIndex = posts.findIndex(p => {
@@ -218,15 +236,27 @@ const TopicPage = () => {
       }
     }
 
-    if (targetId) {
-      scrolledRef.current = true;
-      setTimeout(() => {
+    // Only scroll if it's a new mount or a new target
+    const fullTargetKey = `${id}_${targetPage}_${targetId}`;
+    if (targetId && lastTargetRef.current !== fullTargetKey) {
+      lastTargetRef.current = fullTargetKey;
+      let attempts = 0;
+      const tryScroll = () => {
         const el = document.getElementById(targetId);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 500);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          el.classList.add('highlight-new-post');
+          setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
+        } else if (attempts < 15) {
+          attempts++;
+          setTimeout(tryScroll, 200);
+        }
+      };
+      setTimeout(tryScroll, 300);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length, goLast, currentPage]); const formatTime = (timestamp) => {
+  }, [posts.length, goLast, currentPage, hash, id]);
+  const formatTime = (timestamp) => {
     if (!timestamp) return '...';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -337,6 +367,19 @@ const TopicPage = () => {
       setSubmittingRep(false);
       setRepTargetPost(null);
       setRepTargetPostNumber(null);
+    }
+  };
+
+  const handleToggleSubscription = async () => {
+    if (!user) return;
+    setTogglingSub(true);
+    try {
+      const active = await toggleSubscription(id, user.uid);
+      showToast(active ? t('notifications.followed_toast') : t('notifications.unfollowed_toast'));
+    } catch (err) {
+      showToast(err.message, 'danger');
+    } finally {
+      setTogglingSub(false);
     }
   };
 
@@ -571,6 +614,18 @@ const TopicPage = () => {
         )}
         <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
+            {user && (
+              <Button
+                variant={isSubscribed ? "primary" : "outline-primary"}
+                size="sm"
+                className="d-flex align-items-center gap-2 rounded-pill px-3 me-2"
+                onClick={handleToggleSubscription}
+                disabled={togglingSub}
+              >
+                {isSubscribed ? <BellOff size={14} /> : <Bell size={14} />}
+                {isSubscribed ? t('notifications.unfollow') : t('notifications.follow')}
+              </Button>
+            )}
             <span>
               {t('forum.author')}:{' '}
               <ForumAuthorName

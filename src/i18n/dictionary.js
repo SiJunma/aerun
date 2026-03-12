@@ -139,8 +139,13 @@ export const translations = {
       manage_users: "Manage Users →",
       new_badge: "New",
       types: {
-        new_registration: "New Registration"
-      }
+        new_registration: "New Registration",
+        topic_reply: "{count} new replies in {topic}"
+      },
+      follow: "Follow",
+      unfollow: "Unfollow",
+      followed_toast: "Topic followed",
+      unfollowed_toast: "Topic unfollowed"
     }
   },
   ru: {
@@ -283,8 +288,13 @@ export const translations = {
       manage_users: "К управлению пользователями →",
       new_badge: "Новое",
       types: {
-        new_registration: "Новая регистрация"
-      }
+        new_registration: "Новая регистрация",
+        topic_reply: "{count} новых ответов в теме {topic}"
+      },
+      follow: "Подписаться",
+      unfollow: "Отписаться",
+      followed_toast: "Вы подписались на тему",
+      unfollowed_toast: "Вы отписались от темы"
     }
   }
 };

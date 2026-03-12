@@ -9,6 +9,7 @@ import {
   where,
   updateDoc,
   getDocs,
+  getDoc,
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
@@ -115,9 +116,6 @@ export const markAllAdminNotificationsRead = async () => {
   await batch.commit();
 };
 
-/**
- * Archive all admin notifications (the ones currently in the active tab)
- */
 export const archiveAllAdminNotifications = async () => {
   const q = query(
     collection(db, 'notifications'),
@@ -128,5 +126,96 @@ export const archiveAllAdminNotifications = async () => {
   if (snap.empty) return;
   const batch = writeBatch(db);
   snap.docs.forEach(d => batch.update(d.ref, { archived: true, read: true }));
+  await batch.commit();
+};
+
+export const archiveAllUserNotifications = async (uid) => {
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipient_uid', '==', uid),
+    where('archived', '==', false)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+  const batch = writeBatch(db);
+  snap.docs.forEach(d => batch.update(d.ref, { archived: true, read: true }));
+  await batch.commit();
+};
+
+// ── Merging Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Finds if there is already an unread/unarchived 'topic_reply' notification 
+ * for this user and this topic.
+ */
+export const getUnreadTopicNotification = async (uid, topicId) => {
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipient_uid', '==', uid),
+    where('type', '==', 'topic_reply'),
+    where('read', '==', false),
+    where('archived', '==', false),
+    where('payload.topic_id', '==', topicId)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  // Return the first one (should only be one due to merging logic)
+  return { id: snap.docs[0].id, ...snap.docs[0].data() };
+};
+
+/**
+ * Updates an existing notification's payload and optionally its timestamp.
+ */
+export const updateNotificationPayload = async (id, newPayload, updateTimestamp = false) => {
+  const data = {
+    payload: newPayload
+  };
+  if (updateTimestamp) {
+    data.created_at = serverTimestamp();
+  }
+  await updateDoc(doc(db, 'notifications', id), data);
+};
+
+/**
+ * When a topic is deleted, remove all notifications related to it.
+ */
+export const handleTopicDeletionNotifications = async (topicId) => {
+  const q = query(
+    collection(db, 'notifications'),
+    where('payload.topic_id', '==', topicId)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+  const batch = writeBatch(db);
+  snap.docs.forEach(d => batch.delete(d.ref));
+  await batch.commit();
+};
+
+/**
+ * When a post is deleted, decrement post_count on unread notifications.
+ * If count reaches 0, delete the notification.
+ */
+export const handlePostDeletionNotifications = async (topicId, postId) => {
+  const q = query(
+    collection(db, 'notifications'),
+    where('type', '==', 'topic_reply'),
+    where('read', '==', false),
+    where('payload.topic_id', '==', topicId)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+  
+  const batch = writeBatch(db);
+  snap.docs.forEach(d => {
+    const data = d.data();
+    const count = data.payload?.post_count || 1;
+    if (count <= 1) {
+      batch.delete(d.ref);
+    } else {
+      batch.update(d.ref, {
+        'payload.post_count': count - 1
+      });
+    }
+  });
   await batch.commit();
 };

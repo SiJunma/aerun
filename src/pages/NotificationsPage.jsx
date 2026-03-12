@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, Row, Col, Nav, Toast, ToastContainer } from 'react-bootstrap';
-import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 import {
   subscribeToAdminNotifications,
+  subscribeToUserNotifications,
   markNotificationRead,
   markAllAdminNotificationsRead,
   createNotification,
   archiveNotification,
-  archiveAllAdminNotifications
+  archiveAllAdminNotifications,
+  archiveAllUserNotifications
 } from '../api/notifications';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import ForumPagination from '../components/common/ForumPagination';
 
 const TYPE_META = {
@@ -21,6 +23,11 @@ const TYPE_META = {
     labelRu: 'Новая регистрация',
     labelKey: 'notifications.types.new_registration',
     color: 'primary'
+  },
+  topic_reply: {
+    icon: <MessageSquare size={18} />,
+    labelKey: 'notifications.types.topic_reply',
+    color: 'info'
   }
 };
 
@@ -34,9 +41,8 @@ const formatDate = (ts, lang = 'ru') => {
 const NotificationsPage = () => {
   const { profile, recordActivity } = useAuth();
   const { t, lang } = useI18n();
-  const [activeNotifs, setActiveNotifs] = useState([]);
-  const [archivedNotifs, setArchivedNotifs] = useState([]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const activeTab = searchParams.get('tab') || 'active'; // 'active' or 'archived'
   const setActiveTab = (tab) => setSearchParams({ tab });
   const [archivingId, setArchivingId] = useState(null);
@@ -52,19 +58,46 @@ const NotificationsPage = () => {
   const isAdmin = profile?.role_id === 'admin';
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!profile?.uid) return;
     
-    // Subscribe to Active
-    const unsubActive = subscribeToAdminNotifications(setActiveNotifs, false);
-    
-    // Subscribe to Archive
-    const unsubArchive = subscribeToAdminNotifications(setArchivedNotifs, true);
+    let unsubAdminActive = () => {};
+    let unsubAdminArchive = () => {};
+    let unsubUserActive = () => {};
+    let unsubUserArchive = () => {};
+
+    // Personal Notifications
+    unsubUserActive = subscribeToUserNotifications(profile.uid, (notifs) => {
+      setUserActive(notifs);
+    }, false);
+    unsubUserArchive = subscribeToUserNotifications(profile.uid, (notifs) => {
+      setUserArchived(notifs);
+    }, true);
+
+    // Admin Notifications
+    if (isAdmin) {
+      unsubAdminActive = subscribeToAdminNotifications(setAdminActive, false);
+      unsubAdminArchive = subscribeToAdminNotifications(setAdminArchived, true);
+    }
 
     return () => {
-      unsubActive();
-      unsubArchive();
+      unsubUserActive();
+      unsubUserArchive();
+      unsubAdminActive();
+      unsubAdminArchive();
     };
-  }, [isAdmin]);
+  }, [isAdmin, profile?.uid]);
+
+  const [adminActive, setAdminActive] = useState([]);
+  const [adminArchived, setAdminArchived] = useState([]);
+  const [userActive, setUserActive] = useState([]);
+  const [userArchived, setUserArchived] = useState([]);
+
+  const activeNotifs = [...adminActive, ...userActive].sort((a, b) => 
+    (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0)
+  );
+  const archivedNotifs = [...adminArchived, ...userArchived].sort((a, b) => 
+    (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0)
+  );
 
   // Reset pagination on tab switch
   useEffect(() => {
@@ -72,10 +105,9 @@ const NotificationsPage = () => {
   }, [activeTab]);
 
   const handleMarkRead = (e, id) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     recordActivity();
     markNotificationRead(id)
-      .then(() => showToast(t('notifications.marked_read_toast')))
       .catch(err => showToast(err.message, 'danger'));
   };
 
@@ -100,11 +132,19 @@ const NotificationsPage = () => {
     }, 300);
   };
 
-  const handleArchiveAll = () => {
+  const handleArchiveAll = async () => {
     recordActivity();
-    archiveAllAdminNotifications()
-      .then(() => showToast(t('notifications.archived_all_toast')))
-      .catch(err => showToast(err.message, 'danger'));
+    try {
+      if (isAdmin) {
+        await archiveAllAdminNotifications();
+      }
+      if (profile?.uid) {
+        await archiveAllUserNotifications(profile.uid);
+      }
+      showToast(t('notifications.archived_all_toast'));
+    } catch (err) {
+      showToast(err.message, 'danger');
+    }
   };
 
 
@@ -148,7 +188,28 @@ const NotificationsPage = () => {
             <Col>
               <div className="d-flex align-items-center gap-2 mb-2 line-height-1">
                 <span className="fw-bold small text-uppercase text-muted" style={{ letterSpacing: '1px', fontSize: '0.65rem' }}>
-                  {meta?.labelKey ? t(meta.labelKey) : n.type}
+                  {n.type === 'topic_reply' ? (
+                    (() => {
+                      const fullText = t('notifications.types.topic_reply', { count: payload.post_count, topic: '|||TOPIC|||' });
+                      const parts = fullText.split('|||TOPIC|||');
+                      return (
+                        <>
+                          {parts[0]}
+                          <Link 
+                            to={`/topic/${payload.topic_id}?goLast=0#post-${payload.last_post_id}`}
+                            className="text-primary text-decoration-none hover-underline"
+                            style={{ textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
+                            onClick={() => !n.read && handleMarkRead(null, n.id)}
+                          >
+                            {payload.topic_title}
+                          </Link>
+                          {parts[1]}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    (meta?.labelKey ? t(meta.labelKey) : n.type)
+                  )}
                 </span>
                 {!n.read && (
                   <Badge 
@@ -202,6 +263,31 @@ const NotificationsPage = () => {
                   <div className="mt-3 d-flex align-items-center">
                     <Link to="/admin?tab=users" className="text-decoration-none small fw-bold text-primary">
                       {t('notifications.manage_users')}
+                    </Link>
+
+                    {!n.read && activeTab === 'active' && (
+                      <Button 
+                        variant="link" 
+                        size="sm" 
+                        className="p-0 ms-auto text-decoration-none small fw-bold text-muted transition-all d-flex align-items-center"
+                        onClick={(e) => handleMarkRead(e, n.id)}
+                      >
+                        <CheckCheck size={14} className="me-1" />
+                        {t('notifications.mark_as_read')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {n.type === 'topic_reply' && payload && (
+                <div className="ps-0 ps-md-1">
+                  <div className="mt-3 d-flex align-items-center">
+                    <Link 
+                      to={`/topic/${payload.topic_id}?goLast=0#post-${payload.first_post_id}`} 
+                      className="text-decoration-none small fw-bold text-primary"
+                      onClick={() => !n.read && handleMarkRead(null, n.id)}
+                    >
+                      {lang === 'ru' ? 'Перейти к сообщению →' : 'Go to message →'}
                     </Link>
 
                     {!n.read && activeTab === 'active' && (

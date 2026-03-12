@@ -3,25 +3,44 @@ import { Navbar, Nav, Container, NavDropdown, Image, Badge } from 'react-bootstr
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
-import { User, LogOut, Bell } from 'lucide-react';
-import { subscribeToAdminNotifications } from '../../api/notifications';
+import { Bell, BellOff, User, LogOut } from 'lucide-react';
+import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
 
 const Navigation = () => {
   const { user, profile, settings, logout } = useAuth();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
-  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [adminUnread, setAdminUnread] = React.useState(0);
+  const [userUnread, setUserUnread] = React.useState(0);
 
   const isAdmin = profile?.role_id === 'admin';
 
-  // Subscribe to admin notifications only when logged in as admin
+  // Subscribe to notifications
   React.useEffect(() => {
-    if (!isAdmin) return;
-    const unsub = subscribeToAdminNotifications((notifs) => {
-      setUnreadCount(notifs.filter(n => !n.read).length);
+    if (!user?.uid) return;
+
+    // User notifications
+    const unsubUser = subscribeToUserNotifications(user.uid, (notifs) => {
+      setUserUnread(notifs.filter(n => !n.read).length);
     });
-    return unsub;
-  }, [isAdmin]);
+
+    // Admin notifications
+    let unsubAdmin = () => {};
+    if (isAdmin) {
+      unsubAdmin = subscribeToAdminNotifications((notifs) => {
+        setAdminUnread(notifs.filter(n => !n.read).length);
+      });
+    } else {
+      setAdminUnread(0);
+    }
+
+    return () => {
+      unsubUser();
+      unsubAdmin();
+    };
+  }, [isAdmin, user?.uid]);
+
+  const totalUnread = adminUnread + userUnread;
 
   const handleLogout = async () => {
     await logout();
@@ -50,8 +69,8 @@ const Navigation = () => {
               </Badge>
             )}
 
-            {/* Notifications bell — admin only */}
-            {isAdmin && (
+            {/* Notifications bell — all users */}
+            {user && (
               <Nav.Link
                 as={Link}
                 to="/notifications"
@@ -59,14 +78,14 @@ const Navigation = () => {
                 title={lang === 'ru' ? 'Уведомления' : 'Notifications'}
               >
                 <Bell size={20} />
-                {unreadCount > 0 && (
+                {totalUnread > 0 && (
                   <Badge
                     bg="danger"
                     pill
                     className="position-absolute"
                     style={{ top: '-4px', right: '-6px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
                   >
-                    {unreadCount > 99 ? '99+' : unreadCount}
+                    {totalUnread > 99 ? '99+' : totalUnread}
                   </Badge>
                 )}
               </Nav.Link>

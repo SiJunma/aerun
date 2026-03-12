@@ -127,11 +127,29 @@ service cloud.firestore {
     match /notifications/{notifId} {
       allow create: if isSignedIn();
       allow read: if isAdmin()
-        || (isActive() && resource.data.recipient_uid == request.auth.uid);
+        || (isActive() && (
+             resource.data.recipient_uid == request.auth.uid || 
+             (resource.data.type == 'topic_reply' && resource.data.read == false)
+           ));
       allow update: if isAdmin()
-        || (isActive() && resource.data.recipient_uid == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']));
+        || (isActive() && (
+             // Recipient can mark read/archive/etc
+             (resource.data.recipient_uid == request.auth.uid && 
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['read', 'archived', 'payload', 'created_at']))
+             ||
+             // Other users can ONLY "merge" (update payload/timestamp) unread topic replies
+             (resource.data.type == 'topic_reply' && resource.data.read == false && resource.data.archived == false &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payload', 'created_at']))
+           ));
       allow delete: if isAdmin();
+    }
+
+    // --- Topic Subscriptions ---
+    match /topic_subscriptions/{subId} {
+      allow read: if isActive();
+      allow create: if canPost() && request.resource.data.user_id == request.auth.uid;
+      allow delete: if isActive() && (resource.data.user_id == request.auth.uid || isAdmin());
     }
   }
 }

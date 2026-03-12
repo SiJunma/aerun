@@ -28,7 +28,7 @@ export const I18nProvider = ({ children }) => {
     }
   };
 
-  const t = (path) => {
+  const t = (path, params = {}) => {
     const keys = path.split('.');
     let result = translations[lang];
 
@@ -45,6 +45,15 @@ export const I18nProvider = ({ children }) => {
         if (fallback) fallback = fallback[key];
       }
       result = fallback;
+    }
+
+    if (typeof result === 'string') {
+      // Basic interpolation: replace {key} with params[key]
+      Object.keys(params).forEach(key => {
+        const regex = new RegExp(`{${key}}`, 'g');
+        result = result.replace(regex, params[key]);
+      });
+      return result;
     }
 
     return result || path;
