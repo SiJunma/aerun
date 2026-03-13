@@ -1268,3 +1268,26 @@ a:hover {
   color: #d2ccba !important;
   border: 1px solid #3c3836 !important;
 }
+
+/* Premium Draft/Ghost Post Styling */
+.draft-post-card {
+  border: 2px dashed var(--border-color) !important;
+  opacity: 0.92;
+  filter: saturate(0.85);
+  position: relative;
+}
+
+.draft-post-card .post-header-strip {
+  background-color: rgba(var(--primary-rgb), 0.05) !important;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+[data-theme='dark'] .draft-post-card {
+  background-color: rgba(15, 23, 42, 0.6) !important;
+  backdrop-filter: blur(4px);
+}
+
+[data-theme='neutral'] .draft-post-card {
+  background-color: rgba(244, 241, 234, 0.6) !important;
+  backdrop-filter: blur(4px);
+}

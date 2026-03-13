@@ -2,6 +2,7 @@ import { db } from '../../firebase';
 import {
   collection,
   addDoc,
+  setDoc,
   doc,
   onSnapshot,
   query,
@@ -265,6 +266,144 @@ export const createPost = async (postData) => {
   return postRef.id;
 };
 
+// ── Drafts ────────────────────────────────────────────────────────────────────
+
+// Create a draft post — does NOT touch counters or send notifications
+// Drafts are now stored in a per-user subcollection to avoid permission errors in the main posts collection
+export const createDraftPost = async (postData) => {
+  const draftRef = doc(db, 'users', postData.author_id, 'drafts', postData.topic_id);
+  await setDoc(draftRef, {
+    ...postData,
+    is_draft: true,
+    reputation: 0,
+    created_at: serverTimestamp()
+  });
+  return postData.topic_id; // Using topicId as docId since there is only 1 draft per topic per user
+};
+
+export const subscribeToTopicDraft = (topicId, uid, callback) => {
+  if (!uid) return () => {};
+  const draftRef = doc(db, 'users', uid, 'drafts', topicId);
+  return onSnapshot(draftRef, (snapshot) => {
+    callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+  });
+};
+
+
+// Save/update draft content — does NOT set edited_at (draft has no edit history)
+export const updateDraftPost = async (uid, topicId, content, metadata = {}) => {
+  const { edited_at: _ignored, ...cleanMeta } = metadata;
+  const draftRef = doc(db, 'users', uid, 'drafts', topicId);
+  await updateDoc(draftRef, {
+    content,
+    ...cleanMeta
+    // intentionally no edited_at
+  });
+};
+
+export const deleteDraftPost = async (uid, topicId) => {
+  const draftRef = doc(db, 'users', uid, 'drafts', topicId);
+  await deleteDoc(draftRef);
+};
+
+// Publish a draft: create real post, update counters + notifications, then delete draft
+export const publishDraft = async (uid, topicId) => {
+  const draftRef = doc(db, 'users', uid, 'drafts', topicId);
+  const topicRef = doc(db, 'topics', topicId);
+  const postRef = doc(collection(db, 'posts'));
+
+  // Read draft data first
+  const draftSnap = await getDoc(draftRef);
+  if (!draftSnap.exists()) throw new Error('Draft not found');
+  const postData = draftSnap.data();
+
+  let categoryId = null;
+  let topicTitle = '';
+
+  await runTransaction(db, async (transaction) => {
+    const topicSnap = await transaction.get(topicRef);
+    if (!topicSnap.exists()) throw new Error('Topic not found');
+
+    const topic = topicSnap.data();
+    categoryId = topic.category_id;
+    topicTitle = topic.title;
+
+    const userRef = doc(db, 'users', postData.author_id);
+
+    // 1. Create the real post from draft data
+    transaction.set(postRef, {
+      ...postData,
+      is_draft: false,
+      edited_at: null,
+      created_at: serverTimestamp()
+    });
+
+    // 2. Delete the draft
+    transaction.delete(draftRef);
+
+    // 3. Update topic counters and last_post_* fields
+    transaction.update(topicRef, {
+      last_post_at: serverTimestamp(),
+      last_post_author: postData.author_name,
+      last_post_author_id: postData.author_id,
+      last_post_is_character: postData.is_character || false,
+      last_post_author_character_id: postData.author_character_id || null,
+      posts_count: increment(1)
+    });
+
+    // 4. Update category counters and last_post_* fields
+    if (categoryId) {
+      transaction.update(doc(db, 'categories', categoryId), {
+        posts_count: increment(1),
+        last_post_at: serverTimestamp(),
+        last_post_author: postData.author_name,
+        last_post_author_id: postData.author_id,
+        last_post_topic_id: topicId,
+        last_post_topic_title: topicTitle,
+        last_post_is_character: postData.is_character || false,
+        last_post_author_character_id: postData.author_character_id || null
+      });
+    }
+
+    // 5. Increment author post_count
+    transaction.update(userRef, { post_count: increment(1) });
+  });
+
+  // ── Trigger Notifications (Background) ──
+  (async () => {
+    try {
+      const subscribers = await getTopicSubscribers(topicId);
+      const filteredSubscribers = subscribers.filter(uid => uid !== postData.author_id);
+
+      if (filteredSubscribers.length === 0) return;
+
+      for (const recipientUid of filteredSubscribers) {
+        const existing = await getUnreadTopicNotification(recipientUid, topicId);
+
+        if (existing) {
+          await updateNotificationPayload(existing.id, {
+            ...existing.payload,
+            post_count: (existing.payload?.post_count || 1) + 1,
+            last_post_id: postRef.id
+          }, true);
+        } else {
+          await createNotification('topic_reply', {
+            topic_id: topicId,
+            topic_title: topicTitle,
+            first_post_id: postRef.id,
+            last_post_id: postRef.id,
+            post_count: 1
+          }, recipientUid);
+        }
+      }
+    } catch (err) {
+      console.error('[publishDraft notifications error]', err);
+    }
+  })();
+
+  return postRef.id;
+};
+
 // Edit a post
 export const updatePost = async (postId, content, metadata = {}) => {
   await updateDoc(doc(db, 'posts', postId), {
@@ -311,6 +450,12 @@ export const deletePost = async (post) => {
   const postRef = doc(db, 'posts', post.id);
   const topicRef = doc(db, 'topics', post.topic_id);
   const userRef = doc(db, 'users', post.author_id);
+
+  // If deleting a draft — simply remove the doc, no counters were touched
+  if (post.is_draft) {
+    await deleteDoc(postRef);
+    return;
+  }
 
   // Step 1: Find reputation logs for this post to revert reputation
   const logsQuery = query(collection(db, 'reputation_logs'), where('post_id', '==', post.id));

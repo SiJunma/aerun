@@ -79,7 +79,7 @@ const BBCode = ({ children }) => {
   const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col'];
 
   tokens.forEach(token => {
-    const parent = stack[stack.length - 1];
+    let parent = stack[stack.length - 1];
     if (token.type === 'text') {
       parent.children.push(token.content);
     } else {
@@ -99,7 +99,23 @@ const BBCode = ({ children }) => {
           parent.children.push(token.full);
         }
       } else {
-        if (token.name === '*' && parent.name === '*') stack.pop();
+        if (token.name === '*') {
+          // Robust list item handling: pop until we find the nearest 'list' parent
+          let foundList = false;
+          for (let i = stack.length - 1; i > 0; i--) {
+            if (stack[i].name === 'list') {
+              foundList = true;
+              while (stack.length > i + 1) stack.pop();
+              break;
+            }
+          }
+          if (!foundList) {
+            parent.children.push(token.full);
+            return;
+          }
+          // Update parent after potential stack pop
+          parent = stack[stack.length - 1];
+        }
         const newNode = { type: 'tag', name: token.name, rawParams: token.rawParams, children: [] };
         parent.children.push(newNode);
         stack.push(newNode);
@@ -108,7 +124,7 @@ const BBCode = ({ children }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', 'columns', 'col'];
+  const blockTags = ['quote', 'list', '*', 'columns', 'col'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
@@ -155,7 +171,7 @@ const BBCode = ({ children }) => {
   }
 
   function renderNode(node, index) {
-    if (typeof node === 'string') return <span key={index}>{node}</span>;
+    if (typeof node === 'string') return node;
 
     const { name, rawParams, children } = node;
     const content = children.map((child, i) => renderNode(child, i));
@@ -198,7 +214,13 @@ const BBCode = ({ children }) => {
         );
       case 'list':
         const listClass = (params.default || params.type) === '1' ? 'ps-4 mb-2 list-decimal' : 'ps-4 mb-2';
-        return <ul key={index} className={listClass}>{content}</ul>;
+        // Filter out whitespace-only nodes (spans or raw strings) between list items to avoid hydration errors
+        const listContent = content.filter(c => {
+          if (typeof c === 'string' && !c.trim()) return false;
+          if (React.isValidElement(c) && c.type === 'span' && typeof c.props.children === 'string' && !c.props.children.trim()) return false;
+          return true;
+        });
+        return <ul key={index} className={listClass}>{listContent}</ul>;
       case '*': return <li key={index}>{content}</li>;
       case 'url':
         const url = (params.default || getTextContent(node)).trim();
@@ -222,6 +244,7 @@ const BBCode = ({ children }) => {
         const stackAtValue = params.stack;
         // Filter out whitespace-only nodes between columns to avoid double spacing in flex
         const filtered = content.filter(c => {
+          if (typeof c === 'string' && !c.trim()) return false;
           if (React.isValidElement(c) && c.type === 'span' && typeof c.props.children === 'string' && !c.props.children.trim()) return false;
           return true;
         });

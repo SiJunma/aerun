@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'reac
 import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics } from '../api/forum';
+import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, subscribeToTopicDraft, deleteDraftPost } from '../api/forum';
 import { subscribeToCharacters } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -12,7 +12,7 @@ import RichEditor from '../components/common/RichEditor';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
-import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff, ArrowRightLeft } from 'lucide-react';
+import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff, ArrowRightLeft, Send, FilePen } from 'lucide-react';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
@@ -60,6 +60,7 @@ const TopicPage = () => {
   const [topic, setTopic] = useState(null);
   const [category, setCategory] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [myDraft, setMyDraft] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [authorStats, setAuthorStats] = useState({}); // { uid: { post_count: N } }
 
@@ -94,6 +95,7 @@ const TopicPage = () => {
 
   // Move Topic state
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
 
   const replyRef = useRef(null);
   const scrolledRef = useRef(false); // prevent double-scroll
@@ -106,7 +108,7 @@ const TopicPage = () => {
   useEffect(() => {
     const unsubPosts = subscribeToPosts(id, setPosts);
     const unsubTopic = subscribeToTopic(id, setTopic);
-
+    
     // Save last visit timestamp when leaving this topic
     const visitTime = Date.now();
     return () => {
@@ -116,6 +118,13 @@ const TopicPage = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Subscribe to draft
+  useEffect(() => {
+    if (!user || !id) return;
+    const unsub = subscribeToTopicDraft(id, user.uid, setMyDraft);
+    return () => unsub();
+  }, [user, id]);
 
   // Subscribe to characters separately so we can unsubscribe properly
   useEffect(() => {
@@ -405,28 +414,13 @@ const TopicPage = () => {
     recordActivity(); // posting = user is active
     setSubmitting(true);
     try {
-      const selectedChar = characters.find(c => c.id === selectedCharacterId);
-
-      const postData = {
-        topic_id: id,
-        content: replyContent.trim(),
-        author_id: user.uid,
-        author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
-        author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || user?.photoURL || ''),
-        author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-        author_role_id: profile?.role_id || 'player',
-        is_character: !!selectedChar,
-        author_character_id: selectedCharacterId || null,
-        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
-        owner_name: profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'
-      };
-
+      const postData = buildPostData();
       const newPostId = await createPost(postData);
       // Mark as read immediately
       localStorage.setItem(LAST_VISIT_KEY, Date.now().toString());
       setReplyContent('');
       
-      // Calculate where the new post will be (it's always the last one)
+      // Calculate where the new post will be
       const newTotalPosts = posts.length + 1;
       const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE);
       
@@ -434,8 +428,6 @@ const TopicPage = () => {
         setSearchParams({ page: targetPage });
       }
 
-      // We need to wait for the DOM to update. Since setPosts is triggered by a Firestore subscription,
-      // it might take a moment. We'll use a small timeout or wait for the posts to update.
       setTimeout(() => {
         const element = document.getElementById(`post-${newPostId}`);
         if (element) {
@@ -450,6 +442,82 @@ const TopicPage = () => {
       alert('Error posting reply');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Build post data object for draft operations
+  const buildPostData = () => {
+    const selectedChar = characters.find(c => c.id === selectedCharacterId);
+    return {
+      topic_id: id,
+      content: replyContent.trim(),
+      author_id: user.uid,
+      author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
+      author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || user?.photoURL || ''),
+      author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
+      author_role_id: profile?.role_id || 'player',
+      is_character: !!selectedChar,
+      author_character_id: selectedCharacterId || null,
+      author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
+      owner_name: profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'
+    };
+  };
+
+  const handleSaveDraft = async () => {
+    if (!replyContent.trim() || hasDraft || draftSaving) return;
+    setDraftSaving(true);
+    try {
+      await createDraftPost(buildPostData());
+      setReplyContent('');
+      showToast(t('forum.draft_saved'));
+      // Navigate to last page so draft is visible
+      const lastPage = Math.max(1, totalPages);
+      if (currentPage !== lastPage) setSearchParams({ page: lastPage });
+    } catch (err) {
+      console.error(err);
+      showToast(t('forum.draft_save_error'), 'danger');
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+
+  const handleUpdateDraft = async (postId) => {
+    if (!editContent.trim() || draftSaving) return;
+    setDraftSaving(true);
+    try {
+      await updateDraftPost(user.uid, id, editContent.trim());
+      setEditingPostId(null);
+      setEditContent('');
+      showToast(t('forum.draft_updated'));
+    } catch (err) {
+      console.error(err);
+      showToast(t('forum.draft_update_error'), 'danger');
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+
+  const handlePublishDraft = async (postId) => {
+    if (topic?.is_locked && profile?.role_id !== 'admin' && profile?.role_id !== 'moderator') {
+      showToast(t('forum.draft_locked_error'), 'danger');
+      return;
+    }
+    setDraftSaving(true);
+    try {
+      await publishDraft(user.uid, id);
+      localStorage.setItem(LAST_VISIT_KEY, Date.now().toString());
+      showToast(t('forum.draft_published'));
+      // Go to last page where the published post will appear
+      setTimeout(() => {
+        const newTotal = posts.length + 1;
+        const lastPage = Math.ceil(newTotal / ITEMS_PER_PAGE);
+        setSearchParams({ page: lastPage, goLast: '1' });
+      }, 400);
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || t('forum.draft_publish_error'), 'danger');
+    } finally {
+      setDraftSaving(false);
     }
   };
 
@@ -486,21 +554,28 @@ const TopicPage = () => {
 
   const handleDeletePost = async () => {
     if (!deletingPost) return;
-    const isOnlyPost = posts.length === 1;
-    const categoryId = topic?.category_id;
     
     try {
-      await deletePost(deletingPost);
-      setDeletingPost(null);
-      
-      if (isOnlyPost) {
-        // Topic was deleted because it was the last post
-        if (categoryId) {
-          navigate(`/category/${categoryId}`);
-        } else {
-          navigate('/');
+      if (deletingPost.is_draft) {
+        await deleteDraftPost(user.uid, id);
+      } else {
+        const isOnlyPost = posts.length === 1;
+        const categoryId = topic?.category_id;
+        
+        await deletePost(deletingPost);
+        
+        if (isOnlyPost) {
+          // Topic was deleted because it was the last post
+          if (categoryId) {
+            navigate(`/category/${categoryId}`);
+            return;
+          } else {
+            navigate('/');
+            return;
+          }
         }
       }
+      setDeletingPost(null);
     } catch (err) {
       console.error(err);
       alert('Error deleting post');
@@ -535,12 +610,15 @@ const TopicPage = () => {
   }
 
   const categoryTitle = category ? resolveText(category.title) : '...';
+  const hasDraft = !!myDraft;
 
-  // Pagination logic
-  const totalPages = Math.ceil(posts.length / ITEMS_PER_PAGE);
+  // Pagination logic — since drafts are separate, posts only contains published posts
+  const realPosts = posts;
+  const totalPages = Math.ceil(realPosts.length / ITEMS_PER_PAGE);
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentPosts = posts.slice(indexOfFirstItem, indexOfLastItem);
+  const currentPosts = realPosts.slice(indexOfFirstItem, indexOfLastItem);
+  const isOnLastPage = currentPage >= totalPages || totalPages === 0;
 
   const handlePageChange = (page) => {
     setSearchParams({ page });
@@ -961,6 +1039,156 @@ const TopicPage = () => {
         ))}
       </div>
 
+      {/* Draft Post — rendered after real posts, only on last page, only for author */}
+      {myDraft && isOnLastPage && (
+        <Card
+          id={`post-${myDraft.id}`}
+          className="mb-4 shadow-sm border-0 post-card draft-post-card"
+          style={{ opacity: 0.82 }}
+        >
+          <Card.Body className="p-0">
+            <Row className="g-0">
+              {/* Author sidebar */}
+              <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 text-center d-flex flex-column align-items-center">
+                <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
+                  <ForumAuthorName
+                    userId={myDraft.author_id}
+                    characterId={myDraft.author_character_id}
+                    isCharacter={!!myDraft.is_character}
+                    fallbackName={myDraft.author_name}
+                  />
+                </div>
+                {getLiveAuthorStatus(myDraft) && (
+                  <div className="text-primary small mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                    {getLiveAuthorStatus(myDraft)}
+                  </div>
+                )}
+                <AvatarImage src={getLiveAuthorAvatar(myDraft)} fallbackName={myDraft.author_name} />
+                <div className="text-muted small mt-1">
+                  {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count || 0}</strong>
+                </div>
+                <div className="text-muted small">
+                  {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation || 0}</strong>
+                </div>
+                {!myDraft.is_character && (
+                  <div className="mt-2 text-center w-100">{getRoleBadge(myDraft)}</div>
+                )}
+                {myDraft.is_character && (
+                  <div className="text-muted mt-1 small opacity-75">
+                    {lang === 'ru' ? 'персонаж' : 'character'}
+                    {getLiveOwnerName(myDraft) && ` (${getLiveOwnerName(myDraft)})`}
+                  </div>
+                )}
+              </Col>
+
+              {/* Content Area */}
+              <Col md={9} lg={10} className="d-flex flex-column">
+                {/* Header Strip — no date, no post number, just DRAFT badge */}
+                <div className="post-header-strip px-4 py-1 d-flex justify-content-between align-items-center">
+                  <Badge bg="secondary" className="opacity-75" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
+                    <FilePen size={11} className="me-1" />
+                    {t('forum.draft_label')}
+                  </Badge>
+                  <span className="text-muted small opacity-40 fst-italic">
+                    {t('forum.draft_only_you')}
+                  </span>
+                </div>
+
+                {/* Body */}
+                <div className="px-4 py-2 flex-grow-1 d-flex flex-column">
+                  <div className="flex-grow-1">
+                    {editingPostId === myDraft.id ? (
+                      <div>
+                        <div className="mb-2">
+                          <RichEditor
+                            id="draftEditContent"
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            rows={6}
+                            maxLength={MAX_CHARS}
+                            autoFocus={true}
+                          />
+                        </div>
+                        <div className="d-flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline-secondary"
+                            onClick={() => handleUpdateDraft(myDraft.id)}
+                            disabled={draftSaving}
+                          >
+                            {draftSaving ? t('forum.draft_saving') : t('forum.draft_update_btn')}
+                          </Button>
+                          <Button size="sm" variant="outline-danger" onClick={() => { setEditingPostId(null); setEditContent(''); }}>
+                            {t('common.cancel')}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="post-content">
+                        <BBCode>{myDraft.content}</BBCode>
+                      </div>
+                    )}
+                    {!editingPostId && getLiveAuthorSignature(myDraft) && (
+                      <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
+                        <BBCode>{getLiveAuthorSignature(myDraft)}</BBCode>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Col>
+            </Row>
+
+            {/* Draft Footer: Profile + action buttons */}
+            <div className="post-footer-strip">
+              <Row className="g-0 align-items-center">
+                <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 d-flex gap-3 justify-content-center">
+                  <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none">
+                    {t('profile.view_profile')}
+                  </Link>
+                </Col>
+                <Col md={9} lg={10} className="px-4 py-2 d-flex justify-content-end gap-3">
+                  {/* Delete — allowed even on locked topics */}
+                  {!editingPostId && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="footer-link p-0"
+                      onClick={() => setDeletingPost(myDraft)}
+                    >
+                      {t('common.delete')}
+                    </Button>
+                  )}
+                  {/* Edit */}
+                  {!editingPostId && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="footer-link p-0"
+                      onClick={() => handleStartEdit(myDraft, false)}
+                    >
+                      {t('common.edit')}
+                    </Button>
+                  )}
+                  {/* Publish */}
+                  {!editingPostId && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="footer-link p-0 text-success fw-semibold"
+                      onClick={() => handlePublishDraft(myDraft.id)}
+                      disabled={draftSaving}
+                    >
+                      <Send size={12} className="me-1" />
+                      {draftSaving ? t('forum.draft_publishing') : t('forum.draft_publish')}
+                    </Button>
+                  )}
+                </Col>
+              </Row>
+            </div>
+          </Card.Body>
+        </Card>
+      )}
+
       <div className="d-flex justify-content-center p-3">
         <ForumPagination
           currentPage={currentPage}
@@ -975,9 +1203,7 @@ const TopicPage = () => {
         profile?.role_id === 'spectator' ? (
           <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
             <span className="opacity-75">
-              {lang === 'ru'
-                ? '👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.'
-                : '👁 Spectator mode — you can read but cannot post replies.'}
+              {t('forum.spectator_mode')}
             </span>
           </div>
         ) : topic.is_locked && profile?.role_id !== 'admin' && profile?.role_id !== 'moderator' ? (
@@ -986,12 +1212,10 @@ const TopicPage = () => {
               <MessageSquareOff size={48} className="opacity-25" />
             </div>
             <h5 className="mb-2">
-              {lang === 'ru' ? 'Тема закрыта' : 'Topic Locked'}
+              {t('forum.topic_locked')}
             </h5>
             <p className="small mb-0 opacity-75">
-              {lang === 'ru' 
-                ? 'Эта тема была закрыта модератором. Публикация новых сообщений невозможна.' 
-                : 'This topic has been locked by a moderator. New replies are not allowed.'}
+              {t('forum.topic_locked_desc')}
             </p>
           </div>
         ) : (
@@ -1016,12 +1240,12 @@ const TopicPage = () => {
                       className="mb-2 w-auto"
                     >
                       <option value="">
-                        {lang === 'ru' ? 'Как пользователь' : 'Post as User'}:{' '}
+                        {t('forum.post_as_user')}:{' '}
                         {profile?.nickname || profile?.email?.split('@')[0]}
                       </option>
                       {characters.map(char => (
                         <option key={char.id} value={char.id}>
-                          {lang === 'ru' ? 'Как персонаж' : 'As Character'}: {char.name}
+                          {t('forum.post_as_character')}: {char.name}
                         </option>
                       ))}
                     </Form.Select>
@@ -1029,7 +1253,7 @@ const TopicPage = () => {
                   <Form.Group className="mb-3">
                     <RichEditor
                       id="replyContent"
-                      placeholder={lang === 'ru' ? 'Написать ответ...' : 'Write your reply...'}
+                      placeholder={t('forum.reply_placeholder')}
                       rows={6}
                       value={replyContent}
                       onChange={(e) => setReplyContent(e.target.value)}
@@ -1037,10 +1261,22 @@ const TopicPage = () => {
                       disabled={submitting}
                     />
                   </Form.Group>
-                  <div className="d-flex justify-content-end">
+                  <div className="d-flex justify-content-end gap-2">
+                    {/* Save as Draft — hidden when draft already exists */}
+                    {!hasDraft && (
+                      <Button
+                        variant="outline-secondary"
+                        type="button"
+                        disabled={submitting || draftSaving || !replyContent.trim()}
+                        onClick={handleSaveDraft}
+                      >
+                        <FilePen size={14} className="me-1" />
+                        {draftSaving ? t('forum.draft_saving') : t('forum.draft_save')}
+                      </Button>
+                    )}
                     <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
                       {submitting
-                        ? (lang === 'ru' ? 'Отправка...' : 'Posting...')
+                        ? t('forum.posting')
                         : t('forum.create_post')}
                     </Button>
                   </div>
