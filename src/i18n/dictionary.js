@@ -175,6 +175,19 @@ export const translations = {
       unfollow: "Unfollow",
       followed_toast: "Topic followed",
       unfollowed_toast: "Topic unfollowed"
+    },
+    stats: {
+      title: "Forum Statistics",
+      topics: "Topics",
+      posts: "Posts",
+      members: "Members",
+      newest_member: "Latest registered:",
+      online_now: "Online now",
+      silence: "It's quiet...",
+      active_topics: "Most Active Topics",
+      top_discussed: "Most Discussed Topics",
+      top_discussed_desc: "Top 50 forum topics, sorted by number of replies.",
+      no_topics: "No topics yet"
     }
   },
   ru: {
@@ -353,6 +366,19 @@ export const translations = {
       unfollow: "Отписаться",
       followed_toast: "Вы подписались на тему",
       unfollowed_toast: "Вы отписались от темы"
+    },
+    stats: {
+      title: "Статистика форума",
+      topics: "Темы",
+      posts: "Сообщения",
+      members: "Участники",
+      newest_member: "Последним зарегистрировался:",
+      online_now: "Сейчас на форуме",
+      silence: "Тишина...",
+      active_topics: "Самые активные темы",
+      top_discussed: "Самые обсуждаемые темы",
+      top_discussed_desc: "Топ-50 тем форума, отсортированных по количеству ответов.",
+      no_topics: "Тем пока нет"
     }
   }
 };

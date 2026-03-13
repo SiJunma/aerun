@@ -142,7 +142,11 @@ a:hover {
   background-color: var(--input-focus-bg) !important;
   border-color: var(--input-focus-border) !important;
   color: var(--input-text) !important;
-  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.1) !important;
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.1) !important;
+}
+
+.text-primary {
+  color: var(--primary-color) !important;
 }
 
 [data-theme='dark'] .form-select {
@@ -1326,3 +1330,190 @@ a:hover {
   background-color: rgba(244, 241, 234, 0.6) !important;
   backdrop-filter: blur(4px);
 }
+
+/* Topic List & Row Enhancements */
+.topic-row-hover:hover {
+  background-color: rgba(var(--primary-rgb), 0.05) !important;
+}
+
+.topic-title-link {
+  color: var(--text-color);
+  transition: color 0.15s ease;
+}
+
+.topic-title-link:hover {
+  color: var(--primary-color) !important;
+}
+
+.mini-pagination .mini-page-link {
+  font-size: 0.75rem;
+  padding: 0 4px;
+  background: rgba(var(--primary-rgb), 0.1);
+  border-radius: 3px;
+  color: var(--primary-color) !important;
+  line-height: 1.2;
+  transition: all 0.2s ease;
+}
+
+.mini-pagination .mini-page-link:hover {
+  background: var(--primary-color) !important;
+  color: #fff !important;
+}
+
+[data-theme='dark'] .mini-pagination .mini-page-link:hover,
+[data-theme='neutral'] .mini-pagination .mini-page-link:hover {
+  color: var(--nav-bg) !important;
+}
+
+.unread-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bs-warning);
+  flex-shrink: 0;
+}
+
+.last-post-time {
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.last-post-time:hover {
+  opacity: 1;
+}
+
+.topic-indicator.topic-pinned {
+  color: var(--bs-warning) !important;
+}
+
+.topic-indicator.topic-locked {
+  color: var(--bs-danger) !important;
+}
+
+/* Forum Statistics Styling */
+.forum-stats-card {
+  border: 1px solid var(--border-color) !important;
+  border-radius: 0.75rem !important;
+  overflow: hidden;
+  background-color: var(--card-bg) !important;
+}
+
+.stats-header {
+  background-color: var(--nav-bg) !important;
+  color: var(--text-color) !important;
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.1) !important;
+  font-weight: 500 !important;
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+}
+
+.stats-header span, 
+.stats-header .lucide {
+  opacity: 0.5;
+}
+
+[data-theme='neutral'] .stats-header {
+  color: var(--text-color) !important;
+}
+
+.stats-grid {
+  background-color: var(--card-bg);
+  border-bottom-color: rgba(var(--primary-rgb), 0.05) !important;
+}
+
+.ms-auto-md {
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .ms-auto-md {
+    margin-left: 0;
+  }
+}
+
+.stats-item {
+  transition: opacity 0.2s;
+}
+
+.stats-item:hover {
+  opacity: 1;
+}
+
+.extra-small {
+  font-size: 0.7rem;
+}
+
+.btn-xs {
+  padding: 0.125rem 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.online-users-panel {
+  border-bottom-left-radius: 0.75rem;
+  border-bottom-right-radius: 0.75rem;
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.03);
+}
+
+.online-indicator-blob {
+  width: 10px;
+  height: 10px;
+  background-color: #10b981;
+  border-radius: 50%;
+  position: relative;
+  opacity: 0.8;
+}
+
+.online-user-link {
+  transition: all 0.15s ease;
+  position: relative;
+  opacity: 0.7; /* Dimmed by default for better integration */
+}
+
+.online-user-link:hover {
+  opacity: 1;
+  text-decoration: underline !important;
+  transform: translateY(-1px);
+}
+
+.stats-footer {
+  background-color: rgba(var(--primary-rgb), 0.02);
+  border-top-color: rgba(var(--primary-rgb), 0.05) !important;
+}
+
+.letter-spacing-1 {
+  letter-spacing: 1px;
+}
+
+.gap-x-2 { column-gap: 0.5rem; }
+.gap-y-1 { row-gap: 0.25rem; }
+
+[data-theme='dark'] .online-users-panel {
+  background-color: rgba(15, 23, 42, 0.3) !important;
+}
+
+[data-theme='neutral'] .online-users-panel {
+  background-color: rgba(67, 52, 34, 0.03) !important;
+}
+
+.online-author-admin {
+  color: #ff4d4d !important; /* Vibrant Red */
+}
+
+.online-author-mod {
+  color: #fbbf24 !important; /* Vibrant Amber/Yellow */
+}
+
+/* Theme overrides if needed */
+[data-theme='neutral'] .online-author-admin {
+  color: #b91c1c !important; /* Darker red for light paper theme */
+}
+[data-theme='dark'] .stats-item .h6 {
+  color: #f8fafc;
+}
+[data-theme='dark'] .stats-item .text-dark {
+  color: #f8fafc !important;
+}
+
+

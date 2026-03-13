@@ -810,3 +810,14 @@ export const moveTopics = async (topicIds, targetCategoryId) => {
     await updateCatLastPost(targetCategoryId);
   }
 };
+// Most discussed topics across all categories
+export const subscribeToTopTopics = (callback, limitCount = 50) => {
+  const q = query(
+    collection(db, 'topics'),
+    orderBy('posts_count', 'desc'),
+    limit(limitCount)
+  );
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+  }, (err) => console.error('[subscribeToTopTopics]', err));
+};

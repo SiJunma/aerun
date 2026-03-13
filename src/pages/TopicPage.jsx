@@ -17,35 +17,8 @@ import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumAuthorName from '../components/common/ForumAuthorName';
+import ForumAuthorAvatar from '../components/common/ForumAuthorAvatar';
 
-const AvatarImage = ({ src, fallbackName, size = 90 }) => {
-  const [error, setError] = useState(false);
-  const finalSrc = error || !src
-    ? `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName || '?')}&background=random`
-    : src;
-
-  return (
-    <Image
-      src={finalSrc}
-      rounded
-      fluid
-      className="mb-2 shadow-sm"
-      style={{ width: `${size}px`, height: `${size}px`, objectFit: 'cover' }}
-      referrerPolicy="no-referrer"
-      onError={(e) => {
-        if (!error) {
-          setError(true);
-        } else {
-          // If even the fallback fails, remove the onError handler to stop the loop
-          e.target.onerror = null;
-          // As a last-resort fallback, use a hardcoded generic avatar that is guaranteed to load 
-          // (or just a blank data URI to prevent broken image icons)
-          e.target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90" viewBox="0 0 90 90"><rect width="90" height="90" fill="%23ccc"/><text x="45" y="45" font-family="Arial" font-size="30" fill="%23fff" text-anchor="middle" dy=".3em">?</text></svg>';
-        }
-      }}
-    />
-  );
-};
 
 const TopicPage = () => {
   const { id } = useParams();
@@ -298,17 +271,6 @@ const TopicPage = () => {
     return authorStats[post.author_id]?.nickname || post.author_name;
   };
 
-  const getLiveAuthorAvatar = (post) => {
-    if (post.author_id === user?.uid) {
-      if (post.is_character) {
-        const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
-        return char?.avatar_url || post.author_avatar;
-      }
-      return profile?.avatar_url || post.author_avatar;
-    }
-    if (post.is_character) return post.author_avatar;
-    return authorStats[post.author_id]?.avatar_url || post.author_avatar;
-  };
 
   const getLiveAuthorStatus = (post) => {
     if (post.author_id === user?.uid) {
@@ -789,10 +751,17 @@ const TopicPage = () => {
                   )}
 
                   {/* 3. Avatar */}
-                  <AvatarImage
-                    src={getLiveAuthorAvatar(post)}
-                    fallbackName={post.author_name}
-                  />
+                  <div className="mb-2">
+                    <ForumAuthorAvatar
+                      userId={post.author_id}
+                      characterId={post.author_character_id}
+                      isCharacter={!!post.is_character}
+                      fallbackName={post.author_name}
+                      initialAvatar={post.author_avatar}
+                      size={120}
+                      className="rounded shadow-sm"
+                    />
+                  </div>
 
                   {/* 4. Posts Count */}
                   <div className="text-muted small mt-1">
@@ -1063,7 +1032,15 @@ const TopicPage = () => {
                     {getLiveAuthorStatus(myDraft)}
                   </div>
                 )}
-                <AvatarImage src={getLiveAuthorAvatar(myDraft)} fallbackName={myDraft.author_name} />
+                <ForumAuthorAvatar
+                  userId={myDraft.author_id}
+                  characterId={myDraft.author_character_id}
+                  isCharacter={!!myDraft.is_character}
+                  fallbackName={myDraft.author_name}
+                  initialAvatar={myDraft.author_avatar}
+                  size={120}
+                  className="rounded shadow-sm"
+                />
                 <div className="text-muted small mt-1">
                   {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count || 0}</strong>
                 </div>

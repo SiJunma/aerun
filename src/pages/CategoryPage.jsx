@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table, Button, Breadcrumb, Form, Toast, ToastContainer } from 'react-bootstrap';
-import { Pin, Lock, Trash2, Move, Settings, CheckSquare, XSquare } from 'lucide-react';
+import { Trash2, Move, Settings, CheckSquare, XSquare } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { 
@@ -13,6 +13,7 @@ import {
 } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumPagination from '../components/common/ForumPagination';
+import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import { format } from 'date-fns';
@@ -243,95 +244,15 @@ const CategoryPage = () => {
               </thead>
               <tbody>
                 {currentTopics.map(topic => (
-                  <tr key={topic.id} className={selectedTopicIds.includes(topic.id) ? 'table-active' : ''}>
-                    {isManaging && (
-                      <td>
-                        <Form.Check 
-                          type="checkbox"
-                          checked={selectedTopicIds.includes(topic.id)}
-                          onChange={() => toggleSelect(topic.id)}
-                        />
-                      </td>
-                    )}
-                    <td>
-                      <div className="d-flex align-items-start gap-2">
-                        <div className="flex-grow-1">
-                          <div className="d-flex align-items-center gap-2 mb-1">
-                            {topic.is_pinned && (
-                              <Pin size={14} className="topic-indicator topic-pinned" fill="currentColor" />
-                            )}
-                            {topic.is_locked && (
-                              <Lock size={14} className="topic-indicator topic-locked" />
-                            )}
-                            <Link
-                              to={`/topic/${topic.id}`}
-                              className="fw-bold d-block text-decoration-none h6 mb-0"
-                            >
-                              {topic.title}
-                            </Link>
-                          </div>
-                          {topic.description && (
-                            <div className="text-muted small mb-1 text-truncate" style={{ maxWidth: 480 }}>
-                              {topic.description}
-                            </div>
-                          )}
-                          <small className="text-muted d-flex align-items-center gap-1">
-                            <ForumAuthorName
-                              userId={topic.author_id}
-                              characterId={topic.author_character_id}
-                              isCharacter={!!topic.is_character}
-                              fallbackName={topic.author_name}
-                              className="fw-semibold text-secondary"
-                            />
-                            <span>·</span>
-                            {formatTime(topic.created_at)}
-                          </small>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="text-center">
-                      {Math.max(0, (topic.posts_count || 1) - 1)}
-                    </td>
-                    {/* <td className="text-center">{topic.views || 0}</td> */}
-                    <td>
-                      {topic.last_post_at ? (() => {
-                        const lastVisitKey = `lastVisit_${topic.id}`;
-                        const lastVisit = localStorage.getItem(lastVisitKey);
-                        const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
-                        const hasUnread = topic.last_post_author_id !== user?.uid && (!lastVisit || lastPostMs > parseInt(lastVisit, 10));
-                        return (
-                          <Link
-                            to={`/topic/${topic.id}?goLast=1`}
-                            className="text-decoration-none d-block small"
-                          >
-                            <div className="d-flex align-items-center gap-1 fw-semibold text-primary text-truncate" style={{ maxWidth: 160 }}>
-                              {hasUnread && (
-                                <span
-                                  title={lang === 'ru' ? 'Новые сообщения' : 'New posts'}
-                                  style={{
-                                    display: 'inline-block',
-                                    width: 7, height: 7,
-                                    borderRadius: '50%',
-                                    background: 'var(--bs-warning)',
-                                    flexShrink: 0
-                                  }}
-                                />
-                              )}
-                              <ForumAuthorName
-                                userId={topic.last_post_author_id}
-                                characterId={topic.last_post_author_character_id}
-                                isCharacter={!!topic.last_post_is_character}
-                                fallbackName={topic.last_post_author || topic.author_name}
-                              />
-                            </div>
-                            <div className="text-muted">{formatTime(topic.last_post_at)}</div>
-                          </Link>
-                        );
-                      })() : (
-                        <span className="text-muted small">—</span>
-                      )}
-                    </td>
-                  </tr>
+                  <TopicRow 
+                    key={topic.id}
+                    topic={topic}
+                    user={user}
+                    lang={lang}
+                    isManaging={isManaging}
+                    isSelected={selectedTopicIds.includes(topic.id)}
+                    onSelect={toggleSelect}
+                  />
                 ))}
               </tbody>
             </Table>

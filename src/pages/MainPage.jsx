@@ -5,6 +5,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCategories } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
+import ForumStats from '../components/layout/ForumStats';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -107,6 +108,8 @@ const MainPage = () => {
           </tbody>
         </Table>
       </Card>
+
+      <ForumStats />
     </Container>
   );
 };
