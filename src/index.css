@@ -1563,21 +1563,7 @@ a.badge.bg-danger:hover {
 .gap-x-2 { column-gap: 0.5rem; }
 .gap-y-1 { row-gap: 0.25rem; }
 
-/* Topic Page Neutral theme contrast refinements */
-[data-theme='neutral'] .topic-description,
-[data-theme='neutral'] .topic-meta-bar,
-[data-theme='neutral'] .author-sidebar .text-muted,
-[data-theme='neutral'] .post-header-strip .text-muted {
-  opacity: 1 !important;
-  color: #5c4b3a !important; /* Darker secondary for better readability on parchment */
-}
-
-[data-theme='neutral'] .topic-meta-bar strong,
-[data-theme='neutral'] .author-sidebar .text-muted strong {
-  color: #382d1d !important; /* Main text color for numbers/highlights */
-}
-
-/* Topic Page Light theme (default) contrast refinements */
+/* Topic Page Base visibility (removes transparency) */
 .topic-description,
 .topic-meta-bar,
 .author-sidebar .text-muted,
@@ -1585,16 +1571,40 @@ a.badge.bg-danger:hover {
   opacity: 1 !important;
 }
 
-:root:not([data-theme='dark']):not([data-theme='neutral']) .topic-description,
-:root:not([data-theme='dark']):not([data-theme='neutral']) .topic-meta-bar,
-:root:not([data-theme='dark']):not([data-theme='neutral']) .author-sidebar .text-muted,
-:root:not([data-theme='dark']):not([data-theme='neutral']) .post-header-strip .text-muted {
-  color: #475569 !important; /* Slate 600 for better contrast on white */
+/* Light theme colors (Default) */
+.topic-description,
+.topic-meta-bar,
+.author-sidebar .text-muted,
+.post-header-strip .text-muted {
+  color: #475569 !important; /* Slate 600 */
+}
+.topic-meta-bar strong,
+.author-sidebar .text-muted strong {
+  color: #1e293b !important; /* Slate 800 */
 }
 
-:root:not([data-theme='dark']):not([data-theme='neutral']) .topic-meta-bar strong,
-:root:not([data-theme='dark']):not([data-theme='neutral']) .author-sidebar .text-muted strong {
-  color: #1e293b !important; /* Slate 800 */
+/* Dark theme overrides - Restoration */
+[data-theme='dark'] .topic-description,
+[data-theme='dark'] .topic-meta-bar,
+[data-theme='dark'] .author-sidebar .text-muted,
+[data-theme='dark'] .post-header-strip .text-muted {
+  color: #cbd5e1 !important; /* Slate 300 - clear on dark navy */
+}
+[data-theme='dark'] .topic-meta-bar strong,
+[data-theme='dark'] .author-sidebar .text-muted strong {
+  color: #f1f5f9 !important; /* Slate 100 - bright */
+}
+
+/* Neutral theme overrides */
+[data-theme='neutral'] .topic-description,
+[data-theme='neutral'] .topic-meta-bar,
+[data-theme='neutral'] .author-sidebar .text-muted,
+[data-theme='neutral'] .post-header-strip .text-muted {
+  color: #5c4b3a !important; /* Darker secondary for parchment */
+}
+[data-theme='neutral'] .topic-meta-bar strong,
+[data-theme='neutral'] .author-sidebar .text-muted strong {
+  color: #382d1d !important; /* Main highlights */
 }
 
 [data-theme='dark'] .online-users-panel {
