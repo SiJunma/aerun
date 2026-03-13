@@ -173,7 +173,7 @@ const CategoryPage = () => {
         <div>
           <h2 className="mb-1">{categoryTitle}</h2>
           {category?.description && (
-            <div className="text-muted small mb-0" style={{ lineHeight: 1.2 }}>
+            <div className="text-muted mb-0" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
               {resolveText(category.description)}
             </div>
           )}
@@ -212,7 +212,7 @@ const CategoryPage = () => {
             <h5 className="text-muted mb-2">
               {lang === 'ru' ? 'Тем пока нет' : 'No topics yet'}
             </h5>
-            <p className="text-muted small mb-4">
+            <p className="text-muted mb-4" style={{ fontSize: '0.875rem' }}>
               {lang === 'ru'
                 ? 'Будь первым — создай тему!'
                 : 'Be the first to start a discussion!'}

@@ -31,8 +31,6 @@ const MainPage = () => {
 
   return (
     <Container className="py-4">
-      <h1 className="mb-4">{t('common.welcome')}</h1>
-      <p className="lead text-muted mb-5">{t('common.description')}</p>
 
       <Card className="shadow-sm border-0">
         <Table hover responsive className="mb-0">
@@ -51,7 +49,7 @@ const MainPage = () => {
                   <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1">
                     {typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title}
                   </Link>
-                  <div className="text-muted small" style={{ lineHeight: 1.2 }}>
+                  <div className="text-muted" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
                     {typeof cat.description === 'object' ? (lang === 'ru' ? cat.description.ru : cat.description.en) : cat.description}
                   </div>
                 </td>
@@ -59,7 +57,7 @@ const MainPage = () => {
                 <td className="text-center align-middle">{cat.posts_count || 0}</td>
                 <td className="align-middle">
                   {cat.last_post_topic_id ? (
-                    <div className="small">
+                    <div>
                       <Link
                         to={`/topic/${cat.last_post_topic_id}`}
                         className="d-block fw-semibold text-decoration-none text-truncate mb-1"

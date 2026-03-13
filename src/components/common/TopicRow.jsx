@@ -4,8 +4,7 @@ import { Form, Image } from 'react-bootstrap';
 import { Pin, Lock } from 'lucide-react';
 import ForumAuthorName from './ForumAuthorName';
 import LastPostInfo from './LastPostInfo';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
+import AuthorMeta from './AuthorMeta';
 
 const TopicRow = ({ 
   topic, 
@@ -17,16 +16,6 @@ const TopicRow = ({
   showCategory = false,
   categoryName = ''
 }) => {
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '—';
-    try {
-      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
-    } catch {
-      return '—';
-    }
-  };
-
   const lastVisitKey = `lastVisit_${topic.id}`;
   const lastVisit = localStorage.getItem(lastVisitKey);
   const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
@@ -104,17 +93,14 @@ const TopicRow = ({
               </div>
             )}
             <div className="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-1 mt-1">
-              <div className="text-muted small d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-1 mb-1 mb-sm-0">
-                <span className="text-nowrap">{formatTime(topic.created_at)}</span>
-                <span className="d-none d-sm-inline">·</span>
-                <ForumAuthorName
-                  userId={topic.author_id}
-                  characterId={topic.author_character_id}
-                  isCharacter={!!topic.is_character}
-                  fallbackName={topic.author_name}
-                  className="fw-semibold text-secondary"
-                />
-              </div>
+              <AuthorMeta
+                date={topic.created_at}
+                authorId={topic.author_id}
+                authorCharacterId={topic.author_character_id}
+                isCharacter={!!topic.is_character}
+                authorName={topic.author_name}
+                lang={lang}
+              />
               {showCategory && categoryName && (
                 <div className="d-flex align-items-center gap-1">
                   <span className="text-muted small d-none d-sm-inline">·</span>

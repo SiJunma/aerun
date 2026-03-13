@@ -65,8 +65,15 @@ const Navigation = () => {
             className="me-2 border-0 p-1"
             onClick={() => setExpanded(!expanded)}
           />
-          <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)}>
-            {t('common.app_name')}
+          <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="d-flex align-items-center gap-2">
+            {settings?.logoUrl && (
+              <img 
+                src={settings.logoUrl} 
+                alt="Logo" 
+                style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
+              />
+            )}
+            <span>{settings?.forumName || t('common.app_name')}</span>
           </Navbar.Brand>
         </div>
 

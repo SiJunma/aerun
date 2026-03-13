@@ -366,7 +366,7 @@ a:hover {
     content: attr(data-label);
     font-weight: 700;
     text-transform: uppercase;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     letter-spacing: 0.05em;
     color: var(--secondary-color);
     text-align: left;
@@ -519,7 +519,7 @@ a:hover {
   /* Keep header text light for contrast */
   border-bottom: 2px solid var(--border-color);
   text-transform: uppercase;
-  font-size: 0.75rem; /* Standardized */
+  font-size: 0.875rem; /* Standardized to 14px */
   font-weight: 700;
   letter-spacing: 0.05em;
   padding: 12px;
@@ -970,7 +970,7 @@ a:hover {
 .role-badge {
   display: inline-block;
   /* padding: 0.25rem 0.85rem; */
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -1015,7 +1015,7 @@ a:hover {
   padding: 1rem 1.5rem;
   transition: all 0.3s ease;
   background: transparent !important;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   border-radius: 0 !important;
@@ -1125,7 +1125,7 @@ a:hover {
 }
 
 .footer-link {
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--secondary-color);
   text-decoration: none;
   opacity: 0.8;
@@ -1302,7 +1302,7 @@ a:hover {
 
 .preloader-text {
   margin-top: 1.5rem;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -1344,11 +1344,13 @@ a:hover {
 
 [data-theme='dark'] .draft-post-card {
   background-color: rgba(15, 23, 42, 0.6) !important;
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
 
 [data-theme='neutral'] .draft-post-card {
   background-color: rgba(244, 241, 234, 0.6) !important;
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
 
@@ -1367,7 +1369,7 @@ a:hover {
 }
 
 .mini-pagination .mini-page-link {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   padding: 0 4px;
   background: rgba(var(--primary-rgb), 0.1);
   border-radius: 3px;
@@ -1421,7 +1423,7 @@ a:hover {
 }
 
 .forum-header-text {
-  font-size: 0.75rem !important;
+  font-size: 0.875rem !important;
   font-weight: 700 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.05em !important;
@@ -1468,12 +1470,12 @@ a:hover {
 }
 
 .extra-small {
-  font-size: 0.7rem;
+  font-size: 0.8rem;
 }
 
 .btn-xs {
   padding: 0.125rem 0.25rem;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   line-height: 1;
 }
 
@@ -1543,4 +1545,14 @@ a:hover {
   color: #f8fafc !important;
 }
 
+/* Forum Banner */
+.forum-banner {
+    background-color: var(--bs-dark);
+    color: var(--bs-light);
+    overflow: hidden;
+}
 
+.banner-content img {
+    max-width: 100%;
+    height: auto;
+}

@@ -606,13 +606,13 @@ const TopicPage = () => {
             <h1 className="h2 mb-0">{topic.title}</h1>
           </div>
           {topic.description && (
-            <p className="text-muted mb-0 small opacity-75">{topic.description}</p>
+            <p className="text-muted mb-0 opacity-75" style={{ fontSize: '0.875rem' }}>{topic.description}</p>
           )}
         </div>
         
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end align-items-center gap-3">
           {/* Metadata Group */}
-          <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap small text-muted opacity-75">
+          <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap text-muted opacity-75" style={{ fontSize: '0.875rem' }}>
             <span className="text-nowrap">
               {t('forum.author')}:{' '}
               <ForumAuthorName
@@ -646,7 +646,7 @@ const TopicPage = () => {
                     style={{ background: 'transparent', opacity: 0.8 }}
                   >
                     <Settings size={14} />
-                    <span className="small">{t('forum.manage_topic')}</span>
+                    <span>{t('forum.manage_topic')}</span>
                   </Dropdown.Toggle>
 
                   <Dropdown.Menu className="shadow-sm border-0">
@@ -722,7 +722,7 @@ const TopicPage = () => {
             <Card.Body className="p-0">
               <Row className="g-0">
                 {/* Author sidebar */}
-                <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 text-center d-flex flex-column align-items-center">
+                <Col md={3} lg={2} className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
                   {/* 1. Nickname */}
                   <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
                     <ForumAuthorName
@@ -735,7 +735,7 @@ const TopicPage = () => {
 
                   {/* 2. Status */}
                   {getLiveAuthorStatus(post) && (
-                    <div className="text-primary small mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                    <div className="text-primary mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
                       {getLiveAuthorStatus(post)}
                     </div>
                   )}
@@ -754,28 +754,28 @@ const TopicPage = () => {
                   </div>
 
                   {/* 4. Posts Count */}
-                  <div className="text-muted small mt-1">
+                  <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.8rem' }}>
                     {t('profile.posts_count')}: <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
                   </div>
 
                   {/* 5. Reputation */}
-                  <div className="text-muted small">
+                  <div className="text-muted" style={{ fontSize: '0.875rem' }}>
                     {t('profile.reputation')}: <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
                   </div>
 
                   {/* 6. Role/Mask */}
                   {!post.is_character && (
-                    <div className="mt-2 text-center w-100">{getRoleBadge(post)}</div>
+                    <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(post)}</div>
                   )}
                   {post.is_character && (
-                    <div className="text-muted mt-1 small opacity-75">
+                    <div className="text-muted mt-1 mb-3 opacity-75" style={{ fontSize: '0.875rem' }}>
                       {lang === 'ru' ? 'персонаж' : 'character'}
                       {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
                     </div>
                   )}
 
                   {/* 7. Footer Links (Moved here for mobile stacking) */}
-                  <div className="mt-3 mt-md-auto pt-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
+                  <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
                     <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
                       {t('profile.view_profile')}
                     </Link>
