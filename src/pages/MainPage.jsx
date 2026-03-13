@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCategories } from '../api/forum';
-import ForumAuthorName from '../components/common/ForumAuthorName';
+import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
@@ -58,48 +58,37 @@ const MainPage = () => {
                 <td className="text-center align-middle">{cat.topics_count || 0}</td>
                 <td className="text-center align-middle">{cat.posts_count || 0}</td>
                 <td className="align-middle">
-                  {cat.last_post_topic_id ? (() => {
-                    const lastVisitKey = `lastVisit_${cat.last_post_topic_id}`;
-                    const lastVisit = localStorage.getItem(lastVisitKey);
-                    const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
-                    const hasUnread = cat.last_post_author_id !== user?.uid && (!lastVisit || lastPostMs > parseInt(lastVisit, 10));
-                    return (
-                      <div className="small">
-                        <Link
-                          to={`/topic/${cat.last_post_topic_id}`}
-                          className="d-block fw-semibold text-decoration-none text-truncate mb-1"
-                          style={{ maxWidth: 200 }}
-                        >
-                          {cat.last_post_topic_title || '—'}
-                        </Link>
-                        <Link
-                          to={`/topic/${cat.last_post_topic_id}?goLast=1`}
-                          className="text-decoration-none d-flex align-items-center gap-1 text-muted"
-                        >
-                          {hasUnread && (
-                            <span
-                              title={lang === 'ru' ? 'Новые сообщения' : 'New posts'}
-                              style={{
-                                display: 'inline-block',
-                                width: 7, height: 7,
-                                borderRadius: '50%',
-                                background: 'var(--bs-warning)',
-                                flexShrink: 0
-                              }}
-                            />
-                          )}
-                          <ForumAuthorName
-                            userId={cat.last_post_author_id}
-                            characterId={cat.last_post_author_character_id}
+                  {cat.last_post_topic_id ? (
+                    <div className="small">
+                      <Link
+                        to={`/topic/${cat.last_post_topic_id}`}
+                        className="d-block fw-semibold text-decoration-none text-truncate mb-1"
+                        style={{ maxWidth: 200 }}
+                      >
+                        {cat.last_post_topic_title || '—'}
+                      </Link>
+                      
+                      {(() => {
+                        const lastVisitKey = `lastVisit_${cat.last_post_topic_id}`;
+                        const lastVisit = localStorage.getItem(lastVisitKey);
+                        const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
+                        const hasUnread = cat.last_post_author_id !== user?.uid && (!lastVisit || lastPostMs > parseInt(lastVisit, 10));
+                        
+                        return (
+                          <LastPostInfo
+                            topicId={cat.last_post_topic_id}
+                            lastPostAt={cat.last_post_at}
+                            authorId={cat.last_post_author_id}
+                            authorCharacterId={cat.last_post_author_character_id}
                             isCharacter={!!cat.last_post_is_character}
-                            fallbackName={cat.last_post_author}
+                            authorName={cat.last_post_author}
+                            hasUnread={hasUnread}
+                            lang={lang}
                           />
-                          <span>·</span>
-                          <span>{formatTime(cat.last_post_at)}</span>
-                        </Link>
-                      </div>
-                    );
-                  })() : (
+                        );
+                      })()}
+                    </div>
+                  ) : (
                     <span className="text-muted small">{t('forum.no_posts')}</span>
                   )}
                 </td>

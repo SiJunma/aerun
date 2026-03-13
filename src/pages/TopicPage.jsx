@@ -584,7 +584,6 @@ const TopicPage = () => {
 
   const handlePageChange = (page) => {
     setSearchParams({ page });
-    window.scrollTo({ top: 0 });
   };
 
   return (

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Form, Image } from 'react-bootstrap';
 import { Pin, Lock } from 'lucide-react';
 import ForumAuthorName from './ForumAuthorName';
-import ForumAuthorAvatar from './ForumAuthorAvatar';
+import LastPostInfo from './LastPostInfo';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -131,44 +131,16 @@ const TopicRow = ({
         {Math.max(0, (topic.posts_count || 1) - 1)}
       </td>
       <td>
-        {topic.last_post_at ? (
-          <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center gap-1 gap-md-2 small">
-            <Link
-              to={`/topic/${topic.id}?goLast=1`}
-              className="text-decoration-none text-muted last-post-time text-nowrap"
-            >
-              {hasUnread && (
-                <span
-                  title={lang === 'ru' ? 'Новые сообщения' : 'New posts'}
-                  className="unread-dot me-1"
-                />
-              )}
-              {formatTime(topic.last_post_at)}
-            </Link>
-            
-            <div className="d-flex align-items-center gap-2">
-              {topic.last_post_author_id && (
-                <ForumAuthorAvatar
-                  userId={topic.last_post_author_id}
-                  characterId={topic.last_post_author_character_id}
-                  isCharacter={!!topic.last_post_is_character}
-                  fallbackName={topic.last_post_author || topic.author_name}
-                  size={20}
-                  roundedCircle={true}
-                  className="shadow-sm"
-                />
-              )}
-
-              <div className="text-truncate" style={{ maxWidth: 100 }}>
-                <span className="fw-semibold text-secondary">
-                  {topic.last_post_author || topic.author_name}
-                </span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <span className="text-muted small">—</span>
-        )}
+        <LastPostInfo
+          topicId={topic.id}
+          lastPostAt={topic.last_post_at}
+          authorId={topic.last_post_author_id}
+          authorCharacterId={topic.last_post_author_character_id}
+          isCharacter={!!topic.last_post_is_character}
+          authorName={topic.last_post_author || topic.author_name}
+          hasUnread={hasUnread}
+          lang={lang}
+        />
       </td>
     </tr>
   );
