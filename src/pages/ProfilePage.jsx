@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Toast, ToastContainer, Badge, OverlayTrigger, Tooltip, Spinner } from 'react-bootstrap';
+import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Toast, ToastContainer, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save } from 'lucide-react';
@@ -601,26 +601,63 @@ const ProfilePage = () => {
                         <Col md={6}>
                           <Form.Group className="mb-3">
                             <Form.Label className="fw-bold">{t('profile.language')}</Form.Label>
-                            <Form.Select
-                              value={accountFormData.language}
-                              onChange={(e) => setAccountFormData({ ...accountFormData, language: e.target.value })}
-                            >
-                              <option value="en">English</option>
-                              <option value="ru">Русский</option>
-                            </Form.Select>
+                            <Dropdown className="w-100">
+                              <Dropdown.Toggle 
+                                variant="outline-management" 
+                                className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
+                              >
+                                {accountFormData.language === 'ru' ? 'Русский' : 'English'}
+                              </Dropdown.Toggle>
+                              <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
+                                <Dropdown.Item 
+                                  active={accountFormData.language === 'en'}
+                                  onClick={() => setAccountFormData({ ...accountFormData, language: 'en' })}
+                                >
+                                  English
+                                </Dropdown.Item>
+                                <Dropdown.Item 
+                                  active={accountFormData.language === 'ru'}
+                                  onClick={() => setAccountFormData({ ...accountFormData, language: 'ru' })}
+                                >
+                                  Русский
+                                </Dropdown.Item>
+                              </Dropdown.Menu>
+                            </Dropdown>
                           </Form.Group>
                         </Col>
                         <Col md={6}>
                           <Form.Group className="mb-3">
                             <Form.Label className="fw-bold">{t('profile.theme')}</Form.Label>
-                            <Form.Select
-                              value={accountFormData.theme}
-                              onChange={(e) => setAccountFormData({ ...accountFormData, theme: e.target.value })}
-                            >
-                              <option value="light">{t('profile.theme_light')}</option>
-                              <option value="dark">{t('profile.theme_dark')}</option>
-                              <option value="neutral">{t('profile.theme_neutral')}</option>
-                            </Form.Select>
+                            <Dropdown className="w-100">
+                              <Dropdown.Toggle 
+                                variant="outline-management" 
+                                className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
+                              >
+                                {accountFormData.theme === 'light' ? t('profile.theme_light') : 
+                                 accountFormData.theme === 'dark' ? t('profile.theme_dark') : 
+                                 t('profile.theme_neutral')}
+                              </Dropdown.Toggle>
+                              <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
+                                <Dropdown.Item 
+                                  active={accountFormData.theme === 'light'}
+                                  onClick={() => setAccountFormData({ ...accountFormData, theme: 'light' })}
+                                >
+                                  {t('profile.theme_light')}
+                                </Dropdown.Item>
+                                <Dropdown.Item 
+                                  active={accountFormData.theme === 'dark'}
+                                  onClick={() => setAccountFormData({ ...accountFormData, theme: 'dark' })}
+                                >
+                                  {t('profile.theme_dark')}
+                                </Dropdown.Item>
+                                <Dropdown.Item 
+                                  active={accountFormData.theme === 'neutral'}
+                                  onClick={() => setAccountFormData({ ...accountFormData, theme: 'neutral' })}
+                                >
+                                  {t('profile.theme_neutral')}
+                                </Dropdown.Item>
+                              </Dropdown.Menu>
+                            </Dropdown>
                           </Form.Group>
                         </Col>
                       </Row>

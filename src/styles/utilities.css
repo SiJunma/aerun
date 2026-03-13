@@ -17,11 +17,11 @@
 }
 
 .topic-pinned {
-  color: #f59e0b; /* Amber/Gold */
+  color: #b45309; /* Deeper Amber for better contrast on white */
 }
 
 [data-theme='neutral'] .topic-pinned {
-  color: #b45309 !important; /* Richer Brownish-Amber for Sepia theme */
+  color: #78350f !important; /* Even deeper brownish-amber for Sepia */
 }
 
 .topic-locked {
