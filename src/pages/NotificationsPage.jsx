@@ -179,7 +179,7 @@ const NotificationsPage = () => {
           <Row className="align-items-start g-3">
             <Col xs="auto" className="pt-1 flex-shrink-0">
               <div 
-                className="d-flex align-items-center justify-content-center bg-secondary bg-opacity-20 text-primary rounded-circle"
+                className="d-flex align-items-center justify-content-center text-primary rounded-circle icon-box-small"
                 style={{ width: '40px', height: '40px' }}
               >
                 {meta?.icon ?? <Bell size={18} />}
@@ -229,7 +229,7 @@ const NotificationsPage = () => {
                   {activeTab === 'active' && (
                     <Button 
                       variant="link" 
-                      className="p-0 text-muted hover-opacity-100 opacity-50 transition-all archive-btn d-flex align-items-center"
+                      className="p-0 text-muted archive-btn d-flex align-items-center"
                       onClick={(e) => handleArchive(e, n.id)}
                       title={t('notifications.archive')}
                     >
@@ -247,13 +247,10 @@ const NotificationsPage = () => {
                   </div>
                   {payload.admin_message && (
                     <div
-                      className="mt-2 p-3 rounded-3 small"
+                      className="mt-2 p-3 rounded-3 small message-preview-box"
                       style={{ 
-                        background: 'rgba(var(--primary-rgb), 0.05)', 
-                        border: '1px solid var(--border-color)',
                         whiteSpace: 'pre-wrap', 
                         wordBreak: 'break-word',
-                        color: 'var(--text-color)',
                         lineHeight: '1.5'
                       }}
                     >
@@ -336,36 +333,43 @@ const NotificationsPage = () => {
             border-left: 4px solid transparent !important;
           }
           .notification-card.unread-notif {
-            background-color: rgba(var(--primary-rgb), 0.05) !important;
-            border-left: 4px solid var(--primary-color) !important;
+            border-left: 2px solid var(--primary-color) !important;
             border-top-left-radius: 4px !important;
             border-bottom-left-radius: 4px !important;
+            background-color: var(--card-bg) !important;
           }
           .notification-card.read-notif {
-            opacity: 0.6;
+            opacity: 1;
+            border-left: 2px solid transparent !important;
+          }
+          .notification-card.read-notif .card-body {
+            color: var(--secondary-color);
           }
           .notification-card:hover {
-            background-color: rgba(var(--primary-rgb), 0.02) !important;
+            border-color: rgba(var(--primary-rgb), 0.3) !important;
+            transform: translateY(-1px);
           }
           .archive-btn:hover {
             color: var(--bs-danger) !important;
-            opacity: 1 !important;
           }
           .nav-pills .nav-link {
             color: var(--text-color);
-            opacity: 0.6;
+            opacity: 1;
             font-weight: 500;
             border-radius: 20px;
             padding: 8px 16px;
             transition: all 0.2s ease;
+            border: 1px solid transparent !important;
           }
           .nav-pills .nav-link.active {
             background-color: var(--primary-color) !important;
+            border-color: var(--primary-color) !important;
             color: var(--bg-color) !important;
             opacity: 1;
           }
           .nav-pills .nav-link:hover:not(.active) {
-            background-color: rgba(var(--primary-rgb), 0.1);
+            background-color: var(--input-bg);
+            border-color: var(--border-color) !important;
             opacity: 1;
           }
           .archiving-exit {
@@ -379,10 +383,10 @@ const NotificationsPage = () => {
           }
           .badge-new {
             font-size: 0.6rem;
-            background-color: rgba(var(--primary-rgb), 0.08) !important;
-            color: var(--primary-color) !important;
-            border: 1px solid rgba(var(--primary-rgb), 0.15) !important;
-            opacity: 0.9;
+            background-color: var(--primary-color) !important;
+            color: var(--bg-color) !important;
+            border: 1px solid var(--primary-color) !important;
+            opacity: 1;
           }
           .custom-toast {
             min-width: 240px; 
@@ -393,26 +397,56 @@ const NotificationsPage = () => {
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4) !important;
           }
           .icon-box {
-            background-color: rgba(var(--primary-rgb), 0.05) !important;
+            background-color: #f1f5f9 !important;
             border: 1px solid var(--border-color) !important;
             padding: 12px;
             border-radius: 12px;
-            color: var(--primary-color);
-            opacity: 0.7;
-            transition: opacity 0.2s ease;
+            color: #0f172a;
+            opacity: 1;
+            transition: transform 0.2s ease;
+          }
+          [data-theme='dark'] .icon-box {
+            background-color: #2d3d5a !important;
+            color: #f8fafc;
+          }
+          [data-theme='neutral'] .icon-box {
+            background-color: #ede9df !important;
+            color: #382d1d;
+          }
+          .icon-box-small {
+            background-color: #f8f9fa !important;
+            border: 1px solid var(--border-color) !important;
+          }
+          [data-theme='dark'] .icon-box-small {
+            background-color: #2d3d5a !important;
+          }
+          [data-theme='neutral'] .icon-box-small {
+            background-color: #ede9df !important;
+          }
+          .message-preview-box {
+            background-color: #f8f9fa !important;
+            border: 1px solid var(--border-color) !important;
+            color: var(--text-color) !important;
+          }
+          [data-theme='dark'] .message-preview-box {
+            background-color: #1a2333 !important;
+            border-color: rgba(255, 255, 255, 0.1) !important;
+          }
+          [data-theme='neutral'] .message-preview-box {
+            background-color: #ede9df !important;
           }
           .icon-box:hover {
             opacity: 1;
           }
           .tab-badge {
-            background-color: rgba(var(--primary-rgb), 0.08) !important;
-            color: var(--primary-color) !important;
-            border: 1px solid rgba(var(--primary-rgb), 0.2) !important;
+            background-color: var(--primary-color) !important;
+            color: var(--bg-color) !important;
+            border: 1px solid var(--primary-color) !important;
             font-size: 0.8rem;
             margin-left: 6px;
             font-weight: 700;
             padding: 0.1rem 0.5rem;
-            opacity: 0.9;
+            opacity: 1;
             min-width: 1.8rem;
             display: inline-flex;
             align-items: center;
@@ -424,14 +458,18 @@ const NotificationsPage = () => {
             border-color: rgba(148, 163, 184, 0.4) !important;
           }
           .nav-pills .nav-link.active .tab-badge {
-            background-color: var(--bg-color) !important;
-            color: var(--primary-color) !important;
-            border-color: rgba(var(--primary-rgb), 0.2) !important;
-            box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+            background-color: #0f172a !important;
+            color: #f8fafc !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+            box-shadow: none;
+          }
+          [data-theme='light'] .nav-pills .nav-link.active .tab-badge {
+            background-color: rgba(0,0,0,0.1) !important;
+            color: #000 !important;
           }
           .nav-pills .nav-link.active .tab-badge.archived-badge {
-            color: var(--primary-color) !important;
-            border-color: rgba(var(--primary-rgb), 0.3) !important;
+            color: #f8fafc !important;
+            border-color: rgba(255, 255, 255, 0.3) !important;
           }
         `}
       </style>
@@ -502,7 +540,7 @@ const NotificationsPage = () => {
       {currentSet.length === 0 ? (
         <Card className="text-center py-5 border-0 bg-transparent">
           <Card.Body>
-            <div className="mb-4 text-muted opacity-25">
+            <div className="mb-4 text-muted">
               {activeTab === 'active' ? <BellOff size={64} strokeWidth={1} /> : <Archive size={64} strokeWidth={1} />}
             </div>
             <h4 className="text-muted fw-light">

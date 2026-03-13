@@ -140,7 +140,7 @@ const MembersPage = () => {
         </p>
       </div>
 
-      <Card className="shadow-sm border-0 mb-4" style={{ background: 'rgba(255, 255, 255, 0.03)', backdropFilter: 'blur(10px)' }}>
+      <Card className="shadow-sm border-0 mb-4 bg-card">
         <Card.Body className="p-3">
           <Row className="g-3 align-items-center">
             <Col md={7}>

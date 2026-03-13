@@ -30,7 +30,7 @@ const MainPage = () => {
   };
 
   return (
-    <Container className="py-4">
+    <Container className="pt-5 pb-4">
 
       <Card className="shadow-sm border-0">
         <Table hover responsive className="mb-0">

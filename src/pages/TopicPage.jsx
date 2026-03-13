@@ -232,7 +232,7 @@ const TopicPage = () => {
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'start' });
           el.classList.add('highlight-new-post');
-          setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
+          setTimeout(() => el.classList.remove('highlight-new-post'), 1000);
         } else if (attempts < 15) {
           attempts++;
           setTimeout(tryScroll, 200);
@@ -395,7 +395,7 @@ const TopicPage = () => {
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
           element.classList.add('highlight-new-post');
-          setTimeout(() => element.classList.remove('highlight-new-post'), 2000);
+          setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
         }
       }, 500);
 
@@ -1001,12 +1001,11 @@ const TopicPage = () => {
         <Card
           id={`post-${myDraft.id}`}
           className="mb-4 shadow-sm border-0 post-card draft-post-card"
-          style={{ opacity: 0.82 }}
         >
           <Card.Body className="p-0">
             <Row className="g-0">
               {/* Author sidebar */}
-              <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 text-center d-flex flex-column align-items-center">
+              <Col md={3} lg={2} className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
                 <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
                   <ForumAuthorName
                     userId={myDraft.author_id}
@@ -1016,36 +1015,38 @@ const TopicPage = () => {
                   />
                 </div>
                 {getLiveAuthorStatus(myDraft) && (
-                  <div className="text-primary small mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                  <div className="text-primary mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
                     {getLiveAuthorStatus(myDraft)}
                   </div>
                 )}
-                <ForumAuthorAvatar
-                  userId={myDraft.author_id}
-                  characterId={myDraft.author_character_id}
-                  isCharacter={!!myDraft.is_character}
-                  fallbackName={myDraft.author_name}
-                  initialAvatar={myDraft.author_avatar}
-                  size={120}
-                  className="rounded shadow-sm"
-                />
-                <div className="text-muted small mt-1">
+                <div className="mb-2">
+                  <ForumAuthorAvatar
+                    userId={myDraft.author_id}
+                    characterId={myDraft.author_character_id}
+                    isCharacter={!!myDraft.is_character}
+                    fallbackName={myDraft.author_name}
+                    initialAvatar={myDraft.author_avatar}
+                    size={120}
+                    className="rounded shadow-sm"
+                  />
+                </div>
+                <div className="text-muted mt-1" style={{ fontSize: '0.8rem' }}>
                   {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count || 0}</strong>
                 </div>
-                <div className="text-muted small">
+                <div className="text-muted" style={{ fontSize: '0.875rem' }}>
                   {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation || 0}</strong>
                 </div>
                 {!myDraft.is_character && (
-                  <div className="mt-2 text-center w-100">{getRoleBadge(myDraft)}</div>
+                  <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(myDraft)}</div>
                 )}
                 {myDraft.is_character && (
-                  <div className="text-muted mt-1 small opacity-75">
+                  <div className="text-muted mt-1 mb-3" style={{ fontSize: '0.875rem' }}>
                     {lang === 'ru' ? 'персонаж' : 'character'}
                     {getLiveOwnerName(myDraft) && ` (${getLiveOwnerName(myDraft)})`}
                   </div>
                 )}
                 {/* Draft Status Links */}
-                <div className="mt-3 mt-md-auto pt-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
+                <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
                   <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
                     {t('profile.view_profile')}
                   </Link>
@@ -1056,11 +1057,11 @@ const TopicPage = () => {
               <Col md={9} lg={10} className="d-flex flex-column">
                 {/* Header Strip — no date, no post number, just DRAFT badge */}
                 <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
-                  <Badge bg="secondary" className="opacity-75" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
+                  <Badge bg="secondary" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
                     <FilePen size={11} className="me-1" />
                     {t('forum.draft_label')}
                   </Badge>
-                  <span className="text-muted small opacity-40 fst-italic">
+                  <span className="text-muted small fst-italic">
                     {t('forum.draft_only_you')}
                   </span>
                 </div>
@@ -1100,15 +1101,15 @@ const TopicPage = () => {
                       </div>
                     )}
                     {!editingPostId && getLiveAuthorSignature(myDraft) && (
-                      <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
+                      <div className="mt-4 pt-3 border-top small text-muted post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
                         <BBCode>{getLiveAuthorSignature(myDraft)}</BBCode>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Draft Management Links (Moved here) */}
-                <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
+                {/* Draft Management Links (Aligned with post footer) */}
+                <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed post-footer-links">
                   {/* Delete — allowed even on locked topics */}
                   {!editingPostId && (
                     <Button

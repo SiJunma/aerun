@@ -43,7 +43,7 @@ const ConfirmModal = ({
       onHide={onHide}
       title={title || t('common.confirm_title') || 'Confirm Action'}
       footer={footer}
-      className="confirm-modal"
+      className="premium-modal confirm-modal"
     >
       <p className="mb-0 text-muted">
         {message || t('common.confirm_message') || 'Are you sure you want to proceed?'}
