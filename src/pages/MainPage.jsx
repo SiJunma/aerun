@@ -38,7 +38,7 @@ const MainPage = () => {
         <Table hover responsive className="mb-0">
           <thead>
             <tr>
-              <th>{t('forum.category')}</th>
+              <th style={{ minWidth: 300 }}>{t('forum.category')}</th>
               <th className="text-center">{t('forum.topics')}</th>
               <th className="text-center">{t('forum.posts')}</th>
               <th>{t('forum.last_post')}</th>
@@ -51,9 +51,9 @@ const MainPage = () => {
                   <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1">
                     {typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title}
                   </Link>
-                  <small className="text-muted">
+                  <div className="text-muted small" style={{ lineHeight: 1.2 }}>
                     {typeof cat.description === 'object' ? (lang === 'ru' ? cat.description.ru : cat.description.en) : cat.description}
-                  </small>
+                  </div>
                 </td>
                 <td className="text-center align-middle">{cat.topics_count || 0}</td>
                 <td className="text-center align-middle">{cat.posts_count || 0}</td>

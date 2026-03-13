@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table, Button, Breadcrumb, Form, Toast, ToastContainer } from 'react-bootstrap';
-import { Trash2, Move, Settings, CheckSquare, XSquare } from 'lucide-react';
+import { Trash2, Move, Settings, CheckSquare, XSquare, Pin, Lock } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { 
@@ -170,14 +170,16 @@ const CategoryPage = () => {
         <Breadcrumb.Item active>{categoryTitle}</Breadcrumb.Item>
       </Breadcrumb>
 
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3 mb-4">
         <div>
           <h2 className="mb-1">{categoryTitle}</h2>
           {category?.description && (
-            <p className="text-muted mb-0 small">{resolveText(category.description)}</p>
+            <div className="text-muted small mb-0" style={{ lineHeight: 1.2 }}>
+              {resolveText(category.description)}
+            </div>
           )}
         </div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2 flex-wrap">
           {isStaff && (
             <Button 
               variant={isManaging ? "secondary" : "outline-primary"}

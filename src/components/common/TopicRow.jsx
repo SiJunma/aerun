@@ -105,15 +105,6 @@ const TopicRow = ({
             )}
             <div className="d-flex align-items-center gap-1 flex-wrap">
               <small className="text-muted d-flex align-items-center gap-1">
-                <ForumAuthorAvatar
-                  userId={topic.author_id}
-                  characterId={topic.author_character_id}
-                  isCharacter={!!topic.is_character}
-                  fallbackName={topic.author_name}
-                  initialAvatar={topic.author_avatar}
-                  size={16}
-                  className="rounded shadow-sm"
-                />
                 <ForumAuthorName
                   userId={topic.author_id}
                   characterId={topic.author_character_id}
@@ -141,11 +132,10 @@ const TopicRow = ({
       </td>
       <td>
         {topic.last_post_at ? (
-          <div className="d-flex align-items-center gap-2 small">
+          <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center gap-1 gap-md-2 small">
             <Link
               to={`/topic/${topic.id}?goLast=1`}
-              className="text-decoration-none text-muted last-post-time"
-              style={{ minWidth: 'fit-content' }}
+              className="text-decoration-none text-muted last-post-time text-nowrap"
             >
               {hasUnread && (
                 <span
@@ -156,21 +146,24 @@ const TopicRow = ({
               {formatTime(topic.last_post_at)}
             </Link>
             
-            {topic.last_post_author_id && (
-              <ForumAuthorAvatar
-                userId={topic.last_post_author_id}
-                characterId={topic.last_post_author_character_id}
-                isCharacter={!!topic.last_post_is_character}
-                fallbackName={topic.last_post_author || topic.author_name}
-                size={20}
-                className="rounded shadow-sm"
-              />
-            )}
+            <div className="d-flex align-items-center gap-2">
+              {topic.last_post_author_id && (
+                <ForumAuthorAvatar
+                  userId={topic.last_post_author_id}
+                  characterId={topic.last_post_author_character_id}
+                  isCharacter={!!topic.last_post_is_character}
+                  fallbackName={topic.last_post_author || topic.author_name}
+                  size={20}
+                  roundedCircle={true}
+                  className="shadow-sm"
+                />
+              )}
 
-            <div className="text-truncate" style={{ maxWidth: 100 }}>
-              <span className="fw-semibold text-secondary">
-                {topic.last_post_author || topic.author_name}
-              </span>
+              <div className="text-truncate" style={{ maxWidth: 100 }}>
+                <span className="fw-semibold text-secondary">
+                  {topic.last_post_author || topic.author_name}
+                </span>
+              </div>
             </div>
           </div>
         ) : (
