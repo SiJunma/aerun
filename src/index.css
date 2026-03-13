@@ -901,15 +901,17 @@ a:hover {
   /* Balanced padding */
 }
 
-[data-theme='dark'] .premium-modal .modal-footer,
-[data-theme='dark'] .confirm-modal .modal-footer {
-  background: var(--card-bg) !important;
-}
-
 [data-theme='dark'] .premium-modal .modal-content,
 [data-theme='dark'] .confirm-modal .modal-content {
   background: var(--card-bg);
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme='dark'] .premium-modal .modal-footer,
+[data-theme='dark'] .confirm-modal .modal-footer,
+[data-theme='neutral'] .premium-modal .modal-footer,
+[data-theme='neutral'] .confirm-modal .modal-footer {
+  background: var(--card-bg) !important;
 }
 
 .modal-section-themed {
@@ -1045,6 +1047,34 @@ a:hover {
 #user-nav-dropdown {
   display: flex;
   align-items: center;
+}
+
+.topic-manage-link {
+  color: var(--text-color) !important;
+  opacity: 0.7;
+  padding: 0.25rem 0.6rem !important;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.topic-manage-link:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme='neutral'] .topic-manage-link:hover {
+  background-color: rgba(67, 52, 34, 0.08) !important;
+}
+
+/* Fix navbar dropdown caret visibility in neutral theme */
+[data-theme='neutral'] .navbar-dark .nav-item.dropdown .dropdown-toggle::after {
+  border-top-color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Fix reputation badge hover color change */
+a.badge.bg-success:hover, 
+a.badge.bg-danger:hover {
+  color: #fff !important;
 }
 
 /* ── Dropdown menu — theme-aware ─────────────────────────────────────────── */
@@ -1447,7 +1477,7 @@ a:hover {
 }
 
 [data-theme='neutral'] .stats-header {
-  color: var(--text-color) !important;
+  color: #f4f1ea !important;
 }
 
 .stats-grid {
@@ -1515,12 +1545,36 @@ a:hover {
   border-top-color: rgba(var(--primary-rgb), 0.05) !important;
 }
 
+[data-theme='neutral'] .stats-footer .btn-link {
+  opacity: 0.8 !important;
+  color: #433422 !important;
+}
+
+[data-theme='neutral'] .stats-footer .btn-link:hover {
+  opacity: 1 !important;
+  color: #8c7152 !important;
+}
+
 .letter-spacing-1 {
   letter-spacing: 1px;
 }
 
 .gap-x-2 { column-gap: 0.5rem; }
 .gap-y-1 { row-gap: 0.25rem; }
+
+/* Topic Page Neutral theme contrast refinements */
+[data-theme='neutral'] .topic-description,
+[data-theme='neutral'] .topic-meta-bar,
+[data-theme='neutral'] .author-sidebar .text-muted,
+[data-theme='neutral'] .post-header-strip .text-muted {
+  opacity: 1 !important;
+  color: #5c4b3a !important; /* Darker secondary for better readability on parchment */
+}
+
+[data-theme='neutral'] .topic-meta-bar strong,
+[data-theme='neutral'] .author-sidebar .text-muted strong {
+  color: #382d1d !important; /* Main text color for numbers/highlights */
+}
 
 [data-theme='dark'] .online-users-panel {
   background-color: rgba(15, 23, 42, 0.3) !important;

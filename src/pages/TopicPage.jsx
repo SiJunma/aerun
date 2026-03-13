@@ -598,7 +598,7 @@ const TopicPage = () => {
         <Breadcrumb.Item active>{topic.title}</Breadcrumb.Item>
       </Breadcrumb>
 
-      <div className="mb-4">
+      <div className="mb-4 topic-header-area">
         <div className="mb-2">
           <div className="d-flex align-items-center gap-2 mb-1">
             {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
@@ -606,13 +606,13 @@ const TopicPage = () => {
             <h1 className="h2 mb-0">{topic.title}</h1>
           </div>
           {topic.description && (
-            <p className="text-muted mb-0 opacity-75" style={{ fontSize: '0.875rem' }}>{topic.description}</p>
+            <p className="text-muted mb-0 opacity-75 topic-description" style={{ fontSize: '0.875rem' }}>{topic.description}</p>
           )}
         </div>
         
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end align-items-center gap-3">
           {/* Metadata Group */}
-          <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap text-muted opacity-75" style={{ fontSize: '0.875rem' }}>
+          <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap text-muted opacity-75 topic-meta-bar" style={{ fontSize: '0.875rem' }}>
             <span className="text-nowrap">
               {t('forum.author')}:{' '}
               <ForumAuthorName
@@ -639,11 +639,10 @@ const TopicPage = () => {
               {(profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
                 <Dropdown>
                   <Dropdown.Toggle 
-                    variant="outline-secondary" 
+                    variant="link" 
                     size="sm" 
                     id="admin-topic-controls"
-                    className="d-flex align-items-center gap-1 border-0 p-0"
-                    style={{ background: 'transparent', opacity: 0.8 }}
+                    className="topic-manage-link d-flex align-items-center gap-1 text-decoration-none"
                   >
                     <Settings size={14} />
                     <span>{t('forum.manage_topic')}</span>

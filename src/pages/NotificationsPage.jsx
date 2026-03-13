@@ -410,8 +410,9 @@ const NotificationsPage = () => {
             color: #f8fafc;
           }
           [data-theme='neutral'] .icon-box {
-            background-color: #ede9df !important;
-            color: #382d1d;
+            background-color: #e0dbca !important;
+            color: #433422;
+            border-color: rgba(67, 52, 34, 0.2) !important;
           }
           .icon-box-small {
             background-color: #f8f9fa !important;
@@ -421,7 +422,8 @@ const NotificationsPage = () => {
             background-color: #2d3d5a !important;
           }
           [data-theme='neutral'] .icon-box-small {
-            background-color: #ede9df !important;
+            background-color: #e0dbca !important;
+            border-color: rgba(67, 52, 34, 0.15) !important;
           }
           .message-preview-box {
             background-color: #f8f9fa !important;
@@ -433,7 +435,8 @@ const NotificationsPage = () => {
             border-color: rgba(255, 255, 255, 0.1) !important;
           }
           [data-theme='neutral'] .message-preview-box {
-            background-color: #ede9df !important;
+            background-color: #e8e4d8 !important;
+            border-color: rgba(67, 52, 34, 0.12) !important;
           }
           .icon-box:hover {
             opacity: 1;
@@ -466,6 +469,11 @@ const NotificationsPage = () => {
           [data-theme='light'] .nav-pills .nav-link.active .tab-badge {
             background-color: rgba(0,0,0,0.1) !important;
             color: #000 !important;
+          }
+          [data-theme='neutral'] .nav-pills .nav-link.active .tab-badge {
+            background-color: #433422 !important;
+            color: #fdfaf3 !important;
+            border-color: rgba(67, 52, 34, 0.3) !important;
           }
           .nav-pills .nav-link.active .tab-badge.archived-badge {
             color: #f8fafc !important;
