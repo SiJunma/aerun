@@ -599,33 +599,22 @@ const TopicPage = () => {
         <Breadcrumb.Item active>{topic.title}</Breadcrumb.Item>
       </Breadcrumb>
 
-      {/* Topic header */}
-      <div className="mb-3">
-        <div className="d-flex align-items-center gap-2 mb-1">
-          {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
-          {topic.is_locked && <Lock size={20} className="topic-indicator topic-locked" />}
-          <h1 className="h2 mb-0">{topic.title}</h1>
+      <div className="mb-4">
+        <div className="mb-2">
+          <div className="d-flex align-items-center gap-2 mb-1">
+            {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
+            {topic.is_locked && <Lock size={20} className="topic-indicator topic-locked" />}
+            <h1 className="h2 mb-0">{topic.title}</h1>
+          </div>
+          {topic.description && (
+            <p className="text-muted mb-0 small opacity-75">{topic.description}</p>
+          )}
         </div>
-        {topic.description && (
-          <p className="text-muted mb-2">{topic.description}</p>
-        )}
         
-        {/* Admin/Mod Controls Dropdown relocated above pagination */}
-        <div className="d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div className="d-flex align-items-center gap-2 flex-wrap small text-muted">
-            {user && profile?.role_id !== 'spectator' && (
-              <Button
-                variant={isSubscribed ? "primary" : "outline-primary"}
-                size="sm"
-                className="d-flex align-items-center gap-2 rounded-pill px-3 me-2"
-                onClick={handleToggleSubscription}
-                disabled={togglingSub}
-              >
-                {isSubscribed ? <BellOff size={14} /> : <Bell size={14} />}
-                {isSubscribed ? t('notifications.unfollow') : t('notifications.follow')}
-              </Button>
-            )}
-            <span>
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end align-items-center gap-3">
+          {/* Metadata Group */}
+          <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap small text-muted opacity-75">
+            <span className="text-nowrap">
               {t('forum.author')}:{' '}
               <ForumAuthorName
                 userId={topic.author_id}
@@ -636,91 +625,93 @@ const TopicPage = () => {
               />
             </span>
             <span>·</span>
-            <span>
+            <span className="text-nowrap">
               {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
               <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
             </span>
             <span>·</span>
-            <span>{formatTime(topic.created_at)}</span>
-
-            {/* Admin Management Dropdown moved here */}
-            {(profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
-              <Dropdown className="ms-1">
-                <Dropdown.Toggle 
-                  variant="outline-secondary" 
-                  size="sm" 
-                  id="admin-topic-controls"
-                  className="d-flex align-items-center gap-1 border-0"
-                  style={{ background: 'transparent', padding: '0 4px' }}
-                >
-                  <Settings size={14} />
-                  <span className="small">{t('forum.manage_topic')}</span>
-                </Dropdown.Toggle>
-
-                <Dropdown.Menu className="shadow-sm border-0">
-                  <Dropdown.Item 
-                    onClick={async () => {
-                      try {
-                        await updateTopic(id, { is_pinned: !topic.is_pinned });
-                        showToast(lang === 'ru' 
-                          ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
-                          : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
-                        );
-                      } catch (error) {
-                        showToast(error.message, 'danger');
-                      }
-                    }}
-                    className="d-flex align-items-center gap-2"
-                  >
-                    <Pin size={14} />
-                    {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
-                  </Dropdown.Item>
-                  <Dropdown.Item 
-                    onClick={async () => {
-                      try {
-                        await updateTopic(id, { is_locked: !topic.is_locked });
-                        showToast(lang === 'ru' 
-                          ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
-                          : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
-                        );
-                      } catch (error) {
-                        showToast(error.message, 'danger');
-                      }
-                    }}
-                    className="d-flex align-items-center gap-2"
-                  >
-                    <Lock size={14} />
-                    {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
-                  </Dropdown.Item>
-                  <Dropdown.Item 
-                    onClick={() => setShowMoveModal(true)}
-                    className="d-flex align-items-center gap-2"
-                  >
-                    <ArrowRightLeft size={14} />
-                    {t('forum.move_topic')}
-                  </Dropdown.Item>
-                  <Dropdown.Divider />
-                  <Dropdown.Item 
-                    onClick={() => setShowDeleteTopicModal(true)}
-                    className="d-flex align-items-center gap-2 text-danger"
-                  >
-                    <Trash2 size={14} />
-                    {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
-                  </Dropdown.Item>
-                </Dropdown.Menu>
-              </Dropdown>
-            )}
+            <span className="text-nowrap">{formatTime(topic.created_at)}</span>
           </div>
 
-          <div className="ms-auto d-flex flex-column align-items-end gap-2">
+          {/* Actions & Pagination Group (Right Side) */}
+          <div className="d-flex flex-column align-items-md-end align-items-center gap-2">
+            <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
+              {/* Admin Management Dropdown */}
+              {(profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+                <Dropdown>
+                  <Dropdown.Toggle 
+                    variant="outline-secondary" 
+                    size="sm" 
+                    id="admin-topic-controls"
+                    className="d-flex align-items-center gap-1 border-0 p-0"
+                    style={{ background: 'transparent', opacity: 0.8 }}
+                  >
+                    <Settings size={14} />
+                    <span className="small">{t('forum.manage_topic')}</span>
+                  </Dropdown.Toggle>
 
-            {totalPages > 1 && (
-              <ForumPagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={handlePageChange}
-              />
-            )}
+                  <Dropdown.Menu className="shadow-sm border-0">
+                    <Dropdown.Item 
+                      onClick={async () => {
+                        try {
+                          await updateTopic(id, { is_pinned: !topic.is_pinned });
+                          showToast(lang === 'ru' 
+                            ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
+                            : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
+                          );
+                        } catch (error) {
+                          showToast(error.message, 'danger');
+                        }
+                      }}
+                      className="d-flex align-items-center gap-2"
+                    >
+                      <Pin size={14} />
+                      {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
+                    </Dropdown.Item>
+                    <Dropdown.Item 
+                      onClick={async () => {
+                        try {
+                          await updateTopic(id, { is_locked: !topic.is_locked });
+                          showToast(lang === 'ru' 
+                            ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
+                            : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
+                          );
+                        } catch (error) {
+                          showToast(error.message, 'danger');
+                        }
+                      }}
+                      className="d-flex align-items-center gap-2"
+                    >
+                      <Lock size={14} />
+                      {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
+                    </Dropdown.Item>
+                    <Dropdown.Item 
+                      onClick={() => setShowMoveModal(true)}
+                      className="d-flex align-items-center gap-2"
+                    >
+                      <ArrowRightLeft size={14} />
+                      {t('forum.move_topic')}
+                    </Dropdown.Item>
+                    <Dropdown.Divider />
+                    <Dropdown.Item 
+                      onClick={() => setShowDeleteTopicModal(true)}
+                      className="d-flex align-items-center gap-2 text-danger"
+                    >
+                      <Trash2 size={14} />
+                      {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
+                    </Dropdown.Item>
+                  </Dropdown.Menu>
+                </Dropdown>
+              )}
+
+              {totalPages > 1 && (
+                <ForumPagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -783,12 +774,24 @@ const TopicPage = () => {
                       {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
                     </div>
                   )}
+
+                  {/* 7. Footer Links (Moved here for mobile stacking) */}
+                  <div className="mt-3 mt-md-auto pt-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
+                    <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                      {t('profile.view_profile')}
+                    </Link>
+                    {profile?.role_id !== 'spectator' && (
+                      <Link to="#" className="footer-link text-decoration-none px-0" onClick={(e) => e.preventDefault()}>
+                        {t('profile.pm')}
+                      </Link>
+                    )}
+                  </div>
                 </Col>
 
                 {/* Content Area */}
                 <Col md={9} lg={10} className="d-flex flex-column" style={{ minHeight: '100%' }}>
                   {/* Header Strip: Time, # */}
-                  <div className="post-header-strip px-4 py-1 d-flex justify-content-between align-items-center">
+                  <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
                     <small className="text-muted">
                       <a
                         href={`#post-${post.id}`}
@@ -805,7 +808,7 @@ const TopicPage = () => {
                         {formatTime(post.created_at)}
                       </a>
                       {post.edited_at && (
-                        <span className="ms-2 opacity-50">
+                        <span className="d-block d-md-inline-block ms-md-2 opacity-50">
                           ({lang === 'ru' ? 'ред.' : 'edited'} {formatTime(post.edited_at)})
                         </span>
                       )}
@@ -814,7 +817,7 @@ const TopicPage = () => {
                   </div>
 
                   {/* Body Area */}
-                  <div className="px-4 py-2 flex-grow-1 d-flex flex-column">
+                  <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
                     <div className="flex-grow-1">
                       {editingPostId === post.id ? (
                         <div>
@@ -940,23 +943,9 @@ const TopicPage = () => {
                       )}
                     </div>
                   </div>
-                </Col>
-              </Row>
 
-              {/* Classic Footer Strip (Combined) */}
-              <div className="post-footer-strip">
-                <Row className="g-0 align-items-center">
-                  <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 d-flex gap-3 justify-content-center">
-                    <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none">
-                      {t('profile.view_profile')}
-                    </Link>
-                    {profile?.role_id !== 'spectator' && (
-                      <Link to="#" className="footer-link text-decoration-none" onClick={(e) => e.preventDefault()}>
-                        {t('profile.pm')}
-                      </Link>
-                    )}
-                  </Col>
-                  <Col md={9} lg={10} className="px-4 py-2 d-flex justify-content-end gap-3">
+                  {/* Post Management Links (Moved here) */}
+                  <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
                     {canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
                       <>
                         <Button
@@ -1000,9 +989,9 @@ const TopicPage = () => {
                         {lang === 'ru' ? 'Цитировать' : 'Quote'}
                       </Button>
                     )}
-                  </Col>
-                </Row>
-              </div>
+                  </div>
+                </Col>
+              </Row>
             </Card.Body>
           </Card>
         ))}
@@ -1056,12 +1045,18 @@ const TopicPage = () => {
                     {getLiveOwnerName(myDraft) && ` (${getLiveOwnerName(myDraft)})`}
                   </div>
                 )}
+                {/* Draft Status Links */}
+                <div className="mt-3 mt-md-auto pt-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
+                  <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
+                    {t('profile.view_profile')}
+                  </Link>
+                </div>
               </Col>
 
               {/* Content Area */}
               <Col md={9} lg={10} className="d-flex flex-column">
                 {/* Header Strip — no date, no post number, just DRAFT badge */}
-                <div className="post-header-strip px-4 py-1 d-flex justify-content-between align-items-center">
+                <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
                   <Badge bg="secondary" className="opacity-75" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
                     <FilePen size={11} className="me-1" />
                     {t('forum.draft_label')}
@@ -1072,7 +1067,7 @@ const TopicPage = () => {
                 </div>
 
                 {/* Body */}
-                <div className="px-4 py-2 flex-grow-1 d-flex flex-column">
+                <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
                   <div className="flex-grow-1">
                     {editingPostId === myDraft.id ? (
                       <div>
@@ -1112,18 +1107,9 @@ const TopicPage = () => {
                     )}
                   </div>
                 </div>
-              </Col>
-            </Row>
 
-            {/* Draft Footer: Profile + action buttons */}
-            <div className="post-footer-strip">
-              <Row className="g-0 align-items-center">
-                <Col md={3} lg={2} className="author-sidebar border-end px-3 py-2 d-flex gap-3 justify-content-center">
-                  <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none">
-                    {t('profile.view_profile')}
-                  </Link>
-                </Col>
-                <Col md={9} lg={10} className="px-4 py-2 d-flex justify-content-end gap-3">
+                {/* Draft Management Links (Moved here) */}
+                <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
                   {/* Delete — allowed even on locked topics */}
                   {!editingPostId && (
                     <Button
@@ -1159,20 +1145,37 @@ const TopicPage = () => {
                       {draftSaving ? t('forum.draft_publishing') : t('forum.draft_publish')}
                     </Button>
                   )}
-                </Col>
-              </Row>
-            </div>
+                </div>
+              </Col>
+            </Row>
           </Card.Body>
         </Card>
       )}
 
-      <div className="d-flex justify-content-center p-3">
-        <ForumPagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          onPageChange={handlePageChange}
-          centered
-        />
+      {/* Bottom Actions & Pagination */}
+      <div className="mt-4 mb-4 px-2 px-md-0">
+        {user && profile?.role_id !== 'spectator' && (
+          <div className="d-flex justify-content-end mb-3">
+            <Button
+              variant={isSubscribed ? "primary" : "outline-primary"}
+              size="sm"
+              className="d-flex align-items-center gap-2 rounded-pill px-3 shadow-sm"
+              onClick={handleToggleSubscription}
+              disabled={togglingSub}
+            >
+              {isSubscribed ? <BellOff size={14} /> : <Bell size={14} />}
+              {isSubscribed ? t('notifications.unfollow') : t('notifications.follow')}
+            </Button>
+          </div>
+        )}
+        <div className="d-flex justify-content-center">
+          <ForumPagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+            centered
+          />
+        </div>
       </div>
 
       {/* Reply form — hidden for spectators and closed topics */}
@@ -1201,7 +1204,7 @@ const TopicPage = () => {
               <Card.Header className="bg-dark text-white py-3">
                 <h5 className="mb-0">{t('forum.create_post')}</h5>
               </Card.Header>
-              <Card.Body className="p-4">
+              <Card.Body className="p-3 p-md-4">
                 <Form onSubmit={handleReply}>
                   <Form.Group className="mb-3" controlId="postAs">
                     <Form.Select

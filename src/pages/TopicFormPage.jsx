@@ -143,7 +143,7 @@ const TopicFormPage = () => {
         <Card.Header className="py-3">
           <h4 className="mb-0">{t('forum.create_topic')}</h4>
         </Card.Header>
-        <Card.Body className="p-4">
+        <Card.Body className="p-3 p-md-4">
           <Form onSubmit={handleSubmit}>
             <Form.Group className="mb-3" controlId="topicTitle">
               <div className="d-flex justify-content-between align-items-center mb-1">

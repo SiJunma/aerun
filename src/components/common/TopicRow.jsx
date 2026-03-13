@@ -48,7 +48,7 @@ const TopicRow = ({
     }
 
     return (
-      <span className="mini-pagination ms-2 d-none d-sm-inline-flex gap-1 align-items-center">
+      <span className="mini-pagination ms-2 d-inline-flex gap-1 align-items-center">
         <span className="text-muted" style={{ fontSize: '0.75rem' }}>[</span>
         {pages.map((p, i) => (
           <React.Fragment key={i}>
@@ -80,7 +80,7 @@ const TopicRow = ({
           />
         </td>
       )}
-      <td>
+      <td style={{ minWidth: '280px', maxWidth: '100vw' }}>
         <div className="d-flex align-items-start gap-2">
           <div className="flex-grow-1">
             <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
@@ -103,8 +103,10 @@ const TopicRow = ({
                 {topic.description}
               </div>
             )}
-            <div className="d-flex align-items-center gap-1 flex-wrap">
-              <small className="text-muted d-flex align-items-center gap-1">
+            <div className="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-1 mt-1">
+              <div className="text-muted small d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-1 mb-1 mb-sm-0">
+                <span className="text-nowrap">{formatTime(topic.created_at)}</span>
+                <span className="d-none d-sm-inline">·</span>
                 <ForumAuthorName
                   userId={topic.author_id}
                   characterId={topic.author_character_id}
@@ -112,16 +114,14 @@ const TopicRow = ({
                   fallbackName={topic.author_name}
                   className="fw-semibold text-secondary"
                 />
-                <span>·</span>
-                {formatTime(topic.created_at)}
-              </small>
+              </div>
               {showCategory && categoryName && (
-                <>
-                  <span className="text-muted small">·</span>
+                <div className="d-flex align-items-center gap-1">
+                  <span className="text-muted small d-none d-sm-inline">·</span>
                   <Link to={`/category/${topic.category_id}`} className="text-decoration-none small text-primary opacity-75 hover-opacity-100">
                     {categoryName}
                   </Link>
-                </>
+                </div>
               )}
             </div>
           </div>

@@ -90,6 +90,13 @@ body {
   flex-direction: column;
 }
 
+@media (max-width: 575.98px) {
+  .container, .container-fluid {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
+
 .app-wrapper {
   flex: 1 0 auto;
 }
@@ -1093,6 +1100,18 @@ a:hover {
   border-top: 1px dashed rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.05);
   min-height: 35px;
+}
+
+.border-top-dashed {
+  border-top: 1px dashed rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-theme='light'] .border-top-dashed {
+  border-top: 1px dashed rgba(0, 0, 0, 0.2) !important;
+}
+
+[data-theme='neutral'] .border-top-dashed {
+  border-top: 1px dashed rgba(67, 52, 34, 0.25) !important;
 }
 
 [data-theme='light'] .post-footer-strip {
