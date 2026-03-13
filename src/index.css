@@ -512,9 +512,11 @@ a:hover {
   /* Keep header text light for contrast */
   border-bottom: 2px solid var(--border-color);
   text-transform: uppercase;
-  font-size: 0.85rem;
+  font-size: 0.75rem; /* Standardized */
+  font-weight: 700;
   letter-spacing: 0.05em;
   padding: 12px;
+  opacity: 0.8;
 }
 
 [data-theme='neutral'] .table thead th {
@@ -1399,18 +1401,24 @@ a:hover {
   background-color: var(--card-bg) !important;
 }
 
+.forum-header-text {
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  opacity: 0.8;
+}
+
 .stats-header {
   background-color: var(--nav-bg) !important;
   color: var(--text-color) !important;
   border-bottom: 1px solid rgba(var(--primary-rgb), 0.1) !important;
-  font-weight: 500 !important;
-  padding-top: 0.25rem !important;
-  padding-bottom: 0.25rem !important;
+  padding: 12px !important;
 }
 
-.stats-header span, 
+.stats-header .forum-header-text,
 .stats-header .lucide {
-  opacity: 0.5;
+  opacity: 0.8; /* Matches table thead th opacity */
 }
 
 [data-theme='neutral'] .stats-header {

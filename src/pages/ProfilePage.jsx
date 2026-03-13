@@ -97,7 +97,7 @@ const ProfilePage = () => {
       setAccountFormData({
         nickname: profile.nickname || profile.displayName || '',
         status_line: profile.status_line || '',
-        avatar_url: profile.avatar_url || profile.photoURL || '',
+        avatar_url: profile.avatar_url || '',
         theme: profile.settings?.theme || 'dark',
         language: profile.settings?.language || 'en',
         signature: profile.settings?.signature || '',
@@ -242,7 +242,7 @@ const ProfilePage = () => {
             <Card.Body className="p-4 text-center">
               <div className="mb-4">
                 <Image
-                  src={viewedProfile?.avatar_url || viewedProfile?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
+                  src={viewedProfile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
                   roundedCircle
                   className="mb-3 border border-3 border-light shadow-sm"
                   style={{ width: '120px', height: '120px', objectFit: 'cover' }}

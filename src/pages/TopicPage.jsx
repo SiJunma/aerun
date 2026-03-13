@@ -415,7 +415,7 @@ const TopicPage = () => {
       content: replyContent.trim(),
       author_id: user.uid,
       author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
-      author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || user?.photoURL || ''),
+      author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
       author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
       author_role_id: profile?.role_id || 'player',
       is_character: !!selectedChar,

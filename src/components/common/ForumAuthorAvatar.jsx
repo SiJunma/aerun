@@ -41,7 +41,7 @@ const ForumAuthorAvatar = ({
       });
     } else {
       unsub = subscribeToUser(userId, (userData) => {
-        setAvatarUrl(userData?.avatar_url || userData?.photoURL || initialAvatar || null);
+        setAvatarUrl(userData?.avatar_url || initialAvatar || null);
       });
     }
 

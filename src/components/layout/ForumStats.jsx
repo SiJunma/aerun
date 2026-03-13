@@ -42,11 +42,11 @@ const ForumStats = () => {
   return (
     <div className="forum-stats-section mt-5 mb-4">
       <Card className="shadow-sm border-0 forum-stats-card">
-      <Card.Header className="stats-header py-1 px-3 d-flex align-items-center gap-2">
-        <TrendingUp size={14} className="text-primary opacity-75" />
-        <span className="fw-bold small text-uppercase letter-spacing-1 opacity-75">
+      <Card.Header className="stats-header d-flex align-items-center gap-2">
+        <span className="forum-header-text">
           {t('stats.title')}
         </span>
+        <TrendingUp size={14} className="text-primary opacity-75" />
       </Card.Header>
       <Card.Body className="p-0">
         {/* Main Stats Row - Single Line */}

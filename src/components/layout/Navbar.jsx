@@ -107,7 +107,7 @@ const Navigation = () => {
               title={
                 <div className="d-flex align-items-center gap-2 py-0">
                   <Image
-                    src={profile?.avatar_url || user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.nickname || user.displayName || 'User')}&background=random`}
+                    src={profile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.nickname || user.displayName || 'User')}&background=random`}
                     roundedCircle
                     style={{ width: '32px', height: '32px', objectFit: 'cover', display: 'block' }}
                     alt="Avatar"
