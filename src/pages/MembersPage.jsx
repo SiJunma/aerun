@@ -131,7 +131,7 @@ const MembersPage = () => {
         <h2 className="mb-2 d-flex align-items-center gap-2">
           <User size={28} className="text-primary" />
           {t('nav.members')}
-          <Badge bg="primary" pill className="ms-2" style={{ fontSize: '0.9rem' }}>
+          <Badge bg="none" pill className="ms-2 badge-premium" style={{ fontSize: '0.85rem', padding: '0.35em 0.8em' }}>
             {users.length}
           </Badge>
         </h2>

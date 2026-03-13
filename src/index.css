@@ -458,6 +458,41 @@ a:hover {
 
 .navbar {
   background-color: var(--nav-bg) !important;
+  transition: all 0.3s ease;
+}
+
+.hover-opacity-100 {
+  transition: opacity 0.2s ease;
+}
+
+.hover-opacity-100:hover {
+  opacity: 1 !important;
+}
+
+.nav-link {
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.navbar-toggler:focus {
+  box-shadow: none !important;
+}
+
+.badge-premium {
+  background: rgba(var(--primary-rgb), 0.1) !important;
+  color: var(--primary-color) !important;
+  border: 1px solid rgba(var(--primary-rgb), 0.15) !important;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* Ensure persistent actions don't wrap on tiny screens */
+@media (max-width: 350px) {
+  .navbar-brand {
+    font-size: 1rem;
+  }
+  .gap-2 {
+    gap: 0.25rem !important;
+  }
 }
 
 /* Table Styling */
