@@ -5,6 +5,7 @@ import { Pin, Lock } from 'lucide-react';
 import ForumAuthorName from './ForumAuthorName';
 import LastPostInfo from './LastPostInfo';
 import AuthorMeta from './AuthorMeta';
+import { useAuth } from '../../contexts/AuthProvider';
 
 const TopicRow = ({ 
   topic, 
@@ -16,10 +17,12 @@ const TopicRow = ({
   showCategory = false,
   categoryName = ''
 }) => {
-  const lastVisitKey = `lastVisit_${topic.id}`;
-  const lastVisit = localStorage.getItem(lastVisitKey);
+  const { readMap } = useAuth();
+  const lastVisitRaw = readMap[topic.id];
+  // Handle both Firestore Timestamp (from server) and plain number (optimistic local update)
+  const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
   const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
-  const hasUnread = topic.last_post_author_id !== user?.uid && (!lastVisit || lastPostMs > parseInt(lastVisit, 10));
+  const hasUnread = topic.last_post_author_id !== user?.uid && lastPostMs > lastVisitMs;
 
   const POSTS_PER_PAGE = 20;
   const totalPages = Math.ceil((topic.posts_count || 1) / POSTS_PER_PAGE);

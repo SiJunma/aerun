@@ -11,7 +11,7 @@ import { ru, enUS } from 'date-fns/locale';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user } = useAuth();
+  const { user, readMap } = useAuth();
   const [categories, setCategories] = useState([]);
 
   useEffect(() => {
@@ -67,10 +67,10 @@ const MainPage = () => {
                       </Link>
                       
                       {(() => {
-                        const lastVisitKey = `lastVisit_${cat.last_post_topic_id}`;
-                        const lastVisit = localStorage.getItem(lastVisitKey);
+                        const lastVisitRaw = readMap[cat.last_post_topic_id];
+                        const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
                         const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
-                        const hasUnread = cat.last_post_author_id !== user?.uid && (!lastVisit || lastPostMs > parseInt(lastVisit, 10));
+                        const hasUnread = cat.last_post_author_id !== user?.uid && lastPostMs > lastVisitMs;
                         
                         return (
                           <LastPostInfo

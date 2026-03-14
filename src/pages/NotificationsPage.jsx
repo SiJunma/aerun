@@ -3,6 +3,7 @@ import { Container, Card, Badge, Button, Row, Col, Nav, Toast, ToastContainer } 
 import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import {
   subscribeToAdminNotifications,
   subscribeToUserNotifications,
@@ -322,6 +323,9 @@ const NotificationsPage = () => {
 
   return (
     <Container className="py-5" style={{ maxWidth: '800px' }}>
+      <ForumBreadcrumbs 
+        items={[{ label: t('notifications.title'), active: true }]} 
+      />
       <style>
         {`
           .notification-card {

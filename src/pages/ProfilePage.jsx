@@ -4,6 +4,7 @@ import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save } from 'lucide-react';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { subscribeToUser, checkNicknameExists } from '../api/forum';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -227,6 +228,12 @@ const ProfilePage = () => {
 
   return (
     <Container className="py-5">
+      <ForumBreadcrumbs 
+        items={[
+          { label: t('nav.profile'), active: !viewedProfile?.nickname, to: '/profile' },
+          viewedProfile?.nickname ? { label: viewedProfile.nickname, active: true } : null
+        ].filter(Boolean)} 
+      />
       <Row className="mb-4 align-items-center">
         <Col>
           <h2 className="mb-0">{t('nav.profile')}</h2>

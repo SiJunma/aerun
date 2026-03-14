@@ -26,6 +26,33 @@ import {
   handlePostDeletionNotifications
 } from './notifications';
 
+// ── Read Map (server-side "last visit" tracking) ─────────────────────────────
+
+/**
+ * Record that the current user visited a topic.
+ * Works for ALL roles (admin, moderator, player, spectator) — everyone can read topics.
+ * Uses setDoc+merge so multiple topics accumulate in a single document.
+ */
+export const recordTopicVisit = async (uid, topicId) => {
+  if (!uid || !topicId) return;
+  const ref = doc(db, 'users', uid, 'readmap', 'topics');
+  await setDoc(ref, { [topicId]: serverTimestamp() }, { merge: true });
+};
+
+/**
+ * Live subscription to the user's full read-map ({ topicId → Timestamp }).
+ * Unsubscribes automatically on cleanup. Safe to call with null uid.
+ */
+export const subscribeToReadMap = (uid, callback) => {
+  if (!uid) { callback({}); return () => {}; }
+  const ref = doc(db, 'users', uid, 'readmap', 'topics');
+  return onSnapshot(ref, { includeMetadataChanges: true }, snap => {
+    // metadata.hasPendingWrites means local update is still syncing
+    // serverTimestamps: 'estimate' gives us the local time instead of null while syncing
+    callback(snap.exists() ? snap.data({ serverTimestamps: 'estimate' }) : {});
+  }, err => console.error('[subscribeToReadMap]', err));
+};
+
 // ── Categories ──────────────────────────────────────────────────────────────
 
 export const subscribeToCategories = (callback) => {
@@ -821,3 +848,31 @@ export const subscribeToTopTopics = (callback, limitCount = 50) => {
     callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
   }, (err) => console.error('[subscribeToTopTopics]', err));
 };
+// Latest topics across all categories (sorted by last_post_at)
+export const subscribeToLatestTopics = (callback, limitCount = 200) => {
+  const q = query(
+    collection(db, 'topics'),
+    orderBy('last_post_at', 'desc'),
+    limit(limitCount)
+  );
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+  }, (err) => console.error('[subscribeToLatestTopics]', err));
+};
+
+/**
+ * Marks multiple topics as read for a user in a single operation.
+ * @param {string} uid User ID
+ * @param {string[]} topicIds Array of topic IDs to mark as read
+ */
+export const markAllTopicsRead = async (uid, topicIds) => {
+  if (!uid || !topicIds || topicIds.length === 0) return;
+  const ref = doc(db, 'users', uid, 'readmap', 'topics');
+  const updateData = {};
+  const now = serverTimestamp();
+  topicIds.forEach(id => {
+    updateData[id] = now;
+  });
+  await setDoc(ref, updateData, { merge: true });
+};
+

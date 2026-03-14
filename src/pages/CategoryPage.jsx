@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table, Button, Breadcrumb, Form, Toast, ToastContainer } from 'react-bootstrap';
-import { Trash2, Move, Settings, CheckSquare, XSquare, Pin, Lock } from 'lucide-react';
+import { Container, Card, Table, Button, Badge, Row, Col, Form, Toast, ToastContainer } from 'react-bootstrap';
+import { Trash2, Move, Settings, CheckSquare, XSquare, Pin, Lock, PlusCircle, Search, MessageSquare, Clock, Filter, FolderInput, Unlock, CheckCircle } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { 
@@ -13,6 +13,7 @@ import {
 } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumPagination from '../components/common/ForumPagination';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -22,11 +23,12 @@ import { ru, enUS } from 'date-fns/locale';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user, profile } = useAuth();
+  const { profile, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState([]);
 
   // Management State
   const [isManaging, setIsManaging] = useState(false);
@@ -164,10 +166,9 @@ const CategoryPage = () => {
 
   return (
     <Container className="py-4 position-relative">
-      <Breadcrumb className="mb-4">
-        <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/' }}>{t('nav.home')}</Breadcrumb.Item>
-        <Breadcrumb.Item active>{categoryTitle}</Breadcrumb.Item>
-      </Breadcrumb>
+      <ForumBreadcrumbs 
+        items={[{ label: categoryTitle, active: true }]} 
+      />
 
       <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3 mb-4">
         <div>

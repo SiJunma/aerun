@@ -9,6 +9,7 @@ import ForumModal from '../components/common/ForumModal';
 import { UserCheck, UserMinus, UserX, PlusCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
 const AdminPage = () => {
   const { t } = useI18n();
@@ -510,6 +511,9 @@ const AdminPage = () => {
 
   return (
     <Container className="py-5">
+      <ForumBreadcrumbs 
+        items={[{ label: t('nav.admin'), active: true }]} 
+      />
       <h2 className="mb-4">{t('nav.admin')} Dashboard</h2>
 
       <Nav variant="tabs" activeKey={activeTab} className="mb-4 border-0" onSelect={(k) => setActiveTab(k)}>

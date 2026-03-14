@@ -55,6 +55,7 @@ export const translations = {
       profile: "Profile",
       settings: "Settings",
       admin: "Admin",
+      new_replies: "New Replies",
     },
     forum: {
       topics: "Topics",
@@ -99,6 +100,7 @@ export const translations = {
       spectator_mode: "👁 Spectator mode — you can read but cannot post replies.",
       topic_locked: "Topic Locked",
       topic_locked_desc: "This topic has been locked by a moderator. New replies are not allowed.",
+      mark_all_read: "Mark all as read",
     },
     profile: {
       info: "Account Info",
@@ -183,6 +185,8 @@ export const translations = {
       online_now: "Online now",
       silence: "It's quiet...",
       active_topics: "Most Active Topics",
+      latest_replies: "New Replies",
+      latest_replies_desc: "All forum topics sorted by the latest activity.",
       top_discussed: "Most Discussed Topics",
       top_discussed_desc: "Top 50 forum topics, sorted by number of replies.",
       no_topics: "No topics yet"
@@ -244,6 +248,7 @@ export const translations = {
       profile: "Профиль",
       settings: "Настройки",
       admin: "Админка",
+      new_replies: "Новые ответы",
     },
     forum: {
       topics: "Темы",
@@ -288,6 +293,7 @@ export const translations = {
       spectator_mode: "👁 Режим наблюдателя — вы можете читать, но не можете публиковать сообщения.",
       topic_locked: "Тема закрыта",
       topic_locked_desc: "Эта тема была закрыта модератором. Публикация новых сообщений невозможна.",
+      mark_all_read: "Отметить все как прочитанные",
     },
     profile: {
       info: "Данные аккаунта",
@@ -372,6 +378,8 @@ export const translations = {
       online_now: "Сейчас на форуме",
       silence: "Тишина...",
       active_topics: "Самые активные темы",
+      latest_replies: "Новые ответы",
+      latest_replies_desc: "Все темы форума, отсортированные по времени последних ответов.",
       top_discussed: "Самые обсуждаемые темы",
       top_discussed_desc: "Топ-50 тем форума, отсортированных по количеству ответов.",
       no_topics: "Тем пока нет"

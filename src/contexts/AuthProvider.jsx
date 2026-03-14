@@ -20,6 +20,12 @@ import {
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
 import { createNotification } from '../api/notifications';
+import { 
+  subscribeToReadMap, 
+  recordTopicVisit as apiRecordTopicVisit,
+  subscribeToLatestTopics,
+  markAllTopicsRead
+} from '../api/forum';
 
 const AuthContext = createContext();
 
@@ -35,6 +41,11 @@ export const AuthProvider = ({ children }) => {
   const [profile, setProfile] = useState(null);
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
+  // readMap: { [topicId]: Firestore Timestamp | number } — synced from server
+  const [readMap, setReadMap] = useState({});
+  const [latestTopics, setLatestTopics] = useState([]);
+  const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
+  const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
 
   // Ref holding the timestamp of the last recorded activity
   const lastActivityRef = useRef(Date.now());
@@ -98,6 +109,8 @@ export const AuthProvider = ({ children }) => {
     }, (err) => console.error('[GlobalSettings Listener]', err));
 
     let profileUnsub;
+    let readMapUnsub;
+    let latestTopicsUnsub;
     let lastSeenInterval;
 
     const pushLastSeen = (uid) => {
@@ -210,6 +223,12 @@ export const AuthProvider = ({ children }) => {
             pushLastSeen(firebaseUser.uid);
           }
 
+          // Subscribe to read map (all roles — everyone can read topics)
+          readMapUnsub = subscribeToReadMap(firebaseUser.uid, setReadMap);
+
+          // Subscribe to latest topics to track unread count (100 is enough for global badge)
+          latestTopicsUnsub = subscribeToLatestTopics(setLatestTopics, 100);
+
           profileUnsub = onSnapshot(userDocRef, async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
@@ -257,8 +276,12 @@ export const AuthProvider = ({ children }) => {
       } else {
         setUser(null);
         setProfile(null);
+        setReadMap({});
+        setLatestTopics([]);
         finishLoading();
         if (profileUnsub) profileUnsub();
+        if (readMapUnsub) readMapUnsub();
+        if (latestTopicsUnsub) latestTopicsUnsub();
         clearInterval(lastSeenInterval);
       }
     });
@@ -267,15 +290,85 @@ export const AuthProvider = ({ children }) => {
       unsubGlobalSettings();
       unsubscribe();
       if (profileUnsub) profileUnsub();
+      if (readMapUnsub) readMapUnsub();
+      if (latestTopicsUnsub) latestTopicsUnsub();
       clearInterval(lastSeenInterval);
     };
   }, []);
+
+  // Calculate unreadTopicsCount whenever readMap or latestTopics change
+  useEffect(() => {
+    if (!user || latestTopics.length === 0) {
+      setUnreadTopicsCount(0);
+      return;
+    }
+
+    const count = latestTopics.filter(topic => {
+      // Exclude own posts from unread count
+      if (topic.last_post_author_id === user.uid) return false;
+
+      const lastVisitRaw = readMap[topic.id];
+      const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
+      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
+
+      return lastPostMs > lastVisitMs;
+    }).length;
+
+    setUnreadTopicsCount(count);
+  }, [user, latestTopics, readMap]);
+
+  /**
+   * Mark a topic as read for the current user.
+   * Optimistically updates local readMap, then persists to Firestore.
+   * Works for all roles (admin, moderator, player, spectator).
+   */
+  const markTopicRead = useCallback(async (topicId) => {
+    if (!user || !topicId) return;
+    // Optimistic local update (use a plain number since serverTimestamp doesn't resolve locally)
+    const now = Date.now();
+    setReadMap(prev => ({ ...prev, [topicId]: now }));
+    try {
+      await apiRecordTopicVisit(user.uid, topicId);
+    } catch (err) {
+      console.error('[markTopicRead]', err);
+    }
+  }, [user]);
+
+  /**
+   * Mark all fetched topics as read.
+   */
+  const markAllRead = useCallback(async () => {
+    if (!user || latestTopics.length === 0 || isMarkingAllRead) return;
+    
+    setIsMarkingAllRead(true);
+    try {
+      // Optimistic local update
+      const now = Date.now();
+      const newReadMap = { ...readMap };
+      const topicIds = latestTopics.map(t => {
+        newReadMap[t.id] = now;
+        return t.id;
+      });
+      
+      setReadMap(newReadMap);
+      await markAllTopicsRead(user.uid, topicIds);
+    } catch (err) {
+      console.error('[markAllRead]', err);
+    } finally {
+      setIsMarkingAllRead(false);
+    }
+  }, [user, latestTopics, readMap, isMarkingAllRead]);
 
   const value = {
     user,
     profile,
     settings,
     loading,
+    readMap,
+    unreadTopicsCount,
+    isMarkingAllRead,
+    markTopicRead,
+    markAllRead,
     loginWithGoogle,
     logout,
     updateSettings,

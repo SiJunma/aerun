@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/forum';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -127,6 +128,9 @@ const MembersPage = () => {
 
   return (
     <Container className="py-4">
+      <ForumBreadcrumbs 
+        items={[{ label: t('nav.members'), active: true }]} 
+      />
       <div className="mb-4">
         <h2 className="mb-2 d-flex align-items-center gap-2">
           <User size={28} className="text-primary" />

@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Container, Card, Form, Button, Breadcrumb } from 'react-bootstrap';
+import { Container, Card, Form, Button } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCharacters } from '../api/character';
 import { subscribeToCategories, createTopic, updateUser } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
 const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user } = useAuth();
+  const { profile, user, markTopicRead } = useAuth();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -114,9 +115,10 @@ const TopicFormPage = () => {
 
       const newTopicId = await createTopic(topicData, firstPostData);
       localStorage.removeItem(DRAFT_KEY);
-      // Mark as read immediately
-      localStorage.setItem(`lastVisit_${newTopicId}`, Date.now().toString());
+      // Mark as read immediately (server-side, all roles)
+      await markTopicRead(newTopicId);
       navigate(`/category/${categoryId}`);
+
     } catch (err) {
       console.error(err);
       alert('Error creating topic');
@@ -131,13 +133,12 @@ const TopicFormPage = () => {
 
   return (
     <Container className="py-4">
-      <Breadcrumb className="mb-4">
-        <Breadcrumb.Item linkAs={Link} linkProps={{ to: "/" }}>{t('nav.home')}</Breadcrumb.Item>
-        <Breadcrumb.Item linkAs={Link} linkProps={{ to: `/category/${categoryId}` }}>
-          {categoryTitle}
-        </Breadcrumb.Item>
-        <Breadcrumb.Item active>{t('forum.create_topic')}</Breadcrumb.Item>
-      </Breadcrumb>
+      <ForumBreadcrumbs 
+        items={[
+          { label: categoryTitle, to: `/category/${categoryId}` },
+          { label: t('forum.create_topic'), active: true }
+        ]} 
+      />
 
       <Card className="shadow-sm border-0">
         <Card.Header className="py-3">

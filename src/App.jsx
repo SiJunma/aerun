@@ -16,6 +16,7 @@ import AdminPage from './pages/AdminPage';
 import MaintenancePage from './pages/MaintenancePage';
 import NotificationsPage from './pages/NotificationsPage';
 import ActiveTopicsPage from './pages/ActiveTopicsPage';
+import NewRepliesPage from './pages/NewRepliesPage';
 import { useAuth } from './contexts/AuthProvider';
 
 /**
@@ -53,6 +54,7 @@ const App = () => {
         <Route path="/profile/:uid" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
         <Route path="/active-topics" element={<ProtectedRoute><Layout><ActiveTopicsPage /></Layout></ProtectedRoute>} />
+        <Route path="/new-replies" element={<ProtectedRoute><Layout><NewRepliesPage /></Layout></ProtectedRoute>} />
 
         {/* Posting-required Routes (spectators blocked) */}
         <Route path="/category/:categoryId/new-topic" element={<ProtectedRoute requirePosting><Layout><TopicFormPage /></Layout></ProtectedRoute>} />

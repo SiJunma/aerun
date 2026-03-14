@@ -7,7 +7,7 @@ import { Bell, BellOff, User, LogOut } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
 
 const Navigation = () => {
-  const { user, profile, settings, logout } = useAuth();
+  const { user, profile, settings, logout, unreadTopicsCount } = useAuth();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [adminUnread, setAdminUnread] = React.useState(0);
@@ -156,7 +156,12 @@ const Navigation = () => {
 
         <Navbar.Collapse id="basic-navbar-nav" className="order-lg-2">
           <Nav className="me-auto mt-2 mt-lg-0">
+            <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
+              {t('nav.new_replies')}
+              {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
+            </Nav.Link>
             <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)}>
+
               {t('nav.members')}
             </Nav.Link>
             {isAdmin && (

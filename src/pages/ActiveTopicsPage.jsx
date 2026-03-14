@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Container, Card, Table, Breadcrumb } from 'react-bootstrap';
+import { Container, Card, Table } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToTopTopics, subscribeToCategories } from '../api/forum';
 import TopicRow from '../components/common/TopicRow';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
@@ -34,10 +35,9 @@ const ActiveTopicsPage = () => {
 
   return (
     <Container className="py-4">
-      <Breadcrumb className="mb-4">
-        <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/' }}>{t('nav.home')}</Breadcrumb.Item>
-        <Breadcrumb.Item active>{t('stats.active_topics')}</Breadcrumb.Item>
-      </Breadcrumb>
+      <ForumBreadcrumbs 
+        items={[{ label: t('stats.active_topics'), active: true }]} 
+      />
 
       <div className="mb-4">
         <h2>{t('stats.top_discussed')}</h2>

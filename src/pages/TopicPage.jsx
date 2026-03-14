@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Container, Card, Row, Col, Image, Badge, Breadcrumb, Button, Form, Modal, Pagination, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
+import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Pagination, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, subscribeToTopicDraft, deleteDraftPost } from '../api/forum';
@@ -18,6 +18,7 @@ import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions
 import ForumPagination from '../components/common/ForumPagination';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumAuthorAvatar from '../components/common/ForumAuthorAvatar';
+import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
 
 const TopicPage = () => {
@@ -25,7 +26,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, readMap } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
@@ -73,24 +74,27 @@ const TopicPage = () => {
   const replyRef = useRef(null);
   const scrolledRef = useRef(false); // prevent double-scroll
   const goLast = searchParams.get('goLast') === '1';
+  const LAST_VISIT_KEY = `lastVisit_${id}`; // kept for legacy scroll-to-unread fallback logic (now uses readMap)
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
   const MAX_CHARS = 15000;
-  const LAST_VISIT_KEY = `lastVisit_${id}`;
+
 
   useEffect(() => {
     const unsubPosts = subscribeToPosts(id, setPosts);
     const unsubTopic = subscribeToTopic(id, setTopic);
     
-    // Save last visit timestamp when leaving this topic
-    const visitTime = Date.now();
+    // Mark topic as read when visiting (server-side, all roles)
+    if (user) markTopicRead(id);
+
     return () => {
-      localStorage.setItem(LAST_VISIT_KEY, visitTime.toString());
+      // Re-mark as read on leaving (catches any new posts that arrived while reading)
+      if (user) markTopicRead(id);
       unsubPosts();
       unsubTopic();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, user?.uid]);
 
   // Subscribe to draft
   useEffect(() => {
@@ -206,7 +210,11 @@ const TopicPage = () => {
       }
       targetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
     } else {
-      const lastVisit = parseInt(localStorage.getItem(LAST_VISIT_KEY) || '0', 10);
+      // Use server-side readMap; fall back to legacy localStorage key for existing sessions
+      const lastVisitRaw = readMap[id];
+      const lastVisit = lastVisitRaw?.toMillis
+        ? lastVisitRaw.toMillis()
+        : (lastVisitRaw || parseInt(localStorage.getItem(LAST_VISIT_KEY) || '0', 10));
       const unreadIndex = posts.findIndex(p => {
         const ms = p.created_at?.toMillis?.() ?? 0;
         return ms > lastVisit;
@@ -378,8 +386,8 @@ const TopicPage = () => {
     try {
       const postData = buildPostData();
       const newPostId = await createPost(postData);
-      // Mark as read immediately
-      localStorage.setItem(LAST_VISIT_KEY, Date.now().toString());
+      // Mark as read immediately (server-side)
+      markTopicRead(id);
       setReplyContent('');
       
       // Calculate where the new post will be
@@ -467,7 +475,7 @@ const TopicPage = () => {
     setDraftSaving(true);
     try {
       await publishDraft(user.uid, id);
-      localStorage.setItem(LAST_VISIT_KEY, Date.now().toString());
+      markTopicRead(id);
       showToast(t('forum.draft_published'));
       // Go to last page where the published post will appear
       setTimeout(() => {
@@ -588,15 +596,12 @@ const TopicPage = () => {
 
   return (
     <Container className="py-4">
-      <Breadcrumb className="mb-4">
-        <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/' }}>{t('nav.home')}</Breadcrumb.Item>
-        {category && (
-          <Breadcrumb.Item linkAs={Link} linkProps={{ to: `/category/${category.id}` }}>
-            {categoryTitle}
-          </Breadcrumb.Item>
-        )}
-        <Breadcrumb.Item active>{topic.title}</Breadcrumb.Item>
-      </Breadcrumb>
+      <ForumBreadcrumbs 
+        items={[
+          ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
+          { label: topic?.title || '...', active: true }
+        ]} 
+      />
 
       <div className="mb-4 topic-header-area">
         <div className="mb-2">
@@ -942,52 +947,55 @@ const TopicPage = () => {
                     </div>
                   </div>
 
-                  {/* Post Management Links (Moved here) */}
-                  <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
-                    {canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
-                      <>
+                  {/* Post Management Links — only render if at least one button is visible */}
+                  {((canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator')) ||
+                    (profile?.role_id !== 'spectator' && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator'))) && (
+                    <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
+                      {canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+                        <>
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="footer-link p-0"
+                            onClick={() => setDeletingPost(post)}
+                          >
+                            {lang === 'ru' ? 'Удалить' : 'Delete'}
+                          </Button>
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="footer-link p-0"
+                            onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
+                          >
+                            {lang === 'ru' ? 'Редактировать' : 'Edit'}
+                          </Button>
+                        </>
+                      )}
+                      {profile?.role_id !== 'spectator' && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
                         <Button
                           variant="link"
                           size="sm"
                           className="footer-link p-0"
-                          onClick={() => setDeletingPost(post)}
-                        >
-                          {lang === 'ru' ? 'Удалить' : 'Delete'}
-                        </Button>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="footer-link p-0"
-                          onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
-                        >
-                          {lang === 'ru' ? 'Редактировать' : 'Edit'}
-                        </Button>
-                      </>
-                    )}
-                    {profile?.role_id !== 'spectator' && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="footer-link p-0"
-                        onClick={() => {
-                          const selectedText = window.getSelection().toString().trim();
-                          const author = getLiveAuthorName(post) || 'User';
-                          const content = selectedText || post.content;
-                          const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
+                          onClick={() => {
+                            const selectedText = window.getSelection().toString().trim();
+                            const author = getLiveAuthorName(post) || 'User';
+                            const content = selectedText || post.content;
+                            const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
 
-                          // BBCode Quote layout without extra trailing newlines to prevent gaps
-                          const quote = `[quote]${label}\n${content}[/quote]\n`;
+                            // BBCode Quote layout without extra trailing newlines to prevent gaps
+                            const quote = `[quote]${label}\n${content}[/quote]\n`;
 
-                          setReplyContent(prev => prev + quote);
-                          // Clean selection after quoting
-                          window.getSelection().removeAllRanges();
-                          replyRef.current?.scrollIntoView({ behavior: 'smooth' });
-                        }}
-                      >
-                        {lang === 'ru' ? 'Цитировать' : 'Quote'}
-                      </Button>
-                    )}
-                  </div>
+                            setReplyContent(prev => prev + quote);
+                            // Clean selection after quoting
+                            window.getSelection().removeAllRanges();
+                            replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+                          }}
+                        >
+                          {lang === 'ru' ? 'Цитировать' : 'Quote'}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </Col>
               </Row>
             </Card.Body>
@@ -1186,7 +1194,8 @@ const TopicPage = () => {
             </span>
           </div>
         ) : topic.is_locked && profile?.role_id !== 'admin' && profile?.role_id !== 'moderator' ? (
-          <div className="mt-5 p-5 text-center text-muted border rounded bg-light bg-opacity-10" ref={replyRef}>
+          <div className="mt-5 p-4 text-center text-muted rounded" style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }} ref={replyRef}>
+
             <div className="mb-3">
               <MessageSquareOff size={48} className="opacity-25" />
             </div>
@@ -1267,15 +1276,12 @@ const TopicPage = () => {
       }
 
       <div className="mt-4">
-        <Breadcrumb className="mb-3">
-          <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/' }}>{t('nav.home')}</Breadcrumb.Item>
-          {category && (
-            <Breadcrumb.Item linkAs={Link} linkProps={{ to: `/category/${category.id}` }}>
-              {categoryTitle}
-            </Breadcrumb.Item>
-          )}
-          <Breadcrumb.Item active>{topic.title}</Breadcrumb.Item>
-        </Breadcrumb>
+        <ForumBreadcrumbs 
+          items={[
+            ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
+            { label: topic?.title || '...', active: true }
+          ]} 
+        />
 
         <div className="d-flex justify-content-between">
           {category && (
