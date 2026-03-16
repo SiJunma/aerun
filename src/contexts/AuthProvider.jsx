@@ -360,6 +360,13 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user, latestTopics, readMap, isMarkingAllRead]);
 
+  // Sync document.title with forumName
+  useEffect(() => {
+    if (settings?.forumName) {
+      document.title = settings.forumName;
+    }
+  }, [settings?.forumName]);
+
   const value = {
     user,
     profile,
