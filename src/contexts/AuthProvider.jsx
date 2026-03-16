@@ -303,6 +303,7 @@ export const AuthProvider = ({ children }) => {
       if (rolesUnsub) rolesUnsub();
       clearInterval(lastSeenInterval);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Calculate unreadTopicsCount whenever readMap or latestTopics change

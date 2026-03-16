@@ -4,9 +4,8 @@ import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Paginatio
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, subscribeToTopicDraft, deleteDraftPost } from '../api/forum';
-import { subscribeToRoles } from '../api/admin';
 import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
-import { subscribeToCharacters } from '../api/character';
+import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
@@ -39,6 +38,7 @@ const TopicPage = () => {
   const [myDraft, setMyDraft] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [authorStats, setAuthorStats] = useState({}); // { uid: { post_count: N } }
+  const [maskStats, setMaskStats] = useState({}); // { charId: { status_line: '' } }
 
   // Edit state
   const [editingPostId, setEditingPostId] = useState(null);
@@ -54,7 +54,7 @@ const TopicPage = () => {
 
   // Reputation state
   const [myVotes, setMyVotes] = useState({}); // { postId: value }
-  const [votingPostId, setVotingPostId] = useState(null);
+  const [votingPostId] = useState(null);
   const [showRepModal, setShowRepModal] = useState(false);
   const [repValue, setRepValue] = useState(1);
   const [repComment, setRepComment] = useState('');
@@ -74,7 +74,7 @@ const TopicPage = () => {
   const [draftSaving, setDraftSaving] = useState(false);
 
   const replyRef = useRef(null);
-  const scrolledRef = useRef(false); // prevent double-scroll
+ // prevent double-scroll
   const goLast = searchParams.get('goLast') === '1';
   const LAST_VISIT_KEY = `lastVisit_${id}`; // kept for legacy scroll-to-unread fallback logic (now uses readMap)
   const ITEMS_PER_PAGE = 20;
@@ -169,14 +169,30 @@ const TopicPage = () => {
     const uniqueAuthorIds = [...new Set(posts.map(p => p.author_id))];
     const unsubs = uniqueAuthorIds.map(uid => {
       return subscribeToUser(uid, (data) => {
-        if (data) {
-          setAuthorStats(prev => ({ ...prev, [uid]: data }));
-        }
+        // We store 'null' explicitly to signal that the fetch finished but returned no user (Deleted)
+        setAuthorStats(prev => ({ ...prev, [uid]: data || null }));
       });
     });
     return () => unsubs.forEach(unsub => unsub());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts.length > 0 ? [...new Set(posts.map(p => p.author_id))].join(',') : '']);
+
+  // Subscribe to character masks
+  useEffect(() => {
+    if (posts.length === 0) return;
+    const characterMasks = posts.filter(p => p.is_character && p.author_character_id);
+    const uniqueMasks = [...new Set(characterMasks.map(p => `${p.author_id}_${p.author_character_id}`))];
+    
+    const unsubs = uniqueMasks.map(key => {
+      const [uid, charId] = key.split('_');
+      return subscribeToCharacter(uid, charId, (data) => {
+        setMaskStats(prev => ({ ...prev, [charId]: data || null }));
+      });
+    });
+    
+    return () => unsubs.forEach(unsub => unsub());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts.length > 0 ? [...new Set(posts.filter(p => p.is_character).map(p => p.author_character_id))].join(',') : '']);
 
   // Toast notification
   const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
@@ -306,9 +322,31 @@ const TopicPage = () => {
       }
       return profile ? (profile.status_line || '') : (post.author_status_line || '');
     }
-    if (post.is_character) return post.author_status_line || '';
+    
+    if (post.is_character) {
+      if (post.author_character_id) {
+        if (!(post.author_character_id in maskStats)) return 'LOADING';
+        const stats = maskStats[post.author_character_id];
+        if (stats === null) return post.author_status_line || '';
+        return stats.status_line || '';
+      }
+      return post.author_status_line || '';
+    }
+    
+    // Check if we have entries in authorStats for this UID
+    if (!(post.author_id in authorStats)) {
+      // Not yet loaded or even started fetching? (Should be handled by useEffect but safety first)
+      return 'LOADING';
+    }
+
     const stats = authorStats[post.author_id];
-    return (stats && stats.nickname) ? (stats.status_line || '') : (post.author_status_line || '');
+    if (stats === null) {
+      // Fetch finished but returned nothing (User deleted)
+      return post.author_status_line || '';
+    }
+
+    // Live data found
+    return stats.status_line || '';
   };
 
   const getLiveAuthorSignature = (post) => {
@@ -469,7 +507,7 @@ const TopicPage = () => {
     }
   };
 
-  const handleUpdateDraft = async (postId) => {
+  const handleUpdateDraft = async () => {
     if (!editContent.trim() || draftSaving) return;
     setDraftSaving(true);
     try {
@@ -485,7 +523,7 @@ const TopicPage = () => {
     }
   };
 
-  const handlePublishDraft = async (postId) => {
+  const handlePublishDraft = async () => {
     if (topic?.is_locked && !hasPermission('moderate_content')) {
       showToast(t('forum.draft_locked_error'), 'danger');
       return;
@@ -581,13 +619,20 @@ const TopicPage = () => {
     // Check author data from stats
     const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
     
+    // If it's undefined, it's still loading (we explicitly set null for 'not found')
+    if (authorData === undefined && !post.is_character) {
+      return <div className="skeleton skeleton-badge mb-2"></div>;
+    }
+    
     // 1. Check if user is banned
     if (authorData?.status === 'banned') {
       return <Badge className="role-badge badge-banned mb-2">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
     }
 
     // 2. Resolve Role Visuals
-    const visuals = getRoleVisuals(resolveUserRoleId(authorData?.email, post.author_role_id), roles);
+    // Prioritize live data from authorStats/profile over stale denormalized post.author_role_id
+    const currentRoleId = authorData?.role_id || post.author_role_id;
+    const visuals = getRoleVisuals(resolveUserRoleId(authorData?.email, currentRoleId), roles);
     
     return (
       <Badge 
@@ -766,11 +811,13 @@ const TopicPage = () => {
                   </div>
 
                   {/* 2. Status */}
-                  {getLiveAuthorStatus(post) && (
+                  {getLiveAuthorStatus(post) === 'LOADING' ? (
+                    <div className="skeleton mb-2" style={{ width: '80%', height: '14px' }}></div>
+                  ) : getLiveAuthorStatus(post) ? (
                     <div className="text-primary mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
                       {getLiveAuthorStatus(post)}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* 3. Avatar */}
                   <div className="mb-2">
@@ -786,13 +833,21 @@ const TopicPage = () => {
                   </div>
 
                   {/* 4. Posts Count */}
-                  <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.8rem' }}>
-                    {t('profile.posts_count')}: <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
+                  <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
+                    {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
+                      <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
+                    ) : (
+                      <span className="skeleton ms-1" style={{ width: '25px', height: '14px' }}></span>
+                    )}
                   </div>
 
                   {/* 5. Reputation */}
-                  <div className="text-muted" style={{ fontSize: '0.875rem' }}>
-                    {t('profile.reputation')}: <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
+                  <div className="text-muted" style={{ fontSize: '0.775rem' }}>
+                    {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
+                      <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
+                    ) : (
+                      <span className="skeleton ms-1" style={{ width: '25px', height: '14px' }}></span>
+                    )}
                   </div>
 
                   {/* 6. Role/Mask */}

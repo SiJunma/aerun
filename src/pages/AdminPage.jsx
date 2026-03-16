@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
-import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole, subscribeToRoles, addRole, updateRole, deleteRole } from '../api/admin';
+import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole, addRole, updateRole, deleteRole } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
-import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, resolveUserRoleId, isChiefAdmin } from '../constants/permissions';
+import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin } from '../constants/permissions';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
 import { UserCheck, UserMinus, UserX, PlusCircle, Edit2 } from 'lucide-react';
@@ -13,7 +13,7 @@ import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
-  const { user: currentUser, profile, hasPermission, roles } = useAuth();
+  const { hasPermission, roles } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
@@ -179,16 +179,6 @@ const AdminPage = () => {
         }
       }
     });
-  };
-
-  const handleRoleChange = async (uid, roleId) => {
-    try {
-      await updateUserRole(uid, roleId);
-      setToast({ show: true, message: t('admin.users.toast_role_updated'), variant: 'success' });
-    } catch (err) {
-      console.error(err);
-      setToast({ show: true, message: 'Error updating user role', variant: 'danger' });
-    }
   };
 
   const handleOpenUserModal = (user) => {

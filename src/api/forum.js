@@ -680,7 +680,6 @@ export const checkNicknameExists = async (nickname, excludeUid = null) => {
 };
 // Batch update topic fields (is_pinned, is_locked)
 export const batchUpdateTopics = async (topicIds, data) => {
-  const batch = db.batch ? db.batch() : null; // Firestore batch is better if available, but we can use transactions or simple updates
   // Since we might need to update multiple docs, let's use a simple loop or a transaction if they are few.
   // Actually, standard updateDoc is fine for multiple independent calls, or we can use writeBatch.
   

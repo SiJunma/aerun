@@ -1797,4 +1797,73 @@ a.badge.bg-danger:hover {
   background-color: rgba(67, 52, 34, 0.02) !important;
   border: 1px solid rgba(67, 52, 34, 0.05) !important;
 }
+
+/* Skeleton Loaders */
+.skeleton {
+  background-color: rgba(var(--primary-rgb), 0.08);
+  border-radius: 0.5rem;
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+  min-height: 1em;
+  vertical-align: middle;
+}
+
+[data-theme='dark'] .skeleton {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme='neutral'] .skeleton {
+  background-color: rgba(67, 52, 34, 0.08);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.1) 20%,
+    rgba(255, 255, 255, 0.2) 60%,
+    rgba(255, 255, 255, 0)
+  );
+  animation: shimmer 2s infinite;
+}
+
+[data-theme='dark'] .skeleton::after {
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0) 0,
+    rgba(255, 255, 255, 0.03) 20%,
+    rgba(255, 255, 255, 0.06) 60%,
+    rgba(0, 0, 0, 0)
+  );
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-text {
+  width: 100%;
+  height: 0.8em;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-badge {
+  width: 80px;
+  height: 1.5rem;
+  border-radius: 1rem;
+}
+
+.skeleton-avatar {
+  border-radius: 0.5rem;
+}
 

@@ -29,9 +29,7 @@ const ForumPagination = ({ currentPage, totalPages, onPageChange, className = ''
   }
 
   // Only show first/prev arrows if current range doesn't include 1
-  const showFirstPrev = startPage > 1;
   // Only show next/last arrows if current range doesn't include last
-  const showNextLast = endPage < totalPages;
 
   return (
     <Pagination className={`forum-pagination mb-0 ${centered ? 'forum-pagination-centered' : ''} ${className}`}>

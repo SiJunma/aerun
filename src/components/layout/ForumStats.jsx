@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
@@ -7,7 +7,7 @@ import { subscribeToCategories, subscribeToAllUsers } from '../../api/forum';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const [categories, setCategories] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   
@@ -18,6 +18,12 @@ const ForumStats = () => {
       unsubCats();
       unsubUsers();
     };
+  }, []);
+
+  const [nowLocal, setNowLocal] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNowLocal(Date.now()), 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // Stats calculation
@@ -33,12 +39,13 @@ const ForumStats = () => {
   })[0];
 
   // Online users (last 15 mins)
-  const now = Date.now();
-  const FIFTEEN_MINS = 15 * 60 * 1000;
-  const onlineUsers = allUsers.filter(u => {
-    const lastSeen = u.last_seen?.toMillis?.() ?? 0;
-    return (now - lastSeen) < FIFTEEN_MINS;
-  }).sort((a, b) => a.nickname.localeCompare(b.nickname));
+  const onlineUsers = useMemo(() => {
+    const FIFTEEN_MINS = 15 * 60 * 1000;
+    return allUsers.filter(u => {
+      const lastSeen = u.last_seen?.toMillis?.() ?? 0;
+      return (nowLocal - lastSeen) < FIFTEEN_MINS;
+    }).sort((a, b) => a.nickname.localeCompare(b.nickname));
+  }, [allUsers, nowLocal]);
 
   return (
     <div className="forum-stats-section mt-5 mb-4">

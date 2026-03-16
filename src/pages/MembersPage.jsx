@@ -10,6 +10,15 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
+const ROLE_PRIORITY = {
+  'root': 120,
+  'admin': 100,
+  'moderator': 80,
+  'player': 60,
+  'banned': 40,
+  'pending': 20
+};
+
 const MembersPage = () => {
   const { t, lang } = useI18n();
   const { profile, updateSettings, roles } = useAuth();
@@ -24,7 +33,7 @@ const MembersPage = () => {
   // Keep local state in sync if profile changes (e.g., from another tab)
   useEffect(() => {
     if (profile?.settings?.member_view_style) {
-      setIsStacked(profile.settings.member_view_style === 'stacked');
+      setTimeout(() => setIsStacked(profile.settings.member_view_style === 'stacked'), 0);
     }
   }, [profile?.settings?.member_view_style]);
 
@@ -61,15 +70,6 @@ const MembersPage = () => {
     } catch {
       return '...';
     }
-  };
-
-  const ROLE_PRIORITY = {
-    'root': 120,
-    'admin': 100,
-    'moderator': 80,
-    'player': 60,
-    'banned': 40,
-    'pending': 20
   };
 
   const sortedAndFilteredUsers = useMemo(() => {

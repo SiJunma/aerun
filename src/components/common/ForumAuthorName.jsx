@@ -21,29 +21,28 @@ const ForumAuthorName = ({
   className = ''
 }) => {
   const [liveName, setLiveName] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      setTimeout(() => setLoading(false), 0);
+      return;
+    }
 
+    setTimeout(() => setLoading(true), 0);
     let unsub;
 
     if (isCharacter && characterId) {
       // Subscribe to character name
       unsub = subscribeToCharacter(userId, characterId, (charData) => {
-        if (charData?.name) {
-          setLiveName(charData.name);
-        } else {
-          setLiveName(null);
-        }
+        setLiveName(charData?.name || null);
+        setLoading(false);
       });
     } else {
       // Subscribe to user nickname
       unsub = subscribeToUser(userId, (userData) => {
-        if (userData?.nickname) {
-          setLiveName(userData.nickname);
-        } else {
-          setLiveName(null);
-        }
+        setLiveName(userData?.nickname || null);
+        setLoading(false);
       });
     }
 
@@ -52,7 +51,11 @@ const ForumAuthorName = ({
 
   return (
     <span className={`forum-author-name ${className}`}>
-      {liveName || fallbackName || '—'}
+      {loading ? (
+        <span className="skeleton" style={{ width: '100px', height: '1.2em', display: 'inline-block', verticalAlign: 'middle' }}></span>
+      ) : (
+        liveName || fallbackName || '—'
+      )}
     </span>
   );
 };

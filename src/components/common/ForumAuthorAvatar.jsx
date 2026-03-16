@@ -25,34 +25,48 @@ const ForumAuthorAvatar = ({
   roundedCircle = false,
   className = ''
 }) => {
-  const [avatarUrl, setAvatarUrl] = useState(initialAvatar || null);
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!userId) {
-      setAvatarUrl(initialAvatar || null);
+      setTimeout(() => setLoading(false), 0);
       return;
     }
 
+    setTimeout(() => setLoading(true), 0);
     let unsub;
 
     if (isCharacter && characterId) {
       unsub = subscribeToCharacter(userId, characterId, (charData) => {
-        setAvatarUrl(charData?.avatar_url || initialAvatar || null);
+        setAvatarUrl(charData?.avatar_url || null);
+        setLoading(false);
       });
     } else {
       unsub = subscribeToUser(userId, (userData) => {
-        setAvatarUrl(userData?.avatar_url || initialAvatar || null);
+        setAvatarUrl(userData?.avatar_url || null);
+        setLoading(false);
       });
     }
 
     return () => unsub?.();
-  }, [userId, characterId, isCharacter, initialAvatar]);
+  }, [userId, characterId, isCharacter]);
+
+  if (loading) {
+    return (
+      <div 
+        className={`skeleton skeleton-avatar ${className}`} 
+        style={{ width: size, height: size, borderRadius: roundedCircle ? '50%' : '0.5rem' }} 
+      />
+    );
+  }
 
   const placeholder = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName || '?')}&background=random&size=${size}`;
+  const finalAvatar = avatarUrl || initialAvatar || placeholder;
 
   return (
     <Image
-      src={avatarUrl || placeholder}
+      src={finalAvatar}
       roundedCircle={roundedCircle}
       width={size}
       height={size}

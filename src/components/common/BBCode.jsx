@@ -14,7 +14,7 @@ const ColumnsStacker = ({ children, stackAt }) => {
   useEffect(() => {
     const val = parseInt(stackAt, 10);
     if (!val || isNaN(val)) {
-      setIsStacked(false);
+      setTimeout(() => setIsStacked(false), 0);
       return;
     }
 
@@ -204,7 +204,7 @@ const BBCode = ({ children }) => {
       case 'i': return <em key={index}>{content}</em>;
       case 'u': return <u key={index}>{content}</u>;
       case 's': return <del key={index}>{content}</del>;
-      case 'quote':
+      case 'quote': {
         const author = params.default || params.author;
         return (
           <blockquote key={index} className="bbcode-quote">
@@ -212,7 +212,8 @@ const BBCode = ({ children }) => {
             {content}
           </blockquote>
         );
-      case 'list':
+      }
+      case 'list': {
         const listClass = (params.default || params.type) === '1' ? 'ps-4 mb-2 list-decimal' : 'ps-4 mb-2';
         // Filter out whitespace-only nodes (spans or raw strings) between list items to avoid hydration errors
         const listContent = content.filter(c => {
@@ -221,11 +222,13 @@ const BBCode = ({ children }) => {
           return true;
         });
         return <ul key={index} className={listClass}>{listContent}</ul>;
+      }
       case '*': return <li key={index}>{content}</li>;
-      case 'url':
+      case 'url': {
         const url = (params.default || getTextContent(node)).trim();
         return <a key={index} href={url} target="_blank" rel="noopener noreferrer">{content}</a>;
-      case 'img':
+      }
+      case 'img': {
         const imgUrl = getTextContent(node).trim();
         return <img
           key={index}
@@ -235,12 +238,14 @@ const BBCode = ({ children }) => {
           alt={params.default || "user post"}
           onError={(e) => { e.target.onerror = null; e.target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="%23f8f9fa" /><text x="50" y="50" font-family="Arial" font-size="12" fill="%23dc3545" text-anchor="middle" dominant-baseline="central">Image Not Found</text></svg>'; }}
         />;
+      }
       case 'color': return <span key={index} style={{ color: params.default || params.color }}>{content}</span>;
-      case 'size':
+      case 'size': {
         const sz = params.default || params.size;
         const sizeVal = (!sz || isNaN(sz)) ? sz : `${sz}%`;
         return <span key={index} style={{ fontSize: sizeVal }}>{content}</span>;
-      case 'columns':
+      }
+      case 'columns': {
         const stackAtValue = params.stack;
         // Filter out whitespace-only nodes between columns to avoid double spacing in flex
         const filtered = content.filter(c => {
@@ -249,7 +254,8 @@ const BBCode = ({ children }) => {
           return true;
         });
         return <ColumnsStacker key={index} stackAt={stackAtValue}>{filtered}</ColumnsStacker>;
-      case 'col':
+      }
+      case 'col': {
         const colStyle = { flex: '1', minWidth: '0' };
         const colSz = params.size || params.default;
         if (colSz) {
@@ -258,6 +264,7 @@ const BBCode = ({ children }) => {
           colStyle.maxWidth = val;
         }
         return <div key={index} className="bbcode-col" style={colStyle}>{content}</div>;
+      }
       default: return <span key={index}>{content}</span>;
     }
   }

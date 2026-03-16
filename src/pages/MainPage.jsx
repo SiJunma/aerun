@@ -6,8 +6,6 @@ import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCategories } from '../api/forum';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
@@ -19,15 +17,6 @@ const MainPage = () => {
     return () => unsubscribe();
   }, []);
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '—';
-    try {
-      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
-    } catch {
-      return '—';
-    }
-  };
 
   return (
     <Container className="pt-5 pb-4">

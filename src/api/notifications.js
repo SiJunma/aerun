@@ -9,7 +9,6 @@ import {
   where,
   updateDoc,
   getDocs,
-  getDoc,
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
@@ -210,7 +209,7 @@ export const handleTopicDeletionNotifications = async (topicId) => {
  * When a post is deleted, decrement post_count on unread notifications.
  * If count reaches 0, delete the notification.
  */
-export const handlePostDeletionNotifications = async (topicId, postId) => {
+export const handlePostDeletionNotifications = async (topicId) => {
   const q = query(
     collection(db, 'notifications'),
     where('type', '==', 'topic_reply'),

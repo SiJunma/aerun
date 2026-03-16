@@ -18,7 +18,7 @@ import { ru, enUS } from 'date-fns/locale';
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
-  const { user, profile, hasPermission, roles, updateProfile, recordActivity } = useAuth();
+  const { profile, hasPermission, roles, updateProfile, recordActivity } = useAuth();
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -26,7 +26,7 @@ const ProfilePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   const isLimitedProfile = viewedProfile?.status === 'pending' || viewedProfile?.role_id === 'spectator';
   const hasTabs = !isLimitedProfile || profile?.uid === uid;
@@ -53,8 +53,6 @@ const ProfilePage = () => {
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
   const [myVote, setMyVote] = useState(null);
-  const [tabPosts, setTabPosts] = useState([]);
-  const [tabTopics, setTabTopics] = useState([]);
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -97,7 +95,7 @@ const ProfilePage = () => {
       unsubProfile();
       unsubRep();
     };
-  }, [uid, profile?.uid]);
+  }, [uid, profile]);
 
   // Sync form data with profile (only if viewing own profile)
   useEffect(() => {

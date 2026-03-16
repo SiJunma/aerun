@@ -8,13 +8,11 @@ import {
   subscribeToAdminNotifications,
   subscribeToUserNotifications,
   markNotificationRead,
-  markAllAdminNotificationsRead,
-  createNotification,
   archiveNotification,
   archiveAllAdminNotifications,
   archiveAllUserNotifications
 } from '../api/notifications';
-import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import ForumPagination from '../components/common/ForumPagination';
 
 const TYPE_META = {
@@ -40,13 +38,16 @@ const formatDate = (ts, lang = 'ru') => {
 };
 
 const NotificationsPage = () => {
-  const { profile, recordActivity } = useAuth();
+  const { profile, recordActivity, hasPermission } = useAuth();
   const { t, lang } = useI18n();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'active'; // 'active' or 'archived'
-  const setActiveTab = (tab) => setSearchParams({ tab });
   const [archivingId, setArchivingId] = useState(null);
+
+  const [adminActive, setAdminActive] = useState([]);
+  const [adminArchived, setAdminArchived] = useState([]);
+  const [userActive, setUserActive] = useState([]);
+  const [userArchived, setUserArchived] = useState([]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -88,11 +89,6 @@ const NotificationsPage = () => {
     };
   }, [isAdmin, profile?.uid]);
 
-  const [adminActive, setAdminActive] = useState([]);
-  const [adminArchived, setAdminArchived] = useState([]);
-  const [userActive, setUserActive] = useState([]);
-  const [userArchived, setUserArchived] = useState([]);
-
   const activeNotifs = [...adminActive, ...userActive].sort((a, b) => 
     (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0)
   );
@@ -102,7 +98,7 @@ const NotificationsPage = () => {
 
   // Reset pagination on tab switch
   useEffect(() => {
-    setCurrentPage(1);
+    setTimeout(() => setCurrentPage(1), 0);
   }, [activeTab]);
 
   const handleMarkRead = (e, id) => {

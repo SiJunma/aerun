@@ -1,3 +1,4 @@
+/* eslint-env node */
 const applyFormatting = (text, offset = 0) => {
   if (!text) return '';
 
@@ -8,7 +9,6 @@ const applyFormatting = (text, offset = 0) => {
 
   const fullTag = match[0];
   const tagName = match[1].toLowerCase();
-  const tagParam = match[2];
   const startIndex = match.index;
   const absoluteIndex = startIndex + offset;
 
@@ -39,6 +39,7 @@ const applyFormatting = (text, offset = 0) => {
       loops++;
       if (loops > 100) {
         console.log("INFINITE LOOP DETECTED in while(depth > 0)");
+        // eslint-disable-next-line no-undef
         process.exit(1);
       }
       const nextMatch = tagPattern.exec(text);
@@ -59,7 +60,7 @@ const applyFormatting = (text, offset = 0) => {
 
   if (endIndex === -1 && tagName !== '*') {
     console.log("Fallback branch logic string length", text.substring(0, startIndex + fullTag.length).length, text.substring(startIndex + fullTag.length).length);
-    let loops = 0; // The recursive call here might infinite loop if text doesn't shorten
+    // The recursive call here might infinite loop if text doesn't shorten
     return [
       `|TEXT:${text.substring(0, startIndex + fullTag.length)}|`,
       ...applyFormatting(text.substring(startIndex + fullTag.length), absoluteIndex + fullTag.length)
@@ -97,7 +98,7 @@ const applyFormatting = (text, offset = 0) => {
 try {
   console.log("Testing normal image:")
   console.dir(applyFormatting("hello [img]https://example.com/a.png[/img] world"), { depth: null });
-  console.log("\Testing image with alt:")
+  console.log("Testing image with alt:")
   console.dir(applyFormatting("hello [img=alt]https://example.com/a.png[/img] world"), { depth: null });
 } catch (e) {
   console.error(e);

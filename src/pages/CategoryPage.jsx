@@ -17,18 +17,15 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
 
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { profile, user } = useAuth();
+  const { profile, user, hasPermission } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState([]);
 
   // Management State
   const [isManaging, setIsManaging] = useState(false);
@@ -64,15 +61,6 @@ const CategoryPage = () => {
       ? (lang === 'ru' ? field.ru : field.en) || ''
       : field || '';
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '—';
-    try {
-      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
-    } catch {
-      return '—';
-    }
-  };
 
   const categoryTitle = category ? resolveText(category.title) : '...';
 

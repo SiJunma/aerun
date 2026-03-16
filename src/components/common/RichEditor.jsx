@@ -5,7 +5,7 @@ import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as Imag
 import { useI18n } from '../../contexts/I18nProvider';
 
 const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus }) => {
-  const { t, lang } = useI18n();
+  const { lang } = useI18n();
   const textareaRef = useRef(null);
 
   // Modals state
@@ -20,10 +20,12 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
 
   // Use a ref to store the latest value for keydown handlers
   const latestValueRef = useRef(value);
-  latestValueRef.current = value;
+  useEffect(() => {
+    latestValueRef.current = value;
+  }, [value]);
 
   // Track the last time a new history snapshot was taken
-  const lastHistoryPushTime = useRef(Date.now());
+  const lastHistoryPushTime = useRef(0);
 
   // Flag: set to true when we ourselves triggered an onChange (modal inserts, toolbar actions).
   // Prevents the useEffect below from mistakenly resetting history on our own updates.
@@ -49,6 +51,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       setHistoryIndex(0);
       lastHistoryPushTime.current = Date.now();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]); // REMOVED history and historyIndex from dependencies to prevent infinite loops
 
   // Handle autoFocus
@@ -145,7 +148,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
 
     let replacement = '';
     if (isLink === 'link' || isLink === 'image') {
-      const { url, text: linkText, alt } = isLink === 'link' ? linkData : imageData;
+      const { url, text: linkText } = isLink === 'link' ? linkData : imageData;
       if (!url) return;
       if (isLink === 'link') {
         replacement = `[url=${url}]${linkText || selected || 'link'}[/url]`;
