@@ -681,6 +681,11 @@ a:hover {
   font-size: 1.05rem;
 }
 
+[data-theme='neutral'] .post-number-indicator {
+  opacity: 0.25 !important;
+  font-weight: normal !important;
+}
+
 /* Markdown Styling in Posts */
 .post-content img {
   max-width: 100%;

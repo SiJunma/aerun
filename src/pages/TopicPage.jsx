@@ -79,22 +79,26 @@ const TopicPage = () => {
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
   const MAX_CHARS = 15000;
 
+  const totalPagesLocal = Math.ceil(posts.length / ITEMS_PER_PAGE);
+  const isOnLastPageLocal = totalPagesLocal === 0 || currentPage >= totalPagesLocal;
+
 
   useEffect(() => {
     const unsubPosts = subscribeToPosts(id, setPosts);
     const unsubTopic = subscribeToTopic(id, setTopic);
-    
-    // Mark topic as read when visiting (server-side, all roles)
-    if (user) markTopicRead(id);
 
     return () => {
-      // Re-mark as read on leaving (catches any new posts that arrived while reading)
-      if (user) markTopicRead(id);
       unsubPosts();
       unsubTopic();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, user?.uid]);
+  }, [id]);
+
+  // Only mark the topic as read if the user is currently on the last page.
+  useEffect(() => {
+    if (user && id && posts.length > 0 && isOnLastPageLocal) {
+      markTopicRead(id);
+    }
+  }, [posts.length, id, user, markTopicRead, isOnLastPageLocal]);
 
   // Subscribe to draft
   useEffect(() => {
@@ -180,6 +184,12 @@ const TopicPage = () => {
 
   // Scroll to first unread post (or last post if ?goLast=1, or specific post if #post-ID)
   const lastTargetRef = useRef('');
+  const hasNavigatedToUnreadRef = useRef(false);
+
+  useEffect(() => {
+    hasNavigatedToUnreadRef.current = false;
+  }, [id]);
+
   useEffect(() => {
     if (posts.length === 0) return;
 
@@ -210,6 +220,9 @@ const TopicPage = () => {
       }
       targetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
     } else {
+      // Unread logic should only redirect/scroll once per topic visit
+      if (hasNavigatedToUnreadRef.current) return;
+
       // Use server-side readMap; fall back to legacy localStorage key for existing sessions
       const lastVisitRaw = readMap[id];
       const lastVisit = lastVisitRaw?.toMillis
@@ -223,11 +236,14 @@ const TopicPage = () => {
       if (unreadIndex !== -1) {
         targetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
         if (currentPage !== targetPage) {
+          hasNavigatedToUnreadRef.current = true;
           setSearchParams({ page: targetPage });
           return;
         }
         targetId = `post-${posts[unreadIndex].id}`;
       }
+      
+      hasNavigatedToUnreadRef.current = true;
     }
 
     // Only scroll if it's a new mount or a new target
@@ -816,7 +832,7 @@ const TopicPage = () => {
                         </span>
                       )}
                     </small>
-                    <div className="text-muted small opacity-50 fw-bold">#{index + indexOfFirstItem + 1}</div>
+                    <div className="text-muted small opacity-50 post-number-indicator">#{index + indexOfFirstItem + 1}</div>
                   </div>
 
                   {/* Body Area */}

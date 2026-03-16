@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
-import { createNotification } from '../api/notifications';
+import { createNotification, markTopicNotificationsRead } from '../api/notifications';
 import { 
   subscribeToReadMap, 
   recordTopicVisit as apiRecordTopicVisit,
@@ -329,6 +329,7 @@ export const AuthProvider = ({ children }) => {
     setReadMap(prev => ({ ...prev, [topicId]: now }));
     try {
       await apiRecordTopicVisit(user.uid, topicId);
+      await markTopicNotificationsRead(user.uid, topicId);
     } catch (err) {
       console.error('[markTopicRead]', err);
     }

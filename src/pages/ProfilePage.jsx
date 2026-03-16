@@ -330,7 +330,7 @@ const ProfilePage = () => {
                 <Card.Header className="py-3 d-flex justify-content-between align-items-center">
                   <h5 className="mb-0">{profile?.uid === uid ? t('profile.characters') : t('profile.characters_other')}</h5>
                   {profile?.uid === uid && profile?.role_id !== 'spectator' && (
-                    <Button variant="primary" size="sm" onClick={() => handleOpenModal()}>
+                    <Button variant="outline-light" size="sm" onClick={() => handleOpenModal()}>
                       + {t('profile.add_character')}
                     </Button>
                   )}

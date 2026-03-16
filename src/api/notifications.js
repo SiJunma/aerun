@@ -95,6 +95,21 @@ export const markNotificationRead = async (id) => {
   await updateDoc(doc(db, 'notifications', id), { read: true });
 };
 
+export const markTopicNotificationsRead = async (uid, topicId) => {
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipient_uid', '==', uid),
+    where('type', '==', 'topic_reply'),
+    where('read', '==', false),
+    where('payload.topic_id', '==', topicId)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+  const batch = writeBatch(db);
+  snap.docs.forEach(d => batch.update(d.ref, { read: true }));
+  await batch.commit();
+};
+
 export const archiveNotification = async (id) => {
   await updateDoc(doc(db, 'notifications', id), { archived: true, read: true });
 };
