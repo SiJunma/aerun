@@ -40,7 +40,7 @@ const CategoryPage = () => {
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
-  const isStaff = profile?.role_id === 'admin' || profile?.role_id === 'moderator';
+  const isStaff = hasPermission('moderate_content');
 
   useEffect(() => {
     const unsubCat = subscribeToCategories((cats) => {

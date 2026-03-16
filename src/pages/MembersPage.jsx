@@ -5,13 +5,14 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/forum';
+import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
 const MembersPage = () => {
   const { t, lang } = useI18n();
-  const { profile, updateSettings } = useAuth();
+  const { profile, updateSettings, roles } = useAuth();
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('nickname');
@@ -36,8 +37,10 @@ const MembersPage = () => {
   };
 
   useEffect(() => {
-    const unsub = subscribeToAllUsers(setUsers);
-    return () => unsub();
+    const unsubUsers = subscribeToAllUsers(setUsers);
+    return () => {
+      unsubUsers();
+    };
   }, []);
 
   const formatDate = (timestamp) => {
@@ -61,6 +64,7 @@ const MembersPage = () => {
   };
 
   const ROLE_PRIORITY = {
+    'root': 120,
     'admin': 100,
     'moderator': 80,
     'player': 60,
@@ -117,13 +121,20 @@ const MembersPage = () => {
   };
 
   const getRoleBadge = (u) => {
-    if (u.status === 'banned') return <Badge className="badge-banned">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
-    if (u.status === 'pending') return <Badge bg="info">{lang === 'ru' ? 'Ожидает' : 'Pending'}</Badge>;
-    const role = u.role_id;
-    if (role === 'admin') return <Badge bg="danger">{lang === 'ru' ? 'Админ' : 'Admin'}</Badge>;
-    if (role === 'moderator') return <Badge bg="warning" text="dark">{lang === 'ru' ? 'Модератор' : 'Moderator'}</Badge>;
-    if (role === 'spectator') return <Badge bg="light" text="dark" className="border opacity-75">{lang === 'ru' ? 'Наблюдатель' : 'Spectator'}</Badge>;
-    return <Badge bg="secondary">{lang === 'ru' ? 'Участник' : 'Member'}</Badge>;
+    if (u.status === 'banned') return <Badge className="role-badge badge-banned">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
+    if (u.status === 'pending') return <Badge bg="info" className="role-badge">{lang === 'ru' ? 'Ожидает' : 'Pending'}</Badge>;
+    
+    // 2. Resolve Role Visuals
+    const visuals = getRoleVisuals(resolveUserRoleId(u.email, u.role_id), roles);
+    
+    return (
+      <Badge 
+        bg={visuals.color} 
+        className={`role-badge ${visuals.isLight ? 'text-dark' : 'text-white'}`}
+      >
+        {visuals.name}
+      </Badge>
+    );
   };
 
   return (

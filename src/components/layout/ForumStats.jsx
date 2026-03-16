@@ -4,6 +4,7 @@ import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { subscribeToCategories, subscribeToAllUsers } from '../../api/forum';
+import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
   const { t, lang } = useI18n();
@@ -83,7 +84,7 @@ const ForumStats = () => {
                   <span className="text-muted small">{t('stats.newest_member')}</span>
                   <Link 
                     to={`/profile/${newestUser.id}`} 
-                    className={`online-user-link text-decoration-none fw-bold small ${newestUser.role_id === 'admin' ? 'online-author-admin' : newestUser.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                    className={`online-user-link text-decoration-none fw-bold small ${newestUser.role_id === 'admin' || newestUser.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : newestUser.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
                   >
                     {newestUser.nickname}
                   </Link>
@@ -110,7 +111,7 @@ const ForumStats = () => {
                   <Link 
                     key={u.id}
                     to={`/profile/${u.id}`} 
-                    className={`online-user-link small text-decoration-none fw-bold ${u.role_id === 'admin' ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                    className={`online-user-link small text-decoration-none fw-bold ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
                   >
                     {u.nickname}
                   </Link>

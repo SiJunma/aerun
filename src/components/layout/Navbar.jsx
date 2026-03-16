@@ -7,14 +7,14 @@ import { Bell, BellOff, User, LogOut } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
 
 const Navigation = () => {
-  const { user, profile, settings, logout, unreadTopicsCount } = useAuth();
+  const { user, profile, settings, logout, unreadTopicsCount, hasPermission } = useAuth();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [adminUnread, setAdminUnread] = React.useState(0);
   const [userUnread, setUserUnread] = React.useState(0);
   const [expanded, setExpanded] = React.useState(false);
 
-  const isAdmin = profile?.role_id === 'admin';
+  const isAdmin = hasPermission('admin_access');
 
   // Subscribe to notifications
   React.useEffect(() => {

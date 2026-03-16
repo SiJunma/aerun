@@ -23,9 +23,11 @@ import { createNotification, markTopicNotificationsRead } from '../api/notificat
 import { 
   subscribeToReadMap, 
   recordTopicVisit as apiRecordTopicVisit,
-  subscribeToLatestTopics,
-  markAllTopicsRead
+  markAllTopicsRead,
+  subscribeToLatestTopics
 } from '../api/forum';
+import { subscribeToRoles } from '../api/admin';
+import { CHIEF_ADMIN_ID, PERMISSIONS } from '../constants/permissions';
 
 const AuthContext = createContext();
 
@@ -46,6 +48,7 @@ export const AuthProvider = ({ children }) => {
   const [latestTopics, setLatestTopics] = useState([]);
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
+  const [roles, setRoles] = useState([]);
 
   // Ref holding the timestamp of the last recorded activity
   const lastActivityRef = useRef(Date.now());
@@ -111,6 +114,7 @@ export const AuthProvider = ({ children }) => {
     let profileUnsub;
     let readMapUnsub;
     let latestTopicsUnsub;
+    let rolesUnsub;
     let lastSeenInterval;
 
     const pushLastSeen = (uid) => {
@@ -190,7 +194,7 @@ export const AuthProvider = ({ children }) => {
               nickname: chosenNickname.trim(),
               avatar_url: firebaseUser.photoURL || '',
               status_line: 'Hello, I am new here!',
-              role_id: isAdmin ? 'admin' : 'player',
+              role_id: isAdmin ? CHIEF_ADMIN_ID : 'player',
               status: isAdmin ? 'active' : 'pending',
               created_at: serverTimestamp(),
               last_seen: serverTimestamp(),
@@ -223,6 +227,9 @@ export const AuthProvider = ({ children }) => {
             pushLastSeen(firebaseUser.uid);
           }
 
+          // Subscribe to roles only for authenticated users
+          rolesUnsub = subscribeToRoles(setRoles);
+
           // Subscribe to read map (all roles — everyone can read topics)
           readMapUnsub = subscribeToReadMap(firebaseUser.uid, setReadMap);
 
@@ -233,9 +240,9 @@ export const AuthProvider = ({ children }) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
 
-              if (isAdmin && (data.role_id !== 'admin' || data.status !== 'active')) {
+              if (isAdmin && (data.role_id !== CHIEF_ADMIN_ID || data.status !== 'active')) {
                 const updates = {
-                  role_id: 'admin',
+                  role_id: CHIEF_ADMIN_ID,
                   status: 'active',
                   last_seen: serverTimestamp()
                 };
@@ -244,7 +251,7 @@ export const AuthProvider = ({ children }) => {
                 setProfile({ id: docSnap.id, ...data });
                 // Keep public settings/global in sync with admin's current nickname
                 // so RegisterPage can display it without requiring auth
-                if (isAdmin && data.nickname && data.nickname !== settings?.adminNickname) {
+                if (isAdmin && data.nickname && firebaseUser && data.nickname !== settings?.adminNickname) {
                   setDoc(doc(db, 'settings', 'global'), { adminNickname: data.nickname }, { merge: true })
                     .catch(err => console.warn('[adminNickname sync]', err));
                 }
@@ -282,6 +289,7 @@ export const AuthProvider = ({ children }) => {
         if (profileUnsub) profileUnsub();
         if (readMapUnsub) readMapUnsub();
         if (latestTopicsUnsub) latestTopicsUnsub();
+        if (rolesUnsub) rolesUnsub();
         clearInterval(lastSeenInterval);
       }
     });
@@ -292,6 +300,7 @@ export const AuthProvider = ({ children }) => {
       if (profileUnsub) profileUnsub();
       if (readMapUnsub) readMapUnsub();
       if (latestTopicsUnsub) latestTopicsUnsub();
+      if (rolesUnsub) rolesUnsub();
       clearInterval(lastSeenInterval);
     };
   }, []);
@@ -367,6 +376,14 @@ export const AuthProvider = ({ children }) => {
     }
   }, [settings?.forumName]);
 
+  const hasPermission = useCallback((perm) => {
+    if (user?.email === import.meta.env.VITE_ADMIN_EMAIL) return true;
+    const userRoleId = profile?.role_id || 'player';
+    if (userRoleId === CHIEF_ADMIN_ID) return true;
+    const userRole = roles.find(r => r.id === userRoleId);
+    return userRole?.permissions?.includes(perm);
+  }, [user, profile, roles]);
+
   const value = {
     user,
     profile,
@@ -381,7 +398,9 @@ export const AuthProvider = ({ children }) => {
     logout,
     updateSettings,
     updateProfile,
-    recordActivity
+    recordActivity,
+    hasPermission,
+    roles
   };
 
   return (

@@ -16,10 +16,13 @@
   /* Form Elements */
   --input-bg: #ffffff;
   --input-border: #c6ccd2;
-  --input-text: #212529;
-  --input-focus-bg: #ffffff;
-  --input-focus-border: #94a3b8; /* Slate 400 */
   --input-placeholder: #6c757d;
+  /* Muted Role Colors - Light (Professional & Deep) */
+  --role-admin: #be123c; /* Rose 700 - Deeper */
+  --role-mod: #0e7490; /* Cyan 700 - Calmer */
+  --role-player: #1d4ed8; /* Blue 700 */
+  --role-spectator: #4b5563; /* Gray 600 */
+  --role-banned: #111827; /* Gray 900 */
 }
 
 [data-theme='dark'] {
@@ -42,10 +45,13 @@
   /* Form Elements - Even darker for "cut-in" effect */
   --input-bg: #020617;
   --input-border: #334155;
-  --input-text: #f8fafc;
-  --input-focus-bg: #020617;
-  --input-focus-border: #475569;
   --input-placeholder: #64748b;
+  /* Muted Role Colors - Dark (Subtle glows, no neon) */
+  --role-admin: #fda4af; /* Rose 300 - Softer */
+  --role-mod: #67e8f9; /* Cyan 300 - Calmer */
+  --role-player: #93c5fd; /* Blue 300 - Softer */
+  --role-spectator: #94a3b8; /* Slate 400 */
+  --role-banned: #f8fafc; /* Slate 50 */
 }
 
 [data-theme='neutral'] {
@@ -68,10 +74,13 @@
   /* Form Elements - Even darker for "cut-in" effect in Sepia */
   --input-bg: #e2ddd0;
   --input-border: #d2ccba;
-  --input-text: #382d1d;
-  --input-focus-bg: #e2ddd0;
-  --input-focus-border: #a68a64;
   --input-placeholder: #5c4b3a;
+  /* Role Colors - Neutral (Sepia) */
+  --role-admin: #991b1b; /* Dark red */
+  --role-mod: #0e7490; /* Dark cyan */
+  --role-player: #1e40af; /* Dark blue */
+  --role-spectator: #4b5563; /* Dark gray */
+  --role-banned: #1a150f; /* Pitch black */
 }
 
 body {
@@ -521,10 +530,8 @@ a:hover {
   color: #ffffff !important;
   /* Keep header text light for contrast */
   border-bottom: 2px solid var(--border-color);
-  text-transform: uppercase;
   font-size: 0.875rem; /* Standardized to 14px */
   font-weight: 700;
-  letter-spacing: 0.05em;
   padding: 12px;
 }
 
@@ -976,17 +983,16 @@ a:hover {
 /* Role Badges & Tags */
 .role-badge {
   display: inline-block;
-  /* padding: 0.25rem 0.85rem; */
-  font-size: 0.8rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  border-radius: 50px;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
   background: transparent;
-  /* border: 1.5px solid var(--primary-color); */
   color: var(--primary-color);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
+  white-space: nowrap;
+  line-height: 1.2;
 }
 
 [data-theme='neutral'] .role-badge {
@@ -1023,8 +1029,6 @@ a:hover {
   transition: all 0.3s ease;
   background: transparent !important;
   font-size: 0.875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   border-radius: 0 !important;
 }
 
@@ -1345,24 +1349,46 @@ a.badge.bg-danger:hover {
   opacity: 0.5;
 }
 
-/* Custom Banned Badge */
-.badge-banned {
-  background-color: #212529 !important;
-  color: #ffffff !important;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+/* Role Badge Base Styles - Theme Aware Mapping */
+.role-badge.bg-danger { --badge-bg: var(--role-admin); --badge-text: #fff; }
+.role-badge.bg-info { --badge-bg: var(--role-mod); --badge-text: #fff; }
+.role-badge.bg-primary { --badge-bg: var(--role-player); --badge-text: #fff; }
+.role-badge.bg-secondary { --badge-bg: var(--role-spectator); --badge-text: #fff; }
+
+/* "Calm Down" - Use Ghost/Subtle style for all themes */
+.role-badge {
+  background-color: rgba(var(--badge-bg-rgb, 148, 163, 184), 0.08) !important;
+  color: var(--badge-bg) !important;
+  border: 1px solid rgba(var(--badge-bg-rgb, 148, 163, 184), 0.2) !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
 }
 
-[data-theme='dark'] .badge-banned {
-  background-color: #020617 !important;
+/* Theme-specific RGB mappings for the ghost style */
+:root {
+  --badge-bg-rgb: 75, 85, 99; /* Default gray 600 */
+}
+.role-badge.bg-danger { --badge-bg-rgb: 190, 18, 60; }   /* Rose 700 */
+.role-badge.bg-info { --badge-bg-rgb: 14, 116, 144; }    /* Cyan 700 */
+.role-badge.bg-primary { --badge-bg-rgb: 29, 78, 216; }   /* Blue 700 */
+.role-badge.bg-secondary { --badge-bg-rgb: 75, 85, 99; } /* Gray 600 */
+
+[data-theme='dark'] .role-badge.bg-danger { --badge-bg-rgb: 251, 113, 133; } /* Rose 400 */
+[data-theme='dark'] .role-badge.bg-info { --badge-bg-rgb: 34, 211, 238; }   /* Cyan 400 */
+[data-theme='dark'] .role-badge.bg-primary { --badge-bg-rgb: 96, 165, 250; } /* Blue 400 */
+
+[data-theme='neutral'] .role-badge.bg-danger { --badge-bg-rgb: 153, 27, 27; } /* Blood red */
+[data-theme='neutral'] .role-badge.bg-info { --badge-bg-rgb: 14, 116, 144; }   /* Cyan 700 */
+[data-theme='neutral'] .role-badge.bg-primary { --badge-bg-rgb: 30, 64, 175; } /* Blue 800 */
+
+/* Specific banned badge override */
+.badge-banned {
+  background-color: var(--role-banned) !important;
   color: #ffffff !important;
-  border: 1px solid #334155 !important;
 }
 
 [data-theme='neutral'] .badge-banned {
-  background-color: #1a150f !important;
   color: #d2ccba !important;
-  border: 1px solid #3c3836 !important;
 }
 
 /* Premium Draft/Ghost Post Styling */
@@ -1465,8 +1491,6 @@ a.badge.bg-danger:hover {
 .forum-header-text {
   font-size: 0.875rem !important;
   font-weight: 700 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
   opacity: 0.8;
 }
 
@@ -1621,11 +1645,11 @@ a.badge.bg-danger:hover {
 }
 
 .online-author-admin {
-  color: #ff4d4d !important; /* Vibrant Red */
+  color: var(--role-admin) !important;
 }
 
 .online-author-mod {
-  color: #fbbf24 !important; /* Vibrant Amber/Yellow */
+  color: var(--role-mod) !important;
 }
 
 /* Theme overrides if needed */
@@ -1729,5 +1753,48 @@ a.badge.bg-danger:hover {
 [data-theme='neutral'] .custom-select-menu .dropdown-item.active {
   background-color: #433422 !important;
   color: #fdfaf3 !important;
+}
+
+/* Form Controls - Theme Fixes for Checkboxes & Radios */
+[data-theme='dark'] .form-check-input {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme='dark'] .form-check-input:checked {
+  background-color: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+  /* Dark checkmark for light background in dark theme */
+  --bs-form-check-bg-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%230f172a' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+}
+
+[data-theme='neutral'] .form-check-input:checked {
+  background-color: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+  /* White checkmark for better visibility on golden-tan background */
+  --bs-form-check-bg-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+}
+
+/* Ensure checkmarks are clear */
+[data-theme='dark'] .form-check-input:checked,
+[data-theme='neutral'] .form-check-input:checked {
+  filter: none;
+}
+
+/* Modal Content Grouping */
+.modal-section-themed {
+  background-color: rgba(var(--primary-rgb), 0.03);
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  border-left: 3px solid var(--primary-color); /* Add a tiny accent line to differentiate from inputs */
+}
+
+[data-theme='dark'] .modal-section-themed {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-theme='neutral'] .modal-section-themed {
+  background-color: rgba(67, 52, 34, 0.02) !important;
+  border: 1px solid rgba(67, 52, 34, 0.05) !important;
 }
 

@@ -16,7 +16,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && getUser().data.role_id == 'admin';
+      return isSignedIn() && (getUser().data.role_id == 'admin' || getUser().data.role_id == 'root');
     }
 
     // Active = authenticated + profile exists + status is 'active' (or admin)
@@ -25,7 +25,8 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && (
           getUser().data.status == 'active' ||
-          getUser().data.role_id == 'admin'
+          getUser().data.role_id == 'admin' ||
+          getUser().data.role_id == 'root'
         );
     }
 
@@ -163,6 +164,12 @@ service cloud.firestore {
       allow read: if isActive();
       allow create: if canPost() && request.resource.data.user_id == request.auth.uid;
       allow delete: if isActive() && (resource.data.user_id == request.auth.uid || isAdmin());
+    }
+
+    // --- Roles ---
+    match /roles/{roleId} {
+      allow read: if isSignedIn(); // Allow reading for badge colors etc
+      allow write: if isAdmin();
     }
   }
 }

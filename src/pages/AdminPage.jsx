@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer } from 'react-bootstrap';
+import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
-import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole } from '../api/admin';
+import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole, subscribeToRoles, addRole, updateRole, deleteRole } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
+import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, resolveUserRoleId, isChiefAdmin } from '../constants/permissions';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
-import { UserCheck, UserMinus, UserX, PlusCircle } from 'lucide-react';
+import { UserCheck, UserMinus, UserX, PlusCircle, Edit2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
-
 const AdminPage = () => {
-  const { t } = useI18n();
-  const { user: currentUser } = useAuth();
+  const { t, lang: currentLang } = useI18n();
+  const { user: currentUser, profile, hasPermission, roles } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
@@ -25,7 +25,17 @@ const AdminPage = () => {
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
   const [catForm, setCatForm] = useState({ title: '', description: '', order: 0 });
+
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [editingRole, setEditingRole] = useState(null);
+  const [roleForm, setRoleForm] = useState({ name: '', permissions: [], color: 'primary' });
+
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [userForm, setUserForm] = useState({ role_id: '' });
+
   const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
+
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -67,10 +77,10 @@ const AdminPage = () => {
     setSaving(true);
     try {
       await updateGlobalSettings(settings);
-      setToast({ show: true, message: 'Settings saved successfully!', variant: 'success' });
+      setToast({ show: true, message: t('admin.settings.success'), variant: 'success' });
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: 'Error saving settings', variant: 'danger' });
+      setToast({ show: true, message: t('admin.settings.error'), variant: 'danger' });
     } finally {
       setSaving(false);
     }
@@ -101,10 +111,10 @@ const AdminPage = () => {
       } else {
         await addCategory(catForm);
       }
-      setToast({ show: true, message: 'Category saved successfully!', variant: 'success' });
+      setToast({ show: true, message: t('admin.categories.toast_saved'), variant: 'success' });
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: 'Error saving category', variant: 'danger' });
+      setToast({ show: true, message: t('admin.categories.error_save'), variant: 'danger' });
     } finally {
       setSaving(false);
     }
@@ -113,15 +123,15 @@ const AdminPage = () => {
   const handleDeleteCategory = (id) => {
     setConfirmState({
       show: true,
-      title: 'Delete Category',
-      message: 'Are you sure you want to delete this category and all its contents? This action cannot be undone.',
+      title: t('admin.categories.confirm_delete_title'),
+      message: t('admin.categories.confirm_delete_message'),
       onConfirm: async () => {
         try {
           await deleteCategory(id);
-          setToast({ show: true, message: 'Category deleted', variant: 'success' });
+          setToast({ show: true, message: t('admin.categories.toast_deleted'), variant: 'success' });
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: 'Error deleting category', variant: 'danger' });
+          setToast({ show: true, message: t('admin.categories.error_delete'), variant: 'danger' });
         }
       }
     });
@@ -130,15 +140,15 @@ const AdminPage = () => {
   const handleRejectUser = (uid) => {
     setConfirmState({
       show: true,
-      title: 'Reject User',
-      message: 'Are you sure you want to reject this user? Their pending profile data will be permanently deleted.',
+      title: t('admin.users.confirm_reject_title'),
+      message: t('admin.users.confirm_reject_message'),
       onConfirm: async () => {
         try {
           await rejectUser(uid);
-          setToast({ show: true, message: 'User rejected', variant: 'success' });
+          setToast({ show: true, message: t('admin.users.toast_rejected'), variant: 'success' });
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: 'Error rejecting user', variant: 'danger' });
+          setToast({ show: true, message: t('admin.users.error_reject'), variant: 'danger' });
         }
       }
     });
@@ -147,25 +157,25 @@ const AdminPage = () => {
   const handleApproveUser = async (uid) => {
     try {
       await approveUser(uid);
-      setToast({ show: true, message: 'User approved', variant: 'success' });
+      setToast({ show: true, message: t('admin.users.toast_approved'), variant: 'success' });
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: 'Error approving user', variant: 'danger' });
+      setToast({ show: true, message: 'Error', variant: 'danger' });
     }
   };
 
   const handleBanUser = async (uid) => {
     setConfirmState({
       show: true,
-      title: 'Ban User',
-      message: 'Are you sure you want to ban this user? They will lose all access immediately.',
+      title: t('admin.users.confirm_ban_title'),
+      message: t('admin.users.confirm_ban_message'),
       onConfirm: async () => {
         try {
           await banUser(uid);
-          setToast({ show: true, message: 'User banned', variant: 'success' });
+          setToast({ show: true, message: t('admin.users.toast_banned'), variant: 'success' });
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: 'Error banning user', variant: 'danger' });
+          setToast({ show: true, message: t('admin.users.error_ban'), variant: 'danger' });
         }
       }
     });
@@ -174,20 +184,97 @@ const AdminPage = () => {
   const handleRoleChange = async (uid, roleId) => {
     try {
       await updateUserRole(uid, roleId);
-      setToast({ show: true, message: 'User role updated', variant: 'success' });
+      setToast({ show: true, message: t('admin.users.toast_role_updated'), variant: 'success' });
     } catch (err) {
       console.error(err);
       setToast({ show: true, message: 'Error updating user role', variant: 'danger' });
     }
   };
 
-  // Mock roles and permissions
-  const availableRoles = [
-    { id: 'admin', name: 'Administrator', color: 'danger', permissions: ['all'] },
-    { id: 'moderator', name: 'Moderator', color: 'info', permissions: ['moderate_posts', 'ban_users'] },
-    { id: 'player', name: 'Player', color: 'primary', permissions: ['create_topics', 'post_replies', 'use_masks'] },
-    { id: 'spectator', name: 'Spectator', color: 'secondary', permissions: ['view_content'] }
-  ];
+  const handleOpenUserModal = (user) => {
+    setEditingUser(user);
+    setUserForm({ role_id: user.role_id || 'player' });
+    setShowUserModal(true);
+  };
+
+  const handleSaveUserRole = async () => {
+    if (!editingUser) return;
+    setSaving(true);
+    setShowUserModal(false);
+    try {
+      await updateUserRole(editingUser.id, userForm.role_id);
+      setToast({ show: true, message: t('admin.users.toast_role_updated'), variant: 'success' });
+    } catch (err) {
+      console.error(err);
+      setToast({ show: true, message: 'Error updating user role', variant: 'danger' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleOpenRoleModal = (role = null) => {
+    if (role) {
+      setEditingRole(role);
+      setRoleForm({ name: role.name, permissions: role.permissions || [], color: role.color || 'primary' });
+    } else {
+      setEditingRole(null);
+      const defaultPlayerRole = DEFAULT_ROLES.find(r => r.id === 'player');
+      setRoleForm({ 
+        name: '', 
+        permissions: defaultPlayerRole ? [...defaultPlayerRole.permissions] : [], 
+        color: 'primary', 
+        base_role_id: 'player' 
+      });
+    }
+    setShowRoleModal(true);
+  };
+
+  const handleSaveRole = async () => {
+    if (!roleForm.name) return;
+    setSaving(true);
+    setShowRoleModal(false);
+    try {
+      if (editingRole) {
+        await updateRole(editingRole.id, roleForm);
+      } else {
+        await addRole(roleForm);
+      }
+      setToast({ show: true, message: t('admin.roles.toast_saved'), variant: 'success' });
+    } catch (err) {
+      console.error(err);
+      setToast({ show: true, message: 'Error', variant: 'danger' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteRole = (id, isSystem) => {
+    setConfirmState({
+      show: true,
+      title: t('admin.roles.confirm_delete_title'),
+      message: t('admin.roles.confirm_delete_message'),
+      onConfirm: async () => {
+        try {
+          await deleteRole(id, isSystem);
+          setToast({ show: true, message: t('admin.roles.toast_deleted'), variant: 'success' });
+        } catch (err) {
+          console.error(err);
+          setToast({ show: true, message: t('admin.roles.error_delete'), variant: 'danger' });
+        }
+      }
+    });
+  };
+
+  const togglePermission = (permId) => {
+    setRoleForm(prev => {
+      const hasPerm = prev.permissions.includes(permId);
+      if (hasPerm) {
+        return { ...prev, permissions: prev.permissions.filter(p => p !== permId) };
+      } else {
+        return { ...prev, permissions: [...prev.permissions, permId] };
+      }
+    });
+  };
 
   const renderSettings = () => (
     <Card className="shadow-sm border-0">
@@ -296,22 +383,24 @@ const AdminPage = () => {
             onClick={handleSaveSettings}
             disabled={saving}
           >
-            {saving ? 'Saving...' : 'Save Settings'}
+            {saving ? t('admin.settings.saving') : t('admin.settings.save_btn')}
           </Button>
         </Form>
       </Card.Body>
     </Card>
   );
 
+
+
   const renderUsers = () => (
     <Card className="shadow-sm border-0">
       <Table hover responsive className="mb-0 overflow-hidden">
         <thead>
           <tr>
-            <th>User</th>
-            <th>Role Assignment</th>
-            <th>Status</th>
-            <th className="text-end">Actions</th>
+            <th>{t('admin.users.table_user')}</th>
+            <th>{t('admin.users.table_role')}</th>
+            <th>{t('admin.users.table_status')}</th>
+            <th className="text-end">{t('admin.users.table_actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -327,54 +416,77 @@ const AdminPage = () => {
                 </div>
               </td>
               <td>
-                {(u.id === currentUser.uid || u.email === import.meta.env.VITE_ADMIN_EMAIL) ? (
-                  <Badge bg="danger" className="px-3" style={{ fontSize: '0.85rem' }}>
-                    {availableRoles.find(r => r.id === 'admin')?.name || 'Administrator'}
-                  </Badge>
-                ) : (
-                  <Form.Select
-                    size="sm"
-                    value={u.role_id || 'player'}
-                    className="w-75 bg-light shadow-sm"
-                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                  >
-                    {availableRoles.map(r => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                  </Form.Select>
-                )}
+                <div className="d-flex align-items-center gap-1">
+                  {isChiefAdmin(u.email, u.role_id) ? (
+                    (() => {
+                      const visuals = getRoleVisuals('admin', roles);
+                      return (
+                        <Badge bg={visuals.color} className={`role-badge px-3 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.85rem' }}>
+                          {visuals.name}
+                        </Badge>
+                      );
+                    })()
+                  ) : (
+                    <Button 
+                      variant="link" 
+                      className="p-0 text-decoration-none d-inline-flex align-items-center gap-2 group border-0 shadow-none"
+                      onClick={() => handleOpenUserModal(u)}
+                      disabled={!hasPermission(PERMISSIONS.CHANGE_ROLES)}
+                    >
+                      {(() => {
+                        const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                        return (
+                          <>
+                            <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
+                              {visuals.name}
+                            </Badge>
+                            <Edit2 size={12} className="text-muted opacity-50 group-hover-opacity-100 transition-opacity" />
+                          </>
+                        );
+                      })()}
+                    </Button>
+                  )}
+                </div>
               </td>
               <td>
-                {u.status === 'active' && <Badge bg="success">Active</Badge>}
-                {u.status === 'pending' && <Badge bg="warning" text="dark">Pending</Badge>}
-                {u.status === 'banned' && <Badge bg="danger">Banned</Badge>}
+                {u.status === 'active' && <Badge bg="success">{t('admin.users.status_active')}</Badge>}
+                {u.status === 'pending' && <Badge bg="warning" text="dark">{t('admin.users.status_pending')}</Badge>}
+                {u.status === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
               </td>
               <td className="text-end">
-                {u.id !== currentUser.uid && u.email !== import.meta.env.VITE_ADMIN_EMAIL && (
+                {!isChiefAdmin(u.email, u.role_id) && (
                   <>
                     {u.status === 'pending' && (
                       <>
-                        <Button variant="success" size="sm" className="me-2 fw-bold text-white" onClick={() => handleApproveUser(u.id)}>
-                          <UserCheck size={14} className="me-1" /> Approve
-                        </Button>
-                        <Button variant="danger" size="sm" className="me-2 fw-bold text-white" onClick={() => handleRejectUser(u.id)}>
-                          <UserX size={14} className="me-1" /> Reject
-                        </Button>
+                        {hasPermission(PERMISSIONS.APPROVE_USERS) && (
+                          <Button variant="success" size="sm" className="me-2 fw-bold text-white" onClick={() => handleApproveUser(u.id)}>
+                             <UserCheck size={14} className="me-1" /> {t('admin.users.approve')}
+                          </Button>
+                        )}
+                        {hasPermission(PERMISSIONS.APPROVE_USERS) && (
+                          <Button variant="danger" size="sm" className="me-2 fw-bold text-white" onClick={() => handleRejectUser(u.id)}>
+                            <UserX size={14} className="me-1" /> {t('admin.users.reject')}
+                          </Button>
+                        )}
                       </>
                     )}
                     {u.status !== 'banned' ? (
-                      <Button variant="link" size="sm" className="text-danger" onClick={() => handleBanUser(u.id)}>
-                        <UserMinus size={14} className="me-1" /> Ban
-                      </Button>
+                      hasPermission(PERMISSIONS.BAN_USERS) && (
+                        <Button variant="link" size="sm" className="text-danger" onClick={() => handleBanUser(u.id)}>
+                          <UserMinus size={14} className="me-1" /> {t('admin.users.ban')}
+                        </Button>
+                      )
                     ) : (
-                      <Button variant="link" size="sm" className="text-success" onClick={() => handleApproveUser(u.id)}>
-                        Unban
-                      </Button>
+                      hasPermission(PERMISSIONS.BAN_USERS) && (
+                        <Button variant="link" size="sm" className="text-success" onClick={() => handleApproveUser(u.id)}>
+                          {t('admin.users.unban')}
+                        </Button>
+                      )
                     )}
                   </>
                 )}
-                {(u.id === currentUser.uid || u.email === import.meta.env.VITE_ADMIN_EMAIL) && (
-                  <Badge bg="secondary" className="opacity-50">Protected</Badge>
+                {isChiefAdmin(u.email, u.role_id) && (
+                  <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>
                 )}
               </td>
             </tr>
@@ -385,42 +497,150 @@ const AdminPage = () => {
   );
 
   const renderRoles = () => (
-    <Card className="shadow-sm border-0">
-      <Card.Body className="p-4">
-        <div className="d-flex justify-content-between mb-4">
-          <h5 className="mb-0">Role Permissions (RBAC)</h5>
-          <Button variant="primary" size="sm">+ Create New Role</Button>
-        </div>
-        <Table hover responsive>
-          <thead>
-            <tr>
-              <th>Role Name</th>
-              <th>Permissions</th>
-              <th className="text-end">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {availableRoles.map(role => (
-              <tr key={role.id} className="align-middle">
-                <td>
-                  <Badge bg={role.color} className="me-2">{role.name}</Badge>
-                </td>
-                <td>
-                  {role.permissions.map(p => (
-                    <Badge key={p} bg="secondary" className="me-1 fw-normal opacity-75">
-                      {p.replace(/_/g, ' ')}
-                    </Badge>
-                  ))}
-                </td>
-                <td className="text-end">
-                  <Button variant="link" size="sm">Edit Permissions</Button>
-                </td>
+    <>
+      <Card className="shadow-sm border-0">
+        <Card.Body className="p-4">
+          <div className="d-flex justify-content-between mb-4">
+            <h5 className="mb-0">{t('admin.roles.title')}</h5>
+            {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
+              <Button variant="primary" size="sm" onClick={() => handleOpenRoleModal()}>{t('admin.roles.create_btn')}</Button>
+            )}
+          </div>
+          <Table hover responsive>
+            <thead>
+              <tr>
+                <th>{t('admin.roles.table_name')}</th>
+                <th>{t('admin.roles.table_perms')}</th>
+                <th className="text-end">{t('admin.roles.table_actions')}</th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Card.Body>
-    </Card>
+            </thead>
+            <tbody>
+              {roles.filter(r => r.id !== 'root').map(role => (
+                <tr key={role.id} className="align-middle">
+                  <td>
+                    <Badge bg={role.color || 'primary'} className={`role-badge me-2 ${['warning', 'light'].includes(role.color) ? 'text-dark' : 'text-white'}`}>
+                      {role.name}
+                    </Badge>
+                  </td>
+                  <td>
+                    <div className="d-flex flex-wrap gap-1">
+                      {role.permissions?.map(p => (
+                        <Badge key={p} bg="secondary" className="role-badge fw-normal opacity-75" style={{ background: 'var(--bs-gray-700)', color: 'white' }}>
+                          {PERMISSION_LABELS[p]?.[currentLang] || PERMISSION_LABELS[p]?.en || p}
+                        </Badge>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="text-end">
+                    {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
+                      <>
+                          <Button variant="link" size="sm" onClick={() => handleOpenRoleModal(role)}>
+                            {t('admin.roles.edit')}
+                          </Button>
+                          {!(role.is_system || ['admin', 'moderator', 'player', 'spectator'].includes(role.id)) && (
+                            <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteRole(role.id, role.is_system)}>
+                              {t('admin.roles.delete')}
+                            </Button>
+                          )}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card.Body>
+      </Card>
+
+      <ForumModal
+        show={showRoleModal}
+        onHide={() => setShowRoleModal(false)}
+        title={editingRole ? t('admin.roles.modal_edit') : t('admin.roles.modal_create')}
+        size="lg"
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowRoleModal(false)}>{t('common.cancel')}</Button>
+            <Button variant="primary" onClick={handleSaveRole} disabled={saving}>
+              {saving ? t('admin.settings.saving') : t('admin.roles.save_btn')}
+            </Button>
+          </>
+        }
+      >
+        <Form>
+          <Row>
+            <Col md={7}>
+              <Form.Group className="mb-4">
+                <Form.Label className="fw-bold">{t('admin.roles.modal_name')}</Form.Label>
+                <Form.Control
+                  type="text"
+                  placeholder="e.g. Master Moderator"
+                  value={roleForm.name}
+                  onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+            {!editingRole && (
+              <Col md={5}>
+                <Form.Group className="mb-4">
+                  <Form.Label className="fw-bold">{t('admin.roles.modal_base_role')}</Form.Label>
+                  <Dropdown className="w-100">
+                    <Dropdown.Toggle 
+                      variant="outline-management" 
+                      className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
+                    >
+                      {roleForm.base_role_id === 'moderator' ? t('admin.roles.system_roles.moderator') : 
+                       roleForm.base_role_id === 'spectator' ? t('admin.roles.system_roles.spectator') : 
+                       t('admin.roles.system_roles.player')}
+                    </Dropdown.Toggle>
+                    <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
+                      {['player', 'moderator', 'spectator'].map(baseId => (
+                        <Dropdown.Item 
+                          key={baseId}
+                          active={roleForm.base_role_id === baseId}
+                          onClick={() => {
+                            const template = DEFAULT_ROLES.find(r => r.id === baseId);
+                            setRoleForm({ 
+                              ...roleForm, 
+                              base_role_id: baseId,
+                              permissions: template ? [...template.permissions] : roleForm.permissions
+                            });
+                          }}
+                        >
+                          {t(`admin.roles.system_roles.${baseId}`)}
+                        </Dropdown.Item>
+                      ))}
+                    </Dropdown.Menu>
+                  </Dropdown>
+                </Form.Group>
+              </Col>
+            )}
+            <Col md={editingRole ? 5 : 12}>
+            </Col>
+          </Row>
+
+          <h6 className="fw-bold mb-3">{t('admin.roles.modal_perms')}</h6>
+          <div className="modal-section-themed p-3 rounded mb-2">
+            <Row>
+              {Object.keys(PERMISSIONS).map(permKey => {
+                const permId = PERMISSIONS[permKey];
+                const isChecked = roleForm.permissions.includes(permId);
+                return (
+                  <Col md={6} key={permId} className="mb-2">
+                    <Form.Check
+                      type="checkbox"
+                      id={`perm-${permId}`}
+                      label={PERMISSION_LABELS[permId]?.[currentLang] || PERMISSION_LABELS[permId]?.en || permId}
+                      checked={isChecked}
+                      onChange={() => togglePermission(permId)}
+                    />
+                  </Col>
+                );
+              })}
+            </Row>
+          </div>
+        </Form>
+      </ForumModal>
+    </>
   );
 
   const renderCategories = () => (
@@ -428,16 +648,18 @@ const AdminPage = () => {
       <Card className="shadow-sm border-0">
         <Card.Body className="p-4">
           <div className="d-flex justify-content-between mb-4">
-            <h5 className="mb-0">Forum Categories</h5>
-            <Button variant="primary" size="sm" onClick={() => handleOpenCatModal()}>+ Add Category</Button>
+            <h5 className="mb-0">{t('admin.categories.title')}</h5>
+            {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+              <Button variant="primary" size="sm" onClick={() => handleOpenCatModal()}>{t('admin.categories.create_btn')}</Button>
+            )}
           </div>
           <Table hover responsive>
             <thead>
               <tr>
-                <th>Order</th>
-                <th>Title</th>
-                <th>Stats</th>
-                <th className="text-end">Actions</th>
+                <th>{t('admin.categories.table_order')}</th>
+                <th>{t('admin.categories.table_title')}</th>
+                <th>{t('admin.categories.table_stats')}</th>
+                <th className="text-end">{t('admin.categories.table_actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -452,10 +674,14 @@ const AdminPage = () => {
                       {typeof cat.description === 'object' ? cat.description.en : cat.description}
                     </div>
                   </td>
-                  <td>{cat.topics_count || 0} Topics / {cat.posts_count || 0} Posts</td>
+                  <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
                   <td className="text-end">
-                    <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>Edit</Button>
-                    <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>Delete</Button>
+                    {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                      <>
+                        <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
+                        <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -467,12 +693,12 @@ const AdminPage = () => {
       <ForumModal
         show={showCatModal}
         onHide={() => setShowCatModal(false)}
-        title={editingCat ? 'Edit Category' : 'Add Category'}
+        title={editingCat ? t('admin.categories.modal_edit') : t('admin.categories.modal_create')}
         footer={
           <>
-            <Button variant="outline-secondary" onClick={() => setShowCatModal(false)}>Cancel</Button>
+            <Button variant="outline-secondary" onClick={() => setShowCatModal(false)}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={handleSaveCategory} disabled={saving}>
-              {saving ? 'Saving...' : 'Save Category'}
+              {saving ? t('admin.settings.saving') : t('admin.categories.save_btn')}
             </Button>
           </>
         }
@@ -480,7 +706,7 @@ const AdminPage = () => {
       >
         <Form>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-bold">Title (EN)</Form.Label>
+            <Form.Label className="fw-bold">{t('admin.categories.modal_title')}</Form.Label>
             <Form.Control
               type="text"
               value={catForm.title}
@@ -488,7 +714,7 @@ const AdminPage = () => {
             />
           </Form.Group>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-bold">Description (EN)</Form.Label>
+            <Form.Label className="fw-bold">{t('admin.categories.modal_desc')}</Form.Label>
             <Form.Control
               as="textarea"
               rows={2}
@@ -497,7 +723,7 @@ const AdminPage = () => {
             />
           </Form.Group>
           <Form.Group className="mb-0">
-            <Form.Label className="fw-bold">Display Order</Form.Label>
+            <Form.Label className="fw-bold">{t('admin.categories.modal_order')}</Form.Label>
             <Form.Control
               type="number"
               value={catForm.order}
@@ -514,27 +740,84 @@ const AdminPage = () => {
       <ForumBreadcrumbs 
         items={[{ label: t('nav.admin'), active: true }]} 
       />
-      <h2 className="mb-4">{t('nav.admin')} Dashboard</h2>
+      <h2 className="mb-4">{t('admin.dashboard')}</h2>
 
       <Nav variant="tabs" activeKey={activeTab} className="mb-4 border-0" onSelect={(k) => setActiveTab(k)}>
-        <Nav.Item>
-          <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">Settings</Nav.Link>
-        </Nav.Item>
-        <Nav.Item>
-          <Nav.Link eventKey="users" className="px-4 fw-bold border-0">Users</Nav.Link>
-        </Nav.Item>
-        <Nav.Item>
-          <Nav.Link eventKey="roles" className="px-4 fw-bold border-0">Roles</Nav.Link>
-        </Nav.Item>
-        <Nav.Item>
-          <Nav.Link eventKey="categories" className="px-4 fw-bold border-0">Categories</Nav.Link>
-        </Nav.Item>
+        {hasPermission(PERMISSIONS.MANAGE_SETTINGS) && (
+          <Nav.Item>
+            <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">{t('admin.tabs.settings')}</Nav.Link>
+          </Nav.Item>
+        )}
+        {(hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && (
+          <Nav.Item>
+            <Nav.Link eventKey="users" className="px-4 fw-bold border-0">{t('admin.tabs.users')}</Nav.Link>
+          </Nav.Item>
+        )}
+        {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
+          <Nav.Item>
+            <Nav.Link eventKey="roles" className="px-4 fw-bold border-0">{t('admin.tabs.roles')}</Nav.Link>
+          </Nav.Item>
+        )}
+        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+          <Nav.Item>
+            <Nav.Link eventKey="categories" className="px-4 fw-bold border-0">{t('admin.tabs.categories')}</Nav.Link>
+          </Nav.Item>
+        )}
       </Nav>
 
-      {activeTab === 'settings' && renderSettings()}
-      {activeTab === 'users' && renderUsers()}
-      {activeTab === 'roles' && renderRoles()}
-      {activeTab === 'categories' && renderCategories()}
+      {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_SETTINGS) && renderSettings()}
+      {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
+      {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
+      {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
+
+      {/* User Edit Modal */}
+      <ForumModal
+        show={showUserModal}
+        onHide={() => setShowUserModal(false)}
+        title={t('admin.users.edit_user_title')}
+        footer={
+          <Button variant="primary" onClick={handleSaveUserRole} disabled={saving}>
+            {saving ? t('common.loading') : t('common.save')}
+          </Button>
+        }
+      >
+        {editingUser && (
+          <Form>
+            <div className="mb-4 d-flex align-items-center bg-light p-3 rounded border shadow-sm">
+              {editingUser.avatar_url && (
+                <img src={editingUser.avatar_url} alt="" className="rounded-circle me-3 border border-2 border-white" style={{ width: '48px', height: '48px', objectFit: 'cover' }} />
+              )}
+              <div>
+                <div className="fw-bold h5 mb-0 text-primary">{editingUser.nickname || editingUser.email}</div>
+                <div className="small text-muted">{editingUser.email}</div>
+              </div>
+            </div>
+
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">{t('admin.users.change_role_label')}</Form.Label>
+              <Dropdown className="w-100">
+                <Dropdown.Toggle 
+                  variant="outline-management" 
+                  className="w-100 d-flex justify-content-between align-items-center custom-select-toggle py-2"
+                >
+                  {roles.find(r => r.id === userForm.role_id)?.name || userForm.role_id}
+                </Dropdown.Toggle>
+                <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
+                  {roles.filter(r => r.id !== 'root').map(r => (
+                    <Dropdown.Item 
+                      key={r.id} 
+                      active={userForm.role_id === r.id}
+                      onClick={() => setUserForm({ ...userForm, role_id: r.id })}
+                    >
+                      {r.name}
+                    </Dropdown.Item>
+                  ))}
+                </Dropdown.Menu>
+              </Dropdown>
+            </Form.Group>
+          </Form>
+        )}
+      </ForumModal>
 
       <ConfirmModal
         show={confirmState.show}

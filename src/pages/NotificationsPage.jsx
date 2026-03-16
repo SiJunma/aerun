@@ -56,7 +56,7 @@ const NotificationsPage = () => {
   const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
   const showToast = (message, variant = 'success') => setToast({ show: true, message, variant });
 
-  const isAdmin = profile?.role_id === 'admin';
+  const isAdmin = hasPermission('admin_access');
 
   useEffect(() => {
     if (!profile?.uid) return;

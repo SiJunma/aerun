@@ -67,6 +67,11 @@ export const addCategory = async (catData) => {
     ...catData,
     topics_count: 0,
     posts_count: 0,
+    permissions: catData.permissions || {
+      view: ['all'],
+      create_topic: ['player', 'moderator', 'admin'],
+      reply: ['player', 'moderator', 'admin']
+    },
     created_at: serverTimestamp()
   });
 };

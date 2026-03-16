@@ -4,6 +4,8 @@ import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Paginatio
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, subscribeToTopicDraft, deleteDraftPost } from '../api/forum';
+import { subscribeToRoles } from '../api/admin';
+import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import { subscribeToCharacters } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -26,7 +28,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, readMap } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, roles } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
@@ -484,7 +486,7 @@ const TopicPage = () => {
   };
 
   const handlePublishDraft = async (postId) => {
-    if (topic?.is_locked && profile?.role_id !== 'admin' && profile?.role_id !== 'moderator') {
+    if (topic?.is_locked && !hasPermission('moderate_content')) {
       showToast(t('forum.draft_locked_error'), 'danger');
       return;
     }
@@ -570,23 +572,33 @@ const TopicPage = () => {
 
   const canManagePost = (post) => {
     if (!user) return false;
-    return post.author_id === user.uid || profile?.role_id === 'admin' || profile?.role_id === 'moderator';
+    return post.author_id === user.uid || hasPermission('moderate_content');
   };
 
   const getRoleBadge = (post) => {
     if (post.is_character) return null;
     
-    // Check if user is banned
-    const isBanned = authorStats[post.author_id]?.status === 'banned';
-    if (isBanned) return <Badge className="badge-banned mb-2 opacity-90">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
+    // Check author data from stats
+    const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+    
+    // 1. Check if user is banned
+    if (authorData?.status === 'banned') {
+      return <Badge className="role-badge badge-banned mb-2">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
+    }
 
-    const role = post.author_role_id;
-    if (role === 'admin') return <Badge bg="danger" className="mb-2 opacity-90">{lang === 'ru' ? 'Админ' : 'Admin'}</Badge>;
-    if (role === 'moderator') return <Badge bg="warning" text="dark" className="mb-2 opacity-90">{lang === 'ru' ? 'Модератор' : 'Moderator'}</Badge>;
-    if (role === 'spectator') return <Badge bg="light" text="dark" className="mb-2 border opacity-75">{lang === 'ru' ? 'Наблюдатель' : 'Spectator'}</Badge>;
-    return <Badge bg="secondary" className="mb-2 opacity-75">{lang === 'ru' ? 'Участник' : 'Member'}</Badge>;
+    // 2. Resolve Role Visuals
+    const visuals = getRoleVisuals(resolveUserRoleId(authorData?.email, post.author_role_id), roles);
+    
+    return (
+      <Badge 
+        bg={visuals.color} 
+        className={`role-badge mb-2 shadow-sm ${visuals.isLight ? 'text-dark' : 'text-white'}`}
+      >
+        {visuals.name}
+      </Badge>
+    );
   };
-
+    
   if (!topic) {
     return (
       <Container className="py-5 text-center">
@@ -657,7 +669,7 @@ const TopicPage = () => {
           <div className="d-flex flex-column align-items-md-end align-items-center gap-2">
             <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
               {/* Admin Management Dropdown */}
-              {(profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+              {hasPermission('moderate_content') && (
                 <Dropdown>
                   <Dropdown.Toggle 
                     variant="link" 
@@ -964,10 +976,10 @@ const TopicPage = () => {
                   </div>
 
                   {/* Post Management Links — only render if at least one button is visible */}
-                  {((canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator')) ||
-                    (profile?.role_id !== 'spectator' && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator'))) && (
+                  {((canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content'))) ||
+                    (profile?.role_id !== 'spectator' && (!topic.is_locked || hasPermission('moderate_content')))) && (
                     <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
-                      {canManagePost(post) && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+                      {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
                         <>
                           <Button
                             variant="link"
@@ -987,7 +999,7 @@ const TopicPage = () => {
                           </Button>
                         </>
                       )}
-                      {profile?.role_id !== 'spectator' && (!topic.is_locked || profile?.role_id === 'admin' || profile?.role_id === 'moderator') && (
+                      {profile?.role_id !== 'spectator' && (!topic.is_locked || hasPermission('moderate_content')) && (
                         <Button
                           variant="link"
                           size="sm"

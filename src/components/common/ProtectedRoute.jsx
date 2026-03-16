@@ -11,7 +11,7 @@ import { useAuth } from '../../contexts/AuthProvider';
  *  requirePosting {boolean} – if true, spectators are bounced (cannot post/create, default: false)
  */
 const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false }) => {
-  const { user, profile, settings, loading } = useAuth();
+  const { user, profile, settings, loading, hasPermission } = useAuth();
   const location = useLocation();
 
   if (loading || !settings) {
@@ -37,7 +37,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
       );
     }
 
-    if (profile.role_id !== 'admin') {
+    if (!hasPermission('admin_access')) {
       return <Navigate to="/maintenance" replace />;
     }
   }
@@ -61,7 +61,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   }
 
   // Admin-only route: kick non-admins back home
-  if (requireAdmin && profile?.role_id !== 'admin') {
+  if (requireAdmin && !hasPermission('admin_access')) {
     return <Navigate to="/" replace />;
   }
 

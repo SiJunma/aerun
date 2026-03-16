@@ -7,6 +7,7 @@ import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save }
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { subscribeToUser, checkNicknameExists } from '../api/forum';
+import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
@@ -17,7 +18,7 @@ import { ru, enUS } from 'date-fns/locale';
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
-  const { profile, updateProfile, recordActivity } = useAuth();
+  const { user, profile, hasPermission, roles, updateProfile, recordActivity } = useAuth();
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -25,6 +26,7 @@ const ProfilePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const isLimitedProfile = viewedProfile?.status === 'pending' || viewedProfile?.role_id === 'spectator';
   const hasTabs = !isLimitedProfile || profile?.uid === uid;
@@ -51,6 +53,8 @@ const ProfilePage = () => {
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
   const [myVote, setMyVote] = useState(null);
+  const [tabPosts, setTabPosts] = useState([]);
+  const [tabTopics, setTabTopics] = useState([]);
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -76,7 +80,10 @@ const ProfilePage = () => {
 
   useEffect(() => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
-    const unsubProfile = subscribeToUser(uid, setViewedProfile);
+    const unsubProfile = subscribeToUser(uid, (data) => {
+      setViewedProfile(data);
+      setLoading(false);
+    });
     const unsubRep = subscribeToReputationLogs(uid, setRepLogs);
     
     if (profile && profile.uid !== uid) {
@@ -294,7 +301,7 @@ const ProfilePage = () => {
                 </div>
               )}
 
-              {(profile?.uid === uid || profile?.role_id === 'admin') && (
+              {(profile?.uid === uid || hasPermission('admin_access')) && (
                 <div className="mb-3 text-start border-top pt-3">
                   <span className="text-muted d-block small mb-1">{t('common.email')}</span>
                   <div className="fw-bold text-truncate">{viewedProfile?.email}</div>
@@ -305,12 +312,22 @@ const ProfilePage = () => {
                   {t('profile.account_role')}
                 </span>
                 {viewedProfile?.status === 'banned' ? (
-                  <div className="role-badge badge-banned px-3 py-1 mt-1">{lang === 'ru' ? 'ЗАБАНЕН' : 'BANNED'}</div>
+                  <Badge className="role-badge badge-banned px-3 py-1 mt-1">{lang === 'ru' ? 'ЗАБАНЕН' : 'BANNED'}</Badge>
                 ) : viewedProfile?.status === 'pending' ? (
-                  <div className="role-badge bg-info px-3 py-1 mt-1 text-white border-0">{lang === 'ru' ? 'ОЖИДАЕТ' : 'PENDING'}</div>
-                ) : (
-                  <div className="role-badge">{viewedProfile?.role_id?.toUpperCase()}</div>
-                )}
+                  <Badge bg="info" className="role-badge px-3 py-1 mt-1 text-white">{lang === 'ru' ? 'ОЖИДАЕТ' : 'PENDING'}</Badge>
+                ) : (() => {
+                  const roleId = resolveUserRoleId(viewedProfile?.email, viewedProfile?.role_id);
+                  const { name, color, isLight } = getRoleVisuals(roleId, roles);
+                  
+                  return (
+                    <Badge 
+                      bg={color} 
+                      className={`role-badge px-3 py-1 mt-1 ${isLight ? 'text-dark' : 'text-white'}`}
+                    >
+                      {name}
+                    </Badge>
+                  );
+                })()}
               </div>
             </Card.Body>
           </Card>
