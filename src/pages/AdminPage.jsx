@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
-import { getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, updateUserRole, addRole, updateRole, deleteRole } from '../api/admin';
+import { 
+  getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, 
+  updateUserRole, addRole, updateRole, deleteRole 
+} from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
 import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin } from '../constants/permissions';
 import { InputGroup } from 'react-bootstrap';
@@ -44,6 +47,27 @@ const AdminPage = () => {
     title: '',
     message: ''
   });
+
+  // Tab permissions check
+  const canAccessTab = (tab) => {
+    switch (tab) {
+      case 'settings': return hasPermission(PERMISSIONS.MANAGE_SETTINGS);
+      case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
+      case 'roles': return hasPermission(PERMISSIONS.MANAGE_ROLES);
+      case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
+      default: return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!canAccessTab(activeTab)) {
+      const tabs = ['settings', 'users', 'roles', 'categories'];
+      const firstAvailable = tabs.find(t => canAccessTab(t));
+      if (firstAvailable) {
+        setActiveTab(firstAvailable);
+      }
+    }
+  }, [activeTab, hasPermission]);
 
   // Initial settings state
   const [settings, setSettings] = useState({
@@ -773,13 +797,20 @@ const AdminPage = () => {
       >
         {editingUser && (
           <Form>
-            <div className="mb-4 d-flex align-items-center bg-light p-3 rounded border shadow-sm">
+            <div className="mb-4 d-flex align-items-center modal-section-themed p-3 rounded shadow-sm">
               {editingUser.avatar_url && (
-                <img src={editingUser.avatar_url} alt="" className="rounded-circle me-3 border border-2 border-white" style={{ width: '48px', height: '48px', objectFit: 'cover' }} />
+                <img 
+                  src={editingUser.avatar_url} 
+                  alt="" 
+                  className="rounded-circle me-3 border border-2 border-card" 
+                  style={{ width: '48px', height: '48px', objectFit: 'cover' }} 
+                />
               )}
               <div>
-                <div className="fw-bold h5 mb-0 text-primary">{editingUser.nickname || editingUser.email}</div>
-                <div className="small text-muted">{editingUser.email}</div>
+                <div className="fw-bold h5 mb-0" style={{ color: 'var(--primary-color)' }}>
+                  {editingUser.nickname || editingUser.email}
+                </div>
+                <div className="small opacity-75">{editingUser.email}</div>
               </div>
             </div>
 

@@ -38,7 +38,7 @@ const formatDate = (ts, lang = 'ru') => {
 };
 
 const NotificationsPage = () => {
-  const { profile, recordActivity, hasPermission } = useAuth();
+  const { profile, recordActivity, hasPermission, PERMISSIONS } = useAuth();
   const { t, lang } = useI18n();
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'active'; // 'active' or 'archived'
@@ -57,7 +57,7 @@ const NotificationsPage = () => {
   const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
   const showToast = (message, variant = 'success') => setToast({ show: true, message, variant });
 
-  const isAdmin = hasPermission('admin_access');
+  const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
   useEffect(() => {
     if (!profile?.uid) return;

@@ -48,7 +48,9 @@ export const updateUserRole = async (uid, roleId) => {
 export const subscribeToRoles = (callback) => {
   const q = query(collection(db, 'roles'), orderBy('name', 'asc'));
   return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    // id: d.id must come LAST so the real Firestore document ID always wins
+    // over any stale `id` field that may have been stored inside the document data
+    callback(snapshot.docs.map(d => ({ ...d.data(), id: d.id })));
   });
 };
 
@@ -63,10 +65,11 @@ export const addRole = async (roleData) => {
 };
 
 export const updateRole = async (id, roleData) => {
-  await setDoc(doc(db, 'roles', id), {
+  // Use updateDoc (not setDoc) to preserve is_system, created_at and other existing fields
+  await updateDoc(doc(db, 'roles', id), {
     ...roleData,
     updated_at: serverTimestamp()
-  }, { merge: true });
+  });
 };
 
 export const deleteRole = async (id, isSystem) => {
@@ -77,24 +80,44 @@ export const deleteRole = async (id, isSystem) => {
   // Find the role to get its base_role_id
   const roleSnap = await getDoc(doc(db, 'roles', id));
   if (!roleSnap.exists()) return;
-  
-  const roleData = roleSnap.data();
-  const baseRoleId = roleData.base_role_id || 'player'; // Fallback to player if no base_role_id
 
-  // Update all users who have this role to the base role
+  const roleData = roleSnap.data();
+  const baseRoleId = roleData.base_role_id || 'player';
+
+  // Move all users with this role to the base role
   const usersQuery = query(collection(db, 'users'), where('role_id', '==', id));
   const usersSnapshot = await getDocs(usersQuery);
-  
+
   const batch = writeBatch(db);
   usersSnapshot.forEach((userDoc) => {
-    batch.update(userDoc.ref, { 
+    batch.update(userDoc.ref, {
       role_id: baseRoleId,
-      updated_at: serverTimestamp() 
+      updated_at: serverTimestamp()
     });
   });
-  
   await batch.commit();
 
   // Finally delete the role
   await deleteDoc(doc(db, 'roles', id));
+};
+
+/**
+ * Seed the system roles into Firestore using their canonical string IDs.
+ * Only creates roles that don't yet exist — never overwrites existing data.
+ * Pass DEFAULT_ROLES from constants/permissions.js.
+ */
+export const seedSystemRoles = async (defaultRoles) => {
+  for (const role of defaultRoles) {
+    const ref = doc(db, 'roles', role.id); // fixed ID: 'admin', 'moderator', 'player', 'spectator'
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        name: role.name,
+        color: role.color,
+        permissions: role.permissions,
+        is_system: true,
+        created_at: serverTimestamp()
+      });
+    }
+  }
 };

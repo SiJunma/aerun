@@ -23,6 +23,8 @@
   --role-player: #1d4ed8; /* Blue 700 */
   --role-spectator: #4b5563; /* Gray 600 */
   --role-banned: #111827; /* Gray 900 */
+  /* Block Backgrounds */
+  --block-bg: rgba(30, 41, 59, 0.03); /* Light Slate wash */
 }
 
 [data-theme='dark'] {
@@ -52,6 +54,8 @@
   --role-player: #93c5fd; /* Blue 300 - Softer */
   --role-spectator: #94a3b8; /* Slate 400 */
   --role-banned: #f8fafc; /* Slate 50 */
+  /* Block Backgrounds */
+  --block-bg: rgba(255, 255, 255, 0.04);
 }
 
 [data-theme='neutral'] {
@@ -81,6 +85,8 @@
   --role-player: #1e40af; /* Dark blue */
   --role-spectator: #4b5563; /* Dark gray */
   --role-banned: #1a150f; /* Pitch black */
+  /* Block Backgrounds */
+  --block-bg: rgba(67, 52, 34, 0.03);
 }
 
 body {
@@ -154,11 +160,23 @@ a:hover {
 
 .form-control:focus,
 .form-select:focus {
-  background-color: var(--input-focus-bg) !important;
-  border-color: var(--input-focus-border) !important;
+  border-color: var(--input-focus-border, var(--primary-color)) !important;
   color: var(--input-text) !important;
   box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.1) !important;
 }
+
+label.fw-bold {
+  color: var(--primary-color) !important;
+  opacity: 0.85;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+[data-theme='dark'] label.fw-bold {
+  opacity: 0.9;
+}
+
 
 .text-primary {
   color: var(--primary-color) !important;
@@ -1544,8 +1562,7 @@ a.badge.bg-danger:hover {
 }
 
 .online-users-panel {
-  border-bottom-left-radius: 0.75rem;
-  border-bottom-right-radius: 0.75rem;
+  background-color: var(--block-bg) !important;
   border-bottom: 1px solid rgba(var(--primary-rgb), 0.03);
 }
 
@@ -1715,6 +1732,25 @@ a.badge.bg-danger:hover {
   border-color: #d2ccba !important;
 }
 
+/* Management Button Variant - Consistent across all "Select-Replacement" Dropdowns */
+.btn-outline-management {
+  background-color: var(--input-bg) !important;
+  border-color: var(--input-border) !important;
+  color: var(--text-color) !important;
+  transition: all 0.2s ease;
+}
+
+.btn-outline-management:hover,
+.btn-outline-management:focus,
+.btn-outline-management:active,
+.btn-show > .btn-outline-management {
+  background-color: rgba(var(--primary-rgb), 0.05) !important;
+  border-color: var(--primary-color) !important;
+  color: var(--text-color) !important;
+  box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.1) !important;
+}
+
+
 /* Dropdown Menu & Item Customization */
 .custom-select-menu {
   background-color: var(--card-bg) !important;
@@ -1797,6 +1833,28 @@ a.badge.bg-danger:hover {
   background-color: rgba(67, 52, 34, 0.02) !important;
   border: 1px solid rgba(67, 52, 34, 0.05) !important;
 }
+
+/* Editor Toolbar */
+.editor-toolbar-themed {
+  background-color: var(--block-bg) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+[data-theme='dark'] .editor-toolbar-themed {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+/* Dice Box */
+.bbcode-dice {
+  background-color: var(--block-bg) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-color) !important;
+}
+
+[data-theme='dark'] .bbcode-dice {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
 
 /* Skeleton Loaders */
 .skeleton {

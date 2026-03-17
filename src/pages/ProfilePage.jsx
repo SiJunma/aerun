@@ -18,7 +18,7 @@ import { ru, enUS } from 'date-fns/locale';
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
-  const { profile, hasPermission, roles, updateProfile, recordActivity } = useAuth();
+  const { profile, hasPermission, PERMISSIONS, roles, settings, updateProfile, recordActivity } = useAuth();
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -344,7 +344,7 @@ const ProfilePage = () => {
               <Card className="shadow-sm border-0 bg-card">
                 <Card.Header className="py-3 d-flex justify-content-between align-items-center">
                   <h5 className="mb-0">{profile?.uid === uid ? t('profile.characters') : t('profile.characters_other')}</h5>
-                  {profile?.uid === uid && profile?.role_id !== 'spectator' && (
+                  {profile?.uid === uid && hasPermission(PERMISSIONS.USE_MASKS) && (
                     <Button variant="outline-light" size="sm" onClick={() => handleOpenModal()}>
                       + {t('profile.add_character')}
                     </Button>
@@ -414,7 +414,7 @@ const ProfilePage = () => {
                 </Tab>
               )}
 
-              {!isLimitedProfile && (
+              {!isLimitedProfile && settings?.enableReputation && (
                 <Tab eventKey="reputation" title={t('profile.tab_reputation')}>
               <Card className="shadow-sm border-0 bg-card">
                 <Card.Header className="py-3">
@@ -544,7 +544,7 @@ const ProfilePage = () => {
                           placeholder="Display Name"
                         />
                       </Form.Group>
-                      {profile?.role_id !== 'spectator' && (
+                      {hasPermission(PERMISSIONS.POST_REPLY) && (
                         <Form.Group className="mb-3">
                           <div className="d-flex justify-content-between align-items-center mb-1">
                             <Form.Label className="fw-bold mb-0">{t('profile.status_line')}</Form.Label>
@@ -569,7 +569,7 @@ const ProfilePage = () => {
                         />
                       </Form.Group>
 
-                      {profile?.role_id !== 'spectator' && (
+                      {hasPermission(PERMISSIONS.POST_REPLY) && (
                         <>
                           <hr className="my-4" />
                           <Form.Group className="mb-4">
@@ -778,7 +778,7 @@ const ProfilePage = () => {
               value={formData.signature}
               onChange={(e) => setFormData({ ...formData, signature: e.target.value })}
               placeholder={t('profile.signature_help')}
-              className="bg-light"
+              className=""
             />
           </Form.Group>
         </Form>
@@ -812,7 +812,7 @@ const ProfilePage = () => {
             value={repComment}
             onChange={(e) => setRepComment(e.target.value)}
             placeholder="..."
-            className="bg-light"
+            className=""
           />
         </Form.Group>
       </ForumModal>

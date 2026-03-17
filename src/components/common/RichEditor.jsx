@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Form, Dropdown } from 'react-bootstrap';
 import ForumModal from './ForumModal';
-import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, Type, Columns } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, Type, Columns, Dices } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 
-const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus }) => {
+const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false }) => {
   const { lang } = useI18n();
   const textareaRef = useRef(null);
 
@@ -285,7 +285,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
 
   return (
     <div className="rich-editor-container">
-      <div className="d-flex flex-wrap gap-1 mb-2 p-2 border rounded bg-light editor-toolbar">
+      <div className="d-flex flex-wrap gap-1 mb-2 p-2 rounded editor-toolbar-themed editor-toolbar">
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[b]', '[/b]')} title="Bold"><Bold size={16} /></Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[i]', '[/i]')} title="Italic"><Italic size={16} /></Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[u]', '[/u]')} title="Underline"><Underline size={16} /></Button>
@@ -372,6 +372,9 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
         </Dropdown>
 
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'columns')} title={lang === 'ru' ? 'Колонки' : 'Columns'}><Columns size={16} /></Button>
+        {showDice && (
+          <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[dice]', '[/dice]')} title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}><Dices size={16} /></Button>
+        )}
 
         <div className="vr mx-1"></div>
 

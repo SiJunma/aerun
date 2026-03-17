@@ -262,6 +262,8 @@ export const translations = {
         save_btn: "Save Changes",
         toast_saved: "Role saved successfully!",
         toast_deleted: "Role deleted",
+        seed_btn: "Initialize System Roles",
+        toast_seeded: "System roles initialized!",
         confirm_delete_title: "Delete Role",
         confirm_delete_message: "Are you sure you want to delete this role? This action cannot be undone."
       },
@@ -549,6 +551,8 @@ export const translations = {
         save_btn: "Сохранить изменения",
         toast_saved: "Роль успешно сохранена!",
         toast_deleted: "Роль удалена",
+        seed_btn: "Инициализировать системные роли",
+        toast_seeded: "Системные роли инициализированы!",
         confirm_delete_title: "Удалить роль",
         confirm_delete_message: "Вы уверены, что хотите удалить эту роль? Это действие нельзя отменить."
       },

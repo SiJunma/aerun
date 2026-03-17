@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Container, Card, Form, Button } from 'react-bootstrap';
+import { Container, Card, Form, Button, Dropdown } from 'react-bootstrap';
+import { User } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCharacters } from '../api/character';
@@ -12,7 +13,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, markTopicRead } = useAuth();
+  const { profile, user, markTopicRead, hasPermission, PERMISSIONS } = useAuth();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -181,27 +182,51 @@ const TopicFormPage = () => {
               />
             </Form.Group>
 
-            <Form.Group className="mb-3" controlId="postAs">
-              <Form.Label className="fw-bold h6">{t('forum.post_as')}</Form.Label>
-              <Form.Select
-                value={selectedCharacterId}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedCharacterId(val);
-                  if (user) {
-                    updateUser(user.uid, { last_selected_character_id: val });
-                  }
-                }}
-                className=""
-              >
-                <option value="">User: {profile?.nickname || profile?.email?.split('@')[0] || t('nav.profile')}</option>
-                {characters.map(char => (
-                  <option key={char.id} value={char.id}>
-                    Character: {char.name}
-                  </option>
-                ))}
-              </Form.Select>
-            </Form.Group>
+            {hasPermission(PERMISSIONS.USE_MASKS) && (
+              <Form.Group className="mb-3" controlId="postAs">
+                <Form.Label className="fw-bold h6">{t('forum.post_as')}</Form.Label>
+                <Dropdown className="w-100">
+                  <Dropdown.Toggle 
+                    variant="outline-management" 
+                    className="d-flex align-items-center gap-2 w-100 justify-content-between custom-select-toggle"
+                  >
+                    <div className="d-flex align-items-center gap-2 text-truncate">
+                      <User size={18} />
+                      <span className="text-truncate">
+                        {selectedCharacterId 
+                          ? `${lang === 'ru' ? 'Персонаж' : 'Character'}: ${characters.find(c => c.id === selectedCharacterId)?.name || '...'}`
+                          : `User: ${profile?.nickname || profile?.email?.split('@')[0] || t('nav.profile')}`
+                        }
+                      </span>
+                    </div>
+                  </Dropdown.Toggle>
+                  <Dropdown.Menu className="shadow-sm border-0 w-100 custom-select-menu">
+                    <Dropdown.Item 
+                      active={selectedCharacterId === ''}
+                      onClick={() => {
+                        setSelectedCharacterId('');
+                        if (user) updateUser(user.uid, { last_selected_character_id: '' });
+                      }}
+                    >
+                      User: {profile?.nickname || profile?.email?.split('@')[0]}
+                    </Dropdown.Item>
+                    {characters.length > 0 && <Dropdown.Divider />}
+                    {characters.map(char => (
+                      <Dropdown.Item 
+                        key={char.id}
+                        active={selectedCharacterId === char.id}
+                        onClick={() => {
+                          setSelectedCharacterId(char.id);
+                          if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                        }}
+                      >
+                        {lang === 'ru' ? 'Персонаж' : 'Character'}: {char.name}
+                      </Dropdown.Item>
+                    ))}
+                  </Dropdown.Menu>
+                </Dropdown>
+              </Form.Group>
+            )}
 
             <Form.Group className="mb-3">
               <Form.Label className="fw-bold h6">{lang === 'ru' ? 'Содержание' : 'Content'}</Form.Label>
@@ -213,6 +238,7 @@ const TopicFormPage = () => {
                 onChange={(e) => setContent(e.target.value)}
                 maxLength={LIMITS.content}
                 disabled={submitting}
+                showDice={hasPermission(PERMISSIONS.USE_DICE)}
               />
             </Form.Group>
 

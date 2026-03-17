@@ -76,7 +76,7 @@ const BBCode = ({ children }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -264,6 +264,18 @@ const BBCode = ({ children }) => {
           colStyle.maxWidth = val;
         }
         return <div key={index} className="bbcode-col" style={colStyle}>{content}</div>;
+      }
+      case 'dice': {
+        return (
+          <div key={index} className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm">
+            <div className="d-flex align-items-center gap-2">
+              <span className="dice-icon fs-5">🎲</span>
+              <div className="dice-result fw-bold text-primary">
+                {content.length > 0 ? content : '?'}
+              </div>
+            </div>
+          </div>
+        );
       }
       default: return <span key={index}>{content}</span>;
     }

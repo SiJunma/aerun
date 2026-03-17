@@ -26,8 +26,8 @@ import {
   markAllTopicsRead,
   subscribeToLatestTopics
 } from '../api/forum';
-import { subscribeToRoles } from '../api/admin';
-import { CHIEF_ADMIN_ID, PERMISSIONS } from '../constants/permissions';
+import { subscribeToRoles, seedSystemRoles } from '../api/admin';
+import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES } from '../constants/permissions';
 
 const AuthContext = createContext();
 
@@ -230,6 +230,11 @@ export const AuthProvider = ({ children }) => {
           // Subscribe to roles only for authenticated users
           rolesUnsub = subscribeToRoles(setRoles);
 
+          // Seed system roles with fixed IDs if they don't exist yet (admin-only, safe to call repeatedly)
+          if (isAdmin) {
+            seedSystemRoles(DEFAULT_ROLES).catch(err => console.warn('[seedSystemRoles]', err));
+          }
+
           // Subscribe to read map (all roles — everyone can read topics)
           readMapUnsub = subscribeToReadMap(firebaseUser.uid, setReadMap);
 
@@ -377,13 +382,37 @@ export const AuthProvider = ({ children }) => {
     }
   }, [settings?.forumName]);
 
-  const hasPermission = useCallback((perm) => {
+  const hasPermission = useCallback((perm, context = {}) => {
+    // 1. GLOBAL SETTINGS OVERRIDES (Highest Priority)
+    if (settings) {
+      if (perm === PERMISSIONS.USE_DICE && settings.enableDice === false) return false;
+      
+      if (perm === PERMISSIONS.USE_MASKS && settings.enableCharacters === false) {
+        // Global off for masks means cannot CREATE or APPLY to posts, 
+        // but viewing them in profile might still be allowed (handled in UI)
+        return false;
+      }
+      
+      if (perm === PERMISSIONS.USE_REPUTATION && settings.enableReputation === false) {
+        // Global off for reputation means it's gone from everywhere
+        return false;
+      }
+    }
+
+    // 2. HARD OVERRIDE: Chief Admin always has all permissions
     if (user?.email === import.meta.env.VITE_ADMIN_EMAIL) return true;
     const userRoleId = profile?.role_id || 'player';
     if (userRoleId === CHIEF_ADMIN_ID) return true;
+
+    // 3. CATEGORY OVERRIDES (To be implemented later)
+    // if (context.categoryId) { ... }
+
+    // 4. ROLE-BASED PERMISSIONS (Lowest Priority)
     const userRole = roles.find(r => r.id === userRoleId);
-    return userRole?.permissions?.includes(perm);
-  }, [user, profile, roles]);
+    const hasRolePerm = userRole?.permissions?.includes(perm);
+
+    return !!hasRolePerm;
+  }, [user, profile, roles, settings]);
 
   const value = {
     user,
@@ -401,7 +430,9 @@ export const AuthProvider = ({ children }) => {
     updateProfile,
     recordActivity,
     hasPermission,
-    roles
+    roles,
+    PERMISSIONS,
+    DEFAULT_ROLES
   };
 
   return (

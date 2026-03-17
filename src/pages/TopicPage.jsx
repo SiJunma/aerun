@@ -13,7 +13,7 @@ import RichEditor from '../components/common/RichEditor';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
-import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff, ArrowRightLeft, Send, FilePen } from 'lucide-react';
+import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff, ArrowRightLeft, Send, FilePen, User } from 'lucide-react';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
@@ -27,7 +27,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, roles } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, roles, PERMISSIONS, settings } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
@@ -943,6 +943,7 @@ const TopicPage = () => {
                               rows={6}
                               maxLength={MAX_CHARS}
                               autoFocus={true}
+                              showDice={hasPermission(PERMISSIONS.USE_DICE)}
                             />
                           </div>
                           <div className="d-flex gap-2">
@@ -969,35 +970,47 @@ const TopicPage = () => {
                     </div>
 
                     {/* Reputation / Voting Buttons */}
-                    <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
-                      <div
-                        className={`text-muted small d-flex align-items-center gap-1 ${post.author_id !== profile?.uid && profile?.role_id !== 'spectator' ? 'rep-trigger' : ''}`}
-                        title={post.author_id !== profile?.uid && profile?.role_id !== 'spectator'
-                          ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
-                          : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
-                        onClick={() => {
-                          if (post.author_id === profile?.uid || profile?.role_id === 'spectator') return;
+                    {settings?.enableReputation && (
+                      <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
+                        <div
+                          className={`text-muted small d-flex align-items-center gap-1 ${post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) ? 'rep-trigger' : ''}`}
+                          title={post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION)
+                            ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
+                            : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
+                          onClick={() => {
+                            if (post.author_id === profile?.uid) return;
+                            
+                            // If user has permission to use (vote), show modal or toggle controls
+                            // If they DON'T have permission, they can still view details if they clicked an existing vote?
+                            // Actually, let's stick to the rule: if no role perm, can only read (see counter).
+                            if (!hasPermission(PERMISSIONS.USE_REPUTATION)) {
+                              // Maybe allow viewing info if there are votes?
+                              if (myVotes[post.id]) {
+                                setSelectedVote(myVotes[post.id]);
+                                setShowVoteInfoModal(true);
+                              }
+                              return;
+                            }
 
-                          if (myVotes[post.id]) {
-                            setSelectedVote(myVotes[post.id]);
-                            setShowVoteInfoModal(true);
-                          } else {
-                            setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
-                          }
-                        }}
-                      >
-                        <Award size={14} className="text-accent" />
-                        <strong>{post.reputation || 0}</strong>
-                        {myVotes[post.id] && (
-                          <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
-                            ({myVotes[post.id].value > 0 ? '+1' : '-1'})
-                          </span>
-                        )}
-                      </div>
+                            if (myVotes[post.id]) {
+                              setSelectedVote(myVotes[post.id]);
+                              setShowVoteInfoModal(true);
+                            } else {
+                              setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
+                            }
+                          }}
+                        >
+                          <Award size={14} className="text-accent" />
+                          <strong>{post.reputation || 0}</strong>
+                          {myVotes[post.id] && (
+                            <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
+                              ({myVotes[post.id].value > 0 ? '+1' : '-1'})
+                            </span>
+                          )}
+                        </div>
 
-                      {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && (
-                        <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
-                          {profile?.role_id !== 'spectator' && (
+                        {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (
+                          <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
                             <div className="d-flex gap-1">
                               <Button
                                 size="sm"
@@ -1024,10 +1037,10 @@ const TopicPage = () => {
                                 +
                               </Button>
                             </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Post Management Links — only render if at least one button is visible */}
@@ -1297,30 +1310,48 @@ const TopicPage = () => {
               </Card.Header>
               <Card.Body className="p-3 p-md-4">
                 <Form onSubmit={handleReply}>
-                  <Form.Group className="mb-3" controlId="postAs">
-                    <Form.Select
-                      size="sm"
-                      value={selectedCharacterId}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSelectedCharacterId(val);
-                        if (user) {
-                          updateUser(user.uid, { last_selected_character_id: val });
-                        }
-                      }}
-                      className="mb-2 w-auto"
-                    >
-                      <option value="">
-                        {t('forum.post_as_user')}:{' '}
-                        {profile?.nickname || profile?.email?.split('@')[0]}
-                      </option>
-                      {characters.map(char => (
-                        <option key={char.id} value={char.id}>
-                          {t('forum.post_as_character')}: {char.name}
-                        </option>
-                      ))}
-                    </Form.Select>
-                  </Form.Group>
+                  {hasPermission(PERMISSIONS.USE_MASKS) && (
+                    <Form.Group className="mb-3" controlId="postAs">
+                      <Dropdown className="mb-2 w-auto">
+                        <Dropdown.Toggle 
+                          variant="outline-management" 
+                          className="d-flex align-items-center gap-2 custom-select-toggle"
+                        >
+                          <User size={16} />
+                          <span className="text-truncate" style={{ maxWidth: '250px' }}>
+                            {selectedCharacterId 
+                              ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === selectedCharacterId)?.name || '...'}`
+                              : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                            }
+                          </span>
+                        </Dropdown.Toggle>
+                        <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                          <Dropdown.Item 
+                            active={selectedCharacterId === ''}
+                            onClick={() => {
+                              setSelectedCharacterId('');
+                              if (user) updateUser(user.uid, { last_selected_character_id: '' });
+                            }}
+                          >
+                            {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
+                          </Dropdown.Item>
+                          {characters.length > 0 && <Dropdown.Divider />}
+                          {characters.map(char => (
+                            <Dropdown.Item 
+                              key={char.id}
+                              active={selectedCharacterId === char.id}
+                              onClick={() => {
+                                setSelectedCharacterId(char.id);
+                                if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                              }}
+                            >
+                              {t('forum.post_as_character')}: {char.name}
+                            </Dropdown.Item>
+                          ))}
+                        </Dropdown.Menu>
+                      </Dropdown>
+                    </Form.Group>
+                  )}
                   <Form.Group className="mb-3">
                     <RichEditor
                       id="replyContent"
@@ -1330,6 +1361,7 @@ const TopicPage = () => {
                       onChange={(e) => setReplyContent(e.target.value)}
                       maxLength={MAX_CHARS}
                       disabled={submitting}
+                      showDice={hasPermission(PERMISSIONS.USE_DICE)}
                     />
                   </Form.Group>
                   <div className="d-flex justify-content-end gap-2">

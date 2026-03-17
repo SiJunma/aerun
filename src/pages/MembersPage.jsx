@@ -21,7 +21,7 @@ const ROLE_PRIORITY = {
 
 const MembersPage = () => {
   const { t, lang } = useI18n();
-  const { profile, updateSettings, roles } = useAuth();
+  const { profile, updateSettings, roles, settings } = useAuth();
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('nickname');
@@ -248,12 +248,14 @@ const MembersPage = () => {
                   <ArrowUpDown size={12} />
                 </div>
               </th>
-              <th className="py-3 text-center pe-4" style={{ width: '10%', border: 'none' }}>
-                <div className="d-flex align-items-center justify-content-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('reputation')}>
-                  <Award size={14} />
-                  <ArrowUpDown size={12} />
-                </div>
-              </th>
+              {settings?.enableReputation && (
+                <th className="py-3 text-center pe-4" style={{ width: '10%', border: 'none' }}>
+                  <div className="d-flex align-items-center justify-content-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('reputation')}>
+                    <Award size={14} />
+                    <ArrowUpDown size={12} />
+                  </div>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="border-0">
@@ -297,11 +299,13 @@ const MembersPage = () => {
                     </div>
                   </td>
                   <td className="text-center fw-semibold text-primary border-0" data-label={lang === 'ru' ? 'Посты' : 'Posts'}>{u.post_count || 0}</td>
-                  <td className="text-center pe-4 border-0" data-label={lang === 'ru' ? 'Репутация' : 'Rep'}>
-                    <Badge bg="light" text="dark" className="border">
-                      {u.reputation || 0}
-                    </Badge>
-                  </td>
+                  {settings?.enableReputation && (
+                    <td className="text-center pe-4 border-0" data-label={lang === 'ru' ? 'Репутация' : 'Rep'}>
+                      <Badge bg="light" text="dark" className="border">
+                        {u.reputation || 0}
+                      </Badge>
+                    </td>
+                  )}
                 </tr>
               ))
             ) : (

@@ -21,7 +21,7 @@ import ConfirmModal from '../components/common/ConfirmModal';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { profile, user, hasPermission } = useAuth();
+  const { profile, user, hasPermission, PERMISSIONS } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -37,7 +37,7 @@ const CategoryPage = () => {
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
-  const isStaff = hasPermission('moderate_content');
+  const isStaff = hasPermission(PERMISSIONS.MODERATE_CONTENT);
 
   useEffect(() => {
     const unsubCat = subscribeToCategories((cats) => {

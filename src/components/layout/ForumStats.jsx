@@ -102,7 +102,7 @@ const ForumStats = () => {
         </div>
 
         {/* Online Users Section */}
-        <div className="online-users-panel p-2 px-3 bg-light-subtle">
+        <div className="online-users-panel p-2 px-3">
           <div className="d-flex align-items-center gap-2 mb-1">
             <div className="online-indicator-blob shadow-none" style={{ width: 6, height: 6 }}></div>
             <span className="text-muted small fw-semibold">
