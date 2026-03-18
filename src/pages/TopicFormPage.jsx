@@ -182,7 +182,7 @@ const TopicFormPage = () => {
               />
             </Form.Group>
 
-            {hasPermission(PERMISSIONS.USE_MASKS) && (
+            {hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
               <Form.Group className="mb-3" controlId="postAs">
                 <Form.Label className="fw-bold h6">{t('forum.post_as')}</Form.Label>
                 <Dropdown className="w-100">
@@ -238,7 +238,7 @@ const TopicFormPage = () => {
                 onChange={(e) => setContent(e.target.value)}
                 maxLength={LIMITS.content}
                 disabled={submitting}
-                showDice={hasPermission(PERMISSIONS.USE_DICE)}
+                showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
               />
             </Form.Group>
 

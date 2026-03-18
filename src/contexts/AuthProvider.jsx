@@ -383,35 +383,40 @@ export const AuthProvider = ({ children }) => {
   }, [settings?.forumName]);
 
   const hasPermission = useCallback((perm, context = {}) => {
-    // 1. GLOBAL SETTINGS OVERRIDES (Highest Priority)
+    // ── 1. GLOBAL SETTINGS OVERRIDES (Highest Priority for feature flags) ──
     if (settings) {
       if (perm === PERMISSIONS.USE_DICE && settings.enableDice === false) return false;
-      
-      if (perm === PERMISSIONS.USE_MASKS && settings.enableCharacters === false) {
-        // Global off for masks means cannot CREATE or APPLY to posts, 
-        // but viewing them in profile might still be allowed (handled in UI)
-        return false;
-      }
-      
-      if (perm === PERMISSIONS.USE_REPUTATION && settings.enableReputation === false) {
-        // Global off for reputation means it's gone from everywhere
+      if (perm === PERMISSIONS.USE_MASKS && settings.enableCharacters === false) return false;
+      if (perm === PERMISSIONS.USE_REPUTATION && settings.enableReputation === false) return false;
+    }
+
+    // ── 2. CHIEF ADMIN: bypasses ALL other checks (including category overrides) ──
+    if (user?.email === import.meta.env.VITE_ADMIN_EMAIL) return true;
+    const userRoleId = profile?.role_id || (user ? 'player' : 'guest');
+    if (userRoleId === CHIEF_ADMIN_ID) return true;
+
+    // ── 3. CATEGORY-LEVEL OVERRIDES ──
+    // If a category object is passed in context, and the category has permission overrides
+    // for the requested permission, those override the global role permissions.
+    if (context?.category) {
+      const catPerms = context.category.permissions;
+      if (catPerms && catPerms[perm] !== undefined && catPerms[perm] !== null) {
+        // catPerms[perm] is an array of allowed role IDs.
+        const allowedRoles = catPerms[perm];
+        // Check if user's own role is allowed
+        if (allowedRoles.includes(userRoleId)) return true;
+        // Check if user's role inherits from a base role that is allowed
+        const userRole = roles.find(r => r.id === userRoleId);
+        if (userRole?.base_role_id && allowedRoles.includes(userRole.base_role_id)) return true;
         return false;
       }
     }
 
-    // 2. HARD OVERRIDE: Chief Admin always has all permissions
-    if (user?.email === import.meta.env.VITE_ADMIN_EMAIL) return true;
-    const userRoleId = profile?.role_id || 'player';
-    if (userRoleId === CHIEF_ADMIN_ID) return true;
-
-    // 3. CATEGORY OVERRIDES (To be implemented later)
-    // if (context.categoryId) { ... }
-
-    // 4. ROLE-BASED PERMISSIONS (Lowest Priority)
+    // ── 4. GLOBAL ROLE PERMISSIONS (Baseline) ──
+    // Guests have no global permissions (they rely on category overrides for VIEW_FORUM).
+    if (!user) return false;
     const userRole = roles.find(r => r.id === userRoleId);
-    const hasRolePerm = userRole?.permissions?.includes(perm);
-
-    return !!hasRolePerm;
+    return !!userRole?.permissions?.includes(perm);
   }, [user, profile, roles, settings]);
 
   const value = {

@@ -106,6 +106,15 @@ export const DEFAULT_ROLES = [
     permissions: [
       PERMISSIONS.VIEW_FORUM
     ]
+  },
+  {
+    id: 'guest',
+    name: 'Guest',
+    color: 'light',
+    is_system: true,
+    permissions: []
+    // Guests have no global permissions. Access to specific categories is granted
+    // via category-level VIEW_FORUM overrides that include the 'guest' role.
   }
 ];
 

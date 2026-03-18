@@ -27,7 +27,7 @@ const AdminPage = () => {
   // Modal State
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
-  const [catForm, setCatForm] = useState({ title: '', description: '', order: 0 });
+  const [catForm, setCatForm] = useState({ title: '', description: '', order: 0, permissions: {} });
 
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
@@ -116,13 +116,42 @@ const AdminPage = () => {
       setCatForm({
         title: typeof cat.title === 'object' ? cat.title.en : cat.title,
         description: typeof cat.description === 'object' ? cat.description.en : cat.description,
-        order: cat.order
+        order: cat.order,
+        permissions: cat.permissions || {}
       });
     } else {
       setEditingCat(null);
-      setCatForm({ title: '', description: '', order: categories.length + 1 });
+      setCatForm({ title: '', description: '', order: categories.length + 1, permissions: {} });
     }
     setShowCatModal(true);
+  };
+
+  // Toggle whether a category overrides a permission (null = inherit from role)
+  const toggleCatPermOverride = (permKey) => {
+    setCatForm(prev => {
+      const perms = { ...prev.permissions };
+      if (perms[permKey] !== undefined && perms[permKey] !== null) {
+        // was overridden — revert to inherit
+        perms[permKey] = null;
+      } else {
+        // activate override with roles that currently have this permission globally
+        // This prevents accidentally giving spectators/guests write access when toggling on an override.
+        perms[permKey] = roles
+          .filter(r => r.id !== 'root' && r.permissions?.includes(permKey))
+          .map(r => r.id);
+      }
+      return { ...prev, permissions: perms };
+    });
+  };
+
+  const toggleCatPermRole = (permKey, roleId) => {
+    setCatForm(prev => {
+      const current = Array.isArray(prev.permissions[permKey]) ? prev.permissions[permKey] : [];
+      const next = current.includes(roleId)
+        ? current.filter(r => r !== roleId)
+        : [...current, roleId];
+      return { ...prev, permissions: { ...prev.permissions, [permKey]: next } };
+    });
   };
 
   const handleSaveCategory = async () => {
@@ -736,7 +765,7 @@ const AdminPage = () => {
               onChange={(e) => setCatForm({ ...catForm, description: e.target.value })}
             />
           </Form.Group>
-          <Form.Group className="mb-0">
+          <Form.Group className="mb-3">
             <Form.Label className="fw-bold">{t('admin.categories.modal_order')}</Form.Label>
             <Form.Control
               type="number"
@@ -744,6 +773,53 @@ const AdminPage = () => {
               onChange={(e) => setCatForm({ ...catForm, order: parseInt(e.target.value) })}
             />
           </Form.Group>
+
+          <hr className="my-3" />
+          <h6 className="fw-bold mb-1">{t('admin.categories.modal_perms_title')}</h6>
+          <p className="text-muted small mb-3">{t('admin.categories.modal_perms_hint')}</p>
+          {[
+            { permKey: PERMISSIONS.VIEW_FORUM,   label: t('admin.categories.perm_view') },
+            { permKey: PERMISSIONS.CREATE_TOPIC, label: t('admin.categories.perm_create_topic') },
+            { permKey: PERMISSIONS.POST_REPLY,   label: t('admin.categories.perm_post_reply') },
+            { permKey: PERMISSIONS.USE_MASKS,    label: t('admin.categories.perm_use_masks') },
+            { permKey: PERMISSIONS.USE_DICE,     label: t('admin.categories.perm_use_dice') },
+          ].map(({ permKey, label }) => {
+            const isOverridden = catForm.permissions[permKey] !== undefined && catForm.permissions[permKey] !== null;
+            const allowedRoles = isOverridden ? (catForm.permissions[permKey] || []) : [];
+            // Roles to display: all roles filtered to exclude root
+            const displayRoles = roles.filter(r => r.id !== 'root');
+            return (
+              <div key={permKey} className="modal-section-themed p-3 rounded mb-2">
+                <Form.Check
+                  type="switch"
+                  id={`cat-perm-override-${permKey}`}
+                  label={<span className="fw-bold">{label}</span>}
+                  checked={isOverridden}
+                  onChange={() => toggleCatPermOverride(permKey)}
+                  className="mb-2"
+                />
+                {isOverridden && (
+                  <>
+                    <div className="text-muted small mb-2" style={{ marginLeft: '2rem' }}>
+                      {t('admin.categories.perm_allowed_roles')}
+                    </div>
+                    <div className="d-flex flex-column gap-2" style={{ marginLeft: '2rem' }}>
+                      {displayRoles.map(role => (
+                        <Form.Check
+                          key={role.id}
+                          type="checkbox"
+                          id={`cat-perm-${permKey}-${role.id}`}
+                          label={role.name}
+                          checked={allowedRoles.includes(role.id)}
+                          onChange={() => toggleCatPermRole(permKey, role.id)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </Form>
       </ForumModal>
     </>

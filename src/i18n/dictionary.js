@@ -284,7 +284,18 @@ export const translations = {
         toast_saved: "Category saved successfully!",
         toast_deleted: "Category deleted",
         confirm_delete_title: "Delete Category",
-        confirm_delete_message: "Are you sure you want to delete this category? All topics within it will be moved to the first available category or become uncategorized."
+        confirm_delete_message: "Are you sure you want to delete this category? All topics within it will be moved to the first available category or become uncategorized.",
+        error_save: "Error saving category",
+        error_delete: "Error deleting category",
+        modal_perms_title: "Access Permissions",
+        modal_perms_hint: "Enable overrides for specific permissions. When toggled on, only the selected roles will have this permission in this category (overrides global role settings). Leave off to inherit from global role permissions.",
+        perm_view: "View Topics",
+        perm_create_topic: "Create Topics",
+        perm_post_reply: "Post Replies",
+        perm_use_masks: "Use Masks (Characters)",
+        perm_use_dice: "Use Dice",
+        perm_allowed_roles: "Allowed roles:",
+        role_guest: "Guest (unauthenticated)"
       }
     }
   },
@@ -573,7 +584,18 @@ export const translations = {
         toast_saved: "Категория сохранена!",
         toast_deleted: "Категория удалена",
         confirm_delete_title: "Удалить категорию",
-        confirm_delete_message: "Вы уверены, что хотите удалить эту категорию? Все темы внутри неё будут перемещены или останутся без категории."
+        confirm_delete_message: "Вы уверены, что хотите удалить эту категорию? Все темы внутри неё будут перемещены или останутся без категории.",
+        error_save: "Ошибка при сохранении категории",
+        error_delete: "Ошибка при удалении категории",
+        modal_perms_title: "Права доступа",
+        modal_perms_hint: "Включите переопределение прав. Если переключатель включён — только выбранные роли смогут выполнять это действие в данной категории (перекрывает глобальные настройки ролей). Если выключен — применяются глобальные права роли.",
+        perm_view: "Просматривать темы",
+        perm_create_topic: "Создавать темы",
+        perm_post_reply: "Писать ответы",
+        perm_use_masks: "Использовать маски (персонажей)",
+        perm_use_dice: "Использовать кубики",
+        perm_allowed_roles: "Роли с доступом:",
+        role_guest: "Гость (не авторизован)"
       }
     }
   }

@@ -15,7 +15,8 @@ import {
   increment,
   getDocs,
   limit,
-  getDoc
+  getDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { getTopicSubscribers } from './subscriptions';
 import { 
@@ -63,22 +64,33 @@ export const subscribeToCategories = (callback) => {
 };
 
 export const addCategory = async (catData) => {
+  // Normalize: replace null values with undefined so Firestore doesn't store them as null
+  const permissions = {};
+  if (catData.permissions) {
+    for (const [key, val] of Object.entries(catData.permissions)) {
+      if (val !== null) permissions[key] = val;
+    }
+  }
   await addDoc(collection(db, 'categories'), {
     ...catData,
+    permissions,
     topics_count: 0,
     posts_count: 0,
-    permissions: catData.permissions || {
-      view: ['all'],
-      create_topic: ['player', 'moderator', 'admin'],
-      reply: ['player', 'moderator', 'admin']
-    },
     created_at: serverTimestamp()
   });
 };
 
 export const updateCategory = async (id, catData) => {
+  const { permissions: rawPerms, ...rest } = catData;
+  const permissions = {};
+  if (rawPerms) {
+    for (const [key, val] of Object.entries(rawPerms)) {
+      if (val !== null) permissions[key] = val;
+    }
+  }
   await updateDoc(doc(db, 'categories', id), {
-    ...catData,
+    ...rest,
+    permissions,
     updated_at: serverTimestamp()
   });
 };
@@ -701,27 +713,29 @@ export const deleteTopics = async (topicIds) => {
     const categoryId = topicData.category_id;
     const postsCount = topicData.posts_count || 0;
 
-    await runTransaction(db, async (transaction) => {
-      // 1. Delete all posts in topic
-      const postsQ = query(collection(db, 'posts'), where('topic_id', '==', topicId));
-      const postsSnap = await getDocs(postsQ);
-      postsSnap.forEach(pDoc => transaction.delete(pDoc.ref));
+    // Fetch posts outside of atomic block to avoid running queries inside a transaction callback
+    const postsQ = query(collection(db, 'posts'), where('topic_id', '==', topicId));
+    const postsSnap = await getDocs(postsQ);
 
-      // 2. Delete topic
-      transaction.delete(topicRef);
+    const batch = writeBatch(db);
 
-      // 3. Update Category counters
-      if (categoryId) {
-        const catRef = doc(db, 'categories', categoryId);
-        transaction.update(catRef, {
-          topics_count: increment(-1),
-          posts_count: increment(-postsCount)
-        });
-      }
-      
-      // Note: We don't bother reverting reputation here as it's a "hard delete" of a topic,
-      // usually done by admins. If we wanted to be perfectly clean, we'd loop logs too.
-    });
+    // 1. Delete all posts in topic
+    postsSnap.forEach(pDoc => batch.delete(pDoc.ref));
+
+    // 2. Delete topic
+    batch.delete(topicRef);
+
+    // 3. Update Category counters
+    if (categoryId) {
+      const catRef = doc(db, 'categories', categoryId);
+      batch.update(catRef, {
+        topics_count: increment(-1),
+        posts_count: increment(-postsCount)
+      });
+    }
+    
+    // Commit the batch
+    await batch.commit();
     
     // Recalculate Category last_post if needed
     if (categoryId) {

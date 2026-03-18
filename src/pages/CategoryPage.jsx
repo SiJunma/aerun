@@ -181,7 +181,7 @@ const CategoryPage = () => {
               {lang === 'ru' ? (isManaging ? 'Готово' : 'Управление') : (isManaging ? 'Done' : 'Manage')}
             </Button>
           )}
-          {profile?.role_id !== 'spectator' && (
+          {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
             <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
               {t('forum.create_topic')}
             </Button>
@@ -206,7 +206,7 @@ const CategoryPage = () => {
                 ? 'Будь первым — создай тему!'
                 : 'Be the first to start a discussion!'}
             </p>
-            {profile?.role_id !== 'spectator' && (
+            {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
               <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
                 {t('forum.create_topic')}
               </Button>

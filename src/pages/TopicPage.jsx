@@ -1067,7 +1067,7 @@ const TopicPage = () => {
                           </Button>
                         </>
                       )}
-                      {profile?.role_id !== 'spectator' && (!topic.is_locked || hasPermission('moderate_content')) && (
+                      {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
                         <Button
                           variant="link"
                           size="sm"
@@ -1283,13 +1283,13 @@ const TopicPage = () => {
 
       {/* Reply form — hidden for spectators and closed topics */}
       {
-        profile?.role_id === 'spectator' ? (
+        !hasPermission(PERMISSIONS.POST_REPLY, { category }) ? (
           <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
             <span className="opacity-75">
               {t('forum.spectator_mode')}
             </span>
           </div>
-        ) : topic.is_locked && profile?.role_id !== 'admin' && profile?.role_id !== 'moderator' ? (
+        ) : topic.is_locked && !hasPermission('moderate_content') ? (
           <div className="mt-5 p-4 text-center text-muted rounded" style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }} ref={replyRef}>
 
             <div className="mb-3">
@@ -1310,7 +1310,7 @@ const TopicPage = () => {
               </Card.Header>
               <Card.Body className="p-3 p-md-4">
                 <Form onSubmit={handleReply}>
-                  {hasPermission(PERMISSIONS.USE_MASKS) && (
+                  {hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
                     <Form.Group className="mb-3" controlId="postAs">
                       <Dropdown className="mb-2 w-auto">
                         <Dropdown.Toggle 
@@ -1361,7 +1361,7 @@ const TopicPage = () => {
                       onChange={(e) => setReplyContent(e.target.value)}
                       maxLength={MAX_CHARS}
                       disabled={submitting}
-                      showDice={hasPermission(PERMISSIONS.USE_DICE)}
+                      showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                     />
                   </Form.Group>
                   <div className="d-flex justify-content-end gap-2">

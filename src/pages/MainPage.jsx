@@ -9,7 +9,7 @@ import ForumStats from '../components/layout/ForumStats';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, readMap } = useAuth();
+  const { user, readMap, hasPermission, PERMISSIONS } = useAuth();
   const [categories, setCategories] = useState([]);
 
   useEffect(() => {
@@ -32,7 +32,9 @@ const MainPage = () => {
             </tr>
           </thead>
           <tbody>
-            {categories.map(cat => (
+            {categories
+              .filter(cat => hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat }))
+              .map(cat => (
               <tr key={cat.id}>
                 <td>
                   <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1">
