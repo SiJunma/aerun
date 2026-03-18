@@ -892,25 +892,50 @@ const AdminPage = () => {
 
             <Form.Group className="mb-3">
               <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">{t('admin.users.change_role_label')}</Form.Label>
-              <Dropdown className="w-100">
-                <Dropdown.Toggle 
-                  variant="outline-management" 
-                  className="w-100 d-flex justify-content-between align-items-center custom-select-toggle py-2"
-                >
-                  {roles.find(r => r.id === userForm.role_id)?.name || userForm.role_id}
-                </Dropdown.Toggle>
-                <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
-                  {roles.filter(r => r.id !== 'root').map(r => (
-                    <Dropdown.Item 
-                      key={r.id} 
-                      active={userForm.role_id === r.id}
-                      onClick={() => setUserForm({ ...userForm, role_id: r.id })}
-                    >
-                      {r.name}
-                    </Dropdown.Item>
-                  ))}
-                </Dropdown.Menu>
-              </Dropdown>
+              <div className="d-flex flex-column gap-1">
+                {roles.filter(r => r.id !== 'root').map(r => (
+                  <div 
+                    key={r.id} 
+                    className={`p-2 rounded d-flex align-items-center mb-1 cursor-pointer role-radio-container`}
+                    style={{ 
+                      border: '1px solid',
+                      borderColor: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
+                      background: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
+                      transition: 'all 0.15s ease-in-out',
+                      opacity: userForm.role_id === r.id ? 1 : 0.8
+                    }}
+                    onClick={() => setUserForm({ ...userForm, role_id: r.id })}
+                    onMouseEnter={(e) => {
+                      if (userForm.role_id !== r.id) {
+                        e.currentTarget.style.borderColor = 'rgba(var(--primary-rgb), 0.25)';
+                        e.currentTarget.style.opacity = '1';
+                        e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.03)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (userForm.role_id !== r.id) {
+                        e.currentTarget.style.borderColor = 'rgba(var(--primary-rgb), 0.12)';
+                        e.currentTarget.style.opacity = '0.8';
+                        e.currentTarget.style.background = 'transparent';
+                      }
+                    }}
+                  >
+                    <Form.Check
+                      type="radio"
+                      id={`role-radio-${r.id}`}
+                      name="userRole"
+                      checked={userForm.role_id === r.id}
+                      onChange={() => setUserForm({ ...userForm, role_id: r.id })}
+                      className="mb-0 me-2"
+                    />
+                    <label htmlFor={`role-radio-${r.id}`} className="mb-0 cursor-pointer flex-grow-1">
+                      <Badge bg={r.color || 'primary'} className={`role-badge px-3 ${['warning', 'light', 'management'].includes(r.color) ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.85rem' }}>
+                        {r.name}
+                      </Badge>
+                    </label>
+                  </div>
+                ))}
+              </div>
             </Form.Group>
           </Form>
         )}
