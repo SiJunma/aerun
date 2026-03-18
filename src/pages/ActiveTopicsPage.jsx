@@ -9,7 +9,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
-  const { user } = useAuth();
+  const { user, hasPermission, PERMISSIONS } = useAuth();
   const [topics, setTopics] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +66,10 @@ const ActiveTopicsPage = () => {
               </tr>
             </thead>
             <tbody>
-              {topics.map(topic => (
+              {topics.filter(topic => {
+                const cat = categories.find(c => c.id === topic.category_id);
+                return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+              }).map(topic => (
                 <TopicRow 
                   key={topic.id}
                   topic={topic}

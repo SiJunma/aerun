@@ -10,7 +10,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
 const NewRepliesPage = () => {
   const { t, lang } = useI18n();
-  const { user, markAllRead, isMarkingAllRead, unreadTopicsCount } = useAuth();
+  const { user, markAllRead, isMarkingAllRead, unreadTopicsCount, hasPermission, PERMISSIONS } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [topics, setTopics] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -39,10 +39,15 @@ const NewRepliesPage = () => {
   };
 
   // Pagination logic
-  const totalPages = Math.ceil(topics.length / ITEMS_PER_PAGE);
+  const filteredTopics = topics.filter(topic => {
+    const cat = categories.find(c => c.id === topic.category_id);
+    return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+  });
+
+  const totalPages = Math.ceil(filteredTopics.length / ITEMS_PER_PAGE);
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentTopics = topics.slice(indexOfFirstItem, indexOfLastItem);
+  const currentTopics = filteredTopics.slice(indexOfFirstItem, indexOfLastItem);
 
   const handlePageChange = (page) => {
     setSearchParams({ page });

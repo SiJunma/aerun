@@ -6,12 +6,14 @@ import { useAuth } from '../contexts/AuthProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save } from 'lucide-react';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
-import { subscribeToUser, checkNicknameExists } from '../api/forum';
+import { subscribeToUser, checkNicknameExists, subscribeToCategories } from '../api/forum';
 import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, subscribeToReputationLogs, getProfileVote } from '../api/reputation';
+import { db } from '../../firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -53,6 +55,8 @@ const ProfilePage = () => {
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
   const [myVote, setMyVote] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [logTopicsInfo, setLogTopicsInfo] = useState({});
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -77,6 +81,7 @@ const ProfilePage = () => {
   });
 
   useEffect(() => {
+    const unsubCats = subscribeToCategories(setCategories);
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
     const unsubProfile = subscribeToUser(uid, (data) => {
       setViewedProfile(data);
@@ -91,11 +96,45 @@ const ProfilePage = () => {
     }
 
     return () => {
+      unsubCats();
       unsubscribe();
       unsubProfile();
       unsubRep();
     };
   }, [uid, profile]);
+
+  // Fetch topics associated with reputation logs to check category visibility
+  useEffect(() => {
+    const fetchMissingTopics = async () => {
+      const neededIds = [...new Set(repLogs.map(l => l.topic_id).filter(Boolean))];
+      const newTopics = {};
+      let needsUpdate = false;
+
+      for (const tId of neededIds) {
+        if (!logTopicsInfo[tId]) {
+          try {
+            const snap = await getDoc(doc(db, 'topics', tId));
+            if (snap.exists()) {
+              newTopics[tId] = { category_id: snap.data().category_id };
+              needsUpdate = true;
+            } else {
+              newTopics[tId] = { is_deleted: true };
+              needsUpdate = true;
+            }
+          } catch (e) {
+            console.error('Error fetching topic context for rep log', e);
+          }
+        }
+      }
+
+      if (needsUpdate) {
+        setLogTopicsInfo(prev => ({ ...prev, ...newTopics }));
+      }
+    };
+    if (repLogs.length > 0) {
+      fetchMissingTopics();
+    }
+  }, [repLogs, logTopicsInfo]);
 
   // Sync form data with profile (only if viewing own profile)
   useEffect(() => {
@@ -444,7 +483,18 @@ const ProfilePage = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {repLogs.map(log => (
+                          {repLogs.map(log => {
+                            const isAllowed = (() => {
+                              if (!log.topic_id) return true;
+                              const info = logTopicsInfo[log.topic_id];
+                              if (!info) return true; // not loaded yet
+                              if (info.is_deleted) return false;
+                              const cat = categories.find(c => c.id === info.category_id);
+                              if (!cat) return false;
+                              return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+                            })();
+
+                            return (
                             <tr key={log.id}>
                               <td className="px-4 py-3 small text-muted">
                                 {log.created_at ? format(log.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
@@ -457,8 +507,9 @@ const ProfilePage = () => {
                                       {log.post_id || log.topic_id ? (
                                         <>
                                           <div className="fw-bold">{lang === 'ru' ? 'Голос за сообщение' : 'Post vote'}</div>
-                                          {log.topic_title && <div className="small opacity-75 mt-1">{log.topic_title}</div>}
-                                          {log.post_number && <div className="small opacity-75">#{log.post_number}</div>}
+                                          {isAllowed && log.topic_title && <div className="small opacity-75 mt-1">{log.topic_title}</div>}
+                                          {isAllowed && log.post_number && <div className="small opacity-75">#{log.post_number}</div>}
+                                          {!isAllowed && <div className="small opacity-75 mt-1 text-warning d-flex align-items-center gap-1 justify-content-center"><Lock size={10}/> {t('forum.private_topic')}</div>}
                                         </>
                                       ) : (
                                         lang === 'ru' ? 'Голос за профиль' : 'Profile vote'
@@ -487,9 +538,10 @@ const ProfilePage = () => {
                                     <Tooltip>
                                       {log.topic_id ? (
                                         <>
-                                          {log.topic_title && <div className="fw-bold mb-1">{log.topic_title}</div>}
-                                          {log.post_number && <div className="small opacity-75 mb-1">#{log.post_number}</div>}
-                                          <div>{lang === 'ru' ? 'Перейти к сообщению' : 'Go to post'}</div>
+                                          {isAllowed && log.topic_title && <div className="fw-bold mb-1">{log.topic_title}</div>}
+                                          {isAllowed && log.post_number && <div className="small opacity-75 mb-1">#{log.post_number}</div>}
+                                          {!isAllowed && <div className="fw-bold mb-1 text-warning d-flex align-items-center gap-1 justify-content-center"><Lock size={12}/> {t('forum.private_topic')}</div>}
+                                          {isAllowed && <div>{lang === 'ru' ? 'Перейти к сообщению' : 'Go to post'}</div>}
                                         </>
                                       ) : (
                                         lang === 'ru' ? 'Голос за профиль' : 'Profile vote'
@@ -499,10 +551,10 @@ const ProfilePage = () => {
                                 >
                                   <Badge
                                     bg={log.value > 0 ? 'success' : 'danger'}
-                                    as={log.topic_id ? Link : 'span'}
-                                    to={log.topic_id ? `/topic/${log.topic_id}${log.post_id ? `#post-${log.post_id}` : ''}` : undefined}
+                                    as={(log.topic_id && isAllowed) ? Link : 'span'}
+                                    to={(log.topic_id && isAllowed) ? `/topic/${log.topic_id}${log.post_id ? `#post-${log.post_id}` : ''}` : undefined}
                                     className={log.topic_id ? 'text-decoration-none d-inline-flex align-items-center gap-1' : 'd-inline-flex align-items-center gap-1'}
-                                    style={{ cursor: log.topic_id ? 'pointer' : 'default', padding: '0.4em 0.6em' }}
+                                    style={{ cursor: (log.topic_id && isAllowed) ? 'pointer' : 'default', padding: '0.4em 0.6em' }}
                                   >
                                     {log.value > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                                     <span>{log.value > 0 ? `+${log.value}` : log.value}</span>
@@ -517,7 +569,8 @@ const ProfilePage = () => {
                                 )}
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </Table>
                     </div>

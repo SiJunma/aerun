@@ -652,6 +652,17 @@ const TopicPage = () => {
     );
   }
 
+  if (category && !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) {
+    return (
+      <Container className="py-5 text-center">
+        <h3 className="text-muted">{lang === 'ru' ? 'Тема не найдена или доступ запрещён' : 'Topic not found or access denied'}</h3>
+        <Button as={Link} to="/" variant="outline-primary" className="mt-3">
+          {lang === 'ru' ? 'На главную' : 'Go Home'}
+        </Button>
+      </Container>
+    );
+  }
+
   const categoryTitle = category ? resolveText(category.title) : '...';
   const hasDraft = !!myDraft;
 

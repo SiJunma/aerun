@@ -151,6 +151,13 @@ const CategoryPage = () => {
       setToast({ show: true, message: error.message, variant: 'danger' });
     }
   };
+  if (!loading && category && !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) {
+    return (
+      <Container className="py-5 text-center">
+        <h3 className="text-muted">{lang === 'ru' ? 'Категория не найдена или доступ запрещён' : 'Category not found or access denied'}</h3>
+      </Container>
+    );
+  }
 
   return (
     <Container className="py-4 position-relative">
