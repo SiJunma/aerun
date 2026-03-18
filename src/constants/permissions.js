@@ -8,6 +8,7 @@ export const PERMISSIONS = {
   EDIT_NICKNAMES: 'edit_nicknames',
   MANAGE_ROLES: 'manage_roles',
   MANAGE_CATEGORIES: 'manage_categories',
+  DELETE_USERS: 'delete_users',
   
   // Content Moderation
   MODERATE_CONTENT: 'moderate_content',
@@ -34,6 +35,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.EDIT_NICKNAMES]: { en: 'Edit Nicknames', ru: 'Изменение никнеймов' },
   [PERMISSIONS.MANAGE_ROLES]: { en: 'Manage Roles', ru: 'Управление ролями' },
   [PERMISSIONS.MANAGE_CATEGORIES]: { en: 'Manage Categories', ru: 'Управление категориями' },
+  [PERMISSIONS.DELETE_USERS]: { en: 'Delete Users', ru: 'Удаление пользователей' },
   [PERMISSIONS.MODERATE_CONTENT]: { en: 'Moderate Content', ru: 'Модерация (правка/удаление)' },
   [PERMISSIONS.VIEW_FORUM]: { en: 'View Forum', ru: 'Просмотр форума' },
   [PERMISSIONS.POST_REPLY]: { en: 'Post Reply', ru: 'Отправка ответов' },
@@ -60,6 +62,7 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.EDIT_NICKNAMES,
       PERMISSIONS.MANAGE_ROLES,
       PERMISSIONS.MANAGE_CATEGORIES,
+      PERMISSIONS.DELETE_USERS,
       PERMISSIONS.MODERATE_CONTENT,
       PERMISSIONS.VIEW_FORUM,
       PERMISSIONS.POST_REPLY,

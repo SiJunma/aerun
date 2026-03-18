@@ -26,9 +26,11 @@ export const approveUser = async (uid) => {
   });
 };
 
-export const rejectUser = async (uid) => {
+export const deleteUser = async (uid) => {
   await deleteDoc(doc(db, 'users', uid));
 };
+
+export const rejectUser = deleteUser;
 
 export const banUser = async (uid) => {
   await updateDoc(doc(db, 'users', uid), {
