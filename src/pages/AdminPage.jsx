@@ -498,16 +498,16 @@ const AdminPage = () => {
               </td>
               <td className="text-end">
                 {!isChiefAdmin(u.email, u.role_id) && (
-                  <>
+                  <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
                     {u.status === 'pending' && (
                       <>
                         {hasPermission(PERMISSIONS.APPROVE_USERS) && (
-                          <Button variant="success" size="sm" className="me-2 fw-bold text-white" onClick={() => handleApproveUser(u.id)}>
+                          <Button variant="success" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleApproveUser(u.id)}>
                              <UserCheck size={14} className="me-1" /> {t('admin.users.approve')}
                           </Button>
                         )}
                         {hasPermission(PERMISSIONS.APPROVE_USERS) && (
-                          <Button variant="danger" size="sm" className="me-2 fw-bold text-white" onClick={() => handleRejectUser(u.id)}>
+                          <Button variant="danger" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleRejectUser(u.id)}>
                             <UserX size={14} className="me-1" /> {t('admin.users.reject')}
                           </Button>
                         )}
@@ -515,18 +515,18 @@ const AdminPage = () => {
                     )}
                     {u.status !== 'banned' ? (
                       hasPermission(PERMISSIONS.BAN_USERS) && (
-                        <Button variant="link" size="sm" className="text-danger" onClick={() => handleBanUser(u.id)}>
+                        <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleBanUser(u.id)}>
                           <UserMinus size={14} className="me-1" /> {t('admin.users.ban')}
                         </Button>
                       )
                     ) : (
                       hasPermission(PERMISSIONS.BAN_USERS) && (
-                        <Button variant="link" size="sm" className="text-success" onClick={() => handleApproveUser(u.id)}>
+                        <Button variant="link" size="sm" className="text-success p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleApproveUser(u.id)}>
                           {t('admin.users.unban')}
                         </Button>
                       )
                     )}
-                  </>
+                  </div>
                 )}
                 {isChiefAdmin(u.email, u.role_id) && (
                   <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>

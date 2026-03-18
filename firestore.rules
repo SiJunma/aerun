@@ -50,21 +50,21 @@ service cloud.firestore {
     // --- Characters ---
     // Spectators cannot create characters
     match /characters/{charId} {
-      allow read: if isActive();
+      allow read: if true;
       allow create: if canPost() && request.resource.data.owner_id == request.auth.uid;
       allow update, delete: if isActive() && (resource.data.owner_id == request.auth.uid || isAdmin());
     }
 
     // --- User sub-collection characters ---
     match /users/{userId}/characters/{charId} {
-      allow read: if isActive();
+      allow read: if true;
       allow create: if canPost() && isOwner(userId);
       allow update, delete: if (isOwner(userId) && isActive()) || isAdmin();
     }
 
     // --- Categories ---
     match /categories/{catId} {
-      allow read: if isActive();
+      allow read: if true;
       allow create, delete: if isAdmin();
       // Counter updates from any active user (including spectators: read-only views still trigger view counts)
       allow update: if isAdmin()
@@ -74,7 +74,7 @@ service cloud.firestore {
 
     // --- Topics ---
     match /topics/{topicId} {
-      allow read: if isActive();
+      allow read: if true;
       // Only non-spectators can create topics
       allow create: if canPost();
       // Author or admin can edit; view/counter bumps allowed for all active users
@@ -89,7 +89,7 @@ service cloud.firestore {
 
     // --- Posts ---
     match /posts/{postId} {
-      allow read: if isActive();
+      allow read: if true;
       // Only non-spectators can create or delete posts
       allow create: if canPost();
       allow update: if isAdmin()
@@ -125,7 +125,7 @@ service cloud.firestore {
     // --- Reputation Logs ---
     match /reputation_logs/{logId} {
       // Users can read logs (UI filters based on settings)
-      allow read: if isActive();
+      allow read: if true;
       // Only non-spectators can vote; voter_id must match; cannot vote for self
       allow create: if canPost() 
         && request.resource.data.voter_id == request.auth.uid

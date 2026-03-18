@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Toast, ToastContainer, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save } from 'lucide-react';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock } from 'lucide-react';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { subscribeToUser, checkNicknameExists, subscribeToCategories } from '../api/forum';
