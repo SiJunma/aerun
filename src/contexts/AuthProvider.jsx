@@ -318,19 +318,23 @@ export const AuthProvider = ({ children }) => {
       return;
     }
 
+    // New user baseline: topics updated before registration are treated as read
+    const registrationMs = profile?.created_at?.toMillis?.() || 0;
+
     const count = latestTopics.filter(topic => {
       // Exclude own posts from unread count
       if (topic.last_post_author_id === user.uid) return false;
 
       const lastVisitRaw = readMap[topic.id];
       const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
+      const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
       const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
 
-      return lastPostMs > lastVisitMs;
+      return lastPostMs > effectiveLastVisitMs;
     }).length;
 
     setUnreadTopicsCount(count);
-  }, [user, latestTopics, readMap]);
+  }, [user, profile, latestTopics, readMap]);
 
   /**
    * Mark a topic as read for the current user.

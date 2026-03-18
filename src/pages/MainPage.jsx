@@ -10,7 +10,7 @@ import ForumStats from '../components/layout/ForumStats';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, readMap, hasPermission, PERMISSIONS } = useAuth();
+  const { user, profile, readMap, hasPermission, PERMISSIONS } = useAuth();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -79,8 +79,10 @@ const MainPage = () => {
                         {(() => {
                           const lastVisitRaw = readMap[cat.last_post_topic_id];
                           const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
+                          const registrationMs = profile?.created_at?.toMillis?.() || 0;
+                          const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
                           const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
-                          const hasUnread = cat.last_post_author_id !== user?.uid && lastPostMs > lastVisitMs;
+                          const hasUnread = cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
                           
                           return (
                             <LastPostInfo

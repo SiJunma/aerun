@@ -243,9 +243,12 @@ const TopicPage = () => {
 
       // Use server-side readMap; fall back to legacy localStorage key for existing sessions
       const lastVisitRaw = readMap[id];
-      const lastVisit = lastVisitRaw?.toMillis
+      const registrationMs = profile?.created_at?.toMillis?.() || 0;
+      const storedLastVisit = lastVisitRaw?.toMillis
         ? lastVisitRaw.toMillis()
         : (lastVisitRaw || parseInt(localStorage.getItem(LAST_VISIT_KEY) || '0', 10));
+      const lastVisit = Math.max(storedLastVisit, registrationMs);
+      
       const unreadIndex = posts.findIndex(p => {
         const ms = p.created_at?.toMillis?.() ?? 0;
         return ms > lastVisit;
