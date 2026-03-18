@@ -213,7 +213,7 @@ const AdminPage = () => {
       setToast({ show: true, message: t('admin.users.toast_approved'), variant: 'success' });
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: 'Error', variant: 'danger' });
+      setToast({ show: true, message: t('admin.users.error_approve'), variant: 'danger' });
     }
   };
 
@@ -249,7 +249,7 @@ const AdminPage = () => {
       setToast({ show: true, message: t('admin.users.toast_role_updated'), variant: 'success' });
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: 'Error updating user role', variant: 'danger' });
+      setToast({ show: true, message: t('admin.users.error_role_update'), variant: 'danger' });
     } finally {
       setSaving(false);
     }
