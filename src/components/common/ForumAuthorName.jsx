@@ -18,7 +18,8 @@ const ForumAuthorName = ({
   characterId,
   isCharacter,
   fallbackName,
-  className = ''
+  className = '',
+  onClick
 }) => {
   const [liveName, setLiveName] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -49,12 +50,18 @@ const ForumAuthorName = ({
     return () => unsub?.();
   }, [userId, characterId, isCharacter]);
 
+  const name = liveName || fallbackName || '—';
+
   return (
-    <span className={`forum-author-name ${className}`}>
+    <span 
+      className={`forum-author-name ${className}`} 
+      onClick={onClick ? () => onClick(name) : undefined}
+      style={onClick ? { cursor: 'pointer' } : {}}
+    >
       {loading ? (
         <span className="skeleton" style={{ width: '100px', height: '1.2em', display: 'inline-block', verticalAlign: 'middle' }}></span>
       ) : (
-        liveName || fallbackName || '—'
+        name
       )}
     </span>
   );

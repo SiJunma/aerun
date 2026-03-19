@@ -69,7 +69,7 @@ service cloud.firestore {
       // Counter updates from any active user (including spectators: read-only views still trigger view counts)
       allow update: if isAdmin()
         || (isActive() && request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_topic_id', 'last_post_topic_title']));
+          .hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
     }
 
     // --- Topics ---
@@ -82,7 +82,7 @@ service cloud.firestore {
         || (isActive() && (
           resource.data.author_id == request.auth.uid
           || request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['views', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id'])
+            .hasAny(['views', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_is_character', 'last_post_author_character_id'])
         ));
       allow delete: if isAdmin() || (canPost() && resource.data.author_id == request.auth.uid);
     }
@@ -90,8 +90,11 @@ service cloud.firestore {
     // --- Posts ---
     match /posts/{postId} {
       allow read: if true;
-      // Only non-spectators can create or delete posts
-      allow create: if canPost();
+      // Only non-spectators can create or delete posts; limit to 1000 posts per topic
+      allow create: if canPost() && (
+        !exists(/databases/$(database)/documents/topics/$(request.resource.data.topic_id)) ||
+        get(/databases/$(database)/documents/topics/$(request.resource.data.topic_id)).data.posts_count < 1000
+      );
       allow update: if isAdmin()
         || (canPost() && (
           resource.data.author_id == request.auth.uid
@@ -129,7 +132,8 @@ service cloud.firestore {
       // Only non-spectators can vote; voter_id must match; cannot vote for self
       allow create: if canPost() 
         && request.resource.data.voter_id == request.auth.uid
-        && request.resource.data.target_id != request.auth.uid;
+        && request.resource.data.target_id != request.auth.uid
+        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.status == 'active';
       // Logs are immutable except for admins
       allow update, delete: if isAdmin();
     }

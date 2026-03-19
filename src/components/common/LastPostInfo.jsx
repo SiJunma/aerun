@@ -9,6 +9,7 @@ const LastPostInfo = ({
   authorCharacterId,
   isCharacter,
   authorName,
+  authorAvatar,
   hasUnread,
   lang,
   className = ""
@@ -32,6 +33,7 @@ const LastPostInfo = ({
         authorCharacterId={authorCharacterId}
         isCharacter={isCharacter}
         authorName={authorName}
+        authorAvatar={authorAvatar}
         lang={lang}
         className="w-100"
       />

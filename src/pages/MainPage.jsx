@@ -92,6 +92,7 @@ const MainPage = () => {
                               authorCharacterId={cat.last_post_author_character_id}
                               isCharacter={!!cat.last_post_is_character}
                               authorName={cat.last_post_author}
+                              authorAvatar={cat.last_post_author_avatar}
                               hasUnread={hasUnread}
                               lang={lang}
                             />

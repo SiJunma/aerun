@@ -16,6 +16,7 @@
   /* Form Elements */
   --input-bg: #ffffff;
   --input-border: #c6ccd2;
+  --input-text: #212529;
   --input-placeholder: #6c757d;
   /* Muted Role Colors - Light (Professional & Deep) */
   --role-admin: #be123c; /* Rose 700 - Deeper */
@@ -47,6 +48,7 @@
   /* Form Elements - Even darker for "cut-in" effect */
   --input-bg: #020617;
   --input-border: #334155;
+  --input-text: #f8fafc;
   --input-placeholder: #64748b;
   /* Muted Role Colors - Dark (Subtle glows, no neon) */
   --role-admin: #fda4af; /* Rose 300 - Softer */
@@ -78,6 +80,7 @@
   /* Form Elements - Even darker for "cut-in" effect in Sepia */
   --input-bg: #e2ddd0;
   --input-border: #d2ccba;
+  --input-text: #382d1d;
   --input-placeholder: #5c4b3a;
   /* Role Colors - Neutral (Sepia) */
   --role-admin: #991b1b; /* Dark red */
@@ -1399,14 +1402,35 @@ a.badge.bg-danger:hover {
 [data-theme='neutral'] .role-badge.bg-info { --badge-bg-rgb: 14, 116, 144; }   /* Cyan 700 */
 [data-theme='neutral'] .role-badge.bg-primary { --badge-bg-rgb: 30, 64, 175; } /* Blue 800 */
 
-/* Specific banned badge override */
-.badge-banned {
-  background-color: var(--role-banned) !important;
-  color: #ffffff !important;
+/* Specific banned and deleted badge mappings for ghost style */
+.role-badge.badge-banned { --badge-bg: var(--role-banned); }
+.role-badge.badge-deleted { --badge-bg: var(--role-banned); opacity: 0.7; }
+
+/* Default RGBs (Light) */
+.role-badge.badge-banned, .role-badge.badge-deleted { --badge-bg-rgb: 17, 24, 39; }
+
+/* Dark mode RGBs */
+[data-theme='dark'] .role-badge.badge-banned,
+[data-theme='dark'] .role-badge.badge-deleted { 
+  --badge-bg-rgb: 248, 250, 252; 
 }
 
-[data-theme='neutral'] .badge-banned {
-  color: #d2ccba !important;
+/* Neutral mode RGBs */
+[data-theme='neutral'] .role-badge.badge-banned,
+[data-theme='neutral'] .role-badge.badge-deleted { 
+  --badge-bg-rgb: 26, 21, 15; 
+}
+
+/* Override solid backgrounds to enable ghost style */
+.badge-banned, .badge-deleted {
+  background-color: rgba(var(--badge-bg-rgb), 0.08) !important;
+  color: var(--badge-bg) !important;
+  border: 1px solid rgba(var(--badge-bg-rgb), 0.2) !important;
+}
+
+[data-theme='neutral'] .badge-banned,
+[data-theme='neutral'] .badge-deleted {
+  color: var(--badge-bg) !important; /* Ensure visibility */
 }
 
 /* Premium Draft/Ghost Post Styling */

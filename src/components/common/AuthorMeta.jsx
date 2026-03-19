@@ -11,6 +11,7 @@ const AuthorMeta = ({
   isCharacter,
   authorName,
   lang,
+  authorAvatar,
   showAvatar = true,
   className = ""
 }) => {
@@ -36,6 +37,7 @@ const AuthorMeta = ({
             characterId={authorCharacterId}
             isCharacter={isCharacter}
             fallbackName={authorName}
+            initialAvatar={authorAvatar}
             size={20}
             roundedCircle={true}
             className="shadow-sm"

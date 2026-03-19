@@ -171,6 +171,7 @@ export const createTopic = async (topicData, firstPostData) => {
       last_post_at: serverTimestamp(),
       last_post_author: topicData.author_name,
       last_post_author_id: topicData.author_id,
+      last_post_author_avatar: topicData.author_avatar || null,
       last_post_is_character: topicData.is_character || false,
       last_post_author_character_id: topicData.author_character_id || null,
       created_at: serverTimestamp(),
@@ -190,6 +191,7 @@ export const createTopic = async (topicData, firstPostData) => {
       last_post_at: serverTimestamp(),
       last_post_author: topicData.author_name,
       last_post_author_id: topicData.author_id,
+      last_post_author_avatar: topicData.author_avatar || null,
       last_post_topic_id: topicRef.id,
       last_post_topic_title: topicData.title,
       last_post_is_character: topicData.is_character || false,
@@ -247,6 +249,7 @@ export const createPost = async (postData) => {
       last_post_at: serverTimestamp(),
       last_post_author: postData.author_name,
       last_post_author_id: postData.author_id,
+      last_post_author_avatar: postData.author_avatar || null,
       last_post_is_character: postData.is_character || false,
       last_post_author_character_id: postData.author_character_id || null,
       posts_count: increment(1)
@@ -258,6 +261,7 @@ export const createPost = async (postData) => {
         last_post_at: serverTimestamp(),
         last_post_author: postData.author_name,
         last_post_author_id: postData.author_id,
+        last_post_author_avatar: postData.author_avatar || null,
         last_post_topic_id: postData.topic_id,
         last_post_topic_title: topicSnap.data().title,
         last_post_is_character: postData.is_character || false,
@@ -390,6 +394,7 @@ export const publishDraft = async (uid, topicId) => {
       last_post_at: serverTimestamp(),
       last_post_author: postData.author_name,
       last_post_author_id: postData.author_id,
+      last_post_author_avatar: postData.author_avatar || null,
       last_post_is_character: postData.is_character || false,
       last_post_author_character_id: postData.author_character_id || null,
       posts_count: increment(1)
@@ -402,6 +407,7 @@ export const publishDraft = async (uid, topicId) => {
         last_post_at: serverTimestamp(),
         last_post_author: postData.author_name,
         last_post_author_id: postData.author_id,
+        last_post_author_avatar: postData.author_avatar || null,
         last_post_topic_id: topicId,
         last_post_topic_title: topicTitle,
         last_post_is_character: postData.is_character || false,
@@ -525,11 +531,14 @@ export const deletePost = async (post) => {
     categoryId = topicData.category_id;
     isLastPost = (topicData.posts_count ?? 1) <= 1;
 
+    const userSnap = await transaction.get(userRef);
     transaction.delete(postRef);
-    transaction.update(userRef, { 
-      post_count: increment(-1),
-      reputation: increment(-totalRepChange)
-    });
+    if (userSnap.exists()) {
+      transaction.update(userRef, { 
+        post_count: increment(-1),
+        reputation: increment(-totalRepChange)
+      });
+    }
 
     // Delete associated reputation logs
     logsSnap.forEach(logDoc => {
@@ -578,6 +587,7 @@ export const deletePost = async (post) => {
         last_post_at: newLastAt,
         last_post_author: newLastAuthor,
         last_post_author_id: newLastAuthorId,
+        last_post_author_avatar: newLastPost.author_avatar || null,
         last_post_is_character: newIsChar,
         last_post_author_character_id: newCharId
       });
@@ -597,6 +607,7 @@ export const deletePost = async (post) => {
           last_post_at: latestTopic.last_post_at,
           last_post_author: latestTopic.last_post_author,
           last_post_author_id: latestTopic.last_post_author_id,
+          last_post_author_avatar: latestTopic.last_post_author_avatar || null,
           last_post_topic_id: latestTopic.id,
           last_post_topic_title: latestTopic.title,
           last_post_is_character: latestTopic.last_post_is_character || false,
@@ -754,6 +765,7 @@ export const deleteTopics = async (topicIds) => {
           last_post_at: latestTopic.last_post_at || null,
           last_post_author: latestTopic.last_post_author || null,
           last_post_author_id: latestTopic.last_post_author_id || null,
+          last_post_author_avatar: latestTopic.last_post_author_avatar || null,
           last_post_topic_id: latestTopic.id || null,
           last_post_topic_title: latestTopic.title || null,
           last_post_is_character: latestTopic.last_post_is_character || false,

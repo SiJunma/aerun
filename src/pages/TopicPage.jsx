@@ -20,6 +20,7 @@ import ForumPagination from '../components/common/ForumPagination';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumAuthorAvatar from '../components/common/ForumAuthorAvatar';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import ForumRoleBadge from '../components/common/ForumRoleBadge';
 
 
 const TopicPage = () => {
@@ -302,6 +303,41 @@ const TopicPage = () => {
       return profile?.nickname || post.owner_name;
     }
     return authorStats[post.author_id]?.nickname || post.owner_name;
+  };
+
+  const handleQuoteAuthor = (authorName) => {
+    if (!user || profile?.role_id === 'spectator') return;
+    
+    const tag = `[b]${authorName}[/b],\n`;
+    
+    if (editingPostId) {
+      setEditContent(prev => {
+        const prefix = prev.trim() ? (prev.endsWith('\n') ? '' : '\n') : '';
+        return prev + prefix + tag;
+      });
+      
+      const id = (myDraft && editingPostId === myDraft.id) ? 'draftEditContent' : 'editContent';
+      setTimeout(() => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.focus();
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
+    } else {
+      setReplyContent(prev => {
+        const prefix = prev.trim() ? (prev.endsWith('\n') ? '' : '\n') : '';
+        return prev + prefix + tag;
+      });
+      
+      setTimeout(() => {
+        const el = document.getElementById('replyContent');
+        if (el) {
+          el.focus();
+        }
+        replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    }
   };
 
   const getLiveAuthorName = (post) => {
@@ -623,27 +659,18 @@ const TopicPage = () => {
     const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
     
     // If it's undefined, it's still loading (we explicitly set null for 'not found')
-    if (authorData === undefined && !post.is_character) {
+    if (authorData === undefined) {
       return <div className="skeleton skeleton-badge mb-2"></div>;
     }
     
-    // 1. Check if user is banned
-    if (authorData?.status === 'banned') {
-      return <Badge className="role-badge badge-banned mb-2">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
-    }
-
-    // 2. Resolve Role Visuals
-    // Prioritize live data from authorStats/profile over stale denormalized post.author_role_id
-    const currentRoleId = authorData?.role_id || post.author_role_id;
-    const visuals = getRoleVisuals(resolveUserRoleId(authorData?.email, currentRoleId), roles);
-    
     return (
-      <Badge 
-        bg={visuals.color} 
-        className={`role-badge mb-2 shadow-sm ${visuals.isLight ? 'text-dark' : 'text-white'}`}
-      >
-        {visuals.name}
-      </Badge>
+      <ForumRoleBadge
+        roleId={authorData?.role_id || post.author_role_id}
+        status={authorData?.status}
+        userEmail={authorData?.email}
+        isDeleted={authorData === null}
+        className="mb-2"
+      />
     );
   };
     
@@ -821,6 +848,7 @@ const TopicPage = () => {
                       characterId={post.author_character_id}
                       isCharacter={!!post.is_character}
                       fallbackName={post.author_name}
+                      onClick={handleQuoteAuthor}
                     />
                   </div>
 
@@ -875,17 +903,23 @@ const TopicPage = () => {
                     </div>
                   )}
 
-                  {/* 7. Footer Links (Moved here for mobile stacking) */}
-                  <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
-                    <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
-                      {t('profile.view_profile')}
-                    </Link>
-                    {profile?.role_id !== 'spectator' && (
-                      <Link to="#" className="footer-link text-decoration-none px-0" onClick={(e) => e.preventDefault()}>
-                        {t('profile.pm')}
-                      </Link>
-                    )}
-                  </div>
+                  {(() => {
+                    const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                    if (!authorData) return null;
+                    
+                    return (
+                      <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
+                        <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                          {t('profile.view_profile')}
+                        </Link>
+                        {profile?.role_id !== 'spectator' && authorData.status !== 'banned' && (
+                          <Link to="#" className="footer-link text-decoration-none px-0" onClick={(e) => e.preventDefault()}>
+                            {t('profile.pm')}
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </Col>
 
                 {/* Content Area */}
@@ -984,15 +1018,16 @@ const TopicPage = () => {
                     </div>
 
                     {/* Reputation / Voting Buttons */}
-                    {settings?.enableReputation && (
+                    {settings?.enableReputation && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (
                       <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
                         <div
-                          className={`text-muted small d-flex align-items-center gap-1 ${post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) ? 'rep-trigger' : ''}`}
-                          title={post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION)
+                          className={`text-muted small d-flex align-items-center gap-1 ${post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
+                          title={post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
                             ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
                             : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
                           onClick={() => {
-                            if (post.author_id === profile?.uid) return;
+                            const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                            if (post.author_id === profile?.uid || authorData?.status === 'banned') return;
                             
                             // If user has permission to use (vote), show modal or toggle controls
                             // If they DON'T have permission, they can still view details if they clicked an existing vote?
@@ -1129,6 +1164,7 @@ const TopicPage = () => {
                     characterId={myDraft.author_character_id}
                     isCharacter={!!myDraft.is_character}
                     fallbackName={myDraft.author_name}
+                    onClick={handleQuoteAuthor}
                   />
                 </div>
                 {getLiveAuthorStatus(myDraft) && (
@@ -1303,9 +1339,28 @@ const TopicPage = () => {
               {t('forum.spectator_mode')}
             </span>
           </div>
+        ) : topic.posts_count >= 1000 ? (
+          <div className="mt-5" ref={replyRef}>
+            <Card className="shadow-sm border-0 bg-card overflow-hidden">
+              <Card.Body className="p-4 text-center">
+                <div className="d-flex flex-column align-items-center py-2">
+                  <div className="bg-light rounded-circle p-3 mb-3" style={{ color: 'var(--role-banned)' }}>
+                    <Lock size={32} />
+                  </div>
+                  <h4 className="fw-bold mb-2">
+                    {lang === 'ru' ? 'Тема закрыта' : 'Topic Closed'}
+                  </h4>
+                  <p className="text-muted mb-0 mx-auto" style={{ maxWidth: '400px' }}>
+                    {lang === 'ru' 
+                      ? 'В теме достигнут лимит сообщений (1000/1000). Новые ответы более не принимаются.' 
+                      : 'The message limit (1000/1000) has been reached for this topic. New replies are no longer accepted.'}
+                  </p>
+                </div>
+              </Card.Body>
+            </Card>
+          </div>
         ) : topic.is_locked && !hasPermission('moderate_content') ? (
           <div className="mt-5 p-4 text-center text-muted rounded" style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }} ref={replyRef}>
-
             <div className="mb-3">
               <MessageSquareOff size={48} className="opacity-25" />
             </div>
@@ -1318,7 +1373,7 @@ const TopicPage = () => {
           </div>
         ) : (
           <div className="mt-5" ref={replyRef}>
-            <Card className="shadow-sm border-0">
+            <Card className="shadow-sm border-0 bg-card">
               <Card.Header className="bg-dark text-white py-3">
                 <h5 className="mb-0">{t('forum.create_post')}</h5>
               </Card.Header>
@@ -1368,18 +1423,16 @@ const TopicPage = () => {
                   )}
                   <Form.Group className="mb-3">
                     <RichEditor
-                      id="replyContent"
-                      placeholder={t('forum.reply_placeholder')}
-                      rows={6}
+                      id="reply-editor"
                       value={replyContent}
                       onChange={(e) => setReplyContent(e.target.value)}
+                      placeholder={t('forum.reply_placeholder')}
+                      minHeight="150px"
                       maxLength={MAX_CHARS}
-                      disabled={submitting}
-                      showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                     />
                   </Form.Group>
-                  <div className="d-flex justify-content-end gap-2">
-                    {/* Save as Draft — hidden when draft already exists */}
+
+                  <div className="mt-4 d-flex justify-content-end gap-2">
                     {!hasDraft && (
                       <Button
                         variant="outline-secondary"
@@ -1405,7 +1458,7 @@ const TopicPage = () => {
       }
 
       <div className="mt-4">
-        <ForumBreadcrumbs 
+        <ForumBreadcrumbs
           items={[
             ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
             { label: topic?.title || '...', active: true }

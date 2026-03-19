@@ -104,6 +104,7 @@ const TopicRow = ({
                 authorCharacterId={topic.author_character_id}
                 isCharacter={!!topic.is_character}
                 authorName={topic.author_name}
+                authorAvatar={topic.author_avatar}
                 lang={lang}
               />
               {showCategory && categoryName && (
@@ -129,6 +130,7 @@ const TopicRow = ({
           authorCharacterId={topic.last_post_author_character_id}
           isCharacter={!!topic.last_post_is_character}
           authorName={topic.last_post_author || topic.author_name}
+          authorAvatar={topic.last_post_author_avatar}
           hasUnread={hasUnread}
           lang={lang}
         />

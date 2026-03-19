@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/forum';
 import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
@@ -120,22 +121,13 @@ const MembersPage = () => {
     }
   };
 
-  const getRoleBadge = (u) => {
-    if (u.status === 'banned') return <Badge className="role-badge badge-banned">{lang === 'ru' ? 'Забанен' : 'Banned'}</Badge>;
-    if (u.status === 'pending') return <Badge bg="info" className="role-badge">{lang === 'ru' ? 'Ожидает' : 'Pending'}</Badge>;
-    
-    // 2. Resolve Role Visuals
-    const visuals = getRoleVisuals(resolveUserRoleId(u.email, u.role_id), roles);
-    
-    return (
-      <Badge 
-        bg={visuals.color} 
-        className={`role-badge ${visuals.isLight ? 'text-dark' : 'text-white'}`}
-      >
-        {visuals.name}
-      </Badge>
-    );
-  };
+  const getRoleBadge = (u) => (
+    <ForumRoleBadge
+      roleId={u.role_id}
+      status={u.status}
+      userEmail={u.email}
+    />
+  );
 
   return (
     <Container className="py-4">

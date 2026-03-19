@@ -5,6 +5,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock } from 'lucide-react';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { subscribeToUser, checkNicknameExists, subscribeToCategories } from '../api/forum';
 import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
@@ -317,9 +318,9 @@ const ProfilePage = () => {
                   </div>
                   <div className="text-end">
                     <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
-                    <div className="d-flex align-items-center justify-content-end gap-2">
+                      <div className="d-flex align-items-center justify-content-end gap-2">
                       <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
-                      {profile?.uid !== uid && profile?.role_id !== 'spectator' && (
+                      {profile?.uid !== uid && profile?.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && (
                         <div className="d-flex gap-1 align-items-center">
                           {!myVote ? (
                             <>
@@ -348,23 +349,13 @@ const ProfilePage = () => {
                 <span className="text-muted d-block small mb-1 fw-bold text-uppercase" style={{ fontSize: '0.65rem', letterSpacing: '0.1em' }}>
                   {t('profile.account_role')}
                 </span>
-                {viewedProfile?.status === 'banned' ? (
-                  <Badge className="role-badge badge-banned px-3 py-1 mt-1">{lang === 'ru' ? 'ЗАБАНЕН' : 'BANNED'}</Badge>
-                ) : viewedProfile?.status === 'pending' ? (
-                  <Badge bg="info" className="role-badge px-3 py-1 mt-1 text-white">{lang === 'ru' ? 'ОЖИДАЕТ' : 'PENDING'}</Badge>
-                ) : (() => {
-                  const roleId = resolveUserRoleId(viewedProfile?.email, viewedProfile?.role_id);
-                  const { name, color, isLight } = getRoleVisuals(roleId, roles);
-                  
-                  return (
-                    <Badge 
-                      bg={color} 
-                      className={`role-badge px-3 py-1 mt-1 ${isLight ? 'text-dark' : 'text-white'}`}
-                    >
-                      {name}
-                    </Badge>
-                  );
-                })()}
+                <ForumRoleBadge
+                  roleId={viewedProfile?.role_id}
+                  status={viewedProfile?.status}
+                  userEmail={viewedProfile?.email}
+                  isDeleted={viewedProfile === null}
+                  className="px-3 py-1 mt-1 font-uppercase"
+                />
               </div>
             </Card.Body>
           </Card>

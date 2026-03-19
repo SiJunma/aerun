@@ -3,14 +3,18 @@ import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, Toas
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import { 
-  getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, banUser, 
+  getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, 
   updateUserRole, addRole, updateRole, deleteRole 
 } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
 import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin } from '../constants/permissions';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
-import { UserCheck, UserMinus, UserX, PlusCircle, Edit2 } from 'lucide-react';
+import { 
+  UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2, 
+  Search, Award, Pin, Lock, Settings, MessageSquareOff, 
+  Bell, BellOff, ArrowRightLeft, Send, FilePen, User 
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -23,6 +27,7 @@ const AdminPage = () => {
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
   const [users, setUsers] = useState([]);
+  const [userSearch, setUserSearch] = useState('');
 
   // Modal State
   const [showCatModal, setShowCatModal] = useState(false);
@@ -234,6 +239,23 @@ const AdminPage = () => {
     });
   };
 
+  const handleDeleteUser = (uid) => {
+    setConfirmState({
+      show: true,
+      title: t('admin.users.confirm_delete_title'),
+      message: t('admin.users.confirm_delete_message'),
+      onConfirm: async () => {
+        try {
+          await deleteUser(uid);
+          setToast({ show: true, message: t('admin.users.toast_deleted'), variant: 'success' });
+        } catch (err) {
+          console.error(err);
+          setToast({ show: true, message: t('admin.users.error_delete'), variant: 'danger' });
+        }
+      }
+    });
+  };
+
   const handleOpenUserModal = (user) => {
     setEditingUser(user);
     setUserForm({ role_id: user.role_id || 'player' });
@@ -435,19 +457,39 @@ const AdminPage = () => {
 
 
 
-  const renderUsers = () => (
-    <Card className="shadow-sm border-0">
-      <Table hover responsive className="mb-0 overflow-hidden">
-        <thead>
-          <tr>
-            <th>{t('admin.users.table_user')}</th>
-            <th>{t('admin.users.table_role')}</th>
-            <th>{t('admin.users.table_status')}</th>
-            <th className="text-end">{t('admin.users.table_actions')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map(u => (
+  const renderUsers = () => {
+    const filteredUsers = users.filter(u => 
+      u.nickname?.toLowerCase().includes(userSearch.toLowerCase()) || 
+      u.email?.toLowerCase().includes(userSearch.toLowerCase())
+    );
+
+    return (
+      <Card className="shadow-sm border-0">
+        <Card.Header className="bg-transparent py-3 border-bottom">
+          <InputGroup style={{ maxWidth: '400px' }}>
+            <InputGroup.Text className="bg-card border-end-0 text-muted">
+              <Search size={18} />
+            </InputGroup.Text>
+            <Form.Control
+              type="text"
+              placeholder={currentLang === 'ru' ? 'Поиск по нику или email...' : 'Search by nickname or email...'}
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              className="border-start-0 ps-0"
+            />
+          </InputGroup>
+        </Card.Header>
+        <Table hover responsive className="mb-0 overflow-hidden">
+          <thead>
+            <tr>
+              <th>{t('admin.users.table_user')}</th>
+              <th>{t('admin.users.table_role')}</th>
+              <th>{t('admin.users.table_status')}</th>
+              <th className="text-end">{t('admin.users.table_actions')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredUsers.map(u => (
             <tr key={u.id} className="align-middle">
               <td>
                 <div className="d-flex align-items-center">
@@ -526,6 +568,11 @@ const AdminPage = () => {
                         </Button>
                       )
                     )}
+                    {hasPermission(PERMISSIONS.DELETE_USERS) && (
+                      <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleDeleteUser(u.id)}>
+                        <Trash2 size={14} className="me-1" /> {t('admin.users.delete')}
+                      </Button>
+                    )}
                   </div>
                 )}
                 {isChiefAdmin(u.email, u.role_id) && (
@@ -536,8 +583,9 @@ const AdminPage = () => {
           ))}
         </tbody>
       </Table>
-    </Card>
-  );
+      </Card>
+    );
+  };
 
   const renderRoles = () => (
     <>
