@@ -20,6 +20,7 @@ import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumAuthorAvatar from '../components/common/ForumAuthorAvatar';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
+import Skeleton from '../components/common/Skeleton';
 
 
 const TopicPage = () => {
@@ -72,6 +73,7 @@ const TopicPage = () => {
   // Move Topic state
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(true);
 
   const replyRef = useRef(null);
  // prevent double-scroll
@@ -200,18 +202,16 @@ const TopicPage = () => {
     setToast({ show: true, message, variant });
   };
 
-  // Scroll to first unread post (or last post if ?goLast=1, or specific post if #post-ID)
+  // Scroll to last post if ?goLast=1, or specific post if #post-ID
   const lastTargetRef = useRef('');
-  const hasNavigatedToUnreadRef = useRef(false);
 
   useEffect(() => {
-    hasNavigatedToUnreadRef.current = false;
-  }, [id]);
+    if (posts.length === 0) {
+      if (!isPageLoading) setIsPageLoading(true);
+      return;
+    }
 
-  useEffect(() => {
-    if (posts.length === 0) return;
-
-    let targetId;
+    let targetId = null;
     let targetPage = currentPage;
     const currentHash = hash;
 
@@ -222,6 +222,7 @@ const TopicPage = () => {
         targetPage = Math.ceil((postIndex + 1) / ITEMS_PER_PAGE);
         if (currentPage !== targetPage) {
           // Navigating while preserving hash
+          setIsPageLoading(true);
           navigate({
             search: `?page=${targetPage}${goLast ? '&goLast=0' : ''}`,
             hash: currentHash
@@ -231,41 +232,36 @@ const TopicPage = () => {
         targetId = currentHash.substring(1); // remove #
       }
     } else if (goLast) {
-      targetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
-      if (currentPage !== targetPage) {
-        setSearchParams({ page: targetPage, goLast: '1' });
+      let finalTargetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
+      let finalTargetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
+
+      if (user) {
+        const lastVisitRaw = readMap[id];
+        const registrationMs = profile?.created_at?.toMillis?.() || 0;
+        const lastVisit = Math.max(
+          lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0),
+          registrationMs
+        );
+        const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
+        
+        if (unreadIndex !== -1) {
+          finalTargetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
+          finalTargetId = `post-${posts[unreadIndex].id}`;
+        }
+      }
+
+      if (currentPage !== finalTargetPage) {
+        setIsPageLoading(true);
+        setSearchParams({ page: finalTargetPage, goLast: '1' });
         return;
       }
-      targetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
+      targetPage = finalTargetPage;
+      targetId = finalTargetId;
     } else {
-      // Unread logic should only redirect/scroll once per topic visit
-      if (hasNavigatedToUnreadRef.current) return;
-
-      // Use server-side readMap; fall back to legacy localStorage key for existing sessions
-      const lastVisitRaw = readMap[id];
-      const registrationMs = profile?.created_at?.toMillis?.() || 0;
-      const storedLastVisit = lastVisitRaw?.toMillis
-        ? lastVisitRaw.toMillis()
-        : (lastVisitRaw || parseInt(localStorage.getItem(LAST_VISIT_KEY) || '0', 10));
-      const lastVisit = Math.max(storedLastVisit, registrationMs);
-      
-      const unreadIndex = posts.findIndex(p => {
-        const ms = p.created_at?.toMillis?.() ?? 0;
-        return ms > lastVisit;
-      });
-
-      if (unreadIndex !== -1) {
-        targetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
-        if (currentPage !== targetPage) {
-          hasNavigatedToUnreadRef.current = true;
-          setSearchParams({ page: targetPage });
-          return;
-        }
-        targetId = `post-${posts[unreadIndex].id}`;
-      }
-      
-      hasNavigatedToUnreadRef.current = true;
+      setIsPageLoading(false);
     }
+
+    setIsPageLoading(false);
 
     // Only scroll if it's a new mount or a new target
     const fullTargetKey = `${id}_${targetPage}_${targetId}`;
@@ -286,7 +282,7 @@ const TopicPage = () => {
       setTimeout(tryScroll, 300);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length, goLast, currentPage, hash, id]);
+  }, [posts.length, goLast, currentPage, hash, id, readMap, profile]);
   const formatTime = (timestamp) => {
     if (!timestamp) return '...';
     try {
@@ -649,7 +645,7 @@ const TopicPage = () => {
   };
 
   const canManagePost = (post) => {
-    if (!user) return false;
+    if (!user || profile?.status === 'pending') return false;
     return post.author_id === user.uid || hasPermission('moderate_content');
   };
 
@@ -675,10 +671,51 @@ const TopicPage = () => {
     );
   };
     
-  if (!topic) {
+  if (!topic || isPageLoading) {
     return (
-      <Container className="py-5 text-center">
-        <div className="spinner-border text-primary" role="status" />
+      <Container className="py-4">
+        <div className="mb-2">
+          <Skeleton width={150} height="1rem" className="mb-2" />
+        </div>
+        
+        <div className="mb-4">
+          <div className="mb-2">
+            <Skeleton width="40%" height="2.5rem" className="mb-2" />
+            <Skeleton width="20%" height="1rem" />
+          </div>
+          
+          <div className="d-flex justify-content-between align-items-end mt-3">
+            <Skeleton width="30%" height="1rem" />
+            <Skeleton width="100px" height="2.2rem" className="rounded-pill" />
+          </div>
+        </div>
+
+        {[...Array(3)].map((_, i) => (
+          <Card key={i} className="mb-4 post-card shadow-sm border-0 overflow-hidden">
+            <Row className="g-0">
+              <Col md={3} lg={2} className="author-sidebar p-3 d-none d-md-block text-center border-end" style={{ minHeight: '200px' }}>
+                <Skeleton variant="avatar" width={80} height={80} className="mb-3 mx-auto rounded-circle" />
+                <Skeleton width="70%" height="1.2rem" className="mb-2 mx-auto" />
+                <Skeleton width="50%" height="0.8rem" className="mx-auto" />
+              </Col>
+              <Col md={9} lg={10} className="p-4">
+                <div className="d-flex justify-content-between mb-4">
+                  <Skeleton width="25%" height="1rem" />
+                  <Skeleton width="40px" height="1rem" />
+                </div>
+                <div className="space-y-2">
+                  <Skeleton width="100%" height="1rem" className="mb-2" />
+                  <Skeleton width="100%" height="1rem" className="mb-2" />
+                  <Skeleton width="85%" height="1rem" className="mb-2" />
+                  <Skeleton width="40%" height="1rem" />
+                </div>
+                <div className="mt-5 pt-3 border-top">
+                   <Skeleton width="120px" height="1.2rem" />
+                </div>
+              </Col>
+            </Row>
+          </Card>
+        ))}
       </Container>
     );
   }
@@ -926,7 +963,7 @@ const TopicPage = () => {
                         <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
                           {t('profile.view_profile')}
                         </Link>
-                        {profile?.role_id !== 'spectator' && authorData.status !== 'banned' && (
+                        {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && (
                           <Link to="#" className="footer-link text-decoration-none px-0" onClick={(e) => e.preventDefault()}>
                             {t('profile.pm')}
                           </Link>
@@ -1107,7 +1144,7 @@ const TopicPage = () => {
                   </div>
 
                   {/* Post Management Links — only render if at least one button is visible */}
-                  {((canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content'))) ||
+                  {user && profile?.status !== 'pending' && ((canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content'))) ||
                     (profile?.role_id !== 'spectator' && (!topic.is_locked || hasPermission('moderate_content')))) && (
                     <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
                       {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
@@ -1348,11 +1385,13 @@ const TopicPage = () => {
       {/* Reply form — hidden for spectators and closed topics */}
       {
         !hasPermission(PERMISSIONS.POST_REPLY, { category }) ? (
-          <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
-            <span className="opacity-75">
-              {t('forum.spectator_mode')}
-            </span>
-          </div>
+          user && (
+            <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
+              <span className="opacity-75">
+                {t('forum.spectator_mode')}
+              </span>
+            </div>
+          )
         ) : topic.posts_count >= 1000 ? (
           <div className="mt-5" ref={replyRef}>
             <Card className="shadow-sm border-0 bg-card overflow-hidden">

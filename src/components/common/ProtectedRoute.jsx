@@ -10,7 +10,7 @@ import { useAuth } from '../../contexts/AuthProvider';
  *  requireAdmin   {boolean} – if true, only role_id='admin' may enter (default: false)
  *  requirePosting {boolean} – if true, spectators are bounced (cannot post/create, default: false)
  */
-const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false }) => {
+const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false, allowGuest = false }) => {
   const { user, profile, settings, loading, hasPermission, PERMISSIONS } = useAuth();
   const location = useLocation();
 
@@ -18,8 +18,11 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
     return null; // AuthProvider handles the global preloader
   }
 
-  // Not logged in at all → /login
+  // Not logged in at all → /login (unless allowGuest is true and whitelistMode is OFF)
   if (!user) {
+    if (allowGuest && settings.whitelistMode === false && !requireAdmin && !requirePosting) {
+      return children;
+    }
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

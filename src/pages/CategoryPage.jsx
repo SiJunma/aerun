@@ -17,6 +17,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
+import Skeleton from '../components/common/Skeleton';
 
 const CategoryPage = () => {
   const { id } = useParams();
@@ -62,7 +63,7 @@ const CategoryPage = () => {
       : field || '';
 
 
-  const categoryTitle = category ? resolveText(category.title) : '...';
+  const categoryTitle = category ? resolveText(category.title) : <Skeleton width={150} height="1.5rem" />;
 
   // Pagination logic
   const totalPages = Math.ceil(topics.length / ITEMS_PER_PAGE);
@@ -168,39 +169,81 @@ const CategoryPage = () => {
       <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3 mb-4">
         <div>
           <h2 className="mb-1">{categoryTitle}</h2>
-          {category?.description && (
+          {!category ? (
+            <Skeleton width={250} height="1rem" className="mt-2" />
+          ) : category.description && (
             <div className="text-muted mb-0" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
               {resolveText(category.description)}
             </div>
           )}
         </div>
         <div className="d-flex gap-2 flex-wrap">
-          {isStaff && (
-            <Button 
-              variant={isManaging ? "secondary" : "outline-primary"}
-              onClick={() => {
-                setIsManaging(!isManaging);
-                setSelectedTopicIds([]);
-              }}
-              className="d-flex align-items-center gap-2"
-            >
-              <Settings size={18} />
-              {lang === 'ru' ? (isManaging ? 'Готово' : 'Управление') : (isManaging ? 'Done' : 'Manage')}
-            </Button>
-          )}
-          {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
-            <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
-              {t('forum.create_topic')}
-            </Button>
+          {loading ? (
+             <Skeleton width={120} height="2.5rem" />
+          ) : (
+            <>
+              {isStaff && (
+                <Button 
+                  variant={isManaging ? "secondary" : "outline-primary"}
+                  onClick={() => {
+                    setIsManaging(!isManaging);
+                    setSelectedTopicIds([]);
+                  }}
+                  className="d-flex align-items-center gap-2"
+                >
+                  <Settings size={18} />
+                  {lang === 'ru' ? (isManaging ? 'Готово' : 'Управление') : (isManaging ? 'Done' : 'Manage')}
+                </Button>
+              )}
+              {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
+                <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
+                  {t('forum.create_topic')}
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
 
       <Card className="shadow-sm border-0">
         {loading ? (
-          <div className="p-5 text-center text-muted">
-            <div className="spinner-border spinner-border-sm me-2" role="status" />
-            {lang === 'ru' ? 'Загрузка...' : 'Loading...'}
+          <div className="p-0">
+            <Table hover responsive className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th style={{ width: '50%' }}>{t('forum.topic')}</th>
+                  <th className="text-center">{t('forum.replies')}</th>
+                  <th>{t('forum.last_post')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...Array(5)].map((_, i) => (
+                  <tr key={i}>
+                    <td className="py-3 px-4">
+                      <div className="d-flex align-items-center gap-3">
+                        <Skeleton variant="avatar" width={40} height={40} className="rounded-circle" />
+                        <div className="flex-grow-1">
+                          <Skeleton width="60%" height="1.1rem" className="mb-2" />
+                          <Skeleton width="30%" height="0.8rem" />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="text-center p-3">
+                      <Skeleton width={30} height="1rem" className="mx-auto" />
+                    </td>
+                    <td className="p-3">
+                      <div className="d-flex align-items-center gap-2">
+                        <Skeleton variant="avatar" width={32} height={32} className="rounded-circle" />
+                        <div className="flex-grow-1">
+                          <Skeleton width="80%" height="0.8rem" className="mb-1" />
+                          <Skeleton width="50%" height="0.7rem" />
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
           </div>
         ) : topics.length === 0 ? (
           <div className="p-5 text-center">

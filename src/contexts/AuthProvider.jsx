@@ -106,8 +106,22 @@ export const AuthProvider = ({ children }) => {
     return signInWithPopup(auth, googleProvider);
   };
 
-  const logout = () => {
-    return signOut(auth);
+  const logout = async () => {
+    if (user?.uid) {
+      try {
+        // Set last_seen to 16 minutes ago to immediately remove from "Online Now" list (15 min threshold)
+        const sixteenMinsAgo = new Date(Date.now() - 16 * 60 * 1000);
+        await setDoc(doc(db, 'users', user.uid), { last_seen: sixteenMinsAgo }, { merge: true });
+      } catch (e) {
+        console.warn('[logout presence cleanup]', e);
+      }
+    }
+    localStorage.removeItem('last_guest_push');
+    await signOut(auth);
+    
+    // Immediately record guest activity so they show up in "Online now" as a guest
+    const gid = getOrCreateGuestId();
+    return apiRecordGuestActivity(gid);
   };
 
   const updateSettings = async (newSettings) => {
@@ -154,21 +168,12 @@ export const AuthProvider = ({ children }) => {
     const unsubGlobalSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const ensureBilingual = (val, defaultVal = '') => {
-          if (typeof val === 'string') return { en: val, ru: val };
-          if (typeof val === 'object' && val !== null) {
-            return {
-              en: typeof val.en === 'string' ? val.en : (val.en ? String(val.en) : defaultVal),
-              ru: typeof val.ru === 'string' ? val.ru : (val.ru ? String(val.ru) : defaultVal)
-            };
-          }
-          return { en: defaultVal, ru: defaultVal };
-        };
-
         const migrated = { 
           ...data,
-          forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
-          welcomeMessage: ensureBilingual(data.welcomeMessage, '')
+          forumName: data.forumName || 'Aerun Forum',
+          welcomeMessage: data.welcomeMessage || '',
+          whitelistMode: data.whitelistMode ?? true,
+          requireApproval: data.requireApproval ?? true
         };
         // Defaults for backgrounds
         if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
@@ -196,7 +201,6 @@ export const AuthProvider = ({ children }) => {
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setLoading(true); // Ensure we're in loading state while processing auth change
       if (firebaseUser) {
         setUser(firebaseUser);
         const userDocRef = doc(db, 'users', firebaseUser.uid);
@@ -264,7 +268,7 @@ export const AuthProvider = ({ children }) => {
               avatar_url: firebaseUser.photoURL || '',
               status_line: 'Hello, I am new here!',
               role_id: isAdmin ? CHIEF_ADMIN_ID : 'player',
-              status: isAdmin ? 'active' : 'pending',
+              status: isAdmin ? 'active' : (globalSettings?.requireApproval === false ? 'active' : 'pending'),
               created_at: serverTimestamp(),
               last_seen: serverTimestamp(),
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
@@ -479,8 +483,14 @@ export const AuthProvider = ({ children }) => {
     }
 
     // ── 4. GLOBAL ROLE PERMISSIONS (Baseline) ──
-    // Guests have no global permissions (they rely on category overrides for VIEW_FORUM).
-    if (!user) return false;
+    // Guests have no global permissions unless whitelistMode is OFF (then they get VIEW_FORUM).
+    // Users with 'pending' status also have no global permissions.
+    if (!user || profile?.status === 'pending') {
+      if (perm === PERMISSIONS.VIEW_FORUM && settings?.whitelistMode === false) {
+        return true;
+      }
+      return false;
+    }
     const userRole = roles.find(r => r.id === userRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);

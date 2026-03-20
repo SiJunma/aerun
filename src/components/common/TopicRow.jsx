@@ -24,7 +24,7 @@ const TopicRow = ({
   const registrationMs = profile?.created_at?.toMillis?.() || 0;
   const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
   const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
-  const hasUnread = topic.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
+  const hasUnread = !!user && profile?.status !== 'pending' && topic.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
   const POSTS_PER_PAGE = 20;
   const totalPages = Math.ceil((topic.posts_count || 1) / POSTS_PER_PAGE);

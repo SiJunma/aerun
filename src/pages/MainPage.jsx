@@ -7,6 +7,7 @@ import { Folder } from 'lucide-react';
 import { subscribeToCategories } from '../api/forum';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
+import Skeleton from '../components/common/Skeleton';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
@@ -28,9 +29,42 @@ const MainPage = () => {
 
       <Card className="shadow-sm border-0">
         {loading ? (
-          <div className="p-5 text-center text-muted">
-            <div className="spinner-border spinner-border-sm me-2" role="status" />
-            {t('forum.loading_categories')}
+          <div className="p-0">
+            <Table responsive className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 300 }}>{t('forum.category')}</th>
+                  <th className="text-center">{t('forum.topics')}</th>
+                  <th className="text-center">{t('forum.posts')}</th>
+                  <th>{t('forum.last_post')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...Array(4)].map((_, i) => (
+                  <tr key={i}>
+                    <td className="py-3 px-3">
+                      <Skeleton width="50%" height="1.4rem" className="mb-2" />
+                      <Skeleton width="80%" height="0.9rem" />
+                    </td>
+                    <td className="text-center">
+                      <Skeleton width={30} height="1rem" className="mx-auto" />
+                    </td>
+                    <td className="text-center">
+                      <Skeleton width={30} height="1rem" className="mx-auto" />
+                    </td>
+                    <td>
+                      <div className="d-flex align-items-center gap-2">
+                        <Skeleton variant="avatar" width={32} height={32} className="rounded-circle" />
+                        <div className="flex-grow-1">
+                          <Skeleton width="80%" height="0.9rem" className="mb-1" />
+                          <Skeleton width="40%" height="0.7rem" />
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
           </div>
         ) : categories.filter(cat => hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat })).length === 0 ? (
           <div className="p-5 text-center text-muted">
@@ -82,7 +116,7 @@ const MainPage = () => {
                           const registrationMs = profile?.created_at?.toMillis?.() || 0;
                           const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
                           const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
-                          const hasUnread = cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
+                          const hasUnread = !!user && profile?.status !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
                           
                           return (
                             <LastPostInfo

@@ -57,6 +57,8 @@ const ProfilePage = () => {
 
   // Reputation Voting State
   const [showRepModal, setShowRepModal] = useState(false);
+  const [showVoteInfoModal, setShowVoteInfoModal] = useState(false);
+  const [selectedVote, setSelectedVote] = useState(null);
   const [repValue, setRepValue] = useState(1);
   const [repComment, setRepComment] = useState('');
   const [submittingRep, setSubmittingRep] = useState(false);
@@ -330,7 +332,7 @@ const ProfilePage = () => {
                     <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
                       <div className="d-flex align-items-center justify-content-end gap-2">
                       <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
-                      {profile?.uid !== uid && profile?.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && (
+                      {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && (
                         <div className="d-flex gap-1 align-items-center">
                           {!myVote ? (
                             <>
@@ -848,69 +850,33 @@ const ProfilePage = () => {
               type="text"
               value={formData.status_line}
               onChange={(e) => setFormData({ ...formData, status_line: e.target.value })}
-              placeholder="e.g. Hunting orcs..."
+              placeholder="Title or status"
               maxLength={30}
             />
           </Form.Group>
 
-          <Form.Group className="mb-3" controlId="charAvatar">
-            <AvatarUploader
-              label={t('profile.avatar')}
-              value={formData.avatar_url}
-              onChange={(url) => setFormData({ ...formData, avatar_url: url })}
-              storagePath={`users/${uid}/characters/${editingChar?.id || 'new'}_avatar`}
-              size={80}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="charSignature">
-            <Form.Label className="fw-bold text-primary small uppercase">{t('profile.signature')}</Form.Label>
+          <AvatarUploader
+            label={<div className="fw-bold mb-2">{t('profile.character_avatar')}</div>}
+            value={formData.avatar_url}
+            onChange={(url) => setFormData({ ...formData, avatar_url: url })}
+            storagePath={`users/${uid}/characters/avatar`}
+            size={100}
+          />
+          
+          <Form.Group className="mt-3" controlId="charSignature">
+            <Form.Label className="fw-bold">{t('profile.character_signature')}</Form.Label>
             <Form.Control
               as="textarea"
               rows={3}
               value={formData.signature}
               onChange={(e) => setFormData({ ...formData, signature: e.target.value })}
-              placeholder={t('profile.signature_help')}
-              className=""
+              placeholder="Character biography or signature"
             />
           </Form.Group>
         </Form>
       </ForumModal>
 
-      <ForumModal
-        show={showRepModal}
-        onHide={() => setShowRepModal(false)}
-        title={t('profile.rep_give')}
-        footer={
-          <>
-            <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
-              {submittingRep ? t('common.loading') : t('common.confirm')}
-            </Button>
-          </>
-        }
-      >
-        <div className="text-center mb-4">
-          <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
-            {repValue > 0 ? `+${repValue}` : repValue}
-          </Badge>
-        </div>
-        <Form.Group>
-          <Form.Label className="fw-bold">{t('profile.rep_comment_placeholder')}</Form.Label>
-          <Form.Control
-            as="textarea"
-            rows={3}
-            value={repComment}
-            onChange={(e) => setRepComment(e.target.value)}
-            placeholder="..."
-            className=""
-          />
-        </Form.Group>
-      </ForumModal>
-
-      <ConfirmModal
+      <ConfirmModal 
         show={confirmState.show}
         onHide={() => setConfirmState(prev => ({ ...prev, show: false }))}
         onConfirm={confirmState.onConfirm}
@@ -918,20 +884,105 @@ const ProfilePage = () => {
         message={confirmState.message}
       />
 
-      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100, position: 'fixed' }}>
-        <Toast
+      <ToastContainer position="bottom-end" className="p-3">
+        <Toast 
+          show={toast.show} 
+          onClose={() => setToast({ ...toast, show: false })} 
+          delay={3000} 
+          autohide 
           bg={toast.variant}
-          show={toast.show}
-          onClose={() => setToast(t => ({ ...t, show: false }))}
-          delay={3500}
-          autohide
         >
-          <Toast.Body className="d-flex align-items-center gap-2 text-white fw-semibold">
-            <span>{toast.variant === 'success' ? '✓' : '✕'}</span>
-            <span>{toast.message}</span>
+          <Toast.Body className={toast.variant === 'primary' || toast.variant === 'danger' || toast.variant === 'success' ? 'text-white' : ''}>
+            {toast.message}
           </Toast.Body>
         </Toast>
       </ToastContainer>
+
+      {/* Profile Reputation Modal */}
+      <Modal show={showRepModal} onHide={() => setShowRepModal(false)} centered className="reputation-modal shadow-lg">
+        <Modal.Header closeButton className="border-0 pb-0">
+          <Modal.Title className="fw-bold text-accent">
+            {lang === 'ru' ? 'Репутация пользователя' : 'User Reputation'}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="pt-4">
+          <div className="text-center mb-4">
+            <h5 className="mb-2">
+              {lang === 'ru' ? 'Ваш голос для' : 'Your vote for'} <strong>{viewedProfile?.nickname}</strong>: 
+              <span className={`ms-2 fs-4 fw-bold ${repValue > 0 ? 'text-success' : 'text-danger'}`}>
+                {repValue > 0 ? `+${repValue}` : repValue}
+              </span>
+            </h5>
+            <p className="text-muted small">
+              {lang === 'ru' 
+                ? 'Вы можете добавить комментарий к своему голосу (необязательно)' 
+                : 'You can add a comment to your vote (optional)'}
+            </p>
+          </div>
+          <Form.Group>
+            <Form.Control
+              as="textarea"
+              rows={3}
+              value={repComment}
+              onChange={(e) => setRepComment(e.target.value)}
+              placeholder={lang === 'ru' ? 'Напишите комментарий...' : 'Write a comment...'}
+              maxLength={200}
+              className="rep-textarea border-0 bg-dark opacity-75 text-white"
+            />
+            <div className="text-end mt-1 small text-muted">
+              {repComment.length}/200
+            </div>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer className="border-0 pt-0">
+          <Button variant="outline-secondary" onClick={() => setShowRepModal(false)} disabled={submittingRep}>
+            {t('common.cancel')}
+          </Button>
+          <Button 
+            variant={repValue > 0 ? 'success' : 'danger'} 
+            onClick={handleRepVote} 
+            disabled={submittingRep}
+            className="px-4 fw-bold shadow-sm"
+          >
+            {submittingRep ? <Spinner size="sm" animation="border" className="me-2" /> : null}
+            {lang === 'ru' ? 'Проголосовать' : 'Submit Vote'}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal show={showVoteInfoModal} onHide={() => setShowVoteInfoModal(false)} centered className="vote-info-modal shadow-lg">
+        <Modal.Header closeButton className="border-0 pb-0">
+          <Modal.Title className="fw-bold small text-uppercase opacity-50">
+            {lang === 'ru' ? 'Детали голоса' : 'Vote Details'}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="py-4 text-center">
+          {selectedVote && (
+            <>
+              <div className="mb-3">
+                 <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-3 px-3 py-2">
+                   {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
+                 </Badge>
+              </div>
+              <div className="mb-3">
+                <span className="text-muted d-block small mb-1">{t('profile.rep_from')}</span>
+                <Link to={`/profile/${selectedVote.voter_id}`} className="fw-bold text-decoration-none h5">
+                  {selectedVote.voter_nickname || 'User'}
+                </Link>
+              </div>
+              {selectedVote.comment && (
+                <div className="rep-comment-display p-3 rounded bg-dark border border-dashed text-white italic">
+                  "{selectedVote.comment}"
+                </div>
+              )}
+              <div className="mt-4 text-muted small">
+                {selectedVote.created_at ? format(selectedVote.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
+              </div>
+            </>
+          )}
+        </Modal.Body>
+      </Modal>
+
     </Container>
   );
 };

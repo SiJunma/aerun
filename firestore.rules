@@ -37,9 +37,8 @@ service cloud.firestore {
 
     // --- Users ---
     match /users/{userId} {
-      // Allow read for owner, active members, any signed-in user (for registration check),
-      // or anyone performing a limited query (checking if a nickname exists).
-      allow read: if isOwner(userId) || isActive() || isSignedIn() || (request.query.limit == 1);
+      // Allow read for everyone in public mode (profiles are public)
+      allow read: if true;
       allow create: if isOwner(userId);
       // User can edit own profile; admin can edit anyone; any active user can bump post_count/reputation
       allow update: if isOwner(userId) || isAdmin()
@@ -172,7 +171,7 @@ service cloud.firestore {
 
     // --- Roles ---
     match /roles/{roleId} {
-      allow read: if isSignedIn(); // Allow reading for badge colors etc
+      allow read: if true; // Allow reading for badge colors etc
       allow write: if isAdmin();
     }
 
@@ -180,7 +179,7 @@ service cloud.firestore {
     match /guest_activity/{guestId} {
       allow read: if true;
       allow create: if true;
-      allow update: if (request.time - resource.data.last_seen) > duration.value(10, 'm');
+      allow update: if true;
       allow delete: if true; 
     }
   }

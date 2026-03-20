@@ -22,9 +22,14 @@ export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Initialize App Check (Optional: helps prevent bot attacks)
-// Note: Requires Recaptcha V3 site key from Firebase Console
+// Initialize App Check (helps prevent bot attacks and unauthorized API access)
 if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
+  // In development, enable debug mode to allow localhost testing.
+  // Check browser console for the debug token and add it to Firebase Console -> App Check -> Manage debug tokens.
+  if (import.meta.env.DEV) {
+    self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  }
+  
   initializeAppCheck(app, {
     provider: new ReCaptchaV3Provider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
     isTokenAutoRefreshEnabled: true

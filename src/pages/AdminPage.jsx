@@ -89,6 +89,8 @@ const AdminPage = () => {
     enableReputation: true,
     enableCharacters: true,
     enableDice: true,
+    whitelistMode: true,
+    requireApproval: true,
     logoUrl: '',
     bgLight: 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
     bgDark: 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
@@ -112,7 +114,9 @@ const AdminPage = () => {
         const migrated = { 
           ...data,
           forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
-          welcomeMessage: ensureBilingual(data.welcomeMessage, '')
+          welcomeMessage: ensureBilingual(data.welcomeMessage, ''),
+          whitelistMode: data.whitelistMode ?? true,
+          requireApproval: data.requireApproval ?? true
         };
         // Defaults for backgrounds
         if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
@@ -558,23 +562,59 @@ const AdminPage = () => {
             </Col>
           </Row>
 
-          <Form.Check
-            type="switch"
-            id="reg-switch"
-            label={t('admin.settings.registration')}
-            className="mb-3 fw-bold"
-            checked={settings.registrationEnabled}
-            onChange={(e) => setSettings({ ...settings, registrationEnabled: e.target.checked })}
-          />
+          <div className="d-flex flex-column gap-3 mb-4">
+            <div className="mb-2">
+              <Form.Check
+                type="switch"
+                id="reg-switch"
+                label={t('admin.settings.registration')}
+                className="fw-bold"
+                checked={settings.registrationEnabled}
+                onChange={(e) => setSettings({ ...settings, registrationEnabled: e.target.checked })}
+              />
+            </div>
 
-          <Form.Check
-            type="switch"
-            id="maintenance-switch"
-            label={t('admin.settings.maintenance')}
-            className="mb-4 text-danger fw-bold"
-            checked={settings.maintenanceMode}
-            onChange={(e) => setSettings({ ...settings, maintenanceMode: e.target.checked })}
-          />
+            {settings.registrationEnabled !== false && (
+              <div className="mb-2">
+                <Form.Check
+                  type="switch"
+                  id="approval-switch"
+                  label={t('admin.settings.require_approval')}
+                  className="fw-bold"
+                  checked={settings.requireApproval}
+                  onChange={(e) => setSettings({ ...settings, requireApproval: e.target.checked })}
+                />
+                <div className="small text-muted mt-1 opacity-75">
+                  {t('admin.settings.require_approval_help')}
+                </div>
+              </div>
+            )}
+
+            <div className="mb-2">
+              <Form.Check
+                type="switch"
+                id="whitelist-switch"
+                label={t('admin.settings.whitelist_mode')}
+                className="fw-bold"
+                checked={settings.whitelistMode}
+                onChange={(e) => setSettings({ ...settings, whitelistMode: e.target.checked })}
+              />
+              <div className="small text-muted mt-1 opacity-75">
+                {t('admin.settings.whitelist_mode_help')}
+              </div>
+            </div>
+
+            <div className="mb-2">
+              <Form.Check
+                type="switch"
+                id="maintenance-switch"
+                label={t('admin.settings.maintenance')}
+                className="text-danger fw-bold"
+                checked={settings.maintenanceMode}
+                onChange={(e) => setSettings({ ...settings, maintenanceMode: e.target.checked })}
+              />
+            </div>
+          </div>
 
           <Button
             variant="primary"

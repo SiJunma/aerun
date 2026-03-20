@@ -1,10 +1,11 @@
 import React from 'react';
-import { Navbar, Nav, Container, NavDropdown, Image, Badge } from 'react-bootstrap';
+import { Navbar, Nav, Container, NavDropdown, Image, Badge, Button } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
-import { Bell, BellOff, User, LogOut } from 'lucide-react';
+import { Bell, User, LogOut } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
+import AuthModal from '../modals/AuthModal';
 
 const Navigation = () => {
   const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS } = useAuth();
@@ -13,6 +14,8 @@ const Navigation = () => {
   const [adminUnread, setAdminUnread] = React.useState(0);
   const [userUnread, setUserUnread] = React.useState(0);
   const [expanded, setExpanded] = React.useState(false);
+  const [showAuthModal, setShowAuthModal] = React.useState(false);
+  const [authModalMode, setAuthModalMode] = React.useState('login');
 
   const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
@@ -45,7 +48,11 @@ const Navigation = () => {
 
   const handleLogout = async () => {
     await logout();
-    navigate('/login');
+    if (settings?.whitelistMode) {
+      navigate('/login');
+    } else {
+      navigate('/');
+    }
   };
 
   return (
@@ -150,9 +157,39 @@ const Navigation = () => {
             </NavDropdown>
           ) : (
             <div className="d-flex align-items-center gap-2">
-              <Nav.Link as={Link} to="/login" onClick={() => setExpanded(false)} className="fw-semibold text-light px-2">Login</Nav.Link>
+              <Nav.Link 
+                as={settings?.whitelistMode ? Link : 'span'}
+                to={settings?.whitelistMode ? "/login" : undefined}
+                role={settings?.whitelistMode ? undefined : "button"}
+                onClick={() => {
+                  if (!settings?.whitelistMode) {
+                    setAuthModalMode('login');
+                    setShowAuthModal(true);
+                  }
+                  setExpanded(false);
+                }} 
+                className="fw-semibold text-light px-2"
+                style={{ cursor: 'pointer' }}
+              >
+                {t('nav.login')}
+              </Nav.Link>
               {settings?.registrationEnabled !== false && (
-                <Link to="/register" onClick={() => setExpanded(false)} className="btn btn-primary btn-sm rounded-pill px-3">Register</Link>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="rounded-pill px-3 fw-semibold"
+                  onClick={() => {
+                    if (!settings?.whitelistMode) {
+                      setAuthModalMode('register');
+                      setShowAuthModal(true);
+                    } else {
+                      navigate('/register');
+                    }
+                    setExpanded(false);
+                  }}
+                >
+                  {t('nav.register')}
+                </Button>
               )}
             </div>
           )}
@@ -160,10 +197,12 @@ const Navigation = () => {
 
         <Navbar.Collapse id="basic-navbar-nav" className="order-lg-2">
           <Nav className="me-auto mt-2 mt-lg-0">
-            <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
-              {t('nav.new_replies')}
-              {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
-            </Nav.Link>
+            {user && (
+              <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
+                {t('nav.new_replies')}
+                {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
+              </Nav.Link>
+            )}
             <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)}>
 
               {t('nav.members')}
@@ -176,6 +215,12 @@ const Navigation = () => {
           </Nav>
         </Navbar.Collapse>
       </Container>
+      
+      <AuthModal 
+        show={showAuthModal} 
+        onHide={() => setShowAuthModal(false)} 
+        initialMode={authModalMode}
+      />
     </Navbar>
   );
 };

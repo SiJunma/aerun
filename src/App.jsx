@@ -47,13 +47,13 @@ const App = () => {
         <Route path="/banned" element={<ProtectedRoute requireActive={false}><BannedPage /></ProtectedRoute>} />
 
         {/* Active-user Routes (players, spectators, mods, admins) */}
-        <Route path="/" element={<ProtectedRoute><Layout><MainPage /></Layout></ProtectedRoute>} />
-        <Route path="/category/:id" element={<ProtectedRoute><Layout><CategoryPage /></Layout></ProtectedRoute>} />
-        <Route path="/topic/:id" element={<ProtectedRoute><Layout><TopicPage /></Layout></ProtectedRoute>} />
-        <Route path="/members" element={<ProtectedRoute><Layout><MembersPage /></Layout></ProtectedRoute>} />
-        <Route path="/profile/:uid" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />
+        <Route path="/" element={<ProtectedRoute allowGuest><Layout><MainPage /></Layout></ProtectedRoute>} />
+        <Route path="/category/:id" element={<ProtectedRoute allowGuest><Layout><CategoryPage /></Layout></ProtectedRoute>} />
+        <Route path="/topic/:id" element={<ProtectedRoute allowGuest><Layout><TopicPage /></Layout></ProtectedRoute>} />
+        <Route path="/members" element={<ProtectedRoute allowGuest><Layout><MembersPage /></Layout></ProtectedRoute>} />
+        <Route path="/profile/:uid" element={<ProtectedRoute allowGuest><Layout><ProfilePage /></Layout></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
-        <Route path="/active-topics" element={<ProtectedRoute><Layout><ActiveTopicsPage /></Layout></ProtectedRoute>} />
+        <Route path="/active-topics" element={<ProtectedRoute allowGuest><Layout><ActiveTopicsPage /></Layout></ProtectedRoute>} />
         <Route path="/new-replies" element={<ProtectedRoute><Layout><NewRepliesPage /></Layout></ProtectedRoute>} />
 
         {/* Posting-required Routes (spectators blocked) */}
