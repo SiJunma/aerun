@@ -13,7 +13,7 @@ import { useI18n } from '../../contexts/I18nProvider';
  *   size         – preview circle size in px (default 80)
  *   label        – optional label text
  */
-const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabled = false }) => {
+const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabled = false, canUpload = true }) => {
   const fileInputRef = useRef(null);
   const { t } = useI18n();
   const [mode, setMode] = useState('preview'); // 'preview' | 'url'
@@ -108,14 +108,16 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
       {/* Controls */}
       {mode === 'preview' && !disabled && (
         <div className="d-flex gap-2">
-          <Button
-            variant="outline-secondary"
-            size="sm"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            📁 {t('profile.upload_file')}
-          </Button>
+          {canUpload && (
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              📁 {t('profile.upload_file')}
+            </Button>
+          )}
           <Button
             variant="outline-secondary"
             size="sm"

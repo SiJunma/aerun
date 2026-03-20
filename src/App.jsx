@@ -43,8 +43,8 @@ const App = () => {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/maintenance" element={<MaintenancePage />} />
-        <Route path="/pending" element={<ProtectedRoute requireActive={false}><PendingPage /></ProtectedRoute>} />
-        <Route path="/banned" element={<ProtectedRoute requireActive={false}><BannedPage /></ProtectedRoute>} />
+        <Route path="/pending" element={<ProtectedRoute requireActive={false}><Layout><PendingPage /></Layout></ProtectedRoute>} />
+        <Route path="/banned" element={<ProtectedRoute requireActive={false}><Layout><BannedPage /></Layout></ProtectedRoute>} />
 
         {/* Active-user Routes (players, spectators, mods, admins) */}
         <Route path="/" element={<ProtectedRoute allowGuest><Layout><MainPage /></Layout></ProtectedRoute>} />

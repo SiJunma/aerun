@@ -1,13 +1,15 @@
 import Navigation from './Navbar';
-import { Container } from 'react-bootstrap';
+import { Container, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useMemo } from 'react';
 import ForumBackground from './ForumBackground';
+import { useLocation, Link } from 'react-router-dom';
 
 const Layout = ({ children }) => {
-  const { settings } = useAuth();
-  const { lang } = useI18n();
+  const { settings, profile } = useAuth();
+  const { lang, t } = useI18n();
+  const location = useLocation();
 
   const sanitizedBanner = useMemo(() => {
     if (!settings?.welcomeMessage) return null;
@@ -44,6 +46,14 @@ const Layout = ({ children }) => {
 
       <div className="app-wrapper">
         <Navigation />
+
+        {profile?.status === 'pending' && location.pathname !== '/pending' && (
+          <Alert variant="warning" className="m-0 text-center rounded-0 border-0 shadow-sm sticky-top pending-status-banner" style={{ zIndex: 900, top: '56px' }}>
+            <span className="small fw-medium">
+              {t('gatekeeper.pending_banner')}
+            </span>
+          </Alert>
+        )}
         
         {sanitizedBanner && (
           <div dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />

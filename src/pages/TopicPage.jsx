@@ -122,12 +122,11 @@ const TopicPage = () => {
     return () => unsub();
   }, [user, id]);
 
-  // Handle Topic Subscription
   useEffect(() => {
-    if (!user || !id) return;
+    if (!user || !id || profile?.status !== 'active') return;
     const unsub = subscribeToTopicStatus(id, user.uid, setIsSubscribed);
     return () => unsub();
-  }, [user, id]);
+  }, [user, id, profile?.status]);
 
   // Set initial selectedCharacterId from profile
   useEffect(() => {
@@ -1358,7 +1357,7 @@ const TopicPage = () => {
 
       {/* Bottom Actions & Pagination */}
       <div className="mt-4 mb-4 px-2 px-md-0">
-        {user && profile?.role_id !== 'spectator' && (
+        {user && profile?.status === 'active' && profile?.role_id !== 'spectator' && (
           <div className="d-flex justify-content-end mb-3">
             <Button
               variant={isSubscribed ? "primary" : "outline-primary"}
@@ -1385,7 +1384,7 @@ const TopicPage = () => {
       {/* Reply form — hidden for spectators and closed topics */}
       {
         !hasPermission(PERMISSIONS.POST_REPLY, { category }) ? (
-          user && (
+          user && profile?.status === 'active' && (
             <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
               <span className="opacity-75">
                 {t('forum.spectator_mode')}

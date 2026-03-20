@@ -57,7 +57,9 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   // Pending status handling
   if (profile?.status === 'pending') {
     if (requireActive && location.pathname !== '/pending') {
-      return <Navigate to="/pending" replace />;
+      if (settings?.whitelistMode === true) {
+        return <Navigate to="/pending" replace />;
+      }
     }
   } else if (location.pathname === '/pending') {
     return <Navigate to="/" replace />;

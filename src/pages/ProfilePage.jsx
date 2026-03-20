@@ -656,6 +656,7 @@ const ProfilePage = () => {
                             onChange={(url) => setAccountFormData({ ...accountFormData, avatar_url: url })}
                             storagePath={`users/${uid}/avatar`}
                             size={100}
+                            canUpload={profile?.status !== 'pending'}
                             disabled={false}
                           />
                         </Form.Group>

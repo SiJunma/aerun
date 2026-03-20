@@ -1,5 +1,5 @@
 import React from 'react';
-import { Container, Card, Button } from 'react-bootstrap';
+import { Card, Button } from 'react-bootstrap';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
@@ -24,7 +24,7 @@ const PendingPage = () => {
   }, [profile]);
 
   return (
-    <Container className="d-flex align-items-center justify-content-center vh-100">
+    <div className="d-flex align-items-center justify-content-center py-5" style={{ minHeight: '60vh' }}>
       <Card style={{ maxWidth: '500px', width: '100%' }} className="p-4 shadow border-warning">
         <Card.Body className="text-center">
           <h2 className="mb-4 text-warning">{t('gatekeeper.pending_title')}</h2>
@@ -37,7 +37,7 @@ const PendingPage = () => {
           </div>
         </Card.Body>
       </Card>
-    </Container>
+    </div>
   );
 };
 

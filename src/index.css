@@ -2005,4 +2005,25 @@ a.badge.bg-danger:hover {
   border-radius: 1rem;
 }
 
+/* Pending Status Banner - Theme Aware */
+.pending-status-banner {
+  background-color: var(--card-bg) !important;
+  border-bottom: 2px solid #eab308 !important; /* Amber 500 border bottom for warning feel */
+  color: var(--text-color) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+[data-theme='dark'] .pending-status-banner {
+  background-color: rgba(30, 41, 59, 0.9) !important; /* Slightly transparent slate */
+  border-bottom: 2px solid #f59e0b !important; /* Darker amber */
+}
+
+.pending-status-banner .alert-link {
+  color: #d97706 !important; /* Amber 600 */
+}
+
+[data-theme='dark'] .pending-status-banner .alert-link {
+  color: #fbbf24 !important; /* Amber 400 - more vibrant in dark */
+}
 

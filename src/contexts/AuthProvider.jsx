@@ -420,11 +420,13 @@ export const AuthProvider = ({ children }) => {
     setReadMap(prev => ({ ...prev, [topicId]: now }));
     try {
       await apiRecordTopicVisit(user.uid, topicId);
-      await markTopicNotificationsRead(user.uid, topicId);
+      if (profile?.status === 'active') {
+        await markTopicNotificationsRead(user.uid, topicId);
+      }
     } catch (err) {
       console.error('[markTopicRead]', err);
     }
-  }, [user]);
+  }, [user, profile?.status]);
 
   /**
    * Mark all fetched topics as read.
@@ -487,6 +489,10 @@ export const AuthProvider = ({ children }) => {
     // Users with 'pending' status also have no global permissions.
     if (!user || profile?.status === 'pending') {
       if (perm === PERMISSIONS.VIEW_FORUM && settings?.whitelistMode === false) {
+        return true;
+      }
+      // Allow pending users to set their own profile details
+      if (perm === PERMISSIONS.EDIT_SELF_NICKNAME || perm === PERMISSIONS.EDIT_SELF_AVATAR) {
         return true;
       }
       return false;

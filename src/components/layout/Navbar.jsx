@@ -21,7 +21,7 @@ const Navigation = () => {
 
   // Subscribe to notifications
   React.useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid || profile?.status !== 'active') return;
 
     // User notifications
     const unsubUser = subscribeToUserNotifications(user.uid, (notifs) => {
@@ -98,7 +98,7 @@ const Navigation = () => {
           )}
 
           {/* Notifications bell — not for spectators */}
-          {user && profile?.role_id !== 'spectator' && (
+          {user && profile?.role_id !== 'spectator' && profile?.status === 'active' && (
             <Nav.Link
               as={Link}
               to="/notifications"

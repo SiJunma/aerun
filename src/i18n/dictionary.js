@@ -47,6 +47,7 @@ export const translations = {
     gatekeeper: {
       pending_title: "Access Restricted",
       pending_message: "Your account is currently under review by an administrator. Please wait until your profile is activated.",
+      pending_banner: "Your account is under review. You have read-only access.",
       banned_title: "Access Denied",
       banned_message: "Your account has been suspended. Please contact an administrator for more information.",
     },
@@ -376,6 +377,7 @@ export const translations = {
     gatekeeper: {
       pending_title: "Доступ ограничен",
       pending_message: "Ваша учетная запись находится на рассмотрении администратором. Пожалуйста, подождите, пока ваш профиль будет активирован.",
+      pending_banner: "Ваш аккаунт на проверке. У вас есть доступ только для чтения.",
       banned_title: "Доступ заблокирован",
       banned_message: "Ваш аккаунт был заблокирован. Пожалуйста, свяжитесь с администратором для получения дополнительной информации.",
     },
