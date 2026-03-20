@@ -1,15 +1,24 @@
+import React, { useMemo, useState, useEffect } from 'react';
 import Navigation from './Navbar';
 import { Container, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
-import { useMemo } from 'react';
 import ForumBackground from './ForumBackground';
 import { useLocation, Link } from 'react-router-dom';
 
+
 const Layout = ({ children }) => {
-  const { settings, profile } = useAuth();
+  const { settings, profile, hasPermission, PERMISSIONS } = useAuth();
   const { lang, t } = useI18n();
   const location = useLocation();
+
+  // Update document title dynamically
+  React.useEffect(() => {
+    const forumName = (typeof settings?.forumName === 'object' && settings.forumName !== null)
+      ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+      : (settings?.forumName || 'Aerun Forum');
+    document.title = forumName;
+  }, [settings, lang]);
 
   const sanitizedBanner = useMemo(() => {
     if (!settings?.welcomeMessage) return null;
@@ -46,6 +55,14 @@ const Layout = ({ children }) => {
 
       <div className="app-wrapper">
         <Navigation />
+
+        {settings?.maintenanceMode && location.pathname !== '/maintenance' && (
+          <Alert variant="danger" className="m-0 text-center rounded-0 border-0 shadow-sm sticky-top maintenance-status-banner" style={{ zIndex: 900, top: '56px' }}>
+            <span className="small fw-medium">
+              {t('auth.maintenance_banner')}
+            </span>
+          </Alert>
+        )}
 
         {profile?.status === 'pending' && location.pathname !== '/pending' && (
           <Alert variant="warning" className="m-0 text-center rounded-0 border-0 shadow-sm sticky-top pending-status-banner" style={{ zIndex: 900, top: '56px' }}>

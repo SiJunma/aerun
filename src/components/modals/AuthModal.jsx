@@ -35,7 +35,7 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
                 <span className="text-muted">{t('auth.dont_have_account')}</span>
                 <Button 
                   variant="link" 
-                  className="p-0 mb-1 fw-bold text-decoration-none" 
+                  className="p-0 mb-1 fw-bold text-decoration-none text-primary" 
                   onClick={() => setMode('register')}
                 >
                   {t('auth.register_link')}
@@ -50,7 +50,7 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
               <span className="text-muted">{t('auth.already_have_account')}</span>
               <Button 
                 variant="link" 
-                className="p-0 mb-1 fw-bold text-decoration-none" 
+                className="p-0 mb-1 fw-bold text-decoration-none text-primary" 
                 onClick={() => setMode('login')}
               >
                 {t('auth.login_link')}

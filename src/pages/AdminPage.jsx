@@ -115,7 +115,7 @@ const AdminPage = () => {
           ...data,
           forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
           welcomeMessage: ensureBilingual(data.welcomeMessage, ''),
-          whitelistMode: data.whitelistMode ?? true,
+          whitelistMode: data.whitelistMode ?? false,
           requireApproval: data.requireApproval ?? true
         };
         // Defaults for backgrounds

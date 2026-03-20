@@ -18,6 +18,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import ActiveTopicsPage from './pages/ActiveTopicsPage';
 import NewRepliesPage from './pages/NewRepliesPage';
 import { useAuth } from './contexts/AuthProvider';
+import GlobalModals from './components/common/GlobalModals';
 
 /**
  * ActivityTracker — records every route change as user activity.
@@ -38,6 +39,7 @@ const App = () => {
   return (
     <>
       <ActivityTracker />
+      <GlobalModals />
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />

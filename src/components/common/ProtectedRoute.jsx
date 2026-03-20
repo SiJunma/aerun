@@ -11,18 +11,32 @@ import { useAuth } from '../../contexts/AuthProvider';
  *  requirePosting {boolean} – if true, spectators are bounced (cannot post/create, default: false)
  */
 const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false, allowGuest = false }) => {
-  const { user, profile, settings, loading, hasPermission, PERMISSIONS } = useAuth();
+  const { user: firebaseUser, profile, settings, loading, hasPermission, PERMISSIONS } = useAuth();
   const location = useLocation();
 
   if (loading || !settings) {
     return null; // AuthProvider handles the global preloader
   }
 
+  // Shadow logout for banned users: treat them as guests immediately in terms of routing.
+  // This avoids the jump to /banned before AuthProvider triggers the real logout().
+  const isBanned = profile?.status === 'banned';
+  const user = isBanned ? null : firebaseUser;
+
   // Not logged in at all → /login (unless allowGuest is true and whitelistMode is OFF)
   if (!user) {
-    if (allowGuest && settings.whitelistMode === false && !requireAdmin && !requirePosting) {
+    // More permissive check: if whitelistMode is missing or explicitly false, allow guests
+    const isWhitelistOff = !settings.whitelistMode;
+    if (allowGuest && isWhitelistOff && !requireAdmin && !requirePosting) {
       return children;
     }
+
+    // If whitelist is OFF, we can send them to the home page directly instead of /login
+    // This avoids a "LoginPage -> HomePage" double redirect flicker.
+    if (isWhitelistOff) {
+      return <Navigate to="/" replace />;
+    }
+
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -41,25 +55,29 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
     }
 
     if (!hasPermission(PERMISSIONS.ADMIN_ACCESS)) {
-      return <Navigate to="/maintenance" replace />;
+      if (settings.whitelistMode === true) {
+        return <Navigate to="/maintenance" replace />;
+      }
     }
   }
 
-  // Banned status handling
-  if (profile?.status === 'banned') {
-    if (location.pathname !== '/banned') {
-      return <Navigate to="/banned" replace />;
+  // Banned status handling - only relevant if they are on /banned already or if they are "shadow logged out"
+  if (isBanned) {
+    // If whitelist is OFF, we always land them on the home page as a guest.
+    // This satisfies the requirement to "keep them on the home page" during termination.
+    if (settings.whitelistMode === false && location.pathname !== '/') {
+      return <Navigate to="/" replace />;
     }
-  } else if (location.pathname === '/banned') {
-    return <Navigate to="/" replace />;
+    // If whitelist is ON, we might still want to show them the /banned page if they navigate there
+    if (settings.whitelistMode === true && location.pathname !== '/banned') {
+       return <Navigate to="/banned" replace />;
+    }
   }
 
   // Pending status handling
   if (profile?.status === 'pending') {
     if (requireActive && location.pathname !== '/pending') {
-      if (settings?.whitelistMode === true) {
-        return <Navigate to="/pending" replace />;
-      }
+      return <Navigate to="/pending" replace />;
     }
   } else if (location.pathname === '/pending') {
     return <Navigate to="/" replace />;

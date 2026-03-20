@@ -9,6 +9,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
   onSnapshot,
   serverTimestamp,
   collection,
@@ -63,7 +64,12 @@ export const AuthProvider = ({ children }) => {
       .then(() => {
         lastPushTimeRef.current = Date.now();
       })
-      .catch((e) => console.warn('[last_seen update]', e));
+      .catch((e) => {
+        // Silent on permission-denied during login/logout transitions
+        if (e.code !== 'permission-denied') {
+          console.warn('[last_seen update]', e);
+        }
+      });
   }, []);
 
   const getOrCreateGuestId = useCallback(() => {
@@ -106,22 +112,35 @@ export const AuthProvider = ({ children }) => {
     return signInWithPopup(auth, googleProvider);
   };
 
-  const logout = async () => {
-    if (user?.uid) {
-      try {
-        // Set last_seen to 16 minutes ago to immediately remove from "Online Now" list (15 min threshold)
-        const sixteenMinsAgo = new Date(Date.now() - 16 * 60 * 1000);
-        await setDoc(doc(db, 'users', user.uid), { last_seen: sixteenMinsAgo }, { merge: true });
-      } catch (e) {
-        console.warn('[logout presence cleanup]', e);
+  const loggingOutRef = useRef(false);
+
+  const logout = async (skipPresenceCleanup = false) => {
+    if (loggingOutRef.current) return;
+    loggingOutRef.current = true;
+
+    try {
+      const uid = user?.uid || auth.currentUser?.uid;
+      if (uid && !skipPresenceCleanup) {
+        try {
+          // Set last_seen to 16 minutes ago to immediately remove from "Online Now" list (15 min threshold)
+          const sixteenMinsAgo = new Date(Date.now() - 16 * 60 * 1000);
+          await updateDoc(doc(db, 'users', uid), { last_seen: sixteenMinsAgo });
+        } catch (e) {
+          // Only log if it's not a permission error (which can happen during logout transition)
+          if (e.code !== 'permission-denied') {
+            console.warn('[logout presence cleanup]', e);
+          }
+        }
       }
+      localStorage.removeItem('last_guest_push');
+      await signOut(auth);
+      
+      // Immediately record guest activity so they show up in "Online now" as a guest
+      const gid = getOrCreateGuestId();
+      await apiRecordGuestActivity(gid);
+    } finally {
+      loggingOutRef.current = false;
     }
-    localStorage.removeItem('last_guest_push');
-    await signOut(auth);
-    
-    // Immediately record guest activity so they show up in "Online now" as a guest
-    const gid = getOrCreateGuestId();
-    return apiRecordGuestActivity(gid);
   };
 
   const updateSettings = async (newSettings) => {
@@ -172,8 +191,10 @@ export const AuthProvider = ({ children }) => {
           ...data,
           forumName: data.forumName || 'Aerun Forum',
           welcomeMessage: data.welcomeMessage || '',
-          whitelistMode: data.whitelistMode ?? true,
-          requireApproval: data.requireApproval ?? true
+          maintenanceMode: data.maintenanceMode ?? false,
+          whitelistMode: data.whitelistMode ?? false,
+          requireApproval: data.requireApproval ?? true,
+          registrationEnabled: data.registrationEnabled ?? true
         };
         // Defaults for backgrounds
         if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
@@ -183,10 +204,12 @@ export const AuthProvider = ({ children }) => {
       }
     }, (err) => console.error('[GlobalSettings Listener]', err));
 
+    // Global Roles Listener (needed for unauthenticated guest permissions)
+    const rolesUnsub = subscribeToRoles(setRoles);
+
     let profileUnsub;
     let readMapUnsub;
     let latestTopicsUnsub;
-    let rolesUnsub;
     let lastSeenInterval;
 
 
@@ -201,6 +224,10 @@ export const AuthProvider = ({ children }) => {
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Shield the UI while fetching the profile doc by throwing up the preloader during transitions
+      // (Bypasses stale closure in useEffect([]) by directly triggering the setter)
+      setLoading(true);
+
       if (firebaseUser) {
         setUser(firebaseUser);
         const userDocRef = doc(db, 'users', firebaseUser.uid);
@@ -298,10 +325,12 @@ export const AuthProvider = ({ children }) => {
             // Login counts as activity — update immediately
             lastActivityRef.current = Date.now();
             pushLastSeen(firebaseUser.uid);
-          }
 
-          // Subscribe to roles only for authenticated users
-          rolesUnsub = subscribeToRoles(setRoles);
+            // If an admin logs in, ensure they don't see the maintenance logout modal
+            if (isAdmin) {
+              sessionStorage.removeItem('maintenance_logout');
+            }
+          }
 
           // Seed system roles with fixed IDs if they don't exist yet (admin-only, safe to call repeatedly)
           if (isAdmin) {
@@ -366,7 +395,6 @@ export const AuthProvider = ({ children }) => {
         if (profileUnsub) profileUnsub();
         if (readMapUnsub) readMapUnsub();
         if (latestTopicsUnsub) latestTopicsUnsub();
-        if (rolesUnsub) rolesUnsub();
         clearInterval(lastSeenInterval);
       }
     });
@@ -463,8 +491,10 @@ export const AuthProvider = ({ children }) => {
     }
 
     // ── 2. CHIEF ADMIN: bypasses ALL other checks (including category overrides) ──
-    if (user?.email === import.meta.env.VITE_ADMIN_EMAIL) return true;
-    const userRoleId = profile?.role_id || (user ? 'player' : 'guest');
+    const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
+    if (adminEmail && user?.email === adminEmail) return true;
+    
+    const userRoleId = (profile?.status === 'banned') ? 'guest' : (profile?.role_id || (user ? 'player' : 'guest'));
     if (userRoleId === CHIEF_ADMIN_ID) return true;
 
     // ── 3. CATEGORY-LEVEL OVERRIDES ──
@@ -477,29 +507,45 @@ export const AuthProvider = ({ children }) => {
         const allowedRoles = catPerms[perm];
         // Check if user's own role is allowed
         if (allowedRoles.includes(userRoleId)) return true;
+        
         // Check if user's role inherits from a base role that is allowed
         const userRole = roles.find(r => r.id === userRoleId);
         if (userRole?.base_role_id && allowedRoles.includes(userRole.base_role_id)) return true;
+        
         return false;
       }
     }
 
     // ── 4. GLOBAL ROLE PERMISSIONS (Baseline) ──
-    // Guests have no global permissions unless whitelistMode is OFF (then they get VIEW_FORUM).
-    // Users with 'pending' status also have no global permissions.
-    if (!user || profile?.status === 'pending') {
-      if (perm === PERMISSIONS.VIEW_FORUM && settings?.whitelistMode === false) {
-        return true;
-      }
-      // Allow pending users to set their own profile details
+    // Users with 'pending' status also have no global permissions except profile editing.
+    if (user && profile?.status === 'pending') {
       if (perm === PERMISSIONS.EDIT_SELF_NICKNAME || perm === PERMISSIONS.EDIT_SELF_AVATAR) {
         return true;
       }
       return false;
     }
-    const userRole = roles.find(r => r.id === userRoleId);
+    const userRole = roles.find(r => r.id === userRoleId) || DEFAULT_ROLES.find(r => r.id === userRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
+
+  // Monitoring maintenance mode / status to force logout
+  React.useEffect(() => {
+    if (user && profile && !loading) {
+      const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
+      const isBanned = profile.status === 'banned';
+      
+      // Maintenance applies if ON and whitelist is active
+      const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
+
+      if (isBanned) {
+        sessionStorage.setItem('banned_logout', 'true');
+        logout(true); // skipPresenceCleanup = true to avoid permission error loop
+      } else if (isMaintenanceStrict && !isAdmin) {
+        sessionStorage.setItem('maintenance_logout', 'true');
+        logout();
+      }
+    }
+  }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, PERMISSIONS.ADMIN_ACCESS, logout]);
 
   const value = {
     user,

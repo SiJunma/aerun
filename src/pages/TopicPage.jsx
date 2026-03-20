@@ -1520,7 +1520,7 @@ const TopicPage = () => {
         <div className="d-flex justify-content-between">
           {category && (
             <Link to={`/category/${category.id}`} className="btn btn-outline-secondary">
-              &larr; {t('forum.back_to_categories')}
+              &larr; {t('forum.back_to_category')}
             </Link>
           )}
         </div>

@@ -33,6 +33,11 @@ const ActiveTopicsPage = () => {
     return typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title;
   };
 
+  const visibleTopics = topics.filter(topic => {
+    const cat = categories.find(c => c.id === topic.category_id);
+    return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+  });
+
   return (
     <Container className="py-4">
       <ForumBreadcrumbs 
@@ -52,7 +57,7 @@ const ActiveTopicsPage = () => {
             <div className="spinner-border spinner-border-sm me-2" role="status" />
             {t('common.loading')}
           </div>
-        ) : topics.length === 0 ? (
+        ) : visibleTopics.length === 0 ? (
           <div className="p-5 text-center text-muted">
             {t('stats.no_topics')}
           </div>
@@ -66,10 +71,7 @@ const ActiveTopicsPage = () => {
               </tr>
             </thead>
             <tbody>
-              {topics.filter(topic => {
-                const cat = categories.find(c => c.id === topic.category_id);
-                return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
-              }).map(topic => (
+              {visibleTopics.map(topic => (
                 <TopicRow 
                   key={topic.id}
                   topic={topic}

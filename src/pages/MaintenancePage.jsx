@@ -1,13 +1,28 @@
 import React from 'react';
 import { Container, Card, Button } from 'react-bootstrap';
-import { Link } from 'react-router-dom';
-import { Hammer, LogOut } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Hammer, LogOut, ChevronLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
 const MaintenancePage = () => {
-  const { user, logout } = useAuth();
+  const { user, profile, hasPermission, PERMISSIONS, logout, settings } = useAuth();
   const { lang } = useI18n();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    if (settings && !settings.whitelistMode) {
+      navigate('/', { replace: true });
+    }
+  }, [settings, navigate]);
+
+  // If admin logs in, move them to the forum immediately
+  React.useEffect(() => {
+    if (user && profile && hasPermission(PERMISSIONS.ADMIN_ACCESS)) {
+      navigate('/', { replace: true });
+    }
+  }, [user, profile, hasPermission, navigate]);
 
   return (
     <div className="vh-100 d-flex align-items-center justify-content-center bg-dark text-white p-3">
@@ -20,7 +35,7 @@ const MaintenancePage = () => {
             >
               <Hammer size={64} className="text-warning" />
             </div>
-            <h1 className="fw-bold mb-3" style={{ fontSize: '2.5rem' }}>
+            <h1 className="fw-bold mb-3 text-white" style={{ fontSize: '2.5rem' }}>
               {lang === 'ru' ? 'Технические работы' : 'Maintenance Mode'}
             </h1>
             <p className="text-muted fs-5 mb-5 px-md-4">
@@ -48,6 +63,7 @@ const MaintenancePage = () => {
                 className="fw-bold py-3 d-flex align-items-center justify-content-center gap-2 shadow-sm"
                 as={Link}
                 to="/login"
+                state={{ from: location }}
                 style={{ borderRadius: '12px', transition: 'all 0.3s ease' }}
               >
                 {lang === 'ru' ? 'Войти как админ' : 'Login as Admin'}

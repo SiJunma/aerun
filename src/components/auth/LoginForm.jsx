@@ -5,7 +5,7 @@ import { useI18n } from '../../contexts/I18nProvider';
 
 const LoginForm = ({ onSuccess }) => {
   const { loginWithGoogle, settings } = useAuth();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [authError, setAuthError] = React.useState(null);
 
   React.useEffect(() => {
@@ -36,7 +36,11 @@ const LoginForm = ({ onSuccess }) => {
 
   return (
     <div className="text-center">
-      <h2 className="mb-4">{t('auth.login_title')}</h2>
+      <h2 className="mb-4">
+        {(typeof settings?.forumName === 'object' && settings.forumName !== null)
+          ? (settings.forumName[lang] || settings.forumName.en || t('auth.login_title'))
+          : (settings?.forumName || t('auth.login_title'))}
+      </h2>
       <p className="text-muted mb-4">
         {settings?.whitelistMode === false 
           ? t('auth.login_subtitle_public') 

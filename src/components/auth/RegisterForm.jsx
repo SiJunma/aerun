@@ -7,7 +7,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../../firebase';
 
 const RegisterForm = ({ onSuccess }) => {
-  const { loginWithGoogle } = useAuth();
+  const { loginWithGoogle, settings } = useAuth();
   const { t, lang } = useI18n();
   
   const [nickname, setNickname] = React.useState('');
@@ -85,10 +85,18 @@ const RegisterForm = ({ onSuccess }) => {
     );
   }
 
+  const forumName = (typeof settings?.forumName === 'object' && settings.forumName !== null)
+    ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+    : (settings?.forumName || 'Aerun Forum');
+
   return (
     <div className="text-center">
-      <h2 className="mb-4">{t('auth.register_title')}</h2>
-      <p className="text-muted mb-4">{t('auth.register_subtitle')}</p>
+      <h2 className="mb-4">
+        {(typeof settings?.forumName === 'object' && settings.forumName !== null)
+          ? (settings.forumName[lang] || settings.forumName.en || t('auth.register_title'))
+          : (settings?.forumName || t('auth.register_title'))}
+      </h2>
+      <p className="text-muted mb-4">{t('auth.register_subtitle', { name: forumName })}</p>
 
       {authError && (
         <div className="alert alert-danger py-2 small mb-4 fw-bold text-center">

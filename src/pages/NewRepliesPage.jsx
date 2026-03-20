@@ -71,7 +71,7 @@ const NewRepliesPage = () => {
           <button 
             className="btn btn-outline-primary btn-sm rounded-pill px-3 d-flex align-items-center gap-2"
             onClick={() => markAllRead()}
-            disabled={topics.length === 0 || unreadTopicsCount === 0 || isMarkingAllRead}
+            disabled={filteredTopics.length === 0 || unreadTopicsCount === 0 || isMarkingAllRead}
           >
             {isMarkingAllRead && (
               <div className="spinner-border spinner-border-sm" role="status">
@@ -89,7 +89,7 @@ const NewRepliesPage = () => {
             <div className="spinner-border spinner-border-sm me-2" role="status" />
             {t('common.loading')}
           </div>
-        ) : topics.length === 0 ? (
+        ) : filteredTopics.length === 0 ? (
           <div className="p-5 text-center text-muted">
             {t('stats.no_topics')}
           </div>

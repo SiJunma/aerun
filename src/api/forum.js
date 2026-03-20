@@ -51,7 +51,12 @@ export const subscribeToReadMap = (uid, callback) => {
     // metadata.hasPendingWrites means local update is still syncing
     // serverTimestamps: 'estimate' gives us the local time instead of null while syncing
     callback(snap.exists() ? snap.data({ serverTimestamps: 'estimate' }) : {});
-  }, err => console.error('[subscribeToReadMap]', err));
+  }, err => {
+    // Silent on permission-denied during login/logout transitions
+    if (err.code !== 'permission-denied') {
+      console.error('[subscribeToReadMap]', err);
+    }
+  });
 };
 
 // ── Categories ──────────────────────────────────────────────────────────────
@@ -686,7 +691,10 @@ export const subscribeToActiveUsers = (callback) => {
   );
   
   return onSnapshot(q, (snapshot) => {
-    const users = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    const users = snapshot.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(u => u.status !== 'banned'); // Exclude banned users from online list
+      
     // Sort by nickname client-side (more robust than composite index for now)
     users.sort((a, b) => a.nickname.localeCompare(b.nickname));
     callback(users);

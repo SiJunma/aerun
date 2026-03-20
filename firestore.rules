@@ -16,7 +16,9 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && (getUser().data.role_id == 'admin' || getUser().data.role_id == 'root');
+      return isSignedIn() 
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (getUser().data.role_id == 'admin' || getUser().data.role_id == 'root');
     }
 
     // Active = authenticated + profile exists + status is 'active' (or admin)
@@ -39,9 +41,9 @@ service cloud.firestore {
     match /users/{userId} {
       // Allow read for everyone in public mode (profiles are public)
       allow read: if true;
-      allow create: if isOwner(userId);
+      allow create: if isSignedIn() && request.auth.uid == userId;
       // User can edit own profile; admin can edit anyone; any active user can bump post_count/reputation
-      allow update: if isOwner(userId) || isAdmin()
+      allow update: if (isSignedIn() && request.auth.uid == userId) || isAdmin()
         || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['post_count', 'reputation', 'last_seen', 'last_selected_character_id']));
       allow delete: if isAdmin(); // Added to allow rejecting pending users
     }
@@ -109,7 +111,7 @@ service cloud.firestore {
 
     // --- Read Map (tracks last topic visit per user, synced across devices) ---
     match /users/{userId}/readmap/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
     // --- Global Settings ---

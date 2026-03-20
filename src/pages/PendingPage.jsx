@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
 const PendingPage = () => {
-  const { logout, profile } = useAuth();
+  const { logout, profile, settings } = useAuth();
   const { translations } = useI18n(); // Access raw translations if needed, or just force key
 
   // Force English for this page as requested

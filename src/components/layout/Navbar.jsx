@@ -90,7 +90,7 @@ const Navigation = () => {
 
         {/* Persistent actions (Right side on mobile & desktop) */}
         <div className="d-flex align-items-center gap-2 gap-md-3 order-lg-3 ms-auto">
-          {settings?.maintenanceMode && isAdmin && (
+          {settings?.maintenanceMode && (
             <Badge bg="warning" text="dark" className="d-none d-sm-flex align-items-center gap-1 shadow-sm px-2 py-1" style={{ fontSize: '0.75rem', letterSpacing: '0.5px' }}>
               <div className="bg-dark rounded-circle me-1" style={{ width: '6px', height: '6px', animation: 'pulse 1.5s infinite' }}></div>
               {lang === 'ru' ? 'ТЕХРАБОТЫ' : 'MAINTENANCE'}

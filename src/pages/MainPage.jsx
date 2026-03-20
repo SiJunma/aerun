@@ -11,7 +11,7 @@ import Skeleton from '../components/common/Skeleton';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, profile, readMap, hasPermission, PERMISSIONS } = useAuth();
+  const { user, profile, roles, readMap, hasPermission, PERMISSIONS } = useAuth();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
