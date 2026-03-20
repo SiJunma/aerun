@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
@@ -23,7 +23,7 @@ const AdminPage = () => {
   const { hasPermission, roles } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
-  const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
+  const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
   const [users, setUsers] = useState([]);
@@ -59,7 +59,7 @@ const AdminPage = () => {
   });
 
   // Tab permissions check
-  const canAccessTab = (tab) => {
+  const canAccessTab = useCallback((tab) => {
     switch (tab) {
       case 'settings': return hasPermission(PERMISSIONS.MANAGE_FORUM);
       case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
@@ -67,7 +67,7 @@ const AdminPage = () => {
       case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
       default: return false;
     }
-  };
+  }, [hasPermission]);
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
@@ -77,7 +77,7 @@ const AdminPage = () => {
         setActiveTab(firstAvailable);
       }
     }
-  }, [activeTab, hasPermission]);
+  }, [activeTab, canAccessTab, setActiveTab]);
 
   // Initial settings state
   const [settings, setSettings] = useState({

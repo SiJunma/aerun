@@ -4,7 +4,6 @@ import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Paginatio
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, subscribeToTopicDraft, deleteDraftPost } from '../api/forum';
-import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -28,7 +27,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, roles, PERMISSIONS, settings } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, PERMISSIONS, settings } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');

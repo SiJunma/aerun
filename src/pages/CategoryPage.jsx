@@ -21,7 +21,7 @@ import ConfirmModal from '../components/common/ConfirmModal';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { profile, user, hasPermission, PERMISSIONS } = useAuth();
+  const { user, hasPermission, PERMISSIONS } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);

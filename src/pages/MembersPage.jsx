@@ -5,7 +5,6 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/forum';
-import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { format } from 'date-fns';
@@ -22,7 +21,7 @@ const ROLE_PRIORITY = {
 
 const MembersPage = () => {
   const { t, lang } = useI18n();
-  const { profile, updateSettings, roles, settings } = useAuth();
+  const { profile, updateSettings, settings } = useAuth();
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('nickname');

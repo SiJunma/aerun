@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
@@ -27,11 +27,7 @@ const ForumStats = () => {
     };
   }, []);
 
-  const [nowLocal, setNowLocal] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setNowLocal(Date.now()), 60000);
-    return () => clearInterval(interval);
-  }, []);
+
 
   // Stats calculation
   const totalTopics = categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);

@@ -8,7 +8,6 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { subscribeToUser, checkNicknameExists, subscribeToCategories } from '../api/forum';
-import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
@@ -21,7 +20,7 @@ import { ru, enUS } from 'date-fns/locale';
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
-  const { profile, hasPermission, PERMISSIONS, roles, settings, updateProfile, recordActivity } = useAuth();
+  const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity } = useAuth();
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);

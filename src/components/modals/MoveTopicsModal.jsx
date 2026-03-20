@@ -7,7 +7,7 @@ import { useAuth } from '../../contexts/AuthProvider';
 
 const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryId }) => {
   const { t, lang } = useI18n();
-  const { profile, hasPermission, PERMISSIONS } = useAuth();
+  const { hasPermission, PERMISSIONS } = useAuth();
   const [categories, setCategories] = useState([]);
   const [targetId, setTargetId] = useState('');
 

@@ -905,8 +905,8 @@ label.fw-bold {
   border: 1px solid var(--border-color);
   border-radius: 1.25rem;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   color: var(--text-color);
   overflow: hidden;
   /* Ensure header/footer backgrounds don't bleed out */
@@ -981,8 +981,8 @@ label.fw-bold {
 
 .confirm-modal-backdrop {
   background-color: rgba(0, 0, 0, 0.7) !important;
-  backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
 
 .premium-modal .modal-header .btn-close,
@@ -1018,6 +1018,7 @@ label.fw-bold {
   background: transparent;
   color: var(--primary-color);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  -webkit-user-select: none;
   user-select: none;
   white-space: nowrap;
   line-height: 1.2;
@@ -1125,8 +1126,8 @@ a.badge.bg-danger:hover {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35) !important; /* Slightly deeper shadow for more depth */
   padding: 0.35rem !important;
   min-width: 170px;
-  backdrop-filter: blur(8px); /* Added slight blur for glassmorphism feel */
   -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px); /* Added slight blur for glassmorphism feel */
 }
 
 .dropdown-item {

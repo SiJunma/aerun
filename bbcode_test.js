@@ -1,4 +1,4 @@
-/* eslint-env node */
+/* global process */
 const applyFormatting = (text, offset = 0) => {
   if (!text) return '';
 
