@@ -31,9 +31,16 @@ const ProfilePage = () => {
   const [viewedProfile, setViewedProfile] = useState(null);
   const [, setLoading] = useState(true);
 
-  const isLimitedProfile = viewedProfile?.status === 'pending' || viewedProfile?.role_id === 'spectator';
-  const hasTabs = !isLimitedProfile || profile?.uid === uid;
-  const activeTab = searchParams.get('tab') || (!isLimitedProfile ? 'characters' : (profile?.uid === uid ? 'account' : ''));
+  const isLimitedProfile = viewedProfile?.status === 'pending' || viewedProfile?.role_id === 'spectator' || viewedProfile?.status === 'banned';
+  const isOwn = profile?.uid === uid;
+  const canEditNickname = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_NICKNAME) : hasPermission(PERMISSIONS.EDIT_OTHERS_NICKNAMES);
+  const canEditAvatar = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_AVATAR) : hasPermission(PERMISSIONS.EDIT_OTHERS_AVATARS);
+  const canEditStatus = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_STATUS) : hasPermission(PERMISSIONS.EDIT_OTHERS_STATUSES);
+  const canEditSignature = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_SIGNATURE) : hasPermission(PERMISSIONS.EDIT_OTHERS_SIGNATURES);
+  const canEditAnyAccount = isOwn || canEditNickname || canEditAvatar || canEditStatus || canEditSignature;
+
+  const hasTabs = !isLimitedProfile || profile?.uid === uid || canEditAnyAccount;
+  const activeTab = searchParams.get('tab') || (!isLimitedProfile ? 'characters' : (profile?.uid === uid || canEditAnyAccount ? 'account' : ''));
 
   const [savingAccount, setSavingAccount] = useState(false);
 
@@ -137,21 +144,22 @@ const ProfilePage = () => {
     }
   }, [repLogs, logTopicsInfo]);
 
-  // Sync form data with profile (only if viewing own profile)
+  // Sync form data with profile (own or if admin/mod is editing)
   useEffect(() => {
-    if (profile && profile.uid === uid) {
+    const source = (profile?.uid === uid) ? profile : (canEditAnyAccount ? viewedProfile : null);
+    if (source) {
       setAccountFormData({
-        nickname: profile.nickname || profile.displayName || '',
-        status_line: profile.status_line || '',
-        avatar_url: profile.avatar_url || '',
-        theme: profile.settings?.theme || 'dark',
-        language: profile.settings?.language || 'en',
-        signature: profile.settings?.signature || '',
-        rep_show_history: profile.settings?.rep_show_history !== false,
-        rep_show_comments: profile.settings?.rep_show_comments !== false
+        nickname: source.nickname || source.displayName || '',
+        status_line: source.status_line || '',
+        avatar_url: source.avatar_url || '',
+        theme: source.settings?.theme || 'dark',
+        language: source.settings?.language || 'en',
+        signature: source.settings?.signature || '',
+        rep_show_history: source.settings?.rep_show_history !== false,
+        rep_show_comments: source.settings?.rep_show_comments !== false
       });
     }
-  }, [profile, uid]);
+  }, [profile, viewedProfile, uid, canEditAnyAccount]);
 
   const handleOpenModal = (char = null) => {
     if (char) {
@@ -204,7 +212,7 @@ const ProfilePage = () => {
       }
 
       // Check for uniqueness if the nickname has actually changed
-      if (trimmedNickname !== profile.nickname) {
+      if (trimmedNickname !== viewedProfile?.nickname) {
         const isTaken = await checkNicknameExists(trimmedNickname, uid);
         if (isTaken) {
           showToast(t('common.error_nickname_taken') || (lang === 'ru' ? 'Этот никнейм уже занят.' : 'This nickname is already taken.'), 'danger');
@@ -225,8 +233,8 @@ const ProfilePage = () => {
           rep_show_comments: accountFormData.rep_show_comments ?? true
         }
       };
-      await updateProfile(updates);
-      if (accountFormData.language !== lang) {
+      await updateProfile(updates, uid);
+      if (uid === profile?.uid && accountFormData.language !== lang) {
         setLang(accountFormData.language);
       }
       showToast(lang === 'ru' ? 'Вам удалось обновить профиль' : 'Profile updated successfully!');
@@ -257,10 +265,13 @@ const ProfilePage = () => {
   };
 
   const handleDelete = (id) => {
+    const char = characters.find(c => c.id === id);
     setConfirmState({
       show: true,
       title: t('profile.delete_character'),
-      message: t('profile.delete_character') + '?',
+      message: (lang === 'ru' 
+        ? `Вы уверены, что хотите удалить персонажа "${char?.name || '?'}"?` 
+        : `Are you sure you want to delete character "${char?.name || '?'}"?`) + ' ' + (lang === 'ru' ? 'Это действие нельзя отменить.' : 'This action is irreversible.'),
       onConfirm: async () => {
         try {
           await deleteCharacter(uid, id);
@@ -373,8 +384,8 @@ const ProfilePage = () => {
                 <Tab eventKey="characters" title={t('profile.tab_characters')}>
               <Card className="shadow-sm border-0 bg-card">
                 <Card.Header className="py-3 d-flex justify-content-between align-items-center">
-                  <h5 className="mb-0">{profile?.uid === uid ? t('profile.characters') : t('profile.characters_other')}</h5>
-                  {profile?.uid === uid && hasPermission(PERMISSIONS.USE_MASKS) && (
+                  <h5 className="mb-0">{isOwn ? t('profile.characters') : t('profile.characters_other')}</h5>
+                  {((isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || (!isOwn && hasPermission(PERMISSIONS.CREATE_OTHERS_MASK))) && (
                     <Button variant="outline-light" size="sm" onClick={() => handleOpenModal()}>
                       + {t('profile.add_character')}
                     </Button>
@@ -413,26 +424,28 @@ const ProfilePage = () => {
                                   </p>
                                 )}
                               </div>
-                              {profile?.uid === uid && (
                                 <div className="d-flex flex-column gap-1 align-items-end">
-                                  <Button
-                                    variant="link"
-                                    size="sm"
-                                    className="text-decoration-none p-0 text-primary small fw-bold"
-                                    onClick={() => handleOpenModal(char)}
-                                  >
-                                    {t('profile.edit_character')}
-                                  </Button>
-                                  <Button
-                                    variant="link"
-                                    size="sm"
-                                    className="text-decoration-none p-0 text-danger small"
-                                    onClick={() => handleDelete(char.id)}
-                                  >
-                                    {t('profile.delete_character')}
-                                  </Button>
+                                  {(isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || hasPermission(PERMISSIONS.EDIT_OTHERS_MASK) ? (
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="text-decoration-none p-0 text-primary small fw-bold"
+                                      onClick={() => handleOpenModal(char)}
+                                    >
+                                      {t('profile.edit_character')}
+                                    </Button>
+                                  ) : null}
+                                  {(isOwn && hasPermission(PERMISSIONS.DELETE_SELF_MASK)) || hasPermission(PERMISSIONS.DELETE_OTHERS_MASK) ? (
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="text-decoration-none p-0 text-danger small"
+                                      onClick={() => handleDelete(char.id)}
+                                    >
+                                      {t('profile.delete_character')}
+                                    </Button>
+                                  ) : null}
                                 </div>
-                              )}
                             </Card.Body>
                           </Card>
                         </Col>
@@ -588,7 +601,7 @@ const ProfilePage = () => {
                 </Tab>
               )}
 
-              {profile?.uid === uid && (
+              {canEditAnyAccount && (
               <Tab eventKey="account" title={t('profile.tab_profile')}>
                 <Card className="shadow-sm border-0 bg-card">
                   <Card.Header className="py-3">
@@ -597,18 +610,26 @@ const ProfilePage = () => {
                   <Card.Body className="p-4">
                     <Form>
                       <Form.Group className="mb-3">
-                        <Form.Label className="fw-bold">{t('profile.nickname')}</Form.Label>
+                        <Form.Label className="fw-bold d-flex align-items-center flex-wrap mb-1">
+                          {t('profile.nickname')}
+                          {!canEditNickname && <Lock size={14} className="ms-2 opacity-50 text-muted" />}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={accountFormData.nickname}
                           onChange={(e) => setAccountFormData({ ...accountFormData, nickname: e.target.value })}
                           placeholder="Display Name"
+                          disabled={!canEditNickname}
+                          style={!canEditNickname ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                         />
                       </Form.Group>
                       {hasPermission(PERMISSIONS.POST_REPLY) && (
                         <Form.Group className="mb-3">
                           <div className="d-flex justify-content-between align-items-center mb-1">
-                            <Form.Label className="fw-bold mb-0">{t('profile.status_line')}</Form.Label>
+                            <Form.Label className="fw-bold mb-0 d-flex align-items-center">
+                              {t('profile.status_line')}
+                              {!canEditStatus && <Lock size={14} className="ms-2 opacity-50 text-muted" />}
+                            </Form.Label>
                             <small className="text-muted">{(accountFormData.status_line || '').length}/30</small>
                           </div>
                           <Form.Control
@@ -617,25 +638,35 @@ const ProfilePage = () => {
                             onChange={(e) => setAccountFormData({ ...accountFormData, status_line: e.target.value })}
                             placeholder="What's on your mind?"
                             maxLength={30}
+                            disabled={!canEditStatus}
+                            style={!canEditStatus ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                           />
                         </Form.Group>
                       )}
-                      <Form.Group className="mb-3">
-                        <AvatarUploader
-                          label={t('profile.avatar')}
-                          value={accountFormData.avatar_url}
-                          onChange={(url) => setAccountFormData({ ...accountFormData, avatar_url: url })}
-                          storagePath={`users/${uid}/avatar`}
-                          size={100}
-                        />
-                      </Form.Group>
+                      {canEditAvatar && (
+                        <Form.Group className="mb-3">
+                          <AvatarUploader
+                            label={
+                              <div className="d-flex align-items-center mb-2">
+                                <span className="fw-bold m-0 p-0" style={{ fontSize: '0.875rem' }}>{t('profile.avatar')}</span>
+                              </div>
+                            }
+                            value={accountFormData.avatar_url}
+                            onChange={(url) => setAccountFormData({ ...accountFormData, avatar_url: url })}
+                            storagePath={`users/${uid}/avatar`}
+                            size={100}
+                            disabled={false}
+                          />
+                        </Form.Group>
+                      )}
 
                       {hasPermission(PERMISSIONS.POST_REPLY) && (
                         <>
                           <hr className="my-4" />
                           <Form.Group className="mb-4">
-                            <Form.Label className="fw-bold text-primary small text-uppercase" style={{ letterSpacing: '0.05em' }}>
+                            <Form.Label className="fw-bold text-primary small text-uppercase d-flex align-items-center mb-1" style={{ letterSpacing: '0.05em' }}>
                               {t('profile.signature')}
+                              {!canEditSignature && <Lock size={14} className="ms-2 opacity-50 text-muted" />}
                             </Form.Label>
                             <Form.Control
                               as="textarea"
@@ -643,6 +674,8 @@ const ProfilePage = () => {
                               value={accountFormData.signature}
                               onChange={(e) => setAccountFormData({ ...accountFormData, signature: e.target.value })}
                               placeholder={t('profile.signature_help')}
+                              disabled={!canEditSignature}
+                              style={!canEditSignature ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                             />
                           </Form.Group>
                         </>

@@ -3,22 +3,28 @@ import { Form, Button } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
 import { subscribeToCategories } from '../../api/forum';
 import { useI18n } from '../../contexts/I18nProvider';
+import { useAuth } from '../../contexts/AuthProvider';
 
 const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryId }) => {
   const { t, lang } = useI18n();
+  const { profile, hasPermission, PERMISSIONS } = useAuth();
   const [categories, setCategories] = useState([]);
   const [targetId, setTargetId] = useState('');
 
   useEffect(() => {
     if (show) {
       return subscribeToCategories((cats) => {
-        const filtered = excludeCategoryId 
-          ? cats.filter(cat => cat.id !== excludeCategoryId)
-          : cats;
+        const filtered = cats.filter(cat => {
+          const isExcluded = excludeCategoryId && cat.id === excludeCategoryId;
+          if (isExcluded) return false;
+          
+          // Check if user has permission to see this folder
+          return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+        });
         setCategories(filtered);
       });
     }
-  }, [show, excludeCategoryId]);
+  }, [show, excludeCategoryId, hasPermission, PERMISSIONS.VIEW_FORUM]);
 
   const resolveText = (field) =>
     typeof field === 'object' && field !== null

@@ -29,7 +29,7 @@ import {
   deleteGuestActivity as apiDeleteGuestActivity
 } from '../api/forum';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
-import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES } from '../constants/permissions';
+import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions } from '../constants/permissions';
 
 const AuthContext = createContext();
 
@@ -124,12 +124,15 @@ export const AuthProvider = ({ children }) => {
     }));
   };
 
-  const updateProfile = async (newData) => {
+  const updateProfile = async (newData, targetUid = null) => {
     if (!user) return;
-    const userDocRef = doc(db, 'users', user.uid);
+    const finalUid = targetUid || user.uid;
+    const userDocRef = doc(db, 'users', finalUid);
 
     const updatedData = { ...newData };
-    if (newData.settings && profile?.settings) {
+    const isSelf = finalUid === user.uid;
+
+    if (isSelf && newData.settings && profile?.settings) {
       updatedData.settings = {
         ...profile.settings,
         ...newData.settings
@@ -137,10 +140,13 @@ export const AuthProvider = ({ children }) => {
     }
 
     await setDoc(userDocRef, updatedData, { merge: true });
-    setProfile(prev => ({
-      ...prev,
-      ...updatedData
-    }));
+    
+    if (isSelf) {
+      setProfile(prev => ({
+        ...prev,
+        ...updatedData
+      }));
+    }
   };
 
   useEffect(() => {
@@ -476,7 +482,7 @@ export const AuthProvider = ({ children }) => {
     // Guests have no global permissions (they rely on category overrides for VIEW_FORUM).
     if (!user) return false;
     const userRole = roles.find(r => r.id === userRoleId);
-    return !!userRole?.permissions?.includes(perm);
+    return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
   const value = {

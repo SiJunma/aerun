@@ -7,7 +7,7 @@ import {
   updateUserRole, addRole, updateRole, deleteRole 
 } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
-import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin } from '../constants/permissions';
+import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
 import { 
@@ -61,7 +61,7 @@ const AdminPage = () => {
   // Tab permissions check
   const canAccessTab = (tab) => {
     switch (tab) {
-      case 'settings': return hasPermission(PERMISSIONS.MANAGE_SETTINGS);
+      case 'settings': return hasPermission(PERMISSIONS.MANAGE_FORUM);
       case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
       case 'roles': return hasPermission(PERMISSIONS.MANAGE_ROLES);
       case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
@@ -197,7 +197,6 @@ const AdminPage = () => {
   const handleSaveCategory = async () => {
     if (!catForm.title?.en && !catForm.title?.ru) return;
     setSaving(true);
-    setShowCatModal(false); // Close first
     try {
       if (editingCat) {
         await updateCategory(editingCat, catForm);
@@ -205,6 +204,7 @@ const AdminPage = () => {
         await addCategory(catForm);
       }
       setToast({ show: true, message: t('admin.categories.toast_saved'), variant: 'success' });
+      setShowCatModal(false);
     } catch (err) {
       console.error(err);
       setToast({ show: true, message: t('admin.categories.error_save'), variant: 'danger' });
@@ -300,10 +300,10 @@ const AdminPage = () => {
   const handleSaveUserRole = async () => {
     if (!editingUser) return;
     setSaving(true);
-    setShowUserModal(false);
     try {
       await updateUserRole(editingUser.id, userForm.role_id);
       setToast({ show: true, message: t('admin.users.toast_role_updated'), variant: 'success' });
+      setShowUserModal(false);
     } catch (err) {
       console.error(err);
       setToast({ show: true, message: t('admin.users.error_role_update'), variant: 'danger' });
@@ -315,7 +315,7 @@ const AdminPage = () => {
   const handleOpenRoleModal = (role = null) => {
     if (role) {
       setEditingRole(role);
-      setRoleForm({ name: role.name, permissions: role.permissions || [], color: role.color || 'primary' });
+      setRoleForm({ name: role.name, permissions: normalizePermissions(role.permissions || []), color: role.color || 'primary' });
     } else {
       setEditingRole(null);
       const defaultPlayerRole = DEFAULT_ROLES.find(r => r.id === 'player');
@@ -332,7 +332,6 @@ const AdminPage = () => {
   const handleSaveRole = async () => {
     if (!roleForm.name) return;
     setSaving(true);
-    setShowRoleModal(false);
     try {
       if (editingRole) {
         await updateRole(editingRole.id, roleForm);
@@ -340,6 +339,7 @@ const AdminPage = () => {
         await addRole(roleForm);
       }
       setToast({ show: true, message: t('admin.roles.toast_saved'), variant: 'success' });
+      setShowRoleModal(false);
     } catch (err) {
       console.error(err);
       setToast({ show: true, message: 'Error', variant: 'danger' });
@@ -478,31 +478,67 @@ const AdminPage = () => {
             <Col md={12}>
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">{t('admin.settings.bg_light')}</Form.Label>
-                <Form.Control
-                  type="text"
-                  value={settings.bgLight || ''}
-                  onChange={(e) => setSettings({ ...settings, bgLight: e.target.value })}
-                />
+                <div className="d-flex align-items-center gap-3">
+                  <Form.Control
+                    type="text"
+                    value={settings.bgLight || ''}
+                    onChange={(e) => setSettings({ ...settings, bgLight: e.target.value })}
+                  />
+                  <div className="d-flex align-items-center gap-2" style={{ minWidth: '220px' }}>
+                    <span className="small text-muted text-nowrap">{t('admin.settings.opacity')}:</span>
+                    <Form.Range
+                      min="0" max="1" step="0.05"
+                      value={settings.bgOpacityLight ?? 0.5}
+                      onChange={(e) => setSettings({ ...settings, bgOpacityLight: parseFloat(e.target.value) })}
+                      style={{ width: '100px' }}
+                    />
+                    <span className="small fw-bold" style={{ width: '40px', textAlign: 'right' }}>{Math.round((settings.bgOpacityLight ?? 0.5) * 100)}%</span>
+                  </div>
+                </div>
               </Form.Group>
             </Col>
             <Col md={12}>
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">{t('admin.settings.bg_dark')}</Form.Label>
-                <Form.Control
-                  type="text"
-                  value={settings.bgDark || ''}
-                  onChange={(e) => setSettings({ ...settings, bgDark: e.target.value })}
-                />
+                <div className="d-flex align-items-center gap-3">
+                  <Form.Control
+                    type="text"
+                    value={settings.bgDark || ''}
+                    onChange={(e) => setSettings({ ...settings, bgDark: e.target.value })}
+                  />
+                  <div className="d-flex align-items-center gap-2" style={{ minWidth: '220px' }}>
+                    <span className="small text-muted text-nowrap">{t('admin.settings.opacity')}:</span>
+                    <Form.Range
+                      min="0" max="1" step="0.05"
+                      value={settings.bgOpacityDark ?? 0.5}
+                      onChange={(e) => setSettings({ ...settings, bgOpacityDark: parseFloat(e.target.value) })}
+                      style={{ width: '100px' }}
+                    />
+                    <span className="small fw-bold" style={{ width: '40px', textAlign: 'right' }}>{Math.round((settings.bgOpacityDark ?? 0.5) * 100)}%</span>
+                  </div>
+                </div>
               </Form.Group>
             </Col>
             <Col md={12}>
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">{t('admin.settings.bg_neutral')}</Form.Label>
-                <Form.Control
-                  type="text"
-                  value={settings.bgNeutral || ''}
-                  onChange={(e) => setSettings({ ...settings, bgNeutral: e.target.value })}
-                />
+                <div className="d-flex align-items-center gap-3">
+                  <Form.Control
+                    type="text"
+                    value={settings.bgNeutral || ''}
+                    onChange={(e) => setSettings({ ...settings, bgNeutral: e.target.value })}
+                  />
+                  <div className="d-flex align-items-center gap-2" style={{ minWidth: '220px' }}>
+                    <span className="small text-muted text-nowrap">{t('admin.settings.opacity')}:</span>
+                    <Form.Range
+                      min="0" max="1" step="0.05"
+                      value={settings.bgOpacityNeutral ?? 0.5}
+                      onChange={(e) => setSettings({ ...settings, bgOpacityNeutral: parseFloat(e.target.value) })}
+                      style={{ width: '100px' }}
+                    />
+                    <span className="small fw-bold" style={{ width: '40px', textAlign: 'right' }}>{Math.round((settings.bgOpacityNeutral ?? 0.5) * 100)}%</span>
+                  </div>
+                </div>
               </Form.Group>
             </Col>
           </Row>
@@ -686,8 +722,7 @@ const AdminPage = () => {
   };
 
   const renderRoles = () => (
-    <>
-      <Card className="shadow-sm border-0">
+    <Card className="shadow-sm border-0">
         <Card.Body className="p-4">
           <div className="d-flex justify-content-between mb-4">
             <h5 className="mb-0">{t('admin.roles.title')}</h5>
@@ -704,7 +739,23 @@ const AdminPage = () => {
               </tr>
             </thead>
             <tbody>
-              {roles.filter(r => r.id !== 'root').map(role => (
+              {(() => {
+                const ROLE_ORDER = { admin: 1, moderator: 2, player: 3, spectator: 4 };
+                const sortedRoles = [...roles]
+                  .filter(r => r.id !== 'root')
+                  .sort((a, b) => {
+                    const rankA = ROLE_ORDER[a.base_role_id || a.id] || 99;
+                    const rankB = ROLE_ORDER[b.base_role_id || b.id] || 99;
+                    if (rankA !== rankB) return rankA - rankB;
+                    // Within same rank, system role (id matches base) comes first
+                    const isSystemA = a.id === (a.base_role_id || a.id);
+                    const isSystemB = b.id === (b.base_role_id || b.id);
+                    if (isSystemA && !isSystemB) return -1;
+                    if (!isSystemA && isSystemB) return 1;
+                    return a.name.localeCompare(b.name);
+                  });
+                
+                return sortedRoles.map(role => (
                 <tr key={role.id} className="align-middle">
                   <td>
                     <Badge bg={role.color || 'primary'} className={`role-badge me-2 ${['warning', 'light'].includes(role.color) ? 'text-dark' : 'text-white'}`}>
@@ -712,12 +763,27 @@ const AdminPage = () => {
                     </Badge>
                   </td>
                   <td>
-                    <div className="d-flex flex-wrap gap-1">
-                      {role.permissions?.map(p => (
-                        <Badge key={p} bg="secondary" className="role-badge fw-normal opacity-75" style={{ background: 'var(--bs-gray-700)', color: 'white' }}>
-                          {PERMISSION_LABELS[p]?.[currentLang] || PERMISSION_LABELS[p]?.en || p}
-                        </Badge>
-                      ))}
+                    <div className="d-flex flex-column gap-2 py-1">
+                      {PERMISSION_GROUPS.map(group => {
+                        const rolePerms = normalizePermissions(role.permissions || []);
+                        const groupPerms = rolePerms.filter(p => group.permissions.includes(p));
+                        if (groupPerms.length === 0) return null;
+                        
+                        return (
+                          <div key={group.id} className="d-flex align-items-baseline mb-1">
+                            <div className="text-muted fw-bold me-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', opacity: 0.8, width: '120px', flexShrink: 0 }}>
+                              {group.name[currentLang] || group.name.en}:
+                            </div>
+                            <div className="d-flex flex-wrap gap-1">
+                              {groupPerms.map(p => (
+                                <Badge key={p} bg="secondary" className="role-badge fw-normal" style={{ background: 'var(--bs-gray-700)', color: 'white' }}>
+                                  {PERMISSION_LABELS[p]?.[currentLang] || PERMISSION_LABELS[p]?.en || p}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </td>
                   <td className="text-end">
@@ -735,106 +801,16 @@ const AdminPage = () => {
                     )}
                   </td>
                 </tr>
-              ))}
+              ));
+              })()}
             </tbody>
           </Table>
         </Card.Body>
       </Card>
-
-      <ForumModal
-        show={showRoleModal}
-        onHide={() => setShowRoleModal(false)}
-        title={editingRole ? t('admin.roles.modal_edit') : t('admin.roles.modal_create')}
-        size="lg"
-        footer={
-          <>
-            <Button variant="outline-secondary" onClick={() => setShowRoleModal(false)}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSaveRole} disabled={saving}>
-              {saving ? t('admin.settings.saving') : t('admin.roles.save_btn')}
-            </Button>
-          </>
-        }
-      >
-        <Form>
-          <Row>
-            <Col md={7}>
-              <Form.Group className="mb-4">
-                <Form.Label className="fw-bold">{t('admin.roles.modal_name')}</Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder="e.g. Master Moderator"
-                  value={roleForm.name}
-                  onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
-                />
-              </Form.Group>
-            </Col>
-            {!editingRole && (
-              <Col md={5}>
-                <Form.Group className="mb-4">
-                  <Form.Label className="fw-bold">{t('admin.roles.modal_base_role')}</Form.Label>
-                  <Dropdown className="w-100">
-                    <Dropdown.Toggle 
-                      variant="outline-management" 
-                      className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
-                    >
-                      {roleForm.base_role_id === 'moderator' ? t('admin.roles.system_roles.moderator') : 
-                       roleForm.base_role_id === 'spectator' ? t('admin.roles.system_roles.spectator') : 
-                       t('admin.roles.system_roles.player')}
-                    </Dropdown.Toggle>
-                    <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
-                      {['player', 'moderator', 'spectator'].map(baseId => (
-                        <Dropdown.Item 
-                          key={baseId}
-                          active={roleForm.base_role_id === baseId}
-                          onClick={() => {
-                            const template = DEFAULT_ROLES.find(r => r.id === baseId);
-                            setRoleForm({ 
-                              ...roleForm, 
-                              base_role_id: baseId,
-                              permissions: template ? [...template.permissions] : roleForm.permissions
-                            });
-                          }}
-                        >
-                          {t(`admin.roles.system_roles.${baseId}`)}
-                        </Dropdown.Item>
-                      ))}
-                    </Dropdown.Menu>
-                  </Dropdown>
-                </Form.Group>
-              </Col>
-            )}
-            <Col md={editingRole ? 5 : 12}>
-            </Col>
-          </Row>
-
-          <h6 className="fw-bold mb-3">{t('admin.roles.modal_perms')}</h6>
-          <div className="modal-section-themed p-3 rounded mb-2">
-            <Row>
-              {Object.keys(PERMISSIONS).map(permKey => {
-                const permId = PERMISSIONS[permKey];
-                const isChecked = roleForm.permissions.includes(permId);
-                return (
-                  <Col md={6} key={permId} className="mb-2">
-                    <Form.Check
-                      type="checkbox"
-                      id={`perm-${permId}`}
-                      label={PERMISSION_LABELS[permId]?.[currentLang] || PERMISSION_LABELS[permId]?.en || permId}
-                      checked={isChecked}
-                      onChange={() => togglePermission(permId)}
-                    />
-                  </Col>
-                );
-              })}
-            </Row>
-          </div>
-        </Form>
-      </ForumModal>
-    </>
   );
 
   const renderCategories = () => (
-    <>
-      <Card className="shadow-sm border-0">
+    <Card className="shadow-sm border-0">
         <Card.Body className="p-4">
           <div className="d-flex justify-content-between mb-4">
             <h5 className="mb-0">{t('admin.categories.title')}</h5>
@@ -878,7 +854,139 @@ const AdminPage = () => {
           </Table>
         </Card.Body>
       </Card>
+  );
 
+  return (
+    <Container className="py-5">
+      <ForumBreadcrumbs 
+        items={[{ label: t('nav.admin'), active: true }]} 
+      />
+      <h2 className="mb-4">{t('admin.dashboard')}</h2>
+
+      <Nav variant="tabs" activeKey={activeTab} className="mb-4 border-0" onSelect={(k) => setActiveTab(k)}>
+        {hasPermission(PERMISSIONS.MANAGE_FORUM) && (
+          <Nav.Item>
+            <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">{t('admin.tabs.settings')}</Nav.Link>
+          </Nav.Item>
+        )}
+        {(hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && (
+          <Nav.Item>
+            <Nav.Link eventKey="users" className="px-4 fw-bold border-0">{t('admin.tabs.users')}</Nav.Link>
+          </Nav.Item>
+        )}
+        {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
+          <Nav.Item>
+            <Nav.Link eventKey="roles" className="px-4 fw-bold border-0">{t('admin.tabs.roles')}</Nav.Link>
+          </Nav.Item>
+        )}
+        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+          <Nav.Item>
+            <Nav.Link eventKey="categories" className="px-4 fw-bold border-0">{t('admin.tabs.categories')}</Nav.Link>
+          </Nav.Item>
+        )}
+      </Nav>
+
+      {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
+      {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
+      {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
+      {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
+
+      {/* Role Modal */}
+      <ForumModal
+        show={showRoleModal}
+        onHide={() => setShowRoleModal(false)}
+        title={editingRole ? t('admin.roles.modal_edit') : t('admin.roles.modal_create')}
+        size="lg"
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowRoleModal(false)}>{t('common.cancel')}</Button>
+            <Button variant="primary" onClick={handleSaveRole} disabled={saving}>
+              {saving ? t('admin.settings.saving') : t('admin.roles.save_btn')}
+            </Button>
+          </>
+        }
+      >
+        <Form>
+          <Row>
+            <Col md={7}>
+              <Form.Group className="mb-4">
+                <Form.Label className="fw-bold">{t('admin.roles.modal_name')}</Form.Label>
+                <Form.Control
+                  type="text"
+                  placeholder="e.g. Master Moderator"
+                  value={roleForm.name}
+                  onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+            {!editingRole && (
+              <Col md={5}>
+                <Form.Group className="mb-4">
+                  <Form.Label className="fw-bold">{t('admin.roles.modal_base_role')}</Form.Label>
+                  <Dropdown className="w-100">
+                    <Dropdown.Toggle 
+                      variant="outline-management" 
+                      className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
+                    >
+                      {roleForm.base_role_id === 'admin' ? t('admin.roles.system_roles.admin') :
+                       roleForm.base_role_id === 'moderator' ? t('admin.roles.system_roles.moderator') : 
+                       roleForm.base_role_id === 'spectator' ? t('admin.roles.system_roles.spectator') : 
+                       t('admin.roles.system_roles.player')}
+                    </Dropdown.Toggle>
+                    <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
+                      {['player', 'moderator', 'admin', 'spectator'].map(baseId => (
+                        <Dropdown.Item 
+                          key={baseId}
+                          active={roleForm.base_role_id === baseId}
+                          onClick={() => {
+                            const template = DEFAULT_ROLES.find(r => r.id === baseId);
+                            setRoleForm({ 
+                              ...roleForm, 
+                              base_role_id: baseId,
+                              permissions: template ? [...template.permissions] : roleForm.permissions
+                            });
+                          }}
+                        >
+                          {t(`admin.roles.system_roles.${baseId}`)}
+                        </Dropdown.Item>
+                      ))}
+                    </Dropdown.Menu>
+                  </Dropdown>
+                </Form.Group>
+              </Col>
+            )}
+          </Row>
+
+          <h6 className="fw-bold mb-3">{t('admin.roles.modal_perms')}</h6>
+          {PERMISSION_GROUPS.map(group => (
+            <div key={group.id} className="mb-4">
+              <div className="small fw-bold text-uppercase text-primary mb-2 opacity-90 letter-spacing-1" style={{ fontSize: '0.7rem' }}>
+                {group.name[currentLang] || group.name.en}
+              </div>
+              <div className="modal-section-themed p-3 rounded mb-2">
+                <Row>
+                  {group.permissions.map(permId => {
+                    const isChecked = roleForm.permissions.includes(permId);
+                    return (
+                      <Col md={6} key={permId} className="mb-2">
+                        <Form.Check
+                          type="checkbox"
+                          id={`perm-${permId}`}
+                          label={PERMISSION_LABELS[permId]?.[currentLang] || PERMISSION_LABELS[permId]?.en || permId}
+                          checked={isChecked}
+                          onChange={() => togglePermission(permId)}
+                        />
+                      </Col>
+                    );
+                  })}
+                </Row>
+              </div>
+            </div>
+          ))}
+        </Form>
+      </ForumModal>
+
+      {/* Category Modal */}
       <ForumModal
         show={showCatModal}
         onHide={() => setShowCatModal(false)}
@@ -962,7 +1070,6 @@ const AdminPage = () => {
           ].map(({ permKey, label }) => {
             const isOverridden = catForm.permissions[permKey] !== undefined && catForm.permissions[permKey] !== null;
             const allowedRoles = isOverridden ? (catForm.permissions[permKey] || []) : [];
-            // Roles to display: all roles filtered to exclude root
             const displayRoles = roles.filter(r => r.id !== 'root');
             return (
               <div key={permKey} className="modal-section-themed p-3 rounded mb-2">
@@ -998,43 +1105,6 @@ const AdminPage = () => {
           })}
         </Form>
       </ForumModal>
-    </>
-  );
-
-  return (
-    <Container className="py-5">
-      <ForumBreadcrumbs 
-        items={[{ label: t('nav.admin'), active: true }]} 
-      />
-      <h2 className="mb-4">{t('admin.dashboard')}</h2>
-
-      <Nav variant="tabs" activeKey={activeTab} className="mb-4 border-0" onSelect={(k) => setActiveTab(k)}>
-        {hasPermission(PERMISSIONS.MANAGE_SETTINGS) && (
-          <Nav.Item>
-            <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">{t('admin.tabs.settings')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {(hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && (
-          <Nav.Item>
-            <Nav.Link eventKey="users" className="px-4 fw-bold border-0">{t('admin.tabs.users')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
-          <Nav.Item>
-            <Nav.Link eventKey="roles" className="px-4 fw-bold border-0">{t('admin.tabs.roles')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-          <Nav.Item>
-            <Nav.Link eventKey="categories" className="px-4 fw-bold border-0">{t('admin.tabs.categories')}</Nav.Link>
-          </Nav.Item>
-        )}
-      </Nav>
-
-      {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_SETTINGS) && renderSettings()}
-      {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
-      {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
-      {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
 
       {/* User Edit Modal */}
       <ForumModal

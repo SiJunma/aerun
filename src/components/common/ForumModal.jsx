@@ -21,9 +21,11 @@ const ForumModal = ({
   showCloseButton = true,
   ...props
 }) => {
+  if (!show) return null;
+
   return (
     <Modal
-      show={show}
+      show={true}
       onHide={onHide}
       centered={centered}
       animation={animation}

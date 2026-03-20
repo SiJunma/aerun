@@ -51,14 +51,14 @@ service cloud.firestore {
     // Spectators cannot create characters
     match /characters/{charId} {
       allow read: if true;
-      allow create: if canPost() && request.resource.data.owner_id == request.auth.uid;
+      allow create: if canPost() && (request.resource.data.owner_id == request.auth.uid || isAdmin());
       allow update, delete: if isActive() && (resource.data.owner_id == request.auth.uid || isAdmin());
     }
 
     // --- User sub-collection characters ---
     match /users/{userId}/characters/{charId} {
       allow read: if true;
-      allow create: if canPost() && isOwner(userId);
+      allow create: if (canPost() && isOwner(userId)) || isAdmin();
       allow update, delete: if (isOwner(userId) && isActive()) || isAdmin();
     }
 

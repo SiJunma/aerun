@@ -133,6 +133,26 @@ const TopicFormPage = () => {
     typeof category.title === 'object' ? (lang === 'ru' ? category.title.ru : category.title.en) : category.title
   ) : '...';
 
+  if (!category) {
+    return (
+      <Container className="py-5 text-center">
+        <div className="spinner-border text-primary" role="status" />
+      </Container>
+    );
+  }
+
+  if (!hasPermission(PERMISSIONS.CREATE_TOPIC, { category })) {
+    return (
+      <Container className="py-5 text-center">
+        <h3 className="text-muted">{lang === 'ru' ? 'Доступ запрещён' : 'Access Denied'}</h3>
+        <p className="text-muted">{lang === 'ru' ? 'У вас нет прав для создания тем в этой категории.' : 'You do not have permission to create topics in this category.'}</p>
+        <Button as={Link} to="/" variant="outline-primary" className="mt-3">
+          {lang === 'ru' ? 'На главную' : 'Go Home'}
+        </Button>
+      </Container>
+    );
+  }
+
   return (
     <Container className="py-4">
       <ForumBreadcrumbs 

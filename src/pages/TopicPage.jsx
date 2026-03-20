@@ -757,7 +757,10 @@ const TopicPage = () => {
           <div className="d-flex flex-column align-items-md-end align-items-center gap-2">
             <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
               {/* Admin Management Dropdown */}
-              {hasPermission('moderate_content') && (
+              {(hasPermission(PERMISSIONS.MODERATE_CONTENT) || 
+               hasPermission(PERMISSIONS.PIN_TOPICS) || 
+               hasPermission(PERMISSIONS.CLOSE_TOPICS) || 
+               hasPermission(PERMISSIONS.MOVE_TOPICS)) && (
                 <Dropdown>
                   <Dropdown.Toggle 
                     variant="link" 
@@ -770,6 +773,7 @@ const TopicPage = () => {
                   </Dropdown.Toggle>
 
                   <Dropdown.Menu className="shadow-sm border-0">
+                    {hasPermission(PERMISSIONS.PIN_TOPICS) && (
                     <Dropdown.Item 
                       onClick={async () => {
                         try {
@@ -787,6 +791,8 @@ const TopicPage = () => {
                       <Pin size={14} />
                       {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
                     </Dropdown.Item>
+                    )}
+                    {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
                     <Dropdown.Item 
                       onClick={async () => {
                         try {
@@ -804,6 +810,8 @@ const TopicPage = () => {
                       <Lock size={14} />
                       {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
                     </Dropdown.Item>
+                    )}
+                    {hasPermission(PERMISSIONS.MOVE_TOPICS) && (
                     <Dropdown.Item 
                       onClick={() => setShowMoveModal(true)}
                       className="d-flex align-items-center gap-2"
@@ -811,6 +819,9 @@ const TopicPage = () => {
                       <ArrowRightLeft size={14} />
                       {t('forum.move_topic')}
                     </Dropdown.Item>
+                    )}
+                    {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
+                    <>
                     <Dropdown.Divider />
                     <Dropdown.Item 
                       onClick={() => setShowDeleteTopicModal(true)}
@@ -819,6 +830,8 @@ const TopicPage = () => {
                       <Trash2 size={14} />
                       {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
                     </Dropdown.Item>
+                    </>
+                    )}
                   </Dropdown.Menu>
                 </Dropdown>
               )}
