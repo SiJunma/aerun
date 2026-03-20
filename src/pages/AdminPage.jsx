@@ -32,7 +32,12 @@ const AdminPage = () => {
   // Modal State
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
-  const [catForm, setCatForm] = useState({ title: '', description: '', order: 0, permissions: {} });
+  const [catForm, setCatForm] = useState({ 
+    title: { en: '', ru: '' }, 
+    description: { en: '', ru: '' }, 
+    order: 0, 
+    permissions: {} 
+  });
 
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
@@ -76,20 +81,37 @@ const AdminPage = () => {
 
   // Initial settings state
   const [settings, setSettings] = useState({
-    forumName: 'Aerun Forum',
+    forumName: { en: 'Aerun Forum', ru: 'Aerun Forum' },
     registrationEnabled: true,
     maxUploadSize: 500,
     maintenanceMode: false,
-    welcomeMessage: 'Welcome to our TTRPG home!',
+    welcomeMessage: { en: 'Welcome to our TTRPG home!', ru: 'Добро пожаловать в наш дом TTRPG!' },
     enableReputation: true,
     enableCharacters: true,
     enableDice: true,
-    logoUrl: ''
+    logoUrl: '',
+    bgLight: 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
+    bgDark: 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
+    bgNeutral: 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop'
   });
 
   useEffect(() => {
     const unsubSettings = getGlobalSettings((data) => {
-      if (data) setSettings(data);
+      if (data) {
+        // Migration: convert string to object if needed
+        const migrated = { ...data };
+        if (typeof data.forumName === 'string') {
+          migrated.forumName = { en: data.forumName, ru: data.forumName };
+        }
+        if (typeof data.welcomeMessage === 'string') {
+          migrated.welcomeMessage = { en: data.welcomeMessage, ru: data.welcomeMessage };
+        }
+        // Defaults for backgrounds
+        if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
+        if (!data.bgDark) migrated.bgDark = 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop';
+        if (!data.bgNeutral) migrated.bgNeutral = 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop';
+        setSettings(migrated);
+      }
     });
     const unsubCats = subscribeToCategories(setCategories);
     const unsubUsers = subscribeToAllUsers(setUsers);
@@ -117,16 +139,21 @@ const AdminPage = () => {
 
   const handleOpenCatModal = (cat = null) => {
     if (cat) {
-      setEditingCat(cat);
+      setEditingCat(cat.id);
       setCatForm({
-        title: typeof cat.title === 'object' ? cat.title.en : cat.title,
-        description: typeof cat.description === 'object' ? cat.description.en : cat.description,
-        order: cat.order,
+        title: typeof cat.title === 'object' ? { ...cat.title } : { en: cat.title, ru: cat.title },
+        description: typeof cat.description === 'object' ? { ...cat.description } : { en: cat.description, ru: cat.description },
+        order: cat.order || 0,
         permissions: cat.permissions || {}
       });
     } else {
       setEditingCat(null);
-      setCatForm({ title: '', description: '', order: categories.length + 1, permissions: {} });
+      setCatForm({ 
+        title: { en: '', ru: '' }, 
+        description: { en: '', ru: '' }, 
+        order: categories.length + 1, 
+        permissions: {} 
+      });
     }
     setShowCatModal(true);
   };
@@ -160,12 +187,12 @@ const AdminPage = () => {
   };
 
   const handleSaveCategory = async () => {
-    if (!catForm.title) return;
+    if (!catForm.title?.en && !catForm.title?.ru) return;
     setSaving(true);
     setShowCatModal(false); // Close first
     try {
       if (editingCat) {
-        await updateCategory(editingCat.id, catForm);
+        await updateCategory(editingCat, catForm);
       } else {
         await addCategory(catForm);
       }
@@ -345,21 +372,34 @@ const AdminPage = () => {
     <Card className="shadow-sm border-0">
       <Card.Body className="p-4">
         <Form>
-          <h5 className="mb-4 text-primary">General Configuration</h5>
+          <h5 className="mb-4 text-primary">{t('admin.settings.general')}</h5>
           <Row>
             <Col md={6}>
-              <Form.Group className="mb-4" controlId="forumName">
-                <Form.Label className="fw-bold">Forum Name</Form.Label>
+              <Form.Group className="mb-4" controlId="forumNameEn">
+                <Form.Label className="fw-bold">{t('admin.settings.forum_name')} (EN)</Form.Label>
                 <Form.Control
                   type="text"
-                  value={settings.forumName}
-                  onChange={(e) => setSettings({ ...settings, forumName: e.target.value })}
+                  value={settings.forumName?.en || ''}
+                  onChange={(e) => setSettings({ ...settings, forumName: { ...settings.forumName, en: e.target.value } })}
                 />
               </Form.Group>
             </Col>
             <Col md={6}>
+              <Form.Group className="mb-4" controlId="forumNameRu">
+                <Form.Label className="fw-bold">{t('admin.settings.forum_name')} (RU)</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={settings.forumName?.ru || ''}
+                  onChange={(e) => setSettings({ ...settings, forumName: { ...settings.forumName, ru: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
+
+          <Row>
+            <Col md={12}>
               <Form.Group className="mb-4" controlId="logoUrl">
-                <Form.Label className="fw-bold">Forum Logo URL</Form.Label>
+                <Form.Label className="fw-bold">{t('admin.settings.logo_url')}</Form.Label>
                 <Form.Control
                   type="text"
                   placeholder="https://..."
@@ -370,23 +410,38 @@ const AdminPage = () => {
             </Col>
           </Row>
 
-          <Form.Group className="mb-4" controlId="welcomeMsg">
-            <Form.Label className="fw-bold">Welcome Message (Banner)</Form.Label>
-            <Form.Control
-              as="textarea"
-              rows={3}
-              value={settings.welcomeMessage}
-              onChange={(e) => setSettings({ ...settings, welcomeMessage: e.target.value })}
-            />
-          </Form.Group>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-4" controlId="welcomeMsgEn">
+                <Form.Label className="fw-bold">{t('admin.settings.welcome_msg')} (EN)</Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={3}
+                  value={settings.welcomeMessage?.en || ''}
+                  onChange={(e) => setSettings({ ...settings, welcomeMessage: { ...settings.welcomeMessage, en: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-4" controlId="welcomeMsgRu">
+                <Form.Label className="fw-bold">{t('admin.settings.welcome_msg')} (RU)</Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={3}
+                  value={settings.welcomeMessage?.ru || ''}
+                  onChange={(e) => setSettings({ ...settings, welcomeMessage: { ...settings.welcomeMessage, ru: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
 
           <hr className="my-5" />
-          <h5 className="mb-4 text-primary">Feature Toggles</h5>
+          <h5 className="mb-4 text-primary">{t('admin.settings.features')}</h5>
           <div className="ms-2">
             <Form.Check
               type="switch"
               id="char-switch"
-              label="Enable Character (Mask) System"
+              label={t('admin.settings.enable_characters')}
               className="mb-3 fw-bold"
               checked={settings.enableCharacters}
               onChange={(e) => setSettings({ ...settings, enableCharacters: e.target.checked })}
@@ -394,7 +449,7 @@ const AdminPage = () => {
             <Form.Check
               type="switch"
               id="dice-switch"
-              label="Enable Dice Roller"
+              label={t('admin.settings.enable_dice')}
               className="mb-3 fw-bold"
               checked={settings.enableDice}
               onChange={(e) => setSettings({ ...settings, enableDice: e.target.checked })}
@@ -402,7 +457,7 @@ const AdminPage = () => {
             <Form.Check
               type="switch"
               id="rep-switch"
-              label="Enable Reputation System"
+              label={t('admin.settings.enable_reputation')}
               className="mb-3 fw-bold"
               checked={settings.enableReputation}
               onChange={(e) => setSettings({ ...settings, enableReputation: e.target.checked })}
@@ -410,11 +465,46 @@ const AdminPage = () => {
           </div>
 
           <hr className="my-5" />
-          <h5 className="mb-4 text-primary">Security & Access</h5>
+          <h5 className="mb-4 text-primary">{t('admin.settings.backgrounds')}</h5>
+          <Row>
+            <Col md={12}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.settings.bg_light')}</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={settings.bgLight || ''}
+                  onChange={(e) => setSettings({ ...settings, bgLight: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={12}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.settings.bg_dark')}</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={settings.bgDark || ''}
+                  onChange={(e) => setSettings({ ...settings, bgDark: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={12}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.settings.bg_neutral')}</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={settings.bgNeutral || ''}
+                  onChange={(e) => setSettings({ ...settings, bgNeutral: e.target.value })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
+
+          <hr className="my-5" />
+          <h5 className="mb-4 text-primary">{t('admin.settings.security')}</h5>
           <Row>
             <Col md={6}>
               <Form.Group className="mb-4" controlId="maxUpload">
-                <Form.Label className="fw-bold">Max Upload Size per Post (KB)</Form.Label>
+                <Form.Label className="fw-bold">{t('admin.settings.max_upload')}</Form.Label>
                 <Form.Control
                   type="number"
                   value={settings.maxUploadSize}
@@ -427,7 +517,7 @@ const AdminPage = () => {
           <Form.Check
             type="switch"
             id="reg-switch"
-            label="Allow New User Registration"
+            label={t('admin.settings.registration')}
             className="mb-3 fw-bold"
             checked={settings.registrationEnabled}
             onChange={(e) => setSettings({ ...settings, registrationEnabled: e.target.checked })}
@@ -436,7 +526,7 @@ const AdminPage = () => {
           <Form.Check
             type="switch"
             id="maintenance-switch"
-            label="Maintenance Mode (Only Admins can log in)"
+            label={t('admin.settings.maintenance')}
             className="mb-4 text-danger fw-bold"
             checked={settings.maintenanceMode}
             onChange={(e) => setSettings({ ...settings, maintenanceMode: e.target.checked })}
@@ -759,10 +849,10 @@ const AdminPage = () => {
                   <td>{cat.order}</td>
                   <td>
                     <div className="fw-bold">
-                      {typeof cat.title === 'object' ? cat.title.en : cat.title}
+                      {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
                     </div>
                     <div className="small text-muted">
-                      {typeof cat.description === 'object' ? cat.description.en : cat.description}
+                      {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
                     </div>
                   </td>
                   <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
@@ -796,23 +886,53 @@ const AdminPage = () => {
         backdropClassName="confirm-modal-backdrop"
       >
         <Form>
-          <Form.Group className="mb-3">
-            <Form.Label className="fw-bold">{t('admin.categories.modal_title')}</Form.Label>
-            <Form.Control
-              type="text"
-              value={catForm.title}
-              onChange={(e) => setCatForm({ ...catForm, title: e.target.value })}
-            />
-          </Form.Group>
-          <Form.Group className="mb-3">
-            <Form.Label className="fw-bold">{t('admin.categories.modal_desc')}</Form.Label>
-            <Form.Control
-              as="textarea"
-              rows={2}
-              value={catForm.description}
-              onChange={(e) => setCatForm({ ...catForm, description: e.target.value })}
-            />
-          </Form.Group>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.modal_title')} (EN)</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={catForm.title?.en || ''}
+                  onChange={(e) => setCatForm({ ...catForm, title: { ...catForm.title, en: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.modal_title')} (RU)</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={catForm.title?.ru || ''}
+                  onChange={(e) => setCatForm({ ...catForm, title: { ...catForm.title, ru: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
+
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.modal_desc')} (EN)</Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  value={catForm.description?.en || ''}
+                  onChange={(e) => setCatForm({ ...catForm, description: { ...catForm.description, en: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.modal_desc')} (RU)</Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  value={catForm.description?.ru || ''}
+                  onChange={(e) => setCatForm({ ...catForm, description: { ...catForm.description, ru: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
           <Form.Group className="mb-3">
             <Form.Label className="fw-bold">{t('admin.categories.modal_order')}</Form.Label>
             <Form.Control

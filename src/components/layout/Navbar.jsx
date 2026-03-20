@@ -73,7 +73,11 @@ const Navigation = () => {
                 style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
               />
             )}
-            <span>{settings?.forumName || t('common.app_name')}</span>
+            <span>
+              {typeof settings?.forumName === 'object' 
+                ? (settings.forumName[lang] || settings.forumName.en) 
+                : (settings?.forumName || t('common.app_name'))}
+            </span>
           </Navbar.Brand>
         </div>
 

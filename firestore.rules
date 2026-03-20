@@ -175,5 +175,13 @@ service cloud.firestore {
       allow read: if isSignedIn(); // Allow reading for badge colors etc
       allow write: if isAdmin();
     }
+
+    // --- Guest Activity (throttled unique guest tracking) ---
+    match /guest_activity/{guestId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if (request.time - resource.data.last_seen) > duration.value(10, 'm');
+      allow delete: if true; 
+    }
   }
 }

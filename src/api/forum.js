@@ -677,11 +677,64 @@ export const subscribeToUser = (uid, callback) => {
     callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
   });
 };
+export const subscribeToActiveUsers = (callback) => {
+  // Fetch users active in the last 15 minutes
+  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+  const q = query(
+    collection(db, 'users'), 
+    where('last_seen', '>=', new Date(Date.now() - FIFTEEN_MINS_MS))
+  );
+  
+  return onSnapshot(q, (snapshot) => {
+    const users = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Sort by nickname client-side (more robust than composite index for now)
+    users.sort((a, b) => a.nickname.localeCompare(b.nickname));
+    callback(users);
+  }, (err) => console.error('[subscribeToActiveUsers]', err));
+};
+
 export const subscribeToAllUsers = (callback) => {
   const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
   });
+};
+
+// ── Guest Activity ─────────────────────────────────────────────────────────────
+
+/**
+ * Record a guest's presence.
+ */
+export const recordGuestActivity = async (guestId) => {
+  if (!guestId) return;
+  const ref = doc(db, 'guest_activity', guestId);
+  await setDoc(ref, { 
+    last_seen: serverTimestamp() 
+  }, { merge: true });
+};
+
+/**
+ * Delete a guest's presence (called on login).
+ */
+export const deleteGuestActivity = async (guestId) => {
+  if (!guestId) return;
+  const ref = doc(db, 'guest_activity', guestId);
+  await deleteDoc(ref).catch(() => {}); // Ignore errors if already gone
+};
+
+/**
+ * Subscribe to the count of active guests (last 15 mins).
+ */
+export const subscribeToActiveGuests = (callback) => {
+  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+  const q = query(
+    collection(db, 'guest_activity'),
+    where('last_seen', '>=', new Date(Date.now() - FIFTEEN_MINS_MS))
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.size);
+  }, (err) => console.error('[subscribeToActiveGuests]', err));
 };
 
 export const checkNicknameExists = async (nickname, excludeUid = null) => {

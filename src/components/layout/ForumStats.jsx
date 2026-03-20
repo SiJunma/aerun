@@ -3,20 +3,27 @@ import { Link } from 'react-router-dom';
 import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
-import { subscribeToCategories, subscribeToAllUsers } from '../../api/forum';
+import { subscribeToCategories, subscribeToActiveUsers, subscribeToActiveGuests, subscribeToAllUsers } from '../../api/forum';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
   const { t } = useI18n();
   const [categories, setCategories] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
+  const [activeUsers, setActiveUsers] = useState([]);
+  const [activeGuestsCount, setActiveGuestsCount] = useState(0);
+  const [allUsers, setAllUsers] = useState([]); // Keep for total count and newest member for now
   
   useEffect(() => {
     const unsubCats = subscribeToCategories(setCategories);
-    const unsubUsers = subscribeToAllUsers(setAllUsers);
+    const unsubActiveUsers = subscribeToActiveUsers(setActiveUsers);
+    const unsubGuests = subscribeToActiveGuests(setActiveGuestsCount);
+    const unsubAllUsers = subscribeToAllUsers(setAllUsers);
+    
     return () => {
       unsubCats();
-      unsubUsers();
+      unsubActiveUsers();
+      unsubGuests();
+      unsubAllUsers();
     };
   }, []);
 
@@ -38,14 +45,8 @@ const ForumStats = () => {
     return bTime - aTime;
   })[0];
 
-  // Online users (last 15 mins)
-  const onlineUsers = useMemo(() => {
-    const FIFTEEN_MINS = 15 * 60 * 1000;
-    return allUsers.filter(u => {
-      const lastSeen = u.last_seen?.toMillis?.() ?? 0;
-      return (nowLocal - lastSeen) < FIFTEEN_MINS;
-    }).sort((a, b) => a.nickname.localeCompare(b.nickname));
-  }, [allUsers, nowLocal]);
+  // Online users (already filtered by API)
+  const onlineUsers = activeUsers;
 
   return (
     <div className="forum-stats-section mt-5 mb-4">
@@ -107,6 +108,11 @@ const ForumStats = () => {
             <div className="online-indicator-blob shadow-none" style={{ width: 6, height: 6 }}></div>
             <span className="text-muted small fw-semibold">
               {t('stats.online_now')}: {onlineUsers.length}
+              {activeGuestsCount > 0 && (
+                <span className="ms-1 opacity-75">
+                  {t('stats.guests_count', { count: activeGuestsCount })}
+                </span>
+              )}
             </span>
           </div>
           <div className="online-list">

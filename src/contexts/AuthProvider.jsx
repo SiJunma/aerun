@@ -24,7 +24,9 @@ import {
   subscribeToReadMap, 
   recordTopicVisit as apiRecordTopicVisit,
   markAllTopicsRead,
-  subscribeToLatestTopics
+  subscribeToLatestTopics,
+  recordGuestActivity as apiRecordGuestActivity,
+  deleteGuestActivity as apiDeleteGuestActivity
 } from '../api/forum';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES } from '../constants/permissions';
@@ -52,15 +54,53 @@ export const AuthProvider = ({ children }) => {
 
   // Ref holding the timestamp of the last recorded activity
   const lastActivityRef = useRef(Date.now());
+  // Ref holding the timestamp of the last database push (last_seen)
+  const lastPushTimeRef = useRef(0);
+
+  const pushLastSeen = useCallback((uid) => {
+    if (!uid) return;
+    setDoc(doc(db, 'users', uid), { last_seen: serverTimestamp() }, { merge: true })
+      .then(() => {
+        lastPushTimeRef.current = Date.now();
+      })
+      .catch((e) => console.warn('[last_seen update]', e));
+  }, []);
+
+  const getOrCreateGuestId = useCallback(() => {
+    let gid = localStorage.getItem('guest_id');
+    if (!gid) {
+      gid = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      localStorage.setItem('guest_id', gid);
+    }
+    return gid;
+  }, []);
 
   /**
    * recordActivity — call this whenever the user does something meaningful
    * (page navigation, posting a reply, creating a topic, etc.)
-   * It does NOT trigger a Firestore write by itself — the interval handles that.
    */
   const recordActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-  }, []);
+    const now = Date.now();
+    const idleMs = now - lastActivityRef.current;
+    lastActivityRef.current = now;
+
+    if (user) {
+      // For registered users: push immediately if we haven't pushed in a while (TICK_MS)
+      // or if we were definitively "idle" (IDLE_TIMEOUT_MS)
+      if (now - lastPushTimeRef.current >= TICK_MS || idleMs >= IDLE_TIMEOUT_MS) {
+        pushLastSeen(user.uid);
+      }
+    } else {
+      // For guests: push throttled to 10 minutes (GUEST_TICK_MS)
+      const GUEST_TICK_MS = 10 * 60 * 1000;
+      const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0');
+      if (now - lastGuestPush >= GUEST_TICK_MS) {
+        const gid = getOrCreateGuestId();
+        apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity]', err));
+        localStorage.setItem('last_guest_push', now.toString());
+      }
+    }
+  }, [user, pushLastSeen, getOrCreateGuestId]);
 
   const loginWithGoogle = () => {
     return signInWithPopup(auth, googleProvider);
@@ -107,7 +147,19 @@ export const AuthProvider = ({ children }) => {
     // Global Settings Listener
     const unsubGlobalSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
-        setSettings(docSnap.data());
+        const data = docSnap.data();
+        const migrated = { ...data };
+        if (typeof data.forumName === 'string') {
+          migrated.forumName = { en: data.forumName, ru: data.forumName };
+        }
+        if (typeof data.welcomeMessage === 'string') {
+          migrated.welcomeMessage = { en: data.welcomeMessage, ru: data.welcomeMessage };
+        }
+        // Defaults for backgrounds
+        if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
+        if (!data.bgDark) migrated.bgDark = 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop';
+        if (!data.bgNeutral) migrated.bgNeutral = 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop';
+        setSettings(migrated);
       }
     }, (err) => console.error('[GlobalSettings Listener]', err));
 
@@ -117,10 +169,6 @@ export const AuthProvider = ({ children }) => {
     let rolesUnsub;
     let lastSeenInterval;
 
-    const pushLastSeen = (uid) => {
-      setDoc(doc(db, 'users', uid), { last_seen: serverTimestamp() }, { merge: true })
-        .catch((e) => console.warn('[last_seen update]', e));
-    };
 
     // Buffer to prevent preloader "flash" on fast loads
     const startLoadTime = Date.now();
@@ -137,6 +185,12 @@ export const AuthProvider = ({ children }) => {
       if (firebaseUser) {
         setUser(firebaseUser);
         const userDocRef = doc(db, 'users', firebaseUser.uid);
+
+        // De-register as guest if was one
+        const gid = localStorage.getItem('guest_id');
+        if (gid) {
+          apiDeleteGuestActivity(gid);
+        }
 
         try {
           const userDoc = await getDoc(userDocRef);
@@ -274,11 +328,10 @@ export const AuthProvider = ({ children }) => {
           clearInterval(lastSeenInterval);
           lastSeenInterval = setInterval(() => {
             const idleMs = Date.now() - lastActivityRef.current;
-            if (idleMs < IDLE_TIMEOUT_MS) {
+            if (idleMs < IDLE_TIMEOUT_MS && (Date.now() - lastPushTimeRef.current >= TICK_MS)) {
               pushLastSeen(firebaseUser.uid);
             }
-            // If idle, we do nothing — last_seen stays at the last real activity
-          }, TICK_MS);
+          }, TICK_MS / 2); // Check more frequently than the tick itself to catch status changes
 
         } catch (error) {
           console.error('Error initializing user data:', error);

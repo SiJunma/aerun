@@ -568,6 +568,7 @@ const TopicPage = () => {
       return;
     }
     setDraftSaving(true);
+    recordActivity();
     try {
       await publishDraft(user.uid, id);
       markTopicRead(id);
@@ -598,6 +599,7 @@ const TopicPage = () => {
 
   const handleSaveEdit = async (postId) => {
     if (!editContent.trim()) return;
+    recordActivity();
     try {
       await updatePost(postId, editContent.trim(), {});
       if (editingFirstPost && topic) {
