@@ -152,6 +152,8 @@ export const translations = {
       rep_privacy_show_comments: "Show comments in my public reputation history",
       rep_error_self: "You cannot vote for yourself.",
       rep_success: "Reputation updated!",
+      tab_posts: "Posts",
+      no_posts_user: "This user hasn't posted anything yet.",
     },
     notifications: {
       title: "Notifications",
@@ -471,6 +473,8 @@ export const translations = {
       rep_privacy_show_comments: "Показывать комментарии в публичной истории репутации",
       rep_error_self: "Вы не можете голосовать за себя.",
       rep_success: "Репутация обновлена!",
+      tab_posts: "Сообщения",
+      no_posts_user: "Этот пользователь еще ничего не опубликовал.",
     },
     notifications: {
       title: "Уведомления",

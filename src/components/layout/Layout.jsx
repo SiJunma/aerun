@@ -10,16 +10,20 @@ const Layout = ({ children }) => {
 
   const sanitizedBanner = useMemo(() => {
     if (!settings?.welcomeMessage) return null;
-    // Basic sanitization: remove <script> tags and any on* attributes
     try {
       let rawHtml = '';
-      if (typeof settings.welcomeMessage === 'object') {
+      if (typeof settings.welcomeMessage === 'object' && settings.welcomeMessage !== null) {
         rawHtml = settings.welcomeMessage[lang] || settings.welcomeMessage.en || '';
       } else {
         rawHtml = settings.welcomeMessage;
       }
 
-      if (!rawHtml) return null;
+      if (!rawHtml || typeof rawHtml !== 'string') {
+        if (rawHtml && typeof rawHtml === 'object') {
+          console.error('[Layout] rawHtml is an object, keys:', Object.keys(rawHtml));
+        }
+        return null;
+      }
 
       let html = rawHtml;
       // Remove scripts
@@ -31,7 +35,7 @@ const Layout = ({ children }) => {
       console.error('Error sanitizing banner:', e);
       return null;
     }
-  }, [settings?.welcomeMessage]);
+  }, [settings?.welcomeMessage, lang]);
 
   const getResponsiveSrcSet = (url) => {
     if (!url || typeof url !== 'string') return '';
@@ -114,8 +118,8 @@ const Layout = ({ children }) => {
         <Container>
           <p className="mb-0 small">
             &copy; {new Date().getFullYear()} {
-              typeof settings?.forumName === 'object' 
-                ? (settings.forumName[lang] || settings.forumName.en) 
+              (typeof settings?.forumName === 'object' && settings.forumName !== null)
+                ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
                 : (settings?.forumName || 'Aerun Forum')
             }
           </p>

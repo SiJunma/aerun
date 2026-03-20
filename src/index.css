@@ -1042,15 +1042,17 @@ label.fw-bold {
 
 .premium-tabs .nav-link {
   color: var(--text-color);
-  opacity: 0.6;
+  opacity: 0.7; /* Slightly increased from 0.6 for better readability */
   border: none !important;
-  border-bottom: 3px solid transparent !important;
-  font-weight: 600;
-  padding: 1rem 1.5rem;
+  border-bottom: 3.5px solid transparent !important; /* Slightly thicker line */
+  font-weight: 700; /* Matched fw-bold from Admin */
+  padding: 0.8rem 1.5rem;
   transition: all 0.3s ease;
   background: transparent !important;
-  font-size: 0.875rem;
+  font-size: 1.05rem; /* Increased from 0.875rem */
+  letter-spacing: 0.01em;
   border-radius: 0 !important;
+  text-transform: none;
 }
 
 .premium-tabs .nav-link:hover {
@@ -1111,33 +1113,33 @@ a.badge.bg-danger:hover {
 /* ── Dropdown menu — theme-aware ─────────────────────────────────────────── */
 .dropdown-menu {
   background-color: var(--nav-bg) !important;
-  border: 1px solid var(--border-color) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important; /* Softened from var(--border-color) */
   border-radius: 0.75rem !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35) !important; /* Slightly deeper shadow for more depth */
   padding: 0.35rem !important;
   min-width: 170px;
+  backdrop-filter: blur(8px); /* Added slight blur for glassmorphism feel */
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dropdown-item {
-  color: rgba(255, 255, 255, 0.85) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
   border-radius: 0.5rem !important;
   padding: 0.5rem 0.9rem !important;
-  font-size: 0.9rem;
-  transition: background 0.15s ease, color 0.15s ease;
+  font-size: 0.92rem;
+  transition: all 0.15s ease;
 }
 
 .dropdown-item:hover,
 .dropdown-item:focus,
 .dropdown-item:active {
-  background-color: rgba(255, 255, 255, 0.12) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
   color: #ffffff !important;
 }
 
-
-
 .dropdown-divider {
-  border-color: var(--border-color) !important;
-  margin: 0.25rem 0 !important;
+  border-color: rgba(255, 255, 255, 0.1) !important; /* Softened divider */
+  margin: 0.35rem 0.5rem !important;
 }
 
 /* Classic Forum Layout Styles */

@@ -148,13 +148,22 @@ export const AuthProvider = ({ children }) => {
     const unsubGlobalSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const migrated = { ...data };
-        if (typeof data.forumName === 'string') {
-          migrated.forumName = { en: data.forumName, ru: data.forumName };
-        }
-        if (typeof data.welcomeMessage === 'string') {
-          migrated.welcomeMessage = { en: data.welcomeMessage, ru: data.welcomeMessage };
-        }
+        const ensureBilingual = (val, defaultVal = '') => {
+          if (typeof val === 'string') return { en: val, ru: val };
+          if (typeof val === 'object' && val !== null) {
+            return {
+              en: typeof val.en === 'string' ? val.en : (val.en ? String(val.en) : defaultVal),
+              ru: typeof val.ru === 'string' ? val.ru : (val.ru ? String(val.ru) : defaultVal)
+            };
+          }
+          return { en: defaultVal, ru: defaultVal };
+        };
+
+        const migrated = { 
+          ...data,
+          forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
+          welcomeMessage: ensureBilingual(data.welcomeMessage, '')
+        };
         // Defaults for backgrounds
         if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
         if (!data.bgDark) migrated.bgDark = 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop';
@@ -432,12 +441,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user, latestTopics, readMap, isMarkingAllRead]);
 
-  // Sync document.title with forumName
-  useEffect(() => {
-    if (settings?.forumName) {
-      document.title = settings.forumName;
-    }
-  }, [settings?.forumName]);
 
   const hasPermission = useCallback((perm, context = {}) => {
     // ── 1. GLOBAL SETTINGS OVERRIDES (Highest Priority for feature flags) ──

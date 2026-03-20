@@ -571,6 +571,23 @@ const ProfilePage = () => {
                 </Tab>
               )}
 
+              {!isLimitedProfile && (
+                <Tab eventKey="posts" title={t('profile.tab_posts')}>
+                  <Card className="shadow-sm border-0 bg-card">
+                    <Card.Header className="py-3">
+                      <h5 className="mb-0">{t('profile.tab_posts')}</h5>
+                    </Card.Header>
+                    <Card.Body className="p-5 text-center text-muted">
+                      <MessageSquare size={48} className="mb-3 opacity-20" />
+                      <p className="mb-0">{t('profile.no_posts_user')}</p>
+                      <small className="opacity-50 d-block mt-2">
+                        {lang === 'ru' ? '(Скоро: просмотр всех сообщений пользователя на форуме)' : '(Coming soon: view all user posts across the forum)'}
+                      </small>
+                    </Card.Body>
+                  </Card>
+                </Tab>
+              )}
+
               {profile?.uid === uid && (
               <Tab eventKey="account" title={t('profile.tab_profile')}>
                 <Card className="shadow-sm border-0 bg-card">

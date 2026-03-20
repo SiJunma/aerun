@@ -12,7 +12,7 @@ export const useI18n = () => {
 };
 
 export const I18nProvider = ({ children }) => {
-  const { profile, updateSettings } = useAuth();
+  const { profile, settings, updateSettings } = useAuth();
   const [lang, setLangState] = useState('en');
 
   useEffect(() => {
@@ -20,6 +20,17 @@ export const I18nProvider = ({ children }) => {
       setLangState(profile.settings.language);
     }
   }, [profile]);
+
+  // Sync document.title with forumName (bilingual)
+  useEffect(() => {
+    if (settings?.forumName) {
+      if (typeof settings.forumName === 'object') {
+        document.title = settings.forumName[lang] || settings.forumName.en || 'Aerun Forum';
+      } else {
+        document.title = settings.forumName;
+      }
+    }
+  }, [settings?.forumName, lang]);
 
   const setLang = async (newLang) => {
     setLangState(newLang);

@@ -74,9 +74,9 @@ const Navigation = () => {
               />
             )}
             <span>
-              {typeof settings?.forumName === 'object' 
-                ? (settings.forumName[lang] || settings.forumName.en) 
-                : (settings?.forumName || t('common.app_name'))}
+              {(typeof settings?.forumName === 'object' && settings.forumName !== null)
+                ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+                : (settings?.forumName || 'Aerun Forum')}
             </span>
           </Navbar.Brand>
         </div>

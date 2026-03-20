@@ -1,10 +1,2 @@
 User-agent: *
-Allow: /
-Disallow: /admin
-Disallow: /pending
-Disallow: /banned
-Disallow: /login
-Disallow: /register
-
-# Host
-Sitemap: https://aerun-forum.web.app/sitemap.xml
+Disallow: /
