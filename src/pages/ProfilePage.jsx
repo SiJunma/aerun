@@ -7,7 +7,7 @@ import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, 
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
-import { subscribeToUser, checkNicknameExists, subscribeToCategories } from '../api/forum';
+import { subscribeToUser, checkNicknameExists, subscribeToCategories, subscribeToUserPosts } from '../api/forum';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
@@ -16,9 +16,11 @@ import { db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
+import BBCode from '../components/common/BBCode';
 
 import { useToast } from '../contexts/ToastProvider';
 import DirectMessages from '../components/dm/DirectMessages';
+import ForumPagination from '../components/common/ForumPagination';
 
 
 const ProfilePage = () => {
@@ -69,6 +71,11 @@ const ProfilePage = () => {
   const [myVote, setMyVote] = useState(null);
   const [categories, setCategories] = useState([]);
   const [logTopicsInfo, setLogTopicsInfo] = useState({});
+  const [userPosts, setUserPosts] = useState([]);
+  const [userPostsLimit, setUserPostsLimit] = useState(100); // Fetch more for pagination
+  const [currentPagePosts, setCurrentPagePosts] = useState(1);
+  const [loadingUserPosts, setLoadingUserPosts] = useState(false);
+  const POSTS_PER_PAGE = 10;
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -111,10 +118,26 @@ const ProfilePage = () => {
     };
   }, [uid, profile]);
 
+  // Subscribe to user posts when on 'posts' tab
+  useEffect(() => {
+    if (!uid || activeTab !== 'posts') return;
+    setLoadingUserPosts(true);
+    const unsub = subscribeToUserPosts(uid, userPostsLimit, (posts) => {
+      setUserPosts(posts);
+      setLoadingUserPosts(false);
+    });
+    return () => unsub();
+  }, [uid, userPostsLimit, activeTab]);
+
   // Fetch topics associated with reputation logs to check category visibility
   useEffect(() => {
     const fetchMissingTopics = async () => {
-      const neededIds = [...new Set(repLogs.map(l => l.topic_id).filter(Boolean))];
+      const neededIds = [
+        ...new Set([
+          ...repLogs.map(l => l.topic_id),
+          ...userPosts.map(p => p.topic_id)
+        ].filter(Boolean))
+      ];
       const newTopics = {};
       let needsUpdate = false;
 
@@ -123,14 +146,18 @@ const ProfilePage = () => {
           try {
             const snap = await getDoc(doc(db, 'topics', tId));
             if (snap.exists()) {
-              newTopics[tId] = { category_id: snap.data().category_id };
+              const data = snap.data();
+              newTopics[tId] = { 
+                category_id: data.category_id,
+                title: data.title 
+              };
               needsUpdate = true;
             } else {
               newTopics[tId] = { is_deleted: true };
               needsUpdate = true;
             }
           } catch (e) {
-            console.error('Error fetching topic context for rep log', e);
+            console.error('Error fetching topic context', e);
           }
         }
       }
@@ -139,10 +166,10 @@ const ProfilePage = () => {
         setLogTopicsInfo(prev => ({ ...prev, ...newTopics }));
       }
     };
-    if (repLogs.length > 0) {
+    if (repLogs.length > 0 || userPosts.length > 0) {
       fetchMissingTopics();
     }
-  }, [repLogs, logTopicsInfo]);
+  }, [repLogs, userPosts, logTopicsInfo]);
 
   // Sync form data with profile (own or if admin/mod is editing)
   useEffect(() => {
@@ -199,6 +226,11 @@ const ProfilePage = () => {
       // If failed, we might want to re-open it, but usually a toast is enough
     }
   };
+
+  const resolveText = (field) =>
+    typeof field === 'object' && field !== null
+      ? (lang === 'ru' ? field.ru : field.en) || ''
+      : field || '';
 
   const handleSaveAccount = async () => {
     recordActivity();
@@ -600,22 +632,91 @@ const ProfilePage = () => {
                 </Tab>
               )}
 
-              {!isLimitedProfile && (
-                <Tab eventKey="posts" title={t('profile.tab_posts')}>
-                  <Card className="shadow-sm border-0 bg-card">
-                    <Card.Header className="py-3">
-                      <h5 className="mb-0">{t('profile.tab_posts')}</h5>
-                    </Card.Header>
-                    <Card.Body className="p-5 text-center text-muted">
-                      <MessageSquare size={48} className="mb-3 opacity-20" />
-                      <p className="mb-0">{t('profile.no_posts_user')}</p>
-                      <small className="opacity-50 d-block mt-2">
-                        {lang === 'ru' ? '(Скоро: просмотр всех сообщений пользователя на форуме)' : '(Coming soon: view all user posts across the forum)'}
-                      </small>
-                    </Card.Body>
-                  </Card>
-                </Tab>
-              )}
+              <Tab eventKey="posts" title={t('profile.tab_posts')}>
+                <Card className="shadow-sm border-0 bg-card">
+                  <Card.Header className="py-3 d-flex justify-content-between align-items-center">
+                    <h5 className="mb-0">{t('profile.tab_posts')}</h5>
+                  </Card.Header>
+                  <Card.Body className="p-0">
+                    {userPosts.length === 0 ? (
+                      <div className="p-5 text-center text-muted">
+                        {loadingUserPosts ? t('common.loading') : <p className="mb-0">{t('profile.no_posts_user')}</p>}
+                      </div>
+                    ) : (
+                      <div className="posts-history-list">
+                        <div className="p-3 d-flex justify-content-center border-bottom">
+                          <ForumPagination 
+                            currentPage={currentPagePosts}
+                            totalPages={Math.ceil(userPosts.length / POSTS_PER_PAGE)}
+                            onPageChange={setCurrentPagePosts}
+                          />
+                        </div>
+                        {userPosts
+                          .slice((currentPagePosts - 1) * POSTS_PER_PAGE, currentPagePosts * POSTS_PER_PAGE)
+                          .map(post => {
+                          const topicInfo = logTopicsInfo[post.topic_id];
+                          const category = topicInfo ? categories.find(c => c.id === topicInfo.category_id) : null;
+                          const isAllowed = topicInfo && category && hasPermission(PERMISSIONS.VIEW_FORUM, { category });
+                          
+                          if (topicInfo && !isAllowed) return null; // Hide restricted posts
+
+                          return (
+                            <div key={post.id} className="p-3 border-bottom hover-bg-light transition-all">
+                              <div className="d-flex justify-content-between align-items-start mb-2">
+                                <div className="min-w-0">
+                                  <Link 
+                                    to={`/topic/${post.topic_id}?post=${post.id}`} 
+                                    className="fw-bold text-decoration-none d-block line-clamp-2"
+                                    style={{ fontSize: '1.1rem', lineHeight: '1.25' }}
+                                  >
+                                    {topicInfo?.title || '...'}
+                                  </Link>
+                                  <div className="d-flex align-items-center gap-2 mt-1">
+                                    {category && (
+                                      <Badge bg="secondary" className="opacity-75 fw-normal" style={{ fontSize: '0.7rem' }}>
+                                        {resolveText(category.name)}
+                                      </Badge>
+                                    )}
+                                    <span className="text-muted small">
+                                      {post.created_at ? format(post.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
+                                    </span>
+                                  </div>
+                                </div>
+                                {post.is_character && (
+                                  <Badge className="ms-2 badge-character">
+                                    {post.author_name}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="post-preview text-muted small text-break line-clamp-4">
+                                <BBCode>{post.content}</BBCode>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        
+                        <div className="p-3 d-flex justify-content-center border-top">
+                          <ForumPagination 
+                            currentPage={currentPagePosts}
+                            totalPages={Math.ceil(userPosts.length / POSTS_PER_PAGE)}
+                            onPageChange={setCurrentPagePosts}
+                          />
+                        </div>
+
+                        {userPosts.length >= userPostsLimit && (
+                          <div className="p-2 text-center text-muted small opacity-50 bg-light-subtle">
+                            {lang === 'ru' 
+                              ? 'Показаны последние 100 сообщений. Для доступа к более старым обратитесь к администратору для настройки индексов БД.' 
+                              : 'Showing latest 100 posts. For more, database indexes tuning is required.'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              </Tab>
+
+
 
 
               {canEditAnyAccount && (

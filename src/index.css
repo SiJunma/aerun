@@ -2079,4 +2079,32 @@ a.badge.bg-danger:hover {
     border-top: 1px solid var(--border-color);
   }
 }
+
+/* Line Clamping */
+.line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-5 { display: -webkit-box; -webkit-line-clamp: 5; line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Character Badges */
+.badge-character {
+  background-color: var(--secondary-color) !important;
+  color: #fff !important;
+  opacity: 0.85;
+  font-weight: 500;
+  font-size: 0.8rem;
+  padding: 0.3em 0.6em;
+}
+
+[data-theme='dark'] .badge-character {
+  background-color: rgba(var(--primary-rgb), 0.15) !important;
+  color: var(--primary-color) !important;
+  border: 1px solid rgba(var(--primary-rgb), 0.25);
+}
+
+[data-theme='neutral'] .badge-character {
+  background-color: #5c4b3a !important;
+  color: #fffcf5 !important;
+}
 

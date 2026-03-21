@@ -148,6 +148,33 @@ const TopicPage = () => {
     return () => unsubCat();
   }, [topic?.category_id]);
 
+  // ── Jump to Specific Post ───────────────────────────────────────────────
+  useEffect(() => {
+    const postId = searchParams.get('post');
+    if (postId && posts.length > 0) {
+      const index = posts.findIndex(p => p.id === postId);
+      if (index !== -1) {
+        const targetPage = Math.floor(index / ITEMS_PER_PAGE) + 1;
+        if (targetPage !== currentPage) {
+          setSearchParams(curr => {
+            curr.set('page', targetPage);
+            return curr;
+          });
+        } else {
+          // Already on correct page, scroll to it
+          setTimeout(() => {
+            const el = document.getElementById(`post-${postId}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('highlight-new-post');
+              setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
+            }
+          }, 500);
+        }
+      }
+    }
+  }, [posts, searchParams, currentPage, ITEMS_PER_PAGE, setSearchParams]);
+
   // Draft Auto-save
   const DRAFT_KEY = `reply_draft_${id}`;
 

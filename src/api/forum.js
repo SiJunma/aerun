@@ -232,6 +232,29 @@ export const subscribeToPosts = (topicId, callback) => {
   );
 };
 
+/**
+ * Subscribe to posts by a specific user.
+ */
+export const subscribeToUserPosts = (uid, limitCount, callback) => {
+  const q = query(
+    collection(db, 'posts'),
+    where('author_id', '==', uid)
+  );
+  return onSnapshot(q,
+    (snapshot) => {
+      const posts = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Sort by creation time desc (newest first) client-side
+      posts.sort((a, b) => {
+        const aTime = a.created_at?.toMillis?.() ?? 0;
+        const bTime = b.created_at?.toMillis?.() ?? 0;
+        return bTime - aTime;
+      });
+      callback(posts.slice(0, limitCount));
+    },
+    (err) => console.error('[subscribeToUserPosts]', err)
+  );
+};
+
 // Reply to a topic
 export const createPost = async (postData) => {
   const postRef = doc(collection(db, 'posts'));
