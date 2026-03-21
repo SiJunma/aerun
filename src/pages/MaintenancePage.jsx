@@ -22,7 +22,7 @@ const MaintenancePage = () => {
     if (user && profile && hasPermission(PERMISSIONS.ADMIN_ACCESS)) {
       navigate('/', { replace: true });
     }
-  }, [user, profile, hasPermission, navigate]);
+  }, [user, profile, hasPermission, navigate, PERMISSIONS.ADMIN_ACCESS]);
 
   return (
     <div className="vh-100 d-flex align-items-center justify-content-center bg-dark text-white p-3">

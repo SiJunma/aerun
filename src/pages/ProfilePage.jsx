@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Toast, ToastContainer, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
+import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock } from 'lucide-react';
@@ -17,10 +17,13 @@ import { doc, getDoc } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
+import { useToast } from '../contexts/ToastProvider';
+
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
   const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity } = useAuth();
+  const { showToast } = useToast();
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -57,8 +60,6 @@ const ProfilePage = () => {
 
   // Reputation Voting State
   const [showRepModal, setShowRepModal] = useState(false);
-  const [showVoteInfoModal, setShowVoteInfoModal] = useState(false);
-  const [selectedVote, setSelectedVote] = useState(null);
   const [repValue, setRepValue] = useState(1);
   const [repComment, setRepComment] = useState('');
   const [submittingRep, setSubmittingRep] = useState(false);
@@ -75,11 +76,7 @@ const ProfilePage = () => {
     message: ''
   });
 
-  // Toast notification
-  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
-  const showToast = (message, variant = 'success') => {
-    setToast({ show: true, message, variant });
-  };
+
 
   // Form State for Character
   const [formData, setFormData] = useState({
@@ -885,19 +882,7 @@ const ProfilePage = () => {
         message={confirmState.message}
       />
 
-      <ToastContainer position="bottom-end" className="p-3">
-        <Toast 
-          show={toast.show} 
-          onClose={() => setToast({ ...toast, show: false })} 
-          delay={3000} 
-          autohide 
-          bg={toast.variant}
-        >
-          <Toast.Body className={toast.variant === 'primary' || toast.variant === 'danger' || toast.variant === 'success' ? 'text-white' : ''}>
-            {toast.message}
-          </Toast.Body>
-        </Toast>
-      </ToastContainer>
+
 
       {/* Profile Reputation Modal */}
       <Modal show={showRepModal} onHide={() => setShowRepModal(false)} centered className="reputation-modal shadow-lg">
@@ -951,38 +936,7 @@ const ProfilePage = () => {
         </Modal.Footer>
       </Modal>
 
-      <Modal show={showVoteInfoModal} onHide={() => setShowVoteInfoModal(false)} centered className="vote-info-modal shadow-lg">
-        <Modal.Header closeButton className="border-0 pb-0">
-          <Modal.Title className="fw-bold small text-uppercase opacity-50">
-            {lang === 'ru' ? 'Детали голоса' : 'Vote Details'}
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="py-4 text-center">
-          {selectedVote && (
-            <>
-              <div className="mb-3">
-                 <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-3 px-3 py-2">
-                   {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
-                 </Badge>
-              </div>
-              <div className="mb-3">
-                <span className="text-muted d-block small mb-1">{t('profile.rep_from')}</span>
-                <Link to={`/profile/${selectedVote.voter_id}`} className="fw-bold text-decoration-none h5">
-                  {selectedVote.voter_nickname || 'User'}
-                </Link>
-              </div>
-              {selectedVote.comment && (
-                <div className="rep-comment-display p-3 rounded bg-dark border border-dashed text-white italic">
-                  "{selectedVote.comment}"
-                </div>
-              )}
-              <div className="mt-4 text-muted small">
-                {selectedVote.created_at ? format(selectedVote.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
-              </div>
-            </>
-          )}
-        </Modal.Body>
-      </Modal>
+
 
     </Container>
   );

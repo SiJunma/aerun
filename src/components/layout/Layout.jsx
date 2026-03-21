@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import Navigation from './Navbar';
 import { Container, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -8,7 +8,7 @@ import { useLocation, Link } from 'react-router-dom';
 
 
 const Layout = ({ children }) => {
-  const { settings, profile, hasPermission, PERMISSIONS } = useAuth();
+  const { settings, profile, PERMISSIONS } = useAuth();
   const { lang, t } = useI18n();
   const location = useLocation();
 

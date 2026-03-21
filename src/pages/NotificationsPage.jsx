@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Card, Badge, Button, Row, Col, Nav, Toast, ToastContainer } from 'react-bootstrap';
+import { Container, Card, Badge, Button, Row, Col, Nav } from 'react-bootstrap';
 import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
@@ -37,9 +37,12 @@ const formatDate = (ts, lang = 'ru') => {
   return d.toLocaleString(locale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+import { useToast } from '../contexts/ToastProvider';
+
 const NotificationsPage = () => {
   const { profile, recordActivity, hasPermission, PERMISSIONS } = useAuth();
   const { t, lang } = useI18n();
+  const { showToast } = useToast();
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'active'; // 'active' or 'archived'
   const [archivingId, setArchivingId] = useState(null);
@@ -52,10 +55,6 @@ const NotificationsPage = () => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
-  
-  // Toast state
-  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
-  const showToast = (message, variant = 'success') => setToast({ show: true, message, variant });
 
   const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
@@ -388,14 +387,7 @@ const NotificationsPage = () => {
             border: 1px solid var(--primary-color) !important;
             opacity: 1;
           }
-          .custom-toast {
-            min-width: 240px; 
-            background: #0f172a !important; /* Deep Slate 900 */
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(var(--primary-rgb), 0.2) !important;
-            border-left: 4px solid var(--primary-color) !important;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4) !important;
-          }
+
           .icon-box {
             background-color: #f1f5f9 !important;
             border: 1px solid var(--border-color) !important;
@@ -575,23 +567,6 @@ const NotificationsPage = () => {
         </>
       )}
 
-      {/* Toasts */}
-      <ToastContainer position="bottom-end" className="p-3" style={{ position: 'fixed', zIndex: 1060 }}>
-        <Toast 
-          show={toast.show} 
-          onClose={() => setToast({ ...toast, show: false })} 
-          delay={3000} 
-          autohide
-          className="custom-toast"
-        >
-          <Toast.Body className="d-flex align-items-center gap-3 py-3 px-3 text-white">
-            <div className="d-flex align-items-center" style={{ color: 'var(--primary-color)' }}>
-              {toast.variant === 'danger' ? <BellOff size={18} className="text-danger" /> : <CheckCheck size={18} />}
-            </div>
-            <span className="fw-medium small" style={{ color: '#fff' }}>{toast.message}</span>
-          </Toast.Body>
-        </Toast>
-      </ToastContainer>
     </Container>
   );
 };

@@ -39,7 +39,6 @@ const applyFormatting = (text, offset = 0) => {
       loops++;
       if (loops > 100) {
         console.log("INFINITE LOOP DETECTED in while(depth > 0)");
-        // eslint-disable-next-line no-undef
         process.exit(1);
       }
       const nextMatch = tagPattern.exec(text);

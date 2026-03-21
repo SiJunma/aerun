@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
+import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import { 
@@ -18,9 +18,12 @@ import {
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import { useToast } from '../contexts/ToastProvider';
+
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
   const { hasPermission, roles } = useAuth();
+  const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
@@ -46,8 +49,6 @@ const AdminPage = () => {
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState({ role_id: '' });
-
-  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
 
 
   // Confirm Modal State
@@ -140,10 +141,10 @@ const AdminPage = () => {
     setSaving(true);
     try {
       await updateGlobalSettings(settings);
-      setToast({ show: true, message: t('admin.settings.success'), variant: 'success' });
+      showToast(t('admin.settings.success'), 'success');
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: t('admin.settings.error'), variant: 'danger' });
+      showToast(t('admin.settings.error'), 'danger');
     } finally {
       setSaving(false);
     }
@@ -207,11 +208,11 @@ const AdminPage = () => {
       } else {
         await addCategory(catForm);
       }
-      setToast({ show: true, message: t('admin.categories.toast_saved'), variant: 'success' });
+      showToast(t('admin.categories.toast_saved'), 'success');
       setShowCatModal(false);
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: t('admin.categories.error_save'), variant: 'danger' });
+      showToast(t('admin.categories.error_save'), 'danger');
     } finally {
       setSaving(false);
     }
@@ -225,10 +226,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteCategory(id);
-          setToast({ show: true, message: t('admin.categories.toast_deleted'), variant: 'success' });
+          showToast(t('admin.categories.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: t('admin.categories.error_delete'), variant: 'danger' });
+          showToast(t('admin.categories.error_delete'), 'danger');
         }
       }
     });
@@ -242,10 +243,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await rejectUser(uid);
-          setToast({ show: true, message: t('admin.users.toast_rejected'), variant: 'success' });
+          showToast(t('admin.users.toast_rejected'), 'success');
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: t('admin.users.error_reject'), variant: 'danger' });
+          showToast(t('admin.users.error_reject'), 'danger');
         }
       }
     });
@@ -254,10 +255,10 @@ const AdminPage = () => {
   const handleApproveUser = async (uid) => {
     try {
       await approveUser(uid);
-      setToast({ show: true, message: t('admin.users.toast_approved'), variant: 'success' });
+      showToast(t('admin.users.toast_approved'), 'success');
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: t('admin.users.error_approve'), variant: 'danger' });
+      showToast(t('admin.users.error_approve'), 'danger');
     }
   };
 
@@ -269,10 +270,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await banUser(uid);
-          setToast({ show: true, message: t('admin.users.toast_banned'), variant: 'success' });
+          showToast(t('admin.users.toast_banned'), 'success');
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: t('admin.users.error_ban'), variant: 'danger' });
+          showToast(t('admin.users.error_ban'), 'danger');
         }
       }
     });
@@ -286,10 +287,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteUser(uid);
-          setToast({ show: true, message: t('admin.users.toast_deleted'), variant: 'success' });
+          showToast(t('admin.users.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: t('admin.users.error_delete'), variant: 'danger' });
+          showToast(t('admin.users.error_delete'), 'danger');
         }
       }
     });
@@ -306,11 +307,11 @@ const AdminPage = () => {
     setSaving(true);
     try {
       await updateUserRole(editingUser.id, userForm.role_id);
-      setToast({ show: true, message: t('admin.users.toast_role_updated'), variant: 'success' });
+      showToast(t('admin.users.toast_role_updated'), 'success');
       setShowUserModal(false);
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: t('admin.users.error_role_update'), variant: 'danger' });
+      showToast(t('admin.users.error_role_update'), 'danger');
     } finally {
       setSaving(false);
     }
@@ -347,11 +348,11 @@ const AdminPage = () => {
       } else {
         await addRole(roleForm);
       }
-      setToast({ show: true, message: t('admin.roles.toast_saved'), variant: 'success' });
+      showToast(t('admin.roles.toast_saved'), 'success');
       setShowRoleModal(false);
     } catch (err) {
       console.error(err);
-      setToast({ show: true, message: 'Error', variant: 'danger' });
+      showToast('Error', 'danger');
     } finally {
       setSaving(false);
     }
@@ -365,10 +366,10 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteRole(id, isSystem);
-          setToast({ show: true, message: t('admin.roles.toast_deleted'), variant: 'success' });
+          showToast(t('admin.roles.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
-          setToast({ show: true, message: t('admin.roles.error_delete'), variant: 'danger' });
+          showToast(t('admin.roles.error_delete'), 'danger');
         }
       }
     });
@@ -1246,21 +1247,6 @@ const AdminPage = () => {
         title={confirmState.title}
         message={confirmState.message}
       />
-
-      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100, position: 'fixed' }}>
-        <Toast
-          bg={toast.variant}
-          show={toast.show}
-          onClose={() => setToast(t => ({ ...t, show: false }))}
-          delay={3500}
-          autohide
-        >
-          <Toast.Body className="d-flex align-items-center gap-2 text-white fw-semibold">
-            <span>{toast.variant === 'success' ? '✓' : '✕'}</span>
-            <span>{toast.message}</span>
-          </Toast.Body>
-        </Toast>
-      </ToastContainer>
     </Container>
   );
 };

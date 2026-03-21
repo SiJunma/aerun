@@ -12,7 +12,7 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
 
   useEffect(() => {
     if (show) {
-      setMode(initialMode);
+      setTimeout(() => setMode(initialMode), 0);
     }
   }, [show, initialMode]);
 

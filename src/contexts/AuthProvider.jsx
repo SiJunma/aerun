@@ -114,7 +114,7 @@ export const AuthProvider = ({ children }) => {
 
   const loggingOutRef = useRef(false);
 
-  const logout = async (skipPresenceCleanup = false) => {
+  const logout = useCallback(async (skipPresenceCleanup = false) => {
     if (loggingOutRef.current) return;
     loggingOutRef.current = true;
 
@@ -141,7 +141,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       loggingOutRef.current = false;
     }
-  };
+  }, [user?.uid, getOrCreateGuestId]);
 
   const updateSettings = async (newSettings) => {
     if (!user) return;
@@ -545,7 +545,7 @@ export const AuthProvider = ({ children }) => {
         logout();
       }
     }
-  }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, PERMISSIONS.ADMIN_ACCESS, logout]);
+  }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout]);
 
   const value = {
     user,

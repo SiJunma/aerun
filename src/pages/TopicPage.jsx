@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Pagination, Toast, ToastContainer, Dropdown } from 'react-bootstrap';
+import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Pagination, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, subscribeToTopicDraft, deleteDraftPost } from '../api/forum';
@@ -21,6 +21,7 @@ import ForumAuthorAvatar from '../components/common/ForumAuthorAvatar';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import Skeleton from '../components/common/Skeleton';
+import { useToast } from '../contexts/ToastProvider';
 
 
 const TopicPage = () => {
@@ -29,6 +30,7 @@ const TopicPage = () => {
   const { hash } = useLocation();
   const { t, lang } = useI18n();
   const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, PERMISSIONS, settings } = useAuth();
+  const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
@@ -195,11 +197,7 @@ const TopicPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts.length > 0 ? [...new Set(posts.filter(p => p.is_character).map(p => p.author_character_id))].join(',') : '']);
 
-  // Toast notification
-  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
-  const showToast = (message, variant = 'success') => {
-    setToast({ show: true, message, variant });
-  };
+
 
   // Scroll to last post if ?goLast=1, or specific post if #post-ID
   const lastTargetRef = useRef('');
@@ -1644,20 +1642,6 @@ const TopicPage = () => {
         )}
       </ForumModal>
 
-      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100, position: 'fixed' }}>
-        <Toast
-          bg={toast.variant}
-          show={toast.show}
-          onClose={() => setToast(t => ({ ...t, show: false }))}
-          delay={3500}
-          autohide
-        >
-          <Toast.Body className="d-flex align-items-center gap-2 text-white fw-semibold">
-            <span>{toast.variant === 'success' ? '✓' : '✕'}</span>
-            <span>{toast.message}</span>
-          </Toast.Body>
-        </Toast>
-      </ToastContainer>
     </Container>
   );
 };

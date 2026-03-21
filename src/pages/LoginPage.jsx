@@ -6,7 +6,7 @@ import LoginForm from '../components/auth/LoginForm';
 import { useI18n } from '../contexts/I18nProvider';
 
 const LoginPage = () => {
-  const { user, profile, loading, settings, hasPermission, PERMISSIONS } = useAuth();
+  const { user, profile, settings, hasPermission, PERMISSIONS } = useAuth();
   const { t } = useI18n();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';

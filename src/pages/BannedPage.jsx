@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
 const BannedPage = () => {
-  const { logout, settings } = useAuth();
+  const { logout } = useAuth();
   const { translations } = useI18n();
 
   // Force English for this page as requested

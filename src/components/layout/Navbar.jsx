@@ -42,7 +42,7 @@ const Navigation = () => {
       unsubUser();
       unsubAdmin();
     };
-  }, [isAdmin, user?.uid]);
+  }, [isAdmin, user?.uid, profile?.status]);
 
   const totalUnread = adminUnread + userUnread;
 

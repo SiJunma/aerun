@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table, Button, Badge, Row, Col, Form, Toast, ToastContainer } from 'react-bootstrap';
+import { Container, Card, Table, Button, Badge, Row, Col, Form } from 'react-bootstrap';
 import { Trash2, Move, Settings, CheckSquare, XSquare, Pin, Lock, PlusCircle, Search, MessageSquare, Clock, Filter, FolderInput, Unlock, CheckCircle } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -18,11 +18,13 @@ import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
+import { useToast } from '../contexts/ToastProvider';
 
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
   const { user, hasPermission, PERMISSIONS } = useAuth();
+  const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -33,7 +35,6 @@ const CategoryPage = () => {
   const [selectedTopicIds, setSelectedTopicIds] = useState([]);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
 
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
@@ -94,15 +95,11 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await batchUpdateTopics(selectedTopicIds, { is_pinned: pinned });
-      setToast({
-        show: true,
-        message: lang === 'ru' 
+      showToast(lang === 'ru' 
           ? (pinned ? 'Темы закреплены' : 'Темы откреплены') 
-          : (pinned ? 'Topics pinned' : 'Topics unpinned'),
-        variant: 'success'
-      });
+          : (pinned ? 'Topics pinned' : 'Topics unpinned'), 'success');
     } catch (error) {
-      setToast({ show: true, message: error.message, variant: 'danger' });
+      showToast(error.message, 'danger');
     }
   };
 
@@ -110,15 +107,11 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await batchUpdateTopics(selectedTopicIds, { is_locked: locked });
-      setToast({
-        show: true,
-        message: lang === 'ru' 
+      showToast(lang === 'ru' 
           ? (locked ? 'Темы закрыты' : 'Темы открыты') 
-          : (locked ? 'Topics locked' : 'Topics unlocked'),
-        variant: 'success'
-      });
+          : (locked ? 'Topics locked' : 'Topics unlocked'), 'success');
     } catch (error) {
-      setToast({ show: true, message: error.message, variant: 'danger' });
+      showToast(error.message, 'danger');
     }
   };
 
@@ -126,14 +119,10 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await deleteTopics(selectedTopicIds);
-      setToast({
-        show: true,
-        message: lang === 'ru' ? 'Темы удалены' : 'Topics deleted',
-        variant: 'success'
-      });
+      showToast(lang === 'ru' ? 'Темы удалены' : 'Topics deleted', 'success');
       setSelectedTopicIds([]);
     } catch (error) {
-      setToast({ show: true, message: error.message, variant: 'danger' });
+      showToast(error.message, 'danger');
     }
   };
 
@@ -141,15 +130,11 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await moveTopics(selectedTopicIds, targetCatId);
-      setToast({
-        show: true,
-        message: lang === 'ru' ? 'Темы перенесены' : 'Topics moved',
-        variant: 'success'
-      });
+      showToast(lang === 'ru' ? 'Темы перенесены' : 'Topics moved', 'success');
       setSelectedTopicIds([]);
       setIsManaging(false);
     } catch (error) {
-      setToast({ show: true, message: error.message, variant: 'danger' });
+      showToast(error.message, 'danger');
     }
   };
   if (!loading && category && !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) {
@@ -363,20 +348,7 @@ const CategoryPage = () => {
         </Link>
       </div>
 
-      <ToastContainer position="bottom-end" className="p-3" style={{ zIndex: 1100, position: 'fixed' }}>
-        <Toast
-          bg={toast.variant}
-          show={toast.show}
-          onClose={() => setToast(t => ({ ...t, show: false }))}
-          delay={3500}
-          autohide
-        >
-          <Toast.Body className="d-flex align-items-center gap-2 text-white fw-semibold">
-            <span>{toast.variant === 'success' ? '✓' : '✕'}</span>
-            <span>{toast.message}</span>
-          </Toast.Body>
-        </Toast>
-      </ToastContainer>
+
     </Container>
   );
 };

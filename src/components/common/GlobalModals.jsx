@@ -15,7 +15,7 @@ const GlobalModals = () => {
 
     if (isMaintenanceRedirect) {
       if (!isAdmin) {
-        setShowMaintenanceModal(true);
+        setTimeout(() => setShowMaintenanceModal(true), 0);
       }
       // Always remove the flag once it's been checked for maintenance
       sessionStorage.removeItem('maintenance_logout');
@@ -23,7 +23,7 @@ const GlobalModals = () => {
 
     const isBannedRedirect = sessionStorage.getItem('banned_logout') === 'true';
     if (isBannedRedirect) {
-      setShowBannedModal(true);
+      setTimeout(() => setShowBannedModal(true), 0);
       // We don't remove the banned flag here; it's cleared on onHide,
       // so the modal survives page transitions until manually acknowledged.
     }
