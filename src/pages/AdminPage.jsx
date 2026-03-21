@@ -7,7 +7,7 @@ import {
   updateUserRole, addRole, updateRole, deleteRole 
 } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
-import { PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
+import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
 import { 
@@ -319,7 +319,12 @@ const AdminPage = () => {
   const handleOpenRoleModal = (role = null) => {
     if (role) {
       setEditingRole(role);
-      setRoleForm({ name: role.name, permissions: normalizePermissions(role.permissions || []), color: role.color || 'primary' });
+      setRoleForm({ 
+        name: role.name, 
+        permissions: normalizePermissions(role.permissions || []), 
+        color: role.color || 'primary',
+        base_role_id: role.base_role_id || role.id
+      });
     } else {
       setEditingRole(null);
       const defaultPlayerRole = DEFAULT_ROLES.find(r => r.id === 'player');
@@ -998,14 +1003,21 @@ const AdminPage = () => {
           </Row>
 
           <h6 className="fw-bold mb-3">{t('admin.roles.modal_perms')}</h6>
-          {PERMISSION_GROUPS.map(group => (
+          {PERMISSION_GROUPS.map(group => {
+            const currentBaseRole = roleForm.base_role_id || 'player';
+            const allowedPerms = MAX_ROLE_PERMISSIONS[currentBaseRole] || Object.values(PERMISSIONS);
+            const visiblePerms = group.permissions.filter(p => allowedPerms.includes(p));
+            
+            if (visiblePerms.length === 0) return null;
+
+            return (
             <div key={group.id} className="mb-4">
               <div className="small fw-bold text-uppercase text-primary mb-2 opacity-90 letter-spacing-1" style={{ fontSize: '0.7rem' }}>
                 {group.name[currentLang] || group.name.en}
               </div>
               <div className="modal-section-themed p-3 rounded mb-2">
                 <Row>
-                  {group.permissions.map(permId => {
+                  {visiblePerms.map(permId => {
                     const isChecked = roleForm.permissions.includes(permId);
                     return (
                       <Col md={6} key={permId} className="mb-2">
@@ -1022,7 +1034,7 @@ const AdminPage = () => {
                 </Row>
               </div>
             </div>
-          ))}
+          )})}
         </Form>
       </ForumModal>
 
