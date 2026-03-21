@@ -44,6 +44,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [sending, setSending] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [targetProfile, setTargetProfile] = useState(initialTargetProfile || null);
+  const [messageLimit, setMessageLimit] = useState(50);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -77,18 +78,32 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, targetUid, myUid, targetProfile]);
 
+  // ── Reset state when returning to inbox ──────────────────────────────────
+  useEffect(() => {
+    if (mode === 'inbox') {
+      setActiveChatId(null);
+      setActivePeer(null);
+      setMessages([]);
+    }
+  }, [mode]);
+
   // ── Subscribe to messages when a chat is open ────────────────────────────
   useEffect(() => {
+    setMessageLimit(50);
+  }, [activeChatId]);
+
+  useEffect(() => {
     if (!activeChatId) return;
-    setLoadingChat(true);
-    const unsub = subscribeToDmMessages(activeChatId, (msgs) => {
+    if (messages.length === 0) setLoadingChat(true);
+    const unsub = subscribeToDmMessages(activeChatId, messageLimit, (msgs) => {
       setMessages(msgs);
       setLoadingChat(false);
     });
     // Mark as read when opening
     markDmRead(activeChatId, myUid).catch(() => {});
     return () => unsub();
-  }, [activeChatId, myUid]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChatId, myUid, messageLimit]);
 
   // ── Auto-scroll to bottom ────────────────────────────────────────────────
   useEffect(() => {
@@ -225,7 +240,19 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 <p className="mb-0">{t('dm.empty_chat')}</p>
               </div>
             ) : (
-              <>
+              <div className="d-flex flex-column">
+                {messages.length >= messageLimit && (
+                  <div className="text-center mb-3">
+                    <Button 
+                      variant="link" 
+                      size="sm" 
+                      className="text-muted text-decoration-none" 
+                      onClick={() => setMessageLimit(prev => prev + 50)}
+                    >
+                      {lang === 'ru' ? 'Загрузить предыдущие сообщения' : 'Load previous messages'}
+                    </Button>
+                  </div>
+                )}
                 {messages.map((msg) => {
                   const isMe = msg.sender_uid === myUid;
                   return (
@@ -257,7 +284,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   );
                 })}
                 <div ref={messagesEndRef} />
-              </>
+              </div>
             )}
           </div>
 

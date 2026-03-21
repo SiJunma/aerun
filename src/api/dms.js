@@ -64,13 +64,14 @@ export const subscribeToDmList = (uid, callback) => {
 /**
  * Subscribe to messages in a conversation.
  */
-export const subscribeToDmMessages = (conversationId, callback) => {
+export const subscribeToDmMessages = (conversationId, limitCount, callback) => {
   const q = query(
     collection(db, 'dms', conversationId, 'messages'),
-    orderBy('timestamp', 'asc')
+    orderBy('timestamp', 'desc'),
+    limit(limitCount)
   );
   return onSnapshot(q, (snap) => {
-    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })).reverse());
   }, (err) => console.error('[subscribeToDmMessages]', err));
 };
 
