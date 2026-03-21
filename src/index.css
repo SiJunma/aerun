@@ -2107,4 +2107,9 @@ a.badge.bg-danger:hover {
   background-color: #5c4b3a !important;
   color: #fffcf5 !important;
 }
+
+/* Toast Dark Mode Color Fix */
+[data-theme='dark'] .global-toast .btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
+}
 
