@@ -960,8 +960,8 @@ const TopicPage = () => {
                         <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
                           {t('profile.view_profile')}
                         </Link>
-                        {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && (
-                          <Link to="#" className="footer-link text-decoration-none px-0" onClick={(e) => e.preventDefault()}>
+                        {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && post.author_id !== user?.uid && (
+                          <Link to={`/messages/${post.author_id}`} className="footer-link text-decoration-none px-0">
                             {t('profile.pm')}
                           </Link>
                         )}

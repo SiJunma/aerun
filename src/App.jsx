@@ -17,6 +17,7 @@ import MaintenancePage from './pages/MaintenancePage';
 import NotificationsPage from './pages/NotificationsPage';
 import ActiveTopicsPage from './pages/ActiveTopicsPage';
 import NewRepliesPage from './pages/NewRepliesPage';
+import MessagesPage from './pages/MessagesPage';
 import { useAuth } from './contexts/AuthProvider';
 import GlobalModals from './components/common/GlobalModals';
 
@@ -55,6 +56,8 @@ const App = () => {
         <Route path="/members" element={<ProtectedRoute allowGuest><Layout><MembersPage /></Layout></ProtectedRoute>} />
         <Route path="/profile/:uid" element={<ProtectedRoute allowGuest><Layout><ProfilePage /></Layout></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
+        <Route path="/messages" element={<ProtectedRoute><Layout><MessagesPage /></Layout></ProtectedRoute>} />
+        <Route path="/messages/:uid" element={<ProtectedRoute><Layout><MessagesPage /></Layout></ProtectedRoute>} />
         <Route path="/active-topics" element={<ProtectedRoute allowGuest><Layout><ActiveTopicsPage /></Layout></ProtectedRoute>} />
         <Route path="/new-replies" element={<ProtectedRoute><Layout><NewRepliesPage /></Layout></ProtectedRoute>} />
 

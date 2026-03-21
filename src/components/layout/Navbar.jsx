@@ -3,8 +3,9 @@ import { Navbar, Nav, Container, NavDropdown, Image, Badge, Button } from 'react
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
-import { Bell, User, LogOut } from 'lucide-react';
+import { Bell, User, LogOut, MessageCircle } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
+import { subscribeToDmList } from '../../api/dms';
 import AuthModal from '../modals/AuthModal';
 
 const Navigation = () => {
@@ -13,6 +14,7 @@ const Navigation = () => {
   const navigate = useNavigate();
   const [adminUnread, setAdminUnread] = React.useState(0);
   const [userUnread, setUserUnread] = React.useState(0);
+  const [dmUnread, setDmUnread] = React.useState(0);
   const [expanded, setExpanded] = React.useState(false);
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [authModalMode, setAuthModalMode] = React.useState('login');
@@ -43,6 +45,16 @@ const Navigation = () => {
       unsubAdmin();
     };
   }, [isAdmin, user?.uid, profile?.status]);
+
+  // Subscribe to DM unread count
+  React.useEffect(() => {
+    if (!user?.uid || profile?.status !== 'active' || profile?.role_id === 'spectator') return;
+    const unsub = subscribeToDmList(user.uid, (convs) => {
+      const total = convs.reduce((sum, c) => sum + (c.unread?.[user.uid] || 0), 0);
+      setDmUnread(total);
+    });
+    return () => unsub();
+  }, [user?.uid, profile?.status, profile?.role_id]);
 
   const totalUnread = adminUnread + userUnread;
 
@@ -115,6 +127,29 @@ const Navigation = () => {
                   style={{ top: '-4px', right: '-6px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
                 >
                   {totalUnread > 99 ? '99+' : totalUnread}
+                </Badge>
+              )}
+            </Nav.Link>
+          )}
+
+          {/* DM inbox button — not for spectators */}
+          {user && profile?.role_id !== 'spectator' && profile?.status === 'active' && (
+            <Nav.Link
+              as={Link}
+              to="/messages"
+              onClick={() => setExpanded(false)}
+              className="position-relative p-1 d-flex align-items-center text-light opacity-75 hover-opacity-100"
+              title={lang === 'ru' ? 'Личные сообщения' : 'Messages'}
+            >
+              <MessageCircle size={20} />
+              {dmUnread > 0 && (
+                <Badge
+                  bg="danger"
+                  pill
+                  className="position-absolute"
+                  style={{ top: '-4px', right: '-6px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
+                >
+                  {dmUnread > 99 ? '99+' : dmUnread}
                 </Badge>
               )}
             </Nav.Link>

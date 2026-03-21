@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock } from 'lucide-react';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle } from 'lucide-react';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
@@ -18,6 +18,8 @@ import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 
 import { useToast } from '../contexts/ToastProvider';
+import DirectMessages from '../components/dm/DirectMessages';
+
 
 const ProfilePage = () => {
   const { uid } = useParams();
@@ -317,6 +319,22 @@ const ProfilePage = () => {
                 <p className="text-muted small mb-0 text-truncate mx-auto" style={{ maxWidth: '250px' }}>
                   {viewedProfile?.status_line || 'No status set'}
                 </p>
+
+                {/* Send Message Button */}
+                {profile && profile.status !== 'pending' && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && uid !== profile.uid && (
+                  <div className="mt-3">
+                    <Button
+                      as={Link}
+                      to={`/messages/${uid}`}
+                      variant="primary"
+                      className="d-inline-flex align-items-center justify-content-center gap-2"
+                      style={{ borderRadius: '20px', padding: '0.4rem 1.2rem', fontSize: '0.9rem' }}
+                    >
+                      <MessageCircle size={16} />
+                      {lang === 'ru' ? 'Написать сообщение' : 'Send Message'}
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {!isLimitedProfile && (
@@ -598,6 +616,7 @@ const ProfilePage = () => {
                   </Card>
                 </Tab>
               )}
+
 
               {canEditAnyAccount && (
               <Tab eventKey="account" title={t('profile.tab_profile')}>
