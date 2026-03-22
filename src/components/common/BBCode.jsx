@@ -312,13 +312,13 @@ const BBCode = ({ children, rolls = {} }) => {
             key={index} 
             className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" 
             style={{ 
-              backgroundColor: 'var(--block-bg)', 
-              border: '1px solid var(--border-color)' 
+              backgroundColor: 'var(--input-bg)', 
+              border: '1px solid var(--input-border)' 
             }}
           >
             <div className="d-flex align-items-center gap-2">
               <Dices size={18} style={{ color: 'var(--secondary-color)' }} />
-              <div className="small fw-bold" style={{ color: 'var(--text-color)' }}>
+              <div className="small fw-bold" style={{ color: 'var(--input-text)' }}>
                 {lang === 'ru' ? `Бросок d${sides} (в ожидании...)` : `d${sides} Roll (pending...)`}
               </div>
             </div>
@@ -340,10 +340,10 @@ const BBCode = ({ children, rolls = {} }) => {
 
         if (!canSee) {
           return (
-            <div key={index} className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" style={{ backgroundColor: 'var(--block-bg)', border: '1px solid var(--border-color)' }}>
+            <div key={index} className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" style={{ backgroundColor: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
               <div className="d-flex align-items-center gap-2">
                 <EyeOff size={18} style={{ color: 'var(--secondary-color)' }} />
-                <div className="small fw-bold" style={{ color: 'var(--text-color)', opacity: 0.8 }}>
+                <div className="small fw-bold" style={{ color: 'var(--input-text)', opacity: 0.8 }}>
                   {lang === 'ru' ? 'Мастерский бросок (скрыто)' : 'Master Roll (hidden)'}
                 </div>
               </div>
@@ -356,14 +356,14 @@ const BBCode = ({ children, rolls = {} }) => {
             key={index} 
             className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" 
             style={{ 
-              backgroundColor: 'var(--block-bg)', 
-              border: '1px solid var(--border-color)'
+              backgroundColor: 'var(--input-bg)', 
+              border: '1px solid var(--input-border)'
             }}
           >
             <div className="d-flex align-items-center gap-2">
               <Dices size={18} style={{ color: isMaster ? 'var(--primary-color)' : 'var(--secondary-color)' }} />
               <div className="d-flex flex-column" style={{ lineHeight: 1.2 }}>
-                <span className="fw-bold" style={{ color: 'var(--text-color)', fontSize: '1.1rem' }}>
+                <span className="fw-bold" style={{ color: 'var(--input-text)', fontSize: '1.1rem' }}>
                   {roll.value}
                 </span>
                 <span style={{ fontSize: '0.7rem', color: 'var(--secondary-color)' }}>
