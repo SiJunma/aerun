@@ -500,6 +500,7 @@ label.fw-bold {
 .author-sidebar {
   background-color: #f8f9fa !important;
   color: #212529 !important;
+  border-right: 1px solid var(--border-color) !important;
 }
 
 [data-theme='dark'] .author-sidebar {
@@ -510,7 +511,7 @@ label.fw-bold {
 }
 
 [data-theme='neutral'] .author-sidebar {
-  background-color: #f4f1ea !important;
+  background-color: #faf5ec !important;
   color: #433422 !important;
   border-color: #dcd7c9 !important;
 }
@@ -706,18 +707,6 @@ label.fw-bold {
   scroll-margin-top: 80px;
 }
 
-.author-sidebar {
-  background-color: var(--footer-bg) !important;
-  border-right: 1px solid var(--border-color) !important;
-}
-
-[data-theme='dark'] .author-sidebar {
-  background-color: #243042 !important; /* Slightly lighter than card-bg for contrast */
-}
-
-[data-theme='neutral'] .author-sidebar {
-  background-color: #ede9df !important; /* Slightly darker than card-bg for contrast */
-}
 
 .post-content {
   line-height: 1.6;
@@ -886,6 +875,34 @@ label.fw-bold {
   flex: 1 1 100% !important;
   max-width: 100% !important;
 }
+
+/* BBCode Spoiler */
+.bbcode-spoiler {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card-bg);
+  color: var(--text-color);
+}
+
+.bbcode-spoiler-header {
+  padding: 8px 12px;
+  background: rgba(var(--primary-rgb), 0.05);
+  transition: background 0.2s ease;
+  user-select: none;
+  color: var(--text-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bbcode-spoiler-header:hover {
+  background: rgba(var(--primary-rgb), 0.1);
+}
+
+.bbcode-spoiler-content {
+  background: var(--card-bg);
+}
+
+
 
 /* Admin Styling */
 .nav-tabs .nav-link {
@@ -1887,13 +1904,13 @@ a.badge.bg-danger:hover {
 
 /* Dice Box */
 .bbcode-dice {
-  background-color: var(--block-bg) !important;
-  border: 1px solid var(--border-color) !important;
-  color: var(--text-color) !important;
+  background-color: var(--block-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
 }
 
 [data-theme='dark'] .bbcode-dice {
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 

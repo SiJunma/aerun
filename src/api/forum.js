@@ -19,9 +19,10 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { getTopicSubscribers } from './subscriptions';
-import { 
-  createNotification, 
-  getUnreadTopicNotification, 
+import { processDiceRolls } from '../utils/dice';
+import {
+  createNotification,
+  getUnreadTopicNotification,
   updateNotificationPayload,
   handleTopicDeletionNotifications,
   handlePostDeletionNotifications
@@ -150,8 +151,8 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
       if (snapshot.empty) { callback(null); return; }
       const topics = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       topics.sort((a, b) => {
-        const aTime = a.last_post_at?.toMillis?.() ?? a.created_at?.toMillis?.() ?? 0;
-        const bTime = b.last_post_at?.toMillis?.() ?? b.created_at?.toMillis?.() ?? 0;
+        const aTime = a.last_post_at?.toMillis?.() ?? 0;
+        const bTime = b.last_post_at?.toMillis?.() ?? 0;
         return bTime - aTime;
       });
       callback(topics[0]);
@@ -183,8 +184,12 @@ export const createTopic = async (topicData, firstPostData) => {
       posts_count: 1
     });
 
+    const { content: processedContent, rolls } = processDiceRolls(firstPostData.content);
+
     transaction.set(postRef, {
       ...firstPostData,
+      content: processedContent,
+      rolls,
       topic_id: topicRef.id,
       reputation: 0,
       created_at: serverTimestamp()
@@ -267,8 +272,12 @@ export const createPost = async (postData) => {
     const topicSnap = await transaction.get(topicRef);
     const categoryId = topicSnap.exists() ? topicSnap.data().category_id : null;
 
+    const { content: processedContent, rolls } = processDiceRolls(postData.content);
+
     transaction.set(postRef, {
       ...postData,
+      content: processedContent,
+      rolls,
       reputation: 0,
       created_at: serverTimestamp()
     });
@@ -406,9 +415,13 @@ export const publishDraft = async (uid, topicId) => {
 
     const userRef = doc(db, 'users', postData.author_id);
 
+    const { content: processedContent, rolls } = processDiceRolls(postData.content);
+
     // 1. Create the real post from draft data
     transaction.set(postRef, {
       ...postData,
+      content: processedContent,
+      rolls,
       is_draft: false,
       edited_at: null,
       created_at: serverTimestamp()

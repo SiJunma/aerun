@@ -72,7 +72,7 @@ const ProfilePage = () => {
   const [categories, setCategories] = useState([]);
   const [logTopicsInfo, setLogTopicsInfo] = useState({});
   const [userPosts, setUserPosts] = useState([]);
-  const [userPostsLimit, setUserPostsLimit] = useState(100); // Fetch more for pagination
+  const [userPostsLimit] = useState(100); // Fetch more for pagination
   const [currentPagePosts, setCurrentPagePosts] = useState(1);
   const [loadingUserPosts, setLoadingUserPosts] = useState(false);
   const POSTS_PER_PAGE = 10;
@@ -689,7 +689,7 @@ const ProfilePage = () => {
                                 )}
                               </div>
                               <div className="post-preview text-muted small text-break line-clamp-4">
-                                <BBCode>{post.content}</BBCode>
+                                <BBCode rolls={post.rolls}>{post.content}</BBCode>
                               </div>
                             </div>
                           );

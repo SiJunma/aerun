@@ -12,7 +12,11 @@ import RichEditor from '../components/common/RichEditor';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
-import { Award, Pin, Lock, Trash2, Settings, MessageSquareOff, Bell, BellOff, ArrowRightLeft, Send, FilePen, User } from 'lucide-react';
+import {
+  Award, Pin, Lock, Settings, Trash2, ArrowRightLeft, Bell, BellOff, MessageSquare, Send,
+  Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
+  Dices, User, FilePen, MessageSquareOff
+} from 'lucide-react';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
@@ -814,96 +818,94 @@ const TopicPage = () => {
           </div>
 
           {/* Actions & Pagination Group (Right Side) */}
-          <div className="d-flex flex-column align-items-md-end align-items-center gap-2">
-            <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
-              {/* Admin Management Dropdown */}
-              {(hasPermission(PERMISSIONS.MODERATE_CONTENT) || 
-               hasPermission(PERMISSIONS.PIN_TOPICS) || 
-               hasPermission(PERMISSIONS.CLOSE_TOPICS) || 
-               hasPermission(PERMISSIONS.MOVE_TOPICS)) && (
-                <Dropdown>
-                  <Dropdown.Toggle 
-                    variant="link" 
-                    size="sm" 
-                    id="admin-topic-controls"
-                    className="topic-manage-link d-flex align-items-center gap-1 text-decoration-none"
+          <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
+            {/* Admin Management Dropdown */}
+            {(hasPermission(PERMISSIONS.MODERATE_CONTENT) || 
+             hasPermission(PERMISSIONS.PIN_TOPICS) || 
+             hasPermission(PERMISSIONS.CLOSE_TOPICS) || 
+             hasPermission(PERMISSIONS.MOVE_TOPICS)) && (
+              <Dropdown>
+                <Dropdown.Toggle 
+                  variant="link" 
+                  size="sm" 
+                  id="admin-topic-controls"
+                  className="topic-manage-link d-flex align-items-center gap-1 text-decoration-none"
+                >
+                  <Settings size={14} />
+                  <span>{t('forum.manage_topic')}</span>
+                </Dropdown.Toggle>
+
+                <Dropdown.Menu className="shadow-sm border-0">
+                  {hasPermission(PERMISSIONS.PIN_TOPICS) && (
+                  <Dropdown.Item 
+                    onClick={async () => {
+                      try {
+                        await updateTopic(id, { is_pinned: !topic.is_pinned });
+                        showToast(lang === 'ru' 
+                          ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
+                          : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
+                        );
+                      } catch (error) {
+                        showToast(error.message, 'danger');
+                      }
+                    }}
+                    className="d-flex align-items-center gap-2"
                   >
-                    <Settings size={14} />
-                    <span>{t('forum.manage_topic')}</span>
-                  </Dropdown.Toggle>
+                    <Pin size={14} />
+                    {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
+                  </Dropdown.Item>
+                  )}
+                  {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
+                  <Dropdown.Item 
+                    onClick={async () => {
+                      try {
+                        await updateTopic(id, { is_locked: !topic.is_locked });
+                        showToast(lang === 'ru' 
+                          ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
+                          : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
+                        );
+                      } catch (error) {
+                        showToast(error.message, 'danger');
+                      }
+                    }}
+                    className="d-flex align-items-center gap-2"
+                  >
+                    <Lock size={14} />
+                    {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
+                  </Dropdown.Item>
+                  )}
+                  {hasPermission(PERMISSIONS.MOVE_TOPICS) && (
+                  <Dropdown.Item 
+                    onClick={() => setShowMoveModal(true)}
+                    className="d-flex align-items-center gap-2"
+                  >
+                    <ArrowRightLeft size={14} />
+                    {t('forum.move_topic')}
+                  </Dropdown.Item>
+                  )}
+                  {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
+                  <>
+                  <Dropdown.Divider />
+                  <Dropdown.Item 
+                    onClick={() => setShowDeleteTopicModal(true)}
+                    className="d-flex align-items-center gap-2 text-danger"
+                  >
+                    <Trash2 size={14} />
+                    {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
+                  </Dropdown.Item>
+                  </>
+                  )}
+                </Dropdown.Menu>
+              </Dropdown>
+            )}
 
-                  <Dropdown.Menu className="shadow-sm border-0">
-                    {hasPermission(PERMISSIONS.PIN_TOPICS) && (
-                    <Dropdown.Item 
-                      onClick={async () => {
-                        try {
-                          await updateTopic(id, { is_pinned: !topic.is_pinned });
-                          showToast(lang === 'ru' 
-                            ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
-                            : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
-                          );
-                        } catch (error) {
-                          showToast(error.message, 'danger');
-                        }
-                      }}
-                      className="d-flex align-items-center gap-2"
-                    >
-                      <Pin size={14} />
-                      {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
-                    </Dropdown.Item>
-                    )}
-                    {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
-                    <Dropdown.Item 
-                      onClick={async () => {
-                        try {
-                          await updateTopic(id, { is_locked: !topic.is_locked });
-                          showToast(lang === 'ru' 
-                            ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
-                            : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
-                          );
-                        } catch (error) {
-                          showToast(error.message, 'danger');
-                        }
-                      }}
-                      className="d-flex align-items-center gap-2"
-                    >
-                      <Lock size={14} />
-                      {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
-                    </Dropdown.Item>
-                    )}
-                    {hasPermission(PERMISSIONS.MOVE_TOPICS) && (
-                    <Dropdown.Item 
-                      onClick={() => setShowMoveModal(true)}
-                      className="d-flex align-items-center gap-2"
-                    >
-                      <ArrowRightLeft size={14} />
-                      {t('forum.move_topic')}
-                    </Dropdown.Item>
-                    )}
-                    {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
-                    <>
-                    <Dropdown.Divider />
-                    <Dropdown.Item 
-                      onClick={() => setShowDeleteTopicModal(true)}
-                      className="d-flex align-items-center gap-2 text-danger"
-                    >
-                      <Trash2 size={14} />
-                      {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
-                    </Dropdown.Item>
-                    </>
-                    )}
-                  </Dropdown.Menu>
-                </Dropdown>
-              )}
-
-              {totalPages > 1 && (
-                <ForumPagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={handlePageChange}
-                />
-              )}
-            </div>
+            {totalPages > 1 && (
+              <ForumPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1066,7 +1068,8 @@ const TopicPage = () => {
                               rows={6}
                               maxLength={MAX_CHARS}
                               autoFocus={true}
-                              showDice={hasPermission(PERMISSIONS.USE_DICE)}
+                              showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
+                              isEdit={true}
                             />
                           </div>
                           <div className="d-flex gap-2">
@@ -1080,7 +1083,13 @@ const TopicPage = () => {
                         </div>
                       ) : (
                         <div className="post-content">
-                          <BBCode>{post.content}</BBCode>
+                          <BBCode rolls={post.rolls}>{post.content}</BBCode>
+                          {post.rolls && Object.keys(post.rolls).length > 0 && (
+                            <div className="mt-2 small d-flex align-items-center gap-1" style={{ color: 'var(--secondary-color)' }}>
+                              <Dices size={14} />
+                              <span>{lang === 'ru' ? `Всего бросков: ${Object.keys(post.rolls).length}` : `Dice thrown: ${Object.keys(post.rolls).length}`}</span>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1199,7 +1208,19 @@ const TopicPage = () => {
                           onClick={() => {
                             const selectedText = window.getSelection().toString().trim();
                             const author = getLiveAuthorName(post) || 'User';
-                            const content = selectedText || post.content;
+                            let content = selectedText || post.content;
+                            
+                            // Bake roll data into the content for "Static Quoting" permanence
+                            if (post.rolls) {
+                              content = content.replace(/\[roll=([a-z0-9_]+)\]/gi, (match, id) => {
+                                const r = post.rolls[id];
+                                if (r) {
+                                  return `[roll=${id} value=${r.value} sides=${r.sides}${r.type ? ` type=${r.type}` : ''}]`;
+                                }
+                                return match;
+                              });
+                            }
+
                             const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
 
                             // BBCode Quote layout without extra trailing newlines to prevent gaps
@@ -1307,6 +1328,8 @@ const TopicPage = () => {
                             rows={6}
                             maxLength={MAX_CHARS}
                             autoFocus={true}
+                            showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
+                            isEdit={true}
                           />
                         </div>
                         <div className="d-flex gap-2">
@@ -1325,7 +1348,7 @@ const TopicPage = () => {
                       </div>
                     ) : (
                       <div className="post-content">
-                        <BBCode>{myDraft.content}</BBCode>
+                        <BBCode rolls={myDraft.rolls}>{myDraft.content}</BBCode>
                       </div>
                     )}
                     {!editingPostId && getLiveAuthorSignature(myDraft) && (
@@ -1506,6 +1529,8 @@ const TopicPage = () => {
                       placeholder={t('forum.reply_placeholder')}
                       minHeight="150px"
                       maxLength={MAX_CHARS}
+                      showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
+                      isEdit={false}
                     />
                   </Form.Group>
 

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronRight, Dices, EyeOff } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthProvider';
 
 /**
  * BBCode Component
@@ -6,6 +8,32 @@ import React, { useState, useEffect, useRef } from 'react';
  * A highly robust, single-pass stack-based BBCode parser.
  * Handles nested tags, custom parameters, and flexible tag syntax.
  */
+
+const BBCodeSpoiler = ({ title, children }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  return (
+    <div className={`bbcode-spoiler my-2 ${isOpen ? 'is-open' : ''}`}>
+      <div 
+        className="bbcode-spoiler-header d-flex align-items-center justify-content-between gap-2" 
+        onClick={() => setIsOpen(!isOpen)}
+        style={{ cursor: 'pointer' }}
+      >
+        <span className="spoiler-title fw-bold small">
+          {title || (localStorage.getItem('i18nextLng') === 'ru' ? 'Спойлер' : 'Spoiler')}
+        </span>
+        <span className="spoiler-icon opacity-50">
+          {isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+        </span>
+      </div>
+      {isOpen && (
+        <div className="bbcode-spoiler-content p-2">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ColumnsStacker = ({ children, stackAt }) => {
   const [isStacked, setIsStacked] = useState(false);
@@ -47,7 +75,8 @@ const ColumnsStacker = ({ children, stackAt }) => {
   );
 };
 
-const BBCode = ({ children }) => {
+const BBCode = ({ children, rolls = {} }) => {
+  const { hasPermission, PERMISSIONS, lang } = useAuth() || {};
   if (typeof children !== 'string') return children;
 
   // 1. Tokenize the text into text chunks and tags
@@ -76,7 +105,7 @@ const BBCode = ({ children }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -118,13 +147,16 @@ const BBCode = ({ children }) => {
         }
         const newNode = { type: 'tag', name: token.name, rawParams: token.rawParams, children: [] };
         parent.children.push(newNode);
-        stack.push(newNode);
+        // Dice and Roll are self-closing tags (they don't have [/dice] or [/roll])
+        if (token.name !== 'dice' && token.name !== 'roll') {
+          stack.push(newNode);
+        }
       }
     }
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col'];
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
@@ -180,7 +212,11 @@ const BBCode = ({ children }) => {
     const params = {};
     if (rawParams) {
       if (!rawParams.includes('=')) {
-        params.default = rawParams;
+        let val = rawParams;
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.substring(1, val.length - 1);
+        }
+        params.default = val;
       } else {
         const parts = rawParams.split(/\s+(?=[a-zA-Z]+\s*=)/); 
         parts.forEach(p => {
@@ -193,7 +229,11 @@ const BBCode = ({ children }) => {
             }
             params[k.toLowerCase()] = val;
           } else if (!params.default) {
-            params.default = trimmed;
+            let val = trimmed;
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+              val = val.substring(1, val.length - 1);
+            }
+            params.default = val;
           }
         });
       }
@@ -266,16 +306,77 @@ const BBCode = ({ children }) => {
         return <div key={index} className="bbcode-col" style={colStyle}>{content}</div>;
       }
       case 'dice': {
+        const sides = params.default || '20';
         return (
-          <div key={index} className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm">
+          <div 
+            key={index} 
+            className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" 
+            style={{ 
+              backgroundColor: 'var(--block-bg)', 
+              border: '1px solid var(--border-color)' 
+            }}
+          >
             <div className="d-flex align-items-center gap-2">
-              <span className="dice-icon fs-5">🎲</span>
-              <div className="dice-result fw-bold text-primary">
-                {content.length > 0 ? content : '?'}
+              <Dices size={18} style={{ color: 'var(--secondary-color)' }} />
+              <div className="small fw-bold" style={{ color: 'var(--text-color)' }}>
+                {lang === 'ru' ? `Бросок d${sides} (в ожидании...)` : `d${sides} Roll (pending...)`}
               </div>
             </div>
           </div>
         );
+      }
+      case 'roll': {
+        const rollId = params.default;
+        // Use baked-in values if available (for quotes/permanence if original post is deleted)
+        const roll = rolls[rollId] || (params.value ? {
+          value: params.value,
+          sides: params.sides,
+          type: params.type
+        } : null);
+        if (!roll) return <span key={index}>[roll={rollId}]</span>;
+
+        const isMaster = roll.type === 'master';
+        const canSee = !isMaster || (hasPermission && hasPermission(PERMISSIONS.VIEW_MASTER_DICE));
+
+        if (!canSee) {
+          return (
+            <div key={index} className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" style={{ backgroundColor: 'var(--block-bg)', border: '1px solid var(--border-color)' }}>
+              <div className="d-flex align-items-center gap-2">
+                <EyeOff size={18} style={{ color: 'var(--secondary-color)' }} />
+                <div className="small fw-bold" style={{ color: 'var(--text-color)', opacity: 0.8 }}>
+                  {lang === 'ru' ? 'Мастерский бросок (скрыто)' : 'Master Roll (hidden)'}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div 
+            key={index} 
+            className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" 
+            style={{ 
+              backgroundColor: 'var(--block-bg)', 
+              border: '1px solid var(--border-color)'
+            }}
+          >
+            <div className="d-flex align-items-center gap-2">
+              <Dices size={18} style={{ color: isMaster ? 'var(--primary-color)' : 'var(--secondary-color)' }} />
+              <div className="d-flex flex-column" style={{ lineHeight: 1.2 }}>
+                <span className="fw-bold" style={{ color: 'var(--text-color)', fontSize: '1.1rem' }}>
+                  {roll.value}
+                </span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--secondary-color)' }}>
+                  {lang === 'ru' ? `из ${roll.sides}` : `of ${roll.sides}`}
+                  {isMaster && (lang === 'ru' ? ' • Мастерский' : ' • Master')}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      case 'spoiler': {
+        return <BBCodeSpoiler key={index} title={params.default}>{content}</BBCodeSpoiler>;
       }
       default: return <span key={index}>{content}</span>;
     }

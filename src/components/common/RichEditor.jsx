@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Form, Dropdown } from 'react-bootstrap';
 import ForumModal from './ForumModal';
-import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, Type, Columns, Dices } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 
-const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false }) => {
+const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false }) => {
   const { lang } = useI18n();
   const textareaRef = useRef(null);
 
@@ -13,6 +13,8 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
   const [showImageModal, setShowImageModal] = useState(false);
   const [linkData, setLinkData] = useState({ text: '', url: 'https://' });
   const [imageData, setImageData] = useState({ alt: '', url: 'https://' });
+  const [showDiceModal, setShowDiceModal] = useState(false);
+  const [diceData, setDiceData] = useState({ sides: 6, type: 'normal' });
 
   // Undo/Redo history
   const [history, setHistory] = useState([value]);
@@ -175,6 +177,12 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
       if (start !== 0 && text[start - 1] !== '\n') {
         replacement = '\n' + replacement;
       }
+    } else if (isLink === 'spoiler') {
+      const defaultTitle = lang === 'ru' ? 'Спойлер' : 'Spoiler';
+      replacement = `[spoiler="${defaultTitle}"]${selected || '...'}[/spoiler]`;
+      if (start !== 0 && text[start - 1] !== '\n') {
+        replacement = '\n' + replacement;
+      }
     } else {
       replacement = before + selected + after;
     }
@@ -283,6 +291,41 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
     }, 0);
   };
 
+  const handleDiceSubmit = (e) => {
+    e.preventDefault();
+    const capturedDiceData = { ...diceData };
+    setShowDiceModal(false);
+    
+    setTimeout(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = latestValueRef.current;
+      const currentScrollTop = textarea.scrollTop;
+      
+      const { sides, type } = capturedDiceData;
+      const replacement = `[dice=${sides}${type === 'master' ? ' type=master' : ''}]`;
+      const newValue = text.substring(0, start) + replacement + text.substring(end);
+
+      let newHistory = history.slice(0, historyIndex + 1);
+      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
+      newHistory.push(newValue);
+      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+      lastHistoryPushTime.current = Date.now();
+
+      isInternalUpdate.current = true;
+      onChange({ target: { value: newValue } });
+
+      textarea.focus();
+      const newCursorPos = start + replacement.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      textarea.scrollTop = currentScrollTop;
+    }, 0);
+  };
+
   return (
     <div className="rich-editor-container">
       <div className="d-flex flex-wrap gap-1 mb-2 p-2 rounded editor-toolbar-themed editor-toolbar">
@@ -353,7 +396,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
         {/* Size Selector */}
         <Dropdown className="d-inline-block">
           <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={lang === 'ru' ? 'Размер текста' : 'Text Size'}>
-            <Type size={16} />
+            <ALargeSmall size={19} />
           </Dropdown.Toggle>
           <Dropdown.Menu className="size-picker-menu shadow-sm border-0" style={{ borderRadius: '12px' }}>
             {[
@@ -372,8 +415,9 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
         </Dropdown>
 
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'columns')} title={lang === 'ru' ? 'Колонки' : 'Columns'}><Columns size={16} /></Button>
-        {showDice && (
-          <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[dice]', '[/dice]')} title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}><Dices size={16} /></Button>
+        <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'spoiler')} title={lang === 'ru' ? 'Спойлер' : 'Spoiler'}><Clapperboard size={15} /></Button>
+        {showDice && !isEdit && (
+          <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}><Dices size={16} /></Button>
         )}
 
         <div className="vr mx-1"></div>
@@ -497,6 +541,65 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleImageSubmit(e); } }}
           />
         </Form.Group>
+      </ForumModal>
+
+      {/* Dice Modal */}
+      <ForumModal
+        show={showDiceModal}
+        onHide={() => setShowDiceModal(false)}
+        title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowDiceModal(false)}>
+              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+            </Button>
+            <Button variant="primary" onClick={handleDiceSubmit}>
+              {lang === 'ru' ? 'Бросить' : 'Roll'}
+            </Button>
+          </>
+        }
+      >
+        <div className="alert alert-info py-2" style={{ fontSize: '0.875rem' }}>
+          {lang === 'ru' 
+            ? 'Кубики нельзя менять после публикации. Для нового броска нужно создать новый пост.' 
+            : 'Dice rolls cannot be changed after publication. To roll again, create a new post.'}
+        </div>
+        
+        <Form.Group className="mb-3">
+          <Form.Label>{lang === 'ru' ? 'Выберите кубик' : 'Select dice'}</Form.Label>
+          <Form.Select
+            value={diceData.sides}
+            onChange={e => setDiceData({ ...diceData, sides: parseInt(e.target.value) })}
+            className="form-select-themed"
+          >
+            <option value="4">d4</option>
+            <option value="6">d6</option>
+            <option value="8">d8</option>
+            <option value="10">d10</option>
+            <option value="12">d12</option>
+            <option value="20">d20</option>
+            <option value="100">d100</option>
+          </Form.Select>
+          <Form.Text className="text-muted small mt-1 d-block">
+            {lang === 'ru' 
+              ? 'Выберите тип кубика для броска. Результат будет сгенерирован при публикации.' 
+              : 'Choose the dice type for your roll. The result will be generated upon publication.'}
+          </Form.Text>
+        </Form.Group>
+        
+        {!hideDiceType && (
+          <Form.Group className="mb-3">
+            <Form.Label>{lang === 'ru' ? 'Тип броска' : 'Roll type'}</Form.Label>
+            <Form.Select
+              value={diceData.type}
+              onChange={e => setDiceData({ ...diceData, type: e.target.value })}
+              className="form-select-themed"
+            >
+              <option value="normal">{lang === 'ru' ? 'Обычный (видят все)' : 'Normal (visible to all)'}</option>
+              <option value="master">{lang === 'ru' ? 'Мастерский (только GM)' : 'Master (GM only)'}</option>
+            </Form.Select>
+          </Form.Group>
+        )}
       </ForumModal>
     </div>
   );

@@ -13,6 +13,7 @@ import {
   increment,
   limit
 } from 'firebase/firestore';
+import { processDiceRolls } from '../utils/dice';
 
 /**
  * Returns a deterministic conversation ID for two users.
@@ -83,14 +84,26 @@ export const sendDmMessage = async (conversationId, senderUid, text, recipientUi
   const convRef = doc(db, 'dms', conversationId);
   const msgRef = collection(db, 'dms', conversationId, 'messages');
 
+  const { content: processedContent, rolls } = processDiceRolls(text);
+
   await addDoc(msgRef, {
     sender_uid: senderUid,
-    text: text.trim(),
+    text: processedContent.trim(),
+    rolls,
     timestamp: serverTimestamp(),
   });
 
-  // Strip BBCode tags for the preview snippet
-  const cleanSnippet = text.replace(/\[.*?\]/g, '').trim().substring(0, 100);
+  // Strip BBCode tags for the preview snippet, specially handling spoilers
+  let cleanSnippet = text;
+  // Replace spoilers with a placeholder
+  cleanSnippet = cleanSnippet.replace(/\[spoiler(?:="([^"]*)")?\][\s\S]*?\[\/spoiler\]/gi, (match, p1) => {
+    return p1 ? `__SPOILER_START__${p1}__SPOILER_END__` : '__SPOILER_START__Спойлер__SPOILER_END__';
+  });
+  // Strip all remaining BBCode tags [tags]
+  cleanSnippet = cleanSnippet.replace(/\[.*?\]/g, '').trim();
+  // Restore spoilers into the final display format [Title]
+  cleanSnippet = cleanSnippet.replace(/__SPOILER_START__(.*?)__SPOILER_END__/g, '[$1]');
+  cleanSnippet = cleanSnippet.substring(0, 100);
 
   await updateDoc(convRef, {
     lastMessage: cleanSnippet,

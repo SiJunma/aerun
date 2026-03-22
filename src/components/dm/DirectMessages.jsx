@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Image, Badge, Spinner } from 'react-bootstrap';
-import { Shield, Send, ArrowLeft, MessageCircle, Lock } from 'lucide-react';
+import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -17,6 +17,7 @@ import {
 import { subscribeToUser } from '../../api/forum';
 import { format } from 'date-fns';
 import { ru, enUS } from 'date-fns/locale';
+import { PERMISSIONS } from '../../constants/permissions';
 
 /**
  * DirectMessages component
@@ -28,7 +29,7 @@ import { ru, enUS } from 'date-fns/locale';
  */
 const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTargetProfile }) => {
   const { t, lang } = useI18n();
-  const { profile } = useAuth();
+  const { profile, hasPermission } = useAuth();
   const { showToast } = useToast();
   const myUid = profile?.uid;
 
@@ -156,7 +157,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const formatTs = (ts) => {
     if (!ts) return '';
     const d = ts.toDate ? ts.toDate() : new Date(ts);
-    return format(d, 'HH:mm', { locale: lang === 'ru' ? ru : enUS });
+    return format(d, 'd MMM, HH:mm', { locale: lang === 'ru' ? ru : enUS });
   };
 
   const formatDate = (ts) => {
@@ -253,13 +254,23 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     </Button>
                   </div>
                 )}
-                {messages.map((msg) => {
+                {messages.map((msg, index) => {
                   const isMe = msg.sender_uid === myUid;
+                  const allConversationRolls = messages.reduce((acc, m) => ({ ...acc, ...(m.rolls || {}) }), {});
+
                   return (
                     <div
-                      key={msg.id}
+                      key={msg.id || index}
                       className={`d-flex mb-2 ${isMe ? 'justify-content-end' : 'justify-content-start'}`}
                     >
+                      {!isMe && (
+                        <Image
+                          src={activePeer?.avatar || '/default-avatar.png'}
+                          roundedCircle
+                          className="me-2"
+                          style={{ width: '30px', height: '30px', objectFit: 'cover' }}
+                        />
+                      )}
                       <div
                         className="px-3 py-2 rounded-3"
                         style={{
@@ -272,7 +283,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                         }}
                       >
-                        <div><BBCode>{msg.text}</BBCode></div>
+                        <div><BBCode rolls={allConversationRolls}>{msg.text}</BBCode></div>
                         <div
                           className="text-end mt-1"
                           style={{ fontSize: '0.875rem', opacity: 0.6 }}
@@ -298,6 +309,9 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 placeholder={t('dm.placeholder')}
                 minHeight="120px"
                 maxLength={2000}
+                showDice={hasPermission && hasPermission(PERMISSIONS.USE_DICE)}
+                hideDiceType={true}
+                isEdit={false}
               />
             </div>
             <div className="d-flex justify-content-end">

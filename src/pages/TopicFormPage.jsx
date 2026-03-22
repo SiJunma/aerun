@@ -260,6 +260,7 @@ const TopicFormPage = () => {
                 maxLength={LIMITS.content}
                 disabled={submitting}
                 showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
+                isEdit={false}
               />
             </Form.Group>
 
