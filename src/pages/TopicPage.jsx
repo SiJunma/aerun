@@ -486,7 +486,7 @@ const TopicPage = () => {
 
   const handleMoveTopic = async (targetCategoryId) => {
     try {
-      await moveTopics([id], targetCategoryId);
+      await moveTopics([id], targetCategoryId, user.uid);
       showToast(lang === 'ru' ? 'Тема перенесена!' : 'Topic moved!');
       setShowMoveModal(false);
       navigate(`/category/${targetCategoryId}`);
@@ -624,12 +624,13 @@ const TopicPage = () => {
     if (!editContent.trim()) return;
     recordActivity();
     try {
-      await updatePost(postId, editContent.trim(), {});
+      const originalPost = posts.find(p => p.id === postId);
+      await updatePost(postId, editContent.trim(), {}, user.uid, originalPost?.author_id);
       if (editingFirstPost && topic) {
         await updateTopic(topic.id, {
           title: editTopicTitle.trim() || topic.title,
           description: editTopicDescription.trim()
-        });
+        }, user.uid, topic.author_id);
       }
       setEditingPostId(null);
       setEditContent('');
@@ -653,7 +654,7 @@ const TopicPage = () => {
         const categoryId = topic?.category_id;
         
         if (isFirstPost) {
-          await deleteTopics([id]);
+          await deleteTopics([id], user.uid);
           if (categoryId) {
             navigate(`/category/${categoryId}`);
             return;
@@ -662,7 +663,7 @@ const TopicPage = () => {
             return;
           }
         } else {
-          await deletePost(deletingPost);
+          await deletePost(deletingPost, user.uid);
         }
       }
       setDeletingPost(null);

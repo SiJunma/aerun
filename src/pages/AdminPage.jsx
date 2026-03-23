@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown } from 'react-bootstrap';
+import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown, Modal } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import { 
-  getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, 
+  getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
   updateUserRole, addRole, updateRole, deleteRole 
 } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
+import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
+import { format } from 'date-fns';
+import { ru, enUS } from 'date-fns/locale';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
 import { 
@@ -18,11 +21,12 @@ import {
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
 
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
-  const { hasPermission, roles } = useAuth();
+  const { user, hasPermission, roles } = useAuth();
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
@@ -59,6 +63,18 @@ const AdminPage = () => {
     message: ''
   });
 
+  // Audit Log State
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [selectedAuditLog, setSelectedAuditLog] = useState(null);
+  const [lastAuditDoc, setLastAuditDoc] = useState(null);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [hasMoreAudit, setHasMoreAudit] = useState(true);
+  const [auditSearch, setAuditSearch] = useState('');
+  const [auditActionFilter, setAuditActionFilter] = useState('all');
+  const [auditSortDesc, setAuditSortDesc] = useState(true);
+  const [auditPage, setAuditPage] = useState(1);
+  const AUDIT_PAGE_SIZE = 25;
+
   // Tab permissions check
   const canAccessTab = useCallback((tab) => {
     switch (tab) {
@@ -66,13 +82,14 @@ const AdminPage = () => {
       case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
       case 'roles': return hasPermission(PERMISSIONS.MANAGE_ROLES);
       case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
+      case 'audit': return hasPermission(PERMISSIONS.VIEW_AUDIT_LOG);
       default: return false;
     }
   }, [hasPermission]);
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
-      const tabs = ['settings', 'users', 'roles', 'categories'];
+      const tabs = ['settings', 'users', 'roles', 'categories', 'audit'];
       const firstAvailable = tabs.find(t => canAccessTab(t));
       if (firstAvailable) {
         setActiveTab(firstAvailable);
@@ -136,11 +153,39 @@ const AdminPage = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) {
+      setLoadingAudit(true);
+      const unsub = subscribeToAuditLogs(200, (data, lastDoc) => {
+        setAuditLogs(data);
+        setLastAuditDoc(lastDoc);
+        setHasMoreAudit(data.length >= 200);
+        setLoadingAudit(false);
+      });
+      return () => unsub();
+    }
+  }, [activeTab, hasPermission]);
+
+  const handleLoadMoreAudit = async () => {
+    if (!lastAuditDoc || !hasMoreAudit) return;
+    setLoadingAudit(true);
+    try {
+      const { logs, lastDoc: newLastDoc } = await getMoreAuditLogs(lastAuditDoc, 200);
+      setAuditLogs(prev => [...prev, ...logs]);
+      setLastAuditDoc(newLastDoc);
+      if (logs.length < 200) setHasMoreAudit(false);
+    } catch (err) {
+      console.error('Failed to load more audit logs', err);
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
+
   const handleSaveSettings = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await updateGlobalSettings(settings);
+      await updateGlobalSettings(settings, user.uid);
       showToast(t('admin.settings.success'), 'success');
     } catch (err) {
       console.error(err);
@@ -204,9 +249,9 @@ const AdminPage = () => {
     setSaving(true);
     try {
       if (editingCat) {
-        await updateCategory(editingCat, catForm);
+        await updateCategory(editingCat, catForm, user.uid);
       } else {
-        await addCategory(catForm);
+        await addCategory(catForm, user.uid);
       }
       showToast(t('admin.categories.toast_saved'), 'success');
       setShowCatModal(false);
@@ -225,7 +270,7 @@ const AdminPage = () => {
       message: t('admin.categories.confirm_delete_message'),
       onConfirm: async () => {
         try {
-          await deleteCategory(id);
+          await deleteCategory(id, user.uid);
           showToast(t('admin.categories.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -242,7 +287,7 @@ const AdminPage = () => {
       message: t('admin.users.confirm_reject_message'),
       onConfirm: async () => {
         try {
-          await rejectUser(uid);
+          await rejectUser(uid, user.uid);
           showToast(t('admin.users.toast_rejected'), 'success');
         } catch (err) {
           console.error(err);
@@ -254,7 +299,7 @@ const AdminPage = () => {
 
   const handleApproveUser = async (uid) => {
     try {
-      await approveUser(uid);
+      await approveUser(uid, user.uid);
       showToast(t('admin.users.toast_approved'), 'success');
     } catch (err) {
       console.error(err);
@@ -269,7 +314,7 @@ const AdminPage = () => {
       message: t('admin.users.confirm_ban_message'),
       onConfirm: async () => {
         try {
-          await banUser(uid);
+          await banUser(uid, user.uid);
           showToast(t('admin.users.toast_banned'), 'success');
         } catch (err) {
           console.error(err);
@@ -279,6 +324,16 @@ const AdminPage = () => {
     });
   };
 
+  const handleUnbanUser = async (uid) => {
+    try {
+      await unbanUser(uid, user.uid);
+      showToast(t('admin.users.toast_unbanned'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast(t('admin.users.error_ban'), 'danger');
+    }
+  };
+
   const handleDeleteUser = (uid) => {
     setConfirmState({
       show: true,
@@ -286,7 +341,7 @@ const AdminPage = () => {
       message: t('admin.users.confirm_delete_message'),
       onConfirm: async () => {
         try {
-          await deleteUser(uid);
+          await deleteUser(uid, user.uid);
           showToast(t('admin.users.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -306,7 +361,7 @@ const AdminPage = () => {
     if (!editingUser) return;
     setSaving(true);
     try {
-      await updateUserRole(editingUser.id, userForm.role_id);
+      await updateUserRole(editingUser.id, userForm.role_id, user.uid);
       showToast(t('admin.users.toast_role_updated'), 'success');
       setShowUserModal(false);
     } catch (err) {
@@ -344,9 +399,9 @@ const AdminPage = () => {
     setSaving(true);
     try {
       if (editingRole) {
-        await updateRole(editingRole.id, roleForm);
+        await updateRole(editingRole.id, roleForm, user.uid);
       } else {
-        await addRole(roleForm);
+        await addRole(roleForm, user.uid);
       }
       showToast(t('admin.roles.toast_saved'), 'success');
       setShowRoleModal(false);
@@ -365,7 +420,7 @@ const AdminPage = () => {
       message: t('admin.roles.confirm_delete_message'),
       onConfirm: async () => {
         try {
-          await deleteRole(id, isSystem);
+          await deleteRole(id, isSystem, user.uid);
           showToast(t('admin.roles.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -743,7 +798,7 @@ const AdminPage = () => {
                       )
                     ) : (
                       hasPermission(PERMISSIONS.BAN_USERS) && (
-                        <Button variant="link" size="sm" className="text-success p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleApproveUser(u.id)}>
+                        <Button variant="link" size="sm" className="text-success p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleUnbanUser(u.id)}>
                           {t('admin.users.unban')}
                         </Button>
                       )
@@ -902,6 +957,171 @@ const AdminPage = () => {
       </Card>
   );
 
+  const renderAuditLog = () => {
+    // Build helper lookup
+    const resolveId = (v) => {
+      const usr = users?.find(u => u.id === v);
+      if (usr) return usr.nickname || usr.email;
+      const cat = categories?.find(c => c.id === v);
+      if (cat) return typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title;
+      return v.length < 20 ? v : null; // short = readable role id, long = opaque hash
+    };
+
+    const searchLower = auditSearch.toLowerCase();
+
+    const filtered = auditLogs
+      .filter(log => {
+        if (auditActionFilter !== 'all' && log.action_type !== auditActionFilter) return false;
+        if (!searchLower) return true;
+        const performer = users?.find(u => u.id === log.performer_id);
+        const performerName = (performer?.nickname || performer?.email || '').toLowerCase();
+        const actionLabel = t(`admin.audit.actions.${log.action_type}`).toLowerCase();
+        const detailValues = Object.values(log.details || {}).map(v => {
+          if (typeof v === 'string') return (resolveId(v) || v).toLowerCase();
+          return '';
+        }).join(' ');
+        return performerName.includes(searchLower)
+          || actionLabel.includes(searchLower)
+          || detailValues.includes(searchLower)
+          || log.id.toLowerCase().includes(searchLower);
+      })
+      .slice()
+      .sort((a, b) => {
+        const ta = a.created_at?.toMillis() ?? 0;
+        const tb = b.created_at?.toMillis() ?? 0;
+        return auditSortDesc ? tb - ta : ta - tb;
+      });
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / AUDIT_PAGE_SIZE));
+    const correctedPage = Math.min(auditPage, totalPages);
+    const pageItems = filtered.slice((correctedPage - 1) * AUDIT_PAGE_SIZE, correctedPage * AUDIT_PAGE_SIZE);
+
+    // All action types for the filter dropdown
+    const allActions = [...new Set(auditLogs.map(l => l.action_type))].sort();
+
+    return (
+      <Card className="shadow-sm border-0">
+        <Card.Body className="p-4">
+          <h5 className="mb-3">{t('admin.audit.title')}</h5>
+
+          {/* Toolbar */}
+          <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
+            <div style={{ flex: '1 1 200px', minWidth: '200px' }}>
+              <InputGroup size="sm">
+                <InputGroup.Text><Search size={14} /></InputGroup.Text>
+                <Form.Control
+                  placeholder={currentLang === 'ru' ? 'Поиск...' : 'Search...'}
+                  value={auditSearch}
+                  onChange={e => { setAuditSearch(e.target.value); setAuditPage(1); }}
+                />
+              </InputGroup>
+            </div>
+            <Form.Select size="sm" style={{ width: 'auto' }} value={auditActionFilter} onChange={e => { setAuditActionFilter(e.target.value); setAuditPage(1); }}>
+              <option value="all">{currentLang === 'ru' ? 'Все действия' : 'All actions'}</option>
+              {allActions.map(a => (
+                <option key={a} value={a}>{t(`admin.audit.actions.${a}`) || a}</option>
+              ))}
+            </Form.Select>
+            <Button variant="outline-secondary" size="sm" onClick={() => { setAuditSortDesc(p => !p); setAuditPage(1); }} title={auditSortDesc ? 'Oldest first' : 'Newest first'}>
+              {t('admin.audit.table_date')} {auditSortDesc ? '↓' : '↑'}
+            </Button>
+          </div>
+
+          <div className="table-responsive">
+            <Table hover responsive>
+              <thead>
+                <tr>
+                  <th style={{ minWidth: '150px' }}>{t('admin.audit.table_date')}</th>
+                  <th>{t('admin.audit.table_performer')}</th>
+                  <th>{t('admin.audit.table_action')}</th>
+                  <th>{t('admin.audit.table_details')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageItems.map(log => {
+                  const performer = users.find(u => u.id === log.performer_id);
+                  const performerName = performer ? (performer.nickname || performer.email) : 'Unknown User';
+                  
+                  return (
+                  <tr key={log.id} className="align-middle">
+                    <td className="text-muted small text-nowrap">
+                      {log.created_at ? format(log.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: currentLang === 'ru' ? ru : enUS }) : '...'}
+                    </td>
+                    <td>
+                      <div className="fw-bold">{performerName}</div>
+                    </td>
+                    <td>
+                      <Badge bg="secondary" className="opacity-75">{t(`admin.audit.actions.${log.action_type}`) || log.action_type}</Badge>
+                    </td>
+                    <td className="small text-muted" style={{ wordBreak: 'break-word', minWidth: '200px' }}>
+                      {log.details && Object.keys(log.details).length > 0 ? (
+                        <div className="d-flex flex-column align-items-start gap-1">
+                          {Object.entries(log.details)
+                            .map(([k, v]) => {
+                            const transK = t(`admin.audit.fields.${k}`);
+                            const labelK = transK === `admin.audit.fields.${k}` ? k : transK;
+                            
+                            let displayValue = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                            let hideRow = false;
+
+                            if (typeof v === 'string' && k.toLowerCase().includes('id')) {
+                              const resolved = resolveId(v);
+                              if (resolved !== null) {
+                                displayValue = resolved;
+                              } else {
+                                hideRow = true; // opaque hash
+                              }
+                            }
+                            
+                            if (hideRow) return null;
+
+                            return (
+                              <div key={k}>
+                                <strong>{labelK}:</strong> {displayValue}
+                              </div>
+                            );
+                          })}
+                          <Button variant="link" size="sm" className="p-0 text-decoration-none text-muted" onClick={() => setSelectedAuditLog(log)}>
+                            {currentLang === 'ru' ? 'Подробнее...' : 'View details...'}
+                          </Button>
+                        </div>
+                      ) : <span className="opacity-50">—</span>}
+                    </td>
+                  </tr>
+                )})}
+                {pageItems.length === 0 && !loadingAudit && (
+                  <tr>
+                    <td colSpan="4" className="text-center p-4 text-muted">{t('admin.audit.empty')}</td>
+                  </tr>
+                )}
+              </tbody>
+            </Table>
+          </div>
+
+          <div className="d-flex flex-wrap justify-content-between align-items-center mt-3 gap-2">
+            <div className="small text-muted">
+              {currentLang === 'ru' ? `Записей: ${filtered.length}` : `Entries: ${filtered.length}`}
+              {auditSearch || auditActionFilter !== 'all' ? ` (${currentLang === 'ru' ? 'фильтр)' : 'filtered)'}` : ''}
+            </div>
+            <ForumPagination
+              currentPage={correctedPage}
+              totalPages={totalPages}
+              onPageChange={p => setAuditPage(p)}
+            />
+          </div>
+
+          {hasMoreAudit && (
+            <div className="text-center mt-2">
+              <Button variant="link" size="sm" onClick={handleLoadMoreAudit} disabled={loadingAudit}>
+                {loadingAudit ? t('common.loading') : (currentLang === 'ru' ? 'Загрузить еще...' : 'Load more entries...')}
+              </Button>
+            </div>
+          )}
+        </Card.Body>
+      </Card>
+    );
+  };
+
   return (
     <Container className="py-5">
       <ForumBreadcrumbs 
@@ -930,12 +1150,18 @@ const AdminPage = () => {
             <Nav.Link eventKey="categories" className="px-4 fw-bold border-0">{t('admin.tabs.categories')}</Nav.Link>
           </Nav.Item>
         )}
+        {hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && (
+          <Nav.Item>
+            <Nav.Link eventKey="audit" className="px-4 fw-bold border-0">{t('admin.tabs.audit')}</Nav.Link>
+          </Nav.Item>
+        )}
       </Nav>
 
       {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
       {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
       {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
       {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
+      {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
 
       {/* Role Modal */}
       <ForumModal
@@ -1247,6 +1473,70 @@ const AdminPage = () => {
         title={confirmState.title}
         message={confirmState.message}
       />
+
+      {/* Audit Log Details Modal */}
+      <Modal show={!!selectedAuditLog} onHide={() => setSelectedAuditLog(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{t('admin.audit.table_details')}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="small">
+          {selectedAuditLog && (
+            <div className="d-flex flex-column gap-3" style={{ wordBreak: 'break-word' }}>
+              <div>
+                <strong>{t('admin.audit.table_action')}:</strong> <Badge bg="secondary" className="ms-1">{t(`admin.audit.actions.${selectedAuditLog.action_type}`) || selectedAuditLog.action_type}</Badge>
+              </div>
+              <div>
+                <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? format(selectedAuditLog.created_at.toDate(), 'd MMM yyyy, HH:mm:ss', { locale: currentLang === 'ru' ? ru : enUS }) : '...'}
+              </div>
+              
+              <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
+                <div className="mb-1 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                  {t('admin.audit.table_performer')}
+                </div>
+                <div>
+                  {(() => {
+                    const p = users.find(u => u.id === selectedAuditLog.performer_id);
+                    return p ? `${p.nickname || p.email}` : 'Unknown User';
+                  })()}
+                </div>
+                <div className="text-muted" style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                  ID: {selectedAuditLog.performer_id}
+                </div>
+              </div>
+              
+              <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
+                <div className="mb-2 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                  Raw Details
+                </div>
+                {Object.entries(selectedAuditLog.details || {}).map(([k, v]) => {
+                  const transK = t(`admin.audit.fields.${k}`);
+                  const label = transK === `admin.audit.fields.${k}` ? k : transK;
+                  
+                  let resolvedName = null;
+                  if (k.toLowerCase().includes('id') && k === 'targetId') {
+                    const tgt = users.find(u => u.id === v);
+                    if (tgt) resolvedName = tgt.nickname || tgt.email;
+                  }
+
+                  return (
+                    <div key={k} className="mb-2 last-child-mb-0">
+                      <div className="fw-bold">{label} <span className="text-muted fw-normal">({k})</span>:</div>
+                      <div className="ms-2">
+                        {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
+                        {resolvedName && <span className="text-muted ms-2">({resolvedName})</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="text-muted text-end" style={{ fontSize: '0.65rem', fontFamily: 'monospace' }}>
+                Log ID: {selectedAuditLog.id}
+              </div>
+            </div>
+          )}
+        </Modal.Body>
+      </Modal>
     </Container>
   );
 };

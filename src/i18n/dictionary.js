@@ -225,7 +225,8 @@ export const translations = {
         settings: "Settings",
         users: "Users",
         roles: "Roles",
-        categories: "Categories"
+        categories: "Categories",
+        audit: "Audit Log"
       },
       settings: {
         general: "General Configuration",
@@ -270,6 +271,7 @@ export const translations = {
         toast_approved: "User approved",
         toast_rejected: "User rejected",
         toast_banned: "User banned",
+        toast_unbanned: "User unbanned",
         toast_role_updated: "User role updated",
         confirm_ban_title: "Confirm Ban",
         confirm_ban_message: "Are you sure you want to ban this user? They will lose all access to the forum.",
@@ -346,6 +348,54 @@ export const translations = {
         perm_use_dice: "Use Dice",
         perm_allowed_roles: "Allowed roles:",
         role_guest: "Guest (unauthenticated)"
+      },
+      audit: {
+        title: "Audit Log",
+        table_date: "Date & Time",
+        table_performer: "Performer",
+        table_action: "Action",
+        table_details: "Details",
+        empty: "No audit logs found.",
+        actions: {
+          settings_updated: "Settings Updated",
+          category_created: "Category Created",
+          category_updated: "Category Updated",
+          category_deleted: "Category Deleted",
+          role_created: "Role Created",
+          role_updated: "Role Config Updated",
+          role_deleted: "Role Deleted",
+          user_approved: "User Approved",
+          user_rejected: "User Rejected",
+          user_banned: "User Banned",
+          user_unbanned: "User Unbanned",
+          user_deleted: "User Deleted",
+          user_role_updated: "User's Role Changed",
+          post_edited_by_admin: "Post Edited",
+          post_deleted_by_admin: "Post Deleted",
+          topic_deleted: "Topic Deleted",
+          topic_moved: "Topic Moved",
+          topic_edited_by_admin: "Topic Edited",
+          topic_pinned: "Topic Pinned",
+          topic_unpinned: "Topic Unpinned",
+          topic_locked: "Topic Locked",
+          topic_unlocked: "Topic Unlocked",
+          user_profile_edited_by_admin: "Profile Edited",
+          user_registered: "New Registration",
+          banned_user_login_attempt: "Banned Login Attempt"
+        },
+        fields: {
+          targetId: "Target ID",
+          categoryId: "Category ID",
+          topicId: "Topic ID",
+          title: "Title",
+          email: "Email",
+          nickname: "Nickname",
+          roleId: "Role ID",
+          roleName: "Role Name",
+          status: "Status",
+          is_pinned: "Pinned",
+          is_locked: "Locked"
+        }
       }
     }
   },
@@ -575,7 +625,8 @@ export const translations = {
         settings: "Настройки",
         users: "Пользователи",
         roles: "Роли",
-        categories: "Категории"
+        categories: "Категории",
+        audit: "Журнал изменений"
       },
       settings: {
         general: "Общие настройки",
@@ -620,6 +671,7 @@ export const translations = {
         toast_approved: "Пользователь одобрен",
         toast_rejected: "Пользователь отклонен",
         toast_banned: "Пользователь забанен",
+        toast_unbanned: "Пользователь разбанен",
         toast_role_updated: "Роль пользователя обновлена",
         confirm_ban_title: "Подтверждение бана",
         confirm_ban_message: "Вы уверены, что хотите забанить этого пользователя? Он потеряет любой доступ к форуму.",
@@ -696,6 +748,54 @@ export const translations = {
         perm_use_dice: "Использовать кубики",
         perm_allowed_roles: "Роли с доступом:",
         role_guest: "Гость (не авторизован)"
+      },
+      audit: {
+        title: "Журнал изменений",
+        table_date: "Дата и время",
+        table_performer: "Исполнитель",
+        table_action: "Действие",
+        table_details: "Детали",
+        empty: "Записи в журнале отсутствуют.",
+        actions: {
+          settings_updated: "Настройки изменены",
+          category_created: "Категория создана",
+          category_updated: "Категория обновлена",
+          category_deleted: "Категория удалена",
+          role_created: "Роль создана",
+          role_updated: "Настройки роли обновлены",
+          role_deleted: "Роль удалена",
+          user_approved: "Пользователь одобрен",
+          user_rejected: "Пользователь отклонён",
+          user_banned: "Пользователь забанен",
+          user_unbanned: "Пользователь разбанен",
+          user_deleted: "Пользователь удалён",
+          user_role_updated: "Роль пользователя изменена",
+          post_edited_by_admin: "Пост изменён",
+          post_deleted_by_admin: "Пост удалён",
+          topic_deleted: "Тема удалена",
+          topic_moved: "Тема перемещена",
+          topic_edited_by_admin: "Тема изменена",
+          topic_pinned: "Тема закреплена",
+          topic_unpinned: "Тема откреплена",
+          topic_locked: "Тема закрыта",
+          topic_unlocked: "Тема открыта",
+          user_profile_edited_by_admin: "Профиль изменён",
+          user_registered: "Новая регистрация",
+          banned_user_login_attempt: "Попытка входа забаненного"
+        },
+        fields: {
+          targetId: "ID цели",
+          categoryId: "ID категории",
+          topicId: "ID темы",
+          title: "Заголовок",
+          email: "Email",
+          nickname: "Никнейм",
+          roleId: "ID роли",
+          roleName: "Имя роли",
+          status: "Статус",
+          is_pinned: "Закреплено",
+          is_locked: "Закрыто"
+        }
       }
     }
   }

@@ -94,7 +94,7 @@ const CategoryPage = () => {
   const handleBatchPin = async (pinned) => {
     if (selectedTopicIds.length === 0) return;
     try {
-      await batchUpdateTopics(selectedTopicIds, { is_pinned: pinned });
+      await batchUpdateTopics(selectedTopicIds, { is_pinned: pinned }, user.uid);
       showToast(lang === 'ru' 
           ? (pinned ? 'Темы закреплены' : 'Темы откреплены') 
           : (pinned ? 'Topics pinned' : 'Topics unpinned'), 'success');
@@ -106,7 +106,7 @@ const CategoryPage = () => {
   const handleBatchLock = async (locked) => {
     if (selectedTopicIds.length === 0) return;
     try {
-      await batchUpdateTopics(selectedTopicIds, { is_locked: locked });
+      await batchUpdateTopics(selectedTopicIds, { is_locked: locked }, user.uid);
       showToast(lang === 'ru' 
           ? (locked ? 'Темы закрыты' : 'Темы открыты') 
           : (locked ? 'Topics locked' : 'Topics unlocked'), 'success');
@@ -118,7 +118,7 @@ const CategoryPage = () => {
   const handleBatchDelete = async () => {
     if (selectedTopicIds.length === 0) return;
     try {
-      await deleteTopics(selectedTopicIds);
+      await deleteTopics(selectedTopicIds, user.uid);
       showToast(lang === 'ru' ? 'Темы удалены' : 'Topics deleted', 'success');
       setSelectedTopicIds([]);
     } catch (error) {
@@ -129,7 +129,7 @@ const CategoryPage = () => {
   const handleConfirmMove = async (targetCatId) => {
     if (selectedTopicIds.length === 0) return;
     try {
-      await moveTopics(selectedTopicIds, targetCatId);
+      await moveTopics(selectedTopicIds, targetCatId, user.uid);
       showToast(lang === 'ru' ? 'Темы перенесены' : 'Topics moved', 'success');
       setSelectedTopicIds([]);
       setIsManaging(false);

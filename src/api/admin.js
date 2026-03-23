@@ -1,5 +1,6 @@
 import { db } from '../../firebase';
 import { doc, setDoc, getDoc, onSnapshot, deleteDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, writeBatch, orderBy } from 'firebase/firestore';
+import { logAdminAction } from './audit';
 
 const SETTINGS_DOC = 'settings/global';
 
@@ -11,39 +12,55 @@ export const getGlobalSettings = (callback) => {
   });
 };
 
-export const updateGlobalSettings = async (settings) => {
+export const updateGlobalSettings = async (settings, performerId) => {
   const docRef = doc(db, SETTINGS_DOC);
   await setDoc(docRef, settings, { merge: true });
+  await logAdminAction('settings_updated', performerId);
 };
 
 // --- Invites section removed per user request ---
 
 // --- User Management ---
-export const approveUser = async (uid) => {
+export const approveUser = async (uid, performerId) => {
   await updateDoc(doc(db, 'users', uid), {
     status: 'active',
     updated_at: serverTimestamp()
   });
+  await logAdminAction('user_approved', performerId, { targetId: uid });
 };
 
-export const deleteUser = async (uid) => {
+export const deleteUser = async (uid, performerId) => {
   await deleteDoc(doc(db, 'users', uid));
+  await logAdminAction('user_deleted', performerId, { targetId: uid });
 };
 
-export const rejectUser = deleteUser;
+export const rejectUser = async (uid, performerId) => {
+  await deleteDoc(doc(db, 'users', uid));
+  await logAdminAction('user_rejected', performerId, { targetId: uid });
+};
 
-export const banUser = async (uid) => {
+export const banUser = async (uid, performerId) => {
   await updateDoc(doc(db, 'users', uid), {
     status: 'banned',
     updated_at: serverTimestamp()
   });
+  await logAdminAction('user_banned', performerId, { targetId: uid });
 };
 
-export const updateUserRole = async (uid, roleId) => {
+export const unbanUser = async (uid, performerId) => {
+  await updateDoc(doc(db, 'users', uid), {
+    status: 'active',
+    updated_at: serverTimestamp()
+  });
+  await logAdminAction('user_unbanned', performerId, { targetId: uid });
+};
+
+export const updateUserRole = async (uid, roleId, performerId) => {
   await updateDoc(doc(db, 'users', uid), {
     role_id: roleId,
     updated_at: serverTimestamp()
   });
+  await logAdminAction('user_role_updated', performerId, { targetId: uid, roleId });
 };
 
 // --- Role Management ---
@@ -56,25 +73,27 @@ export const subscribeToRoles = (callback) => {
   });
 };
 
-export const addRole = async (roleData) => {
+export const addRole = async (roleData, performerId) => {
   const roleRef = doc(collection(db, 'roles'));
   await setDoc(roleRef, {
     ...roleData,
     is_system: false,
     created_at: serverTimestamp()
   });
+  await logAdminAction('role_created', performerId, { targetId: roleRef.id, roleName: roleData.name });
   return roleRef.id;
 };
 
-export const updateRole = async (id, roleData) => {
+export const updateRole = async (id, roleData, performerId) => {
   // Use updateDoc (not setDoc) to preserve is_system, created_at and other existing fields
   await updateDoc(doc(db, 'roles', id), {
     ...roleData,
     updated_at: serverTimestamp()
   });
+  await logAdminAction('role_updated', performerId, { targetId: id, roleName: roleData.name });
 };
 
-export const deleteRole = async (id, isSystem) => {
+export const deleteRole = async (id, isSystem, performerId) => {
   if (isSystem) {
     throw new Error('System roles cannot be deleted');
   }
@@ -85,6 +104,7 @@ export const deleteRole = async (id, isSystem) => {
 
   const roleData = roleSnap.data();
   const baseRoleId = roleData.base_role_id || 'player';
+  const roleName = roleData.name;
 
   // Move all users with this role to the base role
   const usersQuery = query(collection(db, 'users'), where('role_id', '==', id));
@@ -101,6 +121,7 @@ export const deleteRole = async (id, isSystem) => {
 
   // Finally delete the role
   await deleteDoc(doc(db, 'roles', id));
+  await logAdminAction('role_deleted', performerId, { targetId: id, roleName });
 };
 
 /**

@@ -16,6 +16,7 @@ export const PERMISSIONS = {
   MANAGE_ROLES: 'manage_roles',
   MANAGE_CATEGORIES: 'manage_categories',
   DELETE_USERS: 'delete_users',
+  VIEW_AUDIT_LOG: 'view_audit_log',
   
   // Content Moderation
   MODERATE_CONTENT: 'moderate_content',
@@ -59,6 +60,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.MANAGE_ROLES]: { en: 'Manage Roles', ru: 'Управление ролями' },
   [PERMISSIONS.MANAGE_CATEGORIES]: { en: 'Manage Categories', ru: 'Управление категориями' },
   [PERMISSIONS.DELETE_USERS]: { en: 'Delete Users', ru: 'Удаление пользователей' },
+  [PERMISSIONS.VIEW_AUDIT_LOG]: { en: 'View Audit Log', ru: 'Просмотр журнала' },
   [PERMISSIONS.MODERATE_CONTENT]: { en: 'Moderate Content', ru: 'Модерация (правка/удаление)' },
   [PERMISSIONS.MOVE_TOPICS]: { en: 'Move Topics', ru: 'Перемещение тем' },
   [PERMISSIONS.CLOSE_TOPICS]: { en: 'Close/Open Topics', ru: 'Закрытие/Открытие тем' },
@@ -94,7 +96,8 @@ export const PERMISSION_GROUPS = [
       PERMISSIONS.DELETE_USERS,
       PERMISSIONS.CHANGE_ROLES,
       PERMISSIONS.MANAGE_ROLES,
-      PERMISSIONS.MANAGE_CATEGORIES
+      PERMISSIONS.MANAGE_CATEGORIES,
+      PERMISSIONS.VIEW_AUDIT_LOG
     ]
   },
   {
@@ -184,6 +187,7 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.MANAGE_ROLES,
       PERMISSIONS.MANAGE_CATEGORIES,
       PERMISSIONS.DELETE_USERS,
+      PERMISSIONS.VIEW_AUDIT_LOG,
       PERMISSIONS.MODERATE_CONTENT,
       PERMISSIONS.MOVE_TOPICS,
       PERMISSIONS.CLOSE_TOPICS,
@@ -208,6 +212,7 @@ export const DEFAULT_ROLES = [
     color: 'info',
     is_system: true,
     permissions: [
+      PERMISSIONS.VIEW_AUDIT_LOG,
       PERMISSIONS.MODERATE_CONTENT,
       PERMISSIONS.MOVE_TOPICS,
       PERMISSIONS.CLOSE_TOPICS,
@@ -307,6 +312,7 @@ export const MAX_ROLE_PERMISSIONS = {
   ],
   moderator: [
     PERMISSIONS.ADMIN_ACCESS,
+    PERMISSIONS.VIEW_AUDIT_LOG,
     PERMISSIONS.APPROVE_USERS,
     PERMISSIONS.BAN_USERS,
     PERMISSIONS.MODERATE_CONTENT,

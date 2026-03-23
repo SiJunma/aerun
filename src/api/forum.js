@@ -1,4 +1,5 @@
 import { db } from '../../firebase';
+import { logAdminAction } from './audit';
 import {
   collection,
   addDoc,
@@ -69,7 +70,7 @@ export const subscribeToCategories = (callback) => {
   });
 };
 
-export const addCategory = async (catData) => {
+export const addCategory = async (catData, performerId) => {
   // Normalize: replace null values with undefined so Firestore doesn't store them as null
   const permissions = {};
   if (catData.permissions) {
@@ -77,16 +78,17 @@ export const addCategory = async (catData) => {
       if (val !== null) permissions[key] = val;
     }
   }
-  await addDoc(collection(db, 'categories'), {
+  const ref = await addDoc(collection(db, 'categories'), {
     ...catData,
     permissions,
     topics_count: 0,
     posts_count: 0,
     created_at: serverTimestamp()
   });
+  await logAdminAction('category_created', performerId, { targetId: ref.id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
 };
 
-export const updateCategory = async (id, catData) => {
+export const updateCategory = async (id, catData, performerId) => {
   const { permissions: rawPerms, ...rest } = catData;
   const permissions = {};
   if (rawPerms) {
@@ -99,10 +101,12 @@ export const updateCategory = async (id, catData) => {
     permissions,
     updated_at: serverTimestamp()
   });
+  await logAdminAction('category_updated', performerId, { targetId: id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
 };
 
-export const deleteCategory = async (id) => {
+export const deleteCategory = async (id, performerId) => {
   await deleteDoc(doc(db, 'categories', id));
+  await logAdminAction('category_deleted', performerId, { targetId: id });
 };
 
 // ── Topics ───────────────────────────────────────────────────────────────────
@@ -495,22 +499,35 @@ export const publishDraft = async (uid, topicId) => {
   return postRef.id;
 };
 
-// Edit a post
-export const updatePost = async (postId, content, metadata = {}) => {
+export const updatePost = async (postId, content, metadata = {}, performerId, authorId) => {
   await updateDoc(doc(db, 'posts', postId), {
     content,
     ...metadata,
     edited_at: serverTimestamp()
   });
+  if (performerId && authorId && performerId !== authorId) {
+    await logAdminAction('post_edited_by_admin', performerId, { targetId: postId, authorId });
+  }
 };
 
-// Update topic fields (title, description, etc.)
-export const updateTopic = async (topicId, data) => {
+export const updateTopic = async (topicId, data, performerId, authorId) => {
   const topicRef = doc(db, 'topics', topicId);
   await updateDoc(topicRef, {
     ...data,
     updated_at: serverTimestamp()
   });
+
+  if (performerId) {
+    if (data.is_pinned !== undefined) {
+      await logAdminAction(data.is_pinned ? 'topic_pinned' : 'topic_unpinned', performerId, { targetId: topicId, title: data.title });
+    }
+    if (data.is_locked !== undefined) {
+      await logAdminAction(data.is_locked ? 'topic_locked' : 'topic_unlocked', performerId, { targetId: topicId, title: data.title });
+    }
+    if ((data.title !== undefined || data.description !== undefined) && performerId !== authorId) {
+      await logAdminAction('topic_edited_by_admin', performerId, { targetId: topicId, authorId });
+    }
+  }
 
   // If title was updated, check if it needs to be synced to the category denormalized field
   if (data.title) {
@@ -535,12 +552,14 @@ export const updateTopic = async (topicId, data) => {
   }
 };
 
-// Delete a post — if it's the last post, deletes the topic too;
-// otherwise recalculates last_post_* fields on the topic and category.
-export const deletePost = async (post) => {
+export const deletePost = async (post, performerId) => {
   const postRef = doc(db, 'posts', post.id);
   const topicRef = doc(db, 'topics', post.topic_id);
   const userRef = doc(db, 'users', post.author_id);
+
+  if (performerId && performerId !== post.author_id) {
+    await logAdminAction('post_deleted_by_admin', performerId, { targetId: post.id, topicId: post.topic_id, authorId: post.author_id });
+  }
 
   // If deleting a draft — simply remove the doc, no counters were touched
   if (post.is_draft) {
@@ -706,11 +725,14 @@ export const deletePost = async (post) => {
 };
 // ── Users ─────────────────────────────────────────────────────────────────────
 
-export const updateUser = async (uid, userData) => {
+export const updateUser = async (uid, userData, performerId) => {
   await updateDoc(doc(db, 'users', uid), {
     ...userData,
     updated_at: serverTimestamp()
   });
+  if (performerId && uid !== performerId) {
+    await logAdminAction('user_profile_edited_by_admin', performerId, { targetId: uid });
+  }
 };
 
 export const subscribeToUser = (uid, callback) => {
@@ -799,19 +821,31 @@ export const checkNicknameExists = async (nickname, excludeUid = null) => {
   return matchingDocs.length > 0;
 };
 // Batch update topic fields (is_pinned, is_locked)
-export const batchUpdateTopics = async (topicIds, data) => {
-  // Since we might need to update multiple docs, let's use a simple loop or a transaction if they are few.
-  // Actually, standard updateDoc is fine for multiple independent calls, or we can use writeBatch.
-  
-  const promises = topicIds.map(id => updateDoc(doc(db, 'topics', id), {
-    ...data,
-    updated_at: serverTimestamp()
-  }));
+export const batchUpdateTopics = async (topicIds, data, performerId) => {
+  const promises = topicIds.map(async (id) => {
+    const topicRef = doc(db, 'topics', id);
+    const snap = await getDoc(topicRef);
+    if (!snap.exists()) return;
+    const title = snap.data().title;
+    
+    await updateDoc(topicRef, {
+      ...data,
+      updated_at: serverTimestamp()
+    });
+    
+    if (performerId) {
+      if (data.is_pinned !== undefined) {
+        await logAdminAction(data.is_pinned ? 'topic_pinned' : 'topic_unpinned', performerId, { targetId: id, title });
+      }
+      if (data.is_locked !== undefined) {
+        await logAdminAction(data.is_locked ? 'topic_locked' : 'topic_unlocked', performerId, { targetId: id, title });
+      }
+    }
+  });
   await Promise.all(promises);
 };
 
-// Delete multiple topics and their posts atomically
-export const deleteTopics = async (topicIds) => {
+export const deleteTopics = async (topicIds, performerId) => {
   for (const topicId of topicIds) {
     const topicRef = doc(db, 'topics', topicId);
     const topicSnap = await getDoc(topicRef);
@@ -832,6 +866,11 @@ export const deleteTopics = async (topicIds) => {
 
     // 2. Delete topic
     batch.delete(topicRef);
+    
+    // Log
+    if (performerId) {
+      await logAdminAction('topic_deleted', performerId, { targetId: topicId, title: topicData.title });
+    }
 
     // 3. Update Category counters
     if (categoryId) {
@@ -892,8 +931,7 @@ export const deleteTopics = async (topicIds) => {
   }
 };
 
-// Move topics to another category
-export const moveTopics = async (topicIds, targetCategoryId) => {
+export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
   const targetCatRef = doc(db, 'categories', targetCategoryId);
   const targetCatSnap = await getDoc(targetCatRef);
   if (!targetCatSnap.exists()) throw new Error('Target category not found');
@@ -930,6 +968,10 @@ export const moveTopics = async (topicIds, targetCategoryId) => {
         posts_count: increment(postsCount)
       });
     });
+    
+    if (performerId) {
+      await logAdminAction('topic_moved', performerId, { targetId: topicId, title: topicData.title, sourceCategoryId, targetCategoryId });
+    }
 
     // Recalculate last_post for both categories (simplified: just trigger update logic)
     const updateCatLastPost = async (catId) => {

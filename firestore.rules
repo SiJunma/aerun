@@ -139,6 +139,15 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // --- Audit Logs ---
+    match /audit_logs/{logId} {
+      allow create: if isSignedIn();
+      allow read: if isSignedIn() 
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getUser().data.role_id in ['admin', 'root', 'moderator'];
+      allow update, delete: if isAdmin();
+    }
+
     // --- Notifications ---
     // Any signed-in user can create (new registrants don't have 'active' status yet).
     // Personal notifications (recipient_uid = own uid) are readable by that user.

@@ -30,6 +30,7 @@ import {
   deleteGuestActivity as apiDeleteGuestActivity
 } from '../api/forum';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
+import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions } from '../constants/permissions';
 
 const AuthContext = createContext();
@@ -173,6 +174,10 @@ export const AuthProvider = ({ children }) => {
     }
 
     await setDoc(userDocRef, updatedData, { merge: true });
+    
+    if (!isSelf) {
+      await logAdminAction('user_profile_edited_by_admin', user.uid, { targetId: finalUid });
+    }
     
     if (isSelf) {
       setProfile(prev => ({
@@ -321,6 +326,13 @@ export const AuthProvider = ({ children }) => {
                 admin_message: pendingMessage || null
               }).catch(err => console.warn('[notification]', err));
             }
+
+            // Log registration to audit log
+            await logAdminAction('user_registered', firebaseUser.uid, { 
+              email: firebaseUser.email, 
+              nickname: chosenNickname.trim(),
+              status: newUser.status
+            }).catch(err => console.error('[audit log error]', err));
           } else {
             // Login counts as activity — update immediately
             lastActivityRef.current = Date.now();
@@ -538,6 +550,14 @@ export const AuthProvider = ({ children }) => {
       const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
 
       if (isBanned) {
+        if (!sessionStorage.getItem('banned_login_logged')) {
+          logAdminAction('banned_user_login_attempt', user.uid, { 
+            email: user.email, 
+            nickname: profile.nickname 
+          }).catch(console.error);
+          sessionStorage.setItem('banned_login_logged', 'true');
+        }
+        
         sessionStorage.setItem('banned_logout', 'true');
         logout(true); // skipPresenceCleanup = true to avoid permission error loop
       } else if (isMaintenanceStrict && !isAdmin) {
