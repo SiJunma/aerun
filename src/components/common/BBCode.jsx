@@ -105,7 +105,7 @@ const BBCode = ({ children, rolls = {} }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -156,7 +156,7 @@ const BBCode = ({ children, rolls = {} }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll'];
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
@@ -202,11 +202,41 @@ const BBCode = ({ children, rolls = {} }) => {
     return (node.children || []).map(getTextContent).join('');
   }
 
-  function renderNode(node, index) {
-    if (typeof node === 'string') return node;
+  function renderNode(node, index, disableAutoEmbed = false) {
+    if (typeof node === 'string') {
+      if (disableAutoEmbed) return node;
+
+      // Extract YouTube URLs from plain text for auto-embedding
+      const ytRegex = /(https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|youtu\.be\/)[a-zA-Z0-9_-]{11}(?:[?&#][\w=.-]*)*)/g;
+      
+      if (!ytRegex.test(node)) return node;
+
+      const parts = node.split(ytRegex);
+      return parts.map((part, i) => {
+        if (!part) return null;
+        
+        const match = part.match(/^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+        if (match) {
+          const videoId = match[1];
+          return (
+            <div key={`${index}-${i}`} className="ratio ratio-16x9 my-2 rounded overflow-hidden shadow-sm mx-auto" style={{ maxWidth: '600px' }}>
+              <iframe
+                src={`https://www.youtube.com/embed/${videoId}`}
+                title="YouTube auto-embed"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              ></iframe>
+            </div>
+          );
+        }
+        return <React.Fragment key={`${index}-${i}`}>{part}</React.Fragment>;
+      });
+    }
 
     const { name, rawParams, children } = node;
-    const content = children.map((child, i) => renderNode(child, i));
+    const isInsideUrl = disableAutoEmbed || name === 'url';
+    const content = children.map((child, i) => renderNode(child, i, isInsideUrl));
 
     // Parameter parsing
     const params = {};
@@ -377,6 +407,37 @@ const BBCode = ({ children, rolls = {} }) => {
       }
       case 'spoiler': {
         return <BBCodeSpoiler key={index} title={params.default}>{content}</BBCodeSpoiler>;
+      }
+      case 'video':
+      case 'youtube':
+      case 'media': {
+        const urlRaw = getTextContent(node).trim();
+        let videoId = null;
+        const ytMatch = urlRaw.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+        if (ytMatch) videoId = ytMatch[1];
+        
+        if (videoId) {
+          return (
+            <div key={index} className="ratio ratio-16x9 my-2 rounded overflow-hidden shadow-sm d-block mx-auto" style={{ maxWidth: '600px' }}>
+              <iframe
+                src={`https://www.youtube.com/embed/${videoId}`}
+                title="YouTube video player"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              ></iframe>
+            </div>
+          );
+        } else if (urlRaw.endsWith('.mp4') || urlRaw.endsWith('.webm') || urlRaw.endsWith('.ogg')) {
+          return (
+            <div key={index} className="my-2 rounded overflow-hidden shadow-sm d-block mx-auto" style={{ maxWidth: '600px' }}>
+              <video controls className="w-100 h-100">
+                 <source src={urlRaw} />
+              </video>
+            </div>
+          );
+        }
+        return <a key={index} href={urlRaw} target="_blank" rel="noopener noreferrer">{urlRaw}</a>;
       }
       default: return <span key={index}>{content}</span>;
     }

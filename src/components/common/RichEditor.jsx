@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Form, Dropdown } from 'react-bootstrap';
 import ForumModal from './ForumModal';
-import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard, Youtube, EyeOff } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 
 const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false }) => {
@@ -416,6 +416,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
 
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'columns')} title={lang === 'ru' ? 'Колонки' : 'Columns'}><Columns size={16} /></Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'spoiler')} title={lang === 'ru' ? 'Спойлер' : 'Spoiler'}><Clapperboard size={15} /></Button>
+        <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[video]', '[/video]')} title={lang === 'ru' ? 'Видео' : 'Video'}><Youtube size={16} /></Button>
         {showDice && !isEdit && (
           <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}><Dices size={16} /></Button>
         )}
