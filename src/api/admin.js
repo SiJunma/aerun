@@ -14,9 +14,30 @@ export const getGlobalSettings = (callback) => {
 
 export const updateGlobalSettings = async (settings, performerId) => {
   const docRef = doc(db, SETTINGS_DOC);
+
+  // Compute a diff vs the current saved settings
+  let changes = {};
+  try {
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const old = snap.data();
+      for (const key of Object.keys(settings)) {
+        // Skip long URL fields — not useful in the log
+        const v = settings[key];
+        if (typeof v === 'string' && v.length > 120) continue;
+        if (JSON.stringify(old[key]) !== JSON.stringify(v)) {
+          changes[key] = { from: old[key], to: v };
+        }
+      }
+    }
+  } catch (e) {
+    // If diff fails, still save — just log without details
+  }
+
   await setDoc(docRef, settings, { merge: true });
-  await logAdminAction('settings_updated', performerId);
+  await logAdminAction('settings_updated', performerId, Object.keys(changes).length > 0 ? { changes } : {});
 };
+
 
 // --- Invites section removed per user request ---
 

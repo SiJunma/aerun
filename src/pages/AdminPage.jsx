@@ -1075,6 +1075,15 @@ const AdminPage = () => {
                             
                             if (hideRow) return null;
 
+                            if (k === 'changes' && typeof v === 'object') {
+                              const changedKeys = Object.keys(v).map(ck => t(`admin.audit.fields.${ck}`) || ck);
+                              return (
+                                <div key={k}>
+                                  <strong>{labelK}:</strong> {changedKeys.join(', ')}
+                                </div>
+                              );
+                            }
+
                             return (
                               <div key={k}>
                                 <strong>{labelK}:</strong> {displayValue}
@@ -1520,10 +1529,30 @@ const AdminPage = () => {
 
                   return (
                     <div key={k} className="mb-2 last-child-mb-0">
-                      <div className="fw-bold">{label} <span className="text-muted fw-normal">({k})</span>:</div>
+                      <div className="fw-bold">{label} {k !== label && <span className="text-muted fw-normal">({k})</span>}:</div>
                       <div className="ms-2">
-                        {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
-                        {resolvedName && <span className="text-muted ms-2">({resolvedName})</span>}
+                        {k === 'changes' && typeof v === 'object' ? (
+                          <div className="d-flex flex-column gap-1 mt-1">
+                            {Object.entries(v).map(([ck, cv]) => {
+                              const cLabel = t(`admin.audit.fields.${ck}`) || ck;
+                              return (
+                                <div key={ck} className="p-2 rounded bg-white border border-secondary border-opacity-10">
+                                  <div className="fw-bold small">{cLabel}:</div>
+                                  <div className="d-flex align-items-center gap-2 small">
+                                    <span className="text-danger text-decoration-line-through opacity-75">{String(cv.from)}</span>
+                                    <ArrowRightLeft size={10} className="text-muted" />
+                                    <span className="text-success fw-bold">{String(cv.to)}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <>
+                            {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
+                            {resolvedName && <span className="text-muted ms-2">({resolvedName})</span>}
+                          </>
+                        )}
                       </div>
                     </div>
                   );
