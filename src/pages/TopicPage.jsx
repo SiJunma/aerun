@@ -649,13 +649,11 @@ const TopicPage = () => {
       if (deletingPost.is_draft) {
         await deleteDraftPost(user.uid, id);
       } else {
-        const isOnlyPost = posts.length === 1;
+        const isFirstPost = posts.length > 0 && posts[0].id === deletingPost.id;
         const categoryId = topic?.category_id;
         
-        await deletePost(deletingPost);
-        
-        if (isOnlyPost) {
-          // Topic was deleted because it was the last post
+        if (isFirstPost) {
+          await deleteTopics([id]);
           if (categoryId) {
             navigate(`/category/${categoryId}`);
             return;
@@ -663,6 +661,8 @@ const TopicPage = () => {
             navigate('/');
             return;
           }
+        } else {
+          await deletePost(deletingPost);
         }
       }
       setDeletingPost(null);
@@ -1577,17 +1577,28 @@ const TopicPage = () => {
       </div>
 
       {/* Modals */}
-      <ConfirmModal
-        show={!!deletingPost}
-        onHide={() => setDeletingPost(null)}
-        onConfirm={handleDeletePost}
-        title={lang === 'ru' ? 'Удалить пост?' : 'Delete post?'}
-        message={lang === 'ru'
-          ? 'Это действие необратимо. Пост будет удалён навсегда.'
-          : 'This action cannot be undone. The post will be permanently deleted.'}
-        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
-        cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
-      />
+      {(() => {
+        const isFirstPost = deletingPost && !deletingPost.is_draft && posts.length > 0 && posts[0].id === deletingPost.id;
+        return (
+          <ConfirmModal
+            show={!!deletingPost}
+            onHide={() => setDeletingPost(null)}
+            onConfirm={handleDeletePost}
+            title={lang === 'ru' 
+              ? (isFirstPost ? 'Удалить тему?' : 'Удалить пост?') 
+              : (isFirstPost ? 'Delete topic?' : 'Delete post?')}
+            message={lang === 'ru'
+              ? (isFirstPost 
+                  ? 'Внимание: удаление первого сообщения приведет к удалению всей темы целиком. Это действие необратимо.' 
+                  : 'Это действие необратимо. Пост будет удалён навсегда.')
+              : (isFirstPost 
+                  ? 'Warning: deleting the first post will delete the entire topic. This action cannot be undone.' 
+                  : 'This action cannot be undone. The post will be permanently deleted.')}
+            confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+            cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+          />
+        );
+      })()}
 
       <ConfirmModal
         show={showDeleteTopicModal}
