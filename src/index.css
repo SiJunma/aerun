@@ -2148,6 +2148,19 @@ a.badge.bg-danger:hover {
   filter: invert(1) grayscale(100%) brightness(200%);
 }
 
+.forum-group-card {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08) !important;
+  border-radius: 12px !important;
+}
+
+[data-theme='dark'] .forum-group-card {
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.35) !important;
+}
+
+[data-theme='neutral'] .forum-group-card {
+  box-shadow: 0 2px 12px rgba(56, 45, 29, 0.12) !important;
+}
+
 .forum-group-header {
   background-color: var(--nav-bg) !important;
   color: #ffffff !important;
