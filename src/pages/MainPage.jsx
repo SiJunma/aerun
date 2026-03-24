@@ -3,7 +3,7 @@ import { Card, Table, Container } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { Folder } from 'lucide-react';
+import { Folder, MessageSquare, FileText } from 'lucide-react';
 import { subscribeToCategories, subscribeToCategoryGroups } from '../api/forum';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
@@ -100,7 +100,7 @@ const MainPage = () => {
         }
 
         return groupsWithCats.map(group => (
-          <Card key={group.id} className="shadow-sm border-0 mb-4 overflow-hidden forum-group-card">
+          <Card key={group.id} className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
             <div className="d-flex align-items-center forum-group-header">
               <h4 className="mb-0">
                 {group.title?.[lang] || group.title?.en}
@@ -119,27 +119,39 @@ const MainPage = () => {
                 {visibleCats
                   .filter(cat => cat.group_id === group.id)
                   .map(cat => (
-                  <tr key={cat.id}>
-                    <td>
-                      <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1 cat-link">
-                        {typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title}
-                      </Link>
-                      <div className="text-muted cat-desc" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
-                        {typeof cat.description === 'object' ? (lang === 'ru' ? cat.description.ru : cat.description.en) : cat.description}
-                      </div>
-                    </td>
-                    <td className="text-center align-middle">{cat.topics_count || 0}</td>
-                    <td className="text-center align-middle">{cat.posts_count || 0}</td>
-                    <td className="align-middle">
-                      {cat.last_post_topic_id ? (
-                        <div>
-                          <Link
-                            to={`/topic/${cat.last_post_topic_id}`}
-                            className="d-block fw-semibold text-decoration-none text-truncate mb-1 last-topic-link"
-                            style={{ maxWidth: 200 }}
-                          >
-                            {cat.last_post_topic_title || '—'}
-                          </Link>
+                    <tr key={cat.id}>
+                      <td data-label={t('forum.category')}>
+                        <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1 cat-link">
+                          {typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title}
+                        </Link>
+                        <div className="text-muted cat-desc" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
+                          {typeof cat.description === 'object' ? (lang === 'ru' ? cat.description.ru : cat.description.en) : cat.description}
+                        </div>
+                        {/* Mobile Stats Line */}
+                        <div className="d-md-none mt-2 d-flex gap-3 small forum-mobile-stats text-muted">
+                          <span className="d-flex align-items-center gap-1">
+                            <MessageSquare size={12} /> {cat.topics_count || 0}
+                          </span>
+                          <span className="d-flex align-items-center gap-1">
+                            <FileText size={12} /> {cat.posts_count || 0}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="text-center align-middle forum-td-stat" data-label={t('forum.topics')}>
+                        {cat.topics_count || 0}
+                      </td>
+                      <td className="text-center align-middle forum-td-stat" data-label={t('forum.posts')}>
+                        {cat.posts_count || 0}
+                      </td>
+                      <td className="align-middle" data-label={t('forum.last_post')}>
+                        {cat.last_post_topic_id ? (
+                          <div>
+                            <Link
+                              to={`/topic/${cat.last_post_topic_id}`}
+                              className="d-block fw-semibold text-decoration-none text-truncate mb-1 last-topic-link"
+                            >
+                              {cat.last_post_topic_title || '—'}
+                            </Link>
                           
                           {(() => {
                             const lastVisitRaw = readMap[cat.last_post_topic_id];

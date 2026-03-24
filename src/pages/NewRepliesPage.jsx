@@ -83,7 +83,7 @@ const NewRepliesPage = () => {
         </div>
       </div>
 
-      <Card className="shadow-sm border-0 mb-4">
+      <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
         {loading ? (
           <div className="p-5 text-center text-muted">
             <div className="spinner-border spinner-border-sm me-2" role="status" />
@@ -95,10 +95,11 @@ const NewRepliesPage = () => {
           </div>
         ) : (
           <>
-            <Table hover responsive className="mb-0 align-middle">
+            <Table hover responsive className="mb-0 align-middle forum-table">
               <thead>
                 <tr>
-                  <th style={{ width: '50%' }}>{t('forum.topic')}</th>
+                  <th style={{ width: '40%' }}>{t('forum.topic')}</th>
+                  <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category')}</th>
                   <th className="text-center">{t('forum.replies')}</th>
                   <th>{t('forum.last_post')}</th>
                 </tr>
@@ -111,6 +112,7 @@ const NewRepliesPage = () => {
                     user={user}
                     lang={lang}
                     showCategory={true}
+                    showCategoryInColumn={true}
                     categoryName={getCategoryName(topic.category_id)}
                   />
                 ))}

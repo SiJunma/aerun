@@ -190,10 +190,10 @@ const CategoryPage = () => {
         </div>
       </div>
 
-      <Card className="shadow-sm border-0">
+      <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
         {loading ? (
           <div className="p-0">
-            <Table hover responsive className="mb-0 align-middle">
+            <Table hover responsive className="mb-0 align-middle forum-table">
               <thead>
                 <tr>
                   <th style={{ width: '50%' }}>{t('forum.topic')}</th>
@@ -249,7 +249,7 @@ const CategoryPage = () => {
           </div>
         ) : (
           <>
-            <Table hover responsive className="mb-0 align-middle">
+            <Table hover responsive className="mb-0 align-middle forum-table">
               <thead>
                 <tr>
                   {isManaging && (

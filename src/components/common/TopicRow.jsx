@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Form, Image } from 'react-bootstrap';
-import { Pin, Lock } from 'lucide-react';
+import { Pin, Lock, MessageSquare } from 'lucide-react';
 import ForumAuthorName from './ForumAuthorName';
 import LastPostInfo from './LastPostInfo';
 import AuthorMeta from './AuthorMeta';
@@ -15,7 +15,8 @@ const TopicRow = ({
   isSelected = false, 
   onSelect = () => {},
   showCategory = false,
-  categoryName = ''
+  categoryName = '',
+  showCategoryInColumn = false
 }) => {
   const { readMap, profile } = useAuth();
   const lastVisitRaw = readMap[topic.id];
@@ -74,8 +75,8 @@ const TopicRow = ({
           />
         </td>
       )}
-      <td style={{ minWidth: '280px', maxWidth: '100vw' }}>
-        <div className="d-flex align-items-start gap-2">
+      <td data-label={lang === 'ru' ? 'Тема' : 'Topic'}>
+        <div className="d-flex align-items-start gap-2 topic-main-cell">
           <div className="flex-grow-1">
             <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
               {topic.is_pinned && (
@@ -93,11 +94,12 @@ const TopicRow = ({
               {renderMiniPagination()}
             </div>
             {topic.description && (
-              <div className="text-muted small mb-1 text-truncate" style={{ maxWidth: 480 }}>
+              <div className="text-muted small mb-1 topic-desc-text">
                 {topic.description}
               </div>
             )}
             <div className="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-1 mt-1">
+            <div className="d-none d-md-block mt-1">
               <AuthorMeta
                 date={topic.created_at}
                 authorId={topic.author_id}
@@ -107,22 +109,38 @@ const TopicRow = ({
                 authorAvatar={topic.author_avatar}
                 lang={lang}
               />
+            </div>
               {showCategory && categoryName && (
-                <div className="d-flex align-items-center gap-1">
+                <div className={`d-flex align-items-center gap-1 ${showCategoryInColumn ? 'd-md-none' : ''}`}>
                   <span className="text-muted small d-none d-sm-inline">·</span>
-                  <Link to={`/category/${topic.category_id}`} className="text-decoration-none small text-primary opacity-75 hover-opacity-100">
+                  <Link to={`/category/${topic.category_id}`} className="text-decoration-none small text-primary hover-opacity-100">
                     {categoryName}
                   </Link>
                 </div>
               )}
             </div>
+            {/* Mobile Replies Line */}
+            <div className="d-md-none mt-2 d-flex gap-3 small forum-mobile-stats text-muted">
+              <span className="d-flex align-items-center gap-1">
+                <MessageSquare size={12} /> {Math.max(0, (topic.posts_count || 1) - 1)}
+              </span>
+            </div>
           </div>
         </div>
       </td>
-      <td className="text-center">
-        {Math.max(0, (topic.posts_count || 1) - 1)}
+      {showCategoryInColumn && (
+        <td className="d-none d-md-table-cell align-middle" data-label={lang === 'ru' ? 'Категория' : 'Category'}>
+          <Link to={`/category/${topic.category_id}`} className="text-decoration-none small text-muted hover-opacity-100">
+            {categoryName}
+          </Link>
+        </td>
+      )}
+      <td className="text-center forum-td-stat" data-label={lang === 'ru' ? 'Ответов' : 'Replies'}>
+        <div className="d-flex align-items-center justify-content-center">
+          <span className="topic-count-val">{Math.max(0, (topic.posts_count || 1) - 1)}</span>
+        </div>
       </td>
-      <td>
+      <td data-label={lang === 'ru' ? 'Последнее' : 'Last Post'}>
         <LastPostInfo
           topicId={topic.id}
           lastPostAt={topic.last_post_at}

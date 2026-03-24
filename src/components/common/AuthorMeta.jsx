@@ -28,7 +28,7 @@ const AuthorMeta = ({
   return (
     <div className={`d-flex align-items-center gap-2 text-muted ${className}`} style={{ fontSize: '0.875rem' }}>
       <span className="text-nowrap">{formatTime(date)}</span>
-      <span className="d-none d-sm-inline opacity-50">·</span>
+      <span className="d-none d-sm-inline">·</span>
       
       <div className="d-flex align-items-center gap-2">
         {showAvatar && authorId && (

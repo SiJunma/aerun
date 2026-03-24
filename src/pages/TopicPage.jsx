@@ -678,7 +678,7 @@ const TopicPage = () => {
     return post.author_id === user.uid || hasPermission('moderate_content');
   };
 
-  const getRoleBadge = (post) => {
+  const getRoleBadge = (post, extraClass = 'mb-2') => {
     if (post.is_character) return null;
     
     // Check author data from stats
@@ -686,7 +686,7 @@ const TopicPage = () => {
     
     // If it's undefined, it's still loading (we explicitly set null for 'not found')
     if (authorData === undefined) {
-      return <div className="skeleton skeleton-badge mb-2"></div>;
+      return <div className={`skeleton skeleton-badge ${extraClass}`}></div>;
     }
     
     return (
@@ -695,7 +695,7 @@ const TopicPage = () => {
         status={authorData?.status}
         userEmail={authorData?.email}
         isDeleted={authorData === null}
-        className="mb-2"
+        className={extraClass}
       />
     );
   };
@@ -918,86 +918,156 @@ const TopicPage = () => {
             <Card.Body className="p-0">
               <Row className="g-0">
                 {/* Author sidebar */}
-                <Col md={3} lg={2} className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
-                  {/* 1. Nickname */}
-                  <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
-                    <ForumAuthorName
-                      userId={post.author_id}
-                      characterId={post.author_character_id}
-                      isCharacter={!!post.is_character}
-                      fallbackName={post.author_name}
-                      onClick={handleQuoteAuthor}
-                    />
-                  </div>
-
-                  {/* 2. Status */}
-                  {getLiveAuthorStatus(post) === 'LOADING' ? (
-                    <div className="skeleton mb-2" style={{ width: '80%', height: '14px' }}></div>
-                  ) : getLiveAuthorStatus(post) ? (
-                    <div className="text-primary mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
-                      {getLiveAuthorStatus(post)}
+                <Col className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center col-lg-2 col-md-3">
+                  {/* --- DESKTOP VERSION (Stay as it was) --- */}
+                  <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
+                    {/* 1. Nickname */}
+                    <div className="fw-bold text-center mb-1 text-truncate w-100">
+                      <ForumAuthorName
+                        userId={post.author_id}
+                        characterId={post.author_character_id}
+                        isCharacter={!!post.is_character}
+                        fallbackName={post.author_name}
+                        onClick={handleQuoteAuthor}
+                      />
                     </div>
-                  ) : null}
 
-                  {/* 3. Avatar */}
-                  <div className="mb-2">
-                    <ForumAuthorAvatar
-                      userId={post.author_id}
-                      characterId={post.author_character_id}
-                      isCharacter={!!post.is_character}
-                      fallbackName={post.author_name}
-                      initialAvatar={post.author_avatar}
-                      size={120}
-                      className="rounded shadow-sm"
-                    />
-                  </div>
-
-                  {/* 4. Posts Count */}
-                  <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
-                    {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
-                      <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
-                    ) : (
-                      <span className="skeleton ms-1" style={{ width: '25px', height: '14px' }}></span>
-                    )}
-                  </div>
-
-                  {/* 5. Reputation */}
-                  <div className="text-muted" style={{ fontSize: '0.775rem' }}>
-                    {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
-                      <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
-                    ) : (
-                      <span className="skeleton ms-1" style={{ width: '25px', height: '14px' }}></span>
-                    )}
-                  </div>
-
-                  {/* 6. Role/Mask */}
-                  {!post.is_character && (
-                    <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(post)}</div>
-                  )}
-                  {post.is_character && (
-                    <div className="text-muted mt-1 mb-3 opacity-75" style={{ fontSize: '0.875rem' }}>
-                      {lang === 'ru' ? 'персонаж' : 'character'}
-                      {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
-                    </div>
-                  )}
-
-                  {(() => {
-                    const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                    if (!authorData) return null;
-                    
-                    return (
-                      <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
-                        <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
-                          {t('profile.view_profile')}
-                        </Link>
-                        {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && post.author_id !== user?.uid && (
-                          <Link to={`/messages/${post.author_id}`} className="footer-link text-decoration-none px-0">
-                            {t('profile.pm')}
-                          </Link>
-                        )}
+                    {/* 2. Status */}
+                    {getLiveAuthorStatus(post) === 'LOADING' ? (
+                      <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
+                    ) : getLiveAuthorStatus(post) ? (
+                      <div className="text-primary mb-2 text-truncate w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
+                        {getLiveAuthorStatus(post)}
                       </div>
-                    );
-                  })()}
+                    ) : null}
+
+                    {/* 3. Avatar */}
+                    <div className="mb-2">
+                      <ForumAuthorAvatar
+                        userId={post.author_id}
+                        characterId={post.author_character_id}
+                        isCharacter={!!post.is_character}
+                        fallbackName={post.author_name}
+                        initialAvatar={post.author_avatar}
+                        size={120}
+                        className="rounded shadow-sm"
+                      />
+                    </div>
+
+                    {/* 4. Posts Count */}
+                    <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
+                      {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
+                        <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
+                      ) : (
+                        <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
+                      )}
+                    </div>
+
+                    {/* 5. Reputation */}
+                    <div className="text-muted" style={{ fontSize: '0.775rem' }}>
+                      {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
+                        <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
+                      ) : (
+                        <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
+                      )}
+                    </div>
+
+                    {/* 6. Role/Mask */}
+                    {!post.is_character && (
+                      <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(post)}</div>
+                    )}
+                    {post.is_character && (
+                      <div className="text-muted mt-1 mb-2 opacity-75 text-center" style={{ fontSize: '0.875rem' }}>
+                        {lang === 'ru' ? 'персонаж' : 'character'}
+                        {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
+                      </div>
+                    )}
+
+                    {/* Desktop profile links */}
+                    {(() => {
+                      const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                      if (!authorData) return null;
+                      
+                      return (
+                        <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
+                          <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                            {t('profile.view_profile')}
+                          </Link>
+                          {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && post.author_id !== user?.uid && (
+                            <Link to={`/messages/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                              {t('profile.pm')}
+                            </Link>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* --- MOBILE VERSION (Compact & Horizontal) --- */}
+                  <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
+                    {/* Avatar */}
+                    <div className="author-avatar-wrapper flex-shrink-0">
+                      <ForumAuthorAvatar
+                        userId={post.author_id}
+                        characterId={post.author_character_id}
+                        isCharacter={!!post.is_character}
+                        fallbackName={post.author_name}
+                        initialAvatar={post.author_avatar}
+                        size={60}
+                        className="rounded shadow-sm"
+                      />
+                    </div>
+
+                    {/* Info Group */}
+                    <div className="flex-grow-1 text-start overflow-hidden">
+                      <div className="fw-bold text-truncate author-res-nickname">
+                        <ForumAuthorName
+                          userId={post.author_id}
+                          characterId={post.author_character_id}
+                          isCharacter={!!post.is_character}
+                          fallbackName={post.author_name}
+                          onClick={handleQuoteAuthor}
+                        />
+                      </div>
+                      {getLiveAuthorStatus(post) && (
+                        <div className="text-primary text-truncate author-res-status" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                          {getLiveAuthorStatus(post)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Stats & Role Group */}
+                    <div className="text-end author-stats-group ms-auto">
+                      <div className="d-flex flex-column align-items-end gap-1">
+                        <div className="text-muted author-res-stat">
+                          {lang === 'ru' ? 'Постов' : 'Posts'}: {authorStats[post.author_id] !== undefined ? (
+                            <strong className="ms-1">{authorStats[post.author_id]?.post_count || 0}</strong>
+                          ) : (
+                            <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
+                          )}
+                        </div>
+                        <div className="text-muted author-res-stat">
+                          {lang === 'ru' ? 'Реп' : 'Rep'}: {authorStats[post.author_id] !== undefined ? (
+                            <strong className="ms-1">{authorStats[post.author_id]?.reputation || 0}</strong>
+                          ) : (
+                            <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
+                          )}
+                        </div>
+                        <div>
+                           {!post.is_character ? (
+                             <div className="author-res-info-lite text-end">
+                               {getRoleBadge(post, 'mb-0')}
+                             </div>
+                           ) : (
+                             <div className="text-muted opacity-75 author-res-stat text-end">
+                               {lang === 'ru' ? 'персонаж' : 'character'}
+                               {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
+                             </div>
+                           )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </Col>
 
                 {/* Content Area */}
@@ -1180,62 +1250,84 @@ const TopicPage = () => {
                   {/* Post Management Links — only render if at least one button is visible */}
                   {user && profile?.status !== 'pending' && ((canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content'))) ||
                     (profile?.role_id !== 'spectator' && (!topic.is_locked || hasPermission('moderate_content')))) && (
-                    <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed">
-                      {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
-                        <>
+                    <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
+                      {/* Left side: Profile Links (Mobile Only) */}
+                      <div className="d-flex d-md-none gap-3">
+                        {(() => {
+                          const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                          if (!authorData) return null;
+                          return (
+                            <>
+                              <Link to={`/profile/${post.author_id}`} className="author-res-footer-link">
+                                {t('profile.view_profile')}
+                              </Link>
+                              {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && post.author_id !== user?.uid && (
+                                <Link to={`/messages/${post.author_id}`} className="author-res-footer-link">
+                                  {t('profile.pm')}
+                                </Link>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                      
+                      {/* Placeholder for desktop formatting if needed, or hide div if empty on desktop */}
+                      <div className="d-none d-md-block"></div>
+
+                      {/* Right side: Management Actions */}
+                      <div className="d-flex gap-2 gap-md-3">
+                        {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                          <>
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="footer-link p-0 text-danger"
+                              onClick={() => setDeletingPost(post)}
+                            >
+                              {lang === 'ru' ? 'Удалить' : 'Delete'}
+                            </Button>
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="footer-link p-0"
+                              onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
+                            >
+                              {lang === 'ru' ? 'Редактировать' : 'Edit'}
+                            </Button>
+                          </>
+                        )}
+                        {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
                           <Button
                             variant="link"
                             size="sm"
                             className="footer-link p-0"
-                            onClick={() => setDeletingPost(post)}
+                            onClick={() => {
+                              const selectedText = window.getSelection().toString().trim();
+                              const author = getLiveAuthorName(post) || 'User';
+                              let content = selectedText || post.content;
+                              
+                              if (post.rolls) {
+                                content = content.replace(/\[roll=([a-z0-9_]+)\]/gi, (match, id) => {
+                                  const r = post.rolls[id];
+                                  if (r) {
+                                    return `[roll=${id} value=${r.value} sides=${r.sides}${r.type ? ` type=${r.type}` : ''}]`;
+                                  }
+                                  return match;
+                                });
+                              }
+
+                              const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
+                              const quote = `[quote]${label}\n${content}[/quote]\n`;
+
+                              setReplyContent(prev => prev + quote);
+                              window.getSelection().removeAllRanges();
+                              replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+                            }}
                           >
-                            {lang === 'ru' ? 'Удалить' : 'Delete'}
+                            {lang === 'ru' ? 'Цитировать' : 'Quote'}
                           </Button>
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="footer-link p-0"
-                            onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
-                          >
-                            {lang === 'ru' ? 'Редактировать' : 'Edit'}
-                          </Button>
-                        </>
-                      )}
-                      {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="footer-link p-0"
-                          onClick={() => {
-                            const selectedText = window.getSelection().toString().trim();
-                            const author = getLiveAuthorName(post) || 'User';
-                            let content = selectedText || post.content;
-                            
-                            // Bake roll data into the content for "Static Quoting" permanence
-                            if (post.rolls) {
-                              content = content.replace(/\[roll=([a-z0-9_]+)\]/gi, (match, id) => {
-                                const r = post.rolls[id];
-                                if (r) {
-                                  return `[roll=${id} value=${r.value} sides=${r.sides}${r.type ? ` type=${r.type}` : ''}]`;
-                                }
-                                return match;
-                              });
-                            }
-
-                            const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
-
-                            // BBCode Quote layout without extra trailing newlines to prevent gaps
-                            const quote = `[quote]${label}\n${content}[/quote]\n`;
-
-                            setReplyContent(prev => prev + quote);
-                            // Clean selection after quoting
-                            window.getSelection().removeAllRanges();
-                            replyRef.current?.scrollIntoView({ behavior: 'smooth' });
-                          }}
-                        >
-                          {lang === 'ru' ? 'Цитировать' : 'Quote'}
-                        </Button>
-                      )}
+                        )}
+                      </div>
                     </div>
                   )}
                 </Col>
