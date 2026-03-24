@@ -42,7 +42,7 @@ const ForumRoleBadge = ({
 
   if (status === 'pending') {
     return (
-      <Badge bg="info" className={`role-badge ${className} text-white`}>
+      <Badge className={`role-badge badge-pending ${className}`}>
         {lang === 'ru' ? 'Ожидает' : 'Pending'}
       </Badge>
     );

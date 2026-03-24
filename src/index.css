@@ -545,6 +545,24 @@ label.fw-bold {
   letter-spacing: 0.3px;
 }
 
+.group-badge, .audit-badge {
+  background: rgba(var(--primary-rgb), 0.08) !important;
+  color: var(--primary-color) !important;
+  border: 1px solid rgba(var(--primary-rgb), 0.15) !important;
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.025em;
+  padding: 0.35em 0.7em !important;
+  border-radius: 6px !important;
+}
+
+.badge-pending {
+  background-color: var(--block-bg) !important;
+  color: var(--secondary-color) !important;
+  border: 1px solid var(--border-color) !important;
+  font-weight: 600;
+}
+
 /* Ensure persistent actions don't wrap on tiny screens */
 @media (max-width: 350px) {
   .navbar-brand {
@@ -2128,5 +2146,42 @@ a.badge.bg-danger:hover {
 /* Toast Dark Mode Color Fix */
 [data-theme='dark'] .global-toast .btn-close {
   filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+.forum-group-header {
+  background-color: var(--nav-bg) !important;
+  color: #ffffff !important;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.75rem 1rem !important;
+}
+
+.forum-group-header h4 {
+  color: #ffffff !important;
+  font-size: 1rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.forum-table-sub thead th {
+  background-color: var(--block-bg) !important;
+  color: var(--secondary-color) !important;
+  font-size: 0.65rem !important; /* Slightly smaller */
+  font-weight: 700 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.35rem 1rem !important; /* Reduced vertical padding and left padding to align better */
+  border-bottom: 1px solid var(--border-color) !important;
+  border-top: none !important;
+}
+
+[data-theme='dark'] .forum-table-sub thead th {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+[data-theme='neutral'] .forum-table-sub thead th {
+  background-color: rgba(67, 52, 34, 0.05) !important;
+  color: var(--secondary-color) !important;
+  border-bottom: 1px solid rgba(67, 52, 34, 0.1) !important;
 }
 

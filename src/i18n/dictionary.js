@@ -347,7 +347,17 @@ export const translations = {
         perm_use_masks: "Use Masks (Characters)",
         perm_use_dice: "Use Dice",
         perm_allowed_roles: "Allowed roles:",
-        role_guest: "Guest (unauthenticated)"
+        role_guest: "Guest (unauthenticated)",
+        groups_title: "Category Groups",
+        add_group: "Add Group",
+        group_order: "Order",
+        group_title_en: "Title (EN)",
+        group_title_ru: "Title (RU)",
+        group_actions: "Actions",
+        modal_group_create: "Create Group",
+        modal_group_edit: "Edit Group",
+        modal_group_select: "Parent Group",
+        group_unassigned: "General"
       },
       audit: {
         title: "Audit Log",
@@ -361,6 +371,9 @@ export const translations = {
           category_created: "Category Created",
           category_updated: "Category Updated",
           category_deleted: "Category Deleted",
+          category_group_created: "Category Group Created",
+          category_group_updated: "Category Group Updated",
+          category_group_deleted: "Category Group Deleted",
           role_created: "Role Created",
           role_updated: "Role Config Updated",
           role_deleted: "Role Deleted",
@@ -385,13 +398,17 @@ export const translations = {
         },
         fields: {
           targetId: "Target",
+          group_id: "Group ID",
           categoryId: "Category",
           topicId: "Topic",
           title: "Title",
+          name: "Name",
           email: "Email",
           nickname: "Nickname",
           roleId: "Role",
           roleName: "Role Name",
+          role_id: "Role ID",
+          target_id: "Target ID",
           status: "Status",
           is_pinned: "Pinned",
           is_locked: "Locked",
@@ -417,7 +434,6 @@ export const translations = {
           bgOpacityNeutral: "Neutral BG Opacity",
           maxUploadSize: "Max Upload Size",
           registrationEnabled: "Allow Registration",
-          requireApproval: "Require Approval"
         }
       }
     }
@@ -770,7 +786,17 @@ export const translations = {
         perm_use_masks: "Использовать маски (персонажей)",
         perm_use_dice: "Использовать кубики",
         perm_allowed_roles: "Роли с доступом:",
-        role_guest: "Гость (не авторизован)"
+        role_guest: "Гость (не авторизован)",
+        groups_title: "Группы разделов",
+        add_group: "Добавить группу",
+        group_order: "Порядок",
+        group_title_en: "Заголовок (EN)",
+        group_title_ru: "Заголовок (RU)",
+        group_actions: "Действия",
+        modal_group_create: "Создать группу",
+        modal_group_edit: "Редактировать группу",
+        modal_group_select: "Группа разделов",
+        group_unassigned: "Общее"
       },
       audit: {
         title: "Журнал изменений",
@@ -783,7 +809,10 @@ export const translations = {
           settings_updated: "Настройки изменены",
           category_created: "Категория создана",
           category_updated: "Категория обновлена",
-          category_deleted: "Категория удалена",
+          category_deleted: "Раздел удален",
+          category_group_created: "Группа разделов создана",
+          category_group_updated: "Группа разделов обновлена",
+          category_group_deleted: "Группа разделов удалена",
           role_created: "Роль создана",
           role_updated: "Настройки роли обновлены",
           role_deleted: "Роль удалена",
@@ -811,10 +840,14 @@ export const translations = {
           categoryId: "Категория",
           topicId: "Тема",
           title: "Заголовок",
+          name: "Имя",
           email: "Email",
           nickname: "Никнейм",
           roleId: "Роль",
           roleName: "Имя роли",
+          role_id: "ID роли",
+          target_id: "ID цели",
+          group_id: "ID группы",
           status: "Статус",
           is_pinned: "Закреплено",
           is_locked: "Закрыто",
@@ -840,7 +873,6 @@ export const translations = {
           bgOpacityNeutral: "Прозрачность (нейтральный)",
           maxUploadSize: "Макс. размер файла",
           registrationEnabled: "Разрешить регистрацию",
-          requireApproval: "Требуется одобрение"
         }
       }
     }

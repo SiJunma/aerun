@@ -30,7 +30,7 @@ export const updateGlobalSettings = async (settings, performerId) => {
         }
       }
     }
-  } catch (e) {
+  } catch {
     // If diff fails, still save — just log without details
   }
 

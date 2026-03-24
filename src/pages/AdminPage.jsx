@@ -6,7 +6,7 @@ import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
   updateUserRole, addRole, updateRole, deleteRole 
 } from '../api/admin';
-import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers } from '../api/forum';
+import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/forum';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
 import { format } from 'date-fns';
@@ -33,6 +33,7 @@ const AdminPage = () => {
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState('');
 
@@ -43,8 +44,13 @@ const AdminPage = () => {
     title: { en: '', ru: '' }, 
     description: { en: '', ru: '' }, 
     order: 0, 
+    group_id: '',
     permissions: {} 
   });
+
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [groupForm, setGroupForm] = useState({ title: { en: '', ru: '' }, order: 0 });
 
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
@@ -144,11 +150,13 @@ const AdminPage = () => {
       }
     });
     const unsubCats = subscribeToCategories(setCategories);
+    const unsubGroups = subscribeToCategoryGroups(setGroups);
     const unsubUsers = subscribeToAllUsers(setUsers);
 
     return () => {
       unsubSettings();
       unsubCats();
+      unsubGroups();
       unsubUsers();
     };
   }, []);
@@ -202,6 +210,7 @@ const AdminPage = () => {
         title: typeof cat.title === 'object' ? { ...cat.title } : { en: cat.title, ru: cat.title },
         description: typeof cat.description === 'object' ? { ...cat.description } : { en: cat.description, ru: cat.description },
         order: cat.order || 0,
+        group_id: cat.group_id || '',
         permissions: cat.permissions || {}
       });
     } else {
@@ -210,6 +219,7 @@ const AdminPage = () => {
         title: { en: '', ru: '' }, 
         description: { en: '', ru: '' }, 
         order: categories.length + 1, 
+        group_id: groups[0]?.id || '',
         permissions: {} 
       });
     }
@@ -271,6 +281,56 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteCategory(id, user.uid);
+          showToast(t('admin.categories.toast_deleted'), 'success');
+        } catch (err) {
+          console.error(err);
+          showToast(t('admin.categories.error_save'), 'danger');
+        }
+      }
+    });
+  };
+
+  const handleOpenGroupModal = (group = null) => {
+    if (group) {
+      setEditingGroup(group.id);
+      setGroupForm({
+        title: typeof group.title === 'object' ? { ...group.title } : { en: group.title, ru: group.title },
+        order: group.order || 0
+      });
+    } else {
+      setEditingGroup(null);
+      setGroupForm({ title: { en: '', ru: '' }, order: groups.length + 1 });
+    }
+    setShowGroupModal(true);
+  };
+
+  const handleSaveGroup = async () => {
+    if (!groupForm.title?.en && !groupForm.title?.ru) return;
+    setSaving(true);
+    try {
+      if (editingGroup) {
+        await updateCategoryGroup(editingGroup, groupForm, user.uid);
+      } else {
+        await addCategoryGroup(groupForm, user.uid);
+      }
+      showToast(t('admin.categories.toast_saved'), 'success');
+      setShowGroupModal(false);
+    } catch (err) {
+      console.error(err);
+      showToast(t('admin.categories.error_save'), 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteGroup = (id) => {
+    setConfirmState({
+      show: true,
+      title: t('common.confirm_title'),
+      message: t('common.confirm_message'),
+      onConfirm: async () => {
+        try {
+          await deleteCategoryGroup(id, user.uid);
           showToast(t('admin.categories.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -911,7 +971,48 @@ const AdminPage = () => {
   );
 
   const renderCategories = () => (
-    <Card className="shadow-sm border-0">
+    <>
+      <Card className="shadow-sm border-0 mb-4">
+        <Card.Body className="p-4">
+          <div className="d-flex justify-content-between mb-4">
+            <h5 className="mb-0">{t('admin.categories.groups_title')}</h5>
+            {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+              <Button variant="primary" size="sm" onClick={() => handleOpenGroupModal()}>
+                {t('admin.categories.add_group')}
+              </Button>
+            )}
+          </div>
+          <Table hover responsive>
+            <thead>
+              <tr>
+                <th style={{ width: '80px' }}>{t('admin.categories.group_order')}</th>
+                <th>{t('admin.categories.group_title_en')}</th>
+                <th>{t('admin.categories.group_title_ru')}</th>
+                <th className="text-end">{t('admin.categories.group_actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map(group => (
+                <tr key={group.id} className="align-middle">
+                  <td>{group.order}</td>
+                  <td>{group.title?.en}</td>
+                  <td>{group.title?.ru}</td>
+                  <td className="text-end">
+                    {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                      <>
+                        <Button variant="link" size="sm" onClick={() => handleOpenGroupModal(group)}>{t('common.edit')}</Button>
+                        <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteGroup(group.id)}>{t('common.delete')}</Button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card.Body>
+      </Card>
+
+      <Card className="shadow-sm border-0">
         <Card.Body className="p-4">
           <div className="d-flex justify-content-between mb-4">
             <h5 className="mb-0">{t('admin.categories.title')}</h5>
@@ -922,39 +1023,49 @@ const AdminPage = () => {
           <Table hover responsive>
             <thead>
               <tr>
-                <th>{t('admin.categories.table_order')}</th>
+                <th style={{ width: '80px' }}>{t('admin.categories.table_order')}</th>
+                <th>{t('admin.categories.modal_group_select')}</th>
                 <th>{t('admin.categories.table_title')}</th>
                 <th>{t('admin.categories.table_stats')}</th>
                 <th className="text-end">{t('admin.categories.table_actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {categories.map(cat => (
-                <tr key={cat.id} className="align-middle">
-                  <td>{cat.order}</td>
-                  <td>
-                    <div className="fw-bold">
-                      {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
-                    </div>
-                    <div className="small text-muted">
-                      {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
-                    </div>
-                  </td>
-                  <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
-                  <td className="text-end">
-                    {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                      <>
-                        <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
-                        <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {categories.map(cat => {
+                const group = groups.find(g => g.id === cat.group_id);
+                return (
+                  <tr key={cat.id} className="align-middle">
+                    <td>{cat.order}</td>
+                    <td>
+                      <span className="group-badge">
+                        {group ? (group.title?.[currentLang] || group.title?.en) : t('admin.categories.group_unassigned')}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="fw-bold">
+                        {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                      </div>
+                      <div className="small text-muted">
+                        {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                      </div>
+                    </td>
+                    <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
+                    <td className="text-end">
+                      {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                        <>
+                          <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
+                          <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         </Card.Body>
       </Card>
+    </>
   );
 
   const renderAuditLog = () => {
@@ -1051,7 +1162,7 @@ const AdminPage = () => {
                       <div className="fw-bold">{performerName}</div>
                     </td>
                     <td>
-                      <Badge bg="secondary" className="opacity-75">{t(`admin.audit.actions.${log.action_type}`) || log.action_type}</Badge>
+                      <span className="audit-badge">{t(`admin.audit.actions.${log.action_type}`) || log.action_type}</span>
                     </td>
                     <td className="small text-muted" style={{ wordBreak: 'break-word', minWidth: '200px' }}>
                       {log.details && Object.keys(log.details).length > 0 ? (
@@ -1337,14 +1448,35 @@ const AdminPage = () => {
               </Form.Group>
             </Col>
           </Row>
-          <Form.Group className="mb-3">
-            <Form.Label className="fw-bold">{t('admin.categories.modal_order')}</Form.Label>
-            <Form.Control
-              type="number"
-              value={catForm.order}
-              onChange={(e) => setCatForm({ ...catForm, order: parseInt(e.target.value) })}
-            />
-          </Form.Group>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.modal_order')}</Form.Label>
+                <Form.Control
+                  type="number"
+                  value={catForm.order}
+                  onChange={(e) => setCatForm({ ...catForm, order: parseInt(e.target.value) || 0 })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.modal_group_select')}</Form.Label>
+                <Form.Select
+                  value={catForm.group_id}
+                  onChange={(e) => setCatForm({ ...catForm, group_id: e.target.value })}
+                  required
+                >
+                  <option value="" disabled>{t('admin.categories.modal_group_select')}...</option>
+                  {groups.map(g => (
+                    <option key={g.id} value={g.id}>
+                      {g.title?.[currentLang] || g.title?.en}
+                    </option>
+                  ))}
+                </Form.Select>
+              </Form.Group>
+            </Col>
+          </Row>
 
           <hr className="my-3" />
           <h6 className="fw-bold mb-1">{t('admin.categories.modal_perms_title')}</h6>
@@ -1492,7 +1624,7 @@ const AdminPage = () => {
           {selectedAuditLog && (
             <div className="d-flex flex-column gap-3" style={{ wordBreak: 'break-word' }}>
               <div>
-                <strong>{t('admin.audit.table_action')}:</strong> <Badge bg="secondary" className="ms-1">{t(`admin.audit.actions.${selectedAuditLog.action_type}`) || selectedAuditLog.action_type}</Badge>
+                <strong>{t('admin.audit.table_action')}:</strong> <span className="audit-badge ms-1">{t(`admin.audit.actions.${selectedAuditLog.action_type}`) || selectedAuditLog.action_type}</span>
               </div>
               <div>
                 <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? format(selectedAuditLog.created_at.toDate(), 'd MMM yyyy, HH:mm:ss', { locale: currentLang === 'ru' ? ru : enUS }) : '...'}
@@ -1566,6 +1698,54 @@ const AdminPage = () => {
           )}
         </Modal.Body>
       </Modal>
+
+      {/* Group Modal */}
+      <ForumModal
+        show={showGroupModal}
+        onHide={() => setShowGroupModal(false)}
+        title={editingGroup ? t('admin.categories.modal_group_edit') : t('admin.categories.modal_group_create')}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowGroupModal(false)}>{t('common.cancel')}</Button>
+            <Button variant="primary" onClick={handleSaveGroup} disabled={saving}>
+              {saving ? t('admin.settings.saving') : t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <Form>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.group_title_en')}</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={groupForm.title?.en || ''}
+                  onChange={(e) => setGroupForm({ ...groupForm, title: { ...groupForm.title, en: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-bold">{t('admin.categories.group_title_ru')}</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={groupForm.title?.ru || ''}
+                  onChange={(e) => setGroupForm({ ...groupForm, title: { ...groupForm.title, ru: e.target.value } })}
+                />
+              </Form.Group>
+            </Col>
+          </Row>
+          <Form.Group className="mb-3">
+            <Form.Label className="fw-bold">{t('admin.categories.group_order')}</Form.Label>
+            <Form.Control
+              type="number"
+              value={groupForm.order}
+              onChange={(e) => setGroupForm({ ...groupForm, order: parseInt(e.target.value) || 0 })}
+            />
+          </Form.Group>
+        </Form>
+      </ForumModal>
     </Container>
   );
 };

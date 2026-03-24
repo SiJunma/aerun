@@ -56,9 +56,47 @@ export const subscribeToReadMap = (uid, callback) => {
   }, err => {
     // Silent on permission-denied during login/logout transitions
     if (err.code !== 'permission-denied') {
-      console.error('[subscribeToReadMap]', err);
+        console.error('[subscribeToReadMap]', err);
     }
   });
+};
+
+// ── Category Groups ──────────────────────────────────────────────────────────
+
+export const subscribeToCategoryGroups = (callback) => {
+  const q = query(collection(db, 'category_groups'), orderBy('order', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+  });
+};
+
+export const addCategoryGroup = async (groupData, performerId) => {
+  const ref = await addDoc(collection(db, 'category_groups'), {
+    ...groupData,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp()
+  });
+  await logAdminAction('category_group_created', performerId, {
+    targetId: ref.id,
+    title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
+  });
+  return ref.id;
+};
+
+export const updateCategoryGroup = async (id, groupData, performerId) => {
+  await updateDoc(doc(db, 'category_groups', id), {
+    ...groupData,
+    updated_at: serverTimestamp()
+  });
+  await logAdminAction('category_group_updated', performerId, {
+    targetId: id,
+    title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
+  });
+};
+
+export const deleteCategoryGroup = async (id, performerId) => {
+  await deleteDoc(doc(db, 'category_groups', id));
+  await logAdminAction('category_group_deleted', performerId, { targetId: id });
 };
 
 // ── Categories ──────────────────────────────────────────────────────────────
@@ -81,6 +119,7 @@ export const addCategory = async (catData, performerId) => {
   const ref = await addDoc(collection(db, 'categories'), {
     ...catData,
     permissions,
+    group_id: catData.group_id || null,
     topics_count: 0,
     posts_count: 0,
     created_at: serverTimestamp()
@@ -99,6 +138,7 @@ export const updateCategory = async (id, catData, performerId) => {
   await updateDoc(doc(db, 'categories', id), {
     ...rest,
     permissions,
+    group_id: catData.group_id || null,
     updated_at: serverTimestamp()
   });
   await logAdminAction('category_updated', performerId, { targetId: id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
