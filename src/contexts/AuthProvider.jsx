@@ -505,9 +505,31 @@ export const AuthProvider = ({ children }) => {
     // ── 2. CHIEF ADMIN: bypasses ALL other checks (including category overrides) ──
     const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
     if (adminEmail && user?.email === adminEmail) return true;
-    
-    const userRoleId = (profile?.status === 'banned') ? 'guest' : (profile?.role_id || (user ? 'player' : 'guest'));
-    if (userRoleId === CHIEF_ADMIN_ID) return true;
+
+    // If the user is logged in but profile hasn't arrived from Firestore yet,
+    // deny everything to avoid a flash of content that disappears once the real
+    // profile (e.g. status='pending') is applied.
+    if (user && profile === null) return false;
+
+    // Pending users: always allow profile editing regardless of other settings
+    const isPending = user && profile?.status === 'pending';
+    if (isPending) {
+      if (perm === PERMISSIONS.EDIT_SELF_NICKNAME || perm === PERMISSIONS.EDIT_SELF_AVATAR) {
+        return true;
+      }
+    }
+
+    const isWhitelistOff = !settings?.whitelistMode;
+    // When whitelistMode is OFF, pending users get spectator-level read access
+    // (spectator has VIEW_FORUM globally, but no posting rights).
+    // When whitelistMode is ON, pending users are strictly locked down.
+    const effectiveRoleId = (profile?.status === 'banned')
+      ? 'guest'
+      : (isPending && isWhitelistOff)
+        ? 'spectator'
+        : (profile?.role_id || (user ? 'player' : 'guest'));
+
+    if (effectiveRoleId === CHIEF_ADMIN_ID) return true;
 
     // ── 3. CATEGORY-LEVEL OVERRIDES ──
     // If a category object is passed in context, and the category has permission overrides
@@ -518,10 +540,10 @@ export const AuthProvider = ({ children }) => {
         // catPerms[perm] is an array of allowed role IDs.
         const allowedRoles = catPerms[perm];
         // Check if user's own role is allowed
-        if (allowedRoles.includes(userRoleId)) return true;
+        if (allowedRoles.includes(effectiveRoleId)) return true;
         
         // Check if user's role inherits from a base role that is allowed
-        const userRole = roles.find(r => r.id === userRoleId);
+        const userRole = roles.find(r => r.id === effectiveRoleId);
         if (userRole?.base_role_id && allowedRoles.includes(userRole.base_role_id)) return true;
         
         return false;
@@ -529,14 +551,11 @@ export const AuthProvider = ({ children }) => {
     }
 
     // ── 4. GLOBAL ROLE PERMISSIONS (Baseline) ──
-    // Users with 'pending' status also have no global permissions except profile editing.
-    if (user && profile?.status === 'pending') {
-      if (perm === PERMISSIONS.EDIT_SELF_NICKNAME || perm === PERMISSIONS.EDIT_SELF_AVATAR) {
-        return true;
-      }
-      return false;
-    }
-    const userRole = roles.find(r => r.id === userRoleId) || DEFAULT_ROLES.find(r => r.id === userRoleId);
+    // Pending users with whitelist ON: no permissions at all (except profile editing above).
+    // Pending users with whitelist OFF: fall through to spectator's global permissions (VIEW_FORUM only).
+    if (isPending && !isWhitelistOff) return false;
+
+    const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 

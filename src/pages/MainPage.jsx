@@ -38,10 +38,15 @@ const MainPage = () => {
   }, []);
 
 
+  // While a logged-in user's profile is still loading from Firestore, treat as loading
+  // to prevent a flash of content with wrong permissions (profile=null → role='player', then
+  // flips to 'pending' once profile arrives and categories may disappear).
+  const profileLoading = !!user && profile === null;
+
   return (
     <Container className="pt-5 pb-4">
 
-      {loading ? (
+      {loading || profileLoading ? (
         <Card className="shadow-sm border-0">
           <div className="p-0">
             <Table responsive className="mb-0 align-middle">

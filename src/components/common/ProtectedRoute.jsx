@@ -75,8 +75,12 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   }
 
   // Pending status handling
+  // When whitelistMode is OFF, pending users browse like spectators (read-only).
+  // They are only blocked from routes that require posting or admin access.
   if (profile?.status === 'pending') {
-    if (requireActive && location.pathname !== '/pending') {
+    const isWhitelistOff = !settings.whitelistMode;
+    const treatedAsSpectator = isWhitelistOff && !requireAdmin && !requirePosting;
+    if (requireActive && !treatedAsSpectator && location.pathname !== '/pending') {
       return <Navigate to="/pending" replace />;
     }
   } else if (location.pathname === '/pending') {

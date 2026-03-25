@@ -99,9 +99,9 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     const unsub = subscribeToDmMessages(activeChatId, messageLimit, (msgs) => {
       setMessages(msgs);
       setLoadingChat(false);
+      // Mark as read every time new messages arrive while the chat is open
+      markDmRead(activeChatId, myUid).catch(() => {});
     });
-    // Mark as read when opening
-    markDmRead(activeChatId, myUid).catch(() => {});
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChatId, myUid, messageLimit]);
