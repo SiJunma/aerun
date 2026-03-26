@@ -37,7 +37,7 @@ const ProfilePage = () => {
   const [viewedProfile, setViewedProfile] = useState(null);
   const [, setLoading] = useState(true);
 
-  const isLimitedProfile = viewedProfile?.status === 'pending' || viewedProfile?.role_id === 'spectator' || viewedProfile?.status === 'banned';
+  const isLimitedProfile = viewedProfile?.role_id === 'pending' || viewedProfile?.role_id === 'spectator' || viewedProfile?.role_id === 'banned';
   const isOwn = profile?.uid === uid;
   const canEditNickname = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_NICKNAME) : hasPermission(PERMISSIONS.EDIT_OTHERS_NICKNAMES);
   const canEditAvatar = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_AVATAR) : hasPermission(PERMISSIONS.EDIT_OTHERS_AVATARS);
@@ -353,7 +353,7 @@ const ProfilePage = () => {
                 </p>
 
                 {/* Send Message Button */}
-                {profile && profile.status !== 'pending' && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && uid !== profile.uid && (
+                {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.role_id !== 'banned' && uid !== profile?.uid && (
                   <div className="mt-3">
                     <Button
                       as={Link}
@@ -379,7 +379,7 @@ const ProfilePage = () => {
                     <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
                       <div className="d-flex align-items-center justify-content-end gap-2">
                       <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
-                      {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && (
+                      {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && (
                         <div className="d-flex gap-1 align-items-center">
                           {!myVote ? (
                             <>
@@ -773,7 +773,7 @@ const ProfilePage = () => {
                             onChange={(url) => setAccountFormData({ ...accountFormData, avatar_url: url })}
                             storagePath={`users/${uid}/avatar`}
                             size={100}
-                            canUpload={profile?.status !== 'pending'}
+                            canUpload={profile?.role_id !== 'pending'}
                             disabled={false}
                           />
                         </Form.Group>

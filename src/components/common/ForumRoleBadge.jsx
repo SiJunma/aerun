@@ -9,14 +9,12 @@ import { getRoleVisuals, resolveUserRoleId } from '../../constants/permissions';
  * 
  * Props:
  *   roleId      {string}  — The UID of the role
- *   status      {string?} — User status (banned, pending)
  *   userEmail   {string?} — Used to resolve Chief Admin role
  *   isDeleted   {boolean} — Whether the user record is missing/deleted
  *   className   {string?} — Extra CSS classes
  */
 const ForumRoleBadge = ({
   roleId,
-  status,
   userEmail,
   isDeleted = false,
   className = ''
@@ -32,7 +30,7 @@ const ForumRoleBadge = ({
     );
   }
 
-  if (status === 'banned') {
+  if (roleId === 'banned') {
     return (
       <Badge className={`role-badge badge-banned ${className}`}>
         {lang === 'ru' ? 'Забанен' : 'Banned'}
@@ -40,7 +38,7 @@ const ForumRoleBadge = ({
     );
   }
 
-  if (status === 'pending') {
+  if (roleId === 'pending') {
     return (
       <Badge className={`role-badge badge-pending ${className}`}>
         {lang === 'ru' ? 'Ожидает' : 'Pending'}

@@ -299,8 +299,7 @@ export const AuthProvider = ({ children }) => {
               nickname: chosenNickname.trim(),
               avatar_url: firebaseUser.photoURL || '',
               status_line: 'Hello, I am new here!',
-              role_id: isAdmin ? CHIEF_ADMIN_ID : 'player',
-              status: isAdmin ? 'active' : (globalSettings?.requireApproval === false ? 'active' : 'pending'),
+              role_id: isAdmin ? CHIEF_ADMIN_ID : (globalSettings?.requireApproval === false ? 'player' : 'pending'),
               created_at: serverTimestamp(),
               last_seen: serverTimestamp(),
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
@@ -331,7 +330,7 @@ export const AuthProvider = ({ children }) => {
             await logAdminAction('user_registered', firebaseUser.uid, { 
               email: firebaseUser.email, 
               nickname: chosenNickname.trim(),
-              status: newUser.status
+              role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
             // Login counts as activity — update immediately
@@ -359,10 +358,9 @@ export const AuthProvider = ({ children }) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
 
-              if (isAdmin && (data.role_id !== CHIEF_ADMIN_ID || data.status !== 'active')) {
+              if (isAdmin && data.role_id !== CHIEF_ADMIN_ID) {
                 const updates = {
                   role_id: CHIEF_ADMIN_ID,
-                  status: 'active',
                   last_seen: serverTimestamp()
                 };
                 await setDoc(userDocRef, updates, { merge: true });
@@ -460,13 +458,13 @@ export const AuthProvider = ({ children }) => {
     setReadMap(prev => ({ ...prev, [topicId]: now }));
     try {
       await apiRecordTopicVisit(user.uid, topicId);
-      if (profile?.status === 'active') {
+      if (profile?.role_id !== 'pending' && profile?.role_id !== 'banned') {
         await markTopicNotificationsRead(user.uid, topicId);
       }
     } catch (err) {
       console.error('[markTopicRead]', err);
     }
-  }, [user, profile?.status]);
+  }, [user, profile?.role_id]);
 
   /**
    * Mark all fetched topics as read.
@@ -512,7 +510,7 @@ export const AuthProvider = ({ children }) => {
     if (user && profile === null) return false;
 
     // Pending users: always allow profile editing regardless of other settings
-    const isPending = user && profile?.status === 'pending';
+    const isPending = user && profile?.role_id === 'pending';
     if (isPending) {
       if (perm === PERMISSIONS.EDIT_SELF_NICKNAME || perm === PERMISSIONS.EDIT_SELF_AVATAR) {
         return true;
@@ -523,9 +521,7 @@ export const AuthProvider = ({ children }) => {
     // When whitelistMode is OFF, pending users get spectator-level read access
     // (spectator has VIEW_FORUM globally, but no posting rights).
     // When whitelistMode is ON, pending users are strictly locked down.
-    const effectiveRoleId = (profile?.status === 'banned')
-      ? 'guest'
-      : (isPending && isWhitelistOff)
+    const effectiveRoleId = (isPending && isWhitelistOff)
         ? 'spectator'
         : (profile?.role_id || (user ? 'player' : 'guest'));
 
@@ -563,7 +559,7 @@ export const AuthProvider = ({ children }) => {
   React.useEffect(() => {
     if (user && profile && !loading) {
       const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
-      const isBanned = profile.status === 'banned';
+      const isBanned = profile.role_id === 'banned';
       
       // Maintenance applies if ON and whitelist is active
       const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);

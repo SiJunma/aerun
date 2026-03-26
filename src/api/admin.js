@@ -44,7 +44,7 @@ export const updateGlobalSettings = async (settings, performerId) => {
 // --- User Management ---
 export const approveUser = async (uid, performerId) => {
   await updateDoc(doc(db, 'users', uid), {
-    status: 'active',
+    role_id: 'player',
     updated_at: serverTimestamp()
   });
   await logAdminAction('user_approved', performerId, { targetId: uid });
@@ -61,16 +61,25 @@ export const rejectUser = async (uid, performerId) => {
 };
 
 export const banUser = async (uid, performerId) => {
+  // Get current role to save it
+  const userSnap = await getDoc(doc(db, 'users', uid));
+  const currentRole = userSnap.exists() ? userSnap.data().role_id : 'player';
+
   await updateDoc(doc(db, 'users', uid), {
-    status: 'banned',
+    role_id: 'banned',
+    previous_role_id: currentRole,
     updated_at: serverTimestamp()
   });
   await logAdminAction('user_banned', performerId, { targetId: uid });
 };
 
 export const unbanUser = async (uid, performerId) => {
+  // Restore previous role
+  const userSnap = await getDoc(doc(db, 'users', uid));
+  const previousRole = userSnap.exists() ? (userSnap.data().previous_role_id || 'player') : 'player';
+
   await updateDoc(doc(db, 'users', uid), {
-    status: 'active',
+    role_id: previousRole,
     updated_at: serverTimestamp()
   });
   await logAdminAction('user_unbanned', performerId, { targetId: uid });

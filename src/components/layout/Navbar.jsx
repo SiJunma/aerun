@@ -23,7 +23,7 @@ const Navigation = () => {
 
   // Subscribe to notifications
   React.useEffect(() => {
-    if (!user?.uid || profile?.status !== 'active') return;
+    if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') return;
 
     // User notifications
     const unsubUser = subscribeToUserNotifications(user.uid, (notifs) => {
@@ -44,17 +44,20 @@ const Navigation = () => {
       unsubUser();
       unsubAdmin();
     };
-  }, [isAdmin, user?.uid, profile?.status]);
+  }, [isAdmin, user?.uid, profile?.role_id]);
 
   // Subscribe to DM unread count
   React.useEffect(() => {
-    if (!user?.uid || profile?.status !== 'active' || profile?.role_id === 'spectator') return;
+    if (!hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES)) {
+      setDmUnread(0);
+      return;
+    }
     const unsub = subscribeToDmList(user.uid, (convs) => {
       const total = convs.reduce((sum, c) => sum + (c.unread?.[user.uid] || 0), 0);
       setDmUnread(total);
     });
     return () => unsub();
-  }, [user?.uid, profile?.status, profile?.role_id]);
+  }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES]);
 
   const totalUnread = adminUnread + userUnread;
 
@@ -109,8 +112,8 @@ const Navigation = () => {
             </Badge>
           )}
 
-          {/* Notifications bell — not for spectators */}
-          {user && profile?.role_id !== 'spectator' && profile?.status === 'active' && (
+          {/* Notifications bell */}
+          {user && profile?.role_id !== 'banned' && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && (
             <Nav.Link
               as={Link}
               to="/notifications"
@@ -132,8 +135,8 @@ const Navigation = () => {
             </Nav.Link>
           )}
 
-          {/* DM inbox button — not for spectators */}
-          {user && profile?.role_id !== 'spectator' && profile?.status === 'active' && (
+          {/* DM inbox button */}
+          {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && (
             <Nav.Link
               as={Link}
               to="/messages"

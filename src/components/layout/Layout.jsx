@@ -64,7 +64,7 @@ const Layout = ({ children }) => {
           </Alert>
         )}
 
-        {profile?.status === 'pending' && location.pathname !== '/pending' && (
+        {profile?.role_id === 'pending' && location.pathname !== '/pending' && (
           <Alert variant="warning" className="m-0 text-center rounded-0 border-0 shadow-sm sticky-top pending-status-banner" style={{ zIndex: 900, top: '56px' }}>
             <span className="small fw-medium">
               {t('gatekeeper.pending_banner')}

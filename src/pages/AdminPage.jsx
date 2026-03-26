@@ -829,14 +829,14 @@ const AdminPage = () => {
                 </div>
               </td>
               <td>
-                {u.status === 'active' && <Badge bg="success">{t('admin.users.status_active')}</Badge>}
-                {u.status === 'pending' && <Badge bg="warning" text="dark">{t('admin.users.status_pending')}</Badge>}
-                {u.status === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
+                {u.role_id !== 'pending' && u.role_id !== 'banned' && <Badge bg="success">{t('admin.users.status_active')}</Badge>}
+                {u.role_id === 'pending' && <Badge bg="warning" text="dark">{t('admin.users.status_pending')}</Badge>}
+                {u.role_id === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
               </td>
               <td className="text-end">
                 {!isChiefAdmin(u.email, u.role_id) && (
                   <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
-                    {u.status === 'pending' && (
+                    {u.role_id === 'pending' && (
                       <>
                         {hasPermission(PERMISSIONS.APPROVE_USERS) && (
                           <Button variant="success" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleApproveUser(u.id)}>
@@ -850,7 +850,7 @@ const AdminPage = () => {
                         )}
                       </>
                     )}
-                    {u.status !== 'banned' ? (
+                    {u.role_id !== 'banned' ? (
                       hasPermission(PERMISSIONS.BAN_USERS) && (
                         <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleBanUser(u.id)}>
                           <UserMinus size={14} className="me-1" /> {t('admin.users.ban')}

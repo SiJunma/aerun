@@ -9,8 +9,9 @@ import { useAuth } from '../../contexts/AuthProvider';
  *  requireActive  {boolean} – if true, pending/banned users are bounced (default: true)
  *  requireAdmin   {boolean} – if true, only role_id='admin' may enter (default: false)
  *  requirePosting {boolean} – if true, spectators are bounced (cannot post/create, default: false)
+ *  requireDm      {boolean} – if true, requires USE_DIRECT_MESSAGES permission (default: false)
  */
-const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false, allowGuest = false }) => {
+const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false, requireDm = false, allowGuest = false }) => {
   const { user: firebaseUser, profile, settings, loading, hasPermission, PERMISSIONS } = useAuth();
   const location = useLocation();
 
@@ -20,7 +21,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
 
   // Shadow logout for banned users: treat them as guests immediately in terms of routing.
   // This avoids the jump to /banned before AuthProvider triggers the real logout().
-  const isBanned = profile?.status === 'banned';
+  const isBanned = profile?.role_id === 'banned';
   const user = isBanned ? null : firebaseUser;
 
   // Not logged in at all → /login (unless allowGuest is true and whitelistMode is OFF)
@@ -77,7 +78,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   // Pending status handling
   // When whitelistMode is OFF, pending users browse like spectators (read-only).
   // They are only blocked from routes that require posting or admin access.
-  if (profile?.status === 'pending') {
+  if (profile?.role_id === 'pending') {
     const isWhitelistOff = !settings.whitelistMode;
     const treatedAsSpectator = isWhitelistOff && !requireAdmin && !requirePosting;
     if (requireActive && !treatedAsSpectator && location.pathname !== '/pending') {
@@ -94,6 +95,11 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
 
   // Posting-required route: spectators cannot post, create topics, etc.
   if (requirePosting && profile?.role_id === 'spectator') {
+    return <Navigate to="/" replace />;
+  }
+
+  // DM-required route: requires USE_DIRECT_MESSAGES permission
+  if (requireDm && !hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES)) {
     return <Navigate to="/" replace />;
   }
 

@@ -129,10 +129,10 @@ const TopicPage = () => {
   }, [user, id]);
 
   useEffect(() => {
-    if (!user || !id || profile?.status !== 'active') return;
+    if (!user || !id || profile?.role_id === 'pending') return;
     const unsub = subscribeToTopicStatus(id, user.uid, setIsSubscribed);
     return () => unsub();
-  }, [user, id, profile?.status]);
+  }, [user, id, profile?.role_id]);
 
   // Set initial selectedCharacterId from profile
   useEffect(() => {
@@ -674,7 +674,7 @@ const TopicPage = () => {
   };
 
   const canManagePost = (post) => {
-    if (!user || profile?.status === 'pending') return false;
+    if (!user || profile?.role_id === 'pending') return false;
     return post.author_id === user.uid || hasPermission('moderate_content');
   };
 
@@ -993,7 +993,7 @@ const TopicPage = () => {
                           <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
                             {t('profile.view_profile')}
                           </Link>
-                          {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && post.author_id !== user?.uid && (
+                          {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
                             <Link to={`/messages/${post.author_id}`} className="footer-link text-decoration-none px-0">
                               {t('profile.pm')}
                             </Link>
@@ -1248,7 +1248,7 @@ const TopicPage = () => {
                   </div>
 
                   {/* Post Management Links — only render if at least one button is visible */}
-                  {user && profile?.status !== 'pending' && ((canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content'))) ||
+                  {user && profile?.role_id !== 'pending' && ((canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content'))) ||
                     (profile?.role_id !== 'spectator' && (!topic.is_locked || hasPermission('moderate_content')))) && (
                     <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
                       {/* Left side: Profile Links (Mobile Only) */}
@@ -1261,7 +1261,7 @@ const TopicPage = () => {
                               <Link to={`/profile/${post.author_id}`} className="author-res-footer-link">
                                 {t('profile.view_profile')}
                               </Link>
-                              {user && profile?.status !== 'pending' && profile?.role_id !== 'spectator' && authorData.status !== 'banned' && post.author_id !== user?.uid && (
+                              {user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
                                 <Link to={`/messages/${post.author_id}`} className="author-res-footer-link">
                                   {t('profile.pm')}
                                 </Link>
@@ -1498,7 +1498,7 @@ const TopicPage = () => {
 
       {/* Bottom Actions & Pagination */}
       <div className="mt-4 mb-4 px-2 px-md-0">
-        {user && profile?.status === 'active' && profile?.role_id !== 'spectator' && (
+        {user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned' && profile?.role_id !== 'spectator' && (
           <div className="d-flex justify-content-end mb-3">
             <Button
               variant={isSubscribed ? "primary" : "outline-primary"}
@@ -1525,7 +1525,7 @@ const TopicPage = () => {
       {/* Reply form — hidden for spectators and closed topics */}
       {
         !hasPermission(PERMISSIONS.POST_REPLY, { category }) ? (
-          user && profile?.status === 'active' && (
+          user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned' && (
             <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
               <span className="opacity-75">
                 {t('forum.spectator_mode')}

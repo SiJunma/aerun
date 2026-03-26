@@ -81,8 +81,8 @@ const MembersPage = () => {
       let aVal, bVal;
 
       if (sortField === 'role_id') {
-        aVal = a.status === 'banned' ? 40 : (a.status === 'pending' ? 20 : (ROLE_PRIORITY[a.role_id] || 60));
-        bVal = b.status === 'banned' ? 40 : (b.status === 'pending' ? 20 : (ROLE_PRIORITY[b.role_id] || 60));
+        aVal = ROLE_PRIORITY[a.role_id] || 60;
+        bVal = ROLE_PRIORITY[b.role_id] || 60;
       } else if (sortField === 'created_at' || sortField === 'last_seen' || sortField === 'updated_at') {
         aVal = a[sortField]?.toMillis?.() || 0;
         bVal = b[sortField]?.toMillis?.() || 0;
@@ -123,7 +123,6 @@ const MembersPage = () => {
   const getRoleBadge = (u) => (
     <ForumRoleBadge
       roleId={u.role_id}
-      status={u.status}
       userEmail={u.email}
     />
   );

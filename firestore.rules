@@ -21,15 +21,12 @@ service cloud.firestore {
         && (getUser().data.role_id == 'admin' || getUser().data.role_id == 'root');
     }
 
-    // Active = authenticated + profile exists + status is 'active' (or admin)
+    // Active = authenticated + profile exists + role is not pending/banned
     function isActive() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && (
-          getUser().data.status == 'active' ||
-          getUser().data.role_id == 'admin' ||
-          getUser().data.role_id == 'root'
-        );
+        && getUser().data.role_id != 'pending' 
+        && getUser().data.role_id != 'banned';
     }
 
     // canPost = active user who is NOT a spectator
@@ -140,7 +137,8 @@ service cloud.firestore {
       allow create: if canPost() 
         && request.resource.data.voter_id == request.auth.uid
         && request.resource.data.target_id != request.auth.uid
-        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.status == 'active';
+        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'banned'
+        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'pending';
       // Logs are immutable except for admins
       allow update, delete: if isAdmin();
     }

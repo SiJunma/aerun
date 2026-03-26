@@ -164,7 +164,7 @@ const MainPage = () => {
                             const registrationMs = profile?.created_at?.toMillis?.() || 0;
                             const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
                             const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
-                            const hasUnread = !!user && profile?.status !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
+                            const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
                             
                             return (
                               <LastPostInfo
