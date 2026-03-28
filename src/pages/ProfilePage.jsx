@@ -21,6 +21,7 @@ import BBCode from '../components/common/BBCode';
 import { useToast } from '../contexts/ToastProvider';
 import DirectMessages from '../components/dm/DirectMessages';
 import ForumPagination from '../components/common/ForumPagination';
+import Skeleton from '../components/common/Skeleton';
 
 
 const ProfilePage = () => {
@@ -35,7 +36,7 @@ const ProfilePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
-  const [, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   const isLimitedProfile = viewedProfile?.role_id === 'pending' || viewedProfile?.role_id === 'spectator' || viewedProfile?.role_id === 'banned';
   const isOwn = profile?.uid === uid;
@@ -337,21 +338,31 @@ const ProfilePage = () => {
             </Card.Header>
             <Card.Body className="p-4 text-center">
               <div className="mb-4">
-                <Image
-                  src={viewedProfile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
-                  roundedCircle
-                  className="mb-3 border border-3 border-light shadow-sm"
-                  style={{ width: '120px', height: '120px', objectFit: 'cover' }}
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    e.target.onerror = null;
-                    e.target.src = 'https://ui-avatars.com/api/?name=User&background=666&color=fff';
-                  }}
-                />
-                <h4 className="mb-1">{viewedProfile?.nickname || 'No Nickname'}</h4>
-                <p className="text-muted small mb-0 text-truncate mx-auto" style={{ maxWidth: '250px' }}>
-                  {viewedProfile?.status_line || 'No status set'}
-                </p>
+                {!viewedProfile ? (
+                  <div className="mb-3">
+                    <Skeleton variant="avatar" width={120} height={120} className="rounded-circle d-block mx-auto shadow-sm" style={{ border: '3px solid var(--border-color)' }} />
+                    <Skeleton width="180px" height="1.8rem" className="d-block mx-auto mt-3" />
+                    <Skeleton width="120px" height="0.9rem" className="d-block mx-auto mt-2" />
+                  </div>
+                ) : (
+                  <>
+                    <Image
+                      src={viewedProfile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
+                      roundedCircle
+                      className="mb-3 border border-3 border-light shadow-sm"
+                      style={{ width: '120px', height: '120px', objectFit: 'cover' }}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = 'https://ui-avatars.com/api/?name=User&background=666&color=fff';
+                      }}
+                    />
+                    <h4 className="mb-1">{viewedProfile?.nickname || 'No Nickname'}</h4>
+                    <p className="text-muted small mb-0 text-truncate mx-auto" style={{ maxWidth: '250px' }}>
+                      {viewedProfile?.status_line || 'No status set'}
+                    </p>
+                  </>
+                )}
 
                 {/* Send Message Button */}
                 {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.role_id !== 'banned' && uid !== profile?.uid && (
@@ -374,12 +385,16 @@ const ProfilePage = () => {
                 <div className="mb-3 text-start border-top pt-3 d-flex justify-content-between align-items-center">
                   <div>
                     <span className="text-muted d-block small mb-1">{t('profile.posts_count')}</span>
-                    <div className="fw-bold fs-5">{viewedProfile?.post_count || 0}</div>
+                    <div className="fw-bold fs-5">
+                      {!viewedProfile ? <Skeleton width="30px" height="1.5rem" /> : (viewedProfile?.post_count || 0)}
+                    </div>
                   </div>
                   <div className="text-end">
                     <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
                       <div className="d-flex align-items-center justify-content-end gap-2">
-                      <div className="fw-bold fs-5 text-accent">{viewedProfile?.reputation || 0}</div>
+                      <div className="fw-bold fs-5 text-accent">
+                        {!viewedProfile ? <Skeleton width="30px" height="1.5rem" /> : (viewedProfile?.reputation || 0)}
+                      </div>
                       {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && (
                         <div className="d-flex gap-1 align-items-center">
                           {!myVote ? (
@@ -409,13 +424,17 @@ const ProfilePage = () => {
                 <span className="text-muted d-block small mb-1 fw-bold text-uppercase" style={{ fontSize: '0.65rem', letterSpacing: '0.1em' }}>
                   {t('profile.account_role')}
                 </span>
-                <ForumRoleBadge
-                  roleId={viewedProfile?.role_id}
-                  status={viewedProfile?.status}
-                  userEmail={viewedProfile?.email}
-                  isDeleted={viewedProfile === null}
-                  className="px-3 py-1 mt-1 font-uppercase"
-                />
+                {!viewedProfile ? (
+                  <Skeleton width="100px" height="1.5rem" className="mt-1" />
+                ) : (
+                  <ForumRoleBadge
+                    roleId={viewedProfile?.role_id}
+                    status={viewedProfile?.status}
+                    userEmail={viewedProfile?.email}
+                    isDeleted={viewedProfile === null}
+                    className="px-3 py-1 mt-1 font-uppercase"
+                  />
+                )}
               </div>
             </Card.Body>
           </Card>
