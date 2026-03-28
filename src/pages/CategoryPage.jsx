@@ -197,8 +197,8 @@ const CategoryPage = () => {
               <thead>
                 <tr>
                   <th style={{ width: '50%' }}>{t('forum.topic')}</th>
-                  <th className="text-center">{t('forum.replies')}</th>
-                  <th>{t('forum.last_post')}</th>
+                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.replies')}</th>
+                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -262,9 +262,9 @@ const CategoryPage = () => {
                     </th>
                   )}
                   <th style={{ width: '50%' }}>{t('forum.topic')}</th>
-                  <th className="text-center">{t('forum.replies')}</th>
+                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.replies')}</th>
                   {/* <th className="text-center">{t('forum.views')}</th> */}
-                  <th>{t('forum.last_post')}</th>
+                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
                 </tr>
               </thead>
               <tbody>

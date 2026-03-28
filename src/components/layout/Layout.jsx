@@ -72,7 +72,7 @@ const Layout = ({ children }) => {
           </Alert>
         )}
         
-        {sanitizedBanner && (
+        {sanitizedBanner && location.pathname === '/' && (
           <div dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />
         )}
 
