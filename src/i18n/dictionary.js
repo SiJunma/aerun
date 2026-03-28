@@ -168,6 +168,9 @@ export const translations = {
       rep_success: "Reputation updated!",
       tab_posts: "Posts",
       no_posts_user: "This user hasn't posted anything yet.",
+      filter_all: "All messages",
+      filter_account: "Account only",
+      filter_masks: "Mask messages",
     },
     dm: {
       tab_title: "Messages",
@@ -610,6 +613,9 @@ export const translations = {
       rep_success: "Репутация обновлена!",
       tab_posts: "Сообщения",
       no_posts_user: "Этот пользователь еще ничего не опубликовал.",
+      filter_all: "Все сообщения",
+      filter_account: "Только аккаунт",
+      filter_masks: "Сообщения масок",
     },
     dm: {
       tab_title: "Сообщения",

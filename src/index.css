@@ -1945,6 +1945,28 @@ a.badge.bg-danger:hover {
   outline: 0;
 }
 
+/* Header-Specific Override for Dropdowns in Dark Headers */
+.card-header .custom-select-toggle.text-light {
+  background-color: transparent !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
+  padding-right: 2rem !important;
+}
+
+.card-header .custom-select-toggle.text-light:hover,
+.card-header .custom-select-toggle.text-light:focus,
+.btn-show > .card-header .custom-select-toggle.text-light {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 0.25rem rgba(255, 255, 255, 0.1) !important;
+}
+
+.card-header .custom-select-toggle.text-light::after {
+  border-top-color: #ffffff !important;
+  opacity: 0.8;
+}
+
 [data-theme='dark'] .custom-select-toggle {
   background-color: var(--input-bg) !important;
   border-color: #334155 !important;
@@ -1967,7 +1989,7 @@ a.badge.bg-danger:hover {
 .btn-outline-management:focus,
 .btn-outline-management:active,
 .btn-show>.btn-outline-management {
-  background-color: rgba(var(--primary-rgb), 0.05) !important;
+  background-color: rgba(var(--primary-rgb), 0.08) !important;
   border-color: var(--primary-color) !important;
   color: var(--text-color) !important;
   box-shadow: 0 0 0 0.25rem rgba(var(--primary-rgb), 0.1) !important;

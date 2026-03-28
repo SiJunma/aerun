@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle } from 'lucide-react';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter } from 'lucide-react';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
@@ -75,6 +75,7 @@ const ProfilePage = () => {
   const [userPostsLimit] = useState(100); // Fetch more for pagination
   const [currentPagePosts, setCurrentPagePosts] = useState(1);
   const [loadingUserPosts, setLoadingUserPosts] = useState(false);
+  const [postFilter, setPostFilter] = useState('all');
   const POSTS_PER_PAGE = 10;
 
   // Confirm Modal State
@@ -634,84 +635,155 @@ const ProfilePage = () => {
 
               <Tab eventKey="posts" title={t('profile.tab_posts')}>
                 <Card className="shadow-sm border-0 bg-card">
-                  <Card.Header className="py-3 d-flex justify-content-between align-items-center">
+                  <Card.Header className="py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <h5 className="mb-0">{t('profile.tab_posts')}</h5>
+                    <Dropdown onSelect={(k) => { setPostFilter(k); setCurrentPagePosts(1); }} align="end" className="flex-shrink-0">
+                      <Dropdown.Toggle 
+                        variant="link" 
+                        size="sm" 
+                        className="d-flex align-items-center gap-2 custom-select-toggle text-light text-decoration-none" 
+                        style={{ minWidth: '160px' }}
+                      >
+                        <Filter size={14} className="opacity-75" />
+                        <span className="text-truncate">
+                          {postFilter === 'all' ? t('profile.filter_all') : 
+                           postFilter === 'account' ? t('profile.filter_account') : 
+                           characters.find(c => `char_${c.id}` === postFilter)?.name || t('profile.filter_masks')}
+                        </span>
+                      </Dropdown.Toggle>
+                      <Dropdown.Menu className="shadow-sm border-0 mt-1 custom-select-menu" style={{ minWidth: '220px' }}>
+                        <Dropdown.Item eventKey="all" active={postFilter === 'all'}>
+                          <div className="d-flex align-items-center gap-2">
+                            <Filter size={14} />
+                            {t('profile.filter_all')}
+                          </div>
+                        </Dropdown.Item>
+                        <Dropdown.Item eventKey="account" active={postFilter === 'account'}>
+                          <div className="d-flex align-items-center gap-2">
+                            <User size={14} />
+                            {t('profile.filter_account')}
+                          </div>
+                        </Dropdown.Item>
+                        {characters.length > 0 && (
+                          <>
+                            <Dropdown.Divider />
+                            <Dropdown.Header className="small text-muted text-uppercase fw-bold opacity-75" style={{ fontSize: '0.65rem', letterSpacing: '0.05em', paddingLeft: '1rem' }}>
+                              {t('profile.filter_masks')}
+                            </Dropdown.Header>
+                            {characters.map(c => (
+                              <Dropdown.Item key={c.id} eventKey={`char_${c.id}`} active={postFilter === `char_${c.id}`}>
+                                {c.name}
+                              </Dropdown.Item>
+                            ))}
+                          </>
+                        )}
+                      </Dropdown.Menu>
+                    </Dropdown>
                   </Card.Header>
                   <Card.Body className="p-0">
-                    {userPosts.length === 0 ? (
-                      <div className="p-5 text-center text-muted">
-                        {loadingUserPosts ? t('common.loading') : <p className="mb-0">{t('profile.no_posts_user')}</p>}
-                      </div>
-                    ) : (
-                      <div className="posts-history-list">
-                        <div className="p-3 d-flex justify-content-center border-bottom">
-                          <ForumPagination 
-                            currentPage={currentPagePosts}
-                            totalPages={Math.ceil(userPosts.length / POSTS_PER_PAGE)}
-                            onPageChange={setCurrentPagePosts}
-                          />
-                        </div>
-                        {userPosts
-                          .slice((currentPagePosts - 1) * POSTS_PER_PAGE, currentPagePosts * POSTS_PER_PAGE)
-                          .map(post => {
-                          const topicInfo = logTopicsInfo[post.topic_id];
-                          const category = topicInfo ? categories.find(c => c.id === topicInfo.category_id) : null;
-                          const isAllowed = topicInfo && category && hasPermission(PERMISSIONS.VIEW_FORUM, { category });
-                          
-                          if (topicInfo && !isAllowed) return null; // Hide restricted posts
+                    {(() => {
+                      const filteredPosts = userPosts.filter(post => {
+                        if (postFilter === 'all') return true;
+                        if (postFilter === 'account') return !post.is_character;
+                        if (postFilter.startsWith('char_')) {
+                          const charId = postFilter.replace('char_', '');
+                          return post.is_character && post.author_character_id === charId;
+                        }
+                        return true;
+                      });
 
-                          return (
-                            <div key={post.id} className="p-3 border-bottom hover-bg-light transition-all">
-                              <div className="d-flex justify-content-between align-items-start mb-2">
-                                <div className="min-w-0">
-                                  <Link 
-                                    to={`/topic/${post.topic_id}?post=${post.id}`} 
-                                    className="fw-bold text-decoration-none d-block line-clamp-2"
-                                    style={{ fontSize: '1.1rem', lineHeight: '1.25' }}
-                                  >
-                                    {topicInfo?.title || '...'}
-                                  </Link>
-                                  <div className="d-flex align-items-center gap-2 mt-1">
-                                    {category && (
-                                      <Badge bg="secondary" className="opacity-75 fw-normal" style={{ fontSize: '0.7rem' }}>
-                                        {resolveText(category.name)}
-                                      </Badge>
-                                    )}
-                                    <span className="text-muted small">
-                                      {post.created_at ? format(post.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
-                                    </span>
-                                  </div>
-                                </div>
-                                {post.is_character && (
-                                  <Badge className="ms-2 badge-character">
-                                    {post.author_name}
-                                  </Badge>
-                                )}
-                              </div>
-                              <div className="post-preview text-muted small text-break line-clamp-4">
-                                <BBCode rolls={post.rolls}>{post.content}</BBCode>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        
-                        <div className="p-3 d-flex justify-content-center border-top">
-                          <ForumPagination 
-                            currentPage={currentPagePosts}
-                            totalPages={Math.ceil(userPosts.length / POSTS_PER_PAGE)}
-                            onPageChange={setCurrentPagePosts}
-                          />
-                        </div>
+                      const totalPagesPosts = Math.ceil(filteredPosts.length / POSTS_PER_PAGE);
 
-                        {userPosts.length >= userPostsLimit && (
-                          <div className="p-2 text-center text-muted small opacity-50 bg-light-subtle">
-                            {lang === 'ru' 
-                              ? 'Показаны последние 100 сообщений. Для доступа к более старым обратитесь к администратору для настройки индексов БД.' 
-                              : 'Showing latest 100 posts. For more, database indexes tuning is required.'}
+                      if (filteredPosts.length === 0) {
+                        return (
+                          <div className="p-5 text-center text-muted">
+                            {loadingUserPosts ? t('common.loading') : <p className="mb-0">{t('profile.no_posts_user')}</p>}
                           </div>
-                        )}
-                      </div>
-                    )}
+                        );
+                      }
+
+                      const pagedPosts = filteredPosts.slice(
+                        (currentPagePosts - 1) * POSTS_PER_PAGE,
+                        currentPagePosts * POSTS_PER_PAGE
+                      );
+
+                      return (
+                        <div className="posts-history-list">
+                          {totalPagesPosts > 1 && (
+                            <div className="p-3 d-flex justify-content-center border-bottom">
+                              <ForumPagination 
+                                currentPage={currentPagePosts}
+                                totalPages={totalPagesPosts}
+                                onPageChange={setCurrentPagePosts}
+                              />
+                            </div>
+                          )}
+                          {pagedPosts.map((post, idx) => {
+                            const topicInfo = logTopicsInfo[post.topic_id];
+                            const category = topicInfo ? categories.find(c => c.id === topicInfo.category_id) : null;
+                            const isAllowed = topicInfo && category && hasPermission(PERMISSIONS.VIEW_FORUM, { category });
+                            
+                            if (topicInfo && !isAllowed) return null; // Hide restricted posts
+
+                            // Only show border-bottom if not the last item OR if pagination follows
+                            const isLastItem = idx === pagedPosts.length - 1;
+                            const showBorder = !isLastItem || totalPagesPosts > 1;
+
+                            return (
+                              <div key={post.id} className={`p-3 hover-bg-light transition-all ${showBorder ? 'border-bottom' : ''}`}>
+                                <div className="d-flex justify-content-between align-items-start mb-2">
+                                  <div className="min-w-0">
+                                    <Link 
+                                      to={`/topic/${post.topic_id}?post=${post.id}`} 
+                                      className="fw-bold text-decoration-none d-block line-clamp-2"
+                                      style={{ fontSize: '1.1rem', lineHeight: '1.25' }}
+                                    >
+                                      {topicInfo?.title || '...'}
+                                    </Link>
+                                    <div className="d-flex align-items-center gap-2 mt-1">
+                                      {category && (
+                                        <Badge bg="secondary" className="opacity-75 fw-normal" style={{ fontSize: '0.7rem' }}>
+                                          {resolveText(category.name)}
+                                        </Badge>
+                                      )}
+                                      <span className="text-muted small">
+                                        {post.created_at ? format(post.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {post.is_character && (
+                                    <Badge className="ms-2 badge-character">
+                                      {post.author_name}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="post-preview text-muted small text-break line-clamp-4">
+                                  <BBCode rolls={post.rolls}>{post.content}</BBCode>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          
+                          {totalPagesPosts > 1 && (
+                            <div className="p-3 d-flex justify-content-center border-top">
+                              <ForumPagination 
+                                currentPage={currentPagePosts}
+                                totalPages={totalPagesPosts}
+                                onPageChange={setCurrentPagePosts}
+                              />
+                            </div>
+                          )}
+
+                          {filteredPosts.length >= userPostsLimit && postFilter === 'all' && (
+                            <div className="p-2 text-center text-muted small opacity-50 bg-light-subtle">
+                              {lang === 'ru' 
+                                ? 'Показаны последние 100 сообщений. Для доступа к более старым обратитесь к администратору для настройки индексов БД.' 
+                                : 'Showing latest 100 posts. For more, database indexes tuning is required.'}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </Card.Body>
                 </Card>
               </Tab>
