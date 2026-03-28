@@ -32,6 +32,7 @@ import {
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions } from '../constants/permissions';
+import { generateRandomNickname } from '../utils/nickname';
 
 const AuthContext = createContext();
 
@@ -275,29 +276,53 @@ export const AuthProvider = ({ children }) => {
 
             const pendingNickname = sessionStorage.getItem('pending_nickname');
             const pendingMessage = sessionStorage.getItem('pending_message');
-            const defaultNickname = firebaseUser.displayName || firebaseUser.email.split('@')[0];
-            const chosenNickname = pendingNickname || defaultNickname;
+            
+            let chosenNickname = (pendingNickname && typeof pendingNickname === 'string') ? pendingNickname.trim() : null;
+            let finalNickname = chosenNickname;
 
-            // 3. Final Nickname Uniqueness Check (Data Level)
-            const q = query(
-              collection(db, 'users'), 
-              where('nickname', '==', chosenNickname.trim()),
-              limit(1)
-            );
-            const querySnapshot = await getDocs(q);
-            if (!querySnapshot.empty) {
-              console.warn('[Registration] Blocked: nickname already taken:', chosenNickname);
-              sessionStorage.setItem('auth_error', 'nickname_taken_at_registration');
-              await signOut(auth);
-              finishLoading();
-              return;
+            // Small delay to allow Auth state to fully settle before Firestore queries
+            // (Known workaround for internal SDK assertion errors during auth transitions)
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const checkNicknameAvailability = async (name) => {
+              try {
+                const qAvailability = query(
+                  collection(db, 'users'), 
+                  where('nickname', '==', name),
+                  limit(1)
+                );
+                const snap = await getDocs(qAvailability);
+                return snap.empty;
+              } catch (e) {
+                console.error('[checkNicknameAvailability error]', e);
+                return true; // Default to available on error to avoid blocking registration
+              }
+            };
+
+            if (!finalNickname) {
+              // Always generate a random one if nothing was provided (privacy)
+              // Add a bit of extra randomness to avoid NEEDING a query check here
+              const randomSuffix = Math.random().toString(36).substring(2, 6);
+              finalNickname = `${generateRandomNickname()}-${randomSuffix}`;
+            } else {
+              // Check if the user-provided nickname is taken
+              const isAvailable = await checkNicknameAvailability(finalNickname);
+              if (!isAvailable) {
+                console.warn('[Registration] Blocked: nickname already taken:', finalNickname);
+                sessionStorage.setItem('auth_error', 'nickname_taken_at_registration');
+                await signOut(auth);
+                finishLoading();
+                return;
+              }
             }
+
+            const defaultAvatar = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(finalNickname)}`;
 
             const newUser = {
               uid: firebaseUser.uid,
               email: firebaseUser.email,
-              nickname: chosenNickname.trim(),
-              avatar_url: firebaseUser.photoURL || '',
+              nickname: finalNickname,
+              avatar_url: defaultAvatar,
               status_line: 'Hello, I am new here!',
               role_id: isAdmin ? CHIEF_ADMIN_ID : (globalSettings?.requireApproval === false ? 'player' : 'pending'),
               created_at: serverTimestamp(),
@@ -320,7 +345,7 @@ export const AuthProvider = ({ children }) => {
             if (!isAdmin) {
               createNotification('new_registration', {
                 uid: firebaseUser.uid,
-                nickname: pendingNickname || defaultNickname,
+                nickname: finalNickname,
                 email: firebaseUser.email,
                 admin_message: pendingMessage || null
               }).catch(err => console.warn('[notification]', err));
@@ -329,7 +354,7 @@ export const AuthProvider = ({ children }) => {
             // Log registration to audit log
             await logAdminAction('user_registered', firebaseUser.uid, { 
               email: firebaseUser.email, 
-              nickname: chosenNickname.trim(),
+              nickname: finalNickname,
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
@@ -557,27 +582,38 @@ export const AuthProvider = ({ children }) => {
 
   // Monitoring maintenance mode / status to force logout
   React.useEffect(() => {
-    if (user && profile && !loading) {
-      const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
-      const isBanned = profile.role_id === 'banned';
+    if (user && !loading) {
+      const isRegistering = sessionStorage.getItem('is_registering') === 'true';
       
-      // Maintenance applies if ON and whitelist is active
-      const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
+      // If user is authenticated but profile is missing and we aren't registering,
+      // it means the account was deleted or never existed correctly.
+      if (!profile && !isRegistering) {
+        logout(true);
+        return;
+      }
 
-      if (isBanned) {
-        if (!sessionStorage.getItem('banned_login_logged')) {
-          logAdminAction('banned_user_login_attempt', user.uid, { 
-            email: user.email, 
-            nickname: profile.nickname 
-          }).catch(console.error);
-          sessionStorage.setItem('banned_login_logged', 'true');
-        }
+      if (profile) {
+        const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
+        const isBanned = profile.role_id === 'banned';
         
-        sessionStorage.setItem('banned_logout', 'true');
-        logout(true); // skipPresenceCleanup = true to avoid permission error loop
-      } else if (isMaintenanceStrict && !isAdmin) {
-        sessionStorage.setItem('maintenance_logout', 'true');
-        logout();
+        // Maintenance applies if ON and whitelist is active
+        const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
+
+        if (isBanned) {
+          if (!sessionStorage.getItem('banned_login_logged')) {
+            logAdminAction('banned_user_login_attempt', user.uid, { 
+              email: user.email, 
+              nickname: profile.nickname 
+            }).catch(console.error);
+            sessionStorage.setItem('banned_login_logged', 'true');
+          }
+          
+          sessionStorage.setItem('banned_logout', 'true');
+          logout(true); // skipPresenceCleanup = true to avoid permission error loop
+        } else if (isMaintenanceStrict && !isAdmin) {
+          sessionStorage.setItem('maintenance_logout', 'true');
+          logout();
+        }
       }
     }
   }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout]);

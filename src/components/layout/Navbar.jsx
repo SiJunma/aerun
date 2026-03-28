@@ -48,7 +48,7 @@ const Navigation = () => {
 
   // Subscribe to DM unread count
   React.useEffect(() => {
-    if (!hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES)) {
+    if (!hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) || profile?.role_id === 'pending') {
       setDmUnread(0);
       return;
     }
@@ -57,7 +57,7 @@ const Navigation = () => {
       setDmUnread(total);
     });
     return () => unsub();
-  }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES]);
+  }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES, profile?.role_id]);
 
   const totalUnread = adminUnread + userUnread;
 

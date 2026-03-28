@@ -36,6 +36,28 @@ export const updateGlobalSettings = async (settings, performerId) => {
 
   await setDoc(docRef, settings, { merge: true });
   await logAdminAction('settings_updated', performerId, Object.keys(changes).length > 0 ? { changes } : {});
+
+  // If "Require Admin Approval" was just turned OFF, automatically approve all currently pending users
+  if (changes.requireApproval && changes.requireApproval.from === true && changes.requireApproval.to === false) {
+    try {
+      const pendingQuery = query(collection(db, 'users'), where('role_id', '==', 'pending'));
+      const snap = await getDocs(pendingQuery);
+      
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.forEach(userDoc => {
+          batch.update(userDoc.ref, { 
+            role_id: 'player', 
+            updated_at: serverTimestamp() 
+          });
+        });
+        await batch.commit();
+        await logAdminAction('bulk_user_approval', performerId, { count: snap.size });
+      }
+    } catch (err) {
+      console.error('[Bulk Approval Error]', err);
+    }
+  }
 };
 
 
