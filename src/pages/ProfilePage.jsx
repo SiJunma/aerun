@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter } from 'lucide-react';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList } from 'lucide-react';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
@@ -36,7 +36,6 @@ const ProfilePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
 
   const isLimitedProfile = viewedProfile?.role_id === 'pending' || viewedProfile?.role_id === 'spectator' || viewedProfile?.role_id === 'banned';
   const isOwn = profile?.uid === uid;
@@ -60,7 +59,13 @@ const ProfilePage = () => {
     language: 'en',
     signature: '',
     rep_show_history: true,
-    rep_show_comments: true
+    rep_show_comments: true,
+    bio: '',
+    location: '',
+    birthday: '',
+    occupation: '',
+    interests: '',
+    contacts: ''
   });
 
   // Reputation Voting State
@@ -102,7 +107,6 @@ const ProfilePage = () => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
     const unsubProfile = subscribeToUser(uid, (data) => {
       setViewedProfile(data);
-      setLoading(false);
     });
     const unsubRep = subscribeToReputationLogs(uid, setRepLogs);
     
@@ -185,7 +189,13 @@ const ProfilePage = () => {
         language: source.settings?.language || 'en',
         signature: source.settings?.signature || '',
         rep_show_history: source.settings?.rep_show_history !== false,
-        rep_show_comments: source.settings?.rep_show_comments !== false
+        rep_show_comments: source.settings?.rep_show_comments !== false,
+        bio: source.bio || '',
+        location: source.location || '',
+        birthday: source.birthday || '',
+        occupation: source.occupation || '',
+        interests: source.interests || '',
+        contacts: source.contacts || ''
       });
     }
   }, [profile, viewedProfile, uid, canEditAnyAccount]);
@@ -259,6 +269,12 @@ const ProfilePage = () => {
         nickname: trimmedNickname,
         status_line: accountFormData.status_line?.trim() || '',
         avatar_url: accountFormData.avatar_url,
+        bio: accountFormData.bio?.trim() || '',
+        location: accountFormData.location?.trim() || '',
+        birthday: accountFormData.birthday?.trim() || '',
+        occupation: accountFormData.occupation?.trim() || '',
+        interests: accountFormData.interests?.trim() || '',
+        contacts: accountFormData.contacts?.trim() || '',
         settings: {
           theme: accountFormData.theme,
           language: accountFormData.language,
@@ -436,18 +452,105 @@ const ProfilePage = () => {
                   />
                 )}
               </div>
+
             </Card.Body>
           </Card>
         </Col>
 
         {hasTabs && (
           <Col lg={8}>
-            <Tabs
-              activeKey={activeTab}
-              onSelect={(k) => setActiveTab(k)}
-              id="profile-tabs"
-              className="mb-4 premium-tabs"
-            >
+              <Tabs
+                activeKey={activeTab}
+                onSelect={(k) => setActiveTab(k)}
+                id="profile-tabs"
+                className="mb-4 premium-tabs"
+              >
+                {!isLimitedProfile && (viewedProfile?.bio || viewedProfile?.contacts || viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests) && (
+                  <Tab eventKey="about" title={t('profile.tab_about')}>
+                    <Card className="shadow-sm border-0 bg-card">
+                      <Card.Header className="py-3">
+                        <h5 className="mb-0">{t('profile.tab_about')}</h5>
+                      </Card.Header>
+                      <Card.Body className="p-4">
+                        {viewedProfile?.bio && (
+                          <div className={viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests || viewedProfile?.contacts ? "mb-4 pb-4 border-bottom" : "mb-0"}>
+                            <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
+                              <User size={16} /> {t('profile.bio')}
+                            </h6>
+                            <div className="post-content fs-5" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
+                              {viewedProfile.bio}
+                            </div>
+                          </div>
+                        )}
+
+                        {(viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests) && (
+                          <div className={viewedProfile?.contacts ? "mb-4 pb-4 border-bottom" : "mb-0"}>
+                            <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
+                              <ClipboardList size={16} /> {lang === 'ru' ? 'Информация' : 'Information'}
+                            </h6>
+                            <Row className="g-4">
+                              {viewedProfile?.location && (
+                                <Col md={6}>
+                                  <div className="d-flex align-items-start gap-2">
+                                    <MapPin size={18} className="mt-1 flex-shrink-0 text-primary opacity-75" />
+                                    <div>
+                                      <span className="text-muted d-block small text-uppercase fw-bold" style={{ fontSize: '0.7rem' }}>{t('profile.location')}</span>
+                                      <div className="fs-6">{viewedProfile.location}</div>
+                                    </div>
+                                  </div>
+                                </Col>
+                              )}
+                              {viewedProfile?.birthday && (
+                                <Col md={6}>
+                                  <div className="d-flex align-items-start gap-2">
+                                    <Cake size={18} className="mt-1 flex-shrink-0 text-danger opacity-75" />
+                                    <div>
+                                      <span className="text-muted d-block small text-uppercase fw-bold" style={{ fontSize: '0.7rem' }}>{t('profile.birthday')}</span>
+                                      <div className="fs-6">{viewedProfile.birthday}</div>
+                                    </div>
+                                  </div>
+                                </Col>
+                              )}
+                              {viewedProfile?.occupation && (
+                                <Col md={6}>
+                                  <div className="d-flex align-items-start gap-2">
+                                    <Briefcase size={18} className="mt-1 flex-shrink-0 text-success opacity-75" />
+                                    <div>
+                                      <span className="text-muted d-block small text-uppercase fw-bold" style={{ fontSize: '0.7rem' }}>{t('profile.occupation')}</span>
+                                      <div className="fs-6">{viewedProfile.occupation}</div>
+                                    </div>
+                                  </div>
+                                </Col>
+                              )}
+                              {viewedProfile?.interests && (
+                                <Col md={6}>
+                                  <div className="d-flex align-items-start gap-2">
+                                    <Heart size={18} className="mt-1 flex-shrink-0 text-accent opacity-75" />
+                                    <div>
+                                      <span className="text-muted d-block small text-uppercase fw-bold" style={{ fontSize: '0.7rem' }}>{t('profile.interests')}</span>
+                                      <div className="fs-6">{viewedProfile.interests}</div>
+                                    </div>
+                                  </div>
+                                </Col>
+                              )}
+                            </Row>
+                          </div>
+                        )}
+
+                        {viewedProfile?.contacts && (
+                          <div className="pt-2">
+                            <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
+                              <Share2 size={16} /> {t('profile.contacts')}
+                            </h6>
+                            <div className="text-muted" style={{ whiteSpace: 'pre-wrap' }}>
+                              {viewedProfile.contacts}
+                            </div>
+                          </div>
+                        )}
+                      </Card.Body>
+                    </Card>
+                  </Tab>
+                )}
               {!isLimitedProfile && (
                 <Tab eventKey="characters" title={t('profile.tab_characters')}>
               <Card className="shadow-sm border-0 bg-card">
@@ -890,6 +993,93 @@ const ProfilePage = () => {
                           </Form.Group>
                         </>
                       )}
+
+                      <hr className="my-4" />
+                      <h6 className="mb-3 text-primary uppercase small fw-bold d-flex align-items-center gap-2">
+                        <ClipboardList size={18} /> {lang === 'ru' ? 'Дополнительная информация' : 'Additional Information'}
+                      </h6>
+                      
+                      <Row>
+                        <Col md={6}>
+                          <Form.Group className="mb-3">
+                            <Form.Label className="fw-bold d-flex align-items-center gap-2 small text-uppercase opacity-75">
+                              <MapPin size={14} /> {t('profile.location')}
+                            </Form.Label>
+                            <Form.Control
+                              type="text"
+                              value={accountFormData.location}
+                              onChange={(e) => setAccountFormData({ ...accountFormData, location: e.target.value })}
+                              placeholder={lang === 'ru' ? 'Город, Страна' : 'City, Country'}
+                            />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6}>
+                          <Form.Group className="mb-3">
+                            <Form.Label className="fw-bold d-flex align-items-center gap-2 small text-uppercase opacity-75">
+                              <Cake size={14} /> {t('profile.birthday')}
+                            </Form.Label>
+                            <Form.Control
+                              type="text"
+                              value={accountFormData.birthday}
+                              onChange={(e) => setAccountFormData({ ...accountFormData, birthday: e.target.value })}
+                              placeholder="e.g. 15 June"
+                            />
+                          </Form.Group>
+                        </Col>
+                      </Row>
+
+                      <Row>
+                        <Col md={6}>
+                          <Form.Group className="mb-3">
+                            <Form.Label className="fw-bold d-flex align-items-center gap-2 small text-uppercase opacity-75">
+                              <Briefcase size={14} /> {t('profile.occupation')}
+                            </Form.Label>
+                            <Form.Control
+                              type="text"
+                              value={accountFormData.occupation}
+                              onChange={(e) => setAccountFormData({ ...accountFormData, occupation: e.target.value })}
+                            />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6}>
+                          <Form.Group className="mb-3">
+                            <Form.Label className="fw-bold d-flex align-items-center gap-2 small text-uppercase opacity-75">
+                              <Heart size={14} /> {t('profile.interests')}
+                            </Form.Label>
+                            <Form.Control
+                              type="text"
+                              value={accountFormData.interests}
+                              onChange={(e) => setAccountFormData({ ...accountFormData, interests: e.target.value })}
+                            />
+                          </Form.Group>
+                        </Col>
+                      </Row>
+
+                      <Form.Group className="mb-3">
+                        <Form.Label className="fw-bold d-flex align-items-center gap-2 small text-uppercase opacity-75">
+                          <Share2 size={14} /> {t('profile.contacts')}
+                        </Form.Label>
+                        <Form.Control
+                          as="textarea"
+                          rows={2}
+                          value={accountFormData.contacts}
+                          onChange={(e) => setAccountFormData({ ...accountFormData, contacts: e.target.value })}
+                          placeholder={t('profile.contacts_help')}
+                        />
+                      </Form.Group>
+
+                      <Form.Group className="mb-3">
+                        <Form.Label className="fw-bold d-flex align-items-center gap-2 small text-uppercase opacity-75">
+                          <User size={14} /> {t('profile.bio')}
+                        </Form.Label>
+                        <Form.Control
+                          as="textarea"
+                          rows={4}
+                          value={accountFormData.bio}
+                          onChange={(e) => setAccountFormData({ ...accountFormData, bio: e.target.value })}
+                          placeholder={t('profile.bio_help')}
+                        />
+                      </Form.Group>
 
                       <Button
                         variant="primary"
