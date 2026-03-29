@@ -272,7 +272,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                         />
                       )}
                       <div
-                        className="px-3 py-2 rounded-3"
+                        className="px-3 py-2 rounded-3 dm-chat-bubble"
                         style={{
                           maxWidth: '85%',
                           background: isMe ? 'var(--primary-color)' : 'var(--block-bg)',
@@ -283,7 +283,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                         }}
                       >
-                        <div><BBCode rolls={allConversationRolls}>{msg.text}</BBCode></div>
+                        <div className="w-100"><BBCode rolls={allConversationRolls}>{msg.text}</BBCode></div>
                         <div
                           className="text-end mt-1"
                           style={{ fontSize: '0.875rem', opacity: 0.6 }}

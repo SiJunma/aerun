@@ -113,6 +113,8 @@ const AdminPage = () => {
     enableReputation: true,
     enableCharacters: true,
     enableDice: true,
+    allowGifAvatars: true,
+    allowGifInPosts: true,
     whitelistMode: true,
     requireApproval: true,
     logoUrl: '',
@@ -139,13 +141,21 @@ const AdminPage = () => {
           ...data,
           forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
           welcomeMessage: ensureBilingual(data.welcomeMessage, ''),
+          registrationEnabled: data.registrationEnabled ?? true,
+          maintenanceMode: data.maintenanceMode ?? false,
+          maxUploadSize: data.maxUploadSize ?? 500,
           whitelistMode: data.whitelistMode ?? false,
-          requireApproval: data.requireApproval ?? true
+          requireApproval: data.requireApproval ?? true,
+          enableCharacters: data.enableCharacters ?? true,
+          enableDice: data.enableDice ?? true,
+          enableReputation: data.enableReputation ?? true,
+          allowGifAvatars: data.allowGifAvatars ?? true,
+          allowGifInPosts: data.allowGifInPosts ?? true,
+          logoUrl: data.logoUrl || '',
+          bgLight: data.bgLight || 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
+          bgDark: data.bgDark || 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
+          bgNeutral: data.bgNeutral || 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop'
         };
-        // Defaults for backgrounds
-        if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
-        if (!data.bgDark) migrated.bgDark = 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop';
-        if (!data.bgNeutral) migrated.bgNeutral = 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop';
         setSettings(migrated);
       }
     });
@@ -594,6 +604,22 @@ const AdminPage = () => {
               className="mb-3 fw-bold"
               checked={settings.enableReputation}
               onChange={(e) => setSettings({ ...settings, enableReputation: e.target.checked })}
+            />
+            <Form.Check
+              type="switch"
+              id="gif-avatar-switch"
+              label={t('admin.settings.allow_gif_avatars')}
+              className="mb-3 fw-bold"
+              checked={settings.allowGifAvatars}
+              onChange={(e) => setSettings({ ...settings, allowGifAvatars: e.target.checked })}
+            />
+            <Form.Check
+              type="switch"
+              id="gif-post-switch"
+              label={t('admin.settings.allow_gif_posts')}
+              className="mb-3 fw-bold"
+              checked={settings.allowGifInPosts}
+              onChange={(e) => setSettings({ ...settings, allowGifInPosts: e.target.checked })}
             />
           </div>
 

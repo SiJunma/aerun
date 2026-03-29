@@ -207,6 +207,16 @@ export const AuthProvider = ({ children }) => {
         if (!data.bgDark) migrated.bgDark = 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop';
         if (!data.bgNeutral) migrated.bgNeutral = 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop';
         setSettings(migrated);
+      } else {
+        // Provide minimal defaults so the app doesn't crash if the document is missing
+        setSettings({
+          forumName: 'Aerun Forum',
+          maintenanceMode: false,
+          whitelistMode: false,
+          registrationEnabled: true,
+          requireApproval: true,
+          bgDark: 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop'
+        });
       }
     }, (err) => console.error('[GlobalSettings Listener]', err));
 
@@ -330,7 +340,12 @@ export const AuthProvider = ({ children }) => {
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
               settings: {
                 theme: 'dark',
-                language: 'en',
+                language: (() => {
+                  const saved = localStorage.getItem('language');
+                  if (saved && (saved === 'ru' || saved === 'en')) return saved;
+                  const browserLang = (navigator.language || navigator.userLanguage || '').toLowerCase();
+                  return browserLang.startsWith('ru') ? 'ru' : 'en';
+                })(),
                 member_view_style: 'table'
               }
             };
@@ -371,6 +386,22 @@ export const AuthProvider = ({ children }) => {
           // Seed system roles with fixed IDs if they don't exist yet (admin-only, safe to call repeatedly)
           if (isAdmin) {
             seedSystemRoles(DEFAULT_ROLES).catch(err => console.warn('[seedSystemRoles]', err));
+            
+            // Also seed global settings if they are missing
+            const globalSettingsRef = doc(db, 'settings', 'global');
+            const globalSettingsSnap = await getDoc(globalSettingsRef);
+            if (!globalSettingsSnap.exists()) {
+              await setDoc(globalSettingsRef, {
+                forumName: 'Aerun Forum',
+                maintenanceMode: false,
+                whitelistMode: false,
+                registrationEnabled: true,
+                requireApproval: true,
+                adminNickname: firebaseUser.displayName || 'Admin',
+                bgDark: 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
+                created_at: serverTimestamp()
+              });
+            }
           }
 
           // Subscribe to read map (all roles — everyone can read topics)

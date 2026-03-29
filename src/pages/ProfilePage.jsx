@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
@@ -101,6 +101,9 @@ const ProfilePage = () => {
     avatar_url: '',
     signature: ''
   });
+  
+  // Track which profile UID is currently loaded into the form to prevent overwriting local edits on background syncs (like last_seen updates)
+  const lastInitUidRef = useRef(null);
 
   useEffect(() => {
     const unsubCats = subscribeToCategories(setCategories);
@@ -180,7 +183,10 @@ const ProfilePage = () => {
   // Sync form data with profile (own or if admin/mod is editing)
   useEffect(() => {
     const source = (profile?.uid === uid) ? profile : (canEditAnyAccount ? viewedProfile : null);
-    if (source) {
+    
+    // Only initialize/reset the form if we are looking at a different user's profile
+    // This prevents background updates to the profile (like last_seen) from wiping unsaved local edits
+    if (source && source.uid !== lastInitUidRef.current) {
       setAccountFormData({
         nickname: source.nickname || source.displayName || '',
         status_line: source.status_line || '',
@@ -197,6 +203,7 @@ const ProfilePage = () => {
         interests: source.interests || '',
         contacts: source.contacts || ''
       });
+      lastInitUidRef.current = source.uid;
     }
   }, [profile, viewedProfile, uid, canEditAnyAccount]);
 
@@ -298,6 +305,14 @@ const ProfilePage = () => {
 
   const handleRepVote = async () => {
     if (!profile || profile.uid === uid || profile.role_id === 'spectator') return;
+
+    // Prevention: Block URLs in reputation comments
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
+    if (repComment && urlRegex.test(repComment)) {
+      showToast(t('profile.rep_error_links'), 'danger');
+      return;
+    }
+
     setSubmittingRep(true);
     try {
       await voteOnProfile(profile.uid, uid, repValue, repComment);
@@ -577,25 +592,25 @@ const ProfilePage = () => {
                                 src={char.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(char.name)}&background=random`}
                                 roundedCircle
                                 style={{ width: '64px', height: '64px', objectFit: 'cover' }}
-                                className="border border-2 border-accent shadow-sm"
+                                className="border border-2 border-accent shadow-sm flex-shrink-0"
                                 onError={(e) => {
                                   e.target.onerror = null;
                                   e.target.src = 'https://ui-avatars.com/api/?name=?&background=666&color=fff';
                                 }}
                               />
-                              <div className="flex-grow-1 min-w-0">
-                                <h6 className="mb-1 fw-bold text-truncate">{char.name}</h6>
+                              <div className="flex-grow-1 min-w-0 me-3" style={{ minWidth: 0, overflow: 'hidden' }}>
+                                <h6 className="mb-1 fw-bold text-truncate w-100">{char.name}</h6>
                                 {char.status_line ? (
-                                  <p className="text-muted small mb-0 text-truncate" style={{ fontStyle: 'italic', opacity: 0.8 }}>
+                                  <p className="text-muted small mb-0 text-truncate w-100" style={{ fontStyle: 'italic', opacity: 0.8 }}>
                                     {char.status_line}
                                   </p>
                                 ) : (
-                                  <p className="text-muted small mb-0 opacity-50">
+                                  <p className="text-muted small mb-0 opacity-50 text-truncate w-100">
                                     {lang === 'ru' ? 'Нет статуса' : 'No status'}
                                   </p>
                                 )}
                               </div>
-                                <div className="d-flex flex-column gap-1 align-items-end">
+                              <div className="d-flex flex-column gap-1 align-items-end flex-shrink-0" style={{ minWidth: '70px' }}>
                                   {(isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || hasPermission(PERMISSIONS.EDIT_OTHERS_MASK) ? (
                                     <Button
                                       variant="link"
@@ -736,7 +751,7 @@ const ProfilePage = () => {
                                   </Badge>
                                 </OverlayTrigger>
                               </td>
-                              <td className="py-3">
+                              <td className="py-3 rep-comment-cell">
                                 {viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid ? (
                                   <span className="text-muted small italic">{t('profile.rep_comments_hidden')}</span>
                                 ) : (
@@ -965,6 +980,7 @@ const ProfilePage = () => {
                             }
                             value={accountFormData.avatar_url}
                             onChange={(url) => setAccountFormData({ ...accountFormData, avatar_url: url })}
+                            allowGifs={settings?.allowGifAvatars !== false}
                             storagePath={`users/${uid}/avatar`}
                             size={100}
                             canUpload={profile?.role_id !== 'pending'}
@@ -1257,6 +1273,7 @@ const ProfilePage = () => {
           <AvatarUploader
             label={<div className="fw-bold mb-2">{t('profile.character_avatar')}</div>}
             value={formData.avatar_url}
+            allowGifs={settings?.allowGifAvatars !== false}
             onChange={(url) => setFormData({ ...formData, avatar_url: url })}
             storagePath={`users/${uid}/characters/avatar`}
             size={100}
@@ -1316,8 +1333,9 @@ const ProfilePage = () => {
               maxLength={200}
               className="rep-textarea border-0 bg-dark opacity-75 text-white"
             />
-            <div className="text-end mt-1 small text-muted">
-              {repComment.length}/200
+            <div className="d-flex justify-content-between mt-1 small text-muted">
+              <span><i className="bi bi-info-circle me-1"></i>{t('profile.rep_no_links_hint')}</span>
+              <span>{repComment.length}/200</span>
             </div>
           </Form.Group>
         </Modal.Body>

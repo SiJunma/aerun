@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Image, Button, Form, Spinner, InputGroup } from 'react-bootstrap';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from '../../../firebase';
+import { storage, isStorageEnabled } from '../../../firebase';
 import { useI18n } from '../../contexts/I18nProvider';
 
 /**
@@ -13,7 +13,7 @@ import { useI18n } from '../../contexts/I18nProvider';
  *   size         – preview circle size in px (default 80)
  *   label        – optional label text
  */
-const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabled = false, canUpload = true }) => {
+const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabled = false, canUpload = true, allowGifs = true }) => {
   const fileInputRef = useRef(null);
   const { t } = useI18n();
   const [mode, setMode] = useState('preview'); // 'preview' | 'url'
@@ -29,14 +29,18 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate — PNG/JPG/WebP only, max 2 MB
+    // Validate — PNG/JPG/WebP only, max 2 MB (strictly enforced)
+    const MAX_SIZE_MB = 2;
+    const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
     const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+    if (allowGifs) ALLOWED_TYPES.push('image/gif');
+
     if (!ALLOWED_TYPES.includes(file.type)) {
-      setError('Only PNG, JPG, and WebP images are allowed.');
+      setError(allowGifs ? 'Only PNG, JPG, WebP, and GIF images are allowed.' : 'Only PNG, JPG, and WebP images are allowed.');
       return;
     }
-    if (file.size > 2 * 1024 * 1024) {
-      setError(t('profile.error_file_size'));
+    if (file.size > MAX_SIZE_BYTES) {
+      setError(`${t('profile.error_file_size') || 'File is too large'} (Max ${MAX_SIZE_MB}MB)`);
       return;
     }
 
@@ -72,8 +76,9 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
   const handleUrlConfirm = () => {
     const lower = urlInput.toLowerCase().split('?')[0]; // strip query params
     const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
+    if (allowGifs) ALLOWED_EXTENSIONS.push('.gif');
     if (!ALLOWED_EXTENSIONS.some(ext => lower.endsWith(ext))) {
-      setError('Only PNG, JPG, and WebP URLs are allowed.');
+      setError(allowGifs ? 'Only PNG, JPG, WebP, and GIF URLs are allowed.' : 'Only PNG, JPG, and WebP URLs are allowed.');
       return;
     }
     setError('');
@@ -108,7 +113,7 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
       {/* Controls */}
       {mode === 'preview' && !disabled && (
         <div className="d-flex gap-2">
-          {canUpload && (
+          {canUpload && isStorageEnabled && (
             <Button
               variant="outline-secondary"
               size="sm"
@@ -155,7 +160,7 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png, image/jpeg, image/webp"
+        accept={allowGifs ? "image/png, image/jpeg, image/webp, image/gif" : "image/png, image/jpeg, image/webp"}
         style={{ display: 'none' }}
         onChange={handleFileChange}
       />

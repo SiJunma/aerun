@@ -76,7 +76,7 @@ const ColumnsStacker = ({ children, stackAt }) => {
 };
 
 const BBCode = ({ children, rolls = {} }) => {
-  const { hasPermission, PERMISSIONS, lang } = useAuth() || {};
+  const { hasPermission, PERMISSIONS, lang, settings } = useAuth() || {};
   if (typeof children !== 'string') return children;
 
   // 1. Tokenize the text into text chunks and tags
@@ -219,7 +219,7 @@ const BBCode = ({ children, rolls = {} }) => {
         if (match) {
           const videoId = match[1];
           return (
-            <div key={`${index}-${i}`} className="ratio ratio-16x9 my-2 rounded overflow-hidden shadow-sm mx-auto" style={{ maxWidth: '600px' }}>
+            <div key={`${index}-${i}`} className="ratio ratio-16x9 my-2 rounded overflow-hidden shadow-sm mx-auto bbcode-media-wrapper" style={{ maxWidth: '600px', width: '100%' }}>
               <iframe
                 src={`https://www.youtube.com/embed/${videoId}`}
                 title="YouTube auto-embed"
@@ -300,6 +300,12 @@ const BBCode = ({ children, rolls = {} }) => {
       }
       case 'img': {
         const imgUrl = getTextContent(node).trim();
+        const isGif = imgUrl.toLowerCase().split('?')[0].endsWith('.gif');
+        
+        if (isGif && settings?.allowGifInPosts === false) {
+           return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{lang === 'ru' ? 'GIF-изображение' : 'GIF Image'}: {imgUrl}]</a>;
+        }
+
         return <img
           key={index}
           src={imgUrl}
@@ -418,7 +424,7 @@ const BBCode = ({ children, rolls = {} }) => {
         
         if (videoId) {
           return (
-            <div key={index} className="ratio ratio-16x9 my-2 rounded overflow-hidden shadow-sm d-block mx-auto" style={{ maxWidth: '600px' }}>
+            <div key={index} className="ratio ratio-16x9 my-2 rounded overflow-hidden shadow-sm d-block mx-auto bbcode-media-wrapper" style={{ maxWidth: '600px', width: '100%' }}>
               <iframe
                 src={`https://www.youtube.com/embed/${videoId}`}
                 title="YouTube video player"
@@ -430,7 +436,7 @@ const BBCode = ({ children, rolls = {} }) => {
           );
         } else if (urlRaw.endsWith('.mp4') || urlRaw.endsWith('.webm') || urlRaw.endsWith('.ogg')) {
           return (
-            <div key={index} className="my-2 rounded overflow-hidden shadow-sm d-block mx-auto" style={{ maxWidth: '600px' }}>
+            <div key={index} className="my-2 rounded overflow-hidden shadow-sm d-block mx-auto bbcode-media-wrapper" style={{ maxWidth: '600px', width: '100%' }}>
               <video controls className="w-100 h-100">
                  <source src={urlRaw} />
               </video>
@@ -444,7 +450,7 @@ const BBCode = ({ children, rolls = {} }) => {
   }
 
   return (
-    <div className="bbcode-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+    <div className="bbcode-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', width: '100%' }}>
       {processedTree.map((node, i) => renderNode(node, i))}
     </div>
   );

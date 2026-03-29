@@ -1,0 +1,50 @@
+---
+description: how to deploy a new Aerun Forum instance
+---
+
+# Setup a New Aerun Forum Instance
+
+Follow these steps to deploy and initialize a new forum instance from scratch.
+
+## 1. Firebase Project Setup
+1. Create a new project in the [Firebase Console](https://console.firebase.google.com/).
+2. Enable **Authentication**:
+   - Go to **Authentication > Sign-in method**.
+   - Enable **Google** as a provider.
+   - Configure a support email (your email).
+3. Create a **Firestore Database** and choose a location.
+4. (Optional) Enable **Firebase Storage** if you need avatar uploads.
+5. Create a **Web App** in the project settings and copy the configuration.
+
+## 2. Environment Configuration
+Create a `.env.production` (or `.env.development`) file with your Firebase keys:
+```env
+VITE_FIREBASE_API_KEY=your_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
+VITE_ADMIN_EMAIL=your_email@gmail.com
+```
+
+## 3. Deployment
+Run the following commands to build and deploy:
+```powershell
+npm run build:prod
+firebase deploy --only "hosting,firestore" --project your_project_id
+```
+
+## 4. Initialization
+1. Visit your deployed URL.
+2. Log in using the **Admin Email** specified in your `.env` file.
+3. The system will automatically:
+   - Create default **Roles** (Admin, Moderator, Player, Spectator).
+   - Create **Global Settings** (Forum Name, Backgrounds, etc.).
+4. Go to the `/admin` panel to create your first **Categories** and **Groups**.
+
+## 5. Security Rules
+Ensure your `firestore.rules` and `storage.rules` are deployed:
+```powershell
+firebase deploy --only firestore:rules,storage:rules
+```

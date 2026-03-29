@@ -24,6 +24,7 @@ import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumAuthorAvatar from '../components/common/ForumAuthorAvatar';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
+import ForumCharacterBadge from '../components/common/ForumCharacterBadge';
 import Skeleton from '../components/common/Skeleton';
 import { useToast } from '../contexts/ToastProvider';
 
@@ -679,7 +680,13 @@ const TopicPage = () => {
   };
 
   const getRoleBadge = (post, extraClass = 'mb-2') => {
-    if (post.is_character) return null;
+    if (post.is_character) {
+        return (
+          <div className={`mt-0 ${extraClass} text-center w-100`}>
+            <ForumCharacterBadge ownerName={getLiveOwnerName(post)} />
+          </div>
+        );
+    }
     
     // Check author data from stats
     const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
@@ -916,9 +923,9 @@ const TopicPage = () => {
         {currentPosts.map((post, index) => (
           <Card key={post.id} id={`post-${post.id}`} className="mb-4 shadow-sm border-0 post-card">
             <Card.Body className="p-0">
-              <Row className="g-0">
+              <div className="d-flex flex-column flex-md-row flex-md-nowrap">
                 {/* Author sidebar */}
-                <Col className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center col-lg-2 col-md-3">
+                <div className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center">
                   {/* --- DESKTOP VERSION (Stay as it was) --- */}
                   <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
                     {/* 1. Nickname */}
@@ -936,7 +943,7 @@ const TopicPage = () => {
                     {getLiveAuthorStatus(post) === 'LOADING' ? (
                       <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
                     ) : getLiveAuthorStatus(post) ? (
-                      <div className="text-primary mb-2 text-truncate w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
+                      <div className="text-primary mb-2 w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
                         {getLiveAuthorStatus(post)}
                       </div>
                     ) : null}
@@ -973,15 +980,7 @@ const TopicPage = () => {
                     </div>
 
                     {/* 6. Role/Mask */}
-                    {!post.is_character && (
-                      <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(post)}</div>
-                    )}
-                    {post.is_character && (
-                      <div className="text-muted mt-1 mb-2 opacity-75 text-center" style={{ fontSize: '0.875rem' }}>
-                        {lang === 'ru' ? 'персонаж' : 'character'}
-                        {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
-                      </div>
-                    )}
+                    <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(post)}</div>
 
                     {/* Desktop profile links */}
                     {(() => {
@@ -1006,7 +1005,7 @@ const TopicPage = () => {
                   {/* --- MOBILE VERSION (Compact & Horizontal) --- */}
                   <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
                     {/* Avatar */}
-                    <div className="author-avatar-wrapper flex-shrink-0">
+                    <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
                       <ForumAuthorAvatar
                         userId={post.author_id}
                         characterId={post.author_character_id}
@@ -1030,7 +1029,7 @@ const TopicPage = () => {
                         />
                       </div>
                       {getLiveAuthorStatus(post) && (
-                        <div className="text-primary text-truncate author-res-status" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                        <div className="text-primary author-res-status" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
                           {getLiveAuthorStatus(post)}
                         </div>
                       )}
@@ -1053,25 +1052,16 @@ const TopicPage = () => {
                             <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
                           )}
                         </div>
-                        <div>
-                           {!post.is_character ? (
-                             <div className="author-res-info-lite text-end">
-                               {getRoleBadge(post, 'mb-0')}
-                             </div>
-                           ) : (
-                             <div className="text-muted opacity-75 author-res-stat text-end">
-                               {lang === 'ru' ? 'персонаж' : 'character'}
-                               {getLiveOwnerName(post) && ` (${getLiveOwnerName(post)})`}
-                             </div>
-                           )}
+                        <div className="author-res-info-lite text-end">
+                          {getRoleBadge(post, 'mb-0')}
                         </div>
                       </div>
                     </div>
                   </div>
-                </Col>
+                </div>
 
                 {/* Content Area */}
-                <Col md={9} lg={10} className="d-flex flex-column" style={{ minHeight: '100%' }}>
+                <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
                   {/* Header Strip: Time, # */}
                   <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
                     <small className="text-muted">
@@ -1330,8 +1320,8 @@ const TopicPage = () => {
                       </div>
                     </div>
                   )}
-                </Col>
-              </Row>
+                </div>
+              </div>
             </Card.Body>
           </Card>
         ))}
@@ -1344,9 +1334,9 @@ const TopicPage = () => {
           className="mb-4 shadow-sm border-0 post-card draft-post-card"
         >
           <Card.Body className="p-0">
-            <Row className="g-0">
+            <div className="d-flex flex-column flex-md-row flex-md-nowrap">
               {/* Author sidebar */}
-              <Col md={3} lg={2} className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
+              <div className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
                 <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
                   <ForumAuthorName
                     userId={myDraft.author_id}
@@ -1357,11 +1347,11 @@ const TopicPage = () => {
                   />
                 </div>
                 {getLiveAuthorStatus(myDraft) && (
-                  <div className="text-primary mb-2 text-truncate w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
+                  <div className="text-primary mb-2 w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
                     {getLiveAuthorStatus(myDraft)}
                   </div>
                 )}
-                <div className="mb-2">
+                <div className="mb-2 hide-on-extra-small-mobile">
                   <ForumAuthorAvatar
                     userId={myDraft.author_id}
                     characterId={myDraft.author_character_id}
@@ -1378,25 +1368,17 @@ const TopicPage = () => {
                 <div className="text-muted" style={{ fontSize: '0.875rem' }}>
                   {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation || 0}</strong>
                 </div>
-                {!myDraft.is_character && (
-                  <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(myDraft)}</div>
-                )}
-                {myDraft.is_character && (
-                  <div className="text-muted mt-1 mb-3" style={{ fontSize: '0.875rem' }}>
-                    {lang === 'ru' ? 'персонаж' : 'character'}
-                    {getLiveOwnerName(myDraft) && ` (${getLiveOwnerName(myDraft)})`}
-                  </div>
-                )}
+                <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(myDraft)}</div>
                 {/* Draft Status Links */}
                 <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
                   <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
                     {t('profile.view_profile')}
                   </Link>
                 </div>
-              </Col>
+              </div>
 
               {/* Content Area */}
-              <Col md={9} lg={10} className="d-flex flex-column">
+              <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
                 {/* Header Strip — no date, no post number, just DRAFT badge */}
                 <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
                   <Badge bg="secondary" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
@@ -1490,11 +1472,11 @@ const TopicPage = () => {
                     </Button>
                   )}
                 </div>
-              </Col>
-            </Row>
+              </div>
+            </div>
           </Card.Body>
-        </Card>
-      )}
+          </Card>
+        )}
 
       {/* Bottom Actions & Pagination */}
       <div className="mt-4 mb-4 px-2 px-md-0">

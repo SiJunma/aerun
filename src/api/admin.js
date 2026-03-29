@@ -26,7 +26,7 @@ export const updateGlobalSettings = async (settings, performerId) => {
         const v = settings[key];
         if (typeof v === 'string' && v.length > 120) continue;
         if (JSON.stringify(old[key]) !== JSON.stringify(v)) {
-          changes[key] = { from: old[key], to: v };
+          changes[key] = { from: old[key] ?? null, to: v ?? null };
         }
       }
     }

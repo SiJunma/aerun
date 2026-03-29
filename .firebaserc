@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "aerun-forum"
+    "default": "aerun-forum",
+    "staging": "aerun-test"
   }
 }

@@ -13,7 +13,17 @@ export const useI18n = () => {
 
 export const I18nProvider = ({ children }) => {
   const { profile, settings, updateSettings } = useAuth();
-  const [lang, setLangState] = useState('en');
+  
+  // Detect browser language or use saved preference
+  const getInitialLang = () => {
+    const saved = localStorage.getItem('language');
+    if (saved && (saved === 'ru' || saved === 'en')) return saved;
+    
+    const browserLang = navigator.language || navigator.userLanguage;
+    return (browserLang && browserLang.toLowerCase().startsWith('ru')) ? 'ru' : 'en';
+  };
+
+  const [lang, setLangState] = useState(getInitialLang());
 
   useEffect(() => {
     if (profile?.settings?.language) {
@@ -34,6 +44,7 @@ export const I18nProvider = ({ children }) => {
 
   const setLang = async (newLang) => {
     setLangState(newLang);
+    localStorage.setItem('language', newLang);
     if (profile) {
       await updateSettings({ language: newLang });
     }

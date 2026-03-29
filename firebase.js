@@ -16,10 +16,13 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
+// Boolean to check if storage is enabled (has a bucket name configured)
+export const isStorageEnabled = !!firebaseConfig.storageBucket;
+
 // Initialize services
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const storage = getStorage(app);
+export const storage = isStorageEnabled ? getStorage(app) : null;
 export const googleProvider = new GoogleAuthProvider();
 
 // Initialize App Check (helps prevent bot attacks and unauthorized API access)
