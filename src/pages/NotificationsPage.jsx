@@ -45,7 +45,7 @@ const formatDate = (ts, lang = 'ru') => {
 import { useToast } from '../contexts/ToastProvider';
 
 const NotificationsPage = () => {
-  const { profile, recordActivity, hasPermission, PERMISSIONS } = useAuth();
+  const { profile, recordActivity, hasPermission, PERMISSIONS, isRootAdmin } = useAuth();
   const { t, lang } = useI18n();
   const { showToast } = useToast();
   const [searchParams] = useSearchParams();
@@ -61,7 +61,10 @@ const NotificationsPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
 
-  const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
+  // Only users who can actually act on registrations should see these notifications
+  const canManageUsers = hasPermission(PERMISSIONS.APPROVE_USERS)
+    || hasPermission(PERMISSIONS.BAN_USERS)
+    || hasPermission(PERMISSIONS.DELETE_USERS);
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -79,8 +82,8 @@ const NotificationsPage = () => {
       setUserArchived(notifs);
     }, true);
 
-    // Admin Notifications
-    if (isAdmin) {
+    // Admin broadcast notifications (backward-compat: legacy recipient_uid=null docs)
+    if (canManageUsers) {
       unsubAdminActive = subscribeToAdminNotifications(setAdminActive, false);
       unsubAdminArchive = subscribeToAdminNotifications(setAdminArchived, true);
     }
@@ -91,7 +94,7 @@ const NotificationsPage = () => {
       unsubAdminActive();
       unsubAdminArchive();
     };
-  }, [isAdmin, profile?.uid]);
+  }, [canManageUsers, profile?.uid]);
 
   const activeNotifs = [...adminActive, ...userActive].sort((a, b) => 
     (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0)
@@ -136,7 +139,7 @@ const NotificationsPage = () => {
   const handleArchiveAll = async () => {
     recordActivity();
     try {
-      if (isAdmin) {
+      if (canManageUsers) {
         await archiveAllAdminNotifications();
       }
       if (profile?.uid) {
@@ -248,7 +251,9 @@ const NotificationsPage = () => {
                 <div className="ps-0 ps-md-1">
                   <div className="mb-2 d-flex align-items-baseline gap-2">
                     <span className="fw-bold fs-5">{payload.nickname}</span>
-                    <span className="text-muted small">{payload.email}</span>
+                    {isRootAdmin && payload.email && (
+                      <span className="text-muted small">{payload.email}</span>
+                    )}
                   </div>
                   {payload.admin_message && (
                     <div

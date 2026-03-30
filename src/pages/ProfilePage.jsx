@@ -446,12 +446,6 @@ const ProfilePage = () => {
                 </div>
               )}
 
-              {(profile?.uid === uid || hasPermission('admin_access')) && (
-                <div className="mb-3 text-start border-top pt-3">
-                  <span className="text-muted d-block small mb-1">{t('common.email')}</span>
-                  <div className="fw-bold text-truncate">{viewedProfile?.email}</div>
-                </div>
-              )}
               <div className="mb-0 text-start">
                 <span className="text-muted d-block small mb-1 fw-bold text-uppercase" style={{ fontSize: '0.65rem', letterSpacing: '0.1em' }}>
                   {t('profile.account_role')}

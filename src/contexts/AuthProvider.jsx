@@ -24,7 +24,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
-import { createNotification, markTopicNotificationsRead } from '../api/notifications';
+import { notifyUserManagers, markTopicNotificationsRead } from '../api/notifications';
 import { 
   subscribeToReadMap, 
   recordTopicVisit as apiRecordTopicVisit,
@@ -35,7 +35,7 @@ import {
 } from '../api/forum';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
-import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions } from '../constants/permissions';
+import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
 import { generateRandomNickname } from '../utils/nickname';
 
 const AuthContext = createContext();
@@ -424,9 +424,9 @@ export const AuthProvider = ({ children }) => {
             sessionStorage.removeItem('pending_message');
             sessionStorage.removeItem('is_registering');
 
-            // Fire admin-broadcast notification for new (non-admin) registrations
+            // Notify only users with user-management permissions about new registrations
             if (!isAdmin) {
-              createNotification('new_registration', {
+              notifyUserManagers('new_registration', {
                 uid: firebaseUser.uid,
                 nickname: finalNickname,
                 email: firebaseUser.email,
@@ -734,9 +734,12 @@ export const AuthProvider = ({ children }) => {
     }
   }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout]);
 
+  const isRootAdmin = isChiefAdmin(user?.email, profile?.role_id);
+
   const value = {
     user,
     profile,
+    isRootAdmin,
     settings,
     loading,
     readMap,

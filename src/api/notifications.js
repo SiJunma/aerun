@@ -12,6 +12,7 @@ import {
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
+import { PERMISSIONS } from '../constants/permissions';
 
 /**
  * Notifications schema (Firestore collection: "notifications")
@@ -53,6 +54,74 @@ export const createNotification = async (type, payload, recipientUid = null) => 
     created_at: serverTimestamp(),
     payload: payload ?? {}
   });
+};
+
+/**
+ * Send a personal notification to every user whose role includes at least one
+ * of the user-management permissions (APPROVE_USERS, BAN_USERS, DELETE_USERS).
+ * Also always notifies the root-admin user identified by VITE_ADMIN_EMAIL.
+ *
+ * This replaces the old admin-broadcast (recipient_uid = null) approach so that
+ * only the right people receive registration notifications.
+ */
+export const notifyUserManagers = async (type, payload) => {
+  const USER_MGMT_PERMS = [
+    PERMISSIONS.APPROVE_USERS,
+    PERMISSIONS.BAN_USERS,
+    PERMISSIONS.DELETE_USERS
+  ];
+
+  // 1. Fetch all roles from Firestore
+  const rolesSnap = await getDocs(collection(db, 'roles'));
+  const eligibleRoleIds = new Set();
+
+  rolesSnap.forEach(roleDoc => {
+    const perms = roleDoc.data().permissions || [];
+    const hasAny = USER_MGMT_PERMS.some(p => perms.includes(p));
+    if (hasAny) eligibleRoleIds.add(roleDoc.id);
+  });
+
+  if (eligibleRoleIds.size === 0) return;
+
+  // 2. For each eligible role fetch users (Firestore 'in' supports up to 30 values)
+  const roleIdList = [...eligibleRoleIds];
+  const recipientUids = new Set();
+
+  // Process in chunks of 30 (Firestore limit for 'in' queries)
+  for (let i = 0; i < roleIdList.length; i += 30) {
+    const chunk = roleIdList.slice(i, i + 30);
+    const usersSnap = await getDocs(
+      query(collection(db, 'users'), where('role_id', 'in', chunk))
+    );
+    usersSnap.forEach(u => recipientUids.add(u.id));
+  }
+
+  // 3. Also notify the root admin (identified by VITE_ADMIN_EMAIL) in case their
+  //    role_id is 'root' which may not be in the Firestore roles collection.
+  const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
+  if (adminEmail) {
+    const adminSnap = await getDocs(
+      query(collection(db, 'users'), where('email', '==', adminEmail))
+    );
+    adminSnap.forEach(u => recipientUids.add(u.id));
+  }
+
+  if (recipientUids.size === 0) return;
+
+  // 4. Create a personal notification for each recipient
+  const batch = writeBatch(db);
+  for (const uid of recipientUids) {
+    const ref = doc(collection(db, 'notifications'));
+    batch.set(ref, {
+      recipient_uid: uid,
+      type,
+      read: false,
+      archived: false,
+      created_at: serverTimestamp(),
+      payload: payload ?? {}
+    });
+  }
+  await batch.commit();
 };
 
 // ── Subscribe ────────────────────────────────────────────────────────────────

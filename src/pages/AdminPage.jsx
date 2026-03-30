@@ -26,7 +26,7 @@ import { useToast } from '../contexts/ToastProvider';
 
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
-  const { user, hasPermission, roles } = useAuth();
+  const { user, hasPermission, roles, isRootAdmin } = useAuth();
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
@@ -796,19 +796,19 @@ const AdminPage = () => {
   const renderUsers = () => {
     const filteredUsers = users.filter(u => 
       u.nickname?.toLowerCase().includes(userSearch.toLowerCase()) || 
-      u.email?.toLowerCase().includes(userSearch.toLowerCase())
+      (isRootAdmin && u.email?.toLowerCase().includes(userSearch.toLowerCase()))
     );
 
     return (
       <Card className="shadow-sm border-0">
         <Card.Header className="bg-transparent py-3 border-bottom">
           <InputGroup style={{ maxWidth: '400px' }}>
-            <InputGroup.Text className="bg-card border-end-0 text-muted">
+            <InputGroup.Text className="border-end-0 text-muted">
               <Search size={18} />
             </InputGroup.Text>
             <Form.Control
               type="text"
-              placeholder={currentLang === 'ru' ? 'Поиск по нику или email...' : 'Search by nickname or email...'}
+              placeholder={currentLang === 'ru' ? 'Поиск...' : 'Search...'}
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
               className="border-start-0 ps-0"
@@ -831,8 +831,8 @@ const AdminPage = () => {
                 <div className="d-flex align-items-center">
                   {u.avatar_url && <img src={u.avatar_url} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
                   <div>
-                    <div className="fw-bold">{u.nickname || u.email}</div>
-                    <div className="small text-muted">{u.email}</div>
+                    <div className="fw-bold">{u.nickname || (isRootAdmin ? u.email : '***')}</div>
+                    {isRootAdmin && <div className="small text-muted">{u.email}</div>}
                   </div>
                 </div>
               </td>
@@ -1113,7 +1113,7 @@ const AdminPage = () => {
     // Build helper lookup
     const resolveId = (v) => {
       const usr = users?.find(u => u.id === v);
-      if (usr) return usr.nickname || usr.email;
+      if (usr) return usr.nickname || (isRootAdmin ? usr.email : '***');
       const cat = categories?.find(c => c.id === v);
       if (cat) return typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title;
       return v.length < 20 ? v : null; // short = readable role id, long = opaque hash
@@ -1126,7 +1126,7 @@ const AdminPage = () => {
         if (auditActionFilter !== 'all' && log.action_type !== auditActionFilter) return false;
         if (!searchLower) return true;
         const performer = users?.find(u => u.id === log.performer_id);
-        const performerName = (performer?.nickname || performer?.email || '').toLowerCase();
+        const performerName = (performer?.nickname || (isRootAdmin ? performer?.email : '***') || '').toLowerCase();
         const actionLabel = t(`admin.audit.actions.${log.action_type}`).toLowerCase();
         const detailValues = Object.values(log.details || {}).map(v => {
           if (typeof v === 'string') return (resolveId(v) || v).toLowerCase();
@@ -1192,7 +1192,7 @@ const AdminPage = () => {
               <tbody>
                 {pageItems.map(log => {
                   const performer = users.find(u => u.id === log.performer_id);
-                  const performerName = performer ? (performer.nickname || performer.email) : 'Unknown User';
+                  const performerName = performer ? (performer.nickname || (isRootAdmin ? performer.email : '***')) : 'Unknown User';
                   
                   return (
                   <tr key={log.id} className="align-middle">
@@ -1591,9 +1591,9 @@ const AdminPage = () => {
               )}
               <div>
                 <div className="fw-bold h5 mb-0" style={{ color: 'var(--primary-color)' }}>
-                  {editingUser.nickname || editingUser.email}
+                  {editingUser.nickname || (isRootAdmin ? editingUser.email : '***')}
                 </div>
-                <div className="small opacity-75">{editingUser.email}</div>
+                {isRootAdmin && <div className="small opacity-75">{editingUser.email}</div>}
               </div>
             </div>
 
@@ -1678,7 +1678,7 @@ const AdminPage = () => {
                 <div>
                   {(() => {
                     const p = users.find(u => u.id === selectedAuditLog.performer_id);
-                    return p ? `${p.nickname || p.email}` : 'Unknown User';
+                    return p ? `${p.nickname || (isRootAdmin ? p.email : '***')}` : 'Unknown User';
                   })()}
                 </div>
                 <div className="text-muted" style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>
@@ -1695,9 +1695,9 @@ const AdminPage = () => {
                   const label = transK === `admin.audit.fields.${k}` ? k : transK;
                   
                   let resolvedName = null;
-                  if (k.toLowerCase().includes('id') && k === 'targetId') {
+                  if (v && typeof v === 'string' && v.length > 20) {
                     const tgt = users.find(u => u.id === v);
-                    if (tgt) resolvedName = tgt.nickname || tgt.email;
+                    if (tgt) resolvedName = tgt.nickname || (isRootAdmin ? tgt.email : '***');
                   }
 
                   return (
