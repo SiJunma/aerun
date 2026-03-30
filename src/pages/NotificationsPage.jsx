@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, Row, Col, Nav } from 'react-bootstrap';
-import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare, TrendingUp, TrendingDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -27,6 +27,11 @@ const TYPE_META = {
     icon: <MessageSquare size={18} />,
     labelKey: 'notifications.types.topic_reply',
     color: 'info'
+  },
+  reputation_change: {
+    // Dynamic icon, set in render
+    labelKey: 'notifications.types.reputation_change',
+    color: 'success'
   }
 };
 
@@ -178,7 +183,11 @@ const NotificationsPage = () => {
                 className="d-flex align-items-center justify-content-center text-primary rounded-circle icon-box-small"
                 style={{ width: '40px', height: '40px' }}
               >
-                {meta?.icon ?? <Bell size={18} />}
+                {n.type === 'reputation_change' ? (
+                  payload?.value > 0 ? <TrendingUp size={18} className="text-success" /> : <TrendingDown size={18} className="text-danger" />
+                ) : (
+                  meta?.icon ?? <Bell size={18} />
+                )}
               </div>
             </Col>
             <Col>
@@ -286,6 +295,56 @@ const NotificationsPage = () => {
                     >
                       {lang === 'ru' ? 'Перейти к сообщению →' : 'Go to message →'}
                     </Link>
+
+                    {!n.read && activeTab === 'active' && (
+                      <Button 
+                        variant="link" 
+                        size="sm" 
+                        className="p-0 ms-auto text-decoration-none small fw-bold text-muted transition-all d-flex align-items-center"
+                        onClick={(e) => handleMarkRead(e, n.id)}
+                      >
+                        <CheckCheck size={14} className="me-1" />
+                        {t('notifications.mark_as_read')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {n.type === 'reputation_change' && payload && (
+                <div className="ps-0 ps-md-1">
+                  <div className="mt-2 text-muted small">
+                    {t(payload.value > 0 ? 'notifications.reputation_increased' : 'notifications.reputation_decreased', { user: payload.voter_nickname }).replace('{user}', payload.voter_nickname)}
+                  </div>
+                  {payload.comment && (
+                    <div
+                      className="mt-2 p-3 rounded-3 small message-preview-box"
+                      style={{ 
+                        whiteSpace: 'pre-wrap', 
+                        wordBreak: 'break-word',
+                        lineHeight: '1.5'
+                      }}
+                    >
+                      {payload.comment}
+                    </div>
+                  )}
+                  <div className="mt-3 d-flex align-items-center">
+                    {payload.post_id ? (
+                      <Link 
+                        to={`/topic/${payload.topic_id}?goLast=0#post-${payload.post_id}`} 
+                        className="text-decoration-none small fw-bold text-primary"
+                        onClick={() => !n.read && handleMarkRead(null, n.id)}
+                      >
+                        {t('notifications.view_post')}
+                      </Link>
+                    ) : (
+                      <Link 
+                        to={`/profile/${profile?.uid}`} 
+                        className="text-decoration-none small fw-bold text-primary"
+                        onClick={() => !n.read && handleMarkRead(null, n.id)}
+                      >
+                        {t('notifications.view_profile')}
+                      </Link>
+                    )}
 
                     {!n.read && activeTab === 'active' && (
                       <Button 
@@ -448,28 +507,62 @@ const NotificationsPage = () => {
             justify-content: center;
           }
           .tab-badge.archived-badge {
-            background-color: transparent !important;
-            color: #94a3b8 !important;
-            border-color: rgba(148, 163, 184, 0.4) !important;
+            background-color: rgba(255, 255, 255, 0.3) !important;
+            backdrop-filter: blur(4px);
+            color: #000 !important;
+            border-color: rgba(0, 0, 0, 0.1) !important;
+          }
+          [data-theme='dark'] .tab-badge.archived-badge {
+            background-color: rgba(255, 255, 255, 0.15) !important;
+            color: #fff !important;
+            border-color: rgba(255, 255, 255, 0.1) !important;
+          }
+          [data-theme='neutral'] .tab-badge.archived-badge {
+            background-color: rgba(255, 255, 255, 0.2) !important;
+            color: #433422 !important;
+            border-color: rgba(67, 52, 34, 0.1) !important;
           }
           .nav-pills .nav-link.active .tab-badge {
-            background-color: #0f172a !important;
-            color: #f8fafc !important;
-            border-color: rgba(255, 255, 255, 0.2) !important;
+            background-color: rgba(0, 0, 0, 0.15) !important;
+            color: inherit !important;
+            border-color: rgba(0, 0, 0, 0.1) !important;
             box-shadow: none;
           }
-          [data-theme='light'] .nav-pills .nav-link.active .tab-badge {
-            background-color: rgba(0,0,0,0.1) !important;
+          [data-theme='dark'] .nav-pills .nav-link.active .tab-badge {
+            background-color: rgba(0, 0, 0, 0.1) !important;
             color: #000 !important;
+            border-color: rgba(0, 0, 0, 0.1) !important;
+          }
+          [data-theme='light'] .nav-pills .nav-link.active .tab-badge {
+            background-color: rgba(255, 255, 255, 0.2) !important;
+            color: #fff !important;
+            border-color: rgba(255, 255, 255, 0.3) !important;
           }
           [data-theme='neutral'] .nav-pills .nav-link.active .tab-badge {
-            background-color: #433422 !important;
+            background-color: rgba(255, 255, 255, 0.15) !important;
             color: #fdfaf3 !important;
-            border-color: rgba(67, 52, 34, 0.3) !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
           }
           .nav-pills .nav-link.active .tab-badge.archived-badge {
-            color: #f8fafc !important;
-            border-color: rgba(255, 255, 255, 0.3) !important;
+            opacity: 1;
+          }
+          .empty-state-card {
+            background: rgba(255, 255, 255, 0.4) !important;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            border-radius: 20px !important;
+          }
+          [data-theme='dark'] .empty-state-card {
+            background: rgba(15, 23, 42, 0.5) !important;
+            border-color: rgba(255, 255, 255, 0.1) !important;
+          }
+          [data-theme='neutral'] .empty-state-card {
+            background: rgba(224, 219, 202, 0.6) !important;
+            border-color: rgba(67, 52, 34, 0.1) !important;
+          }
+          .empty-state-icon {
+            color: var(--primary-color);
+            opacity: 0.8;
           }
         `}
       </style>
@@ -538,15 +631,15 @@ const NotificationsPage = () => {
       </div>
 
       {currentSet.length === 0 ? (
-        <Card className="text-center py-5 border-0 bg-transparent">
+        <Card className="text-center py-5 border-1 empty-state-card shadow-sm">
           <Card.Body>
-            <div className="mb-4 text-muted">
+            <div className="mb-4 empty-state-icon text-muted">
               {activeTab === 'active' ? <BellOff size={64} strokeWidth={1} /> : <Archive size={64} strokeWidth={1} />}
             </div>
-            <h4 className="text-muted fw-light">
+            <h4 className="fw-light mb-2 text-muted">
               {activeTab === 'active' ? t('notifications.no_notifications') : t('notifications.archive_empty')}
             </h4>
-            {activeTab === 'active' && <p className="text-muted small">{t('notifications.we_will_notify')}</p>}
+            {activeTab === 'active' && <p className="text-muted mb-0 small">{t('notifications.we_will_notify')}</p>}
           </Card.Body>
         </Card>
       ) : (

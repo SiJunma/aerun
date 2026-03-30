@@ -9,9 +9,12 @@ import {
   serverTimestamp,
   getDocs,
   getDoc,
-  limit
+  limit,
+  increment
 } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { logAdminAction } from './audit';
+import { createNotification } from './notifications';
 
 /**
  * voteOnPost
@@ -27,7 +30,9 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
   const userRef = doc(db, 'users', targetUid);
   const postRef = doc(db, 'posts', postId);
 
-  await runTransaction(db, async (transaction) => {
+  let finalVoterNickname = 'User';
+
+  finalVoterNickname = await runTransaction(db, async (transaction) => {
     const logDoc = await transaction.get(logRef);
     if (logDoc.exists()) {
       throw new Error('Already voted on this post.');
@@ -67,7 +72,22 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
     transaction.update(postRef, {
       reputation: currentPostRep + value
     });
+
+    return voterNickname; // return to outer scope
   });
+
+  // 4. Send notification
+  try {
+    await createNotification('reputation_change', {
+      voter_nickname: finalVoterNickname,
+      value: value,
+      topic_id: topicId,
+      post_id: postId,
+      comment: comment
+    }, targetUid);
+  } catch (e) {
+    console.error('Failed to create reputation notification', e);
+  }
 };
 
 /**
@@ -108,7 +128,9 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
   const voterRef = doc(db, 'users', voterUid);
   const userRef = doc(db, 'users', targetUid);
 
-  await runTransaction(db, async (transaction) => {
+  let finalVoterNickname = 'User';
+
+  finalVoterNickname = await runTransaction(db, async (transaction) => {
     const logDoc = await transaction.get(logRef);
     if (logDoc.exists()) {
       throw new Error('Already voted on this profile.');
@@ -135,7 +157,21 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
     transaction.update(userRef, {
       reputation: currentRep + value
     });
+
+    return voterNickname; // Return to outer scope
   });
+
+  // Send Notification
+  try {
+    await createNotification('reputation_change', {
+      voter_nickname: finalVoterNickname,
+      value: value,
+      target_id: targetUid,
+      comment: comment
+    }, targetUid);
+  } catch (e) {
+    console.error('Failed to create reputation notification', e);
+  }
 };
 
 /**
@@ -180,4 +216,48 @@ export const checkPostVote = async (voterUid, postId) => {
   const voteId = `${voterUid}_post_${postId}`;
   const logDoc = await getDoc(doc(db, 'reputation_logs', voteId));
   return logDoc.exists();
+};
+
+/**
+ * deleteReputation
+ * Allows an admin/moderator to delete a reputation log entry.
+ * Transactionally reverts the reputation on the user profile and post (if any),
+ * then deletes the log entry and writes to the forum audit log.
+ */
+export const deleteReputation = async (logId, performerId) => {
+  const logRef = doc(db, 'reputation_logs', logId);
+
+  let logData = null;
+
+  await runTransaction(db, async (transaction) => {
+    const logSnap = await transaction.get(logRef);
+    if (!logSnap.exists()) throw new Error('Reputation entry not found.');
+
+    logData = logSnap.data();
+    const { target_id, value, post_id } = logData;
+
+    // Revert user reputation
+    const userRef = doc(db, 'users', target_id);
+    transaction.update(userRef, { reputation: increment(-value) });
+
+    // Revert post reputation if this was a post vote
+    if (post_id) {
+      const postRef = doc(db, 'posts', post_id);
+      transaction.update(postRef, { reputation: increment(-value) });
+    }
+
+    // Delete the log entry
+    transaction.delete(logRef);
+  });
+
+  // Log to audit after transaction
+  await logAdminAction('reputation_deleted', performerId, {
+    targetId: logData?.target_id,
+    voterId: logData?.voter_id,
+    voterNickname: logData?.voter_nickname,
+    value: logData?.value,
+    post_id: logData?.post_id || null,
+    topic_id: logData?.topic_id || null,
+    logId
+  });
 };

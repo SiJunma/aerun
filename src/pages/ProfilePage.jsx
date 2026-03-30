@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList } from 'lucide-react';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2 } from 'lucide-react';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
@@ -11,7 +11,7 @@ import { subscribeToUser, checkNicknameExists, subscribeToCategories, subscribeT
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
-import { voteOnProfile, subscribeToReputationLogs, getProfileVote } from '../api/reputation';
+import { voteOnProfile, subscribeToReputationLogs, getProfileVote, deleteReputation } from '../api/reputation';
 import { db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { format } from 'date-fns';
@@ -650,16 +650,30 @@ const ProfilePage = () => {
                   <h5 className="mb-0">{t('profile.tab_reputation')}</h5>
                 </Card.Header>
                 <Card.Body className="p-0">
-                  {viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid ? (
-                    <div className="p-5 text-center text-muted">
-                      <p className="mb-0">{t('profile.rep_history_hidden')}</p>
-                    </div>
-                  ) : repLogs.length === 0 ? (
-                    <div className="p-5 text-center text-muted">
-                      <p className="mb-0">{t('forum.no_posts')}</p>
-                    </div>
-                  ) : (
+                  {(() => {
+                    const canOverride = hasPermission(PERMISSIONS.DELETE_REPUTATION) || hasPermission(PERMISSIONS.ADMIN_ACCESS);
+                    const historyHidden = viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && !canOverride;
+                    const commentsHidden = viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && !canOverride;
+                    const historyAdminBypass = viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && canOverride;
+                    const commentsAdminBypass = viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && canOverride;
+
+                    if (historyHidden) return (
+                      <div className="p-5 text-center text-muted">
+                        <p className="mb-0">{t('profile.rep_history_hidden')}</p>
+                      </div>
+                    );
+                    if (repLogs.length === 0) return (
+                      <div className="p-5 text-center text-muted">
+                        <p className="mb-0">{t('forum.no_posts')}</p>
+                      </div>
+                    );
+                    return (
                     <div className="table-responsive">
+                      {historyAdminBypass && (
+                        <div className="px-4 py-2 small text-warning opacity-75 d-flex align-items-center gap-1">
+                          <Lock size={12}/> {t('profile.rep_history_admin_note')}
+                        </div>
+                      )}
                       <Table hover className="mb-0">
                         <thead>
                           <tr>
@@ -670,6 +684,7 @@ const ProfilePage = () => {
                             <th>{t('profile.rep_from')}</th>
                             <th className="text-center">{t('profile.rep_value')}</th>
                             <th>{t('profile.rep_comment')}</th>
+                            {hasPermission(PERMISSIONS.DELETE_REPUTATION) && <th></th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -752,19 +767,54 @@ const ProfilePage = () => {
                                 </OverlayTrigger>
                               </td>
                               <td className="py-3 rep-comment-cell">
-                                {viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid ? (
+                                {commentsHidden ? (
                                   <span className="text-muted small italic">{t('profile.rep_comments_hidden')}</span>
                                 ) : (
-                                  log.comment || '—'
+                                  <>
+                                    {commentsAdminBypass && log.comment && (
+                                      <Lock size={10} className="text-warning opacity-50 me-1" />
+                                    )}
+                                    {log.comment || '—'}
+                                  </>
                                 )}
                               </td>
+                              {hasPermission(PERMISSIONS.DELETE_REPUTATION) && (
+                                <td className="py-3 text-end pe-3">
+                                  <Button
+                                    size="sm"
+                                    variant="link"
+                                    className="text-danger p-0 opacity-50"
+                                    style={{ lineHeight: 1 }}
+                                    title={t('profile.rep_delete')}
+                                    onClick={() => {
+                                      setConfirmState({
+                                        show: true,
+                                        title: t('profile.rep_delete'),
+                                        message: t('profile.rep_delete_confirm'),
+                                        onConfirm: async () => {
+                                          try {
+                                            await deleteReputation(log.id, profile.uid);
+                                            showToast(lang === 'ru' ? 'Запись удалена' : 'Entry deleted');
+                                          } catch (err) {
+                                            console.error(err);
+                                            showToast(err.message, 'danger');
+                                          }
+                                        }
+                                      });
+                                    }}
+                                  >
+                                    <Trash2 size={14} />
+                                  </Button>
+                                </td>
+                              )}
                             </tr>
                             );
                           })}
                         </tbody>
                       </Table>
                     </div>
-                  )}
+                    );
+                  })()}
                 </Card.Body>
               </Card>
                 </Tab>

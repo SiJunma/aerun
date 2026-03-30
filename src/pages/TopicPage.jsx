@@ -778,8 +778,20 @@ const TopicPage = () => {
   const currentPosts = realPosts.slice(indexOfFirstItem, indexOfLastItem);
   const isOnLastPage = currentPage >= totalPages || totalPages === 0;
 
-  const handlePageChange = (page) => {
+  const handlePageChange = (page, isFromBottom = false) => {
     setSearchParams({ page });
+    if (isFromBottom) {
+      setTimeout(() => {
+        const topElement = document.querySelector('.topic-header-area') || document.querySelector('.posts-container');
+        if (topElement) {
+          const skipOffset = 70; // Header height
+          const y = topElement.getBoundingClientRect().top + window.scrollY - skipOffset;
+          window.scrollTo({ top: y, behavior: 'instant' });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'instant' });
+        }
+      }, 0);
+    }
   };
 
   return (
@@ -1498,7 +1510,7 @@ const TopicPage = () => {
           <ForumPagination
             currentPage={currentPage}
             totalPages={totalPages}
-            onPageChange={handlePageChange}
+            onPageChange={(page) => handlePageChange(page, true)}
             centered
           />
         </div>

@@ -225,12 +225,22 @@ const AdminPage = () => {
       });
     } else {
       setEditingCat(null);
+      // Build a default VIEW_FORUM override that includes all roles with that permission
+      // plus 'guest' so new categories are visible to guests by default
+      const defaultViewRoles = [
+        ...roles
+          .filter(r => r.id !== 'root' && r.permissions?.includes(PERMISSIONS.VIEW_FORUM))
+          .map(r => r.id),
+        'guest'
+      ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
       setCatForm({ 
         title: { en: '', ru: '' }, 
         description: { en: '', ru: '' }, 
         order: categories.length + 1, 
         group_id: groups[0]?.id || '',
-        permissions: {} 
+        permissions: {
+          [PERMISSIONS.VIEW_FORUM]: defaultViewRoles
+        }
       });
     }
     setShowCatModal(true);
@@ -246,9 +256,14 @@ const AdminPage = () => {
       } else {
         // activate override with roles that currently have this permission globally
         // This prevents accidentally giving spectators/guests write access when toggling on an override.
-        perms[permKey] = roles
+        const roleIds = roles
           .filter(r => r.id !== 'root' && r.permissions?.includes(permKey))
           .map(r => r.id);
+        // For VIEW_FORUM specifically, also include 'guest' by default
+        if (permKey === PERMISSIONS.VIEW_FORUM && !roleIds.includes('guest')) {
+          roleIds.push('guest');
+        }
+        perms[permKey] = roleIds;
       }
       return { ...prev, permissions: perms };
     });

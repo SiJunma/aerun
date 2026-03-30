@@ -139,8 +139,12 @@ service cloud.firestore {
         && request.resource.data.target_id != request.auth.uid
         && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'banned'
         && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'pending';
-      // Logs are immutable except for admins
-      allow update, delete: if isAdmin();
+      // Logs are immutable except for admins and moderators
+      allow update: if isAdmin();
+      allow delete: if isAdmin()
+        || (isSignedIn()
+          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && getUser().data.role_id == 'moderator');
     }
 
     // --- Audit Logs ---

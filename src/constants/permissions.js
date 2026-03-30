@@ -31,6 +31,7 @@ export const PERMISSIONS = {
   
   // Specific Features
   USE_REPUTATION: 'use_reputation',
+  DELETE_REPUTATION: 'delete_reputation',
   USE_MASKS: 'use_masks',
   CREATE_SELF_MASK: 'create_self_mask',
   DELETE_SELF_MASK: 'delete_self_mask',
@@ -70,6 +71,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.POST_REPLY]: { en: 'Post Reply', ru: 'Отправка ответов' },
   [PERMISSIONS.CREATE_TOPIC]: { en: 'Create Topic', ru: 'Создание тем' },
   [PERMISSIONS.USE_REPUTATION]: { en: 'Use Reputation', ru: 'Использование репутации' },
+  [PERMISSIONS.DELETE_REPUTATION]: { en: 'Delete Reputation Entries', ru: 'Удаление выставленной репутации' },
   [PERMISSIONS.USE_MASKS]: { en: 'Use Masks (Characters)', ru: 'Использование масок (персонажей)' },
   [PERMISSIONS.CREATE_SELF_MASK]: { en: 'Create Own Masks', ru: 'Создание своих масок' },
   [PERMISSIONS.DELETE_SELF_MASK]: { en: 'Delete Own Masks', ru: 'Удаление своих масок' },
@@ -140,6 +142,7 @@ export const PERMISSION_GROUPS = [
     name: { en: 'Feature-Specific', ru: 'Специальные возможности' },
     permissions: [
       PERMISSIONS.USE_REPUTATION,
+      PERMISSIONS.DELETE_REPUTATION,
       PERMISSIONS.USE_MASKS,
       PERMISSIONS.CREATE_SELF_MASK,
       PERMISSIONS.DELETE_SELF_MASK,
@@ -199,6 +202,7 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.POST_REPLY,
       PERMISSIONS.CREATE_TOPIC,
       PERMISSIONS.USE_REPUTATION,
+      PERMISSIONS.DELETE_REPUTATION,
       PERMISSIONS.USE_MASKS,
       PERMISSIONS.CREATE_SELF_MASK,
       PERMISSIONS.DELETE_SELF_MASK,
@@ -338,6 +342,7 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.EDIT_OTHERS_AVATARS,
     PERMISSIONS.EDIT_OTHERS_STATUSES,
     PERMISSIONS.EDIT_OTHERS_SIGNATURES,
+    PERMISSIONS.DELETE_REPUTATION,
     PERMISSIONS.EDIT_OTHERS_MASK,
     PERMISSIONS.CREATE_OTHERS_MASK,
     PERMISSIONS.DELETE_OTHERS_MASK,

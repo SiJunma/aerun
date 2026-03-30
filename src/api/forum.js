@@ -145,8 +145,15 @@ export const updateCategory = async (id, catData, performerId) => {
 };
 
 export const deleteCategory = async (id, performerId) => {
-  await deleteDoc(doc(db, 'categories', id));
-  await logAdminAction('category_deleted', performerId, { targetId: id });
+  const catRef = doc(db, 'categories', id);
+  const catDoc = await getDoc(catRef);
+  let title = 'Unnamed';
+  if (catDoc.exists()) {
+    const data = catDoc.data();
+    title = data.title?.en || data.title?.ru || 'Unnamed';
+  }
+  await deleteDoc(catRef);
+  await logAdminAction('category_deleted', performerId, { targetId: id, title });
 };
 
 // ── Topics ───────────────────────────────────────────────────────────────────
@@ -766,6 +773,26 @@ export const deletePost = async (post, performerId) => {
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 export const updateUser = async (uid, userData, performerId) => {
+  // Check if nickname is changing — log it for any change (self or admin)
+  if (userData.nickname !== undefined && performerId) {
+    try {
+      const existingSnap = await getDoc(doc(db, 'users', uid));
+      if (existingSnap.exists()) {
+        const oldNickname = existingSnap.data().nickname;
+        if (oldNickname !== userData.nickname) {
+          await logAdminAction('nickname_changed', performerId, {
+            targetId: uid,
+            oldNickname,
+            newNickname: userData.nickname,
+            self: uid === performerId
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[updateUser nickname log]', e);
+    }
+  }
+
   await updateDoc(doc(db, 'users', uid), {
     ...userData,
     updated_at: serverTimestamp()

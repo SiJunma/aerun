@@ -168,6 +168,10 @@ export const translations = {
       rep_error_links: "Links are not allowed in reputation comments.",
       rep_no_links_hint: "Links are not allowed",
       rep_success: "Reputation updated!",
+      rep_delete: "Delete entry",
+      rep_delete_confirm: "Remove this reputation entry? The vote will be reverted from the user and post.",
+      rep_history_admin_note: "🔒 History hidden (admin view)",
+      rep_comments_admin_note: "🔒 Comments hidden (admin view)",
       tab_posts: "Posts",
       no_posts_user: "This user hasn't posted anything yet.",
       filter_all: "All messages",
@@ -212,8 +216,13 @@ export const translations = {
       new_badge: "New",
       types: {
         new_registration: "New Registration",
-        topic_reply: "{count} new replies in {topic}"
+        topic_reply: "{count} new replies in {topic}",
+        reputation_change: "Reputation change"
       },
+      reputation_increased: "Your reputation was increased by {user}",
+      reputation_decreased: "Your reputation was decreased by {user}",
+      view_post: "View post →",
+      view_profile: "View your profile →",
       follow: "Follow",
       unfollow: "Unfollow",
       followed_toast: "Topic followed",
@@ -413,7 +422,9 @@ export const translations = {
           topic_unlocked: "Topic Unlocked",
           user_profile_edited_by_admin: "Profile Edited",
           user_registered: "New Registration",
-          banned_user_login_attempt: "Banned Login Attempt"
+          banned_user_login_attempt: "Banned Login Attempt",
+          reputation_deleted: "Reputation Entry Deleted",
+          nickname_changed: "Nickname Changed"
         },
         fields: {
           targetId: "Target",
@@ -455,6 +466,15 @@ export const translations = {
           bgOpacityNeutral: "Neutral BG Opacity",
           maxUploadSize: "Max Upload Size",
           registrationEnabled: "Allow Registration",
+          oldNickname: "Old Nickname",
+          newNickname: "New Nickname",
+          self: "Self-change",
+          voterId: "Voter",
+          voterNickname: "Voter Nickname",
+          value: "Value",
+          logId: "Log ID",
+          post_id: "Post ID",
+          topic_id: "Topic ID",
         }
       }
     }
@@ -628,6 +648,10 @@ export const translations = {
       rep_error_links: "Ссылки в комментариях к репутации запрещены.",
       rep_no_links_hint: "Ссылки запрещены",
       rep_success: "Репутация обновлена!",
+      rep_delete: "Удалить запись",
+      rep_delete_confirm: "Убрать эту запись репутации? Голос будет отменён для пользователя и поста.",
+      rep_history_admin_note: "🔒 История скрыта (режим админа)",
+      rep_comments_admin_note: "🔒 Комментарии скрыты (режим админа)",
       tab_posts: "Сообщения",
       no_posts_user: "Этот пользователь еще ничего не опубликовал.",
       filter_all: "Все сообщения",
@@ -672,8 +696,13 @@ export const translations = {
       new_badge: "Новое",
       types: {
         new_registration: "Новая регистрация",
-        topic_reply: "{count} новых ответов в теме {topic}"
+        topic_reply: "{count} новых ответов в теме {topic}",
+        reputation_change: "Изменение репутации"
       },
+      reputation_increased: "Вам повысили репутацию. Автор:",
+      reputation_decreased: "Вам понизили репутацию. Автор:",
+      view_post: "Посмотреть сообщение →",
+      view_profile: "Посмотреть свой профиль →",
       follow: "Подписаться",
       unfollow: "Отписаться",
       followed_toast: "Вы подписались на тему",
@@ -873,7 +902,9 @@ export const translations = {
           topic_unlocked: "Тема открыта",
           user_profile_edited_by_admin: "Профиль изменён",
           user_registered: "Новая регистрация",
-          banned_user_login_attempt: "Попытка входа забаненного"
+          banned_user_login_attempt: "Попытка входа забаненного",
+          reputation_deleted: "Запись репутации удалена",
+          nickname_changed: "Никнейм изменён"
         },
         fields: {
           targetId: "Цель",
@@ -913,6 +944,15 @@ export const translations = {
           bgOpacityNeutral: "Прозрачность (нейтральный)",
           maxUploadSize: "Макс. размер файла",
           registrationEnabled: "Разрешить регистрацию",
+          oldNickname: "Старый никнейм",
+          newNickname: "Новый никнейм",
+          self: "Самостоятельно",
+          voterId: "Голосовавший",
+          voterNickname: "Ник голосовавшего",
+          value: "Значение",
+          logId: "ID записи",
+          post_id: "ID поста",
+          topic_id: "ID темы",
         }
       }
     }
