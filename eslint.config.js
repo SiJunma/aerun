@@ -26,4 +26,15 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    files: ['functions/**/*.js', 'functions/**/*.eslintrc.js'],
+    languageOptions: {
+      ecmaVersion: 2018,
+      globals: {
+        ...globals.node,
+      },
+      sourceType: 'commonjs',
+    },
+    rules: js.configs.recommended.rules,
+  },
 ])

@@ -297,6 +297,11 @@ This file serves as the master context for AI interaction, combining the current
       "'pending'",
       "'banned'"
     ]
+  },
+  "authentication_and_security": {
+    "providers": ["Google", "Email & Password"],
+    "account_linking": "Users can link Google or Password methods in their profile under the Security tab. To link a password to an existing Google account, users can specify a new password.",
+    "email_validation": "When registering via email, a localized verification link is sent. If a user signs in with an unverified email, AuthProvider passes an `emailUnverified` context flag. The `PendingPage` and layout banners adapt to enforce email verification, temporarily restricting forum access."
   }
 }
 ```

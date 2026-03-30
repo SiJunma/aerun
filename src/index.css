@@ -504,6 +504,17 @@ label.fw-bold {
   /* Ensure header corners are clipped */
 }
 
+.bg-card {
+  background-color: var(--card-bg) !important;
+  color: var(--text-color) !important;
+}
+
+.list-group-item {
+  background-color: transparent !important;
+  color: inherit !important;
+  border-color: var(--border-color) !important;
+}
+
 .card-header {
   background-color: var(--nav-bg) !important;
   color: #ffffff !important;

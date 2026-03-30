@@ -22,6 +22,7 @@ import { useToast } from '../contexts/ToastProvider';
 import DirectMessages from '../components/dm/DirectMessages';
 import ForumPagination from '../components/common/ForumPagination';
 import Skeleton from '../components/common/Skeleton';
+import SecurityTab from '../components/profile/SecurityTab';
 
 
 const ProfilePage = () => {
@@ -1274,6 +1275,12 @@ const ProfilePage = () => {
                   </Card.Body>
                 </Card>
               </Tab>
+              )}
+
+              {profile?.uid === uid && !isLimitedProfile && (
+                <Tab eventKey="security" title={t('profile.tab_security')}>
+                  <SecurityTab />
+                </Tab>
               )}
             </Tabs>
           </Col>

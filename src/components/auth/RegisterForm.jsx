@@ -1,22 +1,27 @@
-import React from 'react';
-import { Button, Form, Spinner } from 'react-bootstrap';
+import React, { useState } from 'react';
+import { Button, Form, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { checkNicknameExists } from '../../api/forum';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../../firebase';
+import { db, auth } from '../../../firebase';
+import { fetchSignInMethodsForEmail } from 'firebase/auth';
 
 const RegisterForm = ({ onSuccess }) => {
-  const { loginWithGoogle, settings } = useAuth();
+  const { loginWithGoogle, registerWithEmail, settings } = useAuth();
   const { t, lang } = useI18n();
   
-  const [nickname, setNickname] = React.useState('');
-  const [nicknameError, setNicknameError] = React.useState('');
-  const [checkingNickname, setCheckingNickname] = React.useState(false);
-  const [adminMessage, setAdminMessage] = React.useState('');
-  const [adminNickname, setAdminNickname] = React.useState('');
-  const [registrationEnabled, setRegistrationEnabled] = React.useState(true);
-  const [authError, setAuthError] = React.useState(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [nicknameError, setNicknameError] = useState('');
+  const [adminMessage, setAdminMessage] = useState('');
+  const [adminNickname, setAdminNickname] = useState('');
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [authError, setAuthError] = useState(null);
+  
+  const [loadingEmail, setLoadingEmail] = useState(false);
+  const [loadingGoogle, setLoadingGoogle] = useState(false);
 
   React.useEffect(() => {
     const error = sessionStorage.getItem('auth_error');
@@ -26,7 +31,6 @@ const RegisterForm = ({ onSuccess }) => {
     }
   }, [t]);
 
-  // Fetch global settings from the publicly readable settings doc
   React.useEffect(() => {
     getDoc(doc(db, 'settings', 'global'))
       .then(snap => {
@@ -39,36 +43,91 @@ const RegisterForm = ({ onSuccess }) => {
       .catch(() => { /* silently fail */ });
   }, []);
 
-  const handleRegister = async () => {
+  const prepareSession = async () => {
+    if (nickname.trim()) {
+      setNicknameError('');
+      const isTaken = await checkNicknameExists(nickname.trim());
+      if (isTaken) {
+        setNicknameError(t('auth.error_nickname_taken'));
+        return false;
+      }
+      sessionStorage.setItem('pending_nickname', nickname.trim());
+    } else {
+      sessionStorage.removeItem('pending_nickname');
+    }
+
+    sessionStorage.setItem('is_registering', 'true');
+    
+    if (adminMessage.trim()) {
+      sessionStorage.setItem('pending_message', adminMessage.trim());
+    } else {
+      sessionStorage.removeItem('pending_message');
+    }
+    return true;
+  };
+
+  const handleGoogleRegister = async () => {
     try {
-      if (nickname.trim()) {
-        setCheckingNickname(true);
-        setNicknameError('');
-        const isTaken = await checkNicknameExists(nickname.trim());
-        setCheckingNickname(false);
-
-        if (isTaken) {
-          setNicknameError(t('auth.error_nickname_taken'));
-          return;
-        }
-        sessionStorage.setItem('pending_nickname', nickname.trim());
-      } else {
-        sessionStorage.removeItem('pending_nickname');
+      setLoadingGoogle(true);
+      setAuthError(null);
+      const isOk = await prepareSession();
+      if (!isOk) {
+        setLoadingGoogle(false);
+        return;
       }
-
-      sessionStorage.setItem('is_registering', 'true');
-      
-      if (adminMessage.trim()) {
-        sessionStorage.setItem('pending_message', adminMessage.trim());
-      } else {
-        sessionStorage.removeItem('pending_message');
-      }
-
       await loginWithGoogle();
       if (onSuccess) onSuccess();
     } catch (error) {
-      setCheckingNickname(false);
+      setLoadingGoogle(false);
       console.error(t('auth.login_failed'), error);
+      setAuthError(error.message);
+    }
+  };
+
+  const handleEmailRegister = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password.trim()) return;
+
+    if (password.length < 6) {
+      setAuthError(t('auth.password_too_weak'));
+      return;
+    }
+
+    try {
+      setLoadingEmail(true);
+      setAuthError(null);
+      setNicknameError('');
+
+      // Pre-check email uniqueness locally if possible
+      try {
+        const methods = await fetchSignInMethodsForEmail(auth, email.trim());
+        if (methods && methods.length > 0) {
+          if (methods.includes('google.com')) {
+            setAuthError(t('auth.link_account_google'));
+          } else {
+            setAuthError(t('auth.email_already_in_use'));
+          }
+          setLoadingEmail(false);
+          return;
+        }
+      } catch { /* ignore and let createUser handle it */ }
+
+      const isOk = await prepareSession();
+      if (!isOk) {
+        setLoadingEmail(false);
+        return;
+      }
+
+      await registerWithEmail(email.trim(), password);
+      if (onSuccess) onSuccess();
+    } catch (error) {
+      setLoadingEmail(false);
+      console.error(t('auth.login_failed'), error);
+      if (error.code === 'auth/email-already-in-use') {
+         setAuthError(t('auth.email_already_in_use'));
+      } else {
+         setAuthError(error.message);
+      }
     }
   };
 
@@ -99,71 +158,117 @@ const RegisterForm = ({ onSuccess }) => {
       <p className="text-muted mb-4">{t('auth.register_subtitle', { name: forumName })}</p>
 
       {authError && (
-        <div className="alert alert-danger py-2 small mb-4 fw-bold text-center">
+        <Alert variant="danger" className="py-2 small mb-4 fw-bold text-center">
           {authError}
-        </div>
+        </Alert>
       )}
 
-      <Form.Group className="mb-3 text-start">
-        <Form.Label className="fw-bold">{t('auth.optional_nickname')}</Form.Label>
-        <Form.Control
-          type="text"
-          placeholder={t('auth.optional_nickname_placeholder')}
-          value={nickname}
-          onChange={(e) => {
-            setNickname(e.target.value);
-            setNicknameError('');
-          }}
-          maxLength={30}
-          isInvalid={!!nicknameError}
-          disabled={checkingNickname}
-        />
-        {nicknameError ? (
-          <Form.Text className="text-danger small fw-bold">
-            {nicknameError}
-          </Form.Text>
-        ) : (
-          <Form.Text className="text-muted small">
-            {t('auth.optional_nickname_help')}
-          </Form.Text>
-        )}
-      </Form.Group>
+      <Form onSubmit={handleEmailRegister} className="text-start">
+        <Form.Group className="mb-3">
+          <Form.Label className="fw-bold fs-7">{t('common.email')} *</Form.Label>
+          <Form.Control
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={loadingEmail || loadingGoogle}
+            required
+            className="shadow-none"
+          />
+        </Form.Group>
 
-      <Form.Group className="mb-4 text-start">
-        <Form.Label className="fw-bold">{adminMessageLabel}</Form.Label>
-        <Form.Control
-          as="textarea"
-          rows={3}
-          placeholder={t('auth.admin_message_placeholder')}
-          value={adminMessage}
-          onChange={(e) => setAdminMessage(e.target.value)}
-          maxLength={500}
-          disabled={checkingNickname}
-        />
-        <Form.Text className="text-muted small">
-          {t('auth.admin_message_help')}
-        </Form.Text>
-      </Form.Group>
+        <Form.Group className="mb-3">
+          <Form.Label className="fw-bold fs-7 mb-0">{t('auth.password')} *</Form.Label>
+          <Form.Control
+            type="password"
+            placeholder={t('auth.password_placeholder')}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={loadingEmail || loadingGoogle}
+            required
+            className="shadow-none"
+          />
+        </Form.Group>
+
+        <Form.Group className="mb-3 mt-4 text-start">
+          <Form.Label className="fw-bold">{t('auth.optional_nickname')}</Form.Label>
+          <Form.Control
+            type="text"
+            placeholder={t('auth.optional_nickname_placeholder')}
+            value={nickname}
+            onChange={(e) => {
+              setNickname(e.target.value);
+              setNicknameError('');
+            }}
+            maxLength={30}
+            isInvalid={!!nicknameError}
+            disabled={loadingEmail || loadingGoogle}
+            className="shadow-none"
+          />
+          {nicknameError ? (
+            <Form.Text className="text-danger small fw-bold">
+              {nicknameError}
+            </Form.Text>
+          ) : (
+            <Form.Text className="text-muted small">
+              {t('auth.optional_nickname_help')}
+            </Form.Text>
+          )}
+        </Form.Group>
+
+        <Form.Group className="mb-4 text-start">
+          <Form.Label className="fw-bold">{adminMessageLabel}</Form.Label>
+          <Form.Control
+            as="textarea"
+            rows={2}
+            placeholder={t('auth.admin_message_placeholder')}
+            value={adminMessage}
+            onChange={(e) => setAdminMessage(e.target.value)}
+            maxLength={500}
+            disabled={loadingEmail || loadingGoogle}
+            className="shadow-none"
+          />
+          <Form.Text className="text-muted small">
+            {t('auth.admin_message_help')}
+          </Form.Text>
+        </Form.Group>
+
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          disabled={loadingEmail || loadingGoogle || !email.trim() || !password.trim()}
+          className="w-100 mb-4 fw-bold shadow-sm"
+        >
+          {loadingEmail ? <Spinner size="sm" animation="border" /> : t('auth.sign_up_email')}
+        </Button>
+      </Form>
+
+      <div className="d-flex align-items-center mb-4">
+        <div className="flex-grow-1 border-top"></div>
+        <div className="px-3 text-muted small fw-bold text-uppercase">{t('auth.or_continue_with')}</div>
+        <div className="flex-grow-1 border-top"></div>
+      </div>
 
       <Button
-        variant="outline-primary"
+        variant="outline-secondary"
         size="lg"
-        onClick={handleRegister}
-        disabled={checkingNickname}
-        className="d-flex align-items-center justify-content-center w-100 gap-2 mb-3"
+        onClick={handleGoogleRegister}
+        disabled={loadingEmail || loadingGoogle}
+        className="d-flex align-items-center justify-content-center w-100 gap-2 mb-3 bg-transparent border-2 border-secondary"
+        style={{ color: 'var(--text-color)' }}
       >
-        {checkingNickname ? (
+        {loadingGoogle ? (
           <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
         ) : (
-          <img
-            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-            alt="Google"
-            style={{ width: '20px' }}
-          />
+          <>
+            <img
+              src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+              alt="Google"
+              style={{ width: '22px' }}
+            />
+            <span className="fw-bold">{t('auth.sign_up_google')}</span>
+          </>
         )}
-        <span className="fw-bold">
-          {checkingNickname ? t('common.loading') : t('auth.sign_up_google')}
-        </span>
       </Button>
     </div>
   );

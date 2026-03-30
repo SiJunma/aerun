@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Button } from 'react-bootstrap';
 import LoginForm from '../auth/LoginForm';
 import RegisterForm from '../auth/RegisterForm';
+import ForgotPasswordForm from '../auth/ForgotPasswordForm';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 
@@ -22,14 +23,14 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
       onHide={onHide} 
       centered 
       size="md"
-      contentClassName="shadow-lg rounded-4 overflow-hidden"
+      contentClassName="shadow-lg rounded-4 overflow-hidden bg-card"
     >
       <Modal.Header closeButton className="border-0 pb-0">
       </Modal.Header>
       <Modal.Body className="px-4 pb-4 pt-0">
         {mode === 'login' ? (
           <>
-            <LoginForm onSuccess={onHide} />
+            <LoginForm onSuccess={onHide} onForgotPassword={() => setMode('forgot_password')} />
             {settings?.registrationEnabled !== false && (
               <div className="mt-4 text-center small border-top pt-3">
                 <span className="text-muted">{t('auth.dont_have_account')}</span>
@@ -43,6 +44,8 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
               </div>
             )}
           </>
+        ) : mode === 'forgot_password' ? (
+          <ForgotPasswordForm onSuccess={onHide} onBackToLogin={() => setMode('login')} />
         ) : (
           <>
             <RegisterForm onSuccess={onHide} />

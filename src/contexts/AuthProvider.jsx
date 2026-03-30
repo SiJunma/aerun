@@ -3,7 +3,11 @@ import React, { createContext, useContext, useEffect, useState, useRef, useCallb
 import {
   onAuthStateChanged,
   signInWithPopup,
-  signOut
+  signOut,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import {
   doc,
@@ -48,6 +52,7 @@ export const AuthProvider = ({ children }) => {
   const [profile, setProfile] = useState(null);
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [emailUnverified, setEmailUnverified] = useState(false);
   // readMap: { [topicId]: Firestore Timestamp | number } — synced from server
   const [readMap, setReadMap] = useState({});
   const [latestTopics, setLatestTopics] = useState([]);
@@ -112,6 +117,58 @@ export const AuthProvider = ({ children }) => {
 
   const loginWithGoogle = () => {
     return signInWithPopup(auth, googleProvider);
+  };
+
+  const registerWithEmail = async (email, password) => {
+    auth.languageCode = settings?.language || 'en';
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    await sendEmailVerification(userCredential.user);
+    return userCredential;
+  };
+
+  const loginWithEmail = async (email, password) => {
+    return await signInWithEmailAndPassword(auth, email, password);
+  };
+
+  const resetPassword = async (email) => {
+    auth.languageCode = settings?.language || 'en';
+    await sendPasswordResetEmail(auth, email);
+  };
+
+  const actionTimeRef = useRef({ resend: 0, check: 0 });
+
+  const resendVerificationEmail = async () => {
+    const now = Date.now();
+    // 60 seconds cooldown for emails
+    if (now - actionTimeRef.current.resend < 60000) return;
+    actionTimeRef.current.resend = now;
+
+    if (auth.currentUser) {
+      auth.languageCode = settings?.language || 'en';
+      try {
+        await sendEmailVerification(auth.currentUser);
+      } catch (e) {
+        console.error('[resendVerificationEmail]', e);
+      }
+    }
+  };
+
+  const checkVerificationStatus = async () => {
+    const now = Date.now();
+    // 3 seconds cooldown to prevent spamming the auth API
+    if (now - actionTimeRef.current.check < 3000) return;
+    actionTimeRef.current.check = now;
+
+    if (auth.currentUser) {
+      setLoading(true);
+      try {
+        await auth.currentUser.reload();
+      } catch (e) {
+        console.error('[checkVerificationStatus]', e);
+        setLoading(false);
+      }
+      window.location.reload();
+    }
   };
 
   const loggingOutRef = useRef(false);
@@ -246,6 +303,14 @@ export const AuthProvider = ({ children }) => {
 
       if (firebaseUser) {
         setUser(firebaseUser);
+
+        const usesPassword = firebaseUser.providerData.some(p => p.providerId === 'password');
+        if (usesPassword && !firebaseUser.emailVerified) {
+          setEmailUnverified(true);
+        } else {
+          setEmailUnverified(false);
+        }
+
         const userDocRef = doc(db, 'users', firebaseUser.uid);
 
         // De-register as guest if was one
@@ -328,13 +393,16 @@ export const AuthProvider = ({ children }) => {
 
             const defaultAvatar = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(finalNickname)}`;
 
+            const usesPassword = firebaseUser.providerData.some(p => p.providerId === 'password');
+            const needsVerification = usesPassword && !firebaseUser.emailVerified;
+
             const newUser = {
               uid: firebaseUser.uid,
               email: firebaseUser.email,
               nickname: finalNickname,
               avatar_url: defaultAvatar,
               status_line: 'Hello, I am new here!',
-              role_id: isAdmin ? CHIEF_ADMIN_ID : (globalSettings?.requireApproval === false ? 'player' : 'pending'),
+              role_id: isAdmin ? CHIEF_ADMIN_ID : (globalSettings?.requireApproval === false && !needsVerification ? 'player' : 'pending'),
               created_at: serverTimestamp(),
               last_seen: serverTimestamp(),
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
@@ -373,6 +441,22 @@ export const AuthProvider = ({ children }) => {
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
+            const data = userDoc.data();
+            
+            // Auto-upgrade pending users who just verified their email
+            if (usesPassword && firebaseUser.emailVerified && data.role_id === 'pending') {
+               try {
+                   const globalSnap = await getDoc(doc(db, 'settings', 'global'));
+                   const reqAppr = globalSnap.exists() ? globalSnap.data().requireApproval : false;
+                   if (!reqAppr) {
+                       await updateDoc(userDocRef, { role_id: 'player' });
+                       data.role_id = 'player';
+                   }
+               } catch (e) {
+                   console.error('[Auto-upgrade role error]', e);
+               }
+            }
+
             // Login counts as activity — update immediately
             lastActivityRef.current = Date.now();
             pushLastSeen(firebaseUser.uid);
@@ -455,6 +539,7 @@ export const AuthProvider = ({ children }) => {
       } else {
         setUser(null);
         setProfile(null);
+        setEmailUnverified(false);
         setReadMap({});
         setLatestTopics([]);
         finishLoading();
@@ -660,6 +745,13 @@ export const AuthProvider = ({ children }) => {
     markTopicRead,
     markAllRead,
     loginWithGoogle,
+    registerWithEmail,
+    loginWithEmail,
+    resetPassword,
+    resendVerificationEmail,
+    checkVerificationStatus,
+    emailUnverified,
+    setEmailUnverified,
     logout,
     updateSettings,
     updateProfile,
