@@ -44,6 +44,11 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
     const userDoc = await transaction.get(userRef);
     if (!userDoc.exists()) throw new Error('Target user not found.');
 
+    const targetRole = userDoc.data().role_id;
+    if (targetRole === 'banned' || targetRole === 'pending') {
+      throw new Error('Голосование за этого пользователя запрещено.');
+    }
+
     const currentRep = userDoc.data().reputation || 0;
 
     const postDoc = await transaction.get(postRef);
@@ -141,6 +146,11 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
 
     const userDoc = await transaction.get(userRef);
     if (!userDoc.exists()) throw new Error('Target user not found.');
+
+    const targetRole = userDoc.data().role_id;
+    if (targetRole === 'banned' || targetRole === 'pending') {
+      throw new Error('Голосование за этого пользователя запрещено.');
+    }
 
     const currentRep = userDoc.data().reputation || 0;
 

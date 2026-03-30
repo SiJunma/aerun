@@ -1,0 +1,294 @@
+{
+  "database": {
+    "firestore": {
+      "collections": {
+        "users": {
+          "description": "Registered users.",
+          "fields": {
+            "uid": "string (document ID)",
+            "email": "string",
+            "nickname": "string",
+            "avatar_url": "string",
+            "status_line": "string",
+            "role_id": "string (references roles.id, e.g., 'root', 'admin', 'player')",
+            "previous_role_id": "string (stores role before ban)",
+            "post_count": "number",
+            "reputation": "number",
+            "admin_message": "string (optional)",
+            "settings": {
+              "theme": "string",
+              "language": "string",
+              "member_view_style": "string"
+            },
+            "created_at": "serverTimestamp",
+            "last_seen": "serverTimestamp",
+            "updated_at": "serverTimestamp"
+          },
+          "subcollections": {
+            "characters": {
+              "description": "User-created masks/characters.",
+              "fields": {
+                "name": "string",
+                "avatar_url": "string",
+                "created_at": "serverTimestamp",
+                "updated_at": "serverTimestamp"
+              }
+            },
+            "readmap": {
+              "description": "Keeps track of last read times for topics. Document 'topics' has the mapping.",
+              "fields": {
+                "[topic_id]": "timestamp | number"
+              }
+            },
+            "drafts": {
+              "description": "Unpublished posts. Document ID matches the topic ID.",
+              "fields": {
+                "is_draft": "boolean (must be true)",
+                "topic_id": "string (references topics.id)",
+                "author_id": "string (references users.uid)",
+                "author_name": "string",
+                "content": "string",
+                "created_at": "serverTimestamp"
+              }
+            }
+          }
+        },
+        "roles": {
+          "description": "Forum roles. Determines permissions.",
+          "fields": {
+            "name": "string",
+            "color": "string",
+            "permissions": "array of strings",
+            "is_system": "boolean",
+            "base_role_id": "string (references roles.id)",
+            "created_at": "serverTimestamp",
+            "updated_at": "serverTimestamp"
+          }
+        },
+        "settings": {
+          "description": "Global settings for the forum. Only 'global' document is used.",
+          "fields": {
+            "forumName": "string",
+            "welcomeMessage": "string",
+            "maintenanceMode": "boolean",
+            "whitelistMode": "boolean",
+            "requireApproval": "boolean",
+            "registrationEnabled": "boolean",
+            "adminNickname": "string",
+            "bgLight": "string",
+            "bgDark": "string",
+            "bgNeutral": "string",
+            "enableDice": "boolean",
+            "enableCharacters": "boolean",
+            "enableReputation": "boolean",
+            "created_at": "serverTimestamp"
+          }
+        },
+        "category_groups": {
+          "description": "Groups for organizing categories.",
+          "fields": {
+            "title": { "en": "string", "ru": "string" },
+            "order": "number",
+            "created_at": "serverTimestamp",
+            "updated_at": "serverTimestamp"
+          }
+        },
+        "categories": {
+          "description": "Forum categories holding topics.",
+          "fields": {
+            "group_id": "string (references category_groups.id)",
+            "title": { "en": "string", "ru": "string" },
+            "permissions": "object (e.g., { 'view_forum': ['player'] })",
+            "order": "number",
+            "topics_count": "number",
+            "posts_count": "number",
+            "last_post_at": "serverTimestamp",
+            "last_post_author": "string",
+            "last_post_author_id": "string (references users.uid)",
+            "last_post_author_avatar": "string",
+            "last_post_topic_id": "string (references topics.id)",
+            "last_post_topic_title": "string",
+            "last_post_is_character": "boolean",
+            "last_post_author_character_id": "string (references users.uid/characters.id)",
+            "created_at": "serverTimestamp",
+            "updated_at": "serverTimestamp"
+          }
+        },
+        "topics": {
+          "description": "Threads within categories.",
+          "fields": {
+            "category_id": "string (references categories.id)",
+            "title": "string",
+            "description": "string",
+            "author_id": "string (references users.uid)",
+            "author_name": "string",
+            "author_avatar": "string",
+            "is_character": "boolean",
+            "author_character_id": "string (references users.uid/characters.id)",
+            "is_pinned": "boolean",
+            "is_locked": "boolean",
+            "views": "number",
+            "reputation": "number",
+            "posts_count": "number",
+            "last_post_at": "serverTimestamp",
+            "last_post_author": "string",
+            "last_post_author_id": "string (references users.uid)",
+            "last_post_author_avatar": "string",
+            "last_post_is_character": "boolean",
+            "last_post_author_character_id": "string (references users.uid/characters.id)",
+            "created_at": "serverTimestamp",
+            "updated_at": "serverTimestamp"
+          }
+        },
+        "posts": {
+          "description": "Individual replies within topics. Logic: Authors can delete their own post unless the topic is locked. Admin/Moderator can delete any.",
+          "fields": {
+            "topic_id": "string (references topics.id)",
+            "author_id": "string (references users.uid)",
+            "author_name": "string",
+            "author_avatar": "string",
+            "is_character": "boolean",
+            "author_character_id": "string (references users.uid/characters.id)",
+            "content": "string (can contain BBCode)",
+            "rolls": "array of objects (dice roll results)",
+            "reputation": "number",
+            "is_draft": "boolean (false)",
+            "edited_at": "serverTimestamp",
+            "created_at": "serverTimestamp"
+          }
+        },
+        "topic_subscriptions": {
+          "description": "Users tracking topics for notifications.",
+          "fields": {
+            "topic_id": "string (references topics.id)",
+            "user_id": "string (references users.uid)",
+            "created_at": "serverTimestamp"
+          }
+        },
+        "reputation_logs": {
+          "description": "Reputation votes for posts or user profiles. Logic: Voting for banned or pending users is strictly blocked. Spectators can vote if permitted by UI.",
+          "fields": {
+            "voter_id": "string (references users.uid)",
+            "voter_nickname": "string",
+            "target_id": "string (references users.uid)",
+            "post_id": "string (references posts.id, null for profile votes)",
+            "topic_id": "string (references topics.id, null for profile votes)",
+            "topic_title": "string",
+            "post_number": "number",
+            "value": "number",
+            "comment": "string",
+            "created_at": "serverTimestamp"
+          }
+        },
+        "notifications": {
+          "description": "System or user notifications.",
+          "fields": {
+            "recipient_uid": "string (references users.uid, null for global/admin broadcast)",
+            "type": "string ('new_registration', 'topic_reply', 'reputation_change', etc.)",
+            "read": "boolean",
+            "archived": "boolean",
+            "payload": {
+              "topic_id": "string (optional)",
+              "topic_title": "string (optional)",
+              "first_post_id": "string (optional)",
+              "last_post_id": "string (optional)",
+              "post_count": "number (optional, for grouping)",
+              "value": "number (optional, for reputation)",
+              "admin_message": "string (optional)"
+            },
+            "created_at": "serverTimestamp"
+          }
+        },
+        "dms": {
+          "description": "Direct conversation headers between players.",
+          "fields": {
+            "participants": "array of strings (references users.uid)",
+            "participantNames": "object (maps uid to nickname)",
+            "participantAvatars": "object (maps uid to avatar_url)",
+            "lastMessage": "string",
+            "lastTimestamp": "serverTimestamp",
+            "unread": "object (maps uid to unread count)"
+          },
+          "subcollections": {
+            "messages": {
+              "fields": {
+                "sender_uid": "string (references users.uid)",
+                "text": "string (can contain BBCode)",
+                "rolls": "array of objects",
+                "timestamp": "serverTimestamp"
+              }
+            }
+          }
+        },
+        "audit_logs": {
+          "description": "Log of admin limits and actions.",
+          "fields": {
+            "action_type": "string",
+            "performer_id": "string (references users.uid)",
+            "details": "object (flexible payload)",
+            "created_at": "serverTimestamp"
+          }
+        },
+        "guest_activity": {
+          "description": "Tracks active anonymous users.",
+          "fields": {
+            "guest_id": "string",
+            "last_seen": "serverTimestamp"
+          }
+        }
+      }
+    }
+  },
+  "react_contexts": {
+    "AuthContext": {
+      "path": "src/contexts/AuthProvider.jsx",
+      "description": "Maintains user state, global settings, unread counts, and permission checks.",
+      "state_keys": [
+        "user", "profile", "settings", "loading", "readMap", "unreadTopicsCount", "isMarkingAllRead", "roles", "PERMISSIONS"
+      ]
+    },
+    "ToastContext": {
+      "path": "src/contexts/ToastProvider.jsx",
+      "description": "Global context for pushing flash notifications/toasts onto the screen."
+    },
+    "ThemeContext": {
+      "path": "src/contexts/ThemeProvider.jsx",
+      "description": "Manages global theme (light, dark, neutral, etc)."
+    },
+    "I18nContext": {
+      "path": "src/contexts/I18nProvider.jsx",
+      "description": "Internationalization. Manages switching between app languages (en/ru)."
+    }
+  },
+  "folder_structure": {
+    "src/ api": "Firestore operations isolated from components. Subdivided by domain (forum.js, auth.js, admin.js).",
+    "src/ assets": "Static media (images, svgs).",
+    "src/ components": "React presentation and logic components (common UI elements, layout wrappers).",
+    "src/ constants": "Hardcoded values, role definitions (e.g. permissions.js).",
+    "src/ contexts": "React context providers (Auth, Theme, Toast, I18n).",
+    "src/ i18n": "Translation messages/dictionaries.",
+    "src/ pages": "Route-level functional components representing views.",
+    "src/ styles": "Modular or extra CSS (global CSS is in index.css).",
+    "src/ utils": "Helper functions for parsing bbcode, processing dice rolls, formatting dates."
+  },
+  "global_constants": {
+    "IDLE_TIMEOUT_MS": "15 * 60 * 1000 (15 minutes of inactivity required before ceasing last_seen updates)",
+    "TICK_MS": "2 * 60 * 1000 (Last observed threshold for pushing last_seen state locally)",
+    "GUEST_TICK_MS": "10 * 60 * 1000 (Guest pulse for online visibility limit)",
+    "Pagination Limits": {
+      "dms": "Limit 50 conversations, messages fetched using dynamic limitCount.",
+      "reputation_logs": "Limit 50 entries when viewing recent reputations on profile.",
+      "audit_logs": "Default 50 entries fetched per batch."
+    },
+    "CHIEF_ADMIN_ID": "'root' (Absolute highest privilege role identifier overriable by VITE_ADMIN_EMAIL from .env)",
+    "Role Default Constants": [
+      "'admin'",
+      "'moderator'",
+      "'player'",
+      "'spectator'",
+      "'guest'",
+      "'pending'",
+      "'banned'"
+    ]
+  }
+}

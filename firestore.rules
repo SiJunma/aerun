@@ -29,9 +29,19 @@ service cloud.firestore {
         && getUser().data.role_id != 'banned';
     }
 
-    // canPost = active user who is NOT a spectator
-    function canPost() {
-      return isActive() && getUser().data.role_id != 'spectator';
+    function hasPermission(permission) {
+      let roleId = getUser().data.role_id;
+      return roleId == 'root' || 
+        (exists(/databases/$(database)/documents/roles/$(roleId)) && 
+         permission in get(/databases/$(database)/documents/roles/$(roleId)).data.permissions);
+    }
+
+    function canModerateContent() {
+      return isSignedIn() && hasPermission('moderate_content');
+    }
+
+    function isTopicOpen(topicId) {
+      return get(/databases/$(database)/documents/topics/$(topicId)).data.is_locked != true;
     }
 
     // --- Users ---
@@ -49,14 +59,14 @@ service cloud.firestore {
     // Spectators cannot create characters
     match /characters/{charId} {
       allow read: if true;
-      allow create: if canPost() && (request.resource.data.owner_id == request.auth.uid || isAdmin());
+      allow create: if isActive() && (request.resource.data.owner_id == request.auth.uid || isAdmin());
       allow update, delete: if isActive() && (resource.data.owner_id == request.auth.uid || isAdmin());
     }
 
     // --- User sub-collection characters ---
     match /users/{userId}/characters/{charId} {
       allow read: if true;
-      allow create: if (canPost() && isOwner(userId)) || isAdmin();
+      allow create: if (isActive() && isOwner(userId)) || isAdmin();
       allow update, delete: if (isOwner(userId) && isActive()) || isAdmin();
     }
 
@@ -79,8 +89,8 @@ service cloud.firestore {
     // --- Topics ---
     match /topics/{topicId} {
       allow read: if true;
-      // Only non-spectators can create topics
-      allow create: if canPost();
+      // Active users can create topics (UI handles category-specific permissions)
+      allow create: if isActive();
       // Author or admin can edit; view/counter bumps allowed for all active users
       allow update: if isAdmin()
         || (isActive() && (
@@ -88,23 +98,23 @@ service cloud.firestore {
           || request.resource.data.diff(resource.data).affectedKeys()
             .hasAny(['views', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_is_character', 'last_post_author_character_id'])
         ));
-      allow delete: if isAdmin() || (canPost() && resource.data.author_id == request.auth.uid);
+      allow delete: if canModerateContent() || (isActive() && resource.data.author_id == request.auth.uid && isTopicOpen(topicId));
     }
 
     // --- Posts ---
     match /posts/{postId} {
       allow read: if true;
-      // Only non-spectators can create or delete posts; limit to 1000 posts per topic
-      allow create: if canPost() && (
+      // Active users can create posts; limit to 1000 posts per topic
+      allow create: if isActive() && (
         !exists(/databases/$(database)/documents/topics/$(request.resource.data.topic_id)) ||
         get(/databases/$(database)/documents/topics/$(request.resource.data.topic_id)).data.posts_count < 1000
       );
       allow update: if isAdmin()
-        || (canPost() && (
+        || (isActive() && (
           resource.data.author_id == request.auth.uid
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reputation'])
         ));
-      allow delete: if isAdmin() || (canPost() && resource.data.author_id == request.auth.uid);
+      allow delete: if canModerateContent() || (isActive() && resource.data.author_id == request.auth.uid && isTopicOpen(resource.data.topic_id));
     }
 
     // --- Drafts (Isolated per user/topic) ---
@@ -133,8 +143,8 @@ service cloud.firestore {
     match /reputation_logs/{logId} {
       // Users can read logs (UI filters based on settings)
       allow read: if true;
-      // Only non-spectators can vote; voter_id must match; cannot vote for self
-      allow create: if canPost() 
+      // Any active user can vote (permissions defined by frontend); voter_id must match; cannot vote for self
+      allow create: if isActive() 
         && request.resource.data.voter_id == request.auth.uid
         && request.resource.data.target_id != request.auth.uid
         && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'banned'
@@ -184,7 +194,7 @@ service cloud.firestore {
     // --- Topic Subscriptions ---
     match /topic_subscriptions/{subId} {
       allow read: if isActive();
-      allow create: if canPost() && request.resource.data.user_id == request.auth.uid;
+      allow create: if isActive() && request.resource.data.user_id == request.auth.uid;
       allow delete: if isActive() && (resource.data.user_id == request.auth.uid || isAdmin());
     }
 
