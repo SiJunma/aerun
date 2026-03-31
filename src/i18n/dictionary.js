@@ -277,6 +277,10 @@ export const translations = {
       top_discussed_desc: "Top 50 forum topics, sorted by number of replies.",
       no_topics: "No topics yet"
     },
+    time: {
+      today: "Today",
+      yesterday: "Yesterday"
+    },
     admin: {
       dashboard: "Admin Dashboard",
       tabs: {
@@ -789,6 +793,10 @@ export const translations = {
       top_discussed: "Самые обсуждаемые темы",
       top_discussed_desc: "Топ-50 тем форума, отсортированных по количеству ответов.",
       no_topics: "Тем пока нет"
+    },
+    time: {
+      today: "Сегодня",
+      yesterday: "Вчера"
     },
     admin: {
       dashboard: "Панель управления",

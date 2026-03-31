@@ -7,8 +7,7 @@ import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/forum';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
+import Timestamp from '../components/common/Timestamp';
 
 const ROLE_PRIORITY = {
   'root': 120,
@@ -56,7 +55,7 @@ const MembersPage = () => {
     if (!timestamp) return '...';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
+      return <Timestamp date={date} />;
     } catch {
       return '...';
     }
@@ -66,7 +65,7 @@ const MembersPage = () => {
     if (!timestamp) return '...';
     try {
       const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
+      return <Timestamp date={date} />;
     } catch {
       return '...';
     }

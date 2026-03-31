@@ -14,8 +14,7 @@ import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, subscribeToReputationLogs, getProfileVote, deleteReputation } from '../api/reputation';
 import { db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
+import Timestamp from '../components/common/Timestamp';
 import BBCode from '../components/common/BBCode';
 
 import { useToast } from '../contexts/ToastProvider';
@@ -475,7 +474,7 @@ const ProfilePage = () => {
                 id="profile-tabs"
                 className="mb-4 premium-tabs"
               >
-                {!isLimitedProfile && (viewedProfile?.bio || viewedProfile?.contacts || viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests) && (
+                {!isLimitedProfile && (viewedProfile?.bio || viewedProfile?.contacts || (profile?.uid && (viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests))) && (
                   <Tab eventKey="about" title={t('profile.tab_about')}>
                     <Card className="shadow-sm border-0 bg-card">
                       <Card.Header className="py-3">
@@ -493,7 +492,7 @@ const ProfilePage = () => {
                           </div>
                         )}
 
-                        {(viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests) && (
+                        {profile?.uid && (viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests) && (
                           <div className={viewedProfile?.contacts ? "mb-4 pb-4 border-bottom" : "mb-0"}>
                             <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
                               <ClipboardList size={16} /> {lang === 'ru' ? 'Информация' : 'Information'}
@@ -697,7 +696,7 @@ const ProfilePage = () => {
                             return (
                             <tr key={log.id}>
                               <td className="px-4 py-3 small text-muted">
-                                {log.created_at ? format(log.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
+                                {log.created_at ? <Timestamp date={log.created_at.toDate()} /> : '...'}
                               </td>
                               <td className="py-3 text-center">
                                 <OverlayTrigger
@@ -929,7 +928,7 @@ const ProfilePage = () => {
                                         </Badge>
                                       )}
                                       <span className="text-muted small">
-                                        {post.created_at ? format(post.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS }) : '...'}
+                                        {post.created_at ? <Timestamp date={post.created_at.toDate()} /> : '...'}
                                       </span>
                                     </div>
                                   </div>
@@ -1056,10 +1055,12 @@ const ProfilePage = () => {
                       )}
 
                       <hr className="my-4" />
-                      <h6 className="mb-3 text-primary uppercase small fw-bold d-flex align-items-center gap-2">
+                      <h6 className="mb-1 text-primary uppercase small fw-bold d-flex align-items-center gap-2">
                         <ClipboardList size={18} /> {lang === 'ru' ? 'Дополнительная информация' : 'Additional Information'}
                       </h6>
-                      
+                      <p className="small text-muted mb-3">
+                        {lang === 'ru' ? 'Эта информация будет видна в профиле только зарегистрированным пользователям.' : 'This information will be visible on your profile only to registered users.'}
+                      </p>
                       <Row>
                         <Col md={6}>
                           <Form.Group className="mb-3">

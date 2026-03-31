@@ -9,9 +9,8 @@ import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import RichEditor from '../components/common/RichEditor';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
 import BBCode from '../components/common/BBCode';
+import Timestamp from '../components/common/Timestamp';
 import {
   Award, Pin, Lock, Settings, Trash2, ArrowRightLeft, Bell, BellOff, MessageSquare, Send,
   Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
@@ -312,16 +311,6 @@ const TopicPage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts.length, goLast, currentPage, hash, id, readMap, profile]);
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '...';
-    try {
-      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return format(date, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
-    } catch {
-      return '...';
-    }
-  };
-
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
@@ -834,7 +823,7 @@ const TopicPage = () => {
               <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
             </span>
             <span>·</span>
-            <span className="text-nowrap">{formatTime(topic.created_at)}</span>
+            <Timestamp date={topic.created_at} />
           </div>
 
           {/* Actions & Pagination Group (Right Side) */}
@@ -1089,11 +1078,11 @@ const TopicPage = () => {
                           window.location.hash = `post-${post.id}`;
                         }}
                       >
-                        {formatTime(post.created_at)}
+                        <Timestamp date={post.created_at} className="text-muted" />
                       </a>
                       {post.edited_at && (
                         <span className="d-block d-md-inline-block ms-md-2 opacity-50">
-                          ({lang === 'ru' ? 'ред.' : 'edited'} {formatTime(post.edited_at)})
+                          ({lang === 'ru' ? 'ред.' : 'edited'} <Timestamp date={post.edited_at} />)
                         </span>
                       )}
                     </small>
@@ -1772,7 +1761,7 @@ const TopicPage = () => {
               </div>
               <div className="text-end">
                 <div className="small text-muted">{lang === 'ru' ? 'Дата' : 'Date'}</div>
-                <div className="fw-bold">{formatTime(selectedVote.created_at)}</div>
+                <div className="fw-bold"><Timestamp date={selectedVote.created_at} /></div>
               </div>
             </div>
 

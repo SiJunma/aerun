@@ -14,6 +14,7 @@ import {
 } from '../api/notifications';
 import { Link, useSearchParams } from 'react-router-dom';
 import ForumPagination from '../components/common/ForumPagination';
+import Timestamp from '../components/common/Timestamp';
 
 const TYPE_META = {
   new_registration: {
@@ -35,12 +36,7 @@ const TYPE_META = {
   }
 };
 
-const formatDate = (ts, lang = 'ru') => {
-  if (!ts) return '';
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
-  const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
-  return d.toLocaleString(locale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-};
+
 
 import { useToast } from '../contexts/ToastProvider';
 
@@ -231,7 +227,7 @@ const NotificationsPage = () => {
                 <div className="ms-auto d-flex align-items-center gap-3">
                   <span className="text-muted small d-flex align-items-center gap-1" style={{ fontSize: '0.75rem' }}>
                     <Clock size={12} />
-                    {formatDate(n.created_at, lang)}
+                    <Timestamp date={n.created_at} />
                   </span>
                   
                   {activeTab === 'active' && (

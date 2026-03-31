@@ -1,6 +1,5 @@
 import React from 'react';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
+import Timestamp from './Timestamp';
 import ForumAuthorName from './ForumAuthorName';
 import ForumAuthorAvatar from './ForumAuthorAvatar';
 
@@ -10,7 +9,6 @@ const AuthorMeta = ({
   authorCharacterId,
   isCharacter,
   authorName,
-  lang,
   authorAvatar,
   showAvatar = true,
   className = ""
@@ -19,7 +17,7 @@ const AuthorMeta = ({
     if (!dateValue) return '—';
     try {
       const d = dateValue.toDate ? dateValue.toDate() : new Date(dateValue);
-      return format(d, 'd MMM yyyy, HH:mm', { locale: lang === 'ru' ? ru : enUS });
+      return <Timestamp date={d} />;
     } catch {
       return '—';
     }

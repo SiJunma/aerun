@@ -15,8 +15,7 @@ import {
   markDmRead,
 } from '../../api/dms';
 import { subscribeToUser } from '../../api/forum';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
+import Timestamp from '../common/Timestamp';
 import { PERMISSIONS } from '../../constants/permissions';
 
 /**
@@ -156,14 +155,12 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
   const formatTs = (ts) => {
     if (!ts) return '';
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
-    return format(d, 'd MMM, HH:mm', { locale: lang === 'ru' ? ru : enUS });
+    return <Timestamp date={ts} />;
   };
 
   const formatDate = (ts) => {
     if (!ts) return '';
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
-    return format(d, 'd MMM', { locale: lang === 'ru' ? ru : enUS });
+    return <Timestamp date={ts} />;
   };
 
   // ── Privacy notice ───────────────────────────────────────────────────────

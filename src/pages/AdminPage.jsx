@@ -9,8 +9,7 @@ import {
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/forum';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
-import { format } from 'date-fns';
-import { ru, enUS } from 'date-fns/locale';
+import Timestamp from '../components/common/Timestamp';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
 import { 
@@ -1197,7 +1196,7 @@ const AdminPage = () => {
                   return (
                   <tr key={log.id} className="align-middle">
                     <td className="text-muted small text-nowrap">
-                      {log.created_at ? format(log.created_at.toDate(), 'd MMM yyyy, HH:mm', { locale: currentLang === 'ru' ? ru : enUS }) : '...'}
+                      {log.created_at ? <Timestamp date={log.created_at.toDate()} /> : '...'}
                     </td>
                     <td>
                       <div className="fw-bold">{performerName}</div>
@@ -1668,7 +1667,7 @@ const AdminPage = () => {
                 <strong>{t('admin.audit.table_action')}:</strong> <span className="audit-badge ms-1">{t(`admin.audit.actions.${selectedAuditLog.action_type}`) || selectedAuditLog.action_type}</span>
               </div>
               <div>
-                <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? format(selectedAuditLog.created_at.toDate(), 'd MMM yyyy, HH:mm:ss', { locale: currentLang === 'ru' ? ru : enUS }) : '...'}
+                <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? <Timestamp date={selectedAuditLog.created_at.toDate()} /> : '...'}
               </div>
               
               <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
