@@ -430,7 +430,9 @@ const ProfilePage = () => {
                         <div className="d-flex gap-1 align-items-center">
                           {!myVote ? (
                             <>
-                              <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
+                              {settings?.reputationStyle !== 'positive_only' && (
+                                <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
+                              )}
                               <Button size="sm" variant="outline-success" className="py-0 px-2" onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
                             </>
                           ) : (
@@ -1383,7 +1385,6 @@ const ProfilePage = () => {
               onChange={(e) => setRepComment(e.target.value)}
               placeholder={lang === 'ru' ? 'Напишите комментарий...' : 'Write a comment...'}
               maxLength={200}
-              className="rep-textarea border-0 bg-dark opacity-75 text-white"
             />
             <div className="d-flex justify-content-between mt-1 small text-muted">
               <span><i className="bi bi-info-circle me-1"></i>{t('profile.rep_no_links_hint')}</span>

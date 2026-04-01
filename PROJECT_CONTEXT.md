@@ -88,6 +88,7 @@ This file serves as the master context for AI interaction, combining the current
             "enableDice": "boolean",
             "enableCharacters": "boolean",
             "enableReputation": "boolean",
+            "reputationStyle": "string ('both' or 'positive_only')",
             "created_at": "serverTimestamp"
           }
         },

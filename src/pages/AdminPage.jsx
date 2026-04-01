@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown, Modal } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
-import { 
+import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole 
+  updateUserRole, addRole, updateRole, deleteRole
 } from '../api/admin';
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/forum';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
@@ -12,10 +12,10 @@ import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, ge
 import Timestamp from '../components/common/Timestamp';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
-import { 
-  UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2, 
-  Search, Award, Pin, Lock, Settings, MessageSquareOff, 
-  Bell, BellOff, ArrowRightLeft, Send, FilePen, User 
+import {
+  UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2,
+  Search, Award, Pin, Lock, Settings, MessageSquareOff,
+  Bell, BellOff, ArrowRightLeft, Send, FilePen, User
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -39,12 +39,12 @@ const AdminPage = () => {
   // Modal State
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
-  const [catForm, setCatForm] = useState({ 
-    title: { en: '', ru: '' }, 
-    description: { en: '', ru: '' }, 
-    order: 0, 
+  const [catForm, setCatForm] = useState({
+    title: { en: '', ru: '' },
+    description: { en: '', ru: '' },
+    order: 0,
     group_id: '',
-    permissions: {} 
+    permissions: {}
   });
 
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -110,6 +110,7 @@ const AdminPage = () => {
     maintenanceMode: false,
     welcomeMessage: { en: 'Welcome to our TTRPG home!', ru: 'Добро пожаловать в наш дом TTRPG!' },
     enableReputation: true,
+    reputationStyle: 'both',
     enableCharacters: true,
     enableDice: true,
     allowGifAvatars: true,
@@ -136,7 +137,7 @@ const AdminPage = () => {
           return { en: defaultVal, ru: defaultVal };
         };
 
-        const migrated = { 
+        const migrated = {
           ...data,
           forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
           welcomeMessage: ensureBilingual(data.welcomeMessage, ''),
@@ -148,6 +149,7 @@ const AdminPage = () => {
           enableCharacters: data.enableCharacters ?? true,
           enableDice: data.enableDice ?? true,
           enableReputation: data.enableReputation ?? true,
+          reputationStyle: data.reputationStyle || 'both',
           allowGifAvatars: data.allowGifAvatars ?? true,
           allowGifInPosts: data.allowGifInPosts ?? true,
           logoUrl: data.logoUrl || '',
@@ -232,10 +234,10 @@ const AdminPage = () => {
           .map(r => r.id),
         'guest'
       ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
-      setCatForm({ 
-        title: { en: '', ru: '' }, 
-        description: { en: '', ru: '' }, 
-        order: categories.length + 1, 
+      setCatForm({
+        title: { en: '', ru: '' },
+        description: { en: '', ru: '' },
+        order: categories.length + 1,
         group_id: groups[0]?.id || '',
         permissions: {
           [PERMISSIONS.VIEW_FORUM]: defaultViewRoles
@@ -459,20 +461,20 @@ const AdminPage = () => {
   const handleOpenRoleModal = (role = null) => {
     if (role) {
       setEditingRole(role);
-      setRoleForm({ 
-        name: role.name, 
-        permissions: normalizePermissions(role.permissions || []), 
+      setRoleForm({
+        name: role.name,
+        permissions: normalizePermissions(role.permissions || []),
         color: role.color || 'primary',
         base_role_id: role.base_role_id || role.id
       });
     } else {
       setEditingRole(null);
       const defaultPlayerRole = DEFAULT_ROLES.find(r => r.id === 'player');
-      setRoleForm({ 
-        name: '', 
-        permissions: defaultPlayerRole ? [...defaultPlayerRole.permissions] : [], 
-        color: 'primary', 
-        base_role_id: 'player' 
+      setRoleForm({
+        name: '',
+        permissions: defaultPlayerRole ? [...defaultPlayerRole.permissions] : [],
+        color: 'primary',
+        base_role_id: 'player'
       });
     }
     setShowRoleModal(true);
@@ -619,6 +621,20 @@ const AdminPage = () => {
               checked={settings.enableReputation}
               onChange={(e) => setSettings({ ...settings, enableReputation: e.target.checked })}
             />
+            {settings.enableReputation && (
+              <div className="mb-3 rounded" style={{ marginTop: '-0.5rem' }}>
+                <Form.Label className="small text-muted fw-bold mb-1 opacity-75">{t('admin.settings.reputation_style')}</Form.Label>
+                <Form.Select
+                  size="sm"
+                  value={settings.reputationStyle || 'both'}
+                  onChange={(e) => setSettings({ ...settings, reputationStyle: e.target.value })}
+                  style={{ maxWidth: '250px' }}
+                >
+                  <option value="both">{t('admin.settings.rep_style_both')}</option>
+                  <option value="positive_only">{t('admin.settings.rep_style_positive')}</option>
+                </Form.Select>
+              </div>
+            )}
             <Form.Check
               type="switch"
               id="gif-avatar-switch"
@@ -793,8 +809,8 @@ const AdminPage = () => {
 
 
   const renderUsers = () => {
-    const filteredUsers = users.filter(u => 
-      u.nickname?.toLowerCase().includes(userSearch.toLowerCase()) || 
+    const filteredUsers = users.filter(u =>
+      u.nickname?.toLowerCase().includes(userSearch.toLowerCase()) ||
       (isRootAdmin && u.email?.toLowerCase().includes(userSearch.toLowerCase()))
     );
 
@@ -825,138 +841,138 @@ const AdminPage = () => {
           </thead>
           <tbody>
             {filteredUsers.map(u => (
-            <tr key={u.id} className="align-middle">
-              <td>
-                <div className="d-flex align-items-center">
-                  {u.avatar_url && <img src={u.avatar_url} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
-                  <div>
-                    <div className="fw-bold">{u.nickname || (isRootAdmin ? u.email : '***')}</div>
-                    {isRootAdmin && <div className="small text-muted">{u.email}</div>}
+              <tr key={u.id} className="align-middle">
+                <td>
+                  <div className="d-flex align-items-center">
+                    {u.avatar_url && <img src={u.avatar_url} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
+                    <div>
+                      <div className="fw-bold">{u.nickname || (isRootAdmin ? u.email : '***')}</div>
+                      {isRootAdmin && <div className="small text-muted">{u.email}</div>}
+                    </div>
                   </div>
-                </div>
-              </td>
-              <td>
-                <div className="d-flex align-items-center gap-1">
-                  {isChiefAdmin(u.email, u.role_id) ? (
-                    (() => {
-                      const visuals = getRoleVisuals('admin', roles);
-                      return (
-                        <Badge bg={visuals.color} className={`role-badge px-3 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.85rem' }}>
-                          {visuals.name}
-                        </Badge>
-                      );
-                    })()
-                  ) : (
-                    <Button 
-                      variant="link" 
-                      className="p-0 text-decoration-none d-inline-flex align-items-center gap-2 group border-0 shadow-none"
-                      onClick={() => handleOpenUserModal(u)}
-                      disabled={!hasPermission(PERMISSIONS.CHANGE_ROLES)}
-                    >
-                      {(() => {
-                        const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                </td>
+                <td>
+                  <div className="d-flex align-items-center gap-1">
+                    {isChiefAdmin(u.email, u.role_id) ? (
+                      (() => {
+                        const visuals = getRoleVisuals('admin', roles);
                         return (
-                          <>
-                            <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
-                              {visuals.name}
-                            </Badge>
-                            <Edit2 size={12} className="text-muted opacity-50 group-hover-opacity-100 transition-opacity" />
-                          </>
+                          <Badge bg={visuals.color} className={`role-badge px-3 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.85rem' }}>
+                            {visuals.name}
+                          </Badge>
                         );
-                      })()}
-                    </Button>
-                  )}
-                </div>
-              </td>
-              <td>
-                {u.role_id !== 'pending' && u.role_id !== 'banned' && <Badge bg="success">{t('admin.users.status_active')}</Badge>}
-                {u.role_id === 'pending' && <Badge bg="warning" text="dark">{t('admin.users.status_pending')}</Badge>}
-                {u.role_id === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
-              </td>
-              <td className="text-end">
-                {!isChiefAdmin(u.email, u.role_id) && (
-                  <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
-                    {u.role_id === 'pending' && (
-                      <>
-                        {hasPermission(PERMISSIONS.APPROVE_USERS) && (
-                          <Button variant="success" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleApproveUser(u.id)}>
-                             <UserCheck size={14} className="me-1" /> {t('admin.users.approve')}
-                          </Button>
-                        )}
-                        {hasPermission(PERMISSIONS.APPROVE_USERS) && (
-                          <Button variant="danger" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleRejectUser(u.id)}>
-                            <UserX size={14} className="me-1" /> {t('admin.users.reject')}
-                          </Button>
-                        )}
-                      </>
-                    )}
-                    {u.role_id !== 'banned' ? (
-                      hasPermission(PERMISSIONS.BAN_USERS) && (
-                        <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleBanUser(u.id)}>
-                          <UserMinus size={14} className="me-1" /> {t('admin.users.ban')}
-                        </Button>
-                      )
+                      })()
                     ) : (
-                      hasPermission(PERMISSIONS.BAN_USERS) && (
-                        <Button variant="link" size="sm" className="text-success p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleUnbanUser(u.id)}>
-                          {t('admin.users.unban')}
-                        </Button>
-                      )
-                    )}
-                    {hasPermission(PERMISSIONS.DELETE_USERS) && (
-                      <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleDeleteUser(u.id)}>
-                        <Trash2 size={14} className="me-1" /> {t('admin.users.delete')}
+                      <Button
+                        variant="link"
+                        className="p-0 text-decoration-none d-inline-flex align-items-center gap-2 group border-0 shadow-none"
+                        onClick={() => handleOpenUserModal(u)}
+                        disabled={!hasPermission(PERMISSIONS.CHANGE_ROLES)}
+                      >
+                        {(() => {
+                          const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                          return (
+                            <>
+                              <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
+                                {visuals.name}
+                              </Badge>
+                              <Edit2 size={12} className="text-muted opacity-50 group-hover-opacity-100 transition-opacity" />
+                            </>
+                          );
+                        })()}
                       </Button>
                     )}
                   </div>
-                )}
-                {isChiefAdmin(u.email, u.role_id) && (
-                  <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+                </td>
+                <td>
+                  {u.role_id !== 'pending' && u.role_id !== 'banned' && <Badge bg="success">{t('admin.users.status_active')}</Badge>}
+                  {u.role_id === 'pending' && <Badge bg="warning" text="dark">{t('admin.users.status_pending')}</Badge>}
+                  {u.role_id === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
+                </td>
+                <td className="text-end">
+                  {!isChiefAdmin(u.email, u.role_id) && (
+                    <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
+                      {u.role_id === 'pending' && (
+                        <>
+                          {hasPermission(PERMISSIONS.APPROVE_USERS) && (
+                            <Button variant="success" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleApproveUser(u.id)}>
+                              <UserCheck size={14} className="me-1" /> {t('admin.users.approve')}
+                            </Button>
+                          )}
+                          {hasPermission(PERMISSIONS.APPROVE_USERS) && (
+                            <Button variant="danger" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleRejectUser(u.id)}>
+                              <UserX size={14} className="me-1" /> {t('admin.users.reject')}
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {u.role_id !== 'banned' ? (
+                        hasPermission(PERMISSIONS.BAN_USERS) && (
+                          <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleBanUser(u.id)}>
+                            <UserMinus size={14} className="me-1" /> {t('admin.users.ban')}
+                          </Button>
+                        )
+                      ) : (
+                        hasPermission(PERMISSIONS.BAN_USERS) && (
+                          <Button variant="link" size="sm" className="text-success p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleUnbanUser(u.id)}>
+                            {t('admin.users.unban')}
+                          </Button>
+                        )
+                      )}
+                      {hasPermission(PERMISSIONS.DELETE_USERS) && (
+                        <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleDeleteUser(u.id)}>
+                          <Trash2 size={14} className="me-1" /> {t('admin.users.delete')}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  {isChiefAdmin(u.email, u.role_id) && (
+                    <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
       </Card>
     );
   };
 
   const renderRoles = () => (
     <Card className="shadow-sm border-0">
-        <Card.Body className="p-4">
-          <div className="d-flex justify-content-between mb-4">
-            <h5 className="mb-0">{t('admin.roles.title')}</h5>
-            {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
-              <Button variant="primary" size="sm" onClick={() => handleOpenRoleModal()}>{t('admin.roles.create_btn')}</Button>
-            )}
-          </div>
-          <Table hover responsive>
-            <thead>
-              <tr>
-                <th>{t('admin.roles.table_name')}</th>
-                <th>{t('admin.roles.table_perms')}</th>
-                <th className="text-end">{t('admin.roles.table_actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(() => {
-                const ROLE_ORDER = { admin: 1, moderator: 2, player: 3, spectator: 4 };
-                const sortedRoles = [...roles]
-                  .filter(r => r.id !== 'root')
-                  .sort((a, b) => {
-                    const rankA = ROLE_ORDER[a.base_role_id || a.id] || 99;
-                    const rankB = ROLE_ORDER[b.base_role_id || b.id] || 99;
-                    if (rankA !== rankB) return rankA - rankB;
-                    // Within same rank, system role (id matches base) comes first
-                    const isSystemA = a.id === (a.base_role_id || a.id);
-                    const isSystemB = b.id === (b.base_role_id || b.id);
-                    if (isSystemA && !isSystemB) return -1;
-                    if (!isSystemA && isSystemB) return 1;
-                    return a.name.localeCompare(b.name);
-                  });
-                
-                return sortedRoles.map(role => (
+      <Card.Body className="p-4">
+        <div className="d-flex justify-content-between mb-4">
+          <h5 className="mb-0">{t('admin.roles.title')}</h5>
+          {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
+            <Button variant="primary" size="sm" onClick={() => handleOpenRoleModal()}>{t('admin.roles.create_btn')}</Button>
+          )}
+        </div>
+        <Table hover responsive>
+          <thead>
+            <tr>
+              <th>{t('admin.roles.table_name')}</th>
+              <th>{t('admin.roles.table_perms')}</th>
+              <th className="text-end">{t('admin.roles.table_actions')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(() => {
+              const ROLE_ORDER = { admin: 1, moderator: 2, player: 3, spectator: 4 };
+              const sortedRoles = [...roles]
+                .filter(r => r.id !== 'root')
+                .sort((a, b) => {
+                  const rankA = ROLE_ORDER[a.base_role_id || a.id] || 99;
+                  const rankB = ROLE_ORDER[b.base_role_id || b.id] || 99;
+                  if (rankA !== rankB) return rankA - rankB;
+                  // Within same rank, system role (id matches base) comes first
+                  const isSystemA = a.id === (a.base_role_id || a.id);
+                  const isSystemB = b.id === (b.base_role_id || b.id);
+                  if (isSystemA && !isSystemB) return -1;
+                  if (!isSystemA && isSystemB) return 1;
+                  return a.name.localeCompare(b.name);
+                });
+
+              return sortedRoles.map(role => (
                 <tr key={role.id} className="align-middle">
                   <td>
                     <Badge bg={role.color || 'primary'} className={`role-badge me-2 ${['warning', 'light'].includes(role.color) ? 'text-dark' : 'text-white'}`}>
@@ -969,7 +985,7 @@ const AdminPage = () => {
                         const rolePerms = normalizePermissions(role.permissions || []);
                         const groupPerms = rolePerms.filter(p => group.permissions.includes(p));
                         if (groupPerms.length === 0) return null;
-                        
+
                         return (
                           <div key={group.id} className="d-flex align-items-baseline mb-1">
                             <div className="text-muted fw-bold me-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', opacity: 0.8, width: '120px', flexShrink: 0 }}>
@@ -990,24 +1006,24 @@ const AdminPage = () => {
                   <td className="text-end">
                     {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
                       <>
-                          <Button variant="link" size="sm" onClick={() => handleOpenRoleModal(role)}>
-                            {t('admin.roles.edit')}
+                        <Button variant="link" size="sm" onClick={() => handleOpenRoleModal(role)}>
+                          {t('admin.roles.edit')}
+                        </Button>
+                        {!(role.is_system || ['admin', 'moderator', 'player', 'spectator'].includes(role.id)) && (
+                          <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteRole(role.id, role.is_system)}>
+                            {t('admin.roles.delete')}
                           </Button>
-                          {!(role.is_system || ['admin', 'moderator', 'player', 'spectator'].includes(role.id)) && (
-                            <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteRole(role.id, role.is_system)}>
-                              {t('admin.roles.delete')}
-                            </Button>
-                          )}
+                        )}
                       </>
                     )}
                   </td>
                 </tr>
               ));
-              })()}
-            </tbody>
-          </Table>
-        </Card.Body>
-      </Card>
+            })()}
+          </tbody>
+        </Table>
+      </Card.Body>
+    </Card>
   );
 
   const renderCategories = () => (
@@ -1192,63 +1208,64 @@ const AdminPage = () => {
                 {pageItems.map(log => {
                   const performer = users.find(u => u.id === log.performer_id);
                   const performerName = performer ? (performer.nickname || (isRootAdmin ? performer.email : '***')) : 'Unknown User';
-                  
+
                   return (
-                  <tr key={log.id} className="align-middle">
-                    <td className="text-muted small text-nowrap">
-                      {log.created_at ? <Timestamp date={log.created_at.toDate()} /> : '...'}
-                    </td>
-                    <td>
-                      <div className="fw-bold">{performerName}</div>
-                    </td>
-                    <td>
-                      <span className="audit-badge">{t(`admin.audit.actions.${log.action_type}`) || log.action_type}</span>
-                    </td>
-                    <td className="small text-muted" style={{ wordBreak: 'break-word', minWidth: '200px' }}>
-                      {log.details && Object.keys(log.details).length > 0 ? (
-                        <div className="d-flex flex-column align-items-start gap-1">
-                          {Object.entries(log.details)
-                            .map(([k, v]) => {
-                            const transK = t(`admin.audit.fields.${k}`);
-                            const labelK = transK === `admin.audit.fields.${k}` ? k : transK;
-                            
-                            let displayValue = typeof v === 'object' ? JSON.stringify(v) : String(v);
-                            let hideRow = false;
+                    <tr key={log.id} className="align-middle">
+                      <td className="text-muted small text-nowrap">
+                        {log.created_at ? <Timestamp date={log.created_at.toDate()} /> : '...'}
+                      </td>
+                      <td>
+                        <div className="fw-bold">{performerName}</div>
+                      </td>
+                      <td>
+                        <span className="audit-badge">{t(`admin.audit.actions.${log.action_type}`) || log.action_type}</span>
+                      </td>
+                      <td className="small text-muted" style={{ wordBreak: 'break-word', minWidth: '200px' }}>
+                        {log.details && Object.keys(log.details).length > 0 ? (
+                          <div className="d-flex flex-column align-items-start gap-1">
+                            {Object.entries(log.details)
+                              .map(([k, v]) => {
+                                const transK = t(`admin.audit.fields.${k}`);
+                                const labelK = transK === `admin.audit.fields.${k}` ? k : transK;
 
-                            if (typeof v === 'string' && k.toLowerCase().includes('id')) {
-                              const resolved = resolveId(v);
-                              if (resolved !== null) {
-                                displayValue = resolved;
-                              } else {
-                                hideRow = true; // opaque hash
-                              }
-                            }
-                            
-                            if (hideRow) return null;
+                                let displayValue = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                                let hideRow = false;
 
-                            if (k === 'changes' && typeof v === 'object') {
-                              const changedKeys = Object.keys(v).map(ck => t(`admin.audit.fields.${ck}`) || ck);
-                              return (
-                                <div key={k}>
-                                  <strong>{labelK}:</strong> {changedKeys.join(', ')}
-                                </div>
-                              );
-                            }
+                                if (typeof v === 'string' && k.toLowerCase().includes('id')) {
+                                  const resolved = resolveId(v);
+                                  if (resolved !== null) {
+                                    displayValue = resolved;
+                                  } else {
+                                    hideRow = true; // opaque hash
+                                  }
+                                }
 
-                            return (
-                              <div key={k}>
-                                <strong>{labelK}:</strong> {displayValue}
-                              </div>
-                            );
-                          })}
-                          <Button variant="link" size="sm" className="p-0 text-decoration-none text-muted" onClick={() => setSelectedAuditLog(log)}>
-                            {currentLang === 'ru' ? 'Подробнее...' : 'View details...'}
-                          </Button>
-                        </div>
-                      ) : <span className="opacity-50">—</span>}
-                    </td>
-                  </tr>
-                )})}
+                                if (hideRow) return null;
+
+                                if (k === 'changes' && typeof v === 'object') {
+                                  const changedKeys = Object.keys(v).map(ck => t(`admin.audit.fields.${ck}`) || ck);
+                                  return (
+                                    <div key={k}>
+                                      <strong>{labelK}:</strong> {changedKeys.join(', ')}
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div key={k}>
+                                    <strong>{labelK}:</strong> {displayValue}
+                                  </div>
+                                );
+                              })}
+                            <Button variant="link" size="sm" className="p-0 text-decoration-none text-muted" onClick={() => setSelectedAuditLog(log)}>
+                              {currentLang === 'ru' ? 'Подробнее...' : 'View details...'}
+                            </Button>
+                          </div>
+                        ) : <span className="opacity-50">—</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
                 {pageItems.length === 0 && !loadingAudit && (
                   <tr>
                     <td colSpan="4" className="text-center p-4 text-muted">{t('admin.audit.empty')}</td>
@@ -1284,8 +1301,8 @@ const AdminPage = () => {
 
   return (
     <Container className="py-5">
-      <ForumBreadcrumbs 
-        items={[{ label: t('nav.admin'), active: true }]} 
+      <ForumBreadcrumbs
+        items={[{ label: t('nav.admin'), active: true }]}
       />
       <h2 className="mb-4">{t('admin.dashboard')}</h2>
 
@@ -1356,24 +1373,24 @@ const AdminPage = () => {
                 <Form.Group className="mb-4">
                   <Form.Label className="fw-bold">{t('admin.roles.modal_base_role')}</Form.Label>
                   <Dropdown className="w-100">
-                    <Dropdown.Toggle 
-                      variant="outline-management" 
+                    <Dropdown.Toggle
+                      variant="outline-management"
                       className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
                     >
                       {roleForm.base_role_id === 'admin' ? t('admin.roles.system_roles.admin') :
-                       roleForm.base_role_id === 'moderator' ? t('admin.roles.system_roles.moderator') : 
-                       roleForm.base_role_id === 'spectator' ? t('admin.roles.system_roles.spectator') : 
-                       t('admin.roles.system_roles.player')}
+                        roleForm.base_role_id === 'moderator' ? t('admin.roles.system_roles.moderator') :
+                          roleForm.base_role_id === 'spectator' ? t('admin.roles.system_roles.spectator') :
+                            t('admin.roles.system_roles.player')}
                     </Dropdown.Toggle>
                     <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
                       {['player', 'moderator', 'admin', 'spectator'].map(baseId => (
-                        <Dropdown.Item 
+                        <Dropdown.Item
                           key={baseId}
                           active={roleForm.base_role_id === baseId}
                           onClick={() => {
                             const template = DEFAULT_ROLES.find(r => r.id === baseId);
-                            setRoleForm({ 
-                              ...roleForm, 
+                            setRoleForm({
+                              ...roleForm,
                               base_role_id: baseId,
                               permissions: template ? [...template.permissions] : roleForm.permissions
                             });
@@ -1394,34 +1411,35 @@ const AdminPage = () => {
             const currentBaseRole = roleForm.base_role_id || 'player';
             const allowedPerms = MAX_ROLE_PERMISSIONS[currentBaseRole] || Object.values(PERMISSIONS);
             const visiblePerms = group.permissions.filter(p => allowedPerms.includes(p));
-            
+
             if (visiblePerms.length === 0) return null;
 
             return (
-            <div key={group.id} className="mb-4">
-              <div className="small fw-bold text-uppercase text-primary mb-2 opacity-90 letter-spacing-1" style={{ fontSize: '0.7rem' }}>
-                {group.name[currentLang] || group.name.en}
+              <div key={group.id} className="mb-4">
+                <div className="small fw-bold text-uppercase text-primary mb-2 opacity-90 letter-spacing-1" style={{ fontSize: '0.7rem' }}>
+                  {group.name[currentLang] || group.name.en}
+                </div>
+                <div className="modal-section-themed p-3 rounded mb-2">
+                  <Row>
+                    {visiblePerms.map(permId => {
+                      const isChecked = roleForm.permissions.includes(permId);
+                      return (
+                        <Col md={6} key={permId} className="mb-2">
+                          <Form.Check
+                            type="checkbox"
+                            id={`perm-${permId}`}
+                            label={PERMISSION_LABELS[permId]?.[currentLang] || PERMISSION_LABELS[permId]?.en || permId}
+                            checked={isChecked}
+                            onChange={() => togglePermission(permId)}
+                          />
+                        </Col>
+                      );
+                    })}
+                  </Row>
+                </div>
               </div>
-              <div className="modal-section-themed p-3 rounded mb-2">
-                <Row>
-                  {visiblePerms.map(permId => {
-                    const isChecked = roleForm.permissions.includes(permId);
-                    return (
-                      <Col md={6} key={permId} className="mb-2">
-                        <Form.Check
-                          type="checkbox"
-                          id={`perm-${permId}`}
-                          label={PERMISSION_LABELS[permId]?.[currentLang] || PERMISSION_LABELS[permId]?.en || permId}
-                          checked={isChecked}
-                          onChange={() => togglePermission(permId)}
-                        />
-                      </Col>
-                    );
-                  })}
-                </Row>
-              </div>
-            </div>
-          )})}
+            )
+          })}
         </Form>
       </ForumModal>
 
@@ -1522,11 +1540,11 @@ const AdminPage = () => {
           <h6 className="fw-bold mb-1">{t('admin.categories.modal_perms_title')}</h6>
           <p className="text-muted small mb-3">{t('admin.categories.modal_perms_hint')}</p>
           {[
-            { permKey: PERMISSIONS.VIEW_FORUM,   label: t('admin.categories.perm_view') },
+            { permKey: PERMISSIONS.VIEW_FORUM, label: t('admin.categories.perm_view') },
             { permKey: PERMISSIONS.CREATE_TOPIC, label: t('admin.categories.perm_create_topic') },
-            { permKey: PERMISSIONS.POST_REPLY,   label: t('admin.categories.perm_post_reply') },
-            { permKey: PERMISSIONS.USE_MASKS,    label: t('admin.categories.perm_use_masks') },
-            { permKey: PERMISSIONS.USE_DICE,     label: t('admin.categories.perm_use_dice') },
+            { permKey: PERMISSIONS.POST_REPLY, label: t('admin.categories.perm_post_reply') },
+            { permKey: PERMISSIONS.USE_MASKS, label: t('admin.categories.perm_use_masks') },
+            { permKey: PERMISSIONS.USE_DICE, label: t('admin.categories.perm_use_dice') },
           ].map(({ permKey, label }) => {
             const isOverridden = catForm.permissions[permKey] !== undefined && catForm.permissions[permKey] !== null;
             const allowedRoles = isOverridden ? (catForm.permissions[permKey] || []) : [];
@@ -1581,11 +1599,11 @@ const AdminPage = () => {
           <Form>
             <div className="mb-4 d-flex align-items-center modal-section-themed p-3 rounded shadow-sm">
               {editingUser.avatar_url && (
-                <img 
-                  src={editingUser.avatar_url} 
-                  alt="" 
-                  className="rounded-circle me-3 border border-2 border-card" 
-                  style={{ width: '48px', height: '48px', objectFit: 'cover' }} 
+                <img
+                  src={editingUser.avatar_url}
+                  alt=""
+                  className="rounded-circle me-3 border border-2 border-card"
+                  style={{ width: '48px', height: '48px', objectFit: 'cover' }}
                 />
               )}
               <div>
@@ -1600,10 +1618,10 @@ const AdminPage = () => {
               <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">{t('admin.users.change_role_label')}</Form.Label>
               <div className="d-flex flex-column gap-1">
                 {roles.filter(r => r.id !== 'root').map(r => (
-                  <div 
-                    key={r.id} 
+                  <div
+                    key={r.id}
                     className={`p-2 rounded d-flex align-items-center mb-1 cursor-pointer role-radio-container`}
-                    style={{ 
+                    style={{
                       border: '1px solid',
                       borderColor: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
                       background: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
@@ -1669,7 +1687,7 @@ const AdminPage = () => {
               <div>
                 <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? <Timestamp date={selectedAuditLog.created_at.toDate()} /> : '...'}
               </div>
-              
+
               <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
                 <div className="mb-1 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
                   {t('admin.audit.table_performer')}
@@ -1684,7 +1702,7 @@ const AdminPage = () => {
                   ID: {selectedAuditLog.performer_id}
                 </div>
               </div>
-              
+
               <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
                 <div className="mb-2 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
                   Raw Details
@@ -1692,7 +1710,7 @@ const AdminPage = () => {
                 {Object.entries(selectedAuditLog.details || {}).map(([k, v]) => {
                   const transK = t(`admin.audit.fields.${k}`);
                   const label = transK === `admin.audit.fields.${k}` ? k : transK;
-                  
+
                   let resolvedName = null;
                   if (v && typeof v === 'string' && v.length > 20) {
                     const tgt = users.find(u => u.id === v);

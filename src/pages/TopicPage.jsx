@@ -1191,6 +1191,8 @@ const TopicPage = () => {
                             if (myVotes[post.id]) {
                               setSelectedVote(myVotes[post.id]);
                               setShowVoteInfoModal(true);
+                            } else if (settings?.reputationStyle === 'positive_only') {
+                              handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
                             } else {
                               setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
                             }
@@ -1208,18 +1210,20 @@ const TopicPage = () => {
                         {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (
                           <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
                             <div className="d-flex gap-1">
-                              <Button
-                                size="sm"
-                                variant="outline-danger"
-                                className="py-0 px-2 voting-btn"
-                                disabled={votingPostId === post.id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenVoteModal(post, -1, index + indexOfFirstItem + 1);
-                                }}
-                              >
-                                −
-                              </Button>
+                              {settings?.reputationStyle !== 'positive_only' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline-danger"
+                                  className="py-0 px-2 voting-btn"
+                                  disabled={votingPostId === post.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenVoteModal(post, -1, index + indexOfFirstItem + 1);
+                                  }}
+                                >
+                                  −
+                                </Button>
+                              )}
                               <Button
                                 size="sm"
                                 variant="outline-success"
