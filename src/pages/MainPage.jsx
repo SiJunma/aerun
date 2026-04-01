@@ -44,7 +44,7 @@ const MainPage = () => {
   const profileLoading = !!user && profile === null;
 
   return (
-    <Container className="pt-5 pb-4">
+    <div className="pt-5 pb-4">
 
       {loading || profileLoading ? (
         <Card className="shadow-sm border-0">
@@ -157,36 +157,36 @@ const MainPage = () => {
                             >
                               {cat.last_post_topic_title || '—'}
                             </Link>
-                          
-                          {(() => {
-                            const lastVisitRaw = readMap[cat.last_post_topic_id];
-                            const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
-                            const registrationMs = profile?.created_at?.toMillis?.() || 0;
-                            const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-                            const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
-                            const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
-                            
-                            return (
-                              <LastPostInfo
-                                topicId={cat.last_post_topic_id}
-                                lastPostAt={cat.last_post_at}
-                                authorId={cat.last_post_author_id}
-                                authorCharacterId={cat.last_post_author_character_id}
-                                isCharacter={!!cat.last_post_is_character}
-                                authorName={cat.last_post_author}
-                                authorAvatar={cat.last_post_author_avatar}
-                                hasUnread={hasUnread}
-                                lang={lang}
-                              />
-                            );
-                          })()}
-                        </div>
-                      ) : (
-                        <span className="text-muted small">{t('forum.no_posts')}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+
+                            {(() => {
+                              const lastVisitRaw = readMap[cat.last_post_topic_id];
+                              const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
+                              const registrationMs = profile?.created_at?.toMillis?.() || 0;
+                              const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
+                              const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
+                              const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
+
+                              return (
+                                <LastPostInfo
+                                  topicId={cat.last_post_topic_id}
+                                  lastPostAt={cat.last_post_at}
+                                  authorId={cat.last_post_author_id}
+                                  authorCharacterId={cat.last_post_author_character_id}
+                                  isCharacter={!!cat.last_post_is_character}
+                                  authorName={cat.last_post_author}
+                                  authorAvatar={cat.last_post_author_avatar}
+                                  hasUnread={hasUnread}
+                                  lang={lang}
+                                />
+                              );
+                            })()}
+                          </div>
+                        ) : (
+                          <span className="text-muted small">{t('forum.no_posts')}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </Table>
           </Card>
@@ -194,7 +194,7 @@ const MainPage = () => {
       })()}
 
       <ForumStats />
-    </Container>
+    </div>
   );
 };
 

@@ -82,26 +82,39 @@ const TopicPage = () => {
   const [isPageLoading, setIsPageLoading] = useState(true);
 
   const replyRef = useRef(null);
- // prevent double-scroll
   const goLast = searchParams.get('goLast') === '1';
-  const LAST_VISIT_KEY = `lastVisit_${id}`; // kept for legacy scroll-to-unread fallback logic (now uses readMap)
   const ITEMS_PER_PAGE = 20;
-  const currentPage = parseInt(searchParams.get('page') || '1', 10);
   const MAX_CHARS = 15000;
 
+  // Determine current page based on ?post=ID OR ?page=N
+  const queryPostPage = React.useMemo(() => {
+    const postId = searchParams.get('post');
+    if (!postId || posts.length === 0) return null;
+    const index = posts.findIndex(p => p.id === postId);
+    if (index === -1) return null;
+    return Math.floor(index / ITEMS_PER_PAGE) + 1;
+  }, [searchParams, posts]);
+
+  const currentPage = queryPostPage || parseInt(searchParams.get('page') || '1', 10);
   const totalPagesLocal = Math.ceil(posts.length / ITEMS_PER_PAGE);
   const isOnLastPageLocal = totalPagesLocal === 0 || currentPage >= totalPagesLocal;
 
-
   useEffect(() => {
-    const unsubPosts = subscribeToPosts(id, setPosts);
-    const unsubTopic = subscribeToTopic(id, setTopic);
+    setIsPageLoading(true);
+    const unsubPosts = subscribeToPosts(id, (data) => {
+      setPosts(data);
+      setIsPageLoading(false);
+    });
+    const unsubTopic = subscribeToTopic(id, (data) => {
+      setTopic(data);
+      if (data) setIsPageLoading(false);
+    });
 
     return () => {
       unsubPosts();
       unsubTopic();
     };
-  }, [id]);
+  }, [id, setIsPageLoading]);
 
   // Only mark the topic as read if the user is currently on the last page.
   useEffect(() => {
@@ -151,33 +164,6 @@ const TopicPage = () => {
     });
     return () => unsubCat();
   }, [topic?.category_id]);
-
-  // ── Jump to Specific Post ───────────────────────────────────────────────
-  useEffect(() => {
-    const postId = searchParams.get('post');
-    if (postId && posts.length > 0) {
-      const index = posts.findIndex(p => p.id === postId);
-      if (index !== -1) {
-        const targetPage = Math.floor(index / ITEMS_PER_PAGE) + 1;
-        if (targetPage !== currentPage) {
-          setSearchParams(curr => {
-            curr.set('page', targetPage);
-            return curr;
-          });
-        } else {
-          // Already on correct page, scroll to it
-          setTimeout(() => {
-            const el = document.getElementById(`post-${postId}`);
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              el.classList.add('highlight-new-post');
-              setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
-            }
-          }, 500);
-        }
-      }
-    }
-  }, [posts, searchParams, currentPage, ITEMS_PER_PAGE, setSearchParams]);
 
   // Draft Auto-save
   const DRAFT_KEY = `reply_draft_${id}`;
@@ -230,36 +216,58 @@ const TopicPage = () => {
 
 
 
-  // Scroll to last post if ?goLast=1, or specific post if #post-ID
+  // ── Unified Navigation & Scroll Controller ────────────────────────────────
   const lastTargetRef = useRef('');
+  const { key: locationKey } = useLocation();
 
   useEffect(() => {
+    // 1. Topics not yet loaded
     if (posts.length === 0) {
-      if (!isPageLoading) setIsPageLoading(true);
       return;
     }
 
     let targetId = null;
     let targetPage = currentPage;
-    const currentHash = hash;
-
-    if (currentHash && currentHash.startsWith('#post-')) {
-      const postId = currentHash.replace('#post-', '');
+    let scrollBlock = 'start';
+    
+    // Priority 1: ?post=ID (Clicking from a quote)
+    const queryPostId = searchParams.get('post');
+    if (queryPostId) {
+      const postIndex = posts.findIndex(p => p.id === queryPostId);
+      if (postIndex !== -1) {
+        targetPage = Math.floor(postIndex / ITEMS_PER_PAGE) + 1;
+        // If our calculated currentPage doesn't match the required targetPage, 
+        // we need to set the page query param to trigger the render.
+        // But with our smart currentPage (queryPostPage), they should already match!
+        if (currentPage !== targetPage) {
+          setSearchParams(prev => {
+            prev.set('page', targetPage);
+            return prev;
+          }, { preventScrollReset: true });
+          return;
+        }
+        targetId = `post-${queryPostId}`;
+        scrollBlock = 'center';
+      }
+    } 
+    // Priority 2: #post-ID (Legacy anchors)
+    else if (hash && hash.startsWith('#post-')) {
+      const postId = hash.replace('#post-', '');
       const postIndex = posts.findIndex(p => p.id === postId);
       if (postIndex !== -1) {
         targetPage = Math.ceil((postIndex + 1) / ITEMS_PER_PAGE);
         if (currentPage !== targetPage) {
-          // Navigating while preserving hash
-          setIsPageLoading(true);
           navigate({
             search: `?page=${targetPage}${goLast ? '&goLast=0' : ''}`,
-            hash: currentHash
-          });
+            hash: hash
+          }, { preventScrollReset: true });
           return;
         }
-        targetId = currentHash.substring(1); // remove #
+        targetId = hash.substring(1);
       }
-    } else if (goLast) {
+    } 
+    // Priority 3: goLast (New unread or bottom)
+    else if (goLast) {
       let finalTargetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
       let finalTargetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
 
@@ -279,38 +287,31 @@ const TopicPage = () => {
       }
 
       if (currentPage !== finalTargetPage) {
-        setIsPageLoading(true);
-        setSearchParams({ page: finalTargetPage, goLast: '1' });
+        setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
         return;
       }
-      targetPage = finalTargetPage;
       targetId = finalTargetId;
-    } else {
-      setIsPageLoading(false);
     }
 
-    setIsPageLoading(false);
-
-    // Only scroll if it's a new mount or a new target
-    const fullTargetKey = `${id}_${targetPage}_${targetId}`;
+    // 2. Perform the actual scroll
+    // Including locationKey ensures repeated clicks on the same link work.
+    const fullTargetKey = `${id}_${targetPage}_${targetId}_${queryPostId || ''}_${locationKey}`;
     if (targetId && lastTargetRef.current !== fullTargetKey) {
       lastTargetRef.current = fullTargetKey;
-      let attempts = 0;
+      
       const tryScroll = () => {
         const el = document.getElementById(targetId);
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          el.scrollIntoView({ behavior: 'smooth', block: scrollBlock });
           el.classList.add('highlight-new-post');
-          setTimeout(() => el.classList.remove('highlight-new-post'), 1000);
-        } else if (attempts < 15) {
-          attempts++;
-          setTimeout(tryScroll, 200);
+          setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
         }
       };
-      setTimeout(tryScroll, 300);
+      
+      // Delay it slightly to ensure the DOM has caught up with the render
+      setTimeout(tryScroll, 100);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length, goLast, currentPage, hash, id, readMap, profile]);
+  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey]);
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
@@ -1307,10 +1308,37 @@ const TopicPage = () => {
                                 });
                               }
 
-                              const label = lang === 'ru' ? `[b]${author}[/b] написал(а):` : `[b]${author}[/b] wrote:`;
-                              const quote = `[quote]${label}\n${content}[/quote]\n`;
+                              const stripQuotes = (text) => {
+                                let result = '';
+                                let depth = 0;
+                                const regex = /\[(\/?)(quote)(?:[\s=][^\]]*)?\]/gi;
+                                let match;
+                                let lastIndex = 0;
+                                
+                                while ((match = regex.exec(text)) !== null) {
+                                    if (depth === 0) {
+                                        result += text.substring(lastIndex, match.index);
+                                    }
+                                    if (match[1] === '/') {
+                                        depth = Math.max(0, depth - 1);
+                                    } else {
+                                        depth++;
+                                    }
+                                    lastIndex = regex.lastIndex;
+                                }
+                                if (depth === 0) {
+                                    result += text.substring(lastIndex);
+                                }
+                                return result.trim();
+                              };
 
-                              setReplyContent(prev => prev + quote);
+                              const cleanContent = stripQuotes(content);
+                              const quote = `[quote="#p${post.id},${author}"]\n${cleanContent}\n[/quote]\n\n`;
+
+                              setReplyContent(prev => {
+                                const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
+                                return prev + separator + quote;
+                              });
                               window.getSelection().removeAllRanges();
                               replyRef.current?.scrollIntoView({ behavior: 'smooth' });
                             }}

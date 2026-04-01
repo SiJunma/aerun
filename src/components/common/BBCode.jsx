@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Dices, EyeOff } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, ChevronRight, Dices, EyeOff, Reply } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
+import { useI18n } from '../../contexts/I18nProvider';
 
 /**
  * BBCode Component
@@ -11,11 +13,11 @@ import { useAuth } from '../../contexts/AuthProvider';
 
 const BBCodeSpoiler = ({ title, children }) => {
   const [isOpen, setIsOpen] = useState(false);
-  
+
   return (
     <div className={`bbcode-spoiler my-2 ${isOpen ? 'is-open' : ''}`}>
-      <div 
-        className="bbcode-spoiler-header d-flex align-items-center justify-content-between gap-2" 
+      <div
+        className="bbcode-spoiler-header d-flex align-items-center justify-content-between gap-2"
         onClick={() => setIsOpen(!isOpen)}
         style={{ cursor: 'pointer' }}
       >
@@ -60,14 +62,14 @@ const ColumnsStacker = ({ children, stackAt }) => {
   }, [stackAt]);
 
   return (
-    <div 
-      ref={containerRef} 
+    <div
+      ref={containerRef}
       className={`bbcode-columns ${isStacked ? 'stacked-forced' : ''}`}
-      style={{ 
-        display: 'flex', 
-        flexDirection: isStacked ? 'column' : 'row', 
+      style={{
+        display: 'flex',
+        flexDirection: isStacked ? 'column' : 'row',
         gap: '1rem',
-        width: '100%' 
+        width: '100%'
       }}
     >
       {children}
@@ -76,7 +78,8 @@ const ColumnsStacker = ({ children, stackAt }) => {
 };
 
 const BBCode = ({ children, rolls = {} }) => {
-  const { hasPermission, PERMISSIONS, lang, settings } = useAuth() || {};
+  const { hasPermission, PERMISSIONS, settings } = useAuth() || {};
+  const { t, lang } = useI18n();
   if (typeof children !== 'string') return children;
 
   // 1. Tokenize the text into text chunks and tags
@@ -166,16 +169,16 @@ const BBCode = ({ children, rolls = {} }) => {
         if (i > 0 && typeof result[i - 1] === 'string') {
           const prev = result[i - 1];
           if (!prev.trim() || prev.endsWith('\n')) {
-             // If it's pure whitespace or ends with newline, trip the last newline
-             if (prev.endsWith('\n')) {
-               result[i - 1] = prev.substring(0, prev.length - 1);
-             } else if (prev.endsWith('\r\n')) {
-               result[i - 1] = prev.substring(0, prev.length - 2);
-             }
+            // If it's pure whitespace or ends with newline, trip the last newline
+            if (prev.endsWith('\n')) {
+              result[i - 1] = prev.substring(0, prev.length - 1);
+            } else if (prev.endsWith('\r\n')) {
+              result[i - 1] = prev.substring(0, prev.length - 2);
+            }
           }
         }
         if (i < result.length - 1 && typeof result[i + 1] === 'string') {
-          const next = result[i+1];
+          const next = result[i + 1];
           if (!next.trim() || next.startsWith('\n')) {
             if (next.startsWith('\n')) {
               result[i + 1] = next.substring(1);
@@ -187,6 +190,17 @@ const BBCode = ({ children, rolls = {} }) => {
       }
       // Recursively preprocess children of tags
       if (typeof node !== 'string' && node.children) {
+        if (blockTags.includes(node.name)) {
+          // Remove all leading whitespace from first child
+          if (node.children.length > 0 && typeof node.children[0] === 'string') {
+            node.children[0] = node.children[0].replace(/^\s+/, '');
+          }
+          // Remove all trailing whitespace from last child
+          if (node.children.length > 0 && typeof node.children[node.children.length - 1] === 'string') {
+            const lastIdx = node.children.length - 1;
+            node.children[lastIdx] = node.children[lastIdx].replace(/\s+$/, '');
+          }
+        }
         node.children = preprocessNodes(node.children);
       }
     }
@@ -208,13 +222,13 @@ const BBCode = ({ children, rolls = {} }) => {
 
       // Extract YouTube URLs from plain text for auto-embedding
       const ytRegex = /(https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|youtu\.be\/)[a-zA-Z0-9_-]{11}(?:[?&#][\w=.-]*)*)/g;
-      
+
       if (!ytRegex.test(node)) return node;
 
       const parts = node.split(ytRegex);
       return parts.map((part, i) => {
         if (!part) return null;
-        
+
         const match = part.match(/^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
         if (match) {
           const videoId = match[1];
@@ -248,7 +262,7 @@ const BBCode = ({ children, rolls = {} }) => {
         }
         params.default = val;
       } else {
-        const parts = rawParams.split(/\s+(?=[a-zA-Z]+\s*=)/); 
+        const parts = rawParams.split(/\s+(?=[a-zA-Z]+\s*=)/);
         parts.forEach(p => {
           const trimmed = p.trim();
           if (trimmed.includes('=')) {
@@ -275,10 +289,43 @@ const BBCode = ({ children, rolls = {} }) => {
       case 'u': return <u key={index}>{content}</u>;
       case 's': return <del key={index}>{content}</del>;
       case 'quote': {
-        const author = params.default || params.author;
+        let rawAuthor = params.default || params.author || '';
+        let authorName = rawAuthor;
+        let postId = null;
+
+        if (rawAuthor.startsWith('#p')) {
+          const parts = rawAuthor.split(',');
+          if (parts.length >= 2) {
+            postId = parts[0].substring(2);
+            authorName = parts.slice(1).join(',');
+          } else {
+            postId = rawAuthor.substring(2);
+            authorName = '';
+          }
+        }
+
         return (
           <blockquote key={index} className="bbcode-quote">
-            {author && <div className="fw-bold small mb-1">{author}:</div>}
+            {(authorName || postId) && (
+              <div className="bbcode-quote-header fw-bold small mb-1 pb-2 border-bottom d-flex align-items-center" style={{ color: 'var(--primary-color)', lineHeight: '1.2' }}>
+                {postId ? (
+                    <Link
+                    to={`?post=${postId}`}
+                    preventScrollReset={true}
+                    className="text-decoration-none d-flex align-items-center gap-1"
+                    style={{ color: 'inherit' }}
+                    title={lang === 'ru' ? 'Перейти к сообщению' : 'Go to message'}
+                  >
+                    {authorName ? `${authorName} ${t('forum.wrote')}:` : `${t('forum.quote')}:`}
+                    <Reply size={14} className="opacity-50" />
+                  </Link>
+                ) : (
+                  <span>
+                    {authorName ? `${authorName} ${t('forum.wrote')}:` : `${t('forum.quote')}:`}
+                  </span>
+                )}
+              </div>
+            )}
             {content}
           </blockquote>
         );
@@ -301,9 +348,9 @@ const BBCode = ({ children, rolls = {} }) => {
       case 'img': {
         const imgUrl = getTextContent(node).trim();
         const isGif = imgUrl.toLowerCase().split('?')[0].endsWith('.gif');
-        
+
         if (isGif && settings?.allowGifInPosts === false) {
-           return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{lang === 'ru' ? 'GIF-изображение' : 'GIF Image'}: {imgUrl}]</a>;
+          return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{lang === 'ru' ? 'GIF-изображение' : 'GIF Image'}: {imgUrl}]</a>;
         }
 
         return <img
@@ -344,12 +391,12 @@ const BBCode = ({ children, rolls = {} }) => {
       case 'dice': {
         const sides = params.default || '20';
         return (
-          <div 
-            key={index} 
-            className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" 
-            style={{ 
-              backgroundColor: 'var(--input-bg)', 
-              border: '1px solid var(--input-border)' 
+          <div
+            key={index}
+            className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm"
+            style={{
+              backgroundColor: 'var(--input-bg)',
+              border: '1px solid var(--input-border)'
             }}
           >
             <div className="d-flex align-items-center gap-2">
@@ -388,11 +435,11 @@ const BBCode = ({ children, rolls = {} }) => {
         }
 
         return (
-          <div 
-            key={index} 
-            className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm" 
-            style={{ 
-              backgroundColor: 'var(--input-bg)', 
+          <div
+            key={index}
+            className="bbcode-dice my-2 d-inline-block p-2 rounded shadow-sm"
+            style={{
+              backgroundColor: 'var(--input-bg)',
               border: '1px solid var(--input-border)'
             }}
           >
@@ -421,7 +468,7 @@ const BBCode = ({ children, rolls = {} }) => {
         let videoId = null;
         const ytMatch = urlRaw.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
         if (ytMatch) videoId = ytMatch[1];
-        
+
         if (videoId) {
           return (
             <div key={index} className="ratio ratio-16x9 my-2 rounded overflow-hidden shadow-sm d-block mx-auto bbcode-media-wrapper" style={{ maxWidth: '600px', width: '100%' }}>
@@ -438,7 +485,7 @@ const BBCode = ({ children, rolls = {} }) => {
           return (
             <div key={index} className="my-2 rounded overflow-hidden shadow-sm d-block mx-auto bbcode-media-wrapper" style={{ maxWidth: '600px', width: '100%' }}>
               <video controls className="w-100 h-100">
-                 <source src={urlRaw} />
+                <source src={urlRaw} />
               </video>
             </div>
           );

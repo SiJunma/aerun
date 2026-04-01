@@ -136,6 +136,8 @@ export const translations = {
       topic_locked_desc: "This topic has been locked by a moderator. New replies are not allowed.",
       mark_all_read: "Mark all as read",
       private_topic: "Private Topic",
+      wrote: "wrote",
+      quote: "Quote",
     },
     profile: {
       info: "Account Info",
@@ -653,6 +655,8 @@ export const translations = {
       topic_locked_desc: "Эта тема была закрыта модератором. Публикация новых сообщений невозможна.",
       mark_all_read: "Отметить все как прочитанные",
       private_topic: "Приватная тема",
+      wrote: "написал(а)",
+      quote: "Цитата",
     },
     profile: {
       info: "Данные аккаунта",

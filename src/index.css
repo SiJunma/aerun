@@ -141,6 +141,13 @@ body {
   flex: 1 0 auto;
 }
 
+/* Global maximum width for the forum */
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1080px !important;
+  }
+}
+
 .footer-custom {
   flex-shrink: 0;
   background-color: var(--footer-bg) !important;
@@ -788,9 +795,9 @@ label.fw-bold {
 }
 
 .post-content blockquote {
-  border: 1px dashed var(--border-color) !important;
-  padding: 1rem 1.25rem;
-  margin: 1.25rem 0;
+  border: 1px dashed var(--border-color);
+  padding: 0.8rem 1rem;
+  margin: 0.75rem 0;
   background: #f1f3f5;
   /* Solid contrast for light theme */
   border-radius: 4px;
@@ -809,7 +816,11 @@ label.fw-bold {
 }
 
 .post-content blockquote p {
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.post-content blockquote p:last-child {
+  margin-bottom: 0;
 }
 
 .post-content u {
@@ -819,7 +830,7 @@ label.fw-bold {
 
 .bbcode-quote {
   border-left: 4px solid var(--primary-color);
-  padding: 0.75rem 1rem;
+  padding: 0.2rem 0.75rem;
   margin-top: 1rem;
   margin-bottom: 0;
   background: #f1f3f5;
@@ -1520,27 +1531,30 @@ a.badge.bg-danger:hover {
 
 /* Base Character Badge Override */
 .role-badge.badge-character {
-  --badge-bg: #7c3aed !important; /* Violet 600 */
+  --badge-bg: #7c3aed !important;
+  /* Violet 600 */
   --badge-bg-rgb: 124, 58, 237 !important;
-  
+
   /* Force ghost style properties to win over generic rules */
   background-color: rgba(var(--badge-bg-rgb), 0.08) !important;
   color: var(--badge-bg) !important;
   border: 1px solid rgba(var(--badge-bg-rgb), 0.4) !important;
-  
+
   font-weight: 600 !important;
   text-transform: none !important;
   letter-spacing: normal !important;
 }
 
 [data-theme='dark'] .role-badge.badge-character {
-  --badge-bg: #a78bfa !important; /* Violet 400 */
+  --badge-bg: #a78bfa !important;
+  /* Violet 400 */
   --badge-bg-rgb: 167, 139, 250 !important;
   border-color: rgba(167, 139, 250, 0.4) !important;
 }
 
 [data-theme='neutral'] .role-badge.badge-character {
-  --badge-bg: #b45309 !important; /* Amber 700 */
+  --badge-bg: #b45309 !important;
+  /* Amber 700 */
   --badge-bg-rgb: 180, 83, 9 !important;
   border-color: rgba(180, 83, 9, 0.4) !important;
 }
@@ -1998,7 +2012,7 @@ a.badge.bg-danger:hover {
 
 .card-header .custom-select-toggle.text-light:hover,
 .card-header .custom-select-toggle.text-light:focus,
-.btn-show > .card-header .custom-select-toggle.text-light {
+.btn-show>.card-header .custom-select-toggle.text-light {
   background-color: rgba(255, 255, 255, 0.1) !important;
   border-color: rgba(255, 255, 255, 0.45) !important;
   color: #ffffff !important;
@@ -2680,7 +2694,7 @@ a.badge.bg-danger:hover {
   .bbcode-media-wrapper {
     min-width: 100% !important;
   }
-  
+
   .dm-chat-bubble {
     max-width: 95% !important;
     width: 100% !important;
@@ -2714,5 +2728,3 @@ a.badge.bg-danger:hover {
 .min-w-0 {
   min-width: 0 !important;
 }
-
-
