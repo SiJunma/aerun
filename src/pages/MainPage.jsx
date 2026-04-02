@@ -154,6 +154,7 @@ const MainPage = () => {
                             <Link
                               to={`/topic/${cat.last_post_topic_id}`}
                               className="d-block fw-semibold text-decoration-none text-truncate mb-1 last-topic-link"
+                              title={t('stats.to_first_post')}
                             >
                               {cat.last_post_topic_title || '—'}
                             </Link>

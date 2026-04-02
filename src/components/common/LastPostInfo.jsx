@@ -19,7 +19,8 @@ const LastPostInfo = ({
   return (
     <Link
       to={`/topic/${topicId}?goLast=1`}
-      className={`text-decoration-none d-flex align-items-center gap-1 text-muted ${className}`}
+      className={`text-decoration-none d-flex align-items-center gap-1 text-muted last-post-link-meta ${className}`}
+      title={lang === 'ru' ? 'К первому непрочитанному сообщению' : 'To first unread message'}
     >
       {hasUnread && (
         <span

@@ -1875,6 +1875,30 @@ a.badge.bg-danger:hover {
   row-gap: 0.25rem;
 }
 
+/* Last Post Meta Link Hover Effect (Main Page and Category Views) */
+.last-post-link-meta {
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  padding: 4px 6px !important;
+  margin: -4px -6px !important; /* Counteract padding to avoid layout jump */
+  cursor: pointer;
+  width: fit-content;
+}
+
+.last-post-link-meta:hover {
+  background-color: rgba(var(--primary-rgb), 0.08) !important;
+  color: var(--primary-color) !important;
+  text-decoration: none !important;
+}
+
+[data-theme='dark'] .last-post-link-meta:hover {
+  background-color: rgba(var(--primary-rgb), 0.15) !important;
+}
+
+.last-post-link-meta:hover * {
+  color: inherit !important;
+}
+
 /* Topic Page Base visibility (removes transparency) */
 .topic-description,
 .topic-meta-bar,

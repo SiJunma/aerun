@@ -6,6 +6,7 @@ import ForumAuthorName from './ForumAuthorName';
 import LastPostInfo from './LastPostInfo';
 import AuthorMeta from './AuthorMeta';
 import { useAuth } from '../../contexts/AuthProvider';
+import { useI18n } from '../../contexts/I18nProvider';
 
 const TopicRow = ({ 
   topic, 
@@ -18,6 +19,7 @@ const TopicRow = ({
   categoryName = '',
   showCategoryInColumn = false
 }) => {
+  const { t } = useI18n();
   const { readMap, profile } = useAuth();
   const lastVisitRaw = readMap[topic.id];
   // Handle both Firestore Timestamp (from server) and plain number (optimistic local update)
@@ -88,6 +90,7 @@ const TopicRow = ({
               <Link
                 to={`/topic/${topic.id}`}
                 className="fw-bold d-block text-decoration-none h6 mb-0 topic-title-link"
+                title={t('stats.to_first_post')}
               >
                 {topic.title}
               </Link>
