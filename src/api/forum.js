@@ -826,6 +826,21 @@ export const subscribeToActiveUsers = (callback) => {
   }, (err) => console.error('[subscribeToActiveUsers]', err));
 };
 
+export const subscribeToDailyActiveUsers = (callback) => {
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const q = query(
+    collection(db, 'users'),
+    where('last_seen', '>=', new Date(Date.now() - ONE_DAY_MS))
+  );
+  return onSnapshot(q, (snapshot) => {
+    const users = snapshot.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(u => u.role_id !== 'banned' && u.role_id !== 'pending');
+    users.sort((a, b) => a.nickname.localeCompare(b.nickname));
+    callback(users);
+  }, (err) => console.error('[subscribeToDailyActiveUsers]', err));
+};
+
 export const subscribeToAllUsers = (callback) => {
   const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
   return onSnapshot(q, (snapshot) => {

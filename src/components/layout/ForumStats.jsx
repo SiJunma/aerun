@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
-import { subscribeToCategories, subscribeToActiveUsers, subscribeToActiveGuests, subscribeToAllUsers } from '../../api/forum';
+import { subscribeToCategories, subscribeToActiveUsers, subscribeToActiveGuests, subscribeToAllUsers, subscribeToDailyActiveUsers } from '../../api/forum';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
@@ -11,6 +11,7 @@ const ForumStats = () => {
   const [categories, setCategories] = useState([]);
   const [activeUsers, setActiveUsers] = useState([]);
   const [activeGuestsCount, setActiveGuestsCount] = useState(0);
+  const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
   const [allUsers, setAllUsers] = useState([]); // Keep for total count and newest member for now
   
   useEffect(() => {
@@ -18,12 +19,14 @@ const ForumStats = () => {
     const unsubActiveUsers = subscribeToActiveUsers(setActiveUsers);
     const unsubGuests = subscribeToActiveGuests(setActiveGuestsCount);
     const unsubAllUsers = subscribeToAllUsers(setAllUsers);
+    const unsubDailyUsers = subscribeToDailyActiveUsers(setDailyActiveUsers);
     
     return () => {
       unsubCats();
       unsubActiveUsers();
       unsubGuests();
       unsubAllUsers();
+      unsubDailyUsers();
     };
   }, []);
 
@@ -100,35 +103,53 @@ const ForumStats = () => {
 
         {/* Online Users Section */}
         <div className="online-users-panel p-2 px-3">
-          <div className="d-flex align-items-center gap-2 mb-1">
-            <div className="online-indicator-blob shadow-none" style={{ width: 6, height: 6 }}></div>
-            <span className="text-muted small fw-semibold">
-              {t('stats.online_now')}: {onlineUsers.length}
-              {activeGuestsCount > 0 && (
-                <span className="ms-1 opacity-75">
-                  {t('stats.guests_count', { count: activeGuestsCount })}
-                </span>
-              )}
+          <div className="d-flex flex-wrap align-items-center online-list" style={{ gap: '0 4px' }}>
+            <span className="text-muted small fw-semibold flex-shrink-0 d-flex align-items-center gap-2 me-1">
+              <div className="online-indicator-blob shadow-none" style={{ width: 6, height: 6 }}></div>
+              {t('stats.online_now')} ({t('stats.guests')}: {activeGuestsCount}, {t('stats.users')}: {onlineUsers.length}):
             </span>
-          </div>
-          <div className="online-list">
             {onlineUsers.length === 0 ? (
-               <span className="text-muted small italic opacity-75">{t('stats.silence')}</span>
+              <span className="text-muted small italic opacity-75">{t('stats.silence')}</span>
             ) : (
-              <div className="d-flex flex-wrap gap-2">
-                {onlineUsers.map((u) => (
-                  <Link 
-                    key={u.id}
-                    to={`/profile/${u.id}`} 
-                    className={`online-user-link small text-decoration-none fw-bold ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+              onlineUsers.map((u, i) => (
+                <span key={u.id} className="small">
+                  <Link
+                    to={`/profile/${u.id}`}
+                    className={`online-user-link text-decoration-none ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
                   >
                     {u.nickname}
                   </Link>
-                ))}
-              </div>
+                  {i < onlineUsers.length - 1 && <span className="text-muted">,</span>}
+                </span>
+              ))
             )}
           </div>
         </div>
+
+        {/* Daily Active Users Section */}
+        <div className="online-users-panel p-2 px-3" style={{ borderTop: '1px solid rgba(128,128,128,0.15)' }}>
+          <div className="d-flex flex-wrap align-items-center online-list" style={{ gap: '0 4px' }}>
+            <span className="text-muted small fw-semibold flex-shrink-0 me-1">
+              {t('stats.visited_today')} ({dailyActiveUsers.length}):
+            </span>
+            {dailyActiveUsers.length === 0 ? (
+              <span className="text-muted small italic opacity-75">{t('stats.silence')}</span>
+            ) : (
+              dailyActiveUsers.map((u, i) => (
+                <span key={u.id} className="small">
+                  <Link
+                    to={`/profile/${u.id}`}
+                    className={`online-user-link text-decoration-none ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                  >
+                    {u.nickname}
+                  </Link>
+                  {i < dailyActiveUsers.length - 1 && <span className="text-muted">,</span>}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+
 
         {/* Footer Links */}
         <div className="stats-footer p-1 px-3 border-top d-flex justify-content-between align-items-center flex-wrap gap-2">

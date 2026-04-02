@@ -1840,8 +1840,6 @@ a.badge.bg-danger:hover {
 .online-user-link {
   transition: all 0.15s ease;
   position: relative;
-  opacity: 0.7;
-  /* Dimmed by default for better integration */
 }
 
 .online-user-link:hover {
