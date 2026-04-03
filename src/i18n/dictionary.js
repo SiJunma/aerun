@@ -138,6 +138,8 @@ export const translations = {
       private_topic: "Private Topic",
       wrote: "wrote",
       quote: "Quote",
+      jumping_to_post: "Jumping to message...",
+      please_wait: "Hang on a second",
     },
     profile: {
       info: "Account Info",
@@ -666,6 +668,8 @@ export const translations = {
       private_topic: "Приватная тема",
       wrote: "написал(а)",
       quote: "Цитата",
+      jumping_to_post: "Переходим к сообщению...",
+      please_wait: "Одну секунду",
     },
     profile: {
       info: "Данные аккаунта",

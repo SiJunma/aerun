@@ -3,7 +3,12 @@ import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'reac
 import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Pagination, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, subscribeToCategories, subscribeToUser, updateUser, updateTopic, deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, subscribeToTopicDraft, deleteDraftPost } from '../api/forum';
+import { 
+  subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, 
+  subscribeToCategories, subscribeToUser, updateUser, updateTopic, 
+  deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, 
+  subscribeToTopicDraft, deleteDraftPost, locatePost 
+} from '../api/forum';
 import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -83,6 +88,7 @@ const TopicPage = () => {
 
   const replyRef = useRef(null);
   const goLast = searchParams.get('goLast') === '1';
+  const isJumpRequested = !!(searchParams.get('post') || goLast || hash.startsWith('#post-'));
   const ITEMS_PER_PAGE = 20;
   const MAX_CHARS = 15000;
 
@@ -96,32 +102,41 @@ const TopicPage = () => {
   }, [searchParams, posts]);
 
   const currentPage = queryPostPage || parseInt(searchParams.get('page') || '1', 10);
-  const totalPagesLocal = Math.ceil(posts.length / ITEMS_PER_PAGE);
-  const isOnLastPageLocal = totalPagesLocal === 0 || currentPage >= totalPagesLocal;
 
   useEffect(() => {
     setIsPageLoading(true);
     const unsubPosts = subscribeToPosts(id, (data) => {
       setPosts(data);
-      setIsPageLoading(false);
+      // Don't stop loading here if we expect a jump - the scroll controller will handle it
+      if (!isJumpRequested || alreadyJumpedRef.current) {
+        setIsPageLoading(false);
+      }
     });
     const unsubTopic = subscribeToTopic(id, (data) => {
       setTopic(data);
-      if (data) setIsPageLoading(false);
+      // Same here
+      if (data && (!isJumpRequested || alreadyJumpedRef.current)) {
+        setIsPageLoading(false);
+      }
     });
 
     return () => {
       unsubPosts();
       unsubTopic();
     };
-  }, [id, setIsPageLoading]);
+  }, [id, setIsPageLoading, searchParams, hash, isJumpRequested]);
 
-  // Only mark the topic as read if the user is currently on the last page.
+  // Mark the topic as read with granular offset
   useEffect(() => {
-    if (user && id && posts.length > 0 && isOnLastPageLocal) {
-      markTopicRead(id);
+    // If we are jumping via goLast, wait until the jump is performed (ref=true) before marking as read.
+    const canMarkRead = (!goLast && !searchParams.get('post')) || alreadyJumpedRef.current;
+    
+    if (user && id && posts.length > 0 && canMarkRead && profile?.role_id !== 'spectator') {
+      // Calculate the global index of the last message currently visible on this page
+      const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + posts.length - 1;
+      markTopicRead(id, lastMessageIndex);
     }
-  }, [posts.length, id, user, markTopicRead, isOnLastPageLocal]);
+  }, [posts.length, id, user, markTopicRead, currentPage, goLast, searchParams, profile?.role_id]);
 
   // Subscribe to draft
   useEffect(() => {
@@ -218,7 +233,21 @@ const TopicPage = () => {
 
   // ── Unified Navigation & Scroll Controller ────────────────────────────────
   const lastTargetRef = useRef('');
+  const initialVisitRef = useRef({}); // { topicId: timestamp } - capture when user arrives
+  const alreadyJumpedRef = useRef(false);
   const { key: locationKey } = useLocation();
+
+  // Reset jump flag when navigating to a DIFFERENT topic or clicking a new link
+  useEffect(() => {
+    alreadyJumpedRef.current = false;
+  }, [id, locationKey]);
+
+  // Capture initial visit state once per topic change
+  useEffect(() => {
+    if (user && id && readMap[id] !== undefined && initialVisitRef.current[id] === undefined) {
+      initialVisitRef.current[id] = readMap[id];
+    }
+  }, [user, id, readMap]);
 
   useEffect(() => {
     // 1. Topics not yet loaded
@@ -236,9 +265,6 @@ const TopicPage = () => {
       const postIndex = posts.findIndex(p => p.id === queryPostId);
       if (postIndex !== -1) {
         targetPage = Math.floor(postIndex / ITEMS_PER_PAGE) + 1;
-        // If our calculated currentPage doesn't match the required targetPage, 
-        // we need to set the page query param to trigger the render.
-        // But with our smart currentPage (queryPostPage), they should already match!
         if (currentPage !== targetPage) {
           setSearchParams(prev => {
             prev.set('page', targetPage);
@@ -248,6 +274,30 @@ const TopicPage = () => {
         }
         targetId = `post-${queryPostId}`;
         scrollBlock = 'center';
+      } else if (!alreadyJumpedRef.current) {
+        // Post not found on the current page - try to locate it across the database
+        locatePost(queryPostId, ITEMS_PER_PAGE).then(result => {
+          if (result.found) {
+             if (result.topicId === id) {
+               if (result.page !== currentPage) {
+                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
+               } else {
+                 setIsPageLoading(false);
+                 alreadyJumpedRef.current = true;
+               }
+             } else {
+               navigate(`/topic/${result.topicId}?post=${queryPostId}`);
+             }
+          } else {
+             setIsPageLoading(false);
+             alreadyJumpedRef.current = true;
+          }
+        }).catch(err => {
+          console.error('[TopicPage navigation locator error]', err);
+          setIsPageLoading(false);
+          alreadyJumpedRef.current = true;
+        });
+        return;
       }
     } 
     // Priority 2: #post-ID (Legacy anchors)
@@ -267,22 +317,26 @@ const TopicPage = () => {
       }
     } 
     // Priority 3: goLast (New unread or bottom)
-    else if (goLast) {
+    else if (goLast && !alreadyJumpedRef.current) {
       let finalTargetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
       let finalTargetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
 
       if (user) {
-        const lastVisitRaw = readMap[id];
-        const registrationMs = profile?.created_at?.toMillis?.() || 0;
-        const lastVisit = Math.max(
-          lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0),
-          registrationMs
-        );
-        const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
-        
-        if (unreadIndex !== -1) {
-          finalTargetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
-          finalTargetId = `post-${posts[unreadIndex].id}`;
+        const lastVisitRaw = initialVisitRef.current[id] ?? readMap[id];
+        const previouslyVisited = lastVisitRaw !== undefined;
+
+        if (previouslyVisited) {
+          const registrationMs = profile?.created_at?.toMillis?.() || 0;
+          const lastVisit = Math.max(
+            lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0),
+            registrationMs
+          );
+          const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
+          
+          if (unreadIndex !== -1) {
+            finalTargetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
+            finalTargetId = `post-${posts[unreadIndex].id}`;
+          }
         }
       }
 
@@ -294,24 +348,44 @@ const TopicPage = () => {
     }
 
     // 2. Perform the actual scroll
-    // Including locationKey ensures repeated clicks on the same link work.
     const fullTargetKey = `${id}_${targetPage}_${targetId}_${queryPostId || ''}_${locationKey}`;
     if (targetId && lastTargetRef.current !== fullTargetKey) {
       lastTargetRef.current = fullTargetKey;
       
+      let scrollAttempts = 0;
+      const MAX_ATTEMPTS = 50;
+
       const tryScroll = () => {
         const el = document.getElementById(targetId);
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: scrollBlock });
           el.classList.add('highlight-new-post');
           setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
+          if (goLast || searchParams.get('post')) {
+            alreadyJumpedRef.current = true;
+          }
+          setIsPageLoading(false);
+        } else {
+          scrollAttempts++;
+          if (scrollAttempts < MAX_ATTEMPTS) {
+            setTimeout(tryScroll, 100);
+          } else {
+            setIsPageLoading(false);
+            alreadyJumpedRef.current = true;
+          }
         }
       };
       
-      // Delay it slightly to ensure the DOM has caught up with the render
       setTimeout(tryScroll, 100);
+    } else {
+      if (isJumpRequested || searchParams.get('post') || goLast) {
+        setIsPageLoading(false);
+        alreadyJumpedRef.current = true;
+      } else if (posts.length > 0) {
+        setIsPageLoading(false);
+      }
     }
-  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey]);
+  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested]);
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
@@ -592,6 +666,7 @@ const TopicPage = () => {
         const newTotal = posts.length + 1;
         const lastPage = Math.ceil(newTotal / ITEMS_PER_PAGE);
         setSearchParams({ page: lastPage, goLast: '1' });
+        alreadyJumpedRef.current = false;
       }, 400);
     } catch (err) {
       console.error(err);
@@ -697,53 +772,58 @@ const TopicPage = () => {
     );
   };
     
-  if (!topic || isPageLoading) {
-    return (
-      <Container className="py-4">
+  // ── Render Components ──────────────────────────────────────────────────
+  
+  const TopicPageSkeleton = () => (
+    <Container className="py-4 skeleton-fade-in">
+      <div className="mb-2">
+        <Skeleton width={150} height="1rem" className="mb-2" />
+      </div>
+      
+      <div className="mb-4">
         <div className="mb-2">
-          <Skeleton width={150} height="1rem" className="mb-2" />
+          <Skeleton width="40%" height="2.5rem" className="mb-2" />
+          <Skeleton width="20%" height="1rem" />
         </div>
         
-        <div className="mb-4">
-          <div className="mb-2">
-            <Skeleton width="40%" height="2.5rem" className="mb-2" />
-            <Skeleton width="20%" height="1rem" />
-          </div>
-          
-          <div className="d-flex justify-content-between align-items-end mt-3">
-            <Skeleton width="30%" height="1rem" />
-            <Skeleton width="100px" height="2.2rem" className="rounded-pill" />
-          </div>
+        <div className="d-flex justify-content-between align-items-end mt-3">
+          <Skeleton width="30%" height="1rem" />
+          <Skeleton width="100px" height="2.2rem" className="rounded-pill" />
         </div>
+      </div>
 
-        {[...Array(3)].map((_, i) => (
-          <Card key={i} className="mb-4 post-card shadow-sm border-0 overflow-hidden">
-            <Row className="g-0">
-              <Col md={3} lg={2} className="author-sidebar p-3 d-none d-md-block text-center border-end" style={{ minHeight: '200px' }}>
-                <Skeleton variant="avatar" width={80} height={80} className="mb-3 mx-auto rounded-circle" />
-                <Skeleton width="70%" height="1.2rem" className="mb-2 mx-auto" />
-                <Skeleton width="50%" height="0.8rem" className="mx-auto" />
-              </Col>
-              <Col md={9} lg={10} className="p-4">
-                <div className="d-flex justify-content-between mb-4">
-                  <Skeleton width="25%" height="1rem" />
-                  <Skeleton width="40px" height="1rem" />
-                </div>
-                <div className="space-y-2">
-                  <Skeleton width="100%" height="1rem" className="mb-2" />
-                  <Skeleton width="100%" height="1rem" className="mb-2" />
-                  <Skeleton width="85%" height="1rem" className="mb-2" />
-                  <Skeleton width="40%" height="1rem" />
-                </div>
-                <div className="mt-5 pt-3 border-top">
-                   <Skeleton width="120px" height="1.2rem" />
-                </div>
-              </Col>
-            </Row>
-          </Card>
-        ))}
-      </Container>
-    );
+      {[...Array(3)].map((_, i) => (
+        <Card key={i} className="mb-4 post-card shadow-sm border-0 overflow-hidden">
+          <Row className="g-0">
+            <Col md={3} lg={2} className="author-sidebar p-3 d-none d-md-block text-center border-end" style={{ minHeight: '200px' }}>
+              <Skeleton variant="avatar" width={80} height={80} className="mb-3 mx-auto rounded-circle" />
+              <Skeleton width="70%" height="1.2rem" className="mb-2 mx-auto" />
+              <Skeleton width="50%" height="0.8rem" className="mx-auto" />
+            </Col>
+            <Col md={9} lg={10} className="p-4">
+              <div className="d-flex justify-content-between mb-4">
+                <Skeleton width="25%" height="1rem" />
+                <Skeleton width="40px" height="1rem" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton width="100%" height="1rem" className="mb-2" />
+                <Skeleton width="100%" height="1rem" className="mb-2" />
+                <Skeleton width="85%" height="1rem" className="mb-2" />
+                <Skeleton width="40%" height="1rem" />
+              </div>
+              <div className="mt-5 pt-3 border-top">
+                 <Skeleton width="120px" height="1.2rem" />
+              </div>
+            </Col>
+          </Row>
+        </Card>
+      ))}
+    </Container>
+  );
+
+  // Only show the skeleton alone if we have no topic data OR if we're on the absolute first-load of the database.
+  if (!topic || (isPageLoading && posts.length === 0)) {
+    return <TopicPageSkeleton />;
   }
 
   if (category && !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) {
@@ -784,16 +864,26 @@ const TopicPage = () => {
     }
   };
 
-  return (
-    <Container className="py-4">
-      <ForumBreadcrumbs 
-        items={[
-          ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
-          { label: topic?.title || '...', active: true }
-        ]} 
-      />
+  const needsJump = (searchParams.get('post') || searchParams.get('goLast') === '1' || hash.startsWith('#post-'));
+  const isJumping = needsJump && !alreadyJumpedRef.current;
 
-      <div className="mb-4 topic-header-area">
+  return (
+    <Container className={`py-4 position-relative ${isJumping ? 'topic-jump-loading' : ''}`}>
+      {isJumping && (
+        <div className="position-absolute top-0 start-0 w-100 h-100 skeleton-jump-placeholder" style={{ zIndex: 10, minHeight: '100vh' }}>
+          <TopicPageSkeleton />
+        </div>
+      )}
+      
+      <div className="topic-content-wrapper">
+        <ForumBreadcrumbs 
+          items={[
+            ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
+            { label: topic?.title || '...', active: true }
+          ]} 
+        />
+
+        <div className="mb-4 topic-header-area">
         <div className="mb-2">
           <div className="d-flex align-items-center gap-2 mb-1">
             {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
@@ -910,11 +1000,13 @@ const TopicPage = () => {
             )}
 
             {totalPages > 1 && (
-              <ForumPagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={handlePageChange}
-              />
+              <div className="pagination-top">
+                <ForumPagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -1337,7 +1429,7 @@ const TopicPage = () => {
                               };
 
                               const cleanContent = stripQuotes(content);
-                              const quote = `[quote="#p${post.id},${author}"]\n${cleanContent}\n[/quote]\n\n`;
+                              const quote = `[quote="#p${post.id},t${id},${author}"]\n${cleanContent}\n[/quote]\n\n`;
 
                               setReplyContent(prev => {
                                 const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
@@ -1527,7 +1619,7 @@ const TopicPage = () => {
             </Button>
           </div>
         )}
-        <div className="d-flex justify-content-center">
+        <div className="d-flex justify-content-center pagination-bottom">
           <ForumPagination
             currentPage={currentPage}
             totalPages={totalPages}
@@ -1812,6 +1904,7 @@ const TopicPage = () => {
           </div>
         )}
       </ForumModal>
+      </div>
 
     </Container>
   );

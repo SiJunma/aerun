@@ -576,8 +576,9 @@ export const AuthProvider = ({ children }) => {
       // Exclude own posts from unread count
       if (topic.last_post_author_id === user.uid) return false;
 
-      const lastVisitRaw = readMap[topic.id];
-      const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
+      const entry = readMap[topic.id];
+      const timestamp = entry?.timestamp || entry;
+      const lastVisitMs = timestamp?.toMillis ? timestamp.toMillis() : (timestamp || 0);
       const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
       const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
 
@@ -592,13 +593,14 @@ export const AuthProvider = ({ children }) => {
    * Optimistically updates local readMap, then persists to Firestore.
    * Works for all roles (admin, moderator, player, spectator).
    */
-  const markTopicRead = useCallback(async (topicId) => {
+  const markTopicRead = useCallback(async (topicId, offset = null) => {
     if (!user || !topicId) return;
-    // Optimistic local update (use a plain number since serverTimestamp doesn't resolve locally)
+    // Optimistic local update
     const now = Date.now();
-    setReadMap(prev => ({ ...prev, [topicId]: now }));
+    const value = offset !== null ? { timestamp: now, offset } : now;
+    setReadMap(prev => ({ ...prev, [topicId]: value }));
     try {
-      await apiRecordTopicVisit(user.uid, topicId);
+      await apiRecordTopicVisit(user.uid, topicId, offset);
       if (profile?.role_id !== 'pending' && profile?.role_id !== 'banned') {
         await markTopicNotificationsRead(user.uid, topicId);
       }

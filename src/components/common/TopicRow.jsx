@@ -22,8 +22,10 @@ const TopicRow = ({
   const { t } = useI18n();
   const { readMap, profile } = useAuth();
   const lastVisitRaw = readMap[topic.id];
+  const lastReadOffset = lastVisitRaw?.offset ?? null;
   // Handle both Firestore Timestamp (from server) and plain number (optimistic local update)
-  const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
+  const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
+  const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
   const registrationMs = profile?.created_at?.toMillis?.() || 0;
   const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
   const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
@@ -153,6 +155,8 @@ const TopicRow = ({
           authorName={topic.last_post_author || topic.author_name}
           authorAvatar={topic.last_post_author_avatar}
           hasUnread={hasUnread}
+          lastReadOffset={lastReadOffset}
+          postsCount={topic.posts_count}
           lang={lang}
         />
       </td>

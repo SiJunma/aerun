@@ -292,15 +292,18 @@ const BBCode = ({ children, rolls = {} }) => {
         let rawAuthor = params.default || params.author || '';
         let authorName = rawAuthor;
         let postId = null;
+        let topicId = null;
 
         if (rawAuthor.startsWith('#p')) {
           const parts = rawAuthor.split(',');
-          if (parts.length >= 2) {
-            postId = parts[0].substring(2);
-            authorName = parts.slice(1).join(',');
+          postId = parts[0].substring(2);
+          
+          // Check for topic ID (t456 format)
+          if (parts[1] && parts[1].startsWith('t')) {
+            topicId = parts[1].substring(1);
+            authorName = parts.slice(2).join(',');
           } else {
-            postId = rawAuthor.substring(2);
-            authorName = '';
+            authorName = parts.slice(1).join(',');
           }
         }
 
@@ -310,7 +313,7 @@ const BBCode = ({ children, rolls = {} }) => {
               <div className="bbcode-quote-header fw-bold small mb-1 pb-2 border-bottom d-flex align-items-center" style={{ color: 'var(--primary-color)', lineHeight: '1.2' }}>
                 {postId ? (
                     <Link
-                    to={`?post=${postId}`}
+                    to={topicId ? `/topic/${topicId}?post=${postId}` : `?post=${postId}`}
                     preventScrollReset={true}
                     className="text-decoration-none d-flex align-items-center gap-1"
                     style={{ color: 'inherit' }}

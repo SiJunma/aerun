@@ -17,7 +17,8 @@ import {
   getDocs,
   limit,
   getDoc,
-  writeBatch
+  writeBatch,
+  getCountFromServer
 } from 'firebase/firestore';
 import { getTopicSubscribers } from './subscriptions';
 import { processDiceRolls } from '../utils/dice';
@@ -31,15 +32,16 @@ import {
 
 // ── Read Map (server-side "last visit" tracking) ─────────────────────────────
 
-/**
- * Record that the current user visited a topic.
- * Works for ALL roles (admin, moderator, player, spectator) — everyone can read topics.
- * Uses setDoc+merge so multiple topics accumulate in a single document.
- */
-export const recordTopicVisit = async (uid, topicId) => {
+export const recordTopicVisit = async (uid, topicId, offset = null) => {
   if (!uid || !topicId) return;
   const ref = doc(db, 'users', uid, 'readmap', 'topics');
-  await setDoc(ref, { [topicId]: serverTimestamp() }, { merge: true });
+  
+  // If offset is provided, store as object; otherwise store as flat timestamp for compatibility
+  const value = offset !== null 
+    ? { timestamp: serverTimestamp(), offset } 
+    : serverTimestamp();
+    
+  await setDoc(ref, { [topicId]: value }, { merge: true });
 };
 
 /**
@@ -544,6 +546,41 @@ export const publishDraft = async (uid, topicId) => {
   })();
 
   return postRef.id;
+};
+
+export const locatePost = async (postId, itemsPerPage = 20) => {
+  try {
+    const postRef = doc(db, 'posts', postId);
+    const postSnap = await getDoc(postRef);
+    if (!postSnap.exists()) return { found: false };
+
+    const postData = postSnap.data();
+    const topicId = postData.topic_id;
+    const createdAt = postData.created_at || serverTimestamp();
+
+    // Query posts in the SAME topic that were created BEFORE this post
+    const q = query(
+      collection(db, 'posts'),
+      where('topic_id', '==', topicId),
+      where('created_at', '<', createdAt)
+    );
+
+    const countSnap = await getCountFromServer(q);
+    const countBefore = countSnap.data().count;
+    
+    // Page is (count / page_size) + 1
+    const page = Math.floor(countBefore / itemsPerPage) + 1;
+
+    return { 
+      found: true, 
+      topicId, 
+      page,
+      postCreatedAt: createdAt 
+    };
+  } catch (err) {
+    console.error('[locatePost]', err);
+    return { found: false };
+  }
 };
 
 export const updatePost = async (postId, content, metadata = {}, performerId, authorId) => {

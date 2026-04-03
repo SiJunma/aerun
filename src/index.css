@@ -1899,7 +1899,23 @@ a.badge.bg-danger:hover {
   color: inherit !important;
 }
 
-/* Topic Page Base visibility (removes transparency) */
+/* Forum Topic Navigation Jumping Logic */
+.topic-jump-loading .topic-content-wrapper {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.skeleton-jump-placeholder {
+  background-color: var(--bg-color);
+  pointer-events: none;
+  animation: skeleton-fade-in 0.3s ease-out;
+}
+
+@keyframes skeleton-fade-in {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
 .topic-description,
 .topic-meta-bar,
 .author-sidebar .text-muted,
