@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Image, Badge, Spinner } from 'react-bootstrap';
-import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices } from 'lucide-react';
+import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -13,6 +13,7 @@ import {
   subscribeToDmMessages,
   sendDmMessage,
   markDmRead,
+  deleteConversation,
 } from '../../api/dms';
 import { subscribeToUser } from '../../api/forum';
 import Timestamp from '../common/Timestamp';
@@ -45,9 +46,25 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [loadingChat, setLoadingChat] = useState(false);
   const [targetProfile, setTargetProfile] = useState(initialTargetProfile || null);
   const [messageLimit, setMessageLimit] = useState(50);
+  const [peerStatus, setPeerStatus] = useState('active'); // 'active', 'deleted', 'banned'
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // ── Track peer status ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!activePeer || !activePeer.uid) return;
+    const unsub = subscribeToUser(activePeer.uid, (data) => {
+      if (!data) {
+        setPeerStatus('deleted');
+      } else if (data.role_id === 'banned') {
+        setPeerStatus('banned');
+      } else {
+        setPeerStatus('active');
+      }
+    });
+    return () => unsub();
+  }, [activePeer]);
 
   // ── Load target profile if not provided ─────────────────────────────────
   useEffect(() => {
@@ -163,6 +180,47 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     return <Timestamp date={ts} />;
   };
 
+  // ── Deletion handler ─────────────────────────────────────────────────────
+  const handleDeleteConversation = async (convId, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    const confirmMsg = lang === 'ru' 
+      ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?' 
+      : 'Are you sure you want to permanently delete this conversation for yourself?';
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      await deleteConversation(convId, myUid);
+      showToast(lang === 'ru' ? 'Диалог удален' : 'Conversation deleted', 'success');
+      if (activeChatId === convId) {
+        setActiveChatId(null);
+        setActivePeer(null);
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error('[handleDeleteConversation]', err);
+      showToast(lang === 'ru' ? 'Ошибка удаления' : 'Delete error', 'danger');
+    }
+  };
+
+  // ── Derived State (Filtering) ────────────────────────────────────────────
+  const myClearTime = conversations.find(c => c.id === activeChatId)?.clearedAt?.[myUid];
+
+  const visibleMessages = messages.filter(msg => {
+    if (!myClearTime) return true;
+    if (!msg.timestamp) return true; // Optimistic local messages
+    return msg.timestamp.toMillis() > myClearTime.toMillis();
+  });
+
+  const visibleConversations = conversations.filter(c => {
+    const clearTime = c.clearedAt?.[myUid];
+    if (!clearTime) return true;
+    if (!c.lastTimestamp) return false;
+    return c.lastTimestamp.toMillis() > clearTime.toMillis();
+  });
+
   // ── Privacy notice ───────────────────────────────────────────────────────
   const PrivacyNotice = () => (
     <div
@@ -212,7 +270,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             >
               {activePeer.name}
             </Link>
-            <div
+              <div
               className="d-flex align-items-center gap-1"
               style={{ fontSize: '0.875rem', opacity: 0.8, color: '#ffffff' }}
             >
@@ -220,6 +278,16 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
               <span>{t('dm.encryption_badge')}</span>
             </div>
           </div>
+          <Button
+            variant="link"
+            size="sm"
+            className="ms-auto text-decoration-none p-1"
+            style={{ color: '#ffffff', opacity: 0.8 }}
+            onClick={(e) => handleDeleteConversation(activeChatId, e)}
+            title={lang === 'ru' ? 'Удалить переписку' : 'Delete conversation'}
+          >
+            <Trash2 size={20} />
+          </Button>
         </Card.Header>
 
         {/* Two-column body: messages left, editor right — stacks vertically on mobile (see index.css) */}
@@ -232,14 +300,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
               <div className="text-center py-5 text-muted">
                 <Spinner animation="border" size="sm" />
               </div>
-            ) : messages.length === 0 ? (
+            ) : visibleMessages.length === 0 ? (
               <div className="text-center py-5 text-muted" style={{ fontSize: '1rem' }}>
                 <MessageCircle size={32} className="mb-2 opacity-25" />
                 <p className="mb-0">{t('dm.empty_chat')}</p>
               </div>
             ) : (
               <div className="d-flex flex-column">
-                {messages.length >= messageLimit && (
+                {visibleMessages.length >= messageLimit && (
                   <div className="text-center mb-3">
                     <Button 
                       variant="link" 
@@ -251,9 +319,9 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     </Button>
                   </div>
                 )}
-                {messages.map((msg, index) => {
+                {visibleMessages.map((msg, index) => {
                   const isMe = msg.sender_uid === myUid;
-                  const allConversationRolls = messages.reduce((acc, m) => ({ ...acc, ...(m.rolls || {}) }), {});
+                  const allConversationRolls = visibleMessages.reduce((acc, m) => ({ ...acc, ...(m.rolls || {}) }), {});
 
                   return (
                     <div
@@ -297,32 +365,45 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
           </div>
 
           {/* Right: editor column */}
-          <div className="dm-editor-col">
-            <div className="flex-grow-1">
-              <RichEditor
-                id="dm-reply-editor"
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                placeholder={t('dm.placeholder')}
-                minHeight="120px"
-                maxLength={2000}
-                showDice={hasPermission && hasPermission(PERMISSIONS.USE_DICE)}
-                hideDiceType={true}
-                isEdit={false}
-              />
+          {peerStatus !== 'active' ? (
+            <div className="dm-editor-col d-flex align-items-center justify-content-center">
+              <div className="text-center p-4 border rounded" style={{ background: 'var(--block-bg)', borderColor: 'var(--border-color)', width: '100%' }}>
+                <Lock size={32} className="mb-3 text-muted opacity-50" />
+                <p className="text-muted mb-0 fw-medium">
+                  {peerStatus === 'deleted'
+                    ? (lang === 'ru' ? 'Аккаунт пользователя удален. Отправка сообщений недоступна.' : 'User account deleted. Sending messages is disabled.')
+                    : (lang === 'ru' ? 'Пользователь заблокирован. Отправка сообщений недоступна.' : 'User is banned. Sending messages is disabled.')}
+                </p>
+              </div>
             </div>
-            <div className="d-flex justify-content-end">
-              <Button
-                variant="primary"
-                onClick={handleSend}
-                disabled={sending || !messageText.trim()}
-                className="d-flex align-items-center gap-2"
-              >
-                {sending ? <Spinner size="sm" animation="border" /> : <Send size={15} />}
-                {t('dm.send_button')}
-              </Button>
+          ) : (
+            <div className="dm-editor-col">
+              <div className="flex-grow-1">
+                <RichEditor
+                  id="dm-reply-editor"
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  placeholder={t('dm.placeholder')}
+                  minHeight="120px"
+                  maxLength={2000}
+                  showDice={hasPermission && hasPermission(PERMISSIONS.USE_DICE)}
+                  hideDiceType={true}
+                  isEdit={false}
+                />
+              </div>
+              <div className="d-flex justify-content-end">
+                <Button
+                  variant="primary"
+                  onClick={handleSend}
+                  disabled={sending || !messageText.trim()}
+                  className="d-flex align-items-center gap-2"
+                >
+                  {sending ? <Spinner size="sm" animation="border" /> : <Send size={15} />}
+                  {t('dm.send_button')}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
         </div>
       </Card>
@@ -343,14 +424,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
           <div className="text-center py-5">
             <Spinner animation="border" size="sm" />
           </div>
-        ) : conversations.length === 0 ? (
+        ) : visibleConversations.length === 0 ? (
           <div className="text-center py-5 text-muted">
             <MessageCircle size={40} className="mb-3 opacity-25" />
             <p className="mb-0">{t('dm.no_conversations')}</p>
           </div>
         ) : (
           <div className="d-flex flex-column gap-2">
-            {conversations.map((conv) => {
+            {visibleConversations.map((conv) => {
               const peerUid = conv.participants?.find(p => p !== myUid);
               const peerName = conv.participantNames?.[peerUid] || 'User';
               const peerAvatar = conv.participantAvatars?.[peerUid] || '';
@@ -396,6 +477,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                       {conv.lastMessage || '…'}
                     </p>
                   </div>
+                  <Button
+                    variant="link"
+                    className="text-muted p-2 mx-1 shadow-none dm-trash-btn"
+                    style={{ opacity: 0.6 }}
+                    onClick={(e) => handleDeleteConversation(conv.id, e)}
+                    title={lang === 'ru' ? 'Удалить переписку' : 'Delete conversation'}
+                  >
+                    <Trash2 size={16} />
+                  </Button>
                 </div>
               );
             })}

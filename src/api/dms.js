@@ -121,3 +121,14 @@ export const markDmRead = async (conversationId, uid) => {
     [`unread.${uid}`]: 0,
   });
 };
+
+/**
+ * Deletes the conversation history for the current user by setting a clearedAt timestamp.
+ */
+export const deleteConversation = async (conversationId, uid) => {
+  const convRef = doc(db, 'dms', conversationId);
+  await updateDoc(convRef, {
+    [`clearedAt.${uid}`]: serverTimestamp(),
+    [`unread.${uid}`]: 0,
+  });
+};

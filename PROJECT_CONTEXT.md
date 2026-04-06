@@ -215,7 +215,8 @@ This file serves as the master context for AI interaction, combining the current
             "participantAvatars": "object (maps uid to avatar_url)",
             "lastMessage": "string",
             "lastTimestamp": "serverTimestamp",
-            "unread": "object (maps uid to unread count)"
+            "unread": "object (maps uid to unread count)",
+            "clearedAt": "object (maps uid to timestamp of when the user deleted the dialog, hiding messages prior to this time)"
           },
           "subcollections": {
             "messages": {
