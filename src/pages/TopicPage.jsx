@@ -492,6 +492,19 @@ const TopicPage = () => {
     return (stats && stats.nickname) ? (stats.settings?.signature || '') : (post.author_signature || '');
   };
 
+  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+  const isAuthorOnline = (post) => {
+    // Own posts: current user is always online while viewing
+    if (post.author_id === user?.uid) return true;
+    const stats = authorStats[post.author_id];
+    if (!stats?.last_seen) return false;
+    const lastSeenMs = stats.last_seen?.toMillis
+      ? stats.last_seen.toMillis()
+      : (typeof stats.last_seen === 'number' ? stats.last_seen : 0);
+    return (Date.now() - lastSeenMs) < FIFTEEN_MINS_MS;
+  };
+
+
   const resolveText = (field) =>
     typeof field === 'object' && field !== null
       ? (lang === 'ru' ? field.ru : field.en) || ''
@@ -1055,6 +1068,7 @@ const TopicPage = () => {
                         initialAvatar={post.author_avatar}
                         size={120}
                         className="rounded shadow-sm"
+                        isOnline={isAuthorOnline(post)}
                       />
                     </div>
 
@@ -1111,6 +1125,7 @@ const TopicPage = () => {
                         initialAvatar={post.author_avatar}
                         size={60}
                         className="rounded shadow-sm"
+                        isOnline={isAuthorOnline(post)}
                       />
                     </div>
 
@@ -1488,6 +1503,7 @@ const TopicPage = () => {
                     initialAvatar={myDraft.author_avatar}
                     size={120}
                     className="rounded shadow-sm"
+                    isOnline={!!user}
                   />
                 </div>
                 <div className="text-muted mt-1" style={{ fontSize: '0.8rem' }}>

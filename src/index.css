@@ -556,6 +556,31 @@ label.fw-bold {
   border-color: #dcd7c9 !important;
 }
 
+/* ── Online Status Dot ───────────────────────────────────────────────── */
+.online-status-dot {
+  position: absolute;
+  border-radius: 50%;
+  display: block;
+  /* Light theme: green-600 on light sidebar bg */
+  background-color: #16a34a;
+  border: 2.5px solid #f8f9fa;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.10);
+}
+
+[data-theme='dark'] .online-status-dot {
+  /* green-400: brighter so it reads on the dark card */
+  background-color: #4ade80;
+  border-color: #1e293b;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25), 0 0 6px rgba(74, 222, 128, 0.35);
+}
+
+[data-theme='neutral'] .online-status-dot {
+  /* muted forest green, warm enough for sepia */
+  background-color: #5a8f6a;
+  border-color: #faf5ec;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.10);
+}
+
 .navbar {
   background-color: var(--nav-bg) !important;
   transition: all 0.3s ease;
