@@ -42,10 +42,11 @@ This file serves as the master context for AI interaction, combining the current
               }
             },
             "readmap": {
-              "description": "Keeps track of last read times for topics. Document 'topics' has the mapping.",
+              "description": "Keeps track of last read times for topics. Document ID is 'topics', one field per topic. Entry format is POLYMORPHIC depending on how it was written: (a) legacy: plain Firestore Timestamp (no offset stored), (b) current: object { timestamp: Timestamp, offset: number } where offset is the 0-based global post index of the last read post. IMPORTANT: all consumers must normalize before comparing — use (entry?.timestamp || entry) to unwrap, then check .toMillis().",
               "fields": {
-                "[topic_id]": "timestamp | number"
-              }
+                "[topic_id]": "Firestore Timestamp | number | { timestamp: Firestore Timestamp, offset: number }"
+              },
+              "consumer_pattern": "const lastVisitValue = entry?.timestamp || entry; const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);"
             },
             "drafts": {
               "description": "Unpublished posts. Document ID matches the topic ID.",
@@ -253,7 +254,7 @@ This file serves as the master context for AI interaction, combining the current
       "path": "src/contexts/AuthProvider.jsx",
       "description": "Maintains user state, global settings, unread counts, and permission checks.",
       "state_keys": [
-        "user", "profile", "settings", "loading", "readMap", "unreadTopicsCount", "isMarkingAllRead", "roles", "PERMISSIONS"
+        "user", "profile", "settings", "loading", "readMap (polymorphic — see readmap schema)", "unreadTopicsCount", "isMarkingAllRead", "roles", "PERMISSIONS"
       ]
     },
     "ToastContext": {

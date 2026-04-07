@@ -327,8 +327,11 @@ const TopicPage = () => {
 
         if (previouslyVisited) {
           const registrationMs = profile?.created_at?.toMillis?.() || 0;
+          // lastVisitRaw can be: Firestore Timestamp, plain number, or { timestamp, offset } object
+          // Must normalize before using — same pattern as TopicRow and AuthProvider
+          const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
           const lastVisit = Math.max(
-            lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0),
+            lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0),
             registrationMs
           );
           const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
