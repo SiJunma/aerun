@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pagination } from 'react-bootstrap';
-import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
+import { ChevronsLeft, ChevronsRight } from 'lucide-react';
 import './ForumPagination.css';
 
 /**
@@ -40,13 +40,7 @@ const ForumPagination = ({ currentPage, totalPages, onPageChange, className = ''
       >
         <ChevronsLeft size={16} />
       </Pagination.First>
-      <Pagination.Prev
-        className="prev"
-        onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-        disabled={currentPage === 1}
-      >
-        <ChevronLeft size={16} />
-      </Pagination.Prev>
+
 
       {startPage > 1 && <Pagination.Ellipsis disabled />}
 
@@ -62,13 +56,7 @@ const ForumPagination = ({ currentPage, totalPages, onPageChange, className = ''
 
       {endPage < totalPages && <Pagination.Ellipsis disabled />}
 
-      <Pagination.Next
-        className="next"
-        onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-        disabled={currentPage === totalPages}
-      >
-        <ChevronRight size={16} />
-      </Pagination.Next>
+
       <Pagination.Last
         className="last"
         onClick={() => onPageChange(totalPages)}
