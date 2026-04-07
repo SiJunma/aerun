@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Button } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
-import { subscribeToCategories } from '../../api/forum';
+import { subscribeToCategories } from '../../api/categories';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 

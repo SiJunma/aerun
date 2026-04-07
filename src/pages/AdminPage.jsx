@@ -6,7 +6,8 @@ import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
   updateUserRole, addRole, updateRole, deleteRole
 } from '../api/admin';
-import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToAllUsers, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/forum';
+import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
+import { subscribeToAllUsers } from '../api/auth-resources';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
 import Timestamp from '../components/common/Timestamp';

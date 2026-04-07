@@ -26,13 +26,14 @@ import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
 import { notifyUserManagers, markTopicNotificationsRead } from '../api/notifications';
 import { 
-  subscribeToReadMap, 
-  recordTopicVisit as apiRecordTopicVisit,
   markAllTopicsRead,
-  subscribeToLatestTopics,
   recordGuestActivity as apiRecordGuestActivity,
-  deleteGuestActivity as apiDeleteGuestActivity
-} from '../api/forum';
+  deleteGuestActivity as apiDeleteGuestActivity,
+  subscribeToReadMap,
+  recordTopicVisit as apiRecordTopicVisit,
+  subscribeToLatestTopics
+} from '../api/auth-resources';
+import { subscribeToCategories } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -56,6 +57,7 @@ export const AuthProvider = ({ children }) => {
   // readMap: { [topicId]: Firestore Timestamp | number } — synced from server
   const [readMap, setReadMap] = useState({});
   const [latestTopics, setLatestTopics] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState([]);
@@ -550,6 +552,8 @@ export const AuthProvider = ({ children }) => {
       }
     });
 
+    let catsUnsub = subscribeToCategories(setCategories);
+
     return () => {
       unsubGlobalSettings();
       unsubscribe();
@@ -557,83 +561,11 @@ export const AuthProvider = ({ children }) => {
       if (readMapUnsub) readMapUnsub();
       if (latestTopicsUnsub) latestTopicsUnsub();
       if (rolesUnsub) rolesUnsub();
+      if (catsUnsub) catsUnsub();
       clearInterval(lastSeenInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Calculate unreadTopicsCount whenever readMap or latestTopics change
-  useEffect(() => {
-    if (!user || latestTopics.length === 0) {
-      setUnreadTopicsCount(0);
-      return;
-    }
-
-    // New user baseline: topics updated before registration are treated as read
-    const registrationMs = profile?.created_at?.toMillis?.() || 0;
-
-    const count = latestTopics.filter(topic => {
-      // Exclude own posts from unread count
-      if (topic.last_post_author_id === user.uid) return false;
-
-      const entry = readMap[topic.id];
-      const timestamp = entry?.timestamp || entry;
-      const lastVisitMs = timestamp?.toMillis ? timestamp.toMillis() : (timestamp || 0);
-      const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
-
-      return lastPostMs > effectiveLastVisitMs;
-    }).length;
-
-    setUnreadTopicsCount(count);
-  }, [user, profile, latestTopics, readMap]);
-
-  /**
-   * Mark a topic as read for the current user.
-   * Optimistically updates local readMap, then persists to Firestore.
-   * Works for all roles (admin, moderator, player, spectator).
-   */
-  const markTopicRead = useCallback(async (topicId, offset = null) => {
-    if (!user || !topicId) return;
-    // Optimistic local update
-    const now = Date.now();
-    const value = offset !== null ? { timestamp: now, offset } : now;
-    setReadMap(prev => ({ ...prev, [topicId]: value }));
-    try {
-      await apiRecordTopicVisit(user.uid, topicId, offset);
-      if (profile?.role_id !== 'pending' && profile?.role_id !== 'banned') {
-        await markTopicNotificationsRead(user.uid, topicId);
-      }
-    } catch (err) {
-      console.error('[markTopicRead]', err);
-    }
-  }, [user, profile?.role_id]);
-
-  /**
-   * Mark all fetched topics as read.
-   */
-  const markAllRead = useCallback(async () => {
-    if (!user || latestTopics.length === 0 || isMarkingAllRead) return;
-    
-    setIsMarkingAllRead(true);
-    try {
-      // Optimistic local update
-      const now = Date.now();
-      const newReadMap = { ...readMap };
-      const topicIds = latestTopics.map(t => {
-        newReadMap[t.id] = now;
-        return t.id;
-      });
-      
-      setReadMap(newReadMap);
-      await markAllTopicsRead(user.uid, topicIds);
-    } catch (err) {
-      console.error('[markAllRead]', err);
-    } finally {
-      setIsMarkingAllRead(false);
-    }
-  }, [user, latestTopics, readMap, isMarkingAllRead]);
-
 
   const hasPermission = useCallback((perm, context = {}) => {
     // ── 1. GLOBAL SETTINGS OVERRIDES (Highest Priority for feature flags) ──
@@ -697,6 +629,86 @@ export const AuthProvider = ({ children }) => {
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
+
+  // Calculate unreadTopicsCount whenever readMap or latestTopics change
+  useEffect(() => {
+    if (!user || latestTopics.length === 0) {
+      setUnreadTopicsCount(0);
+      return;
+    }
+
+    // New user baseline: topics updated before registration are treated as read
+    const registrationMs = profile?.created_at?.toMillis?.() || 0;
+
+    const count = latestTopics.filter(topic => {
+      // 1. FILTER BY PERMISSIONS
+      // Ensure the user actually has permission to see the category this topic belongs to
+      const category = categories.find(c => c.id === topic.category_id);
+      if (!category || !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) return false;
+
+      // 2. EXCLUDE OWN POSTS
+      if (topic.last_post_author_id === user.uid) return false;
+
+      // 3. COMPARE TIMESTAMPS
+      const entry = readMap[topic.id];
+      const lastVisitValue = entry?.timestamp || entry;
+      const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
+      const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
+      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
+
+      return lastPostMs > effectiveLastVisitMs;
+    }).length;
+
+    setUnreadTopicsCount(count);
+  }, [user, profile, latestTopics, readMap, categories, hasPermission]);
+
+  /**
+   * Mark a topic as read for the current user.
+   * Optimistically updates local readMap, then persists to Firestore.
+   * Works for all roles (admin, moderator, player, spectator).
+   */
+  const markTopicRead = useCallback(async (topicId, offset = null) => {
+    if (!user || !topicId) return;
+    // Optimistic local update
+    const now = Date.now();
+    const value = offset !== null ? { timestamp: now, offset } : now;
+    setReadMap(prev => ({ ...prev, [topicId]: value }));
+    try {
+      await apiRecordTopicVisit(user.uid, topicId, offset);
+      if (profile?.role_id !== 'pending' && profile?.role_id !== 'banned') {
+        await markTopicNotificationsRead(user.uid, topicId);
+      }
+    } catch (err) {
+      console.error('[markTopicRead]', err);
+    }
+  }, [user, profile?.role_id]);
+
+  /**
+   * Mark all fetched topics as read.
+   */
+  const markAllRead = useCallback(async () => {
+    if (!user || latestTopics.length === 0 || isMarkingAllRead) return;
+    
+    setIsMarkingAllRead(true);
+    try {
+      // Optimistic local update
+      const now = Date.now();
+      const newReadMap = { ...readMap };
+      const topicIds = latestTopics.map(t => {
+        newReadMap[t.id] = now;
+        return t.id;
+      });
+      
+      setReadMap(newReadMap);
+      await markAllTopicsRead(user.uid, topicIds);
+    } catch (err) {
+      console.error('[markAllRead]', err);
+    } finally {
+      setIsMarkingAllRead(false);
+    }
+  }, [user, latestTopics, readMap, isMarkingAllRead]);
+
+
 
   // Monitoring maintenance mode / status to force logout
   React.useEffect(() => {

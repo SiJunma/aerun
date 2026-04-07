@@ -15,7 +15,7 @@ import {
   markDmRead,
   deleteConversation,
 } from '../../api/dms';
-import { subscribeToUser } from '../../api/forum';
+import { subscribeToUser } from '../../api/auth-resources';
 import Timestamp from '../common/Timestamp';
 import { PERMISSIONS } from '../../constants/permissions';
 

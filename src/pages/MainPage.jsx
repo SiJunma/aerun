@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { Folder, MessageSquare, FileText } from 'lucide-react';
-import { subscribeToCategories, subscribeToCategoryGroups } from '../api/forum';
+import { subscribeToCategories, subscribeToCategoryGroups } from '../api/categories';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
@@ -161,7 +161,8 @@ const MainPage = () => {
 
                             {(() => {
                               const lastVisitRaw = readMap[cat.last_post_topic_id];
-                              const lastVisitMs = lastVisitRaw?.toMillis ? lastVisitRaw.toMillis() : (lastVisitRaw || 0);
+                              const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
+                              const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
                               const registrationMs = profile?.created_at?.toMillis?.() || 0;
                               const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
                               const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;

@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToTopTopics, subscribeToCategories } from '../api/forum';
+import { subscribeToCategories } from '../api/categories';
+import { subscribeToTopTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 

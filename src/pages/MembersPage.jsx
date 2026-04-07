@@ -4,7 +4,7 @@ import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock } from
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToAllUsers } from '../api/forum';
+import { subscribeToAllUsers } from '../api/auth-resources';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import Timestamp from '../components/common/Timestamp';

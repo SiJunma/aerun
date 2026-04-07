@@ -4,9 +4,9 @@ import { Container, Card, Table, Button, Badge, Row, Col, Form } from 'react-boo
 import { Trash2, Move, Settings, PinOff, Pin, Lock, PlusCircle, Search, MessageSquare, Clock, Filter, FolderInput, Unlock, CheckCircle } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
+import { subscribeToCategories } from '../api/categories';
 import { 
   subscribeToTopics, 
-  subscribeToCategories, 
   batchUpdateTopics, 
   deleteTopics,
   moveTopics

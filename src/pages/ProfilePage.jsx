@@ -7,7 +7,9 @@ import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, 
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
-import { subscribeToUser, checkNicknameExists, subscribeToCategories, subscribeToUserPosts } from '../api/forum';
+import { subscribeToCategories } from '../api/categories';
+import { checkNicknameExists, subscribeToUserPosts } from '../api/forum';
+import { subscribeToUser } from '../api/auth-resources';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';

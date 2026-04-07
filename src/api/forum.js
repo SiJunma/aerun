@@ -2,7 +2,6 @@ import { db } from '../../firebase';
 import { logAdminAction } from './audit';
 import {
   collection,
-  addDoc,
   setDoc,
   doc,
   onSnapshot,
@@ -30,133 +29,6 @@ import {
   handlePostDeletionNotifications
 } from './notifications';
 
-// ── Read Map (server-side "last visit" tracking) ─────────────────────────────
-
-export const recordTopicVisit = async (uid, topicId, offset = null) => {
-  if (!uid || !topicId) return;
-  const ref = doc(db, 'users', uid, 'readmap', 'topics');
-  
-  // If offset is provided, store as object; otherwise store as flat timestamp for compatibility
-  const value = offset !== null 
-    ? { timestamp: serverTimestamp(), offset } 
-    : serverTimestamp();
-    
-  await setDoc(ref, { [topicId]: value }, { merge: true });
-};
-
-/**
- * Live subscription to the user's full read-map ({ topicId → Timestamp }).
- * Unsubscribes automatically on cleanup. Safe to call with null uid.
- */
-export const subscribeToReadMap = (uid, callback) => {
-  if (!uid) { callback({}); return () => {}; }
-  const ref = doc(db, 'users', uid, 'readmap', 'topics');
-  return onSnapshot(ref, { includeMetadataChanges: true }, snap => {
-    // metadata.hasPendingWrites means local update is still syncing
-    // serverTimestamps: 'estimate' gives us the local time instead of null while syncing
-    callback(snap.exists() ? snap.data({ serverTimestamps: 'estimate' }) : {});
-  }, err => {
-    // Silent on permission-denied during login/logout transitions
-    if (err.code !== 'permission-denied') {
-        console.error('[subscribeToReadMap]', err);
-    }
-  });
-};
-
-// ── Category Groups ──────────────────────────────────────────────────────────
-
-export const subscribeToCategoryGroups = (callback) => {
-  const q = query(collection(db, 'category_groups'), orderBy('order', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
-};
-
-export const addCategoryGroup = async (groupData, performerId) => {
-  const ref = await addDoc(collection(db, 'category_groups'), {
-    ...groupData,
-    created_at: serverTimestamp(),
-    updated_at: serverTimestamp()
-  });
-  await logAdminAction('category_group_created', performerId, {
-    targetId: ref.id,
-    title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
-  });
-  return ref.id;
-};
-
-export const updateCategoryGroup = async (id, groupData, performerId) => {
-  await updateDoc(doc(db, 'category_groups', id), {
-    ...groupData,
-    updated_at: serverTimestamp()
-  });
-  await logAdminAction('category_group_updated', performerId, {
-    targetId: id,
-    title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
-  });
-};
-
-export const deleteCategoryGroup = async (id, performerId) => {
-  await deleteDoc(doc(db, 'category_groups', id));
-  await logAdminAction('category_group_deleted', performerId, { targetId: id });
-};
-
-// ── Categories ──────────────────────────────────────────────────────────────
-
-export const subscribeToCategories = (callback) => {
-  const q = query(collection(db, 'categories'), orderBy('order', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
-};
-
-export const addCategory = async (catData, performerId) => {
-  // Normalize: replace null values with undefined so Firestore doesn't store them as null
-  const permissions = {};
-  if (catData.permissions) {
-    for (const [key, val] of Object.entries(catData.permissions)) {
-      if (val !== null) permissions[key] = val;
-    }
-  }
-  const ref = await addDoc(collection(db, 'categories'), {
-    ...catData,
-    permissions,
-    group_id: catData.group_id || null,
-    topics_count: 0,
-    posts_count: 0,
-    created_at: serverTimestamp()
-  });
-  await logAdminAction('category_created', performerId, { targetId: ref.id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
-};
-
-export const updateCategory = async (id, catData, performerId) => {
-  const { permissions: rawPerms, ...rest } = catData;
-  const permissions = {};
-  if (rawPerms) {
-    for (const [key, val] of Object.entries(rawPerms)) {
-      if (val !== null) permissions[key] = val;
-    }
-  }
-  await updateDoc(doc(db, 'categories', id), {
-    ...rest,
-    permissions,
-    group_id: catData.group_id || null,
-    updated_at: serverTimestamp()
-  });
-  await logAdminAction('category_updated', performerId, { targetId: id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
-};
-
-export const deleteCategory = async (id, performerId) => {
-  const catRef = doc(db, 'categories', id);
-  const catDoc = await getDoc(catRef);
-  let title = 'Unnamed';
-  if (catDoc.exists()) {
-    const data = catDoc.data();
-    title = data.title?.en || data.title?.ru || 'Unnamed';
-  }
-  await deleteDoc(catRef);
-  await logAdminAction('category_deleted', performerId, { targetId: id, title });
-};
 
 // ── Topics ───────────────────────────────────────────────────────────────────
 
@@ -839,88 +711,6 @@ export const updateUser = async (uid, userData, performerId) => {
   }
 };
 
-export const subscribeToUser = (uid, callback) => {
-  return onSnapshot(doc(db, 'users', uid), (snapshot) => {
-    callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
-  });
-};
-export const subscribeToActiveUsers = (callback) => {
-  // Fetch users active in the last 15 minutes
-  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
-  const q = query(
-    collection(db, 'users'), 
-    where('last_seen', '>=', new Date(Date.now() - FIFTEEN_MINS_MS))
-  );
-  
-  return onSnapshot(q, (snapshot) => {
-    const users = snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(u => u.status !== 'banned'); // Exclude banned users from online list
-      
-    // Sort by nickname client-side (more robust than composite index for now)
-    users.sort((a, b) => a.nickname.localeCompare(b.nickname));
-    callback(users);
-  }, (err) => console.error('[subscribeToActiveUsers]', err));
-};
-
-export const subscribeToDailyActiveUsers = (callback) => {
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  const q = query(
-    collection(db, 'users'),
-    where('last_seen', '>=', new Date(Date.now() - ONE_DAY_MS))
-  );
-  return onSnapshot(q, (snapshot) => {
-    const users = snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(u => u.role_id !== 'banned' && u.role_id !== 'pending');
-    users.sort((a, b) => a.nickname.localeCompare(b.nickname));
-    callback(users);
-  }, (err) => console.error('[subscribeToDailyActiveUsers]', err));
-};
-
-export const subscribeToAllUsers = (callback) => {
-  const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
-};
-
-// ── Guest Activity ─────────────────────────────────────────────────────────────
-
-/**
- * Record a guest's presence.
- */
-export const recordGuestActivity = async (guestId) => {
-  if (!guestId) return;
-  const ref = doc(db, 'guest_activity', guestId);
-  await setDoc(ref, { 
-    last_seen: serverTimestamp() 
-  }, { merge: true });
-};
-
-/**
- * Delete a guest's presence (called on login).
- */
-export const deleteGuestActivity = async (guestId) => {
-  if (!guestId) return;
-  const ref = doc(db, 'guest_activity', guestId);
-  await deleteDoc(ref).catch(() => {}); // Ignore errors if already gone
-};
-
-/**
- * Subscribe to the count of active guests (last 15 mins).
- */
-export const subscribeToActiveGuests = (callback) => {
-  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
-  const q = query(
-    collection(db, 'guest_activity'),
-    where('last_seen', '>=', new Date(Date.now() - FIFTEEN_MINS_MS))
-  );
-
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.size);
-  }, (err) => console.error('[subscribeToActiveGuests]', err));
-};
 
 export const checkNicknameExists = async (nickname, excludeUid = null) => {
   if (!nickname) return false;
@@ -938,30 +728,6 @@ export const checkNicknameExists = async (nickname, excludeUid = null) => {
   const matchingDocs = querySnapshot.docs.filter(doc => doc.id !== excludeUid);
 
   return matchingDocs.length > 0;
-};
-// Batch update topic fields (is_pinned, is_locked)
-export const batchUpdateTopics = async (topicIds, data, performerId) => {
-  const promises = topicIds.map(async (id) => {
-    const topicRef = doc(db, 'topics', id);
-    const snap = await getDoc(topicRef);
-    if (!snap.exists()) return;
-    const title = snap.data().title;
-    
-    await updateDoc(topicRef, {
-      ...data,
-      updated_at: serverTimestamp()
-    });
-    
-    if (performerId) {
-      if (data.is_pinned !== undefined) {
-        await logAdminAction(data.is_pinned ? 'topic_pinned' : 'topic_unpinned', performerId, { targetId: id, title });
-      }
-      if (data.is_locked !== undefined) {
-        await logAdminAction(data.is_locked ? 'topic_locked' : 'topic_unlocked', performerId, { targetId: id, title });
-      }
-    }
-  });
-  await Promise.all(promises);
 };
 
 export const deleteTopics = async (topicIds, performerId) => {
@@ -1125,42 +891,30 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
     await updateCatLastPost(targetCategoryId);
   }
 };
-// Most discussed topics across all categories
-export const subscribeToTopTopics = (callback, limitCount = 50) => {
-  const q = query(
-    collection(db, 'topics'),
-    orderBy('posts_count', 'desc'),
-    limit(limitCount)
-  );
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  }, (err) => console.error('[subscribeToTopTopics]', err));
-};
-// Latest topics across all categories (sorted by last_post_at)
-export const subscribeToLatestTopics = (callback, limitCount = 200) => {
-  const q = query(
-    collection(db, 'topics'),
-    orderBy('last_post_at', 'desc'),
-    limit(limitCount)
-  );
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  }, (err) => console.error('[subscribeToLatestTopics]', err));
-};
 
-/**
- * Marks multiple topics as read for a user in a single operation.
- * @param {string} uid User ID
- * @param {string[]} topicIds Array of topic IDs to mark as read
- */
-export const markAllTopicsRead = async (uid, topicIds) => {
-  if (!uid || !topicIds || topicIds.length === 0) return;
-  const ref = doc(db, 'users', uid, 'readmap', 'topics');
-  const updateData = {};
-  const now = serverTimestamp();
-  topicIds.forEach(id => {
-    updateData[id] = now;
+// Batch update topic fields (is_pinned, is_locked)
+export const batchUpdateTopics = async (topicIds, data, performerId) => {
+  const promises = topicIds.map(async (id) => {
+    const topicRef = doc(db, 'topics', id);
+    const snap = await getDoc(topicRef);
+    if (!snap.exists()) return;
+    const topicData = snap.data();
+    const title = topicData.title;
+    
+    await updateDoc(topicRef, {
+      ...data,
+      updated_at: serverTimestamp()
+    });
+    
+    if (performerId) {
+      if (data.is_pinned !== undefined) {
+        await logAdminAction(data.is_pinned ? 'topic_pinned' : 'topic_unpinned', performerId, { targetId: id, title });
+      }
+      if (data.is_locked !== undefined) {
+        await logAdminAction(data.is_locked ? 'topic_locked' : 'topic_unlocked', performerId, { targetId: id, title });
+      }
+    }
   });
-  await setDoc(ref, updateData, { merge: true });
+  await Promise.all(promises);
 };
 

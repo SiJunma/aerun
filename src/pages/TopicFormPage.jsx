@@ -5,7 +5,8 @@ import { User } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCharacters } from '../api/character';
-import { subscribeToCategories, createTopic, updateUser } from '../api/forum';
+import { subscribeToCategories } from '../api/categories';
+import { createTopic, updateUser } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 

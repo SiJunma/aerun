@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Image } from 'react-bootstrap';
-import { subscribeToUser } from '../../api/forum';
+import { subscribeToUser } from '../../api/auth-resources';
 import { subscribeToCharacter } from '../../api/character';
 
 /**

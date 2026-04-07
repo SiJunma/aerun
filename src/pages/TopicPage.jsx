@@ -3,12 +3,14 @@ import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'reac
 import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Pagination, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
+import { subscribeToCategories } from '../api/categories';
 import { 
   subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, 
-  subscribeToCategories, subscribeToUser, updateUser, updateTopic, 
+  updateUser, updateTopic, 
   deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, 
   subscribeToTopicDraft, deleteDraftPost, locatePost 
 } from '../api/forum';
+import { subscribeToUser } from '../api/auth-resources';
 import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -128,15 +130,13 @@ const TopicPage = () => {
 
   // Mark the topic as read with granular offset
   useEffect(() => {
-    // If we are jumping via goLast, wait until the jump is performed (ref=true) before marking as read.
-    const canMarkRead = (!goLast && !searchParams.get('post')) || alreadyJumpedRef.current;
-    
-    if (user && id && posts.length > 0 && canMarkRead && profile?.role_id !== 'spectator') {
+    if (user && id && posts.length > 0 && profile?.role_id !== 'spectator') {
       // Calculate the global index of the last message currently visible on this page
+      // Mark everything on the current page as read
       const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + posts.length - 1;
       markTopicRead(id, lastMessageIndex);
     }
-  }, [posts.length, id, user, markTopicRead, currentPage, goLast, searchParams, profile?.role_id]);
+  }, [posts.length, id, user, markTopicRead, currentPage, profile?.role_id]);
 
   // Subscribe to draft
   useEffect(() => {

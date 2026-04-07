@@ -270,7 +270,7 @@ This file serves as the master context for AI interaction, combining the current
     }
   },
   "folder_structure": {
-    "src/ api": "Firestore operations isolated from components. Subdivided by domain (forum.js, auth.js, admin.js).",
+    "src/ api": "Firestore operations isolated from components. Subdivided by domain (forum.js, auth-resources.js, categories.js, admin.js, etc.).",
     "src/ assets": "Static media (images, svgs).",
     "src/ components": "React presentation and logic components (common UI elements, layout wrappers).",
     "src/ constants": "Hardcoded values, role definitions (e.g. permissions.js).",

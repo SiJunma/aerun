@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
-import { subscribeToCategories, subscribeToActiveUsers, subscribeToActiveGuests, subscribeToAllUsers, subscribeToDailyActiveUsers } from '../../api/forum';
+import { subscribeToCategories } from '../../api/categories';
+import { subscribeToActiveUsers, subscribeToActiveGuests, subscribeToDailyActiveUsers, subscribeToAllUsers } from '../../api/auth-resources';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
+// Decoupled stats component
 const ForumStats = () => {
   const { t } = useI18n();
   const [categories, setCategories] = useState([]);
