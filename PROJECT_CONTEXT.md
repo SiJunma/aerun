@@ -203,6 +203,7 @@ This file serves as the master context for AI interaction, combining the current
               "last_post_id": "string (optional)",
               "post_count": "number (optional, for grouping)",
               "value": "number (optional, for reputation)",
+              "voter_nickname": "string (optional, for reputation)",
               "admin_message": "string (optional)"
             },
             "created_at": "serverTimestamp"

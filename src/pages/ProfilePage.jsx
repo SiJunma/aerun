@@ -3,7 +3,8 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2 } from 'lucide-react';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2, Bell, Volume2 } from 'lucide-react';
+import { playNotificationSound } from '../utils/notificationSound';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
@@ -67,7 +68,13 @@ const ProfilePage = () => {
     birthday: '',
     occupation: '',
     interests: '',
-    contacts: ''
+    contacts: '',
+    notif_topic_reply: true,
+    notif_post_quoted: true,
+    notif_reputation: true,
+    notif_new_registration: true,
+    soundEnabled: false,
+    soundVolume: 40
   });
 
   // Reputation Voting State
@@ -203,7 +210,13 @@ const ProfilePage = () => {
         birthday: source.birthday || '',
         occupation: source.occupation || '',
         interests: source.interests || '',
-        contacts: source.contacts || ''
+        contacts: source.contacts || '',
+        notif_topic_reply: source.settings?.notifications?.topic_reply?.in_app !== false,
+        notif_post_quoted: source.settings?.notifications?.post_quoted?.in_app !== false,
+        notif_reputation:  source.settings?.notifications?.reputation_change?.in_app !== false,
+        notif_new_registration: source.settings?.notifications?.new_registration?.in_app !== false,
+        soundEnabled: source.settings?.sound?.enabled ?? false,
+        soundVolume:  source.settings?.sound?.volume  ?? 40
       });
       lastInitUidRef.current = source.uid;
     }
@@ -289,7 +302,17 @@ const ProfilePage = () => {
           language: accountFormData.language,
           signature: accountFormData.signature,
           rep_show_history: accountFormData.rep_show_history ?? true,
-          rep_show_comments: accountFormData.rep_show_comments ?? true
+          rep_show_comments: accountFormData.rep_show_comments ?? true,
+          notifications: {
+            topic_reply:       { in_app: accountFormData.notif_topic_reply },
+            post_quoted:       { in_app: accountFormData.notif_post_quoted },
+            reputation_change: { in_app: accountFormData.notif_reputation },
+            new_registration:  { in_app: accountFormData.notif_new_registration }
+          },
+          sound: {
+            enabled: accountFormData.soundEnabled,
+            volume:  accountFormData.soundVolume
+          }
         }
       };
       await updateProfile(updates, uid);
@@ -1266,6 +1289,91 @@ const ProfilePage = () => {
                           />
                         </>
                       )}
+
+                      {/* ── Notification Settings ───────────────────────── */}
+                      <hr className="my-4" />
+                      <h6 className="mb-1 text-primary small fw-bold d-flex align-items-center gap-2">
+                        <Bell size={15} /> {t('profile.notifications_section')}
+                      </h6>
+                      <p className="small text-muted mb-3" style={{ maxWidth: '480px' }}>
+                        {lang === 'ru'
+                          ? 'Выберите, какие события будут отображаться на странице уведомлений.'
+                          : 'Choose which events appear on your Notifications page.'}
+                      </p>
+                      <Form.Check
+                        type="switch"
+                        id="notif-topic-reply-switch"
+                        label={t('profile.notif_topic_reply')}
+                        className="mb-2"
+                        checked={accountFormData.notif_topic_reply}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, notif_topic_reply: e.target.checked })}
+                      />
+                      <Form.Check
+                        type="switch"
+                        id="notif-post-quoted-switch"
+                        label={t('profile.notif_post_quoted')}
+                        className="mb-2"
+                        checked={accountFormData.notif_post_quoted}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, notif_post_quoted: e.target.checked })}
+                      />
+                      <Form.Check
+                        type="switch"
+                        id="notif-reputation-switch"
+                        label={t('profile.notif_reputation')}
+                        className="mb-2"
+                        checked={accountFormData.notif_reputation}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, notif_reputation: e.target.checked })}
+                      />
+                      {(hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.DELETE_USERS)) && (
+                        <Form.Check
+                          type="switch"
+                          id="notif-new-registration-switch"
+                          label={t('profile.notif_new_registration')}
+                          className="mb-2"
+                          checked={accountFormData.notif_new_registration}
+                          onChange={(e) => setAccountFormData({ ...accountFormData, notif_new_registration: e.target.checked })}
+                        />
+                      )}
+
+                      {/* ── Sound Settings ──────────────────────────────── */}
+                      <hr className="my-4" />
+                      <h6 className="mb-1 text-primary small fw-bold d-flex align-items-center gap-2">
+                        <Volume2 size={15} /> {t('profile.sound_section')}
+                      </h6>
+                      <Form.Check
+                        type="switch"
+                        id="sound-enabled-switch"
+                        label={t('profile.sound_enabled')}
+                        className="mb-3"
+                        checked={accountFormData.soundEnabled}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, soundEnabled: e.target.checked })}
+                      />
+                      {accountFormData.soundEnabled && (
+                        <div className="mb-3" style={{ maxWidth: '360px' }}>
+                          <div className="d-flex align-items-center justify-content-between mb-1">
+                            <Form.Label className="small fw-bold mb-0">{t('profile.sound_volume')}</Form.Label>
+                            <span className="small text-muted">{accountFormData.soundVolume}%</span>
+                          </div>
+                          <Form.Range
+                            min={1}
+                            max={100}
+                            step={1}
+                            value={accountFormData.soundVolume}
+                            onChange={(e) => setAccountFormData({ ...accountFormData, soundVolume: Number(e.target.value) })}
+                          />
+                          <div className="d-flex justify-content-between" style={{ fontSize: '0.7rem', opacity: 0.5 }}>
+                            <span>1%</span><span>100%</span>
+                          </div>
+                        </div>
+                      )}
+                      <Button
+                        variant="outline-secondary"
+                        size="sm"
+                        className="d-flex align-items-center gap-2 mb-4"
+                        onClick={() => playNotificationSound(accountFormData.soundEnabled ? accountFormData.soundVolume : 40)}
+                      >
+                        <Volume2 size={14} /> {t('profile.sound_test')}
+                      </Button>
 
                       <Button variant="primary" onClick={handleSaveAccount} className="px-4">
                         {t('common.save')}

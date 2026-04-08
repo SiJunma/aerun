@@ -23,6 +23,7 @@ import {
   Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
   Dices, User, FilePen, MessageSquareOff
 } from 'lucide-react';
+import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNotifications } from '../api/notifications';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
@@ -82,6 +83,7 @@ const TopicPage = () => {
   // Subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [togglingSub, setTogglingSub] = useState(false);
+  const [unreadQuotes, setUnreadQuotes] = useState([]);
 
   // Move Topic state
   const [showMoveModal, setShowMoveModal] = useState(false);
@@ -144,6 +146,45 @@ const TopicPage = () => {
     const unsub = subscribeToTopicDraft(id, user.uid, setMyDraft);
     return () => unsub();
   }, [user, id]);
+
+  // Track unread quote notifications and clear them via IntersectionObserver
+  useEffect(() => {
+    if (!user || !id) return;
+    const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
+      const activeQuotes = notifs.filter(n => 
+        !n.read && n.type === 'post_quoted' && n.payload?.topic_id === id
+      );
+      setUnreadQuotes(activeQuotes);
+    });
+    return () => unsub();
+  }, [user, id]);
+
+  useEffect(() => {
+    if (unreadQuotes.length === 0 || posts.length === 0) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const postId = entry.target.id.replace('post-', '');
+          const matchingNotifs = unreadQuotes.filter(n => n.payload?.post_id === postId);
+          
+          if (matchingNotifs.length > 0) {
+            matchingNotifs.forEach(n => markNotificationRead(n.id));
+            setUnreadQuotes(prev => prev.filter(p => !matchingNotifs.some(m => m.id === p.id)));
+          }
+        }
+      });
+    }, { threshold: 0.1 });
+
+    unreadQuotes.forEach(n => {
+      if (n.payload?.post_id) {
+        const node = document.getElementById(`post-${n.payload.post_id}`);
+        if (node) observer.observe(node);
+      }
+    });
+
+    return () => observer.disconnect();
+  }, [unreadQuotes, posts]);
 
   // Subscribe to characters separately so we can unsubscribe properly
   useEffect(() => {
@@ -276,6 +317,7 @@ const TopicPage = () => {
         scrollBlock = 'center';
       } else if (!alreadyJumpedRef.current) {
         // Post not found on the current page - try to locate it across the database
+        alreadyJumpedRef.current = true;
         locatePost(queryPostId, ITEMS_PER_PAGE).then(result => {
           if (result.found) {
              if (result.topicId === id) {
@@ -289,8 +331,21 @@ const TopicPage = () => {
                navigate(`/topic/${result.topicId}?post=${queryPostId}`);
              }
           } else {
+             if (user?.uid) {
+               clearOrphanedPostNotifications(user.uid, queryPostId).catch(err => console.error('[Cleanup Orphaned Notification error]', err));
+             }
              setIsPageLoading(false);
              alreadyJumpedRef.current = true;
+
+             setSearchParams(prev => {
+               const params = new URLSearchParams(prev);
+               params.delete('post');
+               return params;
+             }, { replace: true, preventScrollReset: true });
+
+             setTimeout(() => {
+               showToast(lang === 'ru' ? 'Исходное сообщение было удалено' : 'The original post was deleted', 'warning');
+             }, 500);
           }
         }).catch(err => {
           console.error('[TopicPage navigation locator error]', err);
@@ -388,7 +443,7 @@ const TopicPage = () => {
         setIsPageLoading(false);
       }
     }
-  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested]);
+  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast]);
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;

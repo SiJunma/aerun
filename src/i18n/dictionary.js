@@ -223,6 +223,15 @@ export const translations = {
       contacts: "Contacts / Socials",
       bio_help: "A brief description of yourself.",
       contacts_help: "Discord, Telegram, links, etc.",
+      notifications_section: "Notifications",
+      notif_topic_reply: "Notify me about new posts in subscribed topics",
+      notif_post_quoted: "Notify me when my post is quoted",
+      notif_reputation: "Notify me about reputation changes",
+      notif_new_registration: "New user registration alerts",
+      sound_section: "Sound Notifications",
+      sound_enabled: "Play a sound on new notification",
+      sound_volume: "Volume",
+      sound_test: "Test sound",
     },
     dm: {
       tab_title: "Messages",
@@ -254,6 +263,7 @@ export const translations = {
       types: {
         new_registration: "New Registration",
         topic_reply: "{count} new replies in {topic}",
+        post_quoted: "Your post was quoted in {topic}",
         reputation_change: "Reputation change"
       },
       reputation_increased: "Your reputation was increased by {user}",
@@ -753,6 +763,15 @@ export const translations = {
       contacts: "Контакты / Соцсети",
       bio_help: "Краткое описание вашего профиля.",
       contacts_help: "Discord, Telegram, ссылки и т.д.",
+      notifications_section: "Уведомления",
+      notif_topic_reply: "Уведомлять о новых постах в подписанных темах",
+      notif_post_quoted: "Уведомлять, когда цитируют мой пост",
+      notif_reputation: "Уведомлять об изменении репутации",
+      notif_new_registration: "Уведомления о новых регистрациях",
+      sound_section: "Звуковые уведомления",
+      sound_enabled: "Воспроизводить звук при новом уведомлении",
+      sound_volume: "Громкость",
+      sound_test: "Тест звука",
     },
     dm: {
       tab_title: "Сообщения",
@@ -784,10 +803,11 @@ export const translations = {
       types: {
         new_registration: "Новая регистрация",
         topic_reply: "{count} новых ответов в теме {topic}",
+        post_quoted: "Ваш пост процитировали в {topic}",
         reputation_change: "Изменение репутации"
       },
-      reputation_increased: "Вам повысили репутацию. Автор:",
-      reputation_decreased: "Вам понизили репутацию. Автор:",
+      reputation_increased: "Вам повысили репутацию. Автор: {user}",
+      reputation_decreased: "Вам понизили репутацию. Автор: {user}",
       view_post: "Посмотреть сообщение →",
       view_profile: "Посмотреть свой профиль →",
       follow: "Подписаться",

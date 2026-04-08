@@ -3,7 +3,7 @@
     "firestore": {
       "collections": {
         "users": {
-          "description": "Registered users.",
+          "description": "Registered users. Logic: Users can edit their own profiles, but critical fields (role_id, post_count, reputation, join_date) are protected by Firestore rules from arbitrary modification.",
           "fields": {
             "uid": "string (document ID)",
             "email": "string",
@@ -167,7 +167,7 @@
           }
         },
         "reputation_logs": {
-          "description": "Reputation votes for posts or user profiles. Logic: Voting for banned or pending users is strictly blocked. Spectators can vote if permitted by UI.",
+          "description": "Reputation votes for posts or user profiles. Logic: Voting for banned or pending users is strictly blocked. Logs can be modified/deleted by Admins/Moderators, or by the recipient IF they are deleting their own associated post in the same transaction.",
           "fields": {
             "voter_id": "string (references users.uid)",
             "voter_nickname": "string",

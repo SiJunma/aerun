@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Navbar, Nav, Container, NavDropdown, Image, Badge, Button } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -6,6 +6,7 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { Bell, User, LogOut, MessageCircle } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
 import { subscribeToDmList } from '../../api/dms';
+import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
 
 const Navigation = () => {
@@ -60,6 +61,31 @@ const Navigation = () => {
   }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES, profile?.role_id]);
 
   const totalUnread = adminUnread + userUnread;
+
+  // ── Play sound when new notification arrives ─────────────────────
+  const prevTotalUnreadRef = useRef(totalUnread);
+  React.useEffect(() => {
+    const prev = prevTotalUnreadRef.current;
+    if (totalUnread > prev && profile?.settings?.sound?.enabled) {
+      playNotificationSound(profile.settings.sound.volume ?? 40);
+    }
+    prevTotalUnreadRef.current = totalUnread;
+  }, [totalUnread, profile?.settings?.sound?.enabled, profile?.settings?.sound?.volume]);
+
+  // ── Dynamic browser tab title ───────────────────────────────
+  React.useEffect(() => {
+    const rawName = settings?.forumName;
+    const baseName =
+      (typeof rawName === 'object' && rawName !== null)
+        ? (rawName[profile?.settings?.language] || rawName.ru || rawName.en || 'Forum')
+        : (rawName || 'Forum');
+
+    const totalBadge = totalUnread + dmUnread;
+    document.title = totalBadge > 0 ? `(${totalBadge}) ${baseName}` : baseName;
+
+    // When the component unmounts, restore a plain title
+    return () => { document.title = baseName; };
+  }, [totalUnread, dmUnread, settings?.forumName, profile?.settings?.language]);
 
   const handleLogout = async () => {
     await logout();

@@ -238,36 +238,67 @@ export const createPost = async (postData) => {
   // ── Trigger Notifications (Background) ──
   (async () => {
     try {
-      const subscribers = await getTopicSubscribers(postData.topic_id);
-      const filteredSubscribers = subscribers.filter(uid => uid !== postData.author_id);
-      
-      if (filteredSubscribers.length === 0) return;
-
       const topicSnap = await getDoc(doc(db, 'topics', postData.topic_id));
       const topicTitle = topicSnap.exists() ? topicSnap.data().title : 'Unknown Topic';
 
-      for (const recipientUid of filteredSubscribers) {
-        // Check for existing unread notification for this topic
-        const existing = await getUnreadTopicNotification(recipientUid, postData.topic_id);
-        
-        if (existing) {
-          // Merge: increment post_count, update created_at to bring to top
-          await updateNotificationPayload(existing.id, {
-            ...existing.payload,
-            post_count: (existing.payload?.post_count || 1) + 1,
-            last_post_id: postRef.id
-          }, true); // true = update created_at
-        } else {
-          // Create new
-          await createNotification('topic_reply', {
-            topic_id: postData.topic_id,
-            topic_title: topicTitle,
-            first_post_id: postRef.id,
-            last_post_id: postRef.id,
-            post_count: 1
-          }, recipientUid);
+      const subscribers = await getTopicSubscribers(postData.topic_id);
+      const filteredSubscribers = subscribers.filter(uid => uid !== postData.author_id);
+      
+      if (filteredSubscribers.length > 0) {
+        for (const recipientUid of filteredSubscribers) {
+          // Check for existing unread notification for this topic
+          const existing = await getUnreadTopicNotification(recipientUid, postData.topic_id);
+          
+          if (existing) {
+            // Merge: increment post_count, update created_at to bring to top
+            await updateNotificationPayload(existing.id, {
+              ...existing.payload,
+              post_count: (existing.payload?.post_count || 1) + 1,
+              last_post_id: postRef.id
+            }, true); // true = update created_at
+          } else {
+            // Create new
+            await createNotification('topic_reply', {
+              topic_id: postData.topic_id,
+              topic_title: topicTitle,
+              first_post_id: postRef.id,
+              last_post_id: postRef.id,
+              post_count: 1
+            }, recipientUid);
+          }
         }
       }
+
+      // 2. Quote Notifications
+      if (postData.content) {
+        const quoteRegex = /\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]+),([^\]]+)"\]/gi;
+        const quotedPostIds = new Set();
+        let match;
+        while ((match = quoteRegex.exec(postData.content)) !== null) {
+          quotedPostIds.add(match[1]);
+        }
+
+        for (const qPostId of quotedPostIds) {
+          try {
+            const qPostSnap = await getDoc(doc(db, 'posts', qPostId));
+            if (qPostSnap.exists()) {
+              const qPostData = qPostSnap.data();
+              const qAuthorId = qPostData.author_id;
+              
+              if (qAuthorId && qAuthorId !== postData.author_id) {
+                await createNotification('post_quoted', {
+                  topic_id: postData.topic_id,
+                  topic_title: topicTitle,
+                  post_id: postRef.id
+                }, qAuthorId);
+              }
+            }
+          } catch (e) {
+            console.error('[createPost quote notification error]', e);
+          }
+        }
+      }
+
     } catch (err) {
       console.error('[createPost notifications error]', err);
     }
@@ -388,28 +419,59 @@ export const publishDraft = async (uid, topicId) => {
   // ── Trigger Notifications (Background) ──
   (async () => {
     try {
+      // 1. Topic Reply Notifications
       const subscribers = await getTopicSubscribers(topicId);
       const filteredSubscribers = subscribers.filter(uid => uid !== postData.author_id);
 
-      if (filteredSubscribers.length === 0) return;
+      if (filteredSubscribers.length > 0) {
+        for (const recipientUid of filteredSubscribers) {
+          const existing = await getUnreadTopicNotification(recipientUid, topicId);
 
-      for (const recipientUid of filteredSubscribers) {
-        const existing = await getUnreadTopicNotification(recipientUid, topicId);
+          if (existing) {
+            await updateNotificationPayload(existing.id, {
+              ...existing.payload,
+              post_count: (existing.payload?.post_count || 1) + 1,
+              last_post_id: postRef.id
+            }, true);
+          } else {
+            await createNotification('topic_reply', {
+              topic_id: topicId,
+              topic_title: topicTitle,
+              first_post_id: postRef.id,
+              last_post_id: postRef.id,
+              post_count: 1
+            }, recipientUid);
+          }
+        }
+      }
 
-        if (existing) {
-          await updateNotificationPayload(existing.id, {
-            ...existing.payload,
-            post_count: (existing.payload?.post_count || 1) + 1,
-            last_post_id: postRef.id
-          }, true);
-        } else {
-          await createNotification('topic_reply', {
-            topic_id: topicId,
-            topic_title: topicTitle,
-            first_post_id: postRef.id,
-            last_post_id: postRef.id,
-            post_count: 1
-          }, recipientUid);
+      // 2. Quote Notifications
+      if (postData.content) {
+        const quoteRegex = /\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]+),([^\]]+)"\]/gi;
+        const quotedPostIds = new Set();
+        let match;
+        while ((match = quoteRegex.exec(postData.content)) !== null) {
+          quotedPostIds.add(match[1]);
+        }
+
+        for (const qPostId of quotedPostIds) {
+          try {
+            const qPostSnap = await getDoc(doc(db, 'posts', qPostId));
+            if (qPostSnap.exists()) {
+              const qPostData = qPostSnap.data();
+              const qAuthorId = qPostData.author_id;
+              
+              if (qAuthorId && qAuthorId !== postData.author_id) {
+                await createNotification('post_quoted', {
+                  topic_id: topicId,
+                  topic_title: topicTitle,
+                  post_id: postRef.id
+                }, qAuthorId);
+              }
+            }
+          } catch (e) {
+            console.error('[publishDraft quote notification error]', e);
+          }
         }
       }
     } catch (err) {
