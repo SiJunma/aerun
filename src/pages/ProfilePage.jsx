@@ -966,7 +966,7 @@ const ProfilePage = () => {
                                   )}
                                 </div>
                                 <div className="post-preview text-muted small text-break line-clamp-4">
-                                  <BBCode rolls={post.rolls}>{post.content}</BBCode>
+                                  <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
                                 </div>
                               </div>
                             );

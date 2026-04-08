@@ -40,7 +40,8 @@ export const PERMISSIONS = {
   DELETE_OTHERS_MASK: 'delete_others_mask',
   USE_DICE: 'use_dice',
   VIEW_MASTER_DICE: 'view_master_dice',
-  USE_DIRECT_MESSAGES: 'use_direct_messages'
+  USE_DIRECT_MESSAGES: 'use_direct_messages',
+  BYPASS_HIDE_TAGS: 'bypass_hide_tags'
 };
 
 export const CHIEF_ADMIN_ID = 'root';
@@ -81,6 +82,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.USE_DICE]: { en: 'Use Dice', ru: 'Использование кубиков' },
   [PERMISSIONS.VIEW_MASTER_DICE]: { en: 'View Master Dice', ru: 'Видеть мастерские кубики' },
   [PERMISSIONS.USE_DIRECT_MESSAGES]: { en: 'Use Direct Messages', ru: 'Личные сообщения' },
+  [PERMISSIONS.BYPASS_HIDE_TAGS]: { en: 'Bypass [hide] Tags', ru: 'Видеть скрытый контент ([hide])' },
   
   // Legacy mappings for backward compatibility with Firestore data
   'manage_settings': { en: 'Forum Settings', ru: 'Настройки форума' },
@@ -151,7 +153,8 @@ export const PERMISSION_GROUPS = [
       PERMISSIONS.DELETE_OTHERS_MASK,
       PERMISSIONS.USE_DICE,
       PERMISSIONS.VIEW_MASTER_DICE,
-      PERMISSIONS.USE_DIRECT_MESSAGES
+      PERMISSIONS.USE_DIRECT_MESSAGES,
+      PERMISSIONS.BYPASS_HIDE_TAGS
     ]
   }
 ];
@@ -211,7 +214,8 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.DELETE_OTHERS_MASK,
       PERMISSIONS.USE_DICE,
       PERMISSIONS.VIEW_MASTER_DICE,
-      PERMISSIONS.USE_DIRECT_MESSAGES
+      PERMISSIONS.USE_DIRECT_MESSAGES,
+      PERMISSIONS.BYPASS_HIDE_TAGS
     ]
   },
   {
@@ -240,7 +244,8 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.EDIT_SELF_NICKNAME,
       PERMISSIONS.EDIT_SELF_AVATAR,
       PERMISSIONS.EDIT_SELF_STATUS,
-      PERMISSIONS.EDIT_SELF_SIGNATURE
+      PERMISSIONS.EDIT_SELF_SIGNATURE,
+      PERMISSIONS.BYPASS_HIDE_TAGS
     ]
   },
   {
@@ -359,7 +364,8 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.CREATE_SELF_MASK,
     PERMISSIONS.DELETE_SELF_MASK,
     PERMISSIONS.USE_REPUTATION,
-    PERMISSIONS.USE_DIRECT_MESSAGES
+    PERMISSIONS.USE_DIRECT_MESSAGES,
+    PERMISSIONS.BYPASS_HIDE_TAGS
   ],
   admin: Object.values(PERMISSIONS)
 };

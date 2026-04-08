@@ -77,8 +77,8 @@ const ColumnsStacker = ({ children, stackAt }) => {
   );
 };
 
-const BBCode = ({ children, rolls = {} }) => {
-  const { hasPermission, PERMISSIONS, settings } = useAuth() || {};
+const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
+  const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
   const { t, lang } = useI18n();
   if (typeof children !== 'string') return children;
 
@@ -108,7 +108,7 @@ const BBCode = ({ children, rolls = {} }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -494,6 +494,63 @@ const BBCode = ({ children, rolls = {} }) => {
           );
         }
         return <a key={index} href={urlRaw} target="_blank" rel="noopener noreferrer">{urlRaw}</a>;
+      }
+      case 'hide': {
+        if (isDM) return node.children.map(renderNode);
+
+        const threshold = params.default || 'hidden';
+        const canBypass = (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) || (user && user.uid === authorId);
+        const userPosts = profile?.post_count || profile?.postCount || user?.post_count || user?.postCount || 0;
+
+        let isVisible = canBypass;
+        let thresholdNum = 0;
+
+        if (!isVisible) {
+          if (threshold === 'hidden') {
+            isVisible = false;
+          } else {
+            thresholdNum = parseInt(threshold, 10);
+            if (!isNaN(thresholdNum)) {
+              isVisible = userPosts >= thresholdNum;
+            } else {
+              isVisible = true; // Fallback if param is garbage
+            }
+          }
+        }
+
+        if (isVisible) {
+          return (
+            <div key={index} className="bbcode-hide-container">
+              <div className="bbcode-hide-header">
+                <EyeOff size={14} /> {t('forum.hidden_content')} {isVisible && user && user.uid !== authorId && (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) && <span className="opacity-50 ms-1">(Admin View)</span>}
+                {user && user.uid === authorId && <span className="opacity-50 ms-1">({lang === 'ru' ? 'Автор' : 'Author'})</span>}
+              </div>
+              <div className="bbcode-hide-content">
+                {node.children.map(renderNode)}
+              </div>
+            </div>
+          );
+        } else {
+          const remainingPosts = thresholdNum - userPosts;
+          return (
+            <div key={index} className="bbcode-hide-placeholder shadow-sm">
+              <div className="bbcode-hide-placeholder-icon">
+                <EyeOff size={24} />
+              </div>
+              <div className="bbcode-hide-placeholder-info">
+                <div className="bbcode-hide-placeholder-title">{t('forum.hidden_content')}</div>
+                <div className="bbcode-hide-placeholder-hint">
+                  {threshold === 'hidden' 
+                    ? t('forum.hide_moderator_only') 
+                    : (remainingPosts > 0 
+                        ? t('forum.hide_posts_remaining', { n: remainingPosts }) 
+                        : t('forum.hide_posts_needed', { n: thresholdNum }))
+                  }
+                </div>
+              </div>
+            </div>
+          );
+        }
       }
       default: return <span key={index}>{content}</span>;
     }

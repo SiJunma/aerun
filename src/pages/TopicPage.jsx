@@ -1311,7 +1311,7 @@ const TopicPage = () => {
                         </div>
                       ) : (
                         <div className="post-content">
-                          <BBCode rolls={post.rolls}>{post.content}</BBCode>
+                          <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
                           {post.rolls && Object.keys(post.rolls).length > 0 && (
                             <div className="mt-2 small d-flex align-items-center gap-1" style={{ color: 'var(--secondary-color)' }}>
                               <Dices size={14} />
@@ -1622,7 +1622,7 @@ const TopicPage = () => {
                       </div>
                     ) : (
                       <div className="post-content">
-                        <BBCode rolls={myDraft.rolls}>{myDraft.content}</BBCode>
+                        <BBCode rolls={myDraft.rolls} authorId={myDraft.author_id || user?.uid}>{myDraft.content}</BBCode>
                       </div>
                     )}
                     {!editingPostId && getLiveAuthorSignature(myDraft) && (

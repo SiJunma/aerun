@@ -348,7 +348,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                         }}
                       >
-                        <div className="w-100"><BBCode rolls={allConversationRolls}>{msg.text}</BBCode></div>
+                        <div className="w-100"><BBCode rolls={allConversationRolls} isDM={true}>{msg.text}</BBCode></div>
                         <div
                           className="text-end mt-1"
                           style={{ fontSize: '0.875rem', opacity: 0.6 }}
@@ -389,6 +389,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   showDice={hasPermission && hasPermission(PERMISSIONS.USE_DICE)}
                   hideDiceType={true}
                   isEdit={false}
+                  showHide={false}
                 />
               </div>
               <div className="d-flex justify-content-end">

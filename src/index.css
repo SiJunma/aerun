@@ -1001,6 +1001,67 @@ label.fw-bold {
   background: var(--card-bg);
 }
 
+/* Hide Tag Styles */
+.bbcode-hide-container {
+  border: 1px dashed var(--secondary-color);
+  background: rgba(var(--secondary-rgb, 100, 100, 100), 0.05);
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+
+.bbcode-hide-header {
+  background: rgba(var(--primary-rgb, 100, 100, 100), 0.1);
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: var(--primary-color);
+  border-bottom: 1px dashed rgba(var(--primary-rgb, 100, 100, 100), 0.2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bbcode-hide-content {
+  padding: 12px;
+}
+
+.bbcode-hide-placeholder {
+  border: 1px dashed var(--secondary-color);
+  background: rgba(var(--secondary-rgb, 100, 100, 100), 0.08);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 0.5rem 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-color);
+  opacity: 0.95;
+}
+
+.bbcode-hide-placeholder-icon {
+  color: var(--secondary-color);
+  flex-shrink: 0;
+}
+
+.bbcode-hide-placeholder-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.bbcode-hide-placeholder-title {
+  font-weight: bold;
+  font-size: 0.9rem;
+  margin-bottom: 2px;
+  color: var(--primary-color);
+}
+
+.bbcode-hide-placeholder-hint {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
 
 
 /* Admin Styling */

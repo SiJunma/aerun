@@ -4,8 +4,9 @@ import ForumModal from './ForumModal';
 import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard, Youtube, EyeOff } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 
-const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false }) => {
-  const { lang } = useI18n();
+const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false, showHide = true }) => {
+    const { lang, t } = useI18n();
+
   const textareaRef = useRef(null);
 
   // Modals state
@@ -14,7 +15,10 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
   const [linkData, setLinkData] = useState({ text: '', url: 'https://' });
   const [imageData, setImageData] = useState({ alt: '', url: 'https://' });
   const [showDiceModal, setShowDiceModal] = useState(false);
-  const [diceData, setDiceData] = useState({ sides: 6, type: 'normal' });
+    const [diceData, setDiceData] = useState({ sides: 6, type: 'normal' });
+  const [showHideModal, setShowHideModal] = useState(false);
+  const [hideData, setHideData] = useState({ threshold: '10', type: 'posts' });
+
 
   // Undo/Redo history
   const [history, setHistory] = useState([value]);
@@ -326,6 +330,43 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
     }, 0);
   };
 
+  const handleHideSubmit = (e) => {
+    e.preventDefault();
+    const capturedHideData = { ...hideData };
+    setShowHideModal(false);
+
+    setTimeout(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = latestValueRef.current;
+      const currentScrollTop = textarea.scrollTop;
+      const selected = text.substring(start, end);
+
+      const val = capturedHideData.type === 'posts' ? (capturedHideData.threshold || '10') : 'hidden';
+      const replacement = `[hide=${val}]${selected}[/hide]`;
+      const newValue = text.substring(0, start) + replacement + text.substring(end);
+
+      let newHistory = history.slice(0, historyIndex + 1);
+      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
+      newHistory.push(newValue);
+      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+      lastHistoryPushTime.current = Date.now();
+
+      isInternalUpdate.current = true;
+      onChange({ target: { value: newValue } });
+
+      textarea.focus();
+      const newCursorPos = start + (`[hide=${val}]`).length + selected.length + (`[/hide]`).length;
+      const cursorPos = selected.length > 0 ? newCursorPos : start + (`[hide=${val}]`).length;
+      textarea.setSelectionRange(cursorPos, cursorPos);
+      textarea.scrollTop = currentScrollTop;
+    }, 0);
+  };
+
   return (
     <div className="rich-editor-container">
       <div className="d-flex flex-wrap gap-1 mb-2 p-2 rounded editor-toolbar-themed editor-toolbar">
@@ -414,11 +455,22 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
           </Dropdown.Menu>
         </Dropdown>
 
+        <div className="vr mx-1"></div>
+
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'columns')} title={lang === 'ru' ? 'Колонки' : 'Columns'}><Columns size={16} /></Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'spoiler')} title={lang === 'ru' ? 'Спойлер' : 'Spoiler'}><Clapperboard size={15} /></Button>
-        <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[video]', '[/video]')} title={lang === 'ru' ? 'Видео' : 'Video'}><Youtube size={16} /></Button>
+        <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[video]', '[/video]')} title={lang === 'ru' ? 'Видео' : 'Video'}>
+          <Youtube size={16} />
+        </Button>
         {showDice && !isEdit && (
-          <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}><Dices size={16} /></Button>
+          <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title={lang === 'ru' ? 'Бросить кубик' : 'Roll Dice'}>
+            <Dices size={16} />
+          </Button>
+        )}
+        {showHide && (
+          <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowHideModal(true)} title={t('editor.hide')}>
+            <EyeOff size={16} />
+          </Button>
         )}
 
         <div className="vr mx-1"></div>
@@ -601,6 +653,66 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
             </Form.Select>
           </Form.Group>
         )}
+      </ForumModal>
+
+      {/* Hide Modal */}
+      <ForumModal
+        show={showHideModal}
+        onHide={() => setShowHideModal(false)}
+        title={t('editor.hide_modal_title')}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowHideModal(false)}>
+              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+            </Button>
+            <Button variant="primary" onClick={handleHideSubmit}>
+              {t('editor.hide_insert')}
+            </Button>
+          </>
+        }
+      >
+        <Form onSubmit={handleHideSubmit}>
+          <div className="mb-3 p-3 rounded" style={{ backgroundColor: 'rgba(var(--primary-rgb, 13, 110, 253), 0.05)', border: '1px solid var(--border-color)' }}>
+            <Form.Check
+              type="radio"
+              id="hide-type-posts"
+              label={t('editor.hide_threshold')}
+              name="hideType"
+              checked={hideData.type === 'posts'}
+              onChange={() => setHideData(prev => ({ ...prev, type: 'posts' }))}
+              className="fw-bold mb-2 cursor-pointer"
+            />
+            {hideData.type === 'posts' && (
+              <div className="ms-4">
+                <Form.Control
+                  type="number"
+                  value={hideData.threshold}
+                  onChange={(e) => setHideData(prev => ({ ...prev, threshold: e.target.value }))}
+                  min="1"
+                  placeholder="10"
+                  className="modal-section-themed"
+                  style={{ width: '120px' }}
+                  autoFocus
+                />
+              </div>
+            )}
+            
+            <Form.Check
+              type="radio"
+              id="hide-type-hidden"
+              label={t('editor.hide_hidden')}
+              name="hideType"
+              checked={hideData.type === 'hidden'}
+              onChange={() => setHideData(prev => ({ ...prev, type: 'hidden' }))}
+              className="fw-bold mt-3 cursor-pointer"
+            />
+          </div>
+          <p className="small text-muted mb-0">
+            {lang === 'ru' 
+              ? 'Текст внутри тега будет скрыт от пользователей, не соответствующих условиям.' 
+              : 'Text inside the tag will be hidden from users who do not meet the requirements.'}
+          </p>
+        </Form>
       </ForumModal>
     </div>
   );
