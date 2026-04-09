@@ -58,6 +58,7 @@ const TopicPage = () => {
   // Edit state
   const [editingPostId, setEditingPostId] = useState(null);
   const [editContent, setEditContent] = useState('');
+  const [editCharacterId, setEditCharacterId] = useState('');
   // Extra fields when editing the first post (topic title/description)
   const [editTopicTitle, setEditTopicTitle] = useState('');
   const [editTopicDescription, setEditTopicDescription] = useState('');
@@ -709,9 +710,20 @@ const TopicPage = () => {
     if (!editContent.trim() || draftSaving) return;
     setDraftSaving(true);
     try {
-      await updateDraftPost(user.uid, id, editContent.trim());
+      const selectedChar = characters.find(c => c.id === editCharacterId);
+      const metadata = {
+        author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
+        author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
+        author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
+        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
+        is_character: !!selectedChar,
+        author_character_id: editCharacterId || null
+      };
+
+      await updateDraftPost(user.uid, id, editContent.trim(), metadata);
       setEditingPostId(null);
       setEditContent('');
+      setEditCharacterId('');
       showToast(t('forum.draft_updated'));
     } catch (err) {
       console.error(err);
@@ -750,6 +762,7 @@ const TopicPage = () => {
   const handleStartEdit = (post, isFirst = false) => {
     setEditingPostId(post.id);
     setEditContent(post.content);
+    setEditCharacterId(post.author_character_id || '');
     setEditingFirstPost(isFirst);
     if (isFirst && topic) {
       setEditTopicTitle(topic.title || '');
@@ -762,7 +775,22 @@ const TopicPage = () => {
     recordActivity();
     try {
       const originalPost = posts.find(p => p.id === postId);
-      await updatePost(postId, editContent.trim(), {}, user.uid, originalPost?.author_id);
+      
+      let metadata = {};
+      // If the character ID has changed, we must update the "frozen" display fields
+      if (editCharacterId !== (originalPost?.author_character_id || '')) {
+        const selectedChar = characters.find(c => c.id === editCharacterId);
+        metadata = {
+          author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
+          author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
+          author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
+          author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
+          is_character: !!selectedChar,
+          author_character_id: editCharacterId || null
+        };
+      }
+
+      await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id);
       if (editingFirstPost && topic) {
         await updateTopic(topic.id, {
           title: editTopicTitle.trim() || topic.title,
@@ -771,6 +799,7 @@ const TopicPage = () => {
       }
       setEditingPostId(null);
       setEditContent('');
+      setEditCharacterId('');
       setEditingFirstPost(false);
       setEditTopicTitle('');
       setEditTopicDescription('');
@@ -1289,6 +1318,39 @@ const TopicPage = () => {
                             </div>
                           )}
                           <div className="mb-2">
+                            <Dropdown className="mb-2 w-auto">
+                              <Dropdown.Toggle 
+                                variant="outline-management" 
+                                size="sm"
+                                className="d-flex align-items-center gap-2 custom-select-toggle"
+                              >
+                                <User size={14} />
+                                <span className="text-truncate" style={{ maxWidth: '200px' }}>
+                                  {editCharacterId 
+                                    ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
+                                    : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                                  }
+                                </span>
+                              </Dropdown.Toggle>
+                              <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                                <Dropdown.Item 
+                                  active={editCharacterId === ''}
+                                  onClick={() => setEditCharacterId('')}
+                                >
+                                  {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
+                                </Dropdown.Item>
+                                {characters.length > 0 && <Dropdown.Divider />}
+                                {characters.map(char => (
+                                  <Dropdown.Item 
+                                    key={char.id}
+                                    active={editCharacterId === char.id}
+                                    onClick={() => setEditCharacterId(char.id)}
+                                  >
+                                    {t('forum.post_as_character')}: {char.name}
+                                  </Dropdown.Item>
+                                ))}
+                              </Dropdown.Menu>
+                            </Dropdown>
                             <RichEditor
                               id="editContent"
                               value={editContent}
@@ -1593,8 +1655,41 @@ const TopicPage = () => {
                 <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
                   <div className="flex-grow-1">
                     {editingPostId === myDraft.id ? (
-                      <div>
+                      <div className="pb-3">
                         <div className="mb-2">
+                          <Dropdown className="mb-2 w-auto">
+                            <Dropdown.Toggle 
+                              variant="outline-management" 
+                              size="sm"
+                              className="d-flex align-items-center gap-2 custom-select-toggle"
+                            >
+                              <User size={14} />
+                              <span className="text-truncate" style={{ maxWidth: '200px' }}>
+                                {editCharacterId 
+                                  ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
+                                  : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                                }
+                              </span>
+                            </Dropdown.Toggle>
+                            <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                              <Dropdown.Item 
+                                active={editCharacterId === ''}
+                                onClick={() => setEditCharacterId('')}
+                              >
+                                {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
+                              </Dropdown.Item>
+                              {characters.length > 0 && <Dropdown.Divider />}
+                              {characters.map(char => (
+                                <Dropdown.Item 
+                                  key={char.id}
+                                  active={editCharacterId === char.id}
+                                  onClick={() => setEditCharacterId(char.id)}
+                                >
+                                  {t('forum.post_as_character')}: {char.name}
+                                </Dropdown.Item>
+                              ))}
+                            </Dropdown.Menu>
+                          </Dropdown>
                           <RichEditor
                             id="draftEditContent"
                             value={editContent}
@@ -1634,9 +1729,8 @@ const TopicPage = () => {
                 </div>
 
                 {/* Draft Management Links (Aligned with post footer) */}
-                <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed post-footer-links">
-                  {/* Delete — allowed even on locked topics */}
-                  {!editingPostId && (
+                {!editingPostId && (
+                  <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed post-footer-links">
                     <Button
                       variant="link"
                       size="sm"
@@ -1645,9 +1739,6 @@ const TopicPage = () => {
                     >
                       {t('common.delete')}
                     </Button>
-                  )}
-                  {/* Edit */}
-                  {!editingPostId && (
                     <Button
                       variant="link"
                       size="sm"
@@ -1656,9 +1747,6 @@ const TopicPage = () => {
                     >
                       {t('common.edit')}
                     </Button>
-                  )}
-                  {/* Publish */}
-                  {!editingPostId && (
                     <Button
                       variant="link"
                       size="sm"
@@ -1669,8 +1757,8 @@ const TopicPage = () => {
                       <Send size={12} className="me-1" />
                       {draftSaving ? t('forum.draft_publishing') : t('forum.draft_publish')}
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           </Card.Body>
