@@ -108,11 +108,26 @@ const Navigation = () => {
     >
       <Container className="d-flex align-items-center">
         <div className="d-flex align-items-center">
-          <Navbar.Toggle 
-            aria-controls="basic-navbar-nav" 
-            className="me-2 border-0 p-1"
-            onClick={() => setExpanded(!expanded)}
-          />
+          <div className="position-relative">
+            <Navbar.Toggle 
+              aria-controls="basic-navbar-nav" 
+              className="me-2 border-0 p-1"
+              onClick={() => setExpanded(!expanded)}
+            />
+            {unreadTopicsCount > 0 && (
+              <span 
+                className="position-absolute rounded-circle bg-warning shadow-sm" 
+                style={{ 
+                  width: '10px', 
+                  height: '10px', 
+                  top: '5px', 
+                  right: '11px', 
+                  border: '2px solid var(--nav-bg)',
+                  pointerEvents: 'none'
+                }}
+              />
+            )}
+          </div>
           <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="d-flex align-items-center gap-2">
             {settings?.logoUrl && (
               <img 
