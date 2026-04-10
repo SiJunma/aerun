@@ -112,6 +112,7 @@ const TopicRow = ({
                 isCharacter={!!topic.is_character}
                 authorName={topic.author_name}
                 authorAvatar={topic.author_avatar}
+                showAvatar={false}
                 lang={lang}
               />
             </div>

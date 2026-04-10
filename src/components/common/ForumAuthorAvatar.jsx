@@ -64,7 +64,7 @@ const ForumAuthorAvatar = ({
     );
   }
 
-  const placeholder = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName || '?')}&background=random&size=${size}`;
+  const placeholder = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName || 'Guest')}&size=${size}`;
   const finalAvatar = avatarUrl || initialAvatar || placeholder;
 
   // Dot size scales with avatar: small avatars get a smaller dot

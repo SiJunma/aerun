@@ -1,0 +1,84 @@
+.scroll-buttons-container {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 1050;
+}
+
+.scroll-edge-btn {
+  width: 36px;
+  height: 36px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0.7;
+}
+
+.scroll-edge-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* Light Theme - Clean Monochrome Frosted Glass */
+[data-theme='light'] .scroll-edge-btn {
+  background: rgba(255, 255, 255, 0.5);
+  color: #334155; /* Slate 700 / dark grey */
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme='light'] .scroll-edge-btn:hover {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+/* Dark Theme - Soft Bluish Frosted Glass */
+[data-theme='dark'] .scroll-edge-btn {
+  background: rgba(30, 41, 59, 0.4); /* Slate 800 transparent */
+  color: #93c5fd; /* Soft light blue */
+  border: 1px solid rgba(147, 197, 253, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme='dark'] .scroll-edge-btn:hover {
+  background: rgba(51, 65, 85, 0.6); /* Slate 700 */
+  border-color: rgba(147, 197, 253, 0.3);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+/* Neutral (Sepia) Theme - Warm Amber/Brown */
+[data-theme='neutral'] .scroll-edge-btn {
+  background: rgba(210, 180, 140, 0.25);
+  color: #8b4513;
+  border: 1px solid rgba(139, 69, 19, 0.2);
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.1);
+}
+
+[data-theme='neutral'] .scroll-edge-btn:hover {
+  background: rgba(210, 180, 140, 0.4);
+  border-color: rgba(139, 69, 19, 0.4);
+  box-shadow: 0 4px 15px rgba(139, 69, 19, 0.2);
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .scroll-buttons-container {
+    bottom: 12px;
+    right: 12px;
+    gap: 8px;
+  }
+
+  .scroll-edge-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .scroll-edge-btn svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+}

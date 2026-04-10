@@ -18,6 +18,7 @@ import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
+import { resolveField } from '../utils/text';
 import { useToast } from '../contexts/ToastProvider';
 
 const CategoryPage = () => {
@@ -58,13 +59,10 @@ const CategoryPage = () => {
     };
   }, [id]);
 
-  const resolveText = (field) =>
-    typeof field === 'object' && field !== null
-      ? (lang === 'ru' ? field.ru : field.en) || ''
-      : field || '';
 
 
-  const categoryTitle = category ? resolveText(category.title) : <Skeleton width={150} height="1.5rem" />;
+
+  const categoryTitle = category ? resolveField(category.title, lang) : <Skeleton width={150} height="1.5rem" />;
 
   // Pagination logic
   const totalPages = Math.ceil(topics.length / ITEMS_PER_PAGE);
@@ -158,7 +156,7 @@ const CategoryPage = () => {
             <Skeleton width={250} height="1rem" className="mt-2" />
           ) : category.description && (
             <div className="text-muted mb-0" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
-              {resolveText(category.description)}
+              {resolveField(category.description, lang)}
             </div>
           )}
         </div>
@@ -190,7 +188,7 @@ const CategoryPage = () => {
         </div>
       </div>
 
-      <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
+      <Card className={`mb-4 overflow-hidden forum-group-card ${!loading && topics.length === 0 ? '' : 'border-0 bg-transparent shadow-none'}`}>
         {loading ? (
           <div className="p-0">
             <Table hover responsive className="mb-0 align-middle forum-table">

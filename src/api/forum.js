@@ -93,7 +93,7 @@ export const createTopic = async (topicData, firstPostData) => {
   await runTransaction(db, async (transaction) => {
     const postRef = doc(collection(db, 'posts'));
     const categoryRef = doc(db, 'categories', topicData.category_id);
-    const userRef = doc(db, 'users', topicData.author_id);
+    const userRef = topicData.author_id ? doc(db, 'users', topicData.author_id) : null;
 
     transaction.set(topicRef, {
       ...topicData,
@@ -134,7 +134,7 @@ export const createTopic = async (topicData, firstPostData) => {
     });
 
     // Increment the author's post_count
-    transaction.update(userRef, { post_count: increment(1) });
+    if (userRef) transaction.update(userRef, { post_count: increment(1) });
   });
 
   return topicRef.id;
@@ -191,7 +191,7 @@ export const createPost = async (postData) => {
   
   await runTransaction(db, async (transaction) => {
     const topicRef = doc(db, 'topics', postData.topic_id);
-    const userRef = doc(db, 'users', postData.author_id);
+    const userRef = postData.author_id ? doc(db, 'users', postData.author_id) : null;
 
     // Need to read topic first to get category_id
     const topicSnap = await transaction.get(topicRef);
@@ -232,11 +232,12 @@ export const createPost = async (postData) => {
     }
 
     // Increment the author's post_count
-    transaction.update(userRef, { post_count: increment(1) });
+    if (userRef) transaction.update(userRef, { post_count: increment(1) });
   });
 
   // ── Trigger Notifications (Background) ──
   (async () => {
+    if (!postData.author_id) return; // Guests cannot trigger notifications
     try {
       const topicSnap = await getDoc(doc(db, 'topics', postData.topic_id));
       const topicTitle = topicSnap.exists() ? topicSnap.data().title : 'Unknown Topic';
@@ -418,6 +419,7 @@ export const publishDraft = async (uid, topicId) => {
 
   // ── Trigger Notifications (Background) ──
   (async () => {
+    if (!postData.author_id) return; // Guests cannot trigger notifications
     try {
       // 1. Topic Reply Notifications
       const subscribers = await getTopicSubscribers(topicId);
@@ -573,7 +575,7 @@ export const updateTopic = async (topicId, data, performerId, authorId) => {
 export const deletePost = async (post, performerId) => {
   const postRef = doc(db, 'posts', post.id);
   const topicRef = doc(db, 'topics', post.topic_id);
-  const userRef = doc(db, 'users', post.author_id);
+  const userRef = post.author_id ? doc(db, 'users', post.author_id) : null;
 
   if (performerId && performerId !== post.author_id) {
     await logAdminAction('post_deleted_by_admin', performerId, { targetId: post.id, topicId: post.topic_id, authorId: post.author_id });
@@ -609,9 +611,9 @@ export const deletePost = async (post, performerId) => {
     categoryId = topicData.category_id;
     isLastPost = (topicData.posts_count ?? 1) <= 1;
 
-    const userSnap = await transaction.get(userRef);
+    const userSnap = userRef ? await transaction.get(userRef) : null;
     transaction.delete(postRef);
-    if (userSnap.exists()) {
+    if (userSnap && userSnap.exists()) {
       transaction.update(userRef, { 
         post_count: increment(-1),
         reputation: increment(-totalRepChange)

@@ -2600,7 +2600,11 @@ a.badge.bg-danger:hover {
   border-bottom: 1px solid var(--border-color) !important;
   font-size: 0.9rem;
   font-weight: 600;
-  padding: 0.85rem 1.25rem !important;
+  padding: 0.75rem 1rem !important;
+}
+
+.forum-table td {
+  padding: 1rem 1rem !important;
 }
 
 .forum-table-sub thead th {
@@ -2851,4 +2855,4 @@ a.badge.bg-danger:hover {
 
 .min-w-0 {
   min-width: 0 !important;
-}
+}

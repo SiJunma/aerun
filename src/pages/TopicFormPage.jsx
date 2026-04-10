@@ -9,6 +9,7 @@ import { subscribeToCategories } from '../api/categories';
 import { createTopic, updateUser } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import { resolveField } from '../utils/text';
 
 const TopicFormPage = () => {
   const { categoryId } = useParams();
@@ -130,9 +131,7 @@ const TopicFormPage = () => {
     }
   };
 
-  const categoryTitle = category ? (
-    typeof category.title === 'object' ? (lang === 'ru' ? category.title.ru : category.title.en) : category.title
-  ) : '...';
+  const categoryTitle = category ? resolveField(category.title, lang) : '...';
 
   if (!category) {
     return (

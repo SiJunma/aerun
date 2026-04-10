@@ -7,6 +7,7 @@ import { subscribeToCategories } from '../api/categories';
 import { subscribeToTopTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import { resolveField } from '../utils/text';
 
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
@@ -31,7 +32,7 @@ const ActiveTopicsPage = () => {
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);
     if (!cat) return '';
-    return typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title;
+    return resolveField(cat.title, lang);
   };
 
   const visibleTopics = topics.filter(topic => {
@@ -66,10 +67,10 @@ const ActiveTopicsPage = () => {
           <Table hover responsive className="mb-0 align-middle forum-table">
             <thead>
               <tr>
-                <th style={{ width: '40%' }}>{t('forum.topic')}</th>
-                <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category')}</th>
+                <th style={{ width: '40%' }} className="text-start">{t('forum.topic')}</th>
+                <th className="d-none d-md-table-cell text-start" style={{ width: '15%' }}>{t('forum.category')}</th>
                 <th className="text-center">{t('forum.replies')}</th>
-                <th>{t('forum.last_post')}</th>
+                <th className="text-start">{t('forum.last_post')}</th>
               </tr>
             </thead>
             <tbody>

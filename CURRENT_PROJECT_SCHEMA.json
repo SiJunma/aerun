@@ -105,7 +105,7 @@
             "posts_count": "number",
             "last_post_at": "serverTimestamp",
             "last_post_author": "string",
-            "last_post_author_id": "string (references users.uid)",
+            "last_post_author_id": "string (references users.uid, null for guest posts)",
             "last_post_author_avatar": "string",
             "last_post_topic_id": "string (references topics.id)",
             "last_post_topic_title": "string",
@@ -121,8 +121,8 @@
             "category_id": "string (references categories.id)",
             "title": "string",
             "description": "string",
-            "author_id": "string (references users.uid)",
-            "author_name": "string",
+            "author_id": "string (references users.uid, null for guest topics)",
+            "author_name": "string (used as nickname for guests)",
             "author_avatar": "string",
             "is_character": "boolean",
             "author_character_id": "string (references users.uid/characters.id)",
@@ -145,8 +145,8 @@
           "description": "Individual replies within topics. Logic: Authors can delete their own post unless the topic is locked. Admin/Moderator can delete any.",
           "fields": {
             "topic_id": "string (references topics.id)",
-            "author_id": "string (references users.uid)",
-            "author_name": "string",
+            "author_id": "string (references users.uid, null for guest posts)",
+            "author_name": "string (used as nickname for guests)",
             "author_avatar": "string",
             "is_character": "boolean",
             "author_character_id": "string (references users.uid/characters.id)",
@@ -237,6 +237,15 @@
             "last_seen": "serverTimestamp"
           }
         }
+      },
+      "security_rules_logic": {
+        "description": "Custom security logic for guest-enabled posting and granular permissions.",
+        "helpers": {
+          "getRole": "Returns 'guest' for unauthenticated users, or the User's role_id.",
+          "hasCategoryPermission": "Checks if a specific permission (e.g., 'post_reply') is granted to the current role within a category document's permissions map.",
+          "isTopicOpen": "Ensures the topic is not locked (supports both existing and newly created topics in transactions via getAfter)."
+        },
+        "guest_posting": "Guests (unauthenticated users) are allowed to create topics and posts ONLY in categories where the 'guest' role is explicitly listed in the corresponding category permission array. Guests are also permitted to update denormalized metadata (counters, last post authors) during these operations."
       }
     }
   },

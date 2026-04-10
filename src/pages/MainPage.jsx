@@ -8,6 +8,7 @@ import { subscribeToCategories, subscribeToCategoryGroups } from '../api/categor
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
+import { resolveField } from '../utils/text';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
@@ -108,7 +109,7 @@ const MainPage = () => {
           <Card key={group.id} className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
             <div className="d-flex align-items-center forum-group-header">
               <h4 className="mb-0">
-                {group.title?.[lang] || group.title?.en}
+                {resolveField(group.title, lang)}
               </h4>
             </div>
             <Table hover responsive className="mb-0 forum-table forum-table-sub">
@@ -127,10 +128,10 @@ const MainPage = () => {
                     <tr key={cat.id}>
                       <td data-label={t('forum.category')}>
                         <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1 cat-link">
-                          {typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title}
+                          {resolveField(cat.title, lang)}
                         </Link>
                         <div className="text-muted cat-desc" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
-                          {typeof cat.description === 'object' ? (lang === 'ru' ? cat.description.ru : cat.description.en) : cat.description}
+                          {resolveField(cat.description, lang)}
                         </div>
                         {/* Mobile Stats Line */}
                         <div className="d-md-none mt-2 d-flex gap-3 small forum-mobile-stats text-muted">

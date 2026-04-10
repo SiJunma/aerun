@@ -29,7 +29,7 @@ const AuthorMeta = ({
       <span className="d-none d-sm-inline">·</span>
       
       <div className="d-flex align-items-center gap-2">
-        {showAvatar && authorId && (
+        {showAvatar && (
           <ForumAuthorAvatar
             userId={authorId}
             characterId={authorCharacterId}

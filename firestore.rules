@@ -40,9 +40,45 @@ service cloud.firestore {
       return isSignedIn() && hasPermission('moderate_content');
     }
 
+    function getTopicData(topicId) {
+      return exists(/databases/$(database)/documents/topics/$(topicId)) ? 
+        get(/databases/$(database)/documents/topics/$(topicId)).data : 
+        getAfter(/databases/$(database)/documents/topics/$(topicId)).data;
+    }
+
     function isTopicOpen(topicId) {
-      let tData = get(/databases/$(database)/documents/topics/$(topicId)).data;
+      let tData = getTopicData(topicId);
       return !('is_locked' in tData) || tData.is_locked == false;
+    }
+
+    function getRole() {
+      return !isSignedIn() ? 'guest' : getUser().data.role_id;
+    }
+
+    function isBanned() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'banned';
+    }
+
+    function isPending() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'pending';
+    }
+
+    function hasCategoryPermission(catId, permission) {
+      let role = getRole();
+      return permission in get(/databases/$(database)/documents/categories/$(catId)).data.permissions && 
+             role in get(/databases/$(database)/documents/categories/$(catId)).data.permissions[permission];
+    }
+
+    function canCreateTopic(catId) {
+      return (isActive() || !isSignedIn()) && !isBanned() && !isPending() && hasCategoryPermission(catId, 'create_topic');
+    }
+
+    function canPostToTopic(topicId) {
+      let tData = getTopicData(topicId);
+      return (isActive() || !isSignedIn()) && !isBanned() && !isPending() && 
+             hasCategoryPermission(tData.category_id, 'post_reply') && 
+             (!('is_locked' in tData) || tData.is_locked == false) &&
+             (tData.posts_count < 1000);
     }
 
     // --- Users ---
@@ -82,21 +118,21 @@ service cloud.firestore {
     match /categories/{catId} {
       allow read: if true;
       allow create, delete: if isAdmin();
-      // Counter updates from any active user (including spectators: read-only views still trigger view counts)
+      // Counter updates from any active user or Guest
       allow update: if isAdmin()
-        || (isActive() && request.resource.data.diff(resource.data).affectedKeys()
+        || ((isActive() || !isSignedIn()) && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
     }
 
     // --- Topics ---
     match /topics/{topicId} {
       allow read: if true;
-      // Active users can create topics (UI handles category-specific permissions)
-      allow create: if isActive();
-      // Author or admin can edit; view/counter bumps allowed for all active users
+      // Active users or Guests (if allowed) can create topics
+      allow create: if isAdmin() || canCreateTopic(request.resource.data.category_id);
+      // Author or admin can edit; view/counter bumps allowed for all active users and guests
       allow update: if isAdmin()
-        || (isActive() && (
-          resource.data.author_id == request.auth.uid
+        || ((isActive() || !isSignedIn()) && (
+          (isSignedIn() && resource.data.author_id == request.auth.uid)
           || request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['views', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_is_character', 'last_post_author_character_id'])
         ));
@@ -106,11 +142,8 @@ service cloud.firestore {
     // --- Posts ---
     match /posts/{postId} {
       allow read: if true;
-      // Active users can create posts; limit to 1000 posts per topic
-      allow create: if isActive() && (
-        !exists(/databases/$(database)/documents/topics/$(request.resource.data.topic_id)) ||
-        get(/databases/$(database)/documents/topics/$(request.resource.data.topic_id)).data.posts_count < 1000
-      );
+      // Active users or Guests (if allowed) can create posts
+      allow create: if isAdmin() || canPostToTopic(request.resource.data.topic_id);
       allow update: if isAdmin()
         || (isActive() && (
           resource.data.author_id == request.auth.uid

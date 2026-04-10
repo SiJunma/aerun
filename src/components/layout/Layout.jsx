@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import ForumBackground from './ForumBackground';
 import { useLocation, Link } from 'react-router-dom';
-
+import ScrollButtons from '../common/ScrollButtons';
 
 const Layout = ({ children }) => {
   const { settings, profile, PERMISSIONS, emailUnverified, resendVerificationEmail, checkVerificationStatus } = useAuth();
@@ -103,6 +103,7 @@ const Layout = ({ children }) => {
           </p>
         </Container>
       </footer>
+      <ScrollButtons />
     </>
   );
 };

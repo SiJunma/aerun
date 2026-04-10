@@ -22,6 +22,7 @@ import { createNotification } from './notifications';
  * Uses a transaction to ensure atomic updates and 1-vote limit.
  */
 export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, comment, topicTitle, postNumber) => {
+  if (!targetUid) throw new Error('Cannot vote on guest posts.');
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
   const voteId = `${voterUid}_post_${postId}`;

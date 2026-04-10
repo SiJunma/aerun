@@ -4,6 +4,7 @@ import ForumModal from '../common/ForumModal';
 import { subscribeToCategories } from '../../api/categories';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
+import { resolveField } from '../../utils/text';
 
 const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryId }) => {
   const { t, lang } = useI18n();
@@ -26,10 +27,7 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
     }
   }, [show, excludeCategoryId, hasPermission, PERMISSIONS.VIEW_FORUM]);
 
-  const resolveText = (field) =>
-    typeof field === 'object' && field !== null
-      ? (lang === 'ru' ? field.ru : field.en) || ''
-      : field || '';
+
 
   const handleConfirm = () => {
     if (targetId) {
@@ -67,7 +65,7 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
         <option value="">{lang === 'ru' ? 'Выберите категорию...' : 'Select category...'}</option>
         {categories.map(cat => (
           <option key={cat.id} value={cat.id}>
-            {resolveText(cat.title)}
+            {resolveField(cat.title, lang)}
           </option>
         ))}
       </Form.Select>

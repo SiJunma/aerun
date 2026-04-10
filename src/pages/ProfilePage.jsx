@@ -12,6 +12,7 @@ import { subscribeToCategories } from '../api/categories';
 import { checkNicknameExists, subscribeToUserPosts } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
 import ConfirmModal from '../components/common/ConfirmModal';
+import { resolveField } from '../utils/text';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, subscribeToReputationLogs, getProfileVote, deleteReputation } from '../api/reputation';
@@ -261,10 +262,7 @@ const ProfilePage = () => {
     }
   };
 
-  const resolveText = (field) =>
-    typeof field === 'object' && field !== null
-      ? (lang === 'ru' ? field.ru : field.en) || ''
-      : field || '';
+
 
   const handleSaveAccount = async () => {
     recordActivity();
@@ -951,7 +949,7 @@ const ProfilePage = () => {
                                     <div className="d-flex align-items-center gap-2 mt-1">
                                       {category && (
                                         <Badge bg="secondary" className="opacity-75 fw-normal" style={{ fontSize: '0.7rem' }}>
-                                          {resolveText(category.name)}
+                                          {resolveField(category.name || category.title, lang)}
                                         </Badge>
                                       )}
                                       <span className="text-muted small">

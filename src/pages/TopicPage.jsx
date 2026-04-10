@@ -27,6 +27,7 @@ import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNo
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
+import { resolveField } from '../utils/text';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumAuthorAvatar from '../components/common/ForumAuthorAvatar';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -45,6 +46,7 @@ const TopicPage = () => {
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
+  const [guestNickname, setGuestNickname] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
   const [characters, setCharacters] = useState([]);
   const [topic, setTopic] = useState(null);
@@ -243,7 +245,7 @@ const TopicPage = () => {
   // Subscribe to author stats for each unique author in posts
   useEffect(() => {
     if (posts.length === 0) return;
-    const uniqueAuthorIds = [...new Set(posts.map(p => p.author_id))];
+    const uniqueAuthorIds = [...new Set(posts.map(p => p.author_id).filter(id => id !== null))];
     const unsubs = uniqueAuthorIds.map(uid => {
       return subscribeToUser(uid, (data) => {
         // We store 'null' explicitly to signal that the fetch finished but returned no user (Deleted)
@@ -252,7 +254,7 @@ const TopicPage = () => {
     });
     return () => unsubs.forEach(unsub => unsub());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length > 0 ? [...new Set(posts.map(p => p.author_id))].join(',') : '']);
+  }, [posts.length > 0 ? [...new Set(posts.map(p => p.author_id).filter(id => id !== null))].join(',') : '']);
 
   // Subscribe to character masks
   useEffect(() => {
@@ -453,7 +455,7 @@ const TopicPage = () => {
   };
 
   const handleQuoteAuthor = (authorName) => {
-    if (!user || profile?.role_id === 'spectator') return;
+    if (!hasPermission(PERMISSIONS.POST_REPLY, { category })) return;
     
     const tag = `[b]${authorName}[/b],\n`;
     
@@ -520,6 +522,7 @@ const TopicPage = () => {
     }
     
     // Check if we have entries in authorStats for this UID
+    if (!post.author_id) return '';
     if (!(post.author_id in authorStats)) {
       // Not yet loaded or even started fetching? (Should be handled by useEffect but safety first)
       return 'LOADING';
@@ -561,15 +564,13 @@ const TopicPage = () => {
   };
 
 
-  const resolveText = (field) =>
-    typeof field === 'object' && field !== null
-      ? (lang === 'ru' ? field.ru : field.en) || ''
-      : field || '';
+  // Formatting and Helpers
+
 
 
   const handleOpenVoteModal = (post, value, postNumber) => {
     if (!user || profile?.role_id === 'spectator') return;
-    if (post.author_id === user.uid) return;
+    if (!post.author_id || post.author_id === user.uid) return;
     if (myVotes[post.id]) return;
 
     setRepTargetPost(post);
@@ -635,6 +636,10 @@ const TopicPage = () => {
   const handleReply = async (e) => {
     e.preventDefault();
     if (!replyContent.trim() || submitting) return;
+    if (!user && !guestNickname.trim()) {
+      showToast(lang === 'ru' ? 'Введите ваш никнейм' : 'Please enter your nickname', 'danger');
+      return;
+    }
 
     recordActivity(); // posting = user is active
     setSubmitting(true);
@@ -676,15 +681,15 @@ const TopicPage = () => {
     return {
       topic_id: id,
       content: replyContent.trim(),
-      author_id: user.uid,
-      author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
+      author_id: user?.uid || null,
+      author_name: selectedChar ? selectedChar.name : (profile?.nickname || guestNickname.trim() || user?.displayName || profile?.email?.split('@')[0] || 'Guest'),
       author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
       author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-      author_role_id: profile?.role_id || 'player',
+      author_role_id: profile?.role_id || 'spectator', // guests take base role or 'spectator' depending on context
       is_character: !!selectedChar,
       author_character_id: selectedCharacterId || null,
       author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
-      owner_name: profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'
+      owner_name: profile?.nickname || guestNickname.trim() || user?.displayName || profile?.email?.split('@')[0] || 'Guest'
     };
   };
 
@@ -854,6 +859,9 @@ const TopicPage = () => {
     }
     
     // Check author data from stats
+    if (!post.author_id) {
+      return <ForumRoleBadge roleId="guest" className={extraClass} />;
+    }
     const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
     
     // If it's undefined, it's still loading (we explicitly set null for 'not found')
@@ -937,7 +945,7 @@ const TopicPage = () => {
     );
   }
 
-  const categoryTitle = category ? resolveText(category.title) : '...';
+  const categoryTitle = category ? resolveField(category.title, lang) : '...';
   const hasDraft = !!myDraft;
 
   // Pagination logic — since drafts are separate, posts only contains published posts
@@ -1157,22 +1165,26 @@ const TopicPage = () => {
                     </div>
 
                     {/* 4. Posts Count */}
-                    <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
-                      {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
-                        <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
-                      ) : (
-                        <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
-                      )}
-                    </div>
+                    {post.author_id && (
+                      <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
+                        {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
+                          <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
+                        ) : (
+                          <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
+                        )}
+                      </div>
+                    )}
 
                     {/* 5. Reputation */}
-                    <div className="text-muted" style={{ fontSize: '0.775rem' }}>
-                      {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
-                        <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
-                      ) : (
-                        <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
-                      )}
-                    </div>
+                    {post.author_id && (
+                      <div className="text-muted" style={{ fontSize: '0.775rem' }}>
+                        {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
+                          <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
+                        ) : (
+                          <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
+                        )}
+                      </div>
+                    )}
 
                     {/* 6. Role/Mask */}
                     <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(post)}</div>
@@ -1234,20 +1246,24 @@ const TopicPage = () => {
                     {/* Stats & Role Group */}
                     <div className="text-end author-stats-group ms-auto">
                       <div className="d-flex flex-column align-items-end gap-1">
-                        <div className="text-muted author-res-stat">
-                          {lang === 'ru' ? 'Постов' : 'Posts'}: {authorStats[post.author_id] !== undefined ? (
-                            <strong className="ms-1">{authorStats[post.author_id]?.post_count || 0}</strong>
-                          ) : (
-                            <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
-                          )}
-                        </div>
-                        <div className="text-muted author-res-stat">
-                          {lang === 'ru' ? 'Реп' : 'Rep'}: {authorStats[post.author_id] !== undefined ? (
-                            <strong className="ms-1">{authorStats[post.author_id]?.reputation || 0}</strong>
-                          ) : (
-                            <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
-                          )}
-                        </div>
+                        {post.author_id && (
+                          <div className="text-muted author-res-stat">
+                            {lang === 'ru' ? 'Постов' : 'Posts'}: {authorStats[post.author_id] !== undefined ? (
+                              <strong className="ms-1">{authorStats[post.author_id]?.post_count || 0}</strong>
+                            ) : (
+                              <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
+                            )}
+                          </div>
+                        )}
+                        {post.author_id && (
+                          <div className="text-muted author-res-stat">
+                            {lang === 'ru' ? 'Реп' : 'Rep'}: {authorStats[post.author_id] !== undefined ? (
+                              <strong className="ms-1">{authorStats[post.author_id]?.reputation || 0}</strong>
+                            ) : (
+                              <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
+                            )}
+                          </div>
+                        )}
                         <div className="author-res-info-lite text-end">
                           {getRoleBadge(post, 'mb-0')}
                         </div>
@@ -1318,39 +1334,41 @@ const TopicPage = () => {
                             </div>
                           )}
                           <div className="mb-2">
-                            <Dropdown className="mb-2 w-auto">
-                              <Dropdown.Toggle 
-                                variant="outline-management" 
-                                size="sm"
-                                className="d-flex align-items-center gap-2 custom-select-toggle"
-                              >
-                                <User size={14} />
-                                <span className="text-truncate" style={{ maxWidth: '200px' }}>
-                                  {editCharacterId 
-                                    ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
-                                    : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
-                                  }
-                                </span>
-                              </Dropdown.Toggle>
-                              <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
-                                <Dropdown.Item 
-                                  active={editCharacterId === ''}
-                                  onClick={() => setEditCharacterId('')}
+                            {post.author_id === user?.uid && (
+                              <Dropdown className="mb-2 w-auto">
+                                <Dropdown.Toggle 
+                                  variant="outline-management" 
+                                  size="sm"
+                                  className="d-flex align-items-center gap-2 custom-select-toggle"
                                 >
-                                  {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
-                                </Dropdown.Item>
-                                {characters.length > 0 && <Dropdown.Divider />}
-                                {characters.map(char => (
+                                  <User size={14} />
+                                  <span className="text-truncate" style={{ maxWidth: '200px' }}>
+                                    {editCharacterId 
+                                      ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
+                                      : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                                    }
+                                  </span>
+                                </Dropdown.Toggle>
+                                <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
                                   <Dropdown.Item 
-                                    key={char.id}
-                                    active={editCharacterId === char.id}
-                                    onClick={() => setEditCharacterId(char.id)}
+                                    active={editCharacterId === ''}
+                                    onClick={() => setEditCharacterId('')}
                                   >
-                                    {t('forum.post_as_character')}: {char.name}
+                                    {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
                                   </Dropdown.Item>
-                                ))}
-                              </Dropdown.Menu>
-                            </Dropdown>
+                                  {characters.length > 0 && <Dropdown.Divider />}
+                                  {characters.map(char => (
+                                    <Dropdown.Item 
+                                      key={char.id}
+                                      active={editCharacterId === char.id}
+                                      onClick={() => setEditCharacterId(char.id)}
+                                    >
+                                      {t('forum.post_as_character')}: {char.name}
+                                    </Dropdown.Item>
+                                  ))}
+                                </Dropdown.Menu>
+                              </Dropdown>
+                            )}
                             <RichEditor
                               id="editContent"
                               value={editContent}
@@ -1392,11 +1410,11 @@ const TopicPage = () => {
                     </div>
 
                     {/* Reputation / Voting Buttons */}
-                    {settings?.enableReputation && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (
+                    {settings?.enableReputation && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (
                       <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
                         <div
-                          className={`text-muted small d-flex align-items-center gap-1 ${post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
-                          title={post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
+                          className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
+                          title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
                             ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
                             : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
                           onClick={() => {
@@ -1471,8 +1489,9 @@ const TopicPage = () => {
                   </div>
 
                   {/* Post Management Links — only render if at least one button is visible */}
-                  {user && profile?.role_id !== 'pending' && ((canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content'))) ||
-                    (profile?.role_id !== 'spectator' && (!topic.is_locked || hasPermission('moderate_content')))) && (
+                  {((user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator') || hasPermission(PERMISSIONS.POST_REPLY, { category })) && (
+                    (!topic?.is_locked || hasPermission('moderate_content')) || canManagePost(post)
+                  ) && (
                     <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
                       {/* Left side: Profile Links (Mobile Only) */}
                       <div className="d-flex d-md-none gap-3">
@@ -1841,7 +1860,23 @@ const TopicPage = () => {
               </Card.Header>
               <Card.Body className="p-3 p-md-4">
                 <Form onSubmit={handleReply}>
-                  {hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
+                  {!user && (
+                    <Form.Group className="mb-3" controlId="guestNickname">
+                      <Form.Label className="fw-semibold small">
+                        {lang === 'ru' ? 'Ваш никнейм' : 'Your Nickname'} <span className="text-danger">*</span>
+                      </Form.Label>
+                      <Form.Control
+                        type="text"
+                        placeholder={lang === 'ru' ? 'Введите имя...' : 'Enter your name...'}
+                        value={guestNickname}
+                        onChange={(e) => setGuestNickname(e.target.value)}
+                        required
+                        className="w-auto"
+                        style={{ minWidth: '250px' }}
+                      />
+                    </Form.Group>
+                  )}
+                  {user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
                     <Form.Group className="mb-3" controlId="postAs">
                       <Dropdown className="mb-2 w-auto">
                         <Dropdown.Toggle 
@@ -1897,7 +1932,7 @@ const TopicPage = () => {
                   </Form.Group>
 
                   <div className="mt-4 d-flex justify-content-end gap-2">
-                    {!hasDraft && (
+                    {user && !hasDraft && (
                       <Button
                         variant="outline-secondary"
                         type="button"
