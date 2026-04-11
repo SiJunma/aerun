@@ -320,8 +320,9 @@ export const createDraftPost = async (postData) => {
     reputation: 0,
     created_at: serverTimestamp()
   });
-  return postData.topic_id; // Using topicId as docId since there is only 1 draft per topic per user
+  return postData.topic_id; // One draft per topic per user
 };
+
 
 export const subscribeToTopicDraft = (topicId, uid, callback) => {
   if (!uid) return () => {};
@@ -348,140 +349,29 @@ export const deleteDraftPost = async (uid, topicId) => {
   await deleteDoc(draftRef);
 };
 
-// Publish a draft: create real post, update counters + notifications, then delete draft
+// Publish a draft: reuses the proven 4-op transaction structure of createPost,
+// then deletes the draft. The old approach used a single 5-op transaction which
+// caused permission-denied for non-admin users due to how Firestore Security Rules
+// evaluate get() calls across multi-document commits.
 export const publishDraft = async (uid, topicId) => {
   const draftRef = doc(db, 'users', uid, 'drafts', topicId);
-  const topicRef = doc(db, 'topics', topicId);
-  const postRef = doc(collection(db, 'posts'));
 
-  // Read draft data first
+  // 1. Read the draft
   const draftSnap = await getDoc(draftRef);
   if (!draftSnap.exists()) throw new Error('Draft not found');
-  const postData = draftSnap.data();
+  const rawDraft = draftSnap.data();
 
-  let categoryId = null;
-  let topicTitle = '';
+  // 2. Strip draft-only fields; createPost will add reputation, created_at, rolls
+  const { is_draft: _d, reputation: _r, created_at: _ts, ...postData } = rawDraft;
 
-  await runTransaction(db, async (transaction) => {
-    const topicSnap = await transaction.get(topicRef);
-    if (!topicSnap.exists()) throw new Error('Topic not found');
+  // 3. Create the post using the standard path — identical to a normal reply.
+  //    This handles: post creation, topic/category/user counter updates, AND notifications.
+  const newPostId = await createPost(postData);
 
-    const topic = topicSnap.data();
-    categoryId = topic.category_id;
-    topicTitle = topic.title;
+  // 4. Delete the draft now that the post is live (separate operation — simpler rules)
+  await deleteDoc(draftRef);
 
-    const userRef = doc(db, 'users', postData.author_id);
-
-    const { content: processedContent, rolls } = processDiceRolls(postData.content);
-
-    // 1. Create the real post from draft data
-    transaction.set(postRef, {
-      ...postData,
-      content: processedContent,
-      rolls,
-      is_draft: false,
-      edited_at: null,
-      created_at: serverTimestamp()
-    });
-
-    // 2. Delete the draft
-    transaction.delete(draftRef);
-
-    // 3. Update topic counters and last_post_* fields
-    transaction.update(topicRef, {
-      last_post_at: serverTimestamp(),
-      last_post_author: postData.author_name,
-      last_post_author_id: postData.author_id,
-      last_post_author_avatar: postData.author_avatar || null,
-      last_post_is_character: postData.is_character || false,
-      last_post_author_character_id: postData.author_character_id || null,
-      posts_count: increment(1)
-    });
-
-    // 4. Update category counters and last_post_* fields
-    if (categoryId) {
-      transaction.update(doc(db, 'categories', categoryId), {
-        posts_count: increment(1),
-        last_post_at: serverTimestamp(),
-        last_post_author: postData.author_name,
-        last_post_author_id: postData.author_id,
-        last_post_author_avatar: postData.author_avatar || null,
-        last_post_topic_id: topicId,
-        last_post_topic_title: topicTitle,
-        last_post_is_character: postData.is_character || false,
-        last_post_author_character_id: postData.author_character_id || null
-      });
-    }
-
-    // 5. Increment author post_count
-    transaction.update(userRef, { post_count: increment(1) });
-  });
-
-  // ── Trigger Notifications (Background) ──
-  (async () => {
-    if (!postData.author_id) return; // Guests cannot trigger notifications
-    try {
-      // 1. Topic Reply Notifications
-      const subscribers = await getTopicSubscribers(topicId);
-      const filteredSubscribers = subscribers.filter(uid => uid !== postData.author_id);
-
-      if (filteredSubscribers.length > 0) {
-        for (const recipientUid of filteredSubscribers) {
-          const existing = await getUnreadTopicNotification(recipientUid, topicId);
-
-          if (existing) {
-            await updateNotificationPayload(existing.id, {
-              ...existing.payload,
-              post_count: (existing.payload?.post_count || 1) + 1,
-              last_post_id: postRef.id
-            }, true);
-          } else {
-            await createNotification('topic_reply', {
-              topic_id: topicId,
-              topic_title: topicTitle,
-              first_post_id: postRef.id,
-              last_post_id: postRef.id,
-              post_count: 1
-            }, recipientUid);
-          }
-        }
-      }
-
-      // 2. Quote Notifications
-      if (postData.content) {
-        const quoteRegex = /\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]+),([^\]]+)"\]/gi;
-        const quotedPostIds = new Set();
-        let match;
-        while ((match = quoteRegex.exec(postData.content)) !== null) {
-          quotedPostIds.add(match[1]);
-        }
-
-        for (const qPostId of quotedPostIds) {
-          try {
-            const qPostSnap = await getDoc(doc(db, 'posts', qPostId));
-            if (qPostSnap.exists()) {
-              const qPostData = qPostSnap.data();
-              const qAuthorId = qPostData.author_id;
-              
-              if (qAuthorId && qAuthorId !== postData.author_id) {
-                await createNotification('post_quoted', {
-                  topic_id: topicId,
-                  topic_title: topicTitle,
-                  post_id: postRef.id
-                }, qAuthorId);
-              }
-            }
-          } catch (e) {
-            console.error('[publishDraft quote notification error]', e);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[publishDraft notifications error]', err);
-    }
-  })();
-
-  return postRef.id;
+  return newPostId;
 };
 
 export const locatePost = async (postId, itemsPerPage = 20) => {
@@ -739,7 +629,9 @@ export const deletePost = async (post, performerId) => {
         await handlePostDeletionNotifications(post.topic_id, post.id);
       }
     } catch (err) {
-      console.error('[deletePost notification cleanup error]', err);
+      if (err.code !== 'permission-denied') {
+        console.error('[deletePost notification cleanup error]', err);
+      }
     }
   })();
 };
@@ -874,7 +766,9 @@ export const deleteTopics = async (topicIds, performerId) => {
       try {
         await handleTopicDeletionNotifications(topicId);
       } catch (err) {
-        console.error('[deleteTopics notification cleanup error]', err);
+        if (err.code !== 'permission-denied') {
+          console.error('[deleteTopics notification cleanup error]', err);
+        }
       }
     })();
   }

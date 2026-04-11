@@ -108,7 +108,7 @@ const Navigation = () => {
     >
       <Container className="d-flex align-items-center">
         <div className="d-flex align-items-center">
-          <div className="position-relative">
+          <div className="position-relative d-lg-none">
             <Navbar.Toggle 
               aria-controls="basic-navbar-nav" 
               className="me-2 border-0 p-1"
@@ -168,7 +168,7 @@ const Navigation = () => {
                   bg="danger"
                   pill
                   className="position-absolute"
-                  style={{ top: '-4px', right: '-6px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
+                  style={{ top: '0px', right: '-3px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
                 >
                   {totalUnread > 99 ? '99+' : totalUnread}
                 </Badge>
@@ -191,7 +191,7 @@ const Navigation = () => {
                   bg="danger"
                   pill
                   className="position-absolute"
-                  style={{ top: '-4px', right: '-6px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
+                  style={{ top: '0px', right: '-3px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
                 >
                   {dmUnread > 99 ? '99+' : dmUnread}
                 </Badge>

@@ -41,7 +41,7 @@
               }
             },
             "drafts": {
-              "description": "Unpublished posts. Document ID matches the topic ID.",
+              "description": "Unpublished posts. Document ID matches the topic ID. Note: Publishing decoupled from large batch transactions to avoid Firestore rules read limits. Frontend handles post creation, notification, then deletes draft separately.",
               "fields": {
                 "is_draft": "boolean (must be true)",
                 "topic_id": "string (references topics.id)",

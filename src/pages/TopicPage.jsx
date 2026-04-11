@@ -749,12 +749,27 @@ const TopicPage = () => {
       await publishDraft(user.uid, id);
       markTopicRead(id);
       showToast(t('forum.draft_published'));
-      // Go to last page where the published post will appear
+      
       setTimeout(() => {
         const newTotal = posts.length + 1;
         const lastPage = Math.ceil(newTotal / ITEMS_PER_PAGE);
-        setSearchParams({ page: lastPage, goLast: '1' });
-        alreadyJumpedRef.current = false;
+        
+        if (lastPage !== currentPage) {
+          setSearchParams({ page: lastPage });
+        }
+
+        setTimeout(() => {
+          const postsContainer = document.querySelector('.posts-container');
+          if (postsContainer) {
+            const elements = postsContainer.querySelectorAll('.post-card');
+            if (elements.length > 0) {
+              const lastPost = elements[elements.length - 1];
+              lastPost.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              lastPost.classList.add('highlight-new-post');
+              setTimeout(() => lastPost.classList.remove('highlight-new-post'), 1000);
+            }
+          }
+        }, 500);
       }, 400);
     } catch (err) {
       console.error(err);

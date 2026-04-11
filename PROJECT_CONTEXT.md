@@ -49,7 +49,7 @@ This file serves as the master context for AI interaction, combining the current
               "consumer_pattern": "const lastVisitValue = entry?.timestamp || entry; const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);"
             },
             "drafts": {
-              "description": "Unpublished posts. Document ID matches the topic ID.",
+              "description": "Unpublished posts. Document ID matches the topic ID. Note: Publishing is decoupled from large batch transactions to avoid Firestore rules read limits. Frontend handles post creation, notification, then deletes draft separately.",
               "fields": {
                 "is_draft": "boolean (must be true)",
                 "topic_id": "string (references topics.id)",
@@ -355,8 +355,49 @@ service cloud.firestore {
       return isSignedIn() && hasPermission('moderate_content');
     }
 
+    function getTopicData(topicId) {
+      return exists(/databases/$(database)/documents/topics/$(topicId)) ? 
+        get(/databases/$(database)/documents/topics/$(topicId)).data : 
+        getAfter(/databases/$(database)/documents/topics/$(topicId)).data;
+    }
+
     function isTopicOpen(topicId) {
-      return get(/databases/$(database)/documents/topics/$(topicId)).data.is_locked != true;
+      let tData = getTopicData(topicId);
+      return !('is_locked' in tData) || tData.is_locked == false;
+    }
+
+    function getRole() {
+      return !isSignedIn() ? 'guest' : getUser().data.role_id;
+    }
+
+    function isBanned() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'banned';
+    }
+
+    function isPending() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'pending';
+    }
+
+    function hasCategoryPermission(catId, permission) {
+      let role = getRole();
+      let catPerms = get(/databases/$(database)/documents/categories/$(catId)).data.permissions;
+      // If the permission is not set at category level → fall back to global role check
+      // (mirrors frontend hasPermission() fallback, where missing catPerm = use role default)
+      return !(permission in catPerms)
+        ? (isSignedIn() && hasPermission(permission))
+        : (role in catPerms[permission]);
+    }
+
+    function canCreateTopic(catId) {
+      return (isActive() || !isSignedIn()) && !isBanned() && !isPending() && hasCategoryPermission(catId, 'create_topic');
+    }
+
+    function canPostToTopic(topicId) {
+      let tData = getTopicData(topicId);
+      return (isActive() || !isSignedIn()) && !isBanned() && !isPending() && 
+             hasCategoryPermission(tData.category_id, 'post_reply') && 
+             (!('is_locked' in tData) || tData.is_locked == false) &&
+             (tData.posts_count < 1000);
     }
 
     // --- Users ---

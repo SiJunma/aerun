@@ -65,8 +65,12 @@ service cloud.firestore {
 
     function hasCategoryPermission(catId, permission) {
       let role = getRole();
-      return permission in get(/databases/$(database)/documents/categories/$(catId)).data.permissions && 
-             role in get(/databases/$(database)/documents/categories/$(catId)).data.permissions[permission];
+      let catPerms = get(/databases/$(database)/documents/categories/$(catId)).data.permissions;
+      // If the permission is not set at category level → fall back to global role check
+      // (mirrors frontend hasPermission() fallback, where missing catPerm = use role default)
+      return !(permission in catPerms)
+        ? (isSignedIn() && hasPermission(permission))
+        : (role in catPerms[permission]);
     }
 
     function canCreateTopic(catId) {
