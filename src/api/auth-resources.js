@@ -38,12 +38,12 @@ export const subscribeToReadMap = (uid, callback) => {
   });
 };
 
-export const markAllTopicsRead = async (uid, topics) => {
-  if (!uid || !topics?.length) return;
+export const markAllTopicsRead = async (uid, topicIds) => {
+  if (!uid || !topicIds?.length) return;
   const ref = doc(db, 'users', uid, 'readmap', 'topics');
   const update = {};
-  topics.forEach(t => {
-    update[t.id] = serverTimestamp();
+  topicIds.forEach(id => {
+    update[id] = serverTimestamp();
   });
   await setDoc(ref, update, { merge: true });
 };
