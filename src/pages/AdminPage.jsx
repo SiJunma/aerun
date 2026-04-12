@@ -108,6 +108,7 @@ const AdminPage = () => {
     forumName: { en: 'Aerun Forum', ru: 'Aerun Forum' },
     registrationEnabled: true,
     maxUploadSize: 500,
+    maxCharsPerPost: 15000,
     maintenanceMode: false,
     welcomeMessage: { en: 'Welcome to our TTRPG home!', ru: 'Добро пожаловать в наш дом TTRPG!' },
     enableReputation: true,
@@ -145,6 +146,7 @@ const AdminPage = () => {
           registrationEnabled: data.registrationEnabled ?? true,
           maintenanceMode: data.maintenanceMode ?? false,
           maxUploadSize: data.maxUploadSize ?? 500,
+          maxCharsPerPost: data.maxCharsPerPost ?? 15000,
           whitelistMode: data.whitelistMode ?? false,
           requireApproval: data.requireApproval ?? true,
           enableCharacters: data.enableCharacters ?? true,
@@ -735,6 +737,16 @@ const AdminPage = () => {
                   type="number"
                   value={settings.maxUploadSize}
                   onChange={(e) => setSettings({ ...settings, maxUploadSize: parseInt(e.target.value) })}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-4" controlId="maxChars">
+                <Form.Label className="fw-bold">{t('admin.settings.max_chars')}</Form.Label>
+                <Form.Control
+                  type="number"
+                  value={settings.maxCharsPerPost ?? 15000}
+                  onChange={(e) => setSettings({ ...settings, maxCharsPerPost: parseInt(e.target.value) || 0 })}
                 />
               </Form.Group>
             </Col>

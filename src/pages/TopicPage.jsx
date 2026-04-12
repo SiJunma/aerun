@@ -97,7 +97,8 @@ const TopicPage = () => {
   const goLast = searchParams.get('goLast') === '1';
   const isJumpRequested = !!(searchParams.get('post') || goLast || hash.startsWith('#post-'));
   const ITEMS_PER_PAGE = 20;
-  const MAX_CHARS = 15000;
+  const MAX_CHARS = settings?.maxCharsPerPost ?? 15000;
+  const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
 
   // Determine current page based on ?post=ID OR ?page=N
   const queryPostPage = React.useMemo(() => {
@@ -1389,7 +1390,7 @@ const TopicPage = () => {
                               value={editContent}
                               onChange={(e) => setEditContent(e.target.value)}
                               rows={6}
-                              maxLength={MAX_CHARS}
+                              maxLength={computedMaxChars}
                               autoFocus={true}
                               showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                               isEdit={true}
@@ -1729,7 +1730,7 @@ const TopicPage = () => {
                             value={editContent}
                             onChange={(e) => setEditContent(e.target.value)}
                             rows={6}
-                            maxLength={MAX_CHARS}
+                            maxLength={computedMaxChars}
                             autoFocus={true}
                             showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                             isEdit={true}
@@ -1940,7 +1941,7 @@ const TopicPage = () => {
                       onChange={(e) => setReplyContent(e.target.value)}
                       placeholder={t('forum.reply_placeholder')}
                       minHeight="150px"
-                      maxLength={MAX_CHARS}
+                      maxLength={computedMaxChars}
                       showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                       isEdit={false}
                     />

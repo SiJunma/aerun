@@ -82,6 +82,7 @@
             "enableCharacters": "boolean",
             "enableReputation": "boolean",
             "reputationStyle": "string ('both' or 'positive_only')",
+            "maxCharsPerPost": "number",
             "created_at": "serverTimestamp"
           }
         },

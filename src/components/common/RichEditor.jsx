@@ -515,11 +515,12 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
         <Form.Text className="text-muted small">
           {lang === 'ru' ? 'Поддерживается BBCode' : 'BBCode is supported'}.
         </Form.Text>
-        {maxLength && (
-          <Form.Text className={`${value?.length >= maxLength ? 'text-danger' : 'text-muted'} fw-bold small`}>
-            {value?.length || 0} / {maxLength}
-          </Form.Text>
-        )}
+        <Form.Text className={`${maxLength && value?.length >= maxLength ? 'text-danger' : 'text-muted'} fw-bold small`}>
+          {maxLength > 0 
+            ? `${value?.length || 0} / ${maxLength}` 
+            : `${lang === 'ru' ? 'Символов: ' : 'Chars: '}${value?.length || 0}`
+          }
+        </Form.Text>
       </div>
 
       <ForumModal

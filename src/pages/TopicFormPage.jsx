@@ -15,7 +15,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, hasPermission, PERMISSIONS } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, hasPermission, PERMISSIONS, settings } = useAuth();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -75,7 +75,7 @@ const TopicFormPage = () => {
   const LIMITS = {
     title: 100,
     description: 200,
-    content: 15000
+    content: settings?.maxCharsPerPost > 0 ? settings.maxCharsPerPost : undefined
   };
 
   const handleSubmit = async (e) => {
