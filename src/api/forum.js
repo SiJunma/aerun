@@ -99,14 +99,8 @@ export const createTopic = async (topicData, firstPostData) => {
       ...topicData,
       views: 0,
       reputation: 0,
-      last_post_at: serverTimestamp(),
-      last_post_author: topicData.author_name,
-      last_post_author_id: topicData.author_id,
-      last_post_author_avatar: topicData.author_avatar || null,
-      last_post_is_character: topicData.is_character || false,
-      last_post_author_character_id: topicData.author_character_id || null,
       created_at: serverTimestamp(),
-      posts_count: 1
+      posts_count: 0 // Will be incremented by onPostCreated for the first post
     });
 
     const { content: processedContent, rolls } = processDiceRolls(firstPostData.content);
@@ -119,22 +113,6 @@ export const createTopic = async (topicData, firstPostData) => {
       reputation: 0,
       created_at: serverTimestamp()
     });
-
-    transaction.update(categoryRef, {
-      topics_count: increment(1),
-      posts_count: increment(1),
-      last_post_at: serverTimestamp(),
-      last_post_author: topicData.author_name,
-      last_post_author_id: topicData.author_id,
-      last_post_author_avatar: topicData.author_avatar || null,
-      last_post_topic_id: topicRef.id,
-      last_post_topic_title: topicData.title,
-      last_post_is_character: topicData.is_character || false,
-      last_post_author_character_id: topicData.author_character_id || null
-    });
-
-    // Increment the author's post_count
-    if (userRef) transaction.update(userRef, { post_count: increment(1) });
   });
 
   return topicRef.id;
@@ -190,13 +168,6 @@ export const createPost = async (postData) => {
   const postRef = doc(collection(db, 'posts'));
   
   await runTransaction(db, async (transaction) => {
-    const topicRef = doc(db, 'topics', postData.topic_id);
-    const userRef = postData.author_id ? doc(db, 'users', postData.author_id) : null;
-
-    // Need to read topic first to get category_id
-    const topicSnap = await transaction.get(topicRef);
-    const categoryId = topicSnap.exists() ? topicSnap.data().category_id : null;
-
     const { content: processedContent, rolls } = processDiceRolls(postData.content);
 
     transaction.set(postRef, {
@@ -206,32 +177,6 @@ export const createPost = async (postData) => {
       reputation: 0,
       created_at: serverTimestamp()
     });
-
-    transaction.update(topicRef, {
-      last_post_at: serverTimestamp(),
-      last_post_author: postData.author_name,
-      last_post_author_id: postData.author_id,
-      last_post_author_avatar: postData.author_avatar || null,
-      last_post_is_character: postData.is_character || false,
-      last_post_author_character_id: postData.author_character_id || null,
-      posts_count: increment(1)
-    });
-
-    if (categoryId) {
-      transaction.update(doc(db, 'categories', categoryId), {
-        posts_count: increment(1),
-        last_post_at: serverTimestamp(),
-        last_post_author: postData.author_name,
-        last_post_author_id: postData.author_id,
-        last_post_author_avatar: postData.author_avatar || null,
-        last_post_topic_id: postData.topic_id,
-        last_post_topic_title: topicSnap.data().title,
-        last_post_is_character: postData.is_character || false,
-        last_post_author_character_id: postData.author_character_id || null
-      });
-    }
-
-    // Increment the author's post_count
     if (userRef) transaction.update(userRef, { post_count: increment(1) });
   });
 
@@ -464,176 +409,17 @@ export const updateTopic = async (topicId, data, performerId, authorId) => {
 
 export const deletePost = async (post, performerId) => {
   const postRef = doc(db, 'posts', post.id);
-  const topicRef = doc(db, 'topics', post.topic_id);
-  const userRef = post.author_id ? doc(db, 'users', post.author_id) : null;
 
   if (performerId && performerId !== post.author_id) {
     await logAdminAction('post_deleted_by_admin', performerId, { targetId: post.id, topicId: post.topic_id, authorId: post.author_id });
   }
 
-  // If deleting a draft — simply remove the doc, no counters were touched
-  if (post.is_draft) {
-    await deleteDoc(postRef);
-    return;
-  }
-
-  // Step 1: Find reputation logs for this post to revert reputation
-  const logsQuery = query(collection(db, 'reputation_logs'), where('post_id', '==', post.id));
-  const logsSnap = await getDocs(logsQuery);
-  let totalRepChange = 0;
-  logsSnap.forEach(ld => {
-    totalRepChange += (ld.data().value || 0);
-  });
-
-  // Step 2: transactionally delete the post and update counters
-  let topicData = null;
-  let categoryId = null;
-  let isLastPost = false;
-
-  await runTransaction(db, async (transaction) => {
-    const topicSnap = await transaction.get(topicRef);
-    if (!topicSnap.exists()) {
-      transaction.delete(postRef);
-      return;
-    }
-
-    topicData = topicSnap.data();
-    categoryId = topicData.category_id;
-    isLastPost = (topicData.posts_count ?? 1) <= 1;
-
-    const userSnap = userRef ? await transaction.get(userRef) : null;
-    transaction.delete(postRef);
-    if (userSnap && userSnap.exists()) {
-      transaction.update(userRef, { 
-        post_count: increment(-1),
-        reputation: increment(-totalRepChange)
-      });
-    }
-
-    // Delete associated reputation logs
-    logsSnap.forEach(logDoc => {
-      transaction.delete(logDoc.ref);
-    });
-
-    if (isLastPost) {
-      transaction.delete(topicRef);
-      if (categoryId) {
-        transaction.update(doc(db, 'categories', categoryId), {
-          topics_count: increment(-1),
-          posts_count: increment(-1)
-        });
-      }
-    } else {
-      transaction.update(topicRef, { posts_count: increment(-1) });
-      if (categoryId) {
-        transaction.update(doc(db, 'categories', categoryId), {
-          posts_count: increment(-1)
-        });
-      }
-    }
-  });
-
-  // Step 2: if topic still exists, recalculate last_post_* from remaining posts
-  if (!isLastPost && topicData && categoryId) {
-    // Find new last post in the topic
-    const remainingQ = query(
-      collection(db, 'posts'),
-      where('topic_id', '==', post.topic_id),
-      orderBy('created_at', 'desc'),
-      limit(1)
-    );
-    const remainingSnap = await getDocs(remainingQ);
-
-    if (!remainingSnap.empty) {
-      const newLastPost = remainingSnap.docs[0].data();
-      const newLastAt = newLastPost.created_at;
-      const newLastAuthor = newLastPost.author_name;
-      const newLastAuthorId = newLastPost.author_id;
-      const newIsChar = newLastPost.is_character || false;
-      const newCharId = newLastPost.author_character_id || null;
-
-      // Update topic's denormalized last_post fields
-      await updateDoc(topicRef, {
-        last_post_at: newLastAt,
-        last_post_author: newLastAuthor,
-        last_post_author_id: newLastAuthorId,
-        last_post_author_avatar: newLastPost.author_avatar || null,
-        last_post_is_character: newIsChar,
-        last_post_author_character_id: newCharId
-      });
-
-      // Find the most-recent topic in the category to update category's last_post fields
-      const catTopicsQ = query(
-        collection(db, 'topics'),
-        where('category_id', '==', categoryId),
-        orderBy('last_post_at', 'desc'),
-        limit(1)
-      );
-      const catTopicsSnap = await getDocs(catTopicsQ);
-
-      if (!catTopicsSnap.empty) {
-        const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
-        await updateDoc(doc(db, 'categories', categoryId), {
-          last_post_at: latestTopic.last_post_at,
-          last_post_author: latestTopic.last_post_author,
-          last_post_author_id: latestTopic.last_post_author_id,
-          last_post_author_avatar: latestTopic.last_post_author_avatar || null,
-          last_post_topic_id: latestTopic.id,
-          last_post_topic_title: latestTopic.title,
-          last_post_is_character: latestTopic.last_post_is_character || false,
-          last_post_author_character_id: latestTopic.last_post_author_character_id || null
-        });
-      }
-    }
-  } else if (isLastPost && categoryId) {
-    // Topic was deleted — recalculate category's last_post from remaining topics
-    const catTopicsQ = query(
-      collection(db, 'topics'),
-      where('category_id', '==', categoryId),
-      orderBy('last_post_at', 'desc'),
-      limit(1)
-    );
-    const catTopicsSnap = await getDocs(catTopicsQ);
-
-    if (!catTopicsSnap.empty) {
-      const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
-      await updateDoc(doc(db, 'categories', categoryId), {
-        last_post_at: latestTopic.last_post_at,
-        last_post_author: latestTopic.last_post_author,
-        last_post_author_id: latestTopic.last_post_author_id,
-        last_post_topic_id: latestTopic.id,
-        last_post_topic_title: latestTopic.title,
-        last_post_is_character: latestTopic.last_post_is_character || false,
-        last_post_author_character_id: latestTopic.last_post_author_character_id || null
-      });
-    } else {
-      // No topics left in category
-      await updateDoc(doc(db, 'categories', categoryId), {
-        last_post_at: null,
-        last_post_author: null,
-        last_post_author_id: null,
-        last_post_topic_id: null,
-        last_post_topic_title: null,
-        last_post_is_character: null,
-        last_post_author_character_id: null
-      });
-    }
-  }
-
-  // ── Handle Notifications (Background) ──
-  (async () => {
-    try {
-      if (isLastPost) {
-        await handleTopicDeletionNotifications(post.topic_id);
-      } else {
-        await handlePostDeletionNotifications(post.topic_id, post.id);
-      }
-    } catch (err) {
-      if (err.code !== 'permission-denied') {
-        console.error('[deletePost notification cleanup error]', err);
-      }
-    }
-  })();
+  // Simply delete the post. Cloud Functions handle:
+  // - Decrementing posts_count for topic, category, user
+  // - Reverting reputation and deleting reputation_logs
+  // - Synchronizing last_post metadata for topic and category
+  // - Cleaning up notifications
+  await deleteDoc(postRef);
 };
 // ── Users ─────────────────────────────────────────────────────────────────────
 

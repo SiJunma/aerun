@@ -90,10 +90,11 @@ service cloud.firestore {
       // Allow read for everyone in public mode (profiles are public)
       allow read: if true;
       allow create: if isSignedIn() && request.auth.uid == userId;
-      // User can edit own profile (except protected fields); admin can edit anyone; any active user can bump post_count/reputation
+      // User can edit own profile (except protected fields); admin can edit anyone; 
+      // reputation and post_count are now server-side only (Cloud Functions)
       allow update: if isAdmin()
         || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_id', 'post_count', 'reputation', 'join_date']))
-        || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['post_count', 'reputation', 'last_seen', 'last_selected_character_id']));
+        || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'last_selected_character_id']));
       allow delete: if isAdmin(); // Added to allow rejecting pending users
     }
 
@@ -122,10 +123,10 @@ service cloud.firestore {
     match /categories/{catId} {
       allow read: if true;
       allow create, delete: if isAdmin();
-      // Counter updates from any active user or Guest
+      // Counter updates and last_post metadata are now server-side only (Cloud Functions)
       allow update: if isAdmin()
-        || ((isActive() || !isSignedIn()) && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
+        || ((isActive() || !isSignedIn()) && !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
     }
 
     // --- Topics ---
@@ -133,12 +134,13 @@ service cloud.firestore {
       allow read: if true;
       // Active users or Guests (if allowed) can create topics
       allow create: if isAdmin() || canCreateTopic(request.resource.data.category_id);
-      // Author or admin can edit; view/counter bumps allowed for all active users and guests
+      // Author or admin can edit; counter bumps and metadata are handled by server triggers
       allow update: if isAdmin()
         || ((isActive() || !isSignedIn()) && (
-          (isSignedIn() && resource.data.author_id == request.auth.uid)
-          || request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['views', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_is_character', 'last_post_author_character_id'])
+          (isSignedIn() && resource.data.author_id == request.auth.uid && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_is_character', 'last_post_author_character_id']))
+          || (request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['views']))
         ));
       allow delete: if canModerateContent() || (isActive() && resource.data.author_id == request.auth.uid && isTopicOpen(topicId));
     }
@@ -151,7 +153,6 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (isActive() && (
           resource.data.author_id == request.auth.uid
-          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reputation'])
         ));
       allow delete: if canModerateContent() || (isActive() && resource.data.author_id == request.auth.uid && isTopicOpen(resource.data.topic_id));
     }

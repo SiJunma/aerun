@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "build:test": "vite build --mode development",
-    "deploy:test": "npm run build:test && firebase deploy --only \"hosting,firestore\" --project staging",
+    "deploy:test": "npm run build:test && firebase deploy --only \"hosting,firestore,functions\" --project staging",
     "build:prod": "vite build --mode production",
-    "deploy:prod": "npm run build:prod && firebase deploy --only \"hosting,firestore,storage\" --project default",
+    "deploy:prod": "npm run build:prod && firebase deploy --only \"hosting,firestore,storage,functions\" --project default",
     "lint": "eslint .",
     "preview": "vite preview"
   },

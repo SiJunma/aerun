@@ -9,8 +9,7 @@ import {
   serverTimestamp,
   getDocs,
   getDoc,
-  limit,
-  increment
+  limit
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { logAdminAction } from './audit';
@@ -29,7 +28,6 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
   const logRef = doc(db, 'reputation_logs', voteId);
   const voterRef = doc(db, 'users', voterUid);
   const userRef = doc(db, 'users', targetUid);
-  const postRef = doc(db, 'posts', postId);
 
   let finalVoterNickname = 'User';
 
@@ -50,11 +48,6 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
       throw new Error('Голосование за этого пользователя запрещено.');
     }
 
-    const currentRep = userDoc.data().reputation || 0;
-
-    const postDoc = await transaction.get(postRef);
-    const currentPostRep = postDoc.exists() ? (postDoc.data().reputation || 0) : 0;
-
     // 1. Create log entry
     transaction.set(logRef, {
       voter_id: voterUid,
@@ -67,16 +60,6 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
       value: value,
       comment: comment || '',
       created_at: serverTimestamp()
-    });
-
-    // 2. Update user reputation
-    transaction.update(userRef, {
-      reputation: currentRep + value
-    });
-
-    // 3. Update post reputation
-    transaction.update(postRef, {
-      reputation: currentPostRep + value
     });
 
     return voterNickname; // return to outer scope
@@ -153,8 +136,6 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
       throw new Error('Голосование за этого пользователя запрещено.');
     }
 
-    const currentRep = userDoc.data().reputation || 0;
-
     transaction.set(logRef, {
       voter_id: voterUid,
       voter_nickname: voterNickname,
@@ -163,10 +144,6 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
       comment: comment || '',
       post_id: null,
       created_at: serverTimestamp()
-    });
-
-    transaction.update(userRef, {
-      reputation: currentRep + value
     });
 
     return voterNickname; // Return to outer scope
@@ -245,19 +222,9 @@ export const deleteReputation = async (logId, performerId) => {
     if (!logSnap.exists()) throw new Error('Reputation entry not found.');
 
     logData = logSnap.data();
-    const { target_id, value, post_id } = logData;
-
-    // Revert user reputation
-    const userRef = doc(db, 'users', target_id);
-    transaction.update(userRef, { reputation: increment(-value) });
-
-    // Revert post reputation if this was a post vote
-    if (post_id) {
-      const postRef = doc(db, 'posts', post_id);
-      transaction.update(postRef, { reputation: increment(-value) });
-    }
 
     // Delete the log entry
+    // This will trigger onReputationLogDeleted Cloud Function
     transaction.delete(logRef);
   });
 
