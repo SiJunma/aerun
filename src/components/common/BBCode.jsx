@@ -108,7 +108,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -150,8 +150,8 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         }
         const newNode = { type: 'tag', name: token.name, rawParams: token.rawParams, children: [] };
         parent.children.push(newNode);
-        // Dice and Roll are self-closing tags (they don't have [/dice] or [/roll])
-        if (token.name !== 'dice' && token.name !== 'roll') {
+        // Dice, Roll, and HR are self-closing tags (they don't have [/dice] or [/roll] or [/hr])
+        if (token.name !== 'dice' && token.name !== 'roll' && token.name !== 'hr') {
           stack.push(newNode);
         }
       }
@@ -159,7 +159,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media'];
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
@@ -552,6 +552,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           );
         }
       }
+      case 'hr': return <hr key={index} />;
       default: return <span key={index}>{content}</span>;
     }
   }

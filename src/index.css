@@ -944,10 +944,7 @@ label.fw-bold {
   box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
 }
 
-.size-picker-menu .dropdown-item:hover {
-  background-color: rgba(var(--primary-color-rgb, 13, 110, 253), 0.1) !important;
-  color: var(--primary-color) !important;
-}
+
 
 /* BBCode Columns */
 .bbcode-columns {

@@ -121,7 +121,7 @@ const TopicFormPage = () => {
       localStorage.removeItem(DRAFT_KEY);
       // Mark as read immediately (server-side, all roles)
       await markTopicRead(newTopicId);
-      navigate(`/category/${categoryId}`);
+      navigate(`/topic/${newTopicId}`);
 
     } catch (err) {
       console.error(err);

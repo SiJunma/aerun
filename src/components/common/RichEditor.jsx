@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Form, Dropdown } from 'react-bootstrap';
 import ForumModal from './ForumModal';
-import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard, Youtube, EyeOff } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard, Youtube, EyeOff, Minus } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 
 const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false, showHide = true }) => {
@@ -397,6 +397,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
 
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'bullet')} title="Bullet List"><List size={16} /></Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'quote')} title="Quote"><Quote size={16} /></Button>
+        <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[hr]', '')} title={lang === 'ru' ? 'Линия' : 'Horizontal Rule'}><Minus size={16} /></Button>
 
         <div className="vr mx-1"></div>
 
