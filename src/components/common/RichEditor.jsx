@@ -1,13 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Form, Dropdown } from 'react-bootstrap';
 import ForumModal from './ForumModal';
-import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard, Youtube, EyeOff, Minus } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon, Quote, List, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard, Youtube, EyeOff, Minus, Smile } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
+import SmilesPicker from './SmilesPicker';
 
 const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false, showHide = true }) => {
     const { lang, t } = useI18n();
 
   const textareaRef = useRef(null);
+  const containerRef = useRef(null);
+  const [editorWidth, setEditorWidth] = useState(0);
 
   // Modals state
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -60,21 +63,34 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]); // REMOVED history and historyIndex from dependencies to prevent infinite loops
 
-  // Handle autoFocus
+  // Handle autoFocus and measure width
   useEffect(() => {
     if (autoFocus && textareaRef.current) {
       const textarea = textareaRef.current;
-      // Focus and put cursor at the end
       textarea.focus();
       const length = textarea.value.length;
       textarea.setSelectionRange(length, length);
       
-      // Ensure it's scrolled into view if it was rendered far away
-      // using a small timeout to let the parent layout settle if needed
       setTimeout(() => {
         textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);
     }
+
+    const updateWidth = () => {
+      if (containerRef.current) {
+        setEditorWidth(containerRef.current.offsetWidth);
+      }
+    };
+
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    const observer = new ResizeObserver(updateWidth);
+    if (containerRef.current) observer.observe(containerRef.current);
+
+    return () => {
+      window.removeEventListener('resize', updateWidth);
+      observer.disconnect();
+    };
   }, [autoFocus]);
 
   const addToHistory = (newValue, forceNewSnapshot = true) => {
@@ -368,7 +384,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
   };
 
   return (
-    <div className="rich-editor-container">
+    <div className="rich-editor-container" ref={containerRef}>
       <div className="d-flex flex-wrap gap-1 mb-2 p-2 rounded editor-toolbar-themed editor-toolbar">
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[b]', '[/b]')} title="Bold"><Bold size={16} /></Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[i]', '[/i]')} title="Italic"><Italic size={16} /></Button>
@@ -392,6 +408,66 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
           <LinkIcon size={16} />
         </Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowImageModal(true)} title="Image"><ImageIcon size={16} /></Button>
+        <Dropdown className="d-inline-block" drop="up">
+          <Dropdown.Toggle 
+            variant="light" 
+            size="sm" 
+            className="p-1 px-2 no-caret editor-dropdown-toggle" 
+            title={lang === 'ru' ? 'Смайлики' : 'Smiles'}
+          >
+            <Smile size={16} />
+          </Dropdown.Toggle>
+          <Dropdown.Menu 
+            className="smiles-picker-menu p-0 shadow border-0" 
+            renderOnMount
+            style={{ 
+              width: editorWidth ? `${editorWidth}px` : '320px', 
+              zIndex: 3500,
+              maxWidth: 'none'
+            }}
+            placement="top-start"
+            popperConfig={{ 
+              strategy: 'fixed',
+              modifiers: [
+                {
+                  name: 'offset',
+                  options: {
+                    offset: ({ placement, reference, popper }) => {
+                      if (containerRef.current && reference) {
+                        const containerRect = containerRef.current.getBoundingClientRect();
+                        if (containerRect.width === 0) return [0, 8];
+                        
+                        const toggleRect = reference;
+                        const skhiftX = -(toggleRect.x - containerRect.x);
+                        return [skhiftX, 8];
+                      }
+                      return [0, 8];
+                    },
+                  },
+                },
+                {
+                  name: 'flip',
+                  enabled: false, // Prevents "disappearing" while determining best placement
+                },
+                {
+                  name: 'preventOverflow',
+                  options: {
+                    boundary: 'viewport',
+                  },
+                },
+                {
+                  name: 'computeStyles',
+                  options: {
+                    adaptive: true, 
+                    gpuAcceleration: true,
+                  },
+                }
+              ],
+            }}
+          >
+            <SmilesPicker onSelect={(code) => insertText(code, '')} width={editorWidth} />
+          </Dropdown.Menu>
+        </Dropdown>
 
         <div className="vr mx-1"></div>
 

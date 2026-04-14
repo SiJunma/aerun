@@ -275,6 +275,7 @@ This file serves as the master context for AI interaction, combining the current
     "src/ api": "Firestore operations isolated from components. Subdivided by domain (forum.js, auth-resources.js, categories.js, admin.js, etc.).",
     "src/ assets": "Static media (images, svgs).",
     "src/ components": "React presentation and logic components (common UI elements, layout wrappers).",
+    "src/ config": "Global configuration files, such as smiles.js for animated emojis.",
     "src/ constants": "Hardcoded values, role definitions (e.g. permissions.js).",
     "src/ contexts": "React context providers (Auth, Theme, Toast, I18n).",
     "src/ i18n": "Translation messages/dictionaries.",
@@ -405,9 +406,10 @@ service cloud.firestore {
       // Allow read for everyone in public mode (profiles are public)
       allow read: if true;
       allow create: if isSignedIn() && request.auth.uid == userId;
-      // User can edit own profile; admin can edit anyone; any active user can bump post_count/reputation
-      allow update: if (isSignedIn() && request.auth.uid == userId) || isAdmin()
-        || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['post_count', 'reputation', 'last_seen', 'last_selected_character_id']));
+      // User can edit own profile (except protected fields); admin can edit anyone; 
+      // reputation and post_count are now server-side only (Cloud Functions)
+      allow update: if (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_id', 'post_count', 'reputation', 'join_date'])) || isAdmin()
+        || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'last_selected_character_id']));
       allow delete: if isAdmin(); // Added to allow rejecting pending users
     }
 
@@ -436,9 +438,9 @@ service cloud.firestore {
     match /categories/{catId} {
       allow read: if true;
       allow create, delete: if isAdmin();
-      // Counter updates from any active user (including spectators: read-only views still trigger view counts)
+      // Counter updates and last_post metadata are now server-side only (Cloud Functions)
       allow update: if isAdmin()
-        || (isActive() && request.resource.data.diff(resource.data).affectedKeys()
+        || ((isActive() || !isSignedIn()) && !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
     }
 

@@ -507,8 +507,7 @@ label.fw-bold {
   border-color: var(--border-color);
   color: var(--text-color);
   border-radius: 1rem;
-  overflow: hidden;
-  /* Ensure header corners are clipped */
+  /* overflow: hidden; Removed to allow dropdowns to render outside */
 }
 
 .bg-card {
@@ -527,6 +526,7 @@ label.fw-bold {
   color: #ffffff !important;
   border-bottom: 1px solid var(--border-color) !important;
   padding: 1rem 1.25rem !important;
+  border-radius: 1rem 1rem 0 0 !important; /* Top corners match card radius */
 }
 
 [data-theme='dark'] .card-header {
@@ -541,6 +541,7 @@ label.fw-bold {
   background-color: #f8f9fa !important;
   color: #212529 !important;
   border-right: 1px solid var(--border-color) !important;
+  border-radius: 1rem 0 0 1rem !important; /* Match card radius for left side */
 }
 
 [data-theme='dark'] .author-sidebar {
@@ -794,7 +795,7 @@ label.fw-bold {
 .post-card {
   border: 1px solid var(--border-color) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
-  overflow: hidden;
+  /* overflow: hidden; Removed to allow internal dropdowns to render outside */
   scroll-margin-top: 80px;
 }
 
@@ -931,6 +932,22 @@ label.fw-bold {
 
 .editor-dropdown-toggle.no-caret::after {
   display: none !important;
+}
+
+/* Global Dropdown Hover/Background fixes for themes */
+.dropdown-menu {
+  background-color: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2) !important;
+}
+
+.dropdown-item {
+  color: var(--text-color) !important;
+}
+
+.dropdown-item:hover, .dropdown-item:focus {
+  background-color: var(--block-bg) !important;
+  color: var(--primary-color) !important;
 }
 
 .color-swatch {
@@ -2280,6 +2297,12 @@ a.badge.bg-danger:hover {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
+
+/* BBCode Smile Enhancement */
+.bbcode-smile {
+  vertical-align: middle !important;
+  display: inline-block !important;
+}
 
 /* Skeleton Loaders */
 .skeleton {

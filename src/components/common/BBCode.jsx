@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Dices, EyeOff, Reply } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { ALL_SMILES_MAP } from '../../config/smiles';
 
 /**
  * BBCode Component
@@ -81,6 +82,21 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
   const { t, lang } = useI18n();
   if (typeof children !== 'string') return children;
+  
+  // 0. Preprocess text to wrap smile shortcodes into [smile] tags
+  // We use a single regex to avoid overlapping matches and multi-pass issues
+  const sortedCodes = Object.keys(ALL_SMILES_MAP).sort((a, b) => b.length - a.length);
+  const smileRegex = new RegExp(sortedCodes.map(code => code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  
+  const textWithSmiles = children.replace(smileRegex, (match, offset, fullText) => {
+    // Check if it's already wrapped in [smile] tags (user manually typed it)
+    const before = fullText.substring(0, offset);
+    const after = fullText.substring(offset + match.length);
+    if (before.endsWith('[smile]') && after.startsWith('[/smile]')) {
+      return match;
+    }
+    return `[smile]${match}[/smile]`;
+  });
 
   // 1. Tokenize the text into text chunks and tags
   const tokenRegex = /\[(\/?)([a-zA-Z*]+)(?:[\s=]([^\]]*))?\]/g;
@@ -88,9 +104,9 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   let lastIndex = 0;
   let match;
 
-  while ((match = tokenRegex.exec(children)) !== null) {
+  while ((match = tokenRegex.exec(textWithSmiles)) !== null) {
     if (match.index > lastIndex) {
-      tokens.push({ type: 'text', content: children.substring(lastIndex, match.index) });
+      tokens.push({ type: 'text', content: textWithSmiles.substring(lastIndex, match.index) });
     }
     tokens.push({
       type: 'tag',
@@ -101,14 +117,14 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
     });
     lastIndex = tokenRegex.lastIndex;
   }
-  if (lastIndex < children.length) {
-    tokens.push({ type: 'text', content: children.substring(lastIndex) });
+  if (lastIndex < textWithSmiles.length) {
+    tokens.push({ type: 'text', content: textWithSmiles.substring(lastIndex) });
   }
 
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -553,6 +569,33 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         }
       }
       case 'hr': return <hr key={index} />;
+      case 'smile': {
+        const code = getTextContent(node);
+        const url = ALL_SMILES_MAP[code];
+        if (!url) return <span key={index}>{code}</span>;
+        return (
+          <img
+            key={index}
+            src={url}
+            alt={code}
+            title={code}
+            className="bbcode-smile d-inline-block"
+            style={{ 
+              height: 'auto',
+              width: 'auto',
+              maxWidth: 'none',
+              margin: '0 2px',
+              verticalAlign: 'middle',
+              border: 'none',
+              boxShadow: 'none',
+              outline: 'none',
+              borderRadius: '0',
+              padding: '0',
+              background: 'transparent'
+            }}
+          />
+        );
+      }
       default: return <span key={index}>{content}</span>;
     }
   }

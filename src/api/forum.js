@@ -113,6 +113,8 @@ export const createTopic = async (topicData, firstPostData) => {
       reputation: 0,
       created_at: serverTimestamp()
     });
+
+    // post_count increment is handled server-side via Cloud Functions
   });
 
   return topicRef.id;
@@ -169,6 +171,7 @@ export const createPost = async (postData) => {
   
   await runTransaction(db, async (transaction) => {
     const { content: processedContent, rolls } = processDiceRolls(postData.content);
+    const userRef = postData.author_id ? doc(db, 'users', postData.author_id) : null;
 
     transaction.set(postRef, {
       ...postData,
@@ -177,7 +180,7 @@ export const createPost = async (postData) => {
       reputation: 0,
       created_at: serverTimestamp()
     });
-    if (userRef) transaction.update(userRef, { post_count: increment(1) });
+    // post_count increment is handled server-side via Cloud Functions
   });
 
   // ── Trigger Notifications (Background) ──

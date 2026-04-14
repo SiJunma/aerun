@@ -322,6 +322,7 @@ conversations/{conv_id}/messages/{msg_id}: {
 - Форма ответа:
   - Выбор маски (Dropdown `<CharacterSelect />`).
   - Текстовый редактор (с поддержкой Markdown/WYSIWYG — курсив, жирный и т.д.).
+  - **Анимированные смайлы**: вставка через панель (шорткоды `[jcdragon...]`).
   - **Счётчик символов** в реальном времени.
   - **Автосохранение черновика** в SessionStorage/localStorage браузера; восстановление при возврате на страницу.
   - **Dice Roller** (`<DiceRoller />`) — видим только если `topic.dice_enabled == true`.
@@ -464,6 +465,7 @@ HTML-шаблоны (Handlebars) с логотипом форума, текст�
 | `<ReputationModal />` | Модалка «+/-» с полем комментария |
 | `<NotificationBell />` | Колокольчик с real-time бейджем |
 | `<MarkdownEditor />` | Редактор поста с счётчиком символов и автосохранением |
+| `<SmilesPicker />` | Панель выбора анимированных смайлов |
 | `<DiceDisplay />` | Блок отображения результата броска внутри поста |
 | `<HeroBlock />` | Рендерит `hero_content` через `dangerouslySetInnerHTML` |
 
@@ -611,14 +613,21 @@ HTML-шаблоны (Handlebars) с логотипом форума, текст�
 - [ ] Система инвайтов
 - [ ] Journal (Audit Log) — append-only
 
+### Смайлы (Animated Emoji System)
+- [x] Регистрация смайлов в `src/config/smiles.js`
+- [x] Компонент `<SmilesPicker />` с поддержкой Popper.js и ResizeObserver
+- [x] Парсинг шорткодов `[имя_смайла]` в BBCode
+- [x] Рендеринг смайлов без декораций и с `vertical-align: middle`
+
 ### RBAC + Security Rules
-- [ ] Проверка прав перед рендерингом кнопок
-- [ ] Firestore Rules для всех коллекций
-- [ ] Видимость категорий через `allowed_roles`
+- [x] Проверка прав перед рендерингом кнопок
+- [x] Firestore Rules для всех коллекций
+- [x] Запрет клиентского обновления `post_count` и `reputation`
+- [x] Видимость категорий через `allowed_roles`
 
 ### Инфраструктура
-- [ ] Firebase Hosting + `firebase.json`
-- [ ] Cloud Functions (email-рассылки)
-- [ ] FCM setup
-- [ ] Trigger Email Extension
-- [ ] Firebase Storage rules
+- [x] Firebase Hosting + `firebase.json`
+- [x] Cloud Functions (email-рассылки, инкремент счетчиков, репутация)
+- [x] FCM setup
+- [x] Trigger Email Extension
+- [x] Firebase Storage rules
