@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tabs, Tab, Row, Col } from 'react-bootstrap';
+import { Tabs, Tab } from 'react-bootstrap';
 import { SMILE_PACKS } from '../../config/smiles';
 
 const SmilesPicker = ({ onSelect }) => {

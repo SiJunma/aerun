@@ -479,7 +479,6 @@ export const deleteTopics = async (topicIds, performerId) => {
 
     const topicData = topicSnap.data();
     const categoryId = topicData.category_id;
-    const postsCount = topicData.posts_count || 0;
 
     // Fetch posts outside of atomic block to avoid running queries inside a transaction callback
     const postsQ = query(collection(db, 'posts'), where('topic_id', '==', topicId));
@@ -498,15 +497,9 @@ export const deleteTopics = async (topicIds, performerId) => {
       await logAdminAction('topic_deleted', performerId, { targetId: topicId, title: topicData.title });
     }
 
-    // 3. Update Category counters
-    if (categoryId) {
-      const catRef = doc(db, 'categories', categoryId);
-      batch.update(catRef, {
-        topics_count: increment(-1),
-        posts_count: increment(-postsCount)
-      });
-    }
-    
+    // NOTE: topics_count / posts_count decrements are handled server-side
+    // by the onTopicDeleted / onPostDeleted Cloud Function triggers.
+
     // Commit the batch
     await batch.commit();
     
