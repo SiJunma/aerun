@@ -19,14 +19,8 @@ import {
   writeBatch,
   getCountFromServer
 } from 'firebase/firestore';
-import { getTopicSubscribers } from './subscriptions';
+
 import { processDiceRolls } from '../utils/dice';
-import {
-  createNotification,
-  getUnreadTopicNotification,
-  updateNotificationPayload,
-  handleTopicDeletionNotifications
-} from './notifications';
 
 
 // ── Topics ───────────────────────────────────────────────────────────────────
@@ -179,75 +173,8 @@ export const createPost = async (postData) => {
     // post_count increment is handled server-side via Cloud Functions
   });
 
-  // ── Trigger Notifications (Background) ──
-  (async () => {
-    if (!postData.author_id) return; // Guests cannot trigger notifications
-    try {
-      const topicSnap = await getDoc(doc(db, 'topics', postData.topic_id));
-      const topicTitle = topicSnap.exists() ? topicSnap.data().title : 'Unknown Topic';
-
-      const subscribers = await getTopicSubscribers(postData.topic_id);
-      const filteredSubscribers = subscribers.filter(uid => uid !== postData.author_id);
-      
-      if (filteredSubscribers.length > 0) {
-        for (const recipientUid of filteredSubscribers) {
-          // Check for existing unread notification for this topic
-          const existing = await getUnreadTopicNotification(recipientUid, postData.topic_id);
-          
-          if (existing) {
-            // Merge: increment post_count, update created_at to bring to top
-            await updateNotificationPayload(existing.id, {
-              ...existing.payload,
-              post_count: (existing.payload?.post_count || 1) + 1,
-              last_post_id: postRef.id
-            }, true); // true = update created_at
-          } else {
-            // Create new
-            await createNotification('topic_reply', {
-              topic_id: postData.topic_id,
-              topic_title: topicTitle,
-              first_post_id: postRef.id,
-              last_post_id: postRef.id,
-              post_count: 1
-            }, recipientUid);
-          }
-        }
-      }
-
-      // 2. Quote Notifications
-      if (postData.content) {
-        const quoteRegex = /\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]+),([^\]]+)"\]/gi;
-        const quotedPostIds = new Set();
-        let match;
-        while ((match = quoteRegex.exec(postData.content)) !== null) {
-          quotedPostIds.add(match[1]);
-        }
-
-        for (const qPostId of quotedPostIds) {
-          try {
-            const qPostSnap = await getDoc(doc(db, 'posts', qPostId));
-            if (qPostSnap.exists()) {
-              const qPostData = qPostSnap.data();
-              const qAuthorId = qPostData.author_id;
-              
-              if (qAuthorId && qAuthorId !== postData.author_id) {
-                await createNotification('post_quoted', {
-                  topic_id: postData.topic_id,
-                  topic_title: topicTitle,
-                  post_id: postRef.id
-                }, qAuthorId);
-              }
-            }
-          } catch (e) {
-            console.error('[createPost quote notification error]', e);
-          }
-        }
-      }
-
-    } catch (err) {
-      console.error('[createPost notifications error]', err);
-    }
-  })();
+  // Notifications are handled server-side by the onPostCreated Cloud Function
+  // (handlePostNotifications). Do NOT duplicate that logic here.
 
   return postRef.id;
 };
@@ -318,38 +245,48 @@ export const publishDraft = async (uid, topicId) => {
   return newPostId;
 };
 
+/**
+ * Locate which page a post appears on within its topic.
+ * Returns a stable deep-link descriptor suitable for URL construction.
+ *
+ * @param {string} postId
+ * @param {number} itemsPerPage  Must match the pagination constant used by the UI.
+ * @returns {{ found: boolean, reason?: string, topicId?: string, postId?: string, page?: number, anchor?: string }}
+ */
 export const locatePost = async (postId, itemsPerPage = 20) => {
+  if (!postId) return { found: false, reason: 'missing_post_id' };
+
   try {
-    const postRef = doc(db, 'posts', postId);
-    const postSnap = await getDoc(postRef);
-    if (!postSnap.exists()) return { found: false };
+    const postSnap = await getDoc(doc(db, 'posts', postId));
+    if (!postSnap.exists()) return { found: false, reason: 'not_found' };
 
-    const postData = postSnap.data();
-    const topicId = postData.topic_id;
-    const createdAt = postData.created_at || serverTimestamp();
+    const { topic_id: topicId, created_at: createdAt } = postSnap.data();
+    if (!topicId) return { found: false, reason: 'missing_topic_id' };
 
-    // Query posts in the SAME topic that were created BEFORE this post
-    const q = query(
+    // created_at is null on a freshly committed post whose server timestamp
+    // hasn't propagated yet. A post with no timestamp is necessarily the
+    // newest one in the thread, so page 1 of a single-post view — or the
+    // last page in a multi-page view — is the correct fallback.
+    // We cannot use serverTimestamp() here: it is a write sentinel and
+    // Firestore rejects it as a query comparator.
+    if (!createdAt) {
+      return { found: true, topicId, postId, page: 1, anchor: `#post-${postId}` };
+    }
+
+    const priorPostsQuery = query(
       collection(db, 'posts'),
       where('topic_id', '==', topicId),
       where('created_at', '<', createdAt)
     );
 
-    const countSnap = await getCountFromServer(q);
+    const countSnap = await getCountFromServer(priorPostsQuery);
     const countBefore = countSnap.data().count;
-    
-    // Page is (count / page_size) + 1
     const page = Math.floor(countBefore / itemsPerPage) + 1;
 
-    return { 
-      found: true, 
-      topicId, 
-      page,
-      postCreatedAt: createdAt 
-    };
+    return { found: true, topicId, postId, page, anchor: `#post-${postId}` };
   } catch (err) {
     console.error('[locatePost]', err);
-    return { found: false };
+    return { found: false, reason: 'error' };
   }
 };
 
@@ -539,16 +476,6 @@ export const deleteTopics = async (topicIds, performerId) => {
       }
     }
 
-    // ── Handle Notifications (Background) ──
-    (async () => {
-      try {
-        await handleTopicDeletionNotifications(topicId);
-      } catch (err) {
-        if (err.code !== 'permission-denied') {
-          console.error('[deleteTopics notification cleanup error]', err);
-        }
-      }
-    })();
   }
 };
 

@@ -13,7 +13,6 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { logAdminAction } from './audit';
-import { createNotification } from './notifications';
 
 /**
  * voteOnPost
@@ -29,9 +28,7 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
   const voterRef = doc(db, 'users', voterUid);
   const userRef = doc(db, 'users', targetUid);
 
-  let finalVoterNickname = 'User';
-
-  finalVoterNickname = await runTransaction(db, async (transaction) => {
+  await runTransaction(db, async (transaction) => {
     const logDoc = await transaction.get(logRef);
     if (logDoc.exists()) {
       throw new Error('Already voted on this post.');
@@ -61,22 +58,7 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
       comment: comment || '',
       created_at: serverTimestamp()
     });
-
-    return voterNickname; // return to outer scope
   });
-
-  // 4. Send notification
-  try {
-    await createNotification('reputation_change', {
-      voter_nickname: finalVoterNickname,
-      value: value,
-      topic_id: topicId,
-      post_id: postId,
-      comment: comment
-    }, targetUid);
-  } catch (e) {
-    console.error('Failed to create reputation notification', e);
-  }
 };
 
 /**
@@ -117,9 +99,7 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
   const voterRef = doc(db, 'users', voterUid);
   const userRef = doc(db, 'users', targetUid);
 
-  let finalVoterNickname = 'User';
-
-  finalVoterNickname = await runTransaction(db, async (transaction) => {
+  await runTransaction(db, async (transaction) => {
     const logDoc = await transaction.get(logRef);
     if (logDoc.exists()) {
       throw new Error('Already voted on this profile.');
@@ -145,21 +125,7 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
       post_id: null,
       created_at: serverTimestamp()
     });
-
-    return voterNickname; // Return to outer scope
   });
-
-  // Send Notification
-  try {
-    await createNotification('reputation_change', {
-      voter_nickname: finalVoterNickname,
-      value: value,
-      target_id: targetUid,
-      comment: comment
-    }, targetUid);
-  } catch (e) {
-    console.error('Failed to create reputation notification', e);
-  }
 };
 
 /**

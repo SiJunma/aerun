@@ -210,27 +210,23 @@ service cloud.firestore {
     }
 
     // --- Notifications ---
-    // Any signed-in user can create (new registrants don't have 'active' status yet).
-    // Personal notifications (recipient_uid = own uid) are readable by that user.
-    // Admin-broadcast notifications (recipient_uid = null) are readable/manageable by admin only.
     match /notifications/{notifId} {
-      allow create: if isSignedIn();
+      // Users read only their own; admins read all.
       allow read: if isAdmin()
-        || (isActive() && (
-             resource.data.recipient_uid == request.auth.uid || 
-             (resource.data.type == 'topic_reply' && resource.data.read == false)
-           ));
-      allow update: if isAdmin()
-        || (isActive() && (
-             // Recipient can mark read/archive/etc
-             (resource.data.recipient_uid == request.auth.uid && 
-              request.resource.data.diff(resource.data).affectedKeys()
-                .hasAny(['read', 'archived', 'payload', 'created_at']))
-             ||
-             // Other users can ONLY "merge" (update payload/timestamp) unread topic replies
-             (resource.data.type == 'topic_reply' && resource.data.read == false && resource.data.archived == false &&
-              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payload', 'created_at']))
-           ));
+               || (isActive() && resource.data.recipient_uid == request.auth.uid);
+
+      // All notification creation is server-side via Cloud Functions (Admin SDK bypasses rules).
+      // No client path should ever write a notification directly.
+      allow create: if false;
+
+      // Users may only mark their own notifications as read or archived.
+      // No other field may be changed by the client.
+      allow update: if isActive()
+                 && resource.data.recipient_uid == request.auth.uid
+                 && request.resource.data.diff(resource.data)
+                      .affectedKeys().hasOnly(['read', 'archived']);
+
+      // Only admins may hard-delete notifications.
       allow delete: if isAdmin();
     }
 

@@ -38,6 +38,23 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
             batch.update(postRef, { reputation: admin.firestore.FieldValue.increment(value) });
         }
 
+        // 3. Create notification
+        const notifRef = db.collection("notifications").doc();
+        batch.set(notifRef, {
+            recipient_uid: target_id,
+            type: "reputation_change",
+            read: false,
+            archived: false,
+            payload: {
+                voter_nickname: log.voter_nickname || "User",
+                value: value,
+                topic_id: log.topic_id || null,
+                post_id: log.post_id || null,
+                comment: log.comment || ""
+            },
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+
         await batch.commit();
         logger.info(`Reputation applied for log ${snap.id}: target=${target_id}, value=${value}`);
     } catch (error) {
@@ -134,11 +151,23 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
             batch.update(userRef, { topics_count: admin.firestore.FieldValue.increment(-1) });
         }
 
-        // 3. Notifications Cleanup
-        const notifSnap = await db.collection("notifications").where("payload.topic_id", "==", event.params.topicId).get();
-        notifSnap.forEach(d => batch.delete(d.ref));
-
         await batch.commit();
+
+        // 3. Notifications Cleanup (Chunked)
+        const notifSnap = await db.collection("notifications")
+            .where("payload.topic_id", "==", event.params.topicId)
+            .get();
+
+        if (!notifSnap.empty) {
+            const BATCH_LIMIT = 500;
+            const docs = notifSnap.docs;
+            for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+                const chunkBatch = db.batch();
+                docs.slice(i, i + BATCH_LIMIT).forEach(d => chunkBatch.delete(d.ref));
+                await chunkBatch.commit();
+            }
+            logger.info(`onTopicDeleted: deleted ${docs.length} notifications for topic ${event.params.topicId}`);
+        }
 
         // 4. Metadata Sync (Fallback)
         if (category_id) {
@@ -354,8 +383,41 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
 
         await batch.commit();
 
-        // 3. Metadata Sync (Fallback)
+        // 3. Notification Cleanup
+        const notifSnap = await db.collection("notifications")
+            .where("payload.topic_id", "==", topic_id)
+            .where("read", "==", false)
+            .get();
+        
+        if (!notifSnap.empty) {
+            const batchNotif = db.batch();
+            notifSnap.forEach(d => {
+                const data = d.data();
+                if (data.type === 'topic_reply') {
+                    const count = (data.payload?.post_count || 1) - 1;
+                    if (count <= 0) {
+                        batchNotif.delete(d.ref);
+                    } else {
+                        batchNotif.update(d.ref, { "payload.post_count": count });
+                    }
+                }
+            });
+            await batchNotif.commit();
+        }
+
+        // Cleanup direct post references (quotes, etc)
+        const postNotifsSnap = await db.collection("notifications")
+            .where("payload.post_id", "==", event.params.postId)
+            .get();
+        if (!postNotifsSnap.empty) {
+            const batchPost = db.batch();
+            postNotifsSnap.forEach(d => batchPost.delete(d.ref));
+            await batchPost.commit();
+        }
+
+        // 4. Metadata Sync (Fallback)
         await syncTopicMetadata(db, topic_id);
+
         
         logger.info(`onPostDeleted cleanup for ${event.params.postId} successful.`);
     } catch (error) {
@@ -445,5 +507,73 @@ exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
         logger.info(`Successfully deleted auth user: ${deletedUid}`);
     } catch (error) {
         logger.error(`Error deleting auth user ${deletedUid}:`, error);
+    }
+});
+
+/**
+ * onUserCreated
+ * Triggers when a new user document is created.
+ * Notifies all admins and user managers about the registration.
+ */
+exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const newUser = snap.data();
+    const db = admin.firestore();
+
+    try {
+        // 1. Find roles with user-management permissions
+        const rolesSnap = await db.collection("roles").get();
+        const eligibleRoleIds = [];
+        const USER_MGMT_PERMS = ["APPROVE_USERS", "BAN_USERS", "DELETE_USERS"];
+
+        rolesSnap.forEach(doc => {
+            const data = doc.data();
+            const perms = data.permissions || [];
+            if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
+                eligibleRoleIds.push(doc.id);
+            }
+        });
+
+        // 2. Collect recipients
+        const recipients = new Set();
+        
+        // managers
+        if (eligibleRoleIds.length > 0) {
+            const usersSnap = await db.collection("users")
+                .where("role_id", "in", eligibleRoleIds.slice(0, 30))
+                .get();
+            usersSnap.forEach(u => recipients.add(u.id));
+        }
+
+        // Always notify role_id === 'root'
+        const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
+        rootSnap.forEach(u => recipients.add(u.id));
+
+        if (recipients.size === 0) return;
+
+        // 3. Create notifications
+        const batch = db.batch();
+        recipients.forEach(uid => {
+            const notifRef = db.collection("notifications").doc();
+            batch.set(notifRef, {
+                recipient_uid: uid,
+                type: "new_registration",
+                read: false,
+                archived: false,
+                payload: {
+                    uid: event.params.uid,
+                    nickname: newUser.nickname,
+                    email: newUser.email,
+                    admin_message: newUser.admin_message || null
+                },
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+            });
+        });
+
+        await batch.commit();
+        logger.info(`onUserCreated: Notified ${recipients.size} managers for user ${event.params.uid}`);
+    } catch (error) {
+        logger.error(`onUserCreated error (${event.params.uid}):`, error);
     }
 });

@@ -24,7 +24,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
-import { notifyUserManagers, markTopicNotificationsRead } from '../api/notifications';
+import { markTopicNotificationsRead } from '../api/notifications';
 import { 
   markAllTopicsRead,
   recordGuestActivity as apiRecordGuestActivity,
@@ -425,16 +425,6 @@ export const AuthProvider = ({ children }) => {
             sessionStorage.removeItem('pending_nickname');
             sessionStorage.removeItem('pending_message');
             sessionStorage.removeItem('is_registering');
-
-            // Notify only users with user-management permissions about new registrations
-            if (!isAdmin) {
-              notifyUserManagers('new_registration', {
-                uid: firebaseUser.uid,
-                nickname: finalNickname,
-                email: firebaseUser.email,
-                admin_message: pendingMessage || null
-              }).catch(err => console.warn('[notification]', err));
-            }
 
             // Log registration to audit log
             await logAdminAction('user_registered', firebaseUser.uid, { 
