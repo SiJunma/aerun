@@ -25,8 +25,7 @@ import {
   createNotification,
   getUnreadTopicNotification,
   updateNotificationPayload,
-  handleTopicDeletionNotifications,
-  handlePostDeletionNotifications
+  handleTopicDeletionNotifications
 } from './notifications';
 
 
@@ -92,8 +91,6 @@ export const createTopic = async (topicData, firstPostData) => {
   
   await runTransaction(db, async (transaction) => {
     const postRef = doc(collection(db, 'posts'));
-    const categoryRef = doc(db, 'categories', topicData.category_id);
-    const userRef = topicData.author_id ? doc(db, 'users', topicData.author_id) : null;
 
     transaction.set(topicRef, {
       ...topicData,
@@ -171,7 +168,6 @@ export const createPost = async (postData) => {
   
   await runTransaction(db, async (transaction) => {
     const { content: processedContent, rolls } = processDiceRolls(postData.content);
-    const userRef = postData.author_id ? doc(db, 'users', postData.author_id) : null;
 
     transaction.set(postRef, {
       ...postData,

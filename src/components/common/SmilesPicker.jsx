@@ -2,7 +2,7 @@ import React from 'react';
 import { Tabs, Tab, Row, Col } from 'react-bootstrap';
 import { SMILE_PACKS } from '../../config/smiles';
 
-const SmilesPicker = ({ onSelect, width }) => {
+const SmilesPicker = ({ onSelect }) => {
   return (
     <div className="smiles-picker-container p-2" style={{ 
       maxHeight: '350px', 

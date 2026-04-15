@@ -34,6 +34,19 @@ export const SMILE_PACKS = [
       { code: '[jcdragonmadebby]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fjcdragon%2F48167996_jcdragonmadebby.gif?alt=media&token=ab8d97c4-158f-4253-90cf-90552e93c5d5' },
       { code: '[jcdragonman]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fjcdragon%2F48168032_jcdragonman.gif?alt=media&token=0ab230fa-5f04-49a5-942c-36d79a73fca7' }
     ]
+  },
+  {
+    id: 'possum',
+    name: 'Possum',
+    smiles: [
+      { code: '[possumdead]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fpossum%2Fpossumdead.png?alt=media&token=a3091585-1841-4523-8fbe-09f353cb04b8' },
+      { code: '[possumfishy]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fpossum%2Fpossumfishy.png?alt=media&token=771782dc-66f9-4a2f-9c40-e368626615f2' },
+      { code: '[possumhappy]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fpossum%2Fpossumhappy.png?alt=media&token=4e98965a-5b3a-4f8a-bc9f-77f6f785943f' },
+      { code: '[possumhehe]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fpossum%2Fpossumhehe.png?alt=media&token=c1e46810-731d-4e7c-874b-35480bd41f0e' },
+      { code: '[possumlove]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fpossum%2Fpossumlove.png?alt=media&token=826302cb-c9fe-485d-b8c2-a3d11dd6ced6' },
+      { code: '[possumscared]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fpossum%2Fpossumscared.png?alt=media&token=c903ebb1-ad83-467e-90eb-92c68be48dbc' },
+      { code: '[possumsleep]', url: 'https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles%2Fpossum%2Fpossumsleep.png?alt=media&token=5673962a-53d8-4317-8d4e-07dbb21131a1' }
+    ]
   }
 ];
 

@@ -432,7 +432,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
                 {
                   name: 'offset',
                   options: {
-                    offset: ({ placement, reference, popper }) => {
+                    offset: ({ reference }) => {
                       if (containerRef.current && reference) {
                         const containerRect = containerRef.current.getBoundingClientRect();
                         if (containerRect.width === 0) return [0, 8];
@@ -465,7 +465,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
               ],
             }}
           >
-            <SmilesPicker onSelect={(code) => insertText(code, '')} width={editorWidth} />
+            <SmilesPicker onSelect={(code) => insertText(code, '')} />
           </Dropdown.Menu>
         </Dropdown>
 
