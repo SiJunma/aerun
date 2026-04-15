@@ -4,9 +4,9 @@ import { SMILE_PACKS } from '../../config/smiles';
 
 const SmilesPicker = ({ onSelect }) => {
   return (
-    <div className="smiles-picker-container p-2" style={{ 
-      maxHeight: '350px', 
-      overflowY: 'auto', 
+    <div className="smiles-picker-container p-2" style={{
+      maxHeight: '350px',
+      overflowY: 'auto',
       width: '100%',
       backgroundColor: 'var(--card-bg)',
       color: 'var(--text-color)',
@@ -23,7 +23,7 @@ const SmilesPicker = ({ onSelect }) => {
                   className="smile-item rounded p-1 cursor-pointer hover-bg-theme"
                   onClick={() => onSelect(smile.code)}
                   title={smile.code}
-                  style={{ 
+                  style={{
                     cursor: 'pointer',
                     transition: 'transform 0.1s ease',
                   }}
@@ -32,8 +32,8 @@ const SmilesPicker = ({ onSelect }) => {
                     src={smile.url}
                     alt={smile.code}
                     className="smile-image"
-                    style={{ width: '40px', height: '40px', objectFit: 'contain' }}
-                    onMouseOver={(e) => e.currentTarget.parentElement.style.transform = 'scale(1.2)'}
+                    style={{ width: 'auto', height: 'auto', objectFit: 'contain' }}
+                    onMouseOver={(e) => e.currentTarget.parentElement.style.transform = 'scale(1.05)'}
                     onMouseOut={(e) => e.currentTarget.parentElement.style.transform = 'scale(1.0)'}
                   />
                 </div>
