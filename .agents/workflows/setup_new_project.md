@@ -48,3 +48,11 @@ Ensure your `firestore.rules` and `storage.rules` are deployed:
 ```powershell
 firebase deploy --only firestore:rules,storage:rules
 ```
+
+## 6. Managing Smiles & Stickers
+To add or update sticker packs in the editor:
+1. Upload your `.gif` or `.png` files to a folder in Firebase Storage under `smiles/` (e.g., `smiles/jcdragon/`).
+2. Ensure the files have public read access in `storage.rules`.
+3. Update `src/config/smiles.js` by adding a new pack object to `SMILE_PACKS`.
+4. For each sticker, provide a `code` (e.g., `[jcdragon]`) and its public `url` (including the `token` parameter if necessary).
+5. (Optional) Use the AI Maintenance Guide at `.agents/maintenance/updating_smiles.md` to automate the URL and token retrieval if you have many files.
