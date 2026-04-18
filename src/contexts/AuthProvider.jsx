@@ -409,7 +409,7 @@ export const AuthProvider = ({ children }) => {
               last_seen: serverTimestamp(),
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
               settings: {
-                theme: 'dark',
+                theme: localStorage.getItem('guest_theme') || 'dark',
                 language: (() => {
                   const saved = localStorage.getItem('language');
                   if (saved && (saved === 'ru' || saved === 'en')) return saved;

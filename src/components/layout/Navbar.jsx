@@ -3,7 +3,8 @@ import { Navbar, Nav, Container, NavDropdown, Image, Badge, Button } from 'react
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
-import { Bell, User, LogOut, MessageCircle } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeProvider';
+import { Bell, User, LogOut, MessageCircle, Palette, Check } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
 import { subscribeToDmList } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
@@ -12,6 +13,7 @@ import AuthModal from '../modals/AuthModal';
 const Navigation = () => {
   const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS } = useAuth();
   const { t, lang } = useI18n();
+  const { theme, changeGuestTheme } = useTheme();
   const navigate = useNavigate();
   const [adminUnread, setAdminUnread] = React.useState(0);
   const [userUnread, setUserUnread] = React.useState(0);
@@ -236,6 +238,26 @@ const Navigation = () => {
             </NavDropdown>
           ) : (
             <div className="d-flex align-items-center gap-2">
+              <NavDropdown
+                title={<Palette size={18} className="text-light opacity-75 hover-opacity-100" />}
+                id="guest-theme-dropdown"
+                align="end"
+                className="no-caret"
+              >
+                <NavDropdown.Item onClick={() => { changeGuestTheme('light'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'light' ? 'fw-bold text-primary' : ''}`}>
+                  {theme === 'light' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {t('profile.theme_light')}
+                </NavDropdown.Item>
+                <NavDropdown.Item onClick={() => { changeGuestTheme('dark'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'dark' ? 'fw-bold text-primary' : ''}`}>
+                  {theme === 'dark' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {t('profile.theme_dark')}
+                </NavDropdown.Item>
+                <NavDropdown.Item onClick={() => { changeGuestTheme('neutral'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'neutral' ? 'fw-bold text-primary' : ''}`}>
+                  {theme === 'neutral' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {t('profile.theme_neutral')}
+                </NavDropdown.Item>
+              </NavDropdown>
+
               <Nav.Link 
                 as={settings?.whitelistMode ? Link : 'span'}
                 to={settings?.whitelistMode ? "/login" : undefined}

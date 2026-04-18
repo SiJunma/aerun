@@ -5,7 +5,7 @@ import { Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as Imag
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
 
-const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false, showHide = true }) => {
+const RichEditor = ({ value, onChange, placeholder, rows = 6, minHeight, id = 'rich-editor', maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false, showHide = true, smilesDropDirection = "up", smilesFullWidth = true }) => {
     const { lang, t } = useI18n();
 
   const textareaRef = useRef(null);
@@ -408,7 +408,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
           <LinkIcon size={16} />
         </Button>
         <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowImageModal(true)} title="Image"><ImageIcon size={16} /></Button>
-        <Dropdown className="d-inline-block" drop="up">
+        <Dropdown className="d-inline-block" drop={typeof window !== 'undefined' && window.innerWidth < 992 ? "up" : smilesDropDirection}>
           <Dropdown.Toggle 
             variant="light" 
             size="sm" 
@@ -421,19 +421,21 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
             className="smiles-picker-menu p-0 shadow border-0" 
             renderOnMount
             style={{ 
-              width: editorWidth ? `${editorWidth}px` : '320px', 
+              width: (smilesFullWidth && typeof window !== 'undefined' && window.innerWidth >= 992) ? `${editorWidth}px` : ((typeof window !== 'undefined' && window.innerWidth < 992) ? `${editorWidth}px` : '320px'),
               zIndex: 3500,
               maxWidth: 'none'
             }}
-            placement="top-start"
             popperConfig={{ 
               strategy: 'fixed',
               modifiers: [
                 {
                   name: 'offset',
                   options: {
-                    offset: ({ reference }) => {
-                      if (containerRef.current && reference) {
+                    offset: ({ placement, reference }) => {
+                      // Apply offset fix on mobile, OR if not full width to prevent cut off
+                      // ONLY if it's placed top or bottom. For left/right, it breaks positioning.
+                      const isTopOrBottom = !placement || placement.startsWith('top') || placement.startsWith('bottom');
+                      if (isTopOrBottom && (!smilesFullWidth || (editorWidth > 0 && editorWidth < 576)) && containerRef.current && reference) {
                         const containerRect = containerRef.current.getBoundingClientRect();
                         if (containerRect.width === 0) return [0, 8];
                         
@@ -447,7 +449,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
                 },
                 {
                   name: 'flip',
-                  enabled: false, // Prevents "disappearing" while determining best placement
+                  enabled: true,
                 },
                 {
                   name: 'preventOverflow',
@@ -586,6 +588,7 @@ const RichEditor = ({ value, onChange, placeholder, rows = 6, id = 'rich-editor'
         maxLength={maxLength}
         autoFocus={autoFocus}
         className="form-control"
+        style={minHeight ? { minHeight } : {}}
       />
 
       <div className="d-flex justify-content-between mt-2 px-1">

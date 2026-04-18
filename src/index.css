@@ -141,6 +141,19 @@ body {
   flex: 1 0 auto;
 }
 
+/* Fix primary button contrast inside the dark navbar specifically for light theme */
+[data-theme='light'] .navbar .btn-primary {
+  background-color: #f8f9fa !important;
+  border-color: #f8f9fa !important;
+  color: #212529 !important;
+}
+
+[data-theme='light'] .navbar .btn-primary:hover {
+  background-color: #e2e6ea !important;
+  border-color: #dae0e5 !important;
+  color: #212529 !important;
+}
+
 /* Global maximum width for the forum */
 @media (min-width: 1200px) {
   .container {
@@ -2140,6 +2153,18 @@ a.badge.bg-danger:hover {
   outline: 0;
 }
 
+/* Hide carets universally on components with no-caret */
+.dropdown-toggle.no-caret::after,
+.dropdown-toggle.no-caret::before,
+.dropstart .dropdown-toggle.no-caret::before,
+.dropend .dropdown-toggle.no-caret::after,
+.dropup .dropdown-toggle.no-caret::after,
+.no-caret::after,
+.no-caret::before {
+  display: none !important;
+  content: none !important;
+}
+
 /* Header-Specific Override for Dropdowns in Dark Headers */
 .card-header .custom-select-toggle.text-light {
   background-color: transparent !important;
@@ -2480,7 +2505,8 @@ a.badge.bg-danger:hover {
 
   .dm-messages-col {
     flex: 0 0 auto;
-    height: 100vh;
+    min-height: 300px;
+    height: auto;
   }
 
   .dm-editor-col {

@@ -390,6 +390,8 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   hideDiceType={true}
                   isEdit={false}
                   showHide={false}
+                  smilesDropDirection="start"
+                  smilesFullWidth={false}
                 />
               </div>
               <div className="d-flex justify-content-end">

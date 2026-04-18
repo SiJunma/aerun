@@ -1390,6 +1390,7 @@ const TopicPage = () => {
                               value={editContent}
                               onChange={(e) => setEditContent(e.target.value)}
                               rows={6}
+                              minHeight="210px"
                               maxLength={computedMaxChars}
                               autoFocus={true}
                               showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
@@ -1730,6 +1731,7 @@ const TopicPage = () => {
                             value={editContent}
                             onChange={(e) => setEditContent(e.target.value)}
                             rows={6}
+                            minHeight="210px"
                             maxLength={computedMaxChars}
                             autoFocus={true}
                             showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
@@ -1940,7 +1942,8 @@ const TopicPage = () => {
                       value={replyContent}
                       onChange={(e) => setReplyContent(e.target.value)}
                       placeholder={t('forum.reply_placeholder')}
-                      minHeight="150px"
+                      minHeight="210px"
+                      rows={6}
                       maxLength={computedMaxChars}
                       showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                       isEdit={false}

@@ -254,7 +254,8 @@ const TopicFormPage = () => {
               <RichEditor
                 id="topicContent"
                 placeholder={lang === 'ru' ? 'Напишите ваше сообщение здесь...' : 'Write your message here...'}
-                rows={10}
+                rows={6}
+                minHeight="210px"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 maxLength={LIMITS.content}
