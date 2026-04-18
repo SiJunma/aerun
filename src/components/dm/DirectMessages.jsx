@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Image, Badge, Spinner } from 'react-bootstrap';
 import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useToast } from '../../contexts/ToastProvider';
@@ -31,6 +31,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const { t, lang } = useI18n();
   const { profile, hasPermission } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const myUid = profile?.uid;
 
   // ── Inbox state ──────────────────────────────────────────────────────────
@@ -143,14 +144,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // ── Open chat from inbox click ───────────────────────────────────────────
   const openInboxConversation = (conv) => {
     const peerUid = conv.participants.find(p => p !== myUid);
-    const peerInfo = {
-      uid: peerUid,
-      name: conv.participantNames?.[peerUid] || 'User',
-      avatar: conv.participantAvatars?.[peerUid] || '',
-    };
-    setActivePeer(peerInfo);
-    setActiveChatId(conv.id);
-    markDmRead(conv.id, myUid).catch(() => {});
+    navigate(`/messages/${peerUid}`);
   };
 
   // ── Send message ─────────────────────────────────────────────────────────

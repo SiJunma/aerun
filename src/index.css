@@ -539,7 +539,8 @@ label.fw-bold {
   color: #ffffff !important;
   border-bottom: 1px solid var(--border-color) !important;
   padding: 1rem 1.25rem !important;
-  border-radius: 1rem 1rem 0 0 !important; /* Top corners match card radius */
+  border-radius: 1rem 1rem 0 0 !important;
+  /* Top corners match card radius */
 }
 
 [data-theme='dark'] .card-header {
@@ -554,7 +555,8 @@ label.fw-bold {
   background-color: #f8f9fa !important;
   color: #212529 !important;
   border-right: 1px solid var(--border-color) !important;
-  border-radius: 1rem 0 0 1rem !important; /* Match card radius for left side */
+  border-radius: 1rem 0 0 1rem !important;
+  /* Match card radius for left side */
 }
 
 [data-theme='dark'] .author-sidebar {
@@ -976,7 +978,8 @@ label.fw-bold {
   color: var(--text-color) !important;
 }
 
-.dropdown-item:hover, .dropdown-item:focus {
+.dropdown-item:hover,
+.dropdown-item:focus {
   background-color: var(--block-bg) !important;
   color: var(--primary-color) !important;
 }
@@ -2011,7 +2014,8 @@ a.badge.bg-danger:hover {
   border-radius: 6px;
   transition: all 0.2s ease;
   padding: 4px 6px !important;
-  margin: -4px -6px !important; /* Counteract padding to avoid layout jump */
+  margin: -4px -6px !important;
+  /* Counteract padding to avoid layout jump */
   cursor: pointer;
   width: fit-content;
 }
@@ -2043,8 +2047,13 @@ a.badge.bg-danger:hover {
 }
 
 @keyframes skeleton-fade-in {
-  from { opacity: 0.5; }
-  to { opacity: 1; }
+  from {
+    opacity: 0.5;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .topic-description,
@@ -2518,21 +2527,28 @@ a.badge.bg-danger:hover {
 /* Mobile/Tablet: stack vertically */
 @media (max-width: 991.98px) {
   .dm-fullscreen-card {
-    border-radius: 0 !important;
-    height: auto !important;
-    min-height: auto !important;
-    overflow: visible !important;
+    border-radius: 1rem !important;
+    overflow: hidden !important; /* Fixes white corners */
+    height: calc(100vh - 140px) !important;
+    min-height: 500px !important;
+    margin-bottom: 1rem;
   }
 
   .dm-chat-body {
     flex-direction: column;
-    overflow: visible !important;
+    overflow-y: auto !important; /* Entire body scrolls on mobile */
+    overflow-x: hidden;
+    flex: 1;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
   }
 
   .dm-messages-col {
-    flex: 0 0 auto;
-    min-height: 300px;
+    flex: 0 0 auto; /* Don't scroll separately */
+    overflow-y: visible !important;
     height: auto;
+    min-height: 0;
+    padding-bottom: 0;
   }
 
   .dm-editor-col {
@@ -2540,6 +2556,8 @@ a.badge.bg-danger:hover {
     flex-shrink: 0;
     border-left: none;
     border-top: 1px solid var(--border-color);
+    background: var(--card-bg);
+    margin-top: auto; /* Push to bottom of content if short */
   }
 }
 
@@ -2983,4 +3001,4 @@ kbd {
   align-self: center;
   border-left: 1px solid var(--border-color);
   opacity: 0.2;
-}
+}

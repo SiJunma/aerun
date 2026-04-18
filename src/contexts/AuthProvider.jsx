@@ -395,16 +395,13 @@ export const AuthProvider = ({ children }) => {
 
             const defaultAvatar = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(finalNickname)}`;
 
-            const usesPassword = firebaseUser.providerData.some(p => p.providerId === 'password');
-            const needsVerification = usesPassword && !firebaseUser.emailVerified;
-
             const newUser = {
               uid: firebaseUser.uid,
               email: firebaseUser.email,
               nickname: finalNickname,
               avatar_url: defaultAvatar,
               status_line: 'Hello, I am new here!',
-              role_id: isAdmin ? CHIEF_ADMIN_ID : (globalSettings?.requireApproval === false && !needsVerification ? 'player' : 'pending'),
+              role_id: isAdmin ? CHIEF_ADMIN_ID : (globalSettings?.requireApproval === false ? 'player' : 'pending'),
               created_at: serverTimestamp(),
               last_seen: serverTimestamp(),
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
@@ -574,19 +571,23 @@ export const AuthProvider = ({ children }) => {
     // profile (e.g. status='pending') is applied.
     if (user && profile === null) return false;
 
-    // Pending users: always allow profile editing regardless of other settings
-    const isPending = user && profile?.role_id === 'pending';
-    if (isPending) {
+    // Unverified password accounts are restricted even if they have 'player' role
+    const isPending = profile?.role_id === 'pending';
+    const usesPassword = user?.providerData.some(p => p.providerId === 'password');
+    const isUnverified = usesPassword && !user?.emailVerified;
+    const isRestricted = isPending || (isUnverified && settings?.requireApproval === false);
+
+    if (isRestricted) {
       if (perm === PERMISSIONS.EDIT_SELF_NICKNAME || perm === PERMISSIONS.EDIT_SELF_AVATAR) {
         return true;
       }
     }
 
     const isWhitelistOff = !settings?.whitelistMode;
-    // When whitelistMode is OFF, pending users get spectator-level read access
+    // When whitelistMode is OFF, restricted users (pending or unverified player) get spectator-level read access
     // (spectator has VIEW_FORUM globally, but no posting rights).
-    // When whitelistMode is ON, pending users are strictly locked down.
-    const effectiveRoleId = (isPending && isWhitelistOff)
+    // When whitelistMode is ON, they are strictly locked down.
+    const effectiveRoleId = (isRestricted && isWhitelistOff)
         ? 'spectator'
         : (profile?.role_id || (user ? 'player' : 'guest'));
 
@@ -612,9 +613,9 @@ export const AuthProvider = ({ children }) => {
     }
 
     // ── 4. GLOBAL ROLE PERMISSIONS (Baseline) ──
-    // Pending users with whitelist ON: no permissions at all (except profile editing above).
-    // Pending users with whitelist OFF: fall through to spectator's global permissions (VIEW_FORUM only).
-    if (isPending && !isWhitelistOff) return false;
+    // Restricted users with whitelist ON: no permissions at all (except profile editing above).
+    // Restricted users with whitelist OFF: fall through to spectator's global permissions (VIEW_FORUM only).
+    if (isRestricted && !isWhitelistOff) return false;
 
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
