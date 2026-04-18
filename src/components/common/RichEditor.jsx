@@ -643,8 +643,8 @@ const RichEditor = forwardRef(({
         );
       case 'smiles':
         return isOverflow ? (
-          <Dropdown.Item onClick={() => setShowSmilesModal(true)}>
-             <Smile size={16} className="me-2 text-primary" /> {lang === 'ru' ? 'Смайлики' : 'Smiles'}
+          <Dropdown.Item onClick={() => setShowSmilesModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
+             <Smile size={16} /> {lang === 'ru' ? 'Смайлики' : 'Smiles'}
           </Dropdown.Item>
         ) : (
           <Dropdown className="d-inline-block" drop={smilesDropDirection}>
