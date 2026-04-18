@@ -681,11 +681,26 @@ const ProfilePage = () => {
                         <p className="mb-0">{t('profile.rep_history_hidden')}</p>
                       </div>
                     );
-                    if (repLogs.length === 0) return (
-                      <div className="p-5 text-center text-muted">
-                        <p className="mb-0">{t('forum.no_posts')}</p>
-                      </div>
-                    );
+                    const visibleRepLogs = repLogs.filter(log => {
+                      if (!log.topic_id) return true;
+                      const info = logTopicsInfo[log.topic_id];
+                      if (!info) return true; // Still loading/checking, keep it to show skeleton
+                      if (info.is_deleted) return false;
+                      const cat = categories.find(c => c.id === info.category_id);
+                      if (!cat) return false;
+                      return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+                    });
+
+                    if (visibleRepLogs.length === 0) {
+                      const isStillLoading = repLogs.some(log => log.topic_id && !logTopicsInfo[log.topic_id]);
+                      if (!isStillLoading) {
+                        return (
+                          <div className="p-5 text-center text-muted">
+                            <p className="mb-0">{t('profile.no_rep_logs')}</p>
+                          </div>
+                        );
+                      }
+                    }
                     return (
                     <div className="table-responsive">
                       {historyAdminBypass && (
@@ -707,16 +722,31 @@ const ProfilePage = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {repLogs.map(log => {
+                          {visibleRepLogs.map(log => {
                             const isAllowed = (() => {
                               if (!log.topic_id) return true;
                               const info = logTopicsInfo[log.topic_id];
-                              if (!info) return true; // not loaded yet
+                              if (!info) return null; // Still loading/checking
                               if (info.is_deleted) return false;
                               const cat = categories.find(c => c.id === info.category_id);
                               if (!cat) return false;
                               return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
                             })();
+
+                            if (isAllowed === null && log.topic_id) {
+                              return (
+                                <tr key={log.id} className="opacity-50">
+                                  <td className="px-4 py-3"><Skeleton width="80px" height="1rem" /></td>
+                                  <td className="py-3 text-center"><Skeleton width="16px" height="16px" /></td>
+                                  <td className="py-3"><Skeleton width="100px" height="1rem" /></td>
+                                  <td className="py-3 text-center"><Skeleton width="40px" height="1.5rem" /></td>
+                                  <td className="py-3 px-2"><Skeleton width="150px" height="1rem" /></td>
+                                  {hasPermission(PERMISSIONS.DELETE_REPUTATION) && <td></td>}
+                                </tr>
+                              );
+                            }
+
+                            if (isAllowed === false) return null;
 
                             return (
                             <tr key={log.id}>
@@ -898,17 +928,27 @@ const ProfilePage = () => {
                         return true;
                       });
 
-                      const totalPagesPosts = Math.ceil(filteredPosts.length / POSTS_PER_PAGE);
+                      const visiblePosts = filteredPosts.filter(post => {
+                        const topicInfo = logTopicsInfo[post.topic_id];
+                        if (!topicInfo) return true; // Still loading info, keep to show skeletons
+                        const category = topicInfo ? categories.find(c => c.id === topicInfo.category_id) : null;
+                        return topicInfo && category && hasPermission(PERMISSIONS.VIEW_FORUM, { category });
+                      });
 
-                      if (filteredPosts.length === 0) {
-                        return (
-                          <div className="p-5 text-center text-muted">
-                            {loadingUserPosts ? t('common.loading') : <p className="mb-0">{t('profile.no_posts_user')}</p>}
-                          </div>
-                        );
+                      const totalPagesPosts = Math.ceil(visiblePosts.length / POSTS_PER_PAGE);
+
+                      if (visiblePosts.length === 0) {
+                        const isStillLoading = filteredPosts.some(post => !logTopicsInfo[post.topic_id]);
+                        if (!isStillLoading && !loadingUserPosts) {
+                          return (
+                            <div className="p-5 text-center text-muted">
+                              <p className="mb-0">{t('profile.no_posts_user')}</p>
+                            </div>
+                          );
+                        }
                       }
 
-                      const pagedPosts = filteredPosts.slice(
+                      const pagedPosts = visiblePosts.slice(
                         (currentPagePosts - 1) * POSTS_PER_PAGE,
                         currentPagePosts * POSTS_PER_PAGE
                       );
@@ -929,7 +969,18 @@ const ProfilePage = () => {
                             const category = topicInfo ? categories.find(c => c.id === topicInfo.category_id) : null;
                             const isAllowed = topicInfo && category && hasPermission(PERMISSIONS.VIEW_FORUM, { category });
                             
-                            if (topicInfo && !isAllowed) return null; // Hide restricted posts
+                            // If topic info is still loading, show a skeleton to prevent flicker/leak
+                            if (!topicInfo) {
+                              return (
+                                <div key={post.id} className="p-4 border-bottom opacity-50">
+                                  <Skeleton width="60%" height="1.5rem" className="mb-2" />
+                                  <Skeleton width="40%" height="0.8rem" className="mb-3" />
+                                  <Skeleton count={2} height="0.8rem" />
+                                </div>
+                              );
+                            }
+
+                            if (!isAllowed) return null; // Hide restricted posts
 
                             // Only show border-bottom if not the last item OR if pagination follows
                             const isLastItem = idx === pagedPosts.length - 1;

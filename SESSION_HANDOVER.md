@@ -12,6 +12,7 @@ We are mid-refactor of the **Aerun Forum** architecture. The goal is to move sen
 3.  **Forum Logic**: Migrated topic/post counters and "Last Post" metadata synchronization to server-side triggers (`onTopicCreated/Deleted`, `onPostCreated/Deleted`).
 4.  **Notifications**: Topic reply and quote notifications are now handled automatically by the server.
 5.  **API Cleanup**: Legacy client-side transaction logic has been removed from `src/api/forum.js` and `src/api/reputation.js`.
+6.  **Privacy Hardening**: Fixed a data leak on the Profile Page where restricted posts/comments flickered during loading. Implemented "Skeleton-first" permission checks.
 
 ## 🛠️ Infrastructure Notes (Critical for Resume)
 *   **Workflow**: We use the **"File System Operator"** pattern. The local agent is the "Hands", while the remote **MCP Cloud-Claude-Agent** is the "Architect".
