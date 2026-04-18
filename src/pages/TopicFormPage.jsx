@@ -262,6 +262,7 @@ const TopicFormPage = () => {
                 disabled={submitting}
                 showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                 isEdit={false}
+                onSubmit={() => handleSubmit({ preventDefault: () => {} })}
               />
             </Form.Group>
 

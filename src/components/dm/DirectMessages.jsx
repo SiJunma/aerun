@@ -241,7 +241,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     return (
       <Card
         className="shadow-sm border-0 bg-card dm-fullscreen-card"
-        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', minHeight: '500px', overflow: 'hidden' }}
+        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', minHeight: '500px' }}
       >
         {/* Header */}
         <Card.Header className="py-2 d-flex align-items-center gap-3" style={{ flexShrink: 0, background: 'var(--nav-bg)' }}>

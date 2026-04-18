@@ -21,7 +21,7 @@ import Timestamp from '../components/common/Timestamp';
 import {
   Award, Pin, Lock, Settings, Trash2, ArrowRightLeft, Bell, BellOff, MessageSquare, Send,
   Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
-  Dices, User, FilePen, MessageSquareOff
+  Dices, User, FilePen, MessageSquareOff, Keyboard
 } from 'lucide-react';
 import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNotifications } from '../api/notifications';
 import { voteOnPost, getVotesInTopic } from '../api/reputation';
@@ -94,6 +94,9 @@ const TopicPage = () => {
   const [isPageLoading, setIsPageLoading] = useState(true);
 
   const replyRef = useRef(null);
+  const replyEditorRef = useRef(null);
+  const draftEditorRef = useRef(null);
+  const editEditorRef = useRef(null);
   const goLast = searchParams.get('goLast') === '1';
   const isJumpRequested = !!(searchParams.get('post') || goLast || hash.startsWith('#post-'));
   const ITEMS_PER_PAGE = 20;
@@ -635,7 +638,7 @@ const TopicPage = () => {
   };
 
   const handleReply = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
     if (!replyContent.trim() || submitting) return;
     if (!user && !guestNickname.trim()) {
       showToast(lang === 'ru' ? 'Введите ваш никнейм' : 'Please enter your nickname', 'danger');
@@ -1350,42 +1353,54 @@ const TopicPage = () => {
                             </div>
                           )}
                           <div className="mb-2">
-                            {post.author_id === user?.uid && (
-                              <Dropdown className="mb-2 w-auto">
-                                <Dropdown.Toggle 
-                                  variant="outline-management" 
-                                  size="sm"
-                                  className="d-flex align-items-center gap-2 custom-select-toggle"
-                                >
-                                  <User size={14} />
-                                  <span className="text-truncate" style={{ maxWidth: '200px' }}>
-                                    {editCharacterId 
-                                      ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
-                                      : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
-                                    }
-                                  </span>
-                                </Dropdown.Toggle>
-                                <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
-                                  <Dropdown.Item 
-                                    active={editCharacterId === ''}
-                                    onClick={() => setEditCharacterId('')}
+                            <div className="d-flex align-items-center justify-content-between mb-2">
+                              {post.author_id === user?.uid && (
+                                <Dropdown className="w-auto">
+                                  <Dropdown.Toggle 
+                                    variant="outline-management" 
+                                    size="sm"
+                                    className="d-flex align-items-center gap-2 custom-select-toggle"
                                   >
-                                    {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
-                                  </Dropdown.Item>
-                                  {characters.length > 0 && <Dropdown.Divider />}
-                                  {characters.map(char => (
+                                    <User size={14} />
+                                    <span className="text-truncate" style={{ maxWidth: '200px' }}>
+                                      {editCharacterId 
+                                        ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
+                                        : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                                      }
+                                    </span>
+                                  </Dropdown.Toggle>
+                                  <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
                                     <Dropdown.Item 
-                                      key={char.id}
-                                      active={editCharacterId === char.id}
-                                      onClick={() => setEditCharacterId(char.id)}
+                                      active={editCharacterId === ''}
+                                      onClick={() => setEditCharacterId('')}
                                     >
-                                      {t('forum.post_as_character')}: {char.name}
+                                      {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
                                     </Dropdown.Item>
-                                  ))}
-                                </Dropdown.Menu>
-                              </Dropdown>
-                            )}
+                                    {characters.length > 0 && <Dropdown.Divider />}
+                                    {characters.map(char => (
+                                      <Dropdown.Item 
+                                        key={char.id}
+                                        active={editCharacterId === char.id}
+                                        onClick={() => setEditCharacterId(char.id)}
+                                      >
+                                        {t('forum.post_as_character')}: {char.name}
+                                      </Dropdown.Item>
+                                    ))}
+                                  </Dropdown.Menu>
+                                </Dropdown>
+                              )}
+                              <Button 
+                                variant="outline-management" 
+                                size="sm" 
+                                className="ms-auto d-none d-md-flex align-items-center"
+                                onClick={() => editEditorRef.current?.openHotkeysModal()}
+                                title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+                              >
+                                <Keyboard size={16} />
+                              </Button>
+                            </div>
                             <RichEditor
+                              ref={editEditorRef}
                               id="editContent"
                               value={editContent}
                               onChange={(e) => setEditContent(e.target.value)}
@@ -1395,6 +1410,8 @@ const TopicPage = () => {
                               autoFocus={true}
                               showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                               isEdit={true}
+                              hideHotkeysButton={true}
+                              onSubmit={() => handleSaveEdit(post.id)}
                             />
                           </div>
                           <div className="d-flex gap-2">
@@ -1693,7 +1710,8 @@ const TopicPage = () => {
                     {editingPostId === myDraft.id ? (
                       <div className="pb-3">
                         <div className="mb-2">
-                          <Dropdown className="mb-2 w-auto">
+                        <div className="d-flex align-items-center justify-content-between mb-2">
+                          <Dropdown className="w-auto">
                             <Dropdown.Toggle 
                               variant="outline-management" 
                               size="sm"
@@ -1726,17 +1744,30 @@ const TopicPage = () => {
                               ))}
                             </Dropdown.Menu>
                           </Dropdown>
-                          <RichEditor
-                            id="draftEditContent"
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            rows={6}
-                            minHeight="210px"
-                            maxLength={computedMaxChars}
-                            autoFocus={true}
-                            showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
-                            isEdit={true}
-                          />
+                          <Button 
+                            variant="outline-management" 
+                            size="sm" 
+                            className="ms-auto d-none d-md-flex align-items-center"
+                            onClick={() => draftEditorRef.current?.openHotkeysModal()}
+                            title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+                          >
+                            <Keyboard size={16} />
+                          </Button>
+                        </div>
+                        <RichEditor
+                          ref={draftEditorRef}
+                          id="draftEditContent"
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          rows={6}
+                          minHeight="210px"
+                          maxLength={computedMaxChars}
+                          autoFocus={true}
+                          showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
+                          isEdit={true}
+                          hideHotkeysButton={true}
+                          onSubmit={() => handleUpdateDraft(myDraft.id)}
+                        />
                         </div>
                         <div className="d-flex gap-2">
                           <Button
@@ -1894,9 +1925,9 @@ const TopicPage = () => {
                       />
                     </Form.Group>
                   )}
-                  {user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
-                    <Form.Group className="mb-3" controlId="postAs">
-                      <Dropdown className="mb-2 w-auto">
+                  <div className="d-flex align-items-center justify-content-between mb-2">
+                    {user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
+                      <Dropdown className="w-auto">
                         <Dropdown.Toggle 
                           variant="outline-management" 
                           className="d-flex align-items-center gap-2 custom-select-toggle"
@@ -1934,10 +1965,21 @@ const TopicPage = () => {
                           ))}
                         </Dropdown.Menu>
                       </Dropdown>
-                    </Form.Group>
-                  )}
+                    )}
+                    <Button 
+                      variant="outline-management" 
+                      className={`ms-auto d-none d-md-flex align-items-center gap-2 ${!(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? 'mb-2' : ''}`}
+                      onClick={() => replyEditorRef.current?.openHotkeysModal()}
+                      title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+                    >
+                      <Keyboard size={18} />
+                      <span className="d-none d-md-inline small">{lang === 'ru' ? 'Справка' : 'Help'}</span>
+                    </Button>
+                  </div>
+
                   <Form.Group className="mb-3">
                     <RichEditor
+                      ref={replyEditorRef}
                       id="reply-editor"
                       value={replyContent}
                       onChange={(e) => setReplyContent(e.target.value)}
@@ -1947,6 +1989,8 @@ const TopicPage = () => {
                       maxLength={computedMaxChars}
                       showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                       isEdit={false}
+                      hideHotkeysButton={true}
+                      onSubmit={() => handleReply()}
                     />
                   </Form.Group>
 

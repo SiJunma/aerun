@@ -881,6 +881,24 @@ label.fw-bold {
   margin-top: 0.5rem;
 }
 
+.bbcode-code {
+  background: rgba(30, 41, 59, 0.05);
+  border-left: 4px solid var(--secondary-color);
+  color: var(--text-color);
+  font-size: 0.875rem;
+  overflow-x: auto;
+}
+
+[data-theme='dark'] .bbcode-code {
+  background: rgba(255, 255, 255, 0.05);
+  border-left-color: var(--secondary-color);
+}
+
+[data-theme='neutral'] .bbcode-code {
+  background: rgba(67, 52, 34, 0.05);
+  border-left-color: #8c8679;
+}
+
 [data-theme='neutral'] .bbcode-quote {
   background: #ede9df;
   border-left-color: #666;
@@ -2468,7 +2486,7 @@ a.badge.bg-danger:hover {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .dm-messages-col {
@@ -2487,6 +2505,14 @@ a.badge.bg-danger:hover {
   padding: 0.75rem;
   background: var(--card-bg);
   border-left: 1px solid var(--border-color);
+  overflow: visible !important;
+}
+
+.editor-overflow-smiles .smiles-picker-container {
+  max-height: 250px !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 
 /* Mobile/Tablet: stack vertically */
@@ -2901,4 +2927,60 @@ a.badge.bg-danger:hover {
 
 .min-w-0 {
   min-width: 0 !important;
+}
+
+/* ── Hotkeys Manual Table ────────────────────────────────────────────────── */
+.hotkeys-table {
+  background: transparent !important;
+  color: var(--text-color) !important;
+}
+
+.hotkeys-table td {
+  padding: 0.5rem 0.25rem;
+  border: none !important;
+  vertical-align: middle;
+}
+
+.hotkeys-table tr {
+  border-bottom: 1px solid rgba(var(--primary-rgb, 13, 110, 253), 0.05);
+}
+
+.hotkeys-table tr:last-child {
+  border-bottom: none;
+}
+
+kbd {
+  background-color: var(--input-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-bottom-width: 2px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-weight: 600;
+  display: inline-block;
+  border-radius: 4px;
+}
+
+[data-theme='dark'] kbd {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+[data-theme='neutral'] kbd {
+  background-color: #ede9df;
+  border-color: #d6cfc1;
+  color: #5c4d3c;
+}
+
+/* ── Editor Toolbar Fine-tuning ──────────────────────────────────────────── */
+.editor-toolbar .dropdown-toggle::after {
+  display: none !important;
+}
+
+.editor-toolbar .vr {
+  height: 1.2rem;
+  align-self: center;
+  border-left: 1px solid var(--border-color);
+  opacity: 0.2;
 }

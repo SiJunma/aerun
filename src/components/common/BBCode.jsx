@@ -10,6 +10,29 @@ import { ALL_SMILES_MAP } from '../../config/smiles';
  * 
  * A highly robust, single-pass stack-based BBCode parser.
  * Handles nested tags, custom parameters, and flexible tag syntax.
+ * 
+ * BBCode Rendering & Spacing Rules:
+ * --------------------------------
+ * 1. White-space: 'pre-wrap'
+ *    The entire content is rendered with pre-wrap to preserve user formatting and line breaks.
+ * 
+ * 2. Block Tag Absorption (preprocessNodes)
+ *    Tags like [quote], [list], [spoiler], [columns], etc. are "Block Tags".
+ *    To prevent double spacing in the editor (where users hit Enter before/after 
+ *    a block), we "absorb" ONE newline (\n) appearing immediately before or 
+ *    after a Block Tag.
+ * 
+ * 3. Indentation & Red Lines (preserved)
+ *    Only actual line breaks (\n) are absorbed. Horizontal whitespace (spaces/tabs) 
+ *    is PRESERVED to allow for manual paragraph indentation (красные строки).
+ * 
+ * 4. Nested Blocks
+ *    Spacing absorption is applied recursively. A block tag inside another block 
+ *    tag will also have its surrounding newlines absorbed to maintain flush alignment.
+ * 
+ * 5. Alignment Tags
+ *    [left], [center], [right], [justify] are block-level wrappers that use 
+ *    standard Bootstrap text-alignment classes.
  */
 
 const BBCodeSpoiler = ({ title, children }) => {
@@ -124,7 +147,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile', 'code'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -175,52 +198,37 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr'];
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
       const node = result[i];
       if (typeof node !== 'string' && blockTags.includes(node.name)) {
-        // Absorption: remove ONE newline before and after if they are whitespace-only
+        // Absorption: remove ONE newline before and after
         if (i > 0 && typeof result[i - 1] === 'string') {
-          const prev = result[i - 1];
-          if (!prev.trim() || prev.endsWith('\n')) {
-            // If it's pure whitespace or ends with newline, trip the last newline
-            if (prev.endsWith('\n')) {
-              result[i - 1] = prev.substring(0, prev.length - 1);
-            } else if (prev.endsWith('\r\n')) {
-              result[i - 1] = prev.substring(0, prev.length - 2);
-            }
-          }
+          result[i - 1] = result[i - 1].replace(/\r?\n\s*$/, '');
         }
         if (i < result.length - 1 && typeof result[i + 1] === 'string') {
-          const next = result[i + 1];
-          if (!next.trim() || next.startsWith('\n')) {
-            if (next.startsWith('\n')) {
-              result[i + 1] = next.substring(1);
-            } else if (next.startsWith('\r\n')) {
-              result[i + 1] = next.substring(2);
-            }
-          }
+          result[i + 1] = result[i + 1].replace(/^\r?\n/, '');
         }
       }
       // Recursively preprocess children of tags
       if (typeof node !== 'string' && node.children) {
         if (blockTags.includes(node.name)) {
-          // Remove all leading whitespace from first child
+          // Remove leading newlines only (preserving indent spaces)
           if (node.children.length > 0 && typeof node.children[0] === 'string') {
-            node.children[0] = node.children[0].replace(/^\s+/, '');
+            node.children[0] = node.children[0].replace(/^[\r\n]+/, '');
           }
-          // Remove all trailing whitespace from last child
+          // Remove trailing newlines only
           if (node.children.length > 0 && typeof node.children[node.children.length - 1] === 'string') {
             const lastIdx = node.children.length - 1;
-            node.children[lastIdx] = node.children[lastIdx].replace(/\s+$/, '');
+            node.children[lastIdx] = node.children[lastIdx].replace(/[\r\n]+$/, '');
           }
         }
         node.children = preprocessNodes(node.children);
       }
     }
-    // Filter out empty strings to prevent "phantom" spans
+    // Filter out truly empty strings to prevent "phantom" spans/lines
     return result.filter(n => typeof n !== 'string' || n.length > 0);
   }
 
@@ -407,6 +415,10 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         }
         return <div key={index} className="bbcode-col" style={colStyle}>{content}</div>;
       }
+      case 'left': return <div key={index} className="text-start">{content}</div>;
+      case 'center': return <div key={index} className="text-center">{content}</div>;
+      case 'right': return <div key={index} className="text-end">{content}</div>;
+      case 'justify': return <div key={index} style={{ textAlign: 'justify' }}>{content}</div>;
       case 'dice': {
         const sides = params.default || '20';
         return (
@@ -594,6 +606,13 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
               background: 'transparent'
             }}
           />
+        );
+      }
+      case 'code': {
+        return (
+          <pre key={index} className="bbcode-code p-3 my-2 rounded font-monospace shadow-sm">
+            {content}
+          </pre>
         );
       }
       default: return <span key={index}>{content}</span>;
