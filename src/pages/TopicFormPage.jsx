@@ -25,6 +25,7 @@ const TopicFormPage = () => {
   const [category, setCategory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const [pinFirstPost, setPinFirstPost] = useState(false);
 
   const DRAFT_KEY = `topic_draft_${categoryId}`;
 
@@ -101,7 +102,8 @@ const TopicFormPage = () => {
         author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
         author_role_id: profile?.role_id || 'player',
         is_character: !!selectedChar,
-        author_character_id: selectedCharacterId || null
+        author_character_id: selectedCharacterId || null,
+        first_post_pinned: pinFirstPost
       };
 
       const firstPostData = {
@@ -265,6 +267,15 @@ const TopicFormPage = () => {
                 onSubmit={() => handleSubmit({ preventDefault: () => {} })}
               />
             </Form.Group>
+
+            <Form.Check
+              type="checkbox"
+              id="pinFirstPost"
+              label={t('forum.pin_first_post')}
+              checked={pinFirstPost}
+              onChange={(e) => setPinFirstPost(e.target.checked)}
+              className="mb-3"
+            />
 
             <div className="d-flex justify-content-end gap-2">
               <Button

@@ -145,6 +145,8 @@ export const translations = {
       hide_posts_remaining: "{n} more posts needed to view.",
       hide_user_posts: "You have {count} posts.",
       hide_moderator_only: "Only moderators and admins can see this.",
+      pin_first_post: "Pin first post on all pages",
+      first_post_pinned_label: "First Post",
     },
     editor: {
       hide: "Hide",
@@ -699,6 +701,8 @@ export const translations = {
       hide_posts_remaining: "Нужно еще {n} сообщ. для просмотра.",
       hide_user_posts: "У вас {count} сообщ.",
       hide_moderator_only: "Контент скрыт. Только для администрации.",
+      pin_first_post: "Закрепить первое сообщение на всех страницах",
+      first_post_pinned_label: "Первое сообщение",
     },
     editor: {
       hide: "Скрыть",

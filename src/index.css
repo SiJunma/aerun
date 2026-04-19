@@ -910,6 +910,31 @@ label.fw-bold {
   background: #1a2333;
 }
 
+/* ── Pinned First Post Card ───────────────────────────────────────────── */
+.pinned-first-post-card {
+  border-left: 3px solid var(--primary-color) !important;
+  opacity: 0.95;
+}
+
+.pinned-first-post-strip {
+  background: rgba(var(--primary-rgb), 0.08);
+  color: var(--primary-color);
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.12);
+  font-size: 0.75rem;
+  border-radius: 1rem 1rem 0 0;
+}
+
+[data-theme='dark'] .pinned-first-post-strip {
+  background: rgba(var(--primary-rgb), 0.12);
+}
+
+[data-theme='neutral'] .pinned-first-post-strip {
+  background: rgba(100, 80, 50, 0.08);
+  color: #705c48;
+  border-bottom-color: rgba(100, 80, 50, 0.12);
+}
+
+
 .post-content ul,
 .post-content ol {
   margin-top: 0;

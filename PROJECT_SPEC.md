@@ -103,6 +103,7 @@
   author_id:    string,
   created_at:   Timestamp,
   dice_enabled: bool,         // разрешены ли кубики в этой теме
+  first_post_pinned: bool,    // закрепить первое сообщение на всех страницах темы
   posts_count:  number,       // денормализация
   last_post: {
     post_id:    string,

@@ -129,6 +129,7 @@
             "author_character_id": "string (references users.uid/characters.id)",
             "is_pinned": "boolean",
             "is_locked": "boolean",
+            "first_post_pinned": "boolean (default: false, pins first post on all pages)",
             "views": "number",
             "reputation": "number",
             "posts_count": "number",

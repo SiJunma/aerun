@@ -340,11 +340,12 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
                     to={topicId ? `/topic/${topicId}?post=${postId}` : `?post=${postId}`}
                     preventScrollReset={true}
                     className="text-decoration-none d-flex align-items-center gap-1"
-                    style={{ color: 'inherit' }}
+                    style={{ color: 'inherit', userSelect: 'text' }}
+                    draggable="false"
                     title={lang === 'ru' ? 'Перейти к сообщению' : 'Go to message'}
                   >
                     {authorName ? `${authorName} ${t('forum.wrote')}:` : `${t('forum.quote')}:`}
-                    <Reply size={14} className="opacity-50" />
+                    <Reply size={14} className="opacity-50 flex-shrink-0" />
                   </Link>
                 ) : (
                   <span>

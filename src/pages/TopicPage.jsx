@@ -64,6 +64,7 @@ const TopicPage = () => {
   // Extra fields when editing the first post (topic title/description)
   const [editTopicTitle, setEditTopicTitle] = useState('');
   const [editTopicDescription, setEditTopicDescription] = useState('');
+  const [editPinFirstPost, setEditPinFirstPost] = useState(false);
   const [editingFirstPost, setEditingFirstPost] = useState(false);
 
   // Delete confirmation state
@@ -791,6 +792,7 @@ const TopicPage = () => {
     if (isFirst && topic) {
       setEditTopicTitle(topic.title || '');
       setEditTopicDescription(topic.description || '');
+      setEditPinFirstPost(topic.first_post_pinned || false);
     }
   };
 
@@ -818,7 +820,8 @@ const TopicPage = () => {
       if (editingFirstPost && topic) {
         await updateTopic(topic.id, {
           title: editTopicTitle.trim() || topic.title,
-          description: editTopicDescription.trim()
+          description: editTopicDescription.trim(),
+          first_post_pinned: editPinFirstPost
         }, user.uid, topic.author_id);
       }
       setEditingPostId(null);
@@ -1139,6 +1142,141 @@ const TopicPage = () => {
         </div>
       </div>
 
+      {/* Pinned First Post — shown on pages 2+ when topic.first_post_pinned is true */}
+      {topic.first_post_pinned && currentPage > 1 && posts.length > 0 && (() => {
+        const firstPost = posts[0];
+        return (
+          <Card
+            key="pinned-first-post"
+            id="pinned-first-post"
+            className="mb-4 shadow-sm border-0 post-card pinned-first-post-card"
+          >
+            {/* Pinned marker strip */}
+            <div className="pinned-first-post-strip d-flex align-items-center gap-2 px-3 py-1">
+              <Pin size={13} fill="currentColor" />
+              <span className="fw-semibold" style={{ fontSize: '0.75rem' }}>{t('forum.first_post_pinned_label')}</span>
+            </div>
+            <Card.Body className="p-0">
+              <div className="d-flex flex-column flex-md-row flex-md-nowrap">
+                {/* Author sidebar */}
+                <div className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center">
+                  <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
+                    <div className="fw-bold text-center mb-1 text-truncate w-100">
+                      <ForumAuthorName
+                        userId={firstPost.author_id}
+                        characterId={firstPost.author_character_id}
+                        isCharacter={!!firstPost.is_character}
+                        fallbackName={firstPost.author_name}
+                        onClick={handleQuoteAuthor}
+                      />
+                    </div>
+                    {getLiveAuthorStatus(firstPost) === 'LOADING' ? (
+                      <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
+                    ) : getLiveAuthorStatus(firstPost) ? (
+                      <div className="text-primary mb-2 w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
+                        {getLiveAuthorStatus(firstPost)}
+                      </div>
+                    ) : null}
+                    <div className="mb-2">
+                      <ForumAuthorAvatar
+                        userId={firstPost.author_id}
+                        characterId={firstPost.author_character_id}
+                        isCharacter={!!firstPost.is_character}
+                        fallbackName={firstPost.author_name}
+                        initialAvatar={firstPost.author_avatar}
+                        size={120}
+                        className="rounded shadow-sm"
+                        isOnline={isAuthorOnline(firstPost)}
+                      />
+                    </div>
+                    <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(firstPost)}</div>
+                    {(() => {
+                      const authorData = firstPost.author_id === user?.uid ? profile : authorStats[firstPost.author_id];
+                      if (!authorData) return null;
+                      return (
+                        <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
+                          <Link to={`/profile/${firstPost.author_id}`} className="footer-link text-decoration-none px-0">
+                            {t('profile.view_profile')}
+                          </Link>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  {/* Mobile */}
+                  <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
+                    <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
+                      <ForumAuthorAvatar
+                        userId={firstPost.author_id}
+                        characterId={firstPost.author_character_id}
+                        isCharacter={!!firstPost.is_character}
+                        fallbackName={firstPost.author_name}
+                        initialAvatar={firstPost.author_avatar}
+                        size={60}
+                        className="rounded shadow-sm"
+                        isOnline={isAuthorOnline(firstPost)}
+                      />
+                    </div>
+                    <div className="flex-grow-1 text-start overflow-hidden">
+                      <div className="fw-bold text-truncate author-res-nickname">
+                        <ForumAuthorName
+                          userId={firstPost.author_id}
+                          characterId={firstPost.author_character_id}
+                          isCharacter={!!firstPost.is_character}
+                          fallbackName={firstPost.author_name}
+                          onClick={handleQuoteAuthor}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
+                  <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
+                    <small className="text-muted">
+                      <Timestamp date={firstPost.created_at} className="text-muted" />
+                    </small>
+                  </div>
+                  <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
+                    <div className="flex-grow-1">
+                      <div className="post-content">
+                        <BBCode rolls={firstPost.rolls} authorId={firstPost.author_id}>{firstPost.content}</BBCode>
+                      </div>
+                      {getLiveAuthorSignature(firstPost) && (
+                        <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
+                          <BBCode>{getLiveAuthorSignature(firstPost)}</BBCode>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Quote button */}
+                  {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                    <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-end align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="footer-link p-0"
+                        onClick={() => {
+                          const author = getLiveAuthorName(firstPost) || 'User';
+                          const quote = `[quote="#p${firstPost.id},t${id},${author}"]\n${firstPost.content}\n[/quote]\n\n`;
+                          setReplyContent(prev => {
+                            const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
+                            return prev + separator + quote;
+                          });
+                          replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                      >
+                        {lang === 'ru' ? 'Цитировать' : 'Quote'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card.Body>
+          </Card>
+        );
+      })()}
+
       {/* Posts */}
       <div className="posts-container">
         {currentPosts.map((post, index) => (
@@ -1350,6 +1488,14 @@ const TopicPage = () => {
                                   placeholder={lang === 'ru' ? 'Краткое описание...' : 'Short description...'}
                                 />
                               </Form.Group>
+                              <Form.Check
+                                type="checkbox"
+                                id="editPinFirstPost"
+                                label={t('forum.pin_first_post')}
+                                checked={editPinFirstPost}
+                                onChange={(e) => setEditPinFirstPost(e.target.checked)}
+                                className="mt-2"
+                              />
                             </div>
                           )}
                           <div className="mb-2">
