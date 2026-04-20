@@ -3017,7 +3017,9 @@ kbd {
 }
 
 /* ── Editor Toolbar Fine-tuning ──────────────────────────────────────────── */
-.editor-toolbar .dropdown-toggle::after {
+.editor-toolbar .dropdown-toggle::after,
+.no-caret.dropdown-toggle::after,
+.no-caret .dropdown-toggle::after {
   display: none !important;
 }
 

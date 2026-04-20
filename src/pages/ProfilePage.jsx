@@ -15,7 +15,7 @@ import ConfirmModal from '../components/common/ConfirmModal';
 import { resolveField } from '../utils/text';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
-import { voteOnProfile, subscribeToReputationLogs, getProfileVote, deleteReputation } from '../api/reputation';
+import { voteOnProfile, subscribeToReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
 import { db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import Timestamp from '../components/common/Timestamp';
@@ -85,6 +85,9 @@ const ProfilePage = () => {
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
   const [myVote, setMyVote] = useState(null);
+  const [editingLogId, setEditingLogId] = useState(null);
+  const [editLogComment, setEditLogComment] = useState('');
+  const [savingLogComment, setSavingLogComment] = useState(false);
   const [categories, setCategories] = useState([]);
   const [logTopicsInfo, setLogTopicsInfo] = useState({});
   const [userPosts, setUserPosts] = useState([]);
@@ -349,6 +352,20 @@ const ProfilePage = () => {
       showToast(err.message, 'danger');
     } finally {
       setSubmittingRep(false);
+    }
+  };
+
+  const handleUpdateLogComment = async (logId) => {
+    setSavingLogComment(true);
+    try {
+      await updateReputationComment(logId, editLogComment);
+      setEditingLogId(null);
+      showToast(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
+    } catch (err) {
+      console.error(err);
+      showToast(err.message, 'danger');
+    } finally {
+      setSavingLogComment(false);
     }
   };
 
@@ -819,12 +836,72 @@ const ProfilePage = () => {
                                 {commentsHidden ? (
                                   <span className="text-muted small italic">{t('profile.rep_comments_hidden')}</span>
                                 ) : (
-                                  <>
-                                    {commentsAdminBypass && log.comment && (
-                                      <Lock size={10} className="text-warning opacity-50 me-1" />
-                                    )}
-                                    {log.comment || '—'}
-                                  </>
+                                  editingLogId === log.id ? (
+                                    <div className="d-flex flex-column gap-2" style={{ minWidth: '200px' }}>
+                                      <Form.Control
+                                        as="textarea"
+                                        rows={2}
+                                        value={editLogComment}
+                                        onChange={(e) => setEditLogComment(e.target.value)}
+                                        placeholder={lang === 'ru' ? 'Ваш комментарий...' : 'Your comment...'}
+                                        size="sm"
+                                        className="modal-section-themed"
+                                      />
+                                      <div className="d-flex justify-content-end gap-1">
+                                        <Button variant="outline-secondary" size="sm" onClick={() => setEditingLogId(null)} disabled={savingLogComment}>
+                                          {t('common.cancel')}
+                                        </Button>
+                                        <Button variant="primary" size="sm" onClick={() => handleUpdateLogComment(log.id)} disabled={savingLogComment}>
+                                          {savingLogComment ? t('common.loading') : (lang === 'ru' ? 'Сохранить' : 'Save')}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="d-flex justify-content-between align-items-center">
+                                      <div className="text-break">
+                                        {commentsAdminBypass && log.comment && (
+                                          <Lock size={10} className="text-warning opacity-50 me-1" />
+                                        )}
+                                        {log.comment || '—'}
+                                      </div>
+                                      {profile?.uid === log.voter_id && (
+                                        <div className="d-flex gap-1 ms-2 align-items-center opacity-75">
+                                          <Button 
+                                            variant="link" 
+                                            size="sm" 
+                                            className="p-0 text-decoration-none text-muted"
+                                            onClick={() => {
+                                              setEditLogComment(log.comment || '');
+                                              setEditingLogId(log.id);
+                                            }}
+                                            title={lang === 'ru' ? 'Изменить комментарий' : 'Edit comment'}
+                                          >
+                                            <Settings size={14} />
+                                          </Button>
+                                          {log.comment && (
+                                            <Button 
+                                              variant="link" 
+                                              size="sm" 
+                                              className="p-0 text-decoration-none text-danger opacity-75 ms-1"
+                                              onClick={async () => {
+                                                if (window.confirm(lang === 'ru' ? 'Удалить комментарий?' : 'Delete comment?')) {
+                                                  try {
+                                                    await updateReputationComment(log.id, '');
+                                                    showToast(lang === 'ru' ? 'Комментарий удален' : 'Comment deleted');
+                                                  } catch (err) {
+                                                    showToast(err.message, 'danger');
+                                                  }
+                                                }
+                                              }}
+                                              title={lang === 'ru' ? 'Удалить комментарий' : 'Delete comment'}
+                                            >
+                                              <Trash2 size={14} />
+                                            </Button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
                                 )}
                               </td>
                               {hasPermission(PERMISSIONS.DELETE_REPUTATION) && (

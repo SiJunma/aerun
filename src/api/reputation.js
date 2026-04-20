@@ -9,7 +9,8 @@ import {
   serverTimestamp,
   getDocs,
   getDoc,
-  limit
+  limit,
+  updateDoc
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { logAdminAction } from './audit';
@@ -139,6 +140,17 @@ export const getProfileVote = async (voterUid, targetUid) => {
     return { id: logDoc.id, ...logDoc.data() };
   }
   return null;
+};
+
+/**
+ * updateReputationComment
+ * Allows a user to edit or remove their reputation comment.
+ */
+export const updateReputationComment = async (logId, newComment) => {
+  const logRef = doc(db, 'reputation_logs', logId);
+  await updateDoc(logRef, {
+    comment: newComment || ''
+  });
 };
 
 /**

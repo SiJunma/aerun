@@ -240,9 +240,9 @@ const Navigation = () => {
             <div className="d-flex align-items-center gap-2">
               <NavDropdown
                 title={<Palette size={18} className="text-light opacity-75 hover-opacity-100" />}
-                id="guest-theme-dropdown"
+                id="guest-theme-dropdown-persistent"
                 align="end"
-                className="no-caret"
+                className="no-caret d-none d-lg-block"
               >
                 <NavDropdown.Item onClick={() => { changeGuestTheme('light'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'light' ? 'fw-bold text-primary' : ''}`}>
                   {theme === 'light' ? <Check size={16} /> : <div style={{width: 16}}></div>}
@@ -314,6 +314,35 @@ const Navigation = () => {
               </Nav.Link>
             )}
           </Nav>
+          
+          {!user && (
+            <Nav className="d-lg-none mt-2 pt-2 border-top border-secondary border-opacity-25">
+              <NavDropdown
+                title={
+                  <div className="d-flex align-items-center gap-2 text-light opacity-75 hover-opacity-100">
+                    <Palette size={18} />
+                    <span>{lang === 'ru' ? 'Тема оформления' : 'Theme'}</span>
+                  </div>
+                }
+                id="guest-theme-dropdown-collapse"
+                align="end"
+                className="no-caret"
+              >
+                <NavDropdown.Item onClick={() => { changeGuestTheme('light'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'light' ? 'fw-bold text-primary' : ''}`}>
+                  {theme === 'light' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {t('profile.theme_light')}
+                </NavDropdown.Item>
+                <NavDropdown.Item onClick={() => { changeGuestTheme('dark'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'dark' ? 'fw-bold text-primary' : ''}`}>
+                  {theme === 'dark' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {t('profile.theme_dark')}
+                </NavDropdown.Item>
+                <NavDropdown.Item onClick={() => { changeGuestTheme('neutral'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'neutral' ? 'fw-bold text-primary' : ''}`}>
+                  {theme === 'neutral' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {t('profile.theme_neutral')}
+                </NavDropdown.Item>
+              </NavDropdown>
+            </Nav>
+          )}
         </Navbar.Collapse>
       </Container>
       
