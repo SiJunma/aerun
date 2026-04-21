@@ -4,11 +4,11 @@ import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Paginatio
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCategories } from '../api/categories';
-import { 
-  subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic, 
-  updateUser, updateTopic, 
-  deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft, 
-  subscribeToTopicDraft, deleteDraftPost, locatePost 
+import {
+  subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic,
+  updateUser, updateTopic,
+  deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft,
+  subscribeToTopicDraft, deleteDraftPost, locatePost
 } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
 import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
@@ -83,7 +83,7 @@ const TopicPage = () => {
   const [activeRepPostId, setActiveRepPostId] = useState(null);
   const [showVoteInfoModal, setShowVoteInfoModal] = useState(false);
   const [selectedVote, setSelectedVote] = useState(null);
-  
+
   // Subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [togglingSub, setTogglingSub] = useState(false);
@@ -159,7 +159,7 @@ const TopicPage = () => {
   useEffect(() => {
     if (!user || !id) return;
     const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
-      const activeQuotes = notifs.filter(n => 
+      const activeQuotes = notifs.filter(n =>
         !n.read && n.type === 'post_quoted' && n.payload?.topic_id === id
       );
       setUnreadQuotes(activeQuotes);
@@ -175,7 +175,7 @@ const TopicPage = () => {
         if (entry.isIntersecting) {
           const postId = entry.target.id.replace('post-', '');
           const matchingNotifs = unreadQuotes.filter(n => n.payload?.post_id === postId);
-          
+
           if (matchingNotifs.length > 0) {
             matchingNotifs.forEach(n => markNotificationRead(n.id));
             setUnreadQuotes(prev => prev.filter(p => !matchingNotifs.some(m => m.id === p.id)));
@@ -266,14 +266,14 @@ const TopicPage = () => {
     if (posts.length === 0) return;
     const characterMasks = posts.filter(p => p.is_character && p.author_character_id);
     const uniqueMasks = [...new Set(characterMasks.map(p => `${p.author_id}_${p.author_character_id}`))];
-    
+
     const unsubs = uniqueMasks.map(key => {
       const [uid, charId] = key.split('_');
       return subscribeToCharacter(uid, charId, (data) => {
         setMaskStats(prev => ({ ...prev, [charId]: data || null }));
       });
     });
-    
+
     return () => unsubs.forEach(unsub => unsub());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts.length > 0 ? [...new Set(posts.filter(p => p.is_character).map(p => p.author_character_id))].join(',') : '']);
@@ -307,7 +307,7 @@ const TopicPage = () => {
     let targetId = null;
     let targetPage = currentPage;
     let scrollBlock = 'start';
-    
+
     // Priority 1: ?post=ID (Clicking from a quote)
     const queryPostId = searchParams.get('post');
     if (queryPostId) {
@@ -328,32 +328,32 @@ const TopicPage = () => {
         alreadyJumpedRef.current = true;
         locatePost(queryPostId, ITEMS_PER_PAGE).then(result => {
           if (result.found) {
-             if (result.topicId === id) {
-               if (result.page !== currentPage) {
-                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
-               } else {
-                 setIsPageLoading(false);
-                 alreadyJumpedRef.current = true;
-               }
-             } else {
-               navigate(`/topic/${result.topicId}?post=${queryPostId}`);
-             }
+            if (result.topicId === id) {
+              if (result.page !== currentPage) {
+                setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
+              } else {
+                setIsPageLoading(false);
+                alreadyJumpedRef.current = true;
+              }
+            } else {
+              navigate(`/topic/${result.topicId}?post=${queryPostId}`);
+            }
           } else {
-             if (user?.uid) {
-               clearOrphanedPostNotifications(user.uid, queryPostId).catch(err => console.error('[Cleanup Orphaned Notification error]', err));
-             }
-             setIsPageLoading(false);
-             alreadyJumpedRef.current = true;
+            if (user?.uid) {
+              clearOrphanedPostNotifications(user.uid, queryPostId).catch(err => console.error('[Cleanup Orphaned Notification error]', err));
+            }
+            setIsPageLoading(false);
+            alreadyJumpedRef.current = true;
 
-             setSearchParams(prev => {
-               const params = new URLSearchParams(prev);
-               params.delete('post');
-               return params;
-             }, { replace: true, preventScrollReset: true });
+            setSearchParams(prev => {
+              const params = new URLSearchParams(prev);
+              params.delete('post');
+              return params;
+            }, { replace: true, preventScrollReset: true });
 
-             setTimeout(() => {
-               showToast(lang === 'ru' ? 'Исходное сообщение было удалено' : 'The original post was deleted', 'warning');
-             }, 500);
+            setTimeout(() => {
+              showToast(lang === 'ru' ? 'Исходное сообщение было удалено' : 'The original post was deleted', 'warning');
+            }, 500);
           }
         }).catch(err => {
           console.error('[TopicPage navigation locator error]', err);
@@ -362,7 +362,7 @@ const TopicPage = () => {
         });
         return;
       }
-    } 
+    }
     // Priority 2: #post-ID (Legacy anchors)
     else if (hash && hash.startsWith('#post-')) {
       const postId = hash.replace('#post-', '');
@@ -378,7 +378,7 @@ const TopicPage = () => {
         }
         targetId = hash.substring(1);
       }
-    } 
+    }
     // Priority 3: goLast (New unread or bottom)
     else if (goLast && !alreadyJumpedRef.current) {
       let finalTargetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
@@ -398,7 +398,7 @@ const TopicPage = () => {
             registrationMs
           );
           const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
-          
+
           if (unreadIndex !== -1) {
             finalTargetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
             finalTargetId = `post-${posts[unreadIndex].id}`;
@@ -417,7 +417,7 @@ const TopicPage = () => {
     const fullTargetKey = `${id}_${targetPage}_${targetId}_${queryPostId || ''}_${locationKey}`;
     if (targetId && lastTargetRef.current !== fullTargetKey) {
       lastTargetRef.current = fullTargetKey;
-      
+
       let scrollAttempts = 0;
       const MAX_ATTEMPTS = 50;
 
@@ -441,7 +441,7 @@ const TopicPage = () => {
           }
         }
       };
-      
+
       setTimeout(tryScroll, 100);
     } else {
       if (isJumpRequested || searchParams.get('post') || goLast) {
@@ -461,15 +461,15 @@ const TopicPage = () => {
 
   const handleQuoteAuthor = (authorName) => {
     if (!hasPermission(PERMISSIONS.POST_REPLY, { category })) return;
-    
+
     const tag = `[b]${authorName}[/b],\n`;
-    
+
     if (editingPostId) {
       setEditContent(prev => {
         const prefix = prev.trim() ? (prev.endsWith('\n') ? '' : '\n') : '';
         return prev + prefix + tag;
       });
-      
+
       const id = (myDraft && editingPostId === myDraft.id) ? 'draftEditContent' : 'editContent';
       setTimeout(() => {
         const el = document.getElementById(id);
@@ -483,7 +483,7 @@ const TopicPage = () => {
         const prefix = prev.trim() ? (prev.endsWith('\n') ? '' : '\n') : '';
         return prev + prefix + tag;
       });
-      
+
       setTimeout(() => {
         const el = document.getElementById('replyContent');
         if (el) {
@@ -515,7 +515,7 @@ const TopicPage = () => {
       }
       return profile ? (profile.status_line || '') : (post.author_status_line || '');
     }
-    
+
     if (post.is_character) {
       if (post.author_character_id) {
         if (!(post.author_character_id in maskStats)) return 'LOADING';
@@ -525,7 +525,7 @@ const TopicPage = () => {
       }
       return post.author_status_line || '';
     }
-    
+
     // Check if we have entries in authorStats for this UID
     if (!post.author_id) return '';
     if (!(post.author_id in authorStats)) {
@@ -654,11 +654,11 @@ const TopicPage = () => {
       // Mark as read immediately (server-side)
       markTopicRead(id);
       setReplyContent('');
-      
+
       // Calculate where the new post will be
       const newTotalPosts = posts.length + 1;
       const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE);
-      
+
       if (targetPage !== currentPage) {
         setSearchParams({ page: targetPage });
       }
@@ -754,11 +754,11 @@ const TopicPage = () => {
       await publishDraft(user.uid, id);
       markTopicRead(id);
       showToast(t('forum.draft_published'));
-      
+
       setTimeout(() => {
         const newTotal = posts.length + 1;
         const lastPage = Math.ceil(newTotal / ITEMS_PER_PAGE);
-        
+
         if (lastPage !== currentPage) {
           setSearchParams({ page: lastPage });
         }
@@ -801,7 +801,7 @@ const TopicPage = () => {
     recordActivity();
     try {
       const originalPost = posts.find(p => p.id === postId);
-      
+
       let metadata = {};
       // If the character ID has changed, we must update the "frozen" display fields
       if (editCharacterId !== (originalPost?.author_character_id || '')) {
@@ -838,14 +838,14 @@ const TopicPage = () => {
 
   const handleDeletePost = async () => {
     if (!deletingPost) return;
-    
+
     try {
       if (deletingPost.is_draft) {
         await deleteDraftPost(user.uid, id);
       } else {
         const isFirstPost = posts.length > 0 && posts[0].id === deletingPost.id;
         const categoryId = topic?.category_id;
-        
+
         if (isFirstPost) {
           await deleteTopics([id], user.uid);
           if (categoryId) {
@@ -873,24 +873,24 @@ const TopicPage = () => {
 
   const getRoleBadge = (post, extraClass = 'mb-2') => {
     if (post.is_character) {
-        return (
-          <div className={`mt-0 ${extraClass} text-center w-100`}>
-            <ForumCharacterBadge ownerName={getLiveOwnerName(post)} />
-          </div>
-        );
+      return (
+        <div className={`mt-0 ${extraClass} text-center w-100`}>
+          <ForumCharacterBadge ownerName={getLiveOwnerName(post)} />
+        </div>
+      );
     }
-    
+
     // Check author data from stats
     if (!post.author_id) {
       return <ForumRoleBadge roleId="guest" className={extraClass} />;
     }
     const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-    
+
     // If it's undefined, it's still loading (we explicitly set null for 'not found')
     if (authorData === undefined) {
       return <div className={`skeleton skeleton-badge ${extraClass}`}></div>;
     }
-    
+
     return (
       <ForumRoleBadge
         roleId={authorData?.role_id || post.author_role_id}
@@ -901,21 +901,21 @@ const TopicPage = () => {
       />
     );
   };
-    
+
   // ── Render Components ──────────────────────────────────────────────────
-  
+
   const TopicPageSkeleton = () => (
     <Container className="py-4 skeleton-fade-in">
       <div className="mb-2">
         <Skeleton width={150} height="1rem" className="mb-2" />
       </div>
-      
+
       <div className="mb-4">
         <div className="mb-2">
           <Skeleton width="40%" height="2.5rem" className="mb-2" />
           <Skeleton width="20%" height="1rem" />
         </div>
-        
+
         <div className="d-flex justify-content-between align-items-end mt-3">
           <Skeleton width="30%" height="1rem" />
           <Skeleton width="100px" height="2.2rem" className="rounded-pill" />
@@ -942,7 +942,7 @@ const TopicPage = () => {
                 <Skeleton width="40%" height="1rem" />
               </div>
               <div className="mt-5 pt-3 border-top">
-                 <Skeleton width="120px" height="1.2rem" />
+                <Skeleton width="150px" height="1.5rem" />
               </div>
             </Col>
           </Row>
@@ -1004,220 +1004,164 @@ const TopicPage = () => {
           <TopicPageSkeleton />
         </div>
       )}
-      
+
       <div className="topic-content-wrapper">
-        <ForumBreadcrumbs 
+        <ForumBreadcrumbs
           items={[
             ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
             { label: topic?.title || '...', active: true }
-          ]} 
+          ]}
         />
 
         <div className="mb-4 topic-header-area">
-        <div className="mb-2">
-          <div className="d-flex align-items-center gap-2 mb-1">
-            {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
-            {topic.is_locked && <Lock size={20} className="topic-indicator topic-locked" />}
-            <h1 className="h2 mb-0">{topic.title}</h1>
-          </div>
-          {topic.description && (
-            <p className="text-muted mb-0 opacity-75 topic-description" style={{ fontSize: '0.875rem' }}>{topic.description}</p>
-          )}
-        </div>
-        
-        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end align-items-center gap-3">
-          {/* Metadata Group */}
-          <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap text-muted opacity-75 topic-meta-bar" style={{ fontSize: '0.875rem' }}>
-            <span className="text-nowrap">
-              {t('forum.author')}:{' '}
-              <ForumAuthorName
-                userId={topic.author_id}
-                characterId={topic.author_character_id}
-                isCharacter={!!topic.is_character}
-                fallbackName={topic.author_name}
-                className="fw-semibold text-primary"
-              />
-            </span>
-            <span>·</span>
-            <span className="text-nowrap">
-              {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
-              <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
-            </span>
-            <span>·</span>
-            <Timestamp date={topic.created_at} />
-          </div>
-
-          {/* Actions & Pagination Group (Right Side) */}
-          <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
-            {/* Admin Management Dropdown */}
-            {(hasPermission(PERMISSIONS.MODERATE_CONTENT) || 
-             hasPermission(PERMISSIONS.PIN_TOPICS) || 
-             hasPermission(PERMISSIONS.CLOSE_TOPICS) || 
-             hasPermission(PERMISSIONS.MOVE_TOPICS)) && (
-              <Dropdown>
-                <Dropdown.Toggle 
-                  variant="link" 
-                  size="sm" 
-                  id="admin-topic-controls"
-                  className="topic-manage-link d-flex align-items-center gap-1 text-decoration-none"
-                >
-                  <Settings size={14} />
-                  <span>{t('forum.manage_topic')}</span>
-                </Dropdown.Toggle>
-
-                <Dropdown.Menu className="shadow-sm border-0">
-                  {hasPermission(PERMISSIONS.PIN_TOPICS) && (
-                  <Dropdown.Item 
-                    onClick={async () => {
-                      try {
-                        await updateTopic(id, { is_pinned: !topic.is_pinned });
-                        showToast(lang === 'ru' 
-                          ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена') 
-                          : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
-                        );
-                      } catch (error) {
-                        showToast(error.message, 'danger');
-                      }
-                    }}
-                    className="d-flex align-items-center gap-2"
-                  >
-                    <Pin size={14} />
-                    {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
-                  </Dropdown.Item>
-                  )}
-                  {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
-                  <Dropdown.Item 
-                    onClick={async () => {
-                      try {
-                        await updateTopic(id, { is_locked: !topic.is_locked });
-                        showToast(lang === 'ru' 
-                          ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта') 
-                          : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
-                        );
-                      } catch (error) {
-                        showToast(error.message, 'danger');
-                      }
-                    }}
-                    className="d-flex align-items-center gap-2"
-                  >
-                    <Lock size={14} />
-                    {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
-                  </Dropdown.Item>
-                  )}
-                  {hasPermission(PERMISSIONS.MOVE_TOPICS) && (
-                  <Dropdown.Item 
-                    onClick={() => setShowMoveModal(true)}
-                    className="d-flex align-items-center gap-2"
-                  >
-                    <ArrowRightLeft size={14} />
-                    {t('forum.move_topic')}
-                  </Dropdown.Item>
-                  )}
-                  {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
-                  <>
-                  <Dropdown.Divider />
-                  <Dropdown.Item 
-                    onClick={() => setShowDeleteTopicModal(true)}
-                    className="d-flex align-items-center gap-2 text-danger"
-                  >
-                    <Trash2 size={14} />
-                    {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
-                  </Dropdown.Item>
-                  </>
-                  )}
-                </Dropdown.Menu>
-              </Dropdown>
-            )}
-
-            {totalPages > 1 && (
-              <div className="pagination-top">
-                <ForumPagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={handlePageChange}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Pinned First Post — shown on pages 2+ when topic.first_post_pinned is true */}
-      {topic.first_post_pinned && currentPage > 1 && posts.length > 0 && (() => {
-        const firstPost = posts[0];
-        return (
-          <Card
-            key="pinned-first-post"
-            id="pinned-first-post"
-            className="mb-4 shadow-sm border-0 post-card pinned-first-post-card"
-          >
-            {/* Pinned marker strip */}
-            <div className="pinned-first-post-strip d-flex align-items-center gap-2 px-3 py-1">
-              <Pin size={13} fill="currentColor" />
-              <span className="fw-semibold" style={{ fontSize: '0.75rem' }}>{t('forum.first_post_pinned_label')}</span>
+          <div className="mb-2">
+            <div className="d-flex align-items-center gap-2 mb-1">
+              {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
+              {topic.is_locked && <Lock size={20} className="topic-indicator topic-locked" />}
+              <h1 className="h2 mb-0">{topic.title}</h1>
             </div>
-            <Card.Body className="p-0">
-              <div className="d-flex flex-column flex-md-row flex-md-nowrap">
-                {/* Author sidebar */}
-                <div className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center">
-                  <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
-                    <div className="fw-bold text-center mb-1 text-truncate w-100">
-                      <ForumAuthorName
-                        userId={firstPost.author_id}
-                        characterId={firstPost.author_character_id}
-                        isCharacter={!!firstPost.is_character}
-                        fallbackName={firstPost.author_name}
-                        onClick={handleQuoteAuthor}
-                      />
-                    </div>
-                    {getLiveAuthorStatus(firstPost) === 'LOADING' ? (
-                      <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
-                    ) : getLiveAuthorStatus(firstPost) ? (
-                      <div className="text-primary mb-2 w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
-                        {getLiveAuthorStatus(firstPost)}
-                      </div>
-                    ) : null}
-                    <div className="mb-2">
-                      <ForumAuthorAvatar
-                        userId={firstPost.author_id}
-                        characterId={firstPost.author_character_id}
-                        isCharacter={!!firstPost.is_character}
-                        fallbackName={firstPost.author_name}
-                        initialAvatar={firstPost.author_avatar}
-                        size={120}
-                        className="rounded shadow-sm"
-                        isOnline={isAuthorOnline(firstPost)}
-                      />
-                    </div>
-                    <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(firstPost)}</div>
-                    {(() => {
-                      const authorData = firstPost.author_id === user?.uid ? profile : authorStats[firstPost.author_id];
-                      if (!authorData) return null;
-                      return (
-                        <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
-                          <Link to={`/profile/${firstPost.author_id}`} className="footer-link text-decoration-none px-0">
-                            {t('profile.view_profile')}
-                          </Link>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  {/* Mobile */}
-                  <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
-                    <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
-                      <ForumAuthorAvatar
-                        userId={firstPost.author_id}
-                        characterId={firstPost.author_character_id}
-                        isCharacter={!!firstPost.is_character}
-                        fallbackName={firstPost.author_name}
-                        initialAvatar={firstPost.author_avatar}
-                        size={60}
-                        className="rounded shadow-sm"
-                        isOnline={isAuthorOnline(firstPost)}
-                      />
-                    </div>
-                    <div className="flex-grow-1 text-start overflow-hidden">
-                      <div className="fw-bold text-truncate author-res-nickname">
+            {topic.description && (
+              <p className="text-muted mb-0 opacity-75 topic-description" style={{ fontSize: '0.875rem' }}>{topic.description}</p>
+            )}
+          </div>
+
+          <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end align-items-center gap-3">
+            {/* Metadata Group */}
+            <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap text-muted opacity-75 topic-meta-bar" style={{ fontSize: '0.875rem' }}>
+              <span className="text-nowrap">
+                {t('forum.author')}:{' '}
+                <ForumAuthorName
+                  userId={topic.author_id}
+                  characterId={topic.author_character_id}
+                  isCharacter={!!topic.is_character}
+                  fallbackName={topic.author_name}
+                  className="fw-semibold text-primary"
+                />
+              </span>
+              <span>·</span>
+              <span className="text-nowrap">
+                {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
+                <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
+              </span>
+              <span>·</span>
+              <Timestamp date={topic.created_at} />
+            </div>
+
+            {/* Actions & Pagination Group (Right Side) */}
+            <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
+              {/* Admin Management Dropdown */}
+              {(hasPermission(PERMISSIONS.MODERATE_CONTENT) ||
+                hasPermission(PERMISSIONS.PIN_TOPICS) ||
+                hasPermission(PERMISSIONS.CLOSE_TOPICS) ||
+                hasPermission(PERMISSIONS.MOVE_TOPICS)) && (
+                  <Dropdown>
+                    <Dropdown.Toggle
+                      variant="link"
+                      size="sm"
+                      id="admin-topic-controls"
+                      className="topic-manage-link d-flex align-items-center gap-1 text-decoration-none"
+                    >
+                      <Settings size={14} />
+                      <span>{t('forum.manage_topic')}</span>
+                    </Dropdown.Toggle>
+
+                    <Dropdown.Menu className="shadow-sm border-0">
+                      {hasPermission(PERMISSIONS.PIN_TOPICS) && (
+                        <Dropdown.Item
+                          onClick={async () => {
+                            try {
+                              await updateTopic(id, { is_pinned: !topic.is_pinned });
+                              showToast(lang === 'ru'
+                                ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена')
+                                : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
+                              );
+                            } catch (error) {
+                              showToast(error.message, 'danger');
+                            }
+                          }}
+                          className="d-flex align-items-center gap-2"
+                        >
+                          <Pin size={14} />
+                          {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
+                        </Dropdown.Item>
+                      )}
+                      {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
+                        <Dropdown.Item
+                          onClick={async () => {
+                            try {
+                              await updateTopic(id, { is_locked: !topic.is_locked });
+                              showToast(lang === 'ru'
+                                ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта')
+                                : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
+                              );
+                            } catch (error) {
+                              showToast(error.message, 'danger');
+                            }
+                          }}
+                          className="d-flex align-items-center gap-2"
+                        >
+                          <Lock size={14} />
+                          {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Unlock') : (lang === 'ru' ? 'Закрыть' : 'Lock')}
+                        </Dropdown.Item>
+                      )}
+                      {hasPermission(PERMISSIONS.MOVE_TOPICS) && (
+                        <Dropdown.Item
+                          onClick={() => setShowMoveModal(true)}
+                          className="d-flex align-items-center gap-2"
+                        >
+                          <ArrowRightLeft size={14} />
+                          {t('forum.move_topic')}
+                        </Dropdown.Item>
+                      )}
+                      {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
+                        <>
+                          <Dropdown.Divider />
+                          <Dropdown.Item
+                            onClick={() => setShowDeleteTopicModal(true)}
+                            className="d-flex align-items-center gap-2 text-danger"
+                          >
+                            <Trash2 size={14} />
+                            {lang === 'ru' ? 'Удалить тему' : 'Delete Topic'}
+                          </Dropdown.Item>
+                        </>
+                      )}
+                    </Dropdown.Menu>
+                  </Dropdown>
+                )}
+
+              {totalPages > 1 && (
+                <div className="pagination-top">
+                  <ForumPagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Pinned First Post — shown on pages 2+ when topic.first_post_pinned is true */}
+        {topic.first_post_pinned && currentPage > 1 && posts.length > 0 && (() => {
+          const firstPost = posts[0];
+          return (
+            <Card
+              key="pinned-first-post"
+              id="pinned-first-post"
+              className="mb-4 shadow-sm border-0 post-card pinned-first-post-card"
+            >
+              {/* Pinned marker strip */}
+              <div className="pinned-first-post-strip d-flex align-items-center gap-2 px-3 py-1">
+                <Pin size={13} fill="currentColor" />
+                <span className="fw-semibold" style={{ fontSize: '0.75rem' }}>{t('forum.first_post_pinned_label')}</span>
+              </div>
+              <Card.Body className="p-0">
+                <div className="d-flex flex-column flex-md-row flex-md-nowrap">
+                  {/* Author sidebar */}
+                  <div className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center">
+                    <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
+                      <div className="fw-bold text-center mb-1 text-truncate w-100">
                         <ForumAuthorName
                           userId={firstPost.author_id}
                           characterId={firstPost.author_character_id}
@@ -1226,165 +1170,125 @@ const TopicPage = () => {
                           onClick={handleQuoteAuthor}
                         />
                       </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Content */}
-                <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
-                  <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
-                    <small className="text-muted">
-                      <Timestamp date={firstPost.created_at} className="text-muted" />
-                    </small>
-                  </div>
-                  <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
-                    <div className="flex-grow-1">
-                      <div className="post-content">
-                        <BBCode rolls={firstPost.rolls} authorId={firstPost.author_id}>{firstPost.content}</BBCode>
-                      </div>
-                      {getLiveAuthorSignature(firstPost) && (
-                        <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
-                          <BBCode>{getLiveAuthorSignature(firstPost)}</BBCode>
+                      {getLiveAuthorStatus(firstPost) === 'LOADING' ? (
+                        <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
+                      ) : getLiveAuthorStatus(firstPost) ? (
+                        <div className="text-primary mb-2 w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
+                          {getLiveAuthorStatus(firstPost)}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                  {/* Quote button */}
-                  {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
-                    <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-end align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="footer-link p-0"
-                        onClick={() => {
-                          const author = getLiveAuthorName(firstPost) || 'User';
-                          const quote = `[quote="#p${firstPost.id},t${id},${author}"]\n${firstPost.content}\n[/quote]\n\n`;
-                          setReplyContent(prev => {
-                            const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
-                            return prev + separator + quote;
-                          });
-                          replyRef.current?.scrollIntoView({ behavior: 'smooth' });
-                        }}
-                      >
-                        {lang === 'ru' ? 'Цитировать' : 'Quote'}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Card.Body>
-          </Card>
-        );
-      })()}
-
-      {/* Posts */}
-      <div className="posts-container">
-        {currentPosts.map((post, index) => (
-          <Card key={post.id} id={`post-${post.id}`} className="mb-4 shadow-sm border-0 post-card">
-            <Card.Body className="p-0">
-              <div className="d-flex flex-column flex-md-row flex-md-nowrap">
-                {/* Author sidebar */}
-                <div className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center">
-                  {/* --- DESKTOP VERSION (Stay as it was) --- */}
-                  <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
-                    {/* 1. Nickname */}
-                    <div className="fw-bold text-center mb-1 text-truncate w-100">
-                      <ForumAuthorName
-                        userId={post.author_id}
-                        characterId={post.author_character_id}
-                        isCharacter={!!post.is_character}
-                        fallbackName={post.author_name}
-                        onClick={handleQuoteAuthor}
-                      />
-                    </div>
-
-                    {/* 2. Status */}
-                    {getLiveAuthorStatus(post) === 'LOADING' ? (
-                      <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
-                    ) : getLiveAuthorStatus(post) ? (
-                      <div className="text-primary mb-2 w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
-                        {getLiveAuthorStatus(post)}
+                      ) : null}
+                      <div className="mb-2">
+                        <ForumAuthorAvatar
+                          userId={firstPost.author_id}
+                          characterId={firstPost.author_character_id}
+                          isCharacter={!!firstPost.is_character}
+                          fallbackName={firstPost.author_name}
+                          initialAvatar={firstPost.author_avatar}
+                          size={150}
+                          className="rounded shadow-sm"
+                          isOnline={isAuthorOnline(firstPost)}
+                        />
                       </div>
-                    ) : null}
-
-                    {/* 3. Avatar */}
-                    <div className="mb-2">
-                      <ForumAuthorAvatar
-                        userId={post.author_id}
-                        characterId={post.author_character_id}
-                        isCharacter={!!post.is_character}
-                        fallbackName={post.author_name}
-                        initialAvatar={post.author_avatar}
-                        size={120}
-                        className="rounded shadow-sm"
-                        isOnline={isAuthorOnline(post)}
-                      />
-                    </div>
-
-                    {/* 4. Posts Count */}
-                    {post.author_id && (
-                      <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
-                        {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
-                          <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
-                        ) : (
-                          <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 5. Reputation */}
-                    {post.author_id && (
-                      <div className="text-muted" style={{ fontSize: '0.775rem' }}>
-                        {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
-                          <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
-                        ) : (
-                          <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 6. Role/Mask */}
-                    <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(post)}</div>
-
-                    {/* Desktop profile links */}
-                    {(() => {
-                      const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                      if (!authorData) return null;
-                      
-                      return (
-                        <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
-                          <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
-                            {t('profile.view_profile')}
-                          </Link>
-                          {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
-                            <Link to={`/messages/${post.author_id}`} className="footer-link text-decoration-none px-0">
-                              {t('profile.pm')}
+                      <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(firstPost)}</div>
+                      {(() => {
+                        const authorData = firstPost.author_id === user?.uid ? profile : authorStats[firstPost.author_id];
+                        if (!authorData) return null;
+                        return (
+                          <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
+                            <Link to={`/profile/${firstPost.author_id}`} className="footer-link text-decoration-none px-0">
+                              {t('profile.view_profile')}
                             </Link>
-                          )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {/* Mobile */}
+                    <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
+                      <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
+                        <ForumAuthorAvatar
+                          userId={firstPost.author_id}
+                          characterId={firstPost.author_character_id}
+                          isCharacter={!!firstPost.is_character}
+                          fallbackName={firstPost.author_name}
+                          initialAvatar={firstPost.author_avatar}
+                          size={60}
+                          className="rounded shadow-sm"
+                          isOnline={isAuthorOnline(firstPost)}
+                        />
+                      </div>
+                      <div className="flex-grow-1 text-start overflow-hidden">
+                        <div className="fw-bold text-truncate author-res-nickname">
+                          <ForumAuthorName
+                            userId={firstPost.author_id}
+                            characterId={firstPost.author_character_id}
+                            isCharacter={!!firstPost.is_character}
+                            fallbackName={firstPost.author_name}
+                            onClick={handleQuoteAuthor}
+                          />
                         </div>
-                      );
-                    })()}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* --- MOBILE VERSION (Compact & Horizontal) --- */}
-                  <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
-                    {/* Avatar */}
-                    <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
-                      <ForumAuthorAvatar
-                        userId={post.author_id}
-                        characterId={post.author_character_id}
-                        isCharacter={!!post.is_character}
-                        fallbackName={post.author_name}
-                        initialAvatar={post.author_avatar}
-                        size={60}
-                        className="rounded shadow-sm"
-                        isOnline={isAuthorOnline(post)}
-                      />
+                  {/* Content */}
+                  <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
+                    <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
+                      <small className="text-muted">
+                        <Timestamp date={firstPost.created_at} className="text-muted" />
+                      </small>
                     </div>
+                    <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
+                      <div className="flex-grow-1">
+                        <div className="post-content">
+                          <BBCode rolls={firstPost.rolls} authorId={firstPost.author_id}>{firstPost.content}</BBCode>
+                        </div>
+                        {getLiveAuthorSignature(firstPost) && (
+                          <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
+                            <BBCode>{getLiveAuthorSignature(firstPost)}</BBCode>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Quote button */}
+                    {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                      <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-end align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="footer-link p-0"
+                          onClick={() => {
+                            const author = getLiveAuthorName(firstPost) || 'User';
+                            const quote = `[quote="#p${firstPost.id},t${id},${author}"]\n${firstPost.content}\n[/quote]\n\n`;
+                            setReplyContent(prev => {
+                              const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
+                              return prev + separator + quote;
+                            });
+                            replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+                          }}
+                        >
+                          {lang === 'ru' ? 'Цитировать' : 'Quote'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card.Body>
+            </Card>
+          );
+        })()}
 
-                    {/* Info Group */}
-                    <div className="flex-grow-1 text-start overflow-hidden">
-                      <div className="fw-bold text-truncate author-res-nickname">
+        {/* Posts */}
+        <div className="posts-container">
+          {currentPosts.map((post, index) => (
+            <Card key={post.id} id={`post-${post.id}`} className="mb-4 shadow-sm border-0 post-card">
+              <Card.Body className="p-0">
+                <div className="d-flex flex-column flex-md-row flex-md-nowrap">
+                  {/* Author sidebar */}
+                  <div className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center">
+                    {/* --- DESKTOP VERSION (Stay as it was) --- */}
+                    <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
+                      {/* 1. Nickname */}
+                      <div className="fw-bold text-center mb-1 text-truncate w-100">
                         <ForumAuthorName
                           userId={post.author_id}
                           characterId={post.author_character_id}
@@ -1393,161 +1297,612 @@ const TopicPage = () => {
                           onClick={handleQuoteAuthor}
                         />
                       </div>
-                      {getLiveAuthorStatus(post) && (
-                        <div className="text-primary author-res-status" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+
+                      {/* 2. Status */}
+                      {getLiveAuthorStatus(post) === 'LOADING' ? (
+                        <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
+                      ) : getLiveAuthorStatus(post) ? (
+                        <div className="text-primary mb-2 w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
                           {getLiveAuthorStatus(post)}
+                        </div>
+                      ) : null}
+
+                      {/* 3. Avatar */}
+                      <div className="mb-2">
+                        <ForumAuthorAvatar
+                          userId={post.author_id}
+                          characterId={post.author_character_id}
+                          isCharacter={!!post.is_character}
+                          fallbackName={post.author_name}
+                          initialAvatar={post.author_avatar}
+                          size={150}
+                          className="rounded shadow-sm"
+                          isOnline={isAuthorOnline(post)}
+                        />
+                      </div>
+
+                      {/* 4. Posts Count */}
+                      {post.author_id && (
+                        <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
+                          {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
+                            <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
+                          ) : (
+                            <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 5. Reputation */}
+                      {post.author_id && (
+                        <div className="text-muted" style={{ fontSize: '0.775rem' }}>
+                          {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
+                            <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
+                          ) : (
+                            <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 6. Role/Mask */}
+                      <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(post)}</div>
+
+                      {/* Desktop profile links */}
+                      {(() => {
+                        const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                        if (!authorData) return null;
+
+                        return (
+                          <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
+                            <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                              {t('profile.view_profile')}
+                            </Link>
+                            {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
+                              <Link to={`/messages/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                                {t('profile.pm')}
+                              </Link>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* --- MOBILE VERSION (Compact & Horizontal) --- */}
+                    <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
+                      {/* Avatar */}
+                      <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
+                        <ForumAuthorAvatar
+                          userId={post.author_id}
+                          characterId={post.author_character_id}
+                          isCharacter={!!post.is_character}
+                          fallbackName={post.author_name}
+                          initialAvatar={post.author_avatar}
+                          size={60}
+                          className="rounded shadow-sm"
+                          isOnline={isAuthorOnline(post)}
+                        />
+                      </div>
+
+                      {/* Info Group */}
+                      <div className="flex-grow-1 text-start overflow-hidden">
+                        <div className="fw-bold text-truncate author-res-nickname">
+                          <ForumAuthorName
+                            userId={post.author_id}
+                            characterId={post.author_character_id}
+                            isCharacter={!!post.is_character}
+                            fallbackName={post.author_name}
+                            onClick={handleQuoteAuthor}
+                          />
+                        </div>
+                        {getLiveAuthorStatus(post) && (
+                          <div className="text-primary author-res-status" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                            {getLiveAuthorStatus(post)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Stats & Role Group */}
+                      <div className="text-end author-stats-group ms-auto">
+                        <div className="d-flex flex-column align-items-end gap-1">
+                          {post.author_id && (
+                            <div className="text-muted author-res-stat">
+                              {lang === 'ru' ? 'Постов' : 'Posts'}: {authorStats[post.author_id] !== undefined ? (
+                                <strong className="ms-1">{authorStats[post.author_id]?.post_count || 0}</strong>
+                              ) : (
+                                <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
+                              )}
+                            </div>
+                          )}
+                          {post.author_id && (
+                            <div className="text-muted author-res-stat">
+                              {lang === 'ru' ? 'Реп' : 'Rep'}: {authorStats[post.author_id] !== undefined ? (
+                                <strong className="ms-1">{authorStats[post.author_id]?.reputation || 0}</strong>
+                              ) : (
+                                <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
+                              )}
+                            </div>
+                          )}
+                          <div className="author-res-info-lite text-end">
+                            {getRoleBadge(post, 'mb-0')}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Content Area */}
+                  <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
+                    {/* Header Strip: Time, # */}
+                    <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
+                      <small className="text-muted">
+                        <a
+                          href={`#post-${post.id}`}
+                          className="text-decoration-none text-muted hover-link"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            const url = `${window.location.origin}${window.location.pathname}${window.location.search}#post-${post.id}`;
+                            navigator.clipboard.writeText(url);
+                            showToast(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
+                            // Also navigate for classic behavior
+                            window.location.hash = `post-${post.id}`;
+                          }}
+                        >
+                          <Timestamp date={post.created_at} className="text-muted" />
+                        </a>
+                        {post.edited_at && (
+                          <span className="d-block d-md-inline-block ms-md-2 opacity-50">
+                            ({lang === 'ru' ? 'ред.' : 'edited'} <Timestamp date={post.edited_at} />)
+                          </span>
+                        )}
+                      </small>
+                      <div className="text-muted small opacity-50 post-number-indicator">#{index + indexOfFirstItem + 1}</div>
+                    </div>
+
+                    {/* Body Area */}
+                    <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
+                      <div className="flex-grow-1">
+                        {editingPostId === post.id ? (
+                          <div>
+                            {editingFirstPost && (
+                              <div className="mb-3">
+                                <Form.Group className="mb-2">
+                                  <Form.Label className="fw-semibold small">
+                                    {lang === 'ru' ? 'Название темы' : 'Topic Title'}
+                                  </Form.Label>
+                                  <Form.Control
+                                    type="text"
+                                    value={editTopicTitle}
+                                    onChange={e => setEditTopicTitle(e.target.value)}
+                                    maxLength={100}
+                                    required
+                                  />
+                                </Form.Group>
+                                <Form.Group>
+                                  <Form.Label className="fw-semibold small">
+                                    {lang === 'ru' ? 'Описание темы' : 'Topic Description'}
+                                  </Form.Label>
+                                  <Form.Control
+                                    type="text"
+                                    value={editTopicDescription}
+                                    onChange={e => setEditTopicDescription(e.target.value)}
+                                    maxLength={200}
+                                    placeholder={lang === 'ru' ? 'Краткое описание...' : 'Short description...'}
+                                  />
+                                </Form.Group>
+                                <Form.Check
+                                  type="checkbox"
+                                  id="editPinFirstPost"
+                                  label={t('forum.pin_first_post')}
+                                  checked={editPinFirstPost}
+                                  onChange={(e) => setEditPinFirstPost(e.target.checked)}
+                                  className="mt-2"
+                                />
+                              </div>
+                            )}
+                            <div className="mb-2">
+                              <div className="d-flex align-items-center justify-content-between mb-2">
+                                {post.author_id === user?.uid && (
+                                  <Dropdown className="w-auto">
+                                    <Dropdown.Toggle
+                                      variant="outline-management"
+                                      size="sm"
+                                      className="d-flex align-items-center gap-2 custom-select-toggle"
+                                    >
+                                      <User size={14} />
+                                      <span className="text-truncate" style={{ maxWidth: '200px' }}>
+                                        {editCharacterId
+                                          ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
+                                          : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                                        }
+                                      </span>
+                                    </Dropdown.Toggle>
+                                    <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                                      <Dropdown.Item
+                                        active={editCharacterId === ''}
+                                        onClick={() => setEditCharacterId('')}
+                                      >
+                                        {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
+                                      </Dropdown.Item>
+                                      {characters.length > 0 && <Dropdown.Divider />}
+                                      {characters.map(char => (
+                                        <Dropdown.Item
+                                          key={char.id}
+                                          active={editCharacterId === char.id}
+                                          onClick={() => setEditCharacterId(char.id)}
+                                        >
+                                          {t('forum.post_as_character')}: {char.name}
+                                        </Dropdown.Item>
+                                      ))}
+                                    </Dropdown.Menu>
+                                  </Dropdown>
+                                )}
+                                <Button
+                                  variant="outline-management"
+                                  size="sm"
+                                  className="ms-auto d-none d-md-flex align-items-center"
+                                  onClick={() => editEditorRef.current?.openHotkeysModal()}
+                                  title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+                                >
+                                  <Keyboard size={16} />
+                                </Button>
+                              </div>
+                              <RichEditor
+                                ref={editEditorRef}
+                                id="editContent"
+                                value={editContent}
+                                onChange={(e) => setEditContent(e.target.value)}
+                                rows={6}
+                                minHeight="210px"
+                                maxLength={computedMaxChars}
+                                autoFocus={true}
+                                showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
+                                isEdit={true}
+                                hideHotkeysButton={true}
+                                onSubmit={() => handleSaveEdit(post.id)}
+                              />
+                            </div>
+                            <div className="d-flex gap-2">
+                              <Button size="sm" variant="primary" onClick={() => handleSaveEdit(post.id)}>
+                                {lang === 'ru' ? 'Сохранить' : 'Save'}
+                              </Button>
+                              <Button size="sm" variant="outline-secondary" onClick={() => setEditingPostId(null)}>
+                                {lang === 'ru' ? 'Отмена' : 'Cancel'}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="post-content">
+                            <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
+                            {post.rolls && Object.keys(post.rolls).length > 0 && (
+                              <div className="mt-2 small d-flex align-items-center gap-1" style={{ color: 'var(--secondary-color)' }}>
+                                <Dices size={14} />
+                                <span>{lang === 'ru' ? `Всего бросков: ${Object.keys(post.rolls).length}` : `Dice thrown: ${Object.keys(post.rolls).length}`}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Signature */}
+                        {getLiveAuthorSignature(post) && (
+                          <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
+                            <BBCode>{getLiveAuthorSignature(post)}</BBCode>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Reputation / Voting Buttons */}
+                      {settings?.enableReputation && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (
+                        <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
+                          <div
+                            className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
+                            title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
+                              ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
+                              : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
+                            onClick={() => {
+                              const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                              if (post.author_id === profile?.uid || authorData?.status === 'banned') return;
+
+                              // If user has permission to use (vote), show modal or toggle controls
+                              // If they DON'T have permission, they can still view details if they clicked an existing vote?
+                              // Actually, let's stick to the rule: if no role perm, can only read (see counter).
+                              if (!hasPermission(PERMISSIONS.USE_REPUTATION)) {
+                                // Maybe allow viewing info if there are votes?
+                                if (myVotes[post.id]) {
+                                  setSelectedVote(myVotes[post.id]);
+                                  setShowVoteInfoModal(true);
+                                }
+                                return;
+                              }
+
+                              if (myVotes[post.id]) {
+                                setSelectedVote(myVotes[post.id]);
+                                setShowVoteInfoModal(true);
+                              } else if (settings?.reputationStyle === 'positive_only') {
+                                handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
+                              } else {
+                                setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
+                              }
+                            }}
+                          >
+                            <Award size={14} className="text-accent" />
+                            <strong>{post.reputation || 0}</strong>
+                            {myVotes[post.id] && (
+                              <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
+                                ({myVotes[post.id].value > 0 ? '+1' : '-1'})
+                              </span>
+                            )}
+                          </div>
+
+                          {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (
+                            <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
+                              <div className="d-flex gap-1">
+                                {settings?.reputationStyle !== 'positive_only' && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline-danger"
+                                    className="py-0 px-2 voting-btn"
+                                    disabled={votingPostId === post.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenVoteModal(post, -1, index + indexOfFirstItem + 1);
+                                    }}
+                                  >
+                                    −
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="outline-success"
+                                  className="py-0 px-2 voting-btn"
+                                  disabled={votingPostId === post.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
+                                  }}
+                                >
+                                  +
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
 
-                    {/* Stats & Role Group */}
-                    <div className="text-end author-stats-group ms-auto">
-                      <div className="d-flex flex-column align-items-end gap-1">
-                        {post.author_id && (
-                          <div className="text-muted author-res-stat">
-                            {lang === 'ru' ? 'Постов' : 'Posts'}: {authorStats[post.author_id] !== undefined ? (
-                              <strong className="ms-1">{authorStats[post.author_id]?.post_count || 0}</strong>
-                            ) : (
-                              <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
+                    {/* Post Management Links — only render if at least one button is visible */}
+                    {((user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator') || hasPermission(PERMISSIONS.POST_REPLY, { category })) && (
+                      (!topic?.is_locked || hasPermission('moderate_content')) || canManagePost(post)
+                    ) && (
+                        <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
+                          {/* Left side: Profile Links (Mobile Only) */}
+                          <div className="d-flex d-md-none gap-3">
+                            {(() => {
+                              const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                              if (!authorData) return null;
+                              return (
+                                <>
+                                  <Link to={`/profile/${post.author_id}`} className="author-res-footer-link">
+                                    {t('profile.view_profile')}
+                                  </Link>
+                                  {user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
+                                    <Link to={`/messages/${post.author_id}`} className="author-res-footer-link">
+                                      {t('profile.pm')}
+                                    </Link>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+
+                          {/* Placeholder for desktop formatting if needed, or hide div if empty on desktop */}
+                          <div className="d-none d-md-block"></div>
+
+                          {/* Right side: Management Actions */}
+                          <div className="d-flex gap-2 gap-md-3">
+                            {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                              <>
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  className="footer-link p-0 text-danger"
+                                  onClick={() => setDeletingPost(post)}
+                                >
+                                  {lang === 'ru' ? 'Удалить' : 'Delete'}
+                                </Button>
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  className="footer-link p-0"
+                                  onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
+                                >
+                                  {lang === 'ru' ? 'Редактировать' : 'Edit'}
+                                </Button>
+                              </>
+                            )}
+                            {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="footer-link p-0"
+                                onClick={() => {
+                                  const selectedText = window.getSelection().toString().trim();
+                                  const author = getLiveAuthorName(post) || 'User';
+                                  let content = selectedText || post.content;
+
+                                  if (post.rolls) {
+                                    content = content.replace(/\[roll=([a-z0-9_]+)\]/gi, (match, id) => {
+                                      const r = post.rolls[id];
+                                      if (r) {
+                                        return `[roll=${id} value=${r.value} sides=${r.sides}${r.type ? ` type=${r.type}` : ''}]`;
+                                      }
+                                      return match;
+                                    });
+                                  }
+
+                                  const stripQuotes = (text) => {
+                                    let result = '';
+                                    let depth = 0;
+                                    const regex = /\[(\/?)(quote)(?:[\s=][^\]]*)?\]/gi;
+                                    let match;
+                                    let lastIndex = 0;
+
+                                    while ((match = regex.exec(text)) !== null) {
+                                      if (depth === 0) {
+                                        result += text.substring(lastIndex, match.index);
+                                      }
+                                      if (match[1] === '/') {
+                                        depth = Math.max(0, depth - 1);
+                                      } else {
+                                        depth++;
+                                      }
+                                      lastIndex = regex.lastIndex;
+                                    }
+                                    if (depth === 0) {
+                                      result += text.substring(lastIndex);
+                                    }
+                                    return result.trim();
+                                  };
+
+                                  const cleanContent = stripQuotes(content);
+                                  const quote = `[quote="#p${post.id},t${id},${author}"]\n${cleanContent}\n[/quote]\n\n`;
+
+                                  setReplyContent(prev => {
+                                    const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
+                                    return prev + separator + quote;
+                                  });
+                                  window.getSelection().removeAllRanges();
+                                  replyRef.current?.scrollIntoView({ behavior: 'smooth' });
+                                }}
+                              >
+                                {lang === 'ru' ? 'Цитировать' : 'Quote'}
+                              </Button>
                             )}
                           </div>
-                        )}
-                        {post.author_id && (
-                          <div className="text-muted author-res-stat">
-                            {lang === 'ru' ? 'Реп' : 'Rep'}: {authorStats[post.author_id] !== undefined ? (
-                              <strong className="ms-1">{authorStats[post.author_id]?.reputation || 0}</strong>
-                            ) : (
-                              <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
-                            )}
-                          </div>
-                        )}
-                        <div className="author-res-info-lite text-end">
-                          {getRoleBadge(post, 'mb-0')}
                         </div>
-                      </div>
+                      )}
+                  </div>
+                </div>
+              </Card.Body>
+            </Card>
+          ))}
+        </div>
+
+        {/* Draft Post — rendered after real posts, only on last page, only for author */}
+        {myDraft && isOnLastPage && (
+          <Card
+            id={`post-${myDraft.id}`}
+            className="mb-4 shadow-sm border-0 post-card draft-post-card"
+          >
+            <Card.Body className="p-0">
+              <div className="d-flex flex-column flex-md-row flex-md-nowrap">
+                {/* Author sidebar */}
+                <div className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
+                  <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
+                    <ForumAuthorName
+                      userId={myDraft.author_id}
+                      characterId={myDraft.author_character_id}
+                      isCharacter={!!myDraft.is_character}
+                      fallbackName={myDraft.author_name}
+                      onClick={handleQuoteAuthor}
+                    />
+                  </div>
+                  {getLiveAuthorStatus(myDraft) && (
+                    <div className="text-primary mb-2 w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
+                      {getLiveAuthorStatus(myDraft)}
                     </div>
+                  )}
+                  <div className="mb-2 hide-on-extra-small-mobile">
+                    <ForumAuthorAvatar
+                      userId={myDraft.author_id}
+                      characterId={myDraft.author_character_id}
+                      isCharacter={!!myDraft.is_character}
+                      fallbackName={myDraft.author_name}
+                      initialAvatar={myDraft.author_avatar}
+                      size={150}
+                      className="rounded shadow-sm"
+                      isOnline={!!user}
+                    />
+                  </div>
+                  <div className="text-muted mt-1" style={{ fontSize: '0.8rem' }}>
+                    {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count || 0}</strong>
+                  </div>
+                  <div className="text-muted" style={{ fontSize: '0.875rem' }}>
+                    {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation || 0}</strong>
+                  </div>
+                  <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(myDraft)}</div>
+                  {/* Draft Status Links */}
+                  <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
+                    <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
+                      {t('profile.view_profile')}
+                    </Link>
                   </div>
                 </div>
 
                 {/* Content Area */}
                 <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
-                  {/* Header Strip: Time, # */}
+                  {/* Header Strip — no date, no post number, just DRAFT badge */}
                   <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
-                    <small className="text-muted">
-                      <a
-                        href={`#post-${post.id}`}
-                        className="text-decoration-none text-muted hover-link"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          const url = `${window.location.origin}${window.location.pathname}${window.location.search}#post-${post.id}`;
-                          navigator.clipboard.writeText(url);
-                          showToast(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
-                          // Also navigate for classic behavior
-                          window.location.hash = `post-${post.id}`;
-                        }}
-                      >
-                        <Timestamp date={post.created_at} className="text-muted" />
-                      </a>
-                      {post.edited_at && (
-                        <span className="d-block d-md-inline-block ms-md-2 opacity-50">
-                          ({lang === 'ru' ? 'ред.' : 'edited'} <Timestamp date={post.edited_at} />)
-                        </span>
-                      )}
-                    </small>
-                    <div className="text-muted small opacity-50 post-number-indicator">#{index + indexOfFirstItem + 1}</div>
+                    <Badge bg="secondary" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
+                      <FilePen size={11} className="me-1" />
+                      {t('forum.draft_label')}
+                    </Badge>
+                    <span className="text-muted small fst-italic">
+                      {t('forum.draft_only_you')}
+                    </span>
                   </div>
 
-                  {/* Body Area */}
+                  {/* Body */}
                   <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
                     <div className="flex-grow-1">
-                      {editingPostId === post.id ? (
-                        <div>
-                          {editingFirstPost && (
-                            <div className="mb-3">
-                              <Form.Group className="mb-2">
-                                <Form.Label className="fw-semibold small">
-                                  {lang === 'ru' ? 'Название темы' : 'Topic Title'}
-                                </Form.Label>
-                                <Form.Control
-                                  type="text"
-                                  value={editTopicTitle}
-                                  onChange={e => setEditTopicTitle(e.target.value)}
-                                  maxLength={100}
-                                  required
-                                />
-                              </Form.Group>
-                              <Form.Group>
-                                <Form.Label className="fw-semibold small">
-                                  {lang === 'ru' ? 'Описание темы' : 'Topic Description'}
-                                </Form.Label>
-                                <Form.Control
-                                  type="text"
-                                  value={editTopicDescription}
-                                  onChange={e => setEditTopicDescription(e.target.value)}
-                                  maxLength={200}
-                                  placeholder={lang === 'ru' ? 'Краткое описание...' : 'Short description...'}
-                                />
-                              </Form.Group>
-                              <Form.Check
-                                type="checkbox"
-                                id="editPinFirstPost"
-                                label={t('forum.pin_first_post')}
-                                checked={editPinFirstPost}
-                                onChange={(e) => setEditPinFirstPost(e.target.checked)}
-                                className="mt-2"
-                              />
-                            </div>
-                          )}
+                      {editingPostId === myDraft.id ? (
+                        <div className="pb-3">
                           <div className="mb-2">
                             <div className="d-flex align-items-center justify-content-between mb-2">
-                              {post.author_id === user?.uid && (
-                                <Dropdown className="w-auto">
-                                  <Dropdown.Toggle 
-                                    variant="outline-management" 
-                                    size="sm"
-                                    className="d-flex align-items-center gap-2 custom-select-toggle"
+                              <Dropdown className="w-auto">
+                                <Dropdown.Toggle
+                                  variant="outline-management"
+                                  size="sm"
+                                  className="d-flex align-items-center gap-2 custom-select-toggle"
+                                >
+                                  <User size={14} />
+                                  <span className="text-truncate" style={{ maxWidth: '200px' }}>
+                                    {editCharacterId
+                                      ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
+                                      : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                                    }
+                                  </span>
+                                </Dropdown.Toggle>
+                                <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                                  <Dropdown.Item
+                                    active={editCharacterId === ''}
+                                    onClick={() => setEditCharacterId('')}
                                   >
-                                    <User size={14} />
-                                    <span className="text-truncate" style={{ maxWidth: '200px' }}>
-                                      {editCharacterId 
-                                        ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
-                                        : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
-                                      }
-                                    </span>
-                                  </Dropdown.Toggle>
-                                  <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
-                                    <Dropdown.Item 
-                                      active={editCharacterId === ''}
-                                      onClick={() => setEditCharacterId('')}
+                                    {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
+                                  </Dropdown.Item>
+                                  {characters.length > 0 && <Dropdown.Divider />}
+                                  {characters.map(char => (
+                                    <Dropdown.Item
+                                      key={char.id}
+                                      active={editCharacterId === char.id}
+                                      onClick={() => setEditCharacterId(char.id)}
                                     >
-                                      {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
+                                      {t('forum.post_as_character')}: {char.name}
                                     </Dropdown.Item>
-                                    {characters.length > 0 && <Dropdown.Divider />}
-                                    {characters.map(char => (
-                                      <Dropdown.Item 
-                                        key={char.id}
-                                        active={editCharacterId === char.id}
-                                        onClick={() => setEditCharacterId(char.id)}
-                                      >
-                                        {t('forum.post_as_character')}: {char.name}
-                                      </Dropdown.Item>
-                                    ))}
-                                  </Dropdown.Menu>
-                                </Dropdown>
-                              )}
-                              <Button 
-                                variant="outline-management" 
-                                size="sm" 
+                                  ))}
+                                </Dropdown.Menu>
+                              </Dropdown>
+                              <Button
+                                variant="outline-management"
+                                size="sm"
                                 className="ms-auto d-none d-md-flex align-items-center"
-                                onClick={() => editEditorRef.current?.openHotkeysModal()}
+                                onClick={() => draftEditorRef.current?.openHotkeysModal()}
                                 title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
                               >
                                 <Keyboard size={16} />
                               </Button>
                             </div>
                             <RichEditor
-                              ref={editEditorRef}
-                              id="editContent"
+                              ref={draftEditorRef}
+                              id="draftEditContent"
                               value={editContent}
                               onChange={(e) => setEditContent(e.target.value)}
                               rows={6}
@@ -1557,759 +1912,404 @@ const TopicPage = () => {
                               showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
                               isEdit={true}
                               hideHotkeysButton={true}
-                              onSubmit={() => handleSaveEdit(post.id)}
+                              onSubmit={() => handleUpdateDraft(myDraft.id)}
                             />
                           </div>
                           <div className="d-flex gap-2">
-                            <Button size="sm" variant="primary" onClick={() => handleSaveEdit(post.id)}>
-                              {lang === 'ru' ? 'Сохранить' : 'Save'}
+                            <Button
+                              size="sm"
+                              variant="outline-secondary"
+                              onClick={() => handleUpdateDraft(myDraft.id)}
+                              disabled={draftSaving}
+                            >
+                              {draftSaving ? t('forum.draft_saving') : t('forum.draft_update_btn')}
                             </Button>
-                            <Button size="sm" variant="outline-secondary" onClick={() => setEditingPostId(null)}>
-                              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+                            <Button size="sm" variant="outline-danger" onClick={() => { setEditingPostId(null); setEditContent(''); }}>
+                              {t('common.cancel')}
                             </Button>
                           </div>
                         </div>
                       ) : (
                         <div className="post-content">
-                          <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
-                          {post.rolls && Object.keys(post.rolls).length > 0 && (
-                            <div className="mt-2 small d-flex align-items-center gap-1" style={{ color: 'var(--secondary-color)' }}>
-                              <Dices size={14} />
-                              <span>{lang === 'ru' ? `Всего бросков: ${Object.keys(post.rolls).length}` : `Dice thrown: ${Object.keys(post.rolls).length}`}</span>
-                            </div>
-                          )}
+                          <BBCode rolls={myDraft.rolls} authorId={myDraft.author_id || user?.uid}>{myDraft.content}</BBCode>
                         </div>
                       )}
-
-                      {/* Signature */}
-                      {getLiveAuthorSignature(post) && (
-                        <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
-                          <BBCode>{getLiveAuthorSignature(post)}</BBCode>
+                      {!editingPostId && getLiveAuthorSignature(myDraft) && (
+                        <div className="mt-4 pt-3 border-top small text-muted post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
+                          <BBCode>{getLiveAuthorSignature(myDraft)}</BBCode>
                         </div>
                       )}
                     </div>
-
-                    {/* Reputation / Voting Buttons */}
-                    {settings?.enableReputation && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (
-                      <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
-                        <div
-                          className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
-                          title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
-                            ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
-                            : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
-                          onClick={() => {
-                            const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                            if (post.author_id === profile?.uid || authorData?.status === 'banned') return;
-                            
-                            // If user has permission to use (vote), show modal or toggle controls
-                            // If they DON'T have permission, they can still view details if they clicked an existing vote?
-                            // Actually, let's stick to the rule: if no role perm, can only read (see counter).
-                            if (!hasPermission(PERMISSIONS.USE_REPUTATION)) {
-                              // Maybe allow viewing info if there are votes?
-                              if (myVotes[post.id]) {
-                                setSelectedVote(myVotes[post.id]);
-                                setShowVoteInfoModal(true);
-                              }
-                              return;
-                            }
-
-                            if (myVotes[post.id]) {
-                              setSelectedVote(myVotes[post.id]);
-                              setShowVoteInfoModal(true);
-                            } else if (settings?.reputationStyle === 'positive_only') {
-                              handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
-                            } else {
-                              setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
-                            }
-                          }}
-                        >
-                          <Award size={14} className="text-accent" />
-                          <strong>{post.reputation || 0}</strong>
-                          {myVotes[post.id] && (
-                            <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
-                              ({myVotes[post.id].value > 0 ? '+1' : '-1'})
-                            </span>
-                          )}
-                        </div>
-
-                        {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (
-                          <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
-                            <div className="d-flex gap-1">
-                              {settings?.reputationStyle !== 'positive_only' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline-danger"
-                                  className="py-0 px-2 voting-btn"
-                                  disabled={votingPostId === post.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenVoteModal(post, -1, index + indexOfFirstItem + 1);
-                                  }}
-                                >
-                                  −
-                                </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="outline-success"
-                                className="py-0 px-2 voting-btn"
-                                disabled={votingPostId === post.id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
-                                }}
-                              >
-                                +
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
 
-                  {/* Post Management Links — only render if at least one button is visible */}
-                  {((user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator') || hasPermission(PERMISSIONS.POST_REPLY, { category })) && (
-                    (!topic?.is_locked || hasPermission('moderate_content')) || canManagePost(post)
-                  ) && (
-                    <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
-                      {/* Left side: Profile Links (Mobile Only) */}
-                      <div className="d-flex d-md-none gap-3">
-                        {(() => {
-                          const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                          if (!authorData) return null;
-                          return (
-                            <>
-                              <Link to={`/profile/${post.author_id}`} className="author-res-footer-link">
-                                {t('profile.view_profile')}
-                              </Link>
-                              {user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
-                                <Link to={`/messages/${post.author_id}`} className="author-res-footer-link">
-                                  {t('profile.pm')}
-                                </Link>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-                      
-                      {/* Placeholder for desktop formatting if needed, or hide div if empty on desktop */}
-                      <div className="d-none d-md-block"></div>
-
-                      {/* Right side: Management Actions */}
-                      <div className="d-flex gap-2 gap-md-3">
-                        {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
-                          <>
-                            <Button
-                              variant="link"
-                              size="sm"
-                              className="footer-link p-0 text-danger"
-                              onClick={() => setDeletingPost(post)}
-                            >
-                              {lang === 'ru' ? 'Удалить' : 'Delete'}
-                            </Button>
-                            <Button
-                              variant="link"
-                              size="sm"
-                              className="footer-link p-0"
-                              onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
-                            >
-                              {lang === 'ru' ? 'Редактировать' : 'Edit'}
-                            </Button>
-                          </>
-                        )}
-                        {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="footer-link p-0"
-                            onClick={() => {
-                              const selectedText = window.getSelection().toString().trim();
-                              const author = getLiveAuthorName(post) || 'User';
-                              let content = selectedText || post.content;
-                              
-                              if (post.rolls) {
-                                content = content.replace(/\[roll=([a-z0-9_]+)\]/gi, (match, id) => {
-                                  const r = post.rolls[id];
-                                  if (r) {
-                                    return `[roll=${id} value=${r.value} sides=${r.sides}${r.type ? ` type=${r.type}` : ''}]`;
-                                  }
-                                  return match;
-                                });
-                              }
-
-                              const stripQuotes = (text) => {
-                                let result = '';
-                                let depth = 0;
-                                const regex = /\[(\/?)(quote)(?:[\s=][^\]]*)?\]/gi;
-                                let match;
-                                let lastIndex = 0;
-                                
-                                while ((match = regex.exec(text)) !== null) {
-                                    if (depth === 0) {
-                                        result += text.substring(lastIndex, match.index);
-                                    }
-                                    if (match[1] === '/') {
-                                        depth = Math.max(0, depth - 1);
-                                    } else {
-                                        depth++;
-                                    }
-                                    lastIndex = regex.lastIndex;
-                                }
-                                if (depth === 0) {
-                                    result += text.substring(lastIndex);
-                                }
-                                return result.trim();
-                              };
-
-                              const cleanContent = stripQuotes(content);
-                              const quote = `[quote="#p${post.id},t${id},${author}"]\n${cleanContent}\n[/quote]\n\n`;
-
-                              setReplyContent(prev => {
-                                const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
-                                return prev + separator + quote;
-                              });
-                              window.getSelection().removeAllRanges();
-                              replyRef.current?.scrollIntoView({ behavior: 'smooth' });
-                            }}
-                          >
-                            {lang === 'ru' ? 'Цитировать' : 'Quote'}
-                          </Button>
-                        )}
-                      </div>
+                  {/* Draft Management Links (Aligned with post footer) */}
+                  {!editingPostId && (
+                    <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed post-footer-links">
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="footer-link p-0"
+                        onClick={() => setDeletingPost(myDraft)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="footer-link p-0"
+                        onClick={() => handleStartEdit(myDraft, false)}
+                      >
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="footer-link p-0 text-success fw-semibold"
+                        onClick={() => handlePublishDraft(myDraft.id)}
+                        disabled={draftSaving}
+                      >
+                        <Send size={12} className="me-1" />
+                        {draftSaving ? t('forum.draft_publishing') : t('forum.draft_publish')}
+                      </Button>
                     </div>
                   )}
                 </div>
               </div>
             </Card.Body>
           </Card>
-        ))}
-      </div>
+        )}
 
-      {/* Draft Post — rendered after real posts, only on last page, only for author */}
-      {myDraft && isOnLastPage && (
-        <Card
-          id={`post-${myDraft.id}`}
-          className="mb-4 shadow-sm border-0 post-card draft-post-card"
-        >
-          <Card.Body className="p-0">
-            <div className="d-flex flex-column flex-md-row flex-md-nowrap">
-              {/* Author sidebar */}
-              <div className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
-                <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
-                  <ForumAuthorName
-                    userId={myDraft.author_id}
-                    characterId={myDraft.author_character_id}
-                    isCharacter={!!myDraft.is_character}
-                    fallbackName={myDraft.author_name}
-                    onClick={handleQuoteAuthor}
-                  />
-                </div>
-                {getLiveAuthorStatus(myDraft) && (
-                  <div className="text-primary mb-2 w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
-                    {getLiveAuthorStatus(myDraft)}
-                  </div>
-                )}
-                <div className="mb-2 hide-on-extra-small-mobile">
-                  <ForumAuthorAvatar
-                    userId={myDraft.author_id}
-                    characterId={myDraft.author_character_id}
-                    isCharacter={!!myDraft.is_character}
-                    fallbackName={myDraft.author_name}
-                    initialAvatar={myDraft.author_avatar}
-                    size={120}
-                    className="rounded shadow-sm"
-                    isOnline={!!user}
-                  />
-                </div>
-                <div className="text-muted mt-1" style={{ fontSize: '0.8rem' }}>
-                  {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count || 0}</strong>
-                </div>
-                <div className="text-muted" style={{ fontSize: '0.875rem' }}>
-                  {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation || 0}</strong>
-                </div>
-                <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(myDraft)}</div>
-                {/* Draft Status Links */}
-                <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
-                  <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
-                    {t('profile.view_profile')}
-                  </Link>
-                </div>
-              </div>
-
-              {/* Content Area */}
-              <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
-                {/* Header Strip — no date, no post number, just DRAFT badge */}
-                <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
-                  <Badge bg="secondary" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
-                    <FilePen size={11} className="me-1" />
-                    {t('forum.draft_label')}
-                  </Badge>
-                  <span className="text-muted small fst-italic">
-                    {t('forum.draft_only_you')}
-                  </span>
-                </div>
-
-                {/* Body */}
-                <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
-                  <div className="flex-grow-1">
-                    {editingPostId === myDraft.id ? (
-                      <div className="pb-3">
-                        <div className="mb-2">
-                        <div className="d-flex align-items-center justify-content-between mb-2">
-                          <Dropdown className="w-auto">
-                            <Dropdown.Toggle 
-                              variant="outline-management" 
-                              size="sm"
-                              className="d-flex align-items-center gap-2 custom-select-toggle"
-                            >
-                              <User size={14} />
-                              <span className="text-truncate" style={{ maxWidth: '200px' }}>
-                                {editCharacterId 
-                                  ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === editCharacterId)?.name || '...'}`
-                                  : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
-                                }
-                              </span>
-                            </Dropdown.Toggle>
-                            <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
-                              <Dropdown.Item 
-                                active={editCharacterId === ''}
-                                onClick={() => setEditCharacterId('')}
-                              >
-                                {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
-                              </Dropdown.Item>
-                              {characters.length > 0 && <Dropdown.Divider />}
-                              {characters.map(char => (
-                                <Dropdown.Item 
-                                  key={char.id}
-                                  active={editCharacterId === char.id}
-                                  onClick={() => setEditCharacterId(char.id)}
-                                >
-                                  {t('forum.post_as_character')}: {char.name}
-                                </Dropdown.Item>
-                              ))}
-                            </Dropdown.Menu>
-                          </Dropdown>
-                          <Button 
-                            variant="outline-management" 
-                            size="sm" 
-                            className="ms-auto d-none d-md-flex align-items-center"
-                            onClick={() => draftEditorRef.current?.openHotkeysModal()}
-                            title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
-                          >
-                            <Keyboard size={16} />
-                          </Button>
-                        </div>
-                        <RichEditor
-                          ref={draftEditorRef}
-                          id="draftEditContent"
-                          value={editContent}
-                          onChange={(e) => setEditContent(e.target.value)}
-                          rows={6}
-                          minHeight="210px"
-                          maxLength={computedMaxChars}
-                          autoFocus={true}
-                          showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
-                          isEdit={true}
-                          hideHotkeysButton={true}
-                          onSubmit={() => handleUpdateDraft(myDraft.id)}
-                        />
-                        </div>
-                        <div className="d-flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline-secondary"
-                            onClick={() => handleUpdateDraft(myDraft.id)}
-                            disabled={draftSaving}
-                          >
-                            {draftSaving ? t('forum.draft_saving') : t('forum.draft_update_btn')}
-                          </Button>
-                          <Button size="sm" variant="outline-danger" onClick={() => { setEditingPostId(null); setEditContent(''); }}>
-                            {t('common.cancel')}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="post-content">
-                        <BBCode rolls={myDraft.rolls} authorId={myDraft.author_id || user?.uid}>{myDraft.content}</BBCode>
-                      </div>
-                    )}
-                    {!editingPostId && getLiveAuthorSignature(myDraft) && (
-                      <div className="mt-4 pt-3 border-top small text-muted post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
-                        <BBCode>{getLiveAuthorSignature(myDraft)}</BBCode>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Draft Management Links (Aligned with post footer) */}
-                {!editingPostId && (
-                  <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed post-footer-links">
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="footer-link p-0"
-                      onClick={() => setDeletingPost(myDraft)}
-                    >
-                      {t('common.delete')}
-                    </Button>
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="footer-link p-0"
-                      onClick={() => handleStartEdit(myDraft, false)}
-                    >
-                      {t('common.edit')}
-                    </Button>
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="footer-link p-0 text-success fw-semibold"
-                      onClick={() => handlePublishDraft(myDraft.id)}
-                      disabled={draftSaving}
-                    >
-                      <Send size={12} className="me-1" />
-                      {draftSaving ? t('forum.draft_publishing') : t('forum.draft_publish')}
-                    </Button>
-                  </div>
-                )}
-              </div>
+        {/* Bottom Actions & Pagination */}
+        <div className="mt-4 mb-4 px-2 px-md-0">
+          {user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned' && profile?.role_id !== 'spectator' && (
+            <div className="d-flex justify-content-end mb-3">
+              <Button
+                variant={isSubscribed ? "primary" : "outline-primary"}
+                size="sm"
+                className="d-flex align-items-center gap-2 rounded-pill px-3 shadow-sm"
+                onClick={handleToggleSubscription}
+                disabled={togglingSub}
+              >
+                {isSubscribed ? <BellOff size={14} /> : <Bell size={14} />}
+                {isSubscribed ? t('notifications.unfollow') : t('notifications.follow')}
+              </Button>
             </div>
-          </Card.Body>
-          </Card>
-        )}
-
-      {/* Bottom Actions & Pagination */}
-      <div className="mt-4 mb-4 px-2 px-md-0">
-        {user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned' && profile?.role_id !== 'spectator' && (
-          <div className="d-flex justify-content-end mb-3">
-            <Button
-              variant={isSubscribed ? "primary" : "outline-primary"}
-              size="sm"
-              className="d-flex align-items-center gap-2 rounded-pill px-3 shadow-sm"
-              onClick={handleToggleSubscription}
-              disabled={togglingSub}
-            >
-              {isSubscribed ? <BellOff size={14} /> : <Bell size={14} />}
-              {isSubscribed ? t('notifications.unfollow') : t('notifications.follow')}
-            </Button>
+          )}
+          <div className="d-flex justify-content-center pagination-bottom">
+            <ForumPagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={(page) => handlePageChange(page, true)}
+              centered
+            />
           </div>
-        )}
-        <div className="d-flex justify-content-center pagination-bottom">
-          <ForumPagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={(page) => handlePageChange(page, true)}
-            centered
-          />
         </div>
-      </div>
 
-      {/* Reply form — hidden for spectators and closed topics */}
-      {
-        !hasPermission(PERMISSIONS.POST_REPLY, { category }) ? (
-          user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned' && (
-            <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
-              <span className="opacity-75">
-                {t('forum.spectator_mode')}
-              </span>
-            </div>
-          )
-        ) : topic.posts_count >= 1000 ? (
-          <div className="mt-5" ref={replyRef}>
-            <Card className="shadow-sm border-0 bg-card overflow-hidden">
-              <Card.Body className="p-4 text-center">
-                <div className="d-flex flex-column align-items-center py-2">
-                  <div className="bg-light rounded-circle p-3 mb-3" style={{ color: 'var(--role-banned)' }}>
-                    <Lock size={32} />
+        {/* Reply form — hidden for spectators and closed topics */}
+        {
+          !hasPermission(PERMISSIONS.POST_REPLY, { category }) ? (
+            user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned' && (
+              <div className="mt-5 p-4 text-center text-muted border rounded" ref={replyRef}>
+                <span className="opacity-75">
+                  {t('forum.spectator_mode')}
+                </span>
+              </div>
+            )
+          ) : topic.posts_count >= 1000 ? (
+            <div className="mt-5" ref={replyRef}>
+              <Card className="shadow-sm border-0 bg-card overflow-hidden">
+                <Card.Body className="p-4 text-center">
+                  <div className="d-flex flex-column align-items-center py-2">
+                    <div className="bg-light rounded-circle p-3 mb-3" style={{ color: 'var(--role-banned)' }}>
+                      <Lock size={32} />
+                    </div>
+                    <h4 className="fw-bold mb-2">
+                      {lang === 'ru' ? 'Тема закрыта' : 'Topic Closed'}
+                    </h4>
+                    <p className="text-muted mb-0 mx-auto" style={{ maxWidth: '400px' }}>
+                      {lang === 'ru'
+                        ? 'В теме достигнут лимит сообщений (1000/1000). Новые ответы более не принимаются.'
+                        : 'The message limit (1000/1000) has been reached for this topic. New replies are no longer accepted.'}
+                    </p>
                   </div>
-                  <h4 className="fw-bold mb-2">
-                    {lang === 'ru' ? 'Тема закрыта' : 'Topic Closed'}
-                  </h4>
-                  <p className="text-muted mb-0 mx-auto" style={{ maxWidth: '400px' }}>
-                    {lang === 'ru' 
-                      ? 'В теме достигнут лимит сообщений (1000/1000). Новые ответы более не принимаются.' 
-                      : 'The message limit (1000/1000) has been reached for this topic. New replies are no longer accepted.'}
-                  </p>
-                </div>
-              </Card.Body>
-            </Card>
-          </div>
-        ) : topic.is_locked && !hasPermission('moderate_content') ? (
-          <div className="mt-5 p-4 text-center text-muted rounded" style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }} ref={replyRef}>
-            <div className="mb-3">
-              <MessageSquareOff size={48} className="opacity-25" />
+                </Card.Body>
+              </Card>
             </div>
-            <h5 className="mb-2">
-              {t('forum.topic_locked')}
-            </h5>
-            <p className="small mb-0 opacity-75">
-              {t('forum.topic_locked_desc')}
-            </p>
-          </div>
-        ) : (
-          <div className="mt-5" ref={replyRef}>
-            <Card className="shadow-sm border-0 bg-card">
-              <Card.Header className="bg-dark text-white py-3">
-                <h5 className="mb-0">{t('forum.create_post')}</h5>
-              </Card.Header>
-              <Card.Body className="p-3 p-md-4">
-                <Form onSubmit={handleReply}>
-                  {!user && (
-                    <Form.Group className="mb-3" controlId="guestNickname">
-                      <Form.Label className="fw-semibold small">
-                        {lang === 'ru' ? 'Ваш никнейм' : 'Your Nickname'} <span className="text-danger">*</span>
-                      </Form.Label>
-                      <Form.Control
-                        type="text"
-                        placeholder={lang === 'ru' ? 'Введите имя...' : 'Enter your name...'}
-                        value={guestNickname}
-                        onChange={(e) => setGuestNickname(e.target.value)}
-                        required
-                        className="w-auto"
-                        style={{ minWidth: '250px' }}
-                      />
-                    </Form.Group>
-                  )}
-                  <div className="d-flex align-items-center justify-content-between mb-2">
-                    {user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
-                      <Dropdown className="w-auto">
-                        <Dropdown.Toggle 
-                          variant="outline-management" 
-                          className="d-flex align-items-center gap-2 custom-select-toggle"
-                        >
-                          <User size={16} />
-                          <span className="text-truncate" style={{ maxWidth: '250px' }}>
-                            {selectedCharacterId 
-                              ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === selectedCharacterId)?.name || '...'}`
-                              : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
-                            }
-                          </span>
-                        </Dropdown.Toggle>
-                        <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
-                          <Dropdown.Item 
-                            active={selectedCharacterId === ''}
-                            onClick={() => {
-                              setSelectedCharacterId('');
-                              if (user) updateUser(user.uid, { last_selected_character_id: '' });
-                            }}
+          ) : topic.is_locked && !hasPermission('moderate_content') ? (
+            <div className="mt-5 p-4 text-center text-muted rounded" style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }} ref={replyRef}>
+              <div className="mb-3">
+                <MessageSquareOff size={48} className="opacity-25" />
+              </div>
+              <h5 className="mb-2">
+                {t('forum.topic_locked')}
+              </h5>
+              <p className="small mb-0 opacity-75">
+                {t('forum.topic_locked_desc')}
+              </p>
+            </div>
+          ) : (
+            <div className="mt-5" ref={replyRef}>
+              <Card className="shadow-sm border-0 bg-card">
+                <Card.Header className="bg-dark text-white py-3">
+                  <h5 className="mb-0">{t('forum.create_post')}</h5>
+                </Card.Header>
+                <Card.Body className="p-3 p-md-4">
+                  <Form onSubmit={handleReply}>
+                    {!user && (
+                      <Form.Group className="mb-3" controlId="guestNickname">
+                        <Form.Label className="fw-semibold small">
+                          {lang === 'ru' ? 'Ваш никнейм' : 'Your Nickname'} <span className="text-danger">*</span>
+                        </Form.Label>
+                        <Form.Control
+                          type="text"
+                          placeholder={lang === 'ru' ? 'Введите имя...' : 'Enter your name...'}
+                          value={guestNickname}
+                          onChange={(e) => setGuestNickname(e.target.value)}
+                          required
+                          className="w-auto"
+                          style={{ minWidth: '250px' }}
+                        />
+                      </Form.Group>
+                    )}
+                    <div className="d-flex align-items-center justify-content-between mb-2">
+                      {user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
+                        <Dropdown className="w-auto">
+                          <Dropdown.Toggle
+                            variant="outline-management"
+                            className="d-flex align-items-center gap-2 custom-select-toggle"
                           >
-                            {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
-                          </Dropdown.Item>
-                          {characters.length > 0 && <Dropdown.Divider />}
-                          {characters.map(char => (
-                            <Dropdown.Item 
-                              key={char.id}
-                              active={selectedCharacterId === char.id}
+                            <User size={16} />
+                            <span className="text-truncate" style={{ maxWidth: '250px' }}>
+                              {selectedCharacterId
+                                ? `${t('forum.post_as_character')}: ${characters.find(c => c.id === selectedCharacterId)?.name || '...'}`
+                                : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0]}`
+                              }
+                            </span>
+                          </Dropdown.Toggle>
+                          <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                            <Dropdown.Item
+                              active={selectedCharacterId === ''}
                               onClick={() => {
-                                setSelectedCharacterId(char.id);
-                                if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                                setSelectedCharacterId('');
+                                if (user) updateUser(user.uid, { last_selected_character_id: '' });
                               }}
                             >
-                              {t('forum.post_as_character')}: {char.name}
+                              {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
                             </Dropdown.Item>
-                          ))}
-                        </Dropdown.Menu>
-                      </Dropdown>
-                    )}
-                    <Button 
-                      variant="outline-management" 
-                      className={`ms-auto d-none d-md-flex align-items-center gap-2 ${!(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? 'mb-2' : ''}`}
-                      onClick={() => replyEditorRef.current?.openHotkeysModal()}
-                      title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
-                    >
-                      <Keyboard size={18} />
-                      <span className="d-none d-md-inline small">{lang === 'ru' ? 'Справка' : 'Help'}</span>
-                    </Button>
-                  </div>
-
-                  <Form.Group className="mb-3">
-                    <RichEditor
-                      ref={replyEditorRef}
-                      id="reply-editor"
-                      value={replyContent}
-                      onChange={(e) => setReplyContent(e.target.value)}
-                      placeholder={t('forum.reply_placeholder')}
-                      minHeight="210px"
-                      rows={6}
-                      maxLength={computedMaxChars}
-                      showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
-                      isEdit={false}
-                      hideHotkeysButton={true}
-                      onSubmit={() => handleReply()}
-                    />
-                  </Form.Group>
-
-                  <div className="mt-4 d-flex justify-content-end gap-2">
-                    {user && !hasDraft && (
+                            {characters.length > 0 && <Dropdown.Divider />}
+                            {characters.map(char => (
+                              <Dropdown.Item
+                                key={char.id}
+                                active={selectedCharacterId === char.id}
+                                onClick={() => {
+                                  setSelectedCharacterId(char.id);
+                                  if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                                }}
+                              >
+                                {t('forum.post_as_character')}: {char.name}
+                              </Dropdown.Item>
+                            ))}
+                          </Dropdown.Menu>
+                        </Dropdown>
+                      )}
                       <Button
-                        variant="outline-secondary"
-                        type="button"
-                        disabled={submitting || draftSaving || !replyContent.trim()}
-                        onClick={handleSaveDraft}
+                        variant="outline-management"
+                        className={`ms-auto d-none d-md-flex align-items-center gap-2 ${!(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? 'mb-2' : ''}`}
+                        onClick={() => replyEditorRef.current?.openHotkeysModal()}
+                        title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
                       >
-                        <FilePen size={14} className="me-1" />
-                        {draftSaving ? t('forum.draft_saving') : t('forum.draft_save')}
+                        <Keyboard size={18} />
+                        <span className="d-none d-md-inline small">{lang === 'ru' ? 'Справка' : 'Help'}</span>
                       </Button>
-                    )}
-                    <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
-                      {submitting
-                        ? t('forum.posting')
-                        : t('forum.create_post')}
-                    </Button>
-                  </div>
-                </Form>
-              </Card.Body>
-            </Card>
-          </div>
-        )
-      }
+                    </div>
 
-      <div className="mt-4">
-        <ForumBreadcrumbs
-          items={[
-            ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
-            { label: topic?.title || '...', active: true }
-          ]} 
+                    <Form.Group className="mb-3">
+                      <RichEditor
+                        ref={replyEditorRef}
+                        id="reply-editor"
+                        value={replyContent}
+                        onChange={(e) => setReplyContent(e.target.value)}
+                        placeholder={t('forum.reply_placeholder')}
+                        minHeight="210px"
+                        rows={6}
+                        maxLength={computedMaxChars}
+                        showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}
+                        isEdit={false}
+                        hideHotkeysButton={true}
+                        onSubmit={() => handleReply()}
+                      />
+                    </Form.Group>
+
+                    <div className="mt-4 d-flex justify-content-end gap-2">
+                      {user && !hasDraft && (
+                        <Button
+                          variant="outline-secondary"
+                          type="button"
+                          disabled={submitting || draftSaving || !replyContent.trim()}
+                          onClick={handleSaveDraft}
+                        >
+                          <FilePen size={14} className="me-1" />
+                          {draftSaving ? t('forum.draft_saving') : t('forum.draft_save')}
+                        </Button>
+                      )}
+                      <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
+                        {submitting
+                          ? t('forum.posting')
+                          : t('forum.create_post')}
+                      </Button>
+                    </div>
+                  </Form>
+                </Card.Body>
+              </Card>
+            </div>
+          )
+        }
+
+        <div className="mt-4">
+          <ForumBreadcrumbs
+            items={[
+              ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
+              { label: topic?.title || '...', active: true }
+            ]}
+          />
+
+          <div className="d-flex justify-content-between">
+            {category && (
+              <Link to={`/category/${category.id}`} className="btn btn-outline-secondary">
+                &larr; {t('forum.back_to_category')}
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {/* Modals */}
+        {(() => {
+          const isFirstPost = deletingPost && !deletingPost.is_draft && posts.length > 0 && posts[0].id === deletingPost.id;
+          return (
+            <ConfirmModal
+              show={!!deletingPost}
+              onHide={() => setDeletingPost(null)}
+              onConfirm={handleDeletePost}
+              title={lang === 'ru'
+                ? (isFirstPost ? 'Удалить тему?' : 'Удалить пост?')
+                : (isFirstPost ? 'Delete topic?' : 'Delete post?')}
+              message={lang === 'ru'
+                ? (isFirstPost
+                  ? 'Внимание: удаление первого сообщения приведет к удалению всей темы целиком. Это действие необратимо.'
+                  : 'Это действие необратимо. Пост будет удалён навсегда.')
+                : (isFirstPost
+                  ? 'Warning: deleting the first post will delete the entire topic. This action cannot be undone.'
+                  : 'This action cannot be undone. The post will be permanently deleted.')}
+              confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+              cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+            />
+          );
+        })()}
+
+        <ConfirmModal
+          show={showDeleteTopicModal}
+          onHide={() => setShowDeleteTopicModal(false)}
+          onConfirm={async () => {
+            const catId = topic.category_id;
+            await deleteTopics([id]);
+            navigate(catId ? `/category/${catId}` : '/');
+          }}
+          title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}
+          message={lang === 'ru'
+            ? 'Это действие удалит саму тему и все сообщения в ней навсегда. Вы уверены?'
+            : 'This action will permanently delete the topic and all its posts. Are you sure?'}
+          confirmText={lang === 'ru' ? 'Удалить полностью' : 'Delete permanently'}
+          cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
         />
 
-        <div className="d-flex justify-content-between">
-          {category && (
-            <Link to={`/category/${category.id}`} className="btn btn-outline-secondary">
-              &larr; {t('forum.back_to_category')}
-            </Link>
-          )}
-        </div>
-      </div>
+        {/* Move Topic Modal */}
+        <MoveTopicsModal
+          show={showMoveModal}
+          onHide={() => setShowMoveModal(false)}
+          onConfirm={handleMoveTopic}
+          topicCount={1}
+          excludeCategoryId={topic?.category_id}
+        />
 
-      {/* Modals */}
-      {(() => {
-        const isFirstPost = deletingPost && !deletingPost.is_draft && posts.length > 0 && posts[0].id === deletingPost.id;
-        return (
-          <ConfirmModal
-            show={!!deletingPost}
-            onHide={() => setDeletingPost(null)}
-            onConfirm={handleDeletePost}
-            title={lang === 'ru' 
-              ? (isFirstPost ? 'Удалить тему?' : 'Удалить пост?') 
-              : (isFirstPost ? 'Delete topic?' : 'Delete post?')}
-            message={lang === 'ru'
-              ? (isFirstPost 
-                  ? 'Внимание: удаление первого сообщения приведет к удалению всей темы целиком. Это действие необратимо.' 
-                  : 'Это действие необратимо. Пост будет удалён навсегда.')
-              : (isFirstPost 
-                  ? 'Warning: deleting the first post will delete the entire topic. This action cannot be undone.' 
-                  : 'This action cannot be undone. The post will be permanently deleted.')}
-            confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
-            cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
-          />
-        );
-      })()}
-
-      <ConfirmModal
-        show={showDeleteTopicModal}
-        onHide={() => setShowDeleteTopicModal(false)}
-        onConfirm={async () => {
-          const catId = topic.category_id;
-          await deleteTopics([id]);
-          navigate(catId ? `/category/${catId}` : '/');
-        }}
-        title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}
-        message={lang === 'ru'
-          ? 'Это действие удалит саму тему и все сообщения в ней навсегда. Вы уверены?'
-          : 'This action will permanently delete the topic and all its posts. Are you sure?'}
-        confirmText={lang === 'ru' ? 'Удалить полностью' : 'Delete permanently'}
-        cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
-      />
-
-      {/* Move Topic Modal */}
-      <MoveTopicsModal
-        show={showMoveModal}
-        onHide={() => setShowMoveModal(false)}
-        onConfirm={handleMoveTopic}
-        topicCount={1}
-        excludeCategoryId={topic?.category_id}
-      />
-
-      <ForumModal
-        show={showRepModal}
-        onHide={() => setShowRepModal(false)}
-        title={t('profile.rep_give')}
-        footer={
-          <>
-            <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
-              {submittingRep ? t('common.loading') : t('common.confirm')}
-            </Button>
-          </>
-        }
-      >
-        <div className="text-center mb-4">
-          <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
-            {repValue > 0 ? `+${repValue}` : repValue}
-          </Badge>
-          <div className="mt-3 text-muted small px-3">
-            {lang === 'ru'
-              ? 'Этот голос изменит репутацию данного поста и будет зачислен в общую репутацию (карму) автора.'
-              : 'This vote will change the reputation of this post and contribute to the author\'s total reputation (karma).'}
-          </div>
-        </div>
-        <Form.Group>
-          <Form.Label className="fw-bold small">{lang === 'ru' ? 'Комментарий (опционально)' : 'Leave a comment (optional)'}</Form.Label>
-          <Form.Control
-            as="textarea"
-            rows={3}
-            value={repComment}
-            onChange={(e) => setRepComment(e.target.value)}
-            placeholder=""
-            className="modal-section-themed"
-          />
-        </Form.Group>
-      </ForumModal>
-
-      <ForumModal
-        show={showVoteInfoModal}
-        onHide={() => setShowVoteInfoModal(false)}
-        title={lang === 'ru' ? 'Информация о вашем голосе' : 'Your Vote Information'}
-        className="premium-modal shadow-lg"
-        footer={
-          <Button variant="outline-secondary" className="w-100" onClick={() => setShowVoteInfoModal(false)}>
-            {t('common.close')}
-          </Button>
-        }
-      >
-        {selectedVote && (
-          <div className="d-flex flex-column gap-3">
-            <div className="d-flex justify-content-between align-items-center modal-inner-card p-3">
-              <div>
-                <div className="small text-muted">{lang === 'ru' ? 'Ваш голос' : 'Your vote'}</div>
-                <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-5 mt-1">
-                  {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
-                </Badge>
-              </div>
-              <div className="text-end">
-                <div className="small text-muted">{lang === 'ru' ? 'Дата' : 'Date'}</div>
-                <div className="fw-bold"><Timestamp date={selectedVote.created_at} /></div>
-              </div>
-            </div>
-
-            <div>
-              <div className="small text-muted mb-2">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
-              <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
-                {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
-              </div>
-            </div>
-
-            <div className="small text-muted opacity-75 italic text-center mt-2">
+        <ForumModal
+          show={showRepModal}
+          onHide={() => setShowRepModal(false)}
+          title={t('profile.rep_give')}
+          footer={
+            <>
+              <Button variant="outline-secondary" onClick={() => setShowRepModal(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button variant="primary" onClick={handleRepVote} disabled={submittingRep}>
+                {submittingRep ? t('common.loading') : t('common.confirm')}
+              </Button>
+            </>
+          }
+        >
+          <div className="text-center mb-4">
+            <Badge bg={repValue > 0 ? 'success' : 'danger'} className="fs-3 px-4 py-2">
+              {repValue > 0 ? `+${repValue}` : repValue}
+            </Badge>
+            <div className="mt-3 text-muted small px-3">
               {lang === 'ru'
-                ? 'Этот голос зачислен автору поста.'
-                : 'This vote has been contributed to the post author.'}
+                ? 'Этот голос изменит репутацию данного поста и будет зачислен в общую репутацию (карму) автора.'
+                : 'This vote will change the reputation of this post and contribute to the author\'s total reputation (karma).'}
             </div>
           </div>
-        )}
-      </ForumModal>
+          <Form.Group>
+            <Form.Label className="fw-bold small">{lang === 'ru' ? 'Комментарий (опционально)' : 'Leave a comment (optional)'}</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={3}
+              value={repComment}
+              onChange={(e) => setRepComment(e.target.value)}
+              placeholder=""
+              className="modal-section-themed"
+            />
+          </Form.Group>
+        </ForumModal>
+
+        <ForumModal
+          show={showVoteInfoModal}
+          onHide={() => setShowVoteInfoModal(false)}
+          title={lang === 'ru' ? 'Информация о вашем голосе' : 'Your Vote Information'}
+          className="premium-modal shadow-lg"
+          footer={
+            <Button variant="outline-secondary" className="w-100" onClick={() => setShowVoteInfoModal(false)}>
+              {t('common.close')}
+            </Button>
+          }
+        >
+          {selectedVote && (
+            <div className="d-flex flex-column gap-3">
+              <div className="d-flex justify-content-between align-items-center modal-inner-card p-3">
+                <div>
+                  <div className="small text-muted">{lang === 'ru' ? 'Ваш голос' : 'Your vote'}</div>
+                  <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-5 mt-1">
+                    {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
+                  </Badge>
+                </div>
+                <div className="text-end">
+                  <div className="small text-muted">{lang === 'ru' ? 'Дата' : 'Date'}</div>
+                  <div className="fw-bold"><Timestamp date={selectedVote.created_at} /></div>
+                </div>
+              </div>
+
+              <div>
+                <div className="small text-muted mb-2">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
+                <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
+                  {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
+                </div>
+              </div>
+
+              <div className="small text-muted opacity-75 italic text-center mt-2">
+                {lang === 'ru'
+                  ? 'Этот голос зачислен автору поста.'
+                  : 'This vote has been contributed to the post author.'}
+              </div>
+            </div>
+          )}
+        </ForumModal>
       </div>
 
     </Container>
