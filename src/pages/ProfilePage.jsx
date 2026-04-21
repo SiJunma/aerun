@@ -1555,7 +1555,7 @@ const ProfilePage = () => {
               type="text"
               value={formData.status_line}
               onChange={(e) => setFormData({ ...formData, status_line: e.target.value })}
-              placeholder="Title or status"
+              placeholder={t('profile.character_status_placeholder')}
               maxLength={30}
             />
           </Form.Group>
@@ -1576,7 +1576,7 @@ const ProfilePage = () => {
               rows={3}
               value={formData.signature}
               onChange={(e) => setFormData({ ...formData, signature: e.target.value })}
-              placeholder="Character biography or signature"
+              placeholder={t('profile.character_signature_placeholder')}
             />
           </Form.Group>
         </Form>

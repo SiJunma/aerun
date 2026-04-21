@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Image, Button, Form, Spinner, InputGroup } from 'react-bootstrap';
+import { Image as BSImage, Button, Form, Spinner, InputGroup } from 'react-bootstrap';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage, isStorageEnabled } from '../../../firebase';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -25,11 +25,64 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
   const placeholderSrc = `https://ui-avatars.com/api/?name=?&background=666&color=fff&size=${size * 2}`;
   const displaySrc = value || placeholderSrc;
 
-  const handleFileChange = (e) => {
+  const resizeImage = (file, minSide = 250) => {
+    return new Promise((resolve) => {
+      // GIF resizing is complex in JS, usually better to skip or use a lib.
+      // If it's a GIF and allowGifs is true, we'll just upload as is to preserve animation.
+      if (file.type === 'image/gif') {
+        resolve(file);
+        return;
+      }
+
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(img.src);
+        let width = img.width;
+        let height = img.height;
+
+        const shorterSide = Math.min(width, height);
+        if (shorterSide > minSide) {
+          const ratio = minSide / shorterSide;
+          width *= ratio;
+          height *= ratio;
+        } else {
+          // If already small enough, just return original file
+          resolve(file);
+          return;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        
+        // Use better image smoothing
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            resolve(file); // Fallback to original
+          }
+        }, file.type, 0.85);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(img.src);
+        resolve(file); // Fallback
+      };
+    });
+  };
+
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate — PNG/JPG/WebP only, max 2 MB (strictly enforced)
+    // Validate — PNG/JPG/WebP/GIF
     const MAX_SIZE_MB = 2;
     const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
     const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -48,26 +101,33 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
     setUploading(true);
     setProgress(0);
 
-    const storageRef = ref(storage, storagePath);
-    const uploadTask = uploadBytesResumable(storageRef, file);
+    try {
+      const uploadData = await resizeImage(file);
+      const storageRef = ref(storage, storagePath);
+      const uploadTask = uploadBytesResumable(storageRef, uploadData);
 
-    uploadTask.on(
-      'state_changed',
-      (snapshot) => {
-        setProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
-      },
-      (err) => {
-        console.error('[AvatarUploader]', err);
-        setError(t('profile.error_upload_failed'));
-        setUploading(false);
-      },
-      async () => {
-        const url = await getDownloadURL(uploadTask.snapshot.ref);
-        onChange(url);
-        setUploading(false);
-        setMode('preview');
-      }
-    );
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          setProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+        },
+        (err) => {
+          console.error('[AvatarUploader]', err);
+          setError(t('profile.error_upload_failed'));
+          setUploading(false);
+        },
+        async () => {
+          const url = await getDownloadURL(uploadTask.snapshot.ref);
+          onChange(url);
+          setUploading(false);
+          setMode('preview');
+        }
+      );
+    } catch (err) {
+      console.error('[AvatarUploader] Resize error:', err);
+      setUploading(false);
+      setError(t('profile.error_upload_failed'));
+    }
 
     // Reset input so the same file can be re-selected
     e.target.value = '';
@@ -101,7 +161,7 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
             {progress}%
           </div>
         ) : (
-          <Image
+          <BSImage
             src={displaySrc}
             roundedCircle
             style={{ width: size, height: size, objectFit: 'cover' }}
@@ -112,26 +172,33 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
 
       {/* Controls */}
       {mode === 'preview' && !disabled && (
-        <div className="d-flex gap-2">
-          {canUpload && isStorageEnabled && (
+        <>
+          <div className="d-flex gap-2">
+            {canUpload && isStorageEnabled && (
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                📁 {t('profile.upload_file')}
+              </Button>
+            )}
             <Button
               variant="outline-secondary"
               size="sm"
               disabled={uploading}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => { setUrlInput(value || ''); setMode('url'); }}
             >
-              📁 {t('profile.upload_file')}
+              🔗 {t('profile.by_url')}
             </Button>
+          </div>
+          {canUpload && (
+            <div className="text-muted" style={{ fontSize: '0.7rem', opacity: 0.8 }}>
+              {t('profile.avatar_help', { size: 2 })}
+            </div>
           )}
-          <Button
-            variant="outline-secondary"
-            size="sm"
-            disabled={uploading}
-            onClick={() => { setUrlInput(value || ''); setMode('url'); }}
-          >
-            🔗 {t('profile.by_url')}
-          </Button>
-        </div>
+        </>
       )}
 
       {mode === 'url' && (
