@@ -24,7 +24,7 @@ import {
   Dices, User, FilePen, MessageSquareOff, Keyboard
 } from 'lucide-react';
 import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNotifications } from '../api/notifications';
-import { voteOnPost, getVotesInTopic } from '../api/reputation';
+import { voteOnPost, getVotesInTopic, updateReputationComment } from '../api/reputation';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
 import { resolveField } from '../utils/text';
@@ -83,6 +83,9 @@ const TopicPage = () => {
   const [activeRepPostId, setActiveRepPostId] = useState(null);
   const [showVoteInfoModal, setShowVoteInfoModal] = useState(false);
   const [selectedVote, setSelectedVote] = useState(null);
+  const [isEditingRepComment, setIsEditingRepComment] = useState(false);
+  const [editingRepComment, setEditingRepComment] = useState('');
+  const [savingRepComment, setSavingRepComment] = useState(false);
 
   // Subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -611,6 +614,29 @@ const TopicPage = () => {
       setSubmittingRep(false);
       setRepTargetPost(null);
       setRepTargetPostNumber(null);
+    }
+  };
+
+  const handleUpdateRepComment = async () => {
+    if (!selectedVote || !user) return;
+    setSavingRepComment(true);
+    try {
+      await updateReputationComment(selectedVote.id, editingRepComment);
+
+      const updatedVote = { ...selectedVote, comment: editingRepComment };
+      setSelectedVote(updatedVote);
+      setMyVotes(prev => ({
+        ...prev,
+        [selectedVote.post_id]: updatedVote
+      }));
+
+      setIsEditingRepComment(false);
+      showToast(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
+    } catch (err) {
+      console.error(err);
+      showToast(err.message, 'danger');
+    } finally {
+      setSavingRepComment(false);
     }
   };
 
@@ -2296,10 +2322,57 @@ const TopicPage = () => {
               </div>
 
               <div>
-                <div className="small text-muted mb-2">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
-                <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
-                  {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <div className="small text-muted">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
+                  {(selectedVote.voter_id === user?.uid) && !isEditingRepComment && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0 text-decoration-none small"
+                      onClick={() => {
+                        setEditingRepComment(selectedVote.comment || '');
+                        setIsEditingRepComment(true);
+                      }}
+                    >
+                      {selectedVote.comment ? (lang === 'ru' ? 'Изменить' : 'Edit') : (lang === 'ru' ? 'Добавить' : 'Add')}
+                    </Button>
+                  )}
                 </div>
+
+                {isEditingRepComment ? (
+                  <div className="modal-inner-card p-3 border-start border-4 border-accent">
+                    <Form.Control
+                      as="textarea"
+                      rows={2}
+                      value={editingRepComment}
+                      onChange={(e) => setEditingRepComment(e.target.value)}
+                      placeholder={lang === 'ru' ? 'Введите комментарий...' : 'Enter your comment...'}
+                      className="modal-section-themed mb-2"
+                    />
+                    <div className="d-flex justify-content-end gap-2">
+                      <Button
+                        variant="outline-secondary"
+                        size="sm"
+                        onClick={() => setIsEditingRepComment(false)}
+                        disabled={savingRepComment}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={handleUpdateRepComment}
+                        disabled={savingRepComment}
+                      >
+                        {savingRepComment ? t('common.loading') : (lang === 'ru' ? 'Сохранить' : 'Save')}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
+                    {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
+                  </div>
+                )}
               </div>
 
               <div className="small text-muted opacity-75 italic text-center mt-2">
