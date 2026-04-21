@@ -20,7 +20,7 @@ const TopicRow = ({
   showCategoryInColumn = false
 }) => {
   const { t } = useI18n();
-  const { readMap, profile } = useAuth();
+  const { readMap, profile, settings } = useAuth();
   const lastVisitRaw = readMap[topic.id];
   const lastReadOffset = lastVisitRaw?.offset ?? null;
   // Handle both Firestore Timestamp (from server) and plain number (optimistic local update)
@@ -31,8 +31,8 @@ const TopicRow = ({
   const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
   const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
-  const POSTS_PER_PAGE = 20;
-  const totalPages = Math.ceil((topic.posts_count || 1) / POSTS_PER_PAGE);
+  const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
+  const totalPages = Math.ceil((topic.posts_count || 1) / ITEMS_PER_PAGE);
 
   const renderMiniPagination = () => {
     if (totalPages <= 1) return null;

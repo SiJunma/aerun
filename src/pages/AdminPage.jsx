@@ -107,8 +107,9 @@ const AdminPage = () => {
   const [settings, setSettings] = useState({
     forumName: { en: 'Aerun Forum', ru: 'Aerun Forum' },
     registrationEnabled: true,
-    maxUploadSize: 500,
     maxCharsPerPost: 15000,
+    postsPerPage: 20,
+    maxPostsPerTopic: 1000,
     maintenanceMode: false,
     welcomeMessage: { en: 'Welcome to our TTRPG home!', ru: 'Добро пожаловать в наш дом TTRPG!' },
     enableReputation: true,
@@ -145,8 +146,9 @@ const AdminPage = () => {
           welcomeMessage: ensureBilingual(data.welcomeMessage, ''),
           registrationEnabled: data.registrationEnabled ?? true,
           maintenanceMode: data.maintenanceMode ?? false,
-          maxUploadSize: data.maxUploadSize ?? 500,
           maxCharsPerPost: data.maxCharsPerPost ?? 15000,
+          postsPerPage: data.postsPerPage ?? 20,
+          maxPostsPerTopic: data.maxPostsPerTopic ?? 1000,
           whitelistMode: data.whitelistMode ?? false,
           requireApproval: data.requireApproval ?? true,
           enableCharacters: data.enableCharacters ?? true,
@@ -730,17 +732,7 @@ const AdminPage = () => {
           <hr className="my-5" />
           <h5 className="mb-4 text-primary">{t('admin.settings.security')}</h5>
           <Row>
-            <Col md={6}>
-              <Form.Group className="mb-4" controlId="maxUpload">
-                <Form.Label className="fw-bold">{t('admin.settings.max_upload')}</Form.Label>
-                <Form.Control
-                  type="number"
-                  value={settings.maxUploadSize}
-                  onChange={(e) => setSettings({ ...settings, maxUploadSize: parseInt(e.target.value) })}
-                />
-              </Form.Group>
-            </Col>
-            <Col md={6}>
+            <Col md={12}>
               <Form.Group className="mb-4" controlId="maxChars">
                 <Form.Label className="fw-bold">{t('admin.settings.max_chars')}</Form.Label>
                 <Form.Control
@@ -748,6 +740,32 @@ const AdminPage = () => {
                   value={settings.maxCharsPerPost ?? 15000}
                   onChange={(e) => setSettings({ ...settings, maxCharsPerPost: parseInt(e.target.value) || 0 })}
                 />
+              </Form.Group>
+            </Col>
+            <Col md={12}>
+              <Form.Group className="mb-4" controlId="postsPerPage">
+                <Form.Label className="fw-bold">{t('admin.settings.posts_per_page')}</Form.Label>
+                <Form.Control
+                  type="number"
+                  value={settings.postsPerPage ?? 20}
+                  onChange={(e) => setSettings({ ...settings, postsPerPage: parseInt(e.target.value) || 20 })}
+                />
+                <div className="small text-muted mt-1 opacity-75">
+                  {t('admin.settings.posts_per_page_help')}
+                </div>
+              </Form.Group>
+            </Col>
+            <Col md={12}>
+              <Form.Group className="mb-4" controlId="maxPostsPerTopic">
+                <Form.Label className="fw-bold">{t('admin.settings.max_posts_per_topic')}</Form.Label>
+                <Form.Control
+                  type="number"
+                  value={settings.maxPostsPerTopic ?? 1000}
+                  onChange={(e) => setSettings({ ...settings, maxPostsPerTopic: parseInt(e.target.value) || 1000 })}
+                />
+                <div className="small text-muted mt-1 opacity-75">
+                  {t('admin.settings.max_posts_per_topic_help')}
+                </div>
               </Form.Group>
             </Col>
           </Row>
@@ -1738,13 +1756,14 @@ const AdminPage = () => {
                           <div className="d-flex flex-column gap-1 mt-1">
                             {Object.entries(v).map(([ck, cv]) => {
                               const cLabel = t(`admin.audit.fields.${ck}`) || ck;
+                              const renderValue = (val) => typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val);
                               return (
                                 <div key={ck} className="p-2 rounded bg-white border border-secondary border-opacity-10">
                                   <div className="fw-bold small">{cLabel}:</div>
-                                  <div className="d-flex align-items-center gap-2 small">
-                                    <span className="text-danger text-decoration-line-through opacity-75">{String(cv.from)}</span>
+                                  <div className="d-flex align-items-center gap-2 small flex-wrap">
+                                    <span className="text-danger text-decoration-line-through opacity-75">{renderValue(cv.from)}</span>
                                     <ArrowRightLeft size={10} className="text-muted" />
-                                    <span className="text-success fw-bold">{String(cv.to)}</span>
+                                    <span className="text-success fw-bold">{renderValue(cv.to)}</span>
                                   </div>
                                 </div>
                               );

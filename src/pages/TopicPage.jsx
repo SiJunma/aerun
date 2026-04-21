@@ -103,7 +103,7 @@ const TopicPage = () => {
   const editEditorRef = useRef(null);
   const goLast = searchParams.get('goLast') === '1';
   const isJumpRequested = !!(searchParams.get('post') || goLast || hash.startsWith('#post-'));
-  const ITEMS_PER_PAGE = 20;
+  const ITEMS_PER_PAGE = settings?.postsPerPage ?? 20;
   const MAX_CHARS = settings?.maxCharsPerPost ?? 15000;
   const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
 
@@ -114,7 +114,7 @@ const TopicPage = () => {
     const index = posts.findIndex(p => p.id === postId);
     if (index === -1) return null;
     return Math.floor(index / ITEMS_PER_PAGE) + 1;
-  }, [searchParams, posts]);
+  }, [searchParams, posts, ITEMS_PER_PAGE]);
 
   const currentPage = queryPostPage || parseInt(searchParams.get('page') || '1', 10);
 
@@ -149,7 +149,7 @@ const TopicPage = () => {
       const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + posts.length - 1;
       markTopicRead(id, lastMessageIndex);
     }
-  }, [posts.length, id, user, markTopicRead, currentPage, profile?.role_id]);
+  }, [posts.length, id, user, markTopicRead, currentPage, profile?.role_id, ITEMS_PER_PAGE]);
 
   // Subscribe to draft
   useEffect(() => {
@@ -454,7 +454,7 @@ const TopicPage = () => {
         setIsPageLoading(false);
       }
     }
-  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast]);
+  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE]);
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
@@ -2041,7 +2041,7 @@ const TopicPage = () => {
                 </span>
               </div>
             )
-          ) : topic.posts_count >= 1000 ? (
+          ) : topic.posts_count >= (settings?.maxPostsPerTopic ?? 1000) ? (
             <div className="mt-5" ref={replyRef}>
               <Card className="shadow-sm border-0 bg-card overflow-hidden">
                 <Card.Body className="p-4 text-center">
@@ -2054,8 +2054,8 @@ const TopicPage = () => {
                     </h4>
                     <p className="text-muted mb-0 mx-auto" style={{ maxWidth: '400px' }}>
                       {lang === 'ru'
-                        ? 'В теме достигнут лимит сообщений (1000/1000). Новые ответы более не принимаются.'
-                        : 'The message limit (1000/1000) has been reached for this topic. New replies are no longer accepted.'}
+                        ? `В теме достигнут лимит сообщений (${settings?.maxPostsPerTopic ?? 1000}/${settings?.maxPostsPerTopic ?? 1000}). Новые ответы более не принимаются.`
+                        : `The message limit (${settings?.maxPostsPerTopic ?? 1000}/${settings?.maxPostsPerTopic ?? 1000}) has been reached for this topic. New replies are no longer accepted.`}
                     </p>
                   </div>
                 </Card.Body>

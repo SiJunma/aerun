@@ -259,7 +259,9 @@ export const AuthProvider = ({ children }) => {
           maintenanceMode: data.maintenanceMode ?? false,
           whitelistMode: data.whitelistMode ?? false,
           requireApproval: data.requireApproval ?? true,
-          registrationEnabled: data.registrationEnabled ?? true
+          registrationEnabled: data.registrationEnabled ?? true,
+          postsPerPage: data.postsPerPage ?? 20,
+          maxPostsPerTopic: data.maxPostsPerTopic ?? 1000
         };
         // Defaults for backgrounds
         if (!data.bgLight) migrated.bgLight = 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop';
@@ -274,6 +276,8 @@ export const AuthProvider = ({ children }) => {
           whitelistMode: false,
           registrationEnabled: true,
           requireApproval: true,
+          postsPerPage: 20,
+          maxPostsPerTopic: 1000,
           bgDark: 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop'
         });
       }

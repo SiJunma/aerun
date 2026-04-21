@@ -348,8 +348,11 @@ export const translations = {
         bg_neutral: "Neutral Theme Background URL",
         opacity: "Opacity",
         security: "Security & Access",
-        max_upload: "Max Upload Size per Post (KB)",
         max_chars: "Max Characters per Post (0 = unlimited)",
+        posts_per_page: "Posts per Page in Topics",
+        posts_per_page_help: "How many posts are shown per page. Affects navigation and the 'locate post' feature.",
+        max_posts_per_topic: "Max Posts per Topic",
+        max_posts_per_topic_help: "When a topic reaches this many posts, it will be automatically locked.",
         registration: "Allow New User Registration",
         maintenance: "Maintenance Mode (Only Admins can log in)",
         save_btn: "Save Settings",
@@ -551,6 +554,8 @@ export const translations = {
           logId: "Log ID",
           post_id: "Post ID",
           topic_id: "Topic ID",
+          postsPerPage: "Posts per Page",
+          maxPostsPerTopic: "Max Posts per Topic"
         }
       }
     }
@@ -904,8 +909,11 @@ export const translations = {
         bg_neutral: "Фон для нейтральной темы (URL)",
         opacity: "Прозрачность",
         security: "Безопасность и доступ",
-        max_upload: "Макс. размер файла (КБ)",
         max_chars: "Макс. символов в сообщении (0 = безлимит)",
+        posts_per_page: "Сообщений на страницу в темах",
+        posts_per_page_help: "Сколько сообщений показывается на одной странице. Влияет на навигацию и поиск нужного поста.",
+        max_posts_per_topic: "Максимум сообщений в теме",
+        max_posts_per_topic_help: "При достижении этого количества сообщений тема автоматически закроется (lock).",
         registration: "Разрешить регистрацию",
         maintenance: "Техническое обслуживание (только админы)",
         save_btn: "Сохранить настройки",
@@ -1105,6 +1113,8 @@ export const translations = {
           logId: "ID записи",
           post_id: "ID поста",
           topic_id: "ID темы",
+          postsPerPage: "Сообщений на страницу",
+          maxPostsPerTopic: "Максимум сообщений в теме"
         }
       }
     }

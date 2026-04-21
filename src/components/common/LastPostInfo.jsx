@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import AuthorMeta from './AuthorMeta';
+import { useAuth } from '../../contexts/AuthProvider';
 
 const LastPostInfo = ({
   topicId,
@@ -16,19 +17,20 @@ const LastPostInfo = ({
   lang,
   className = ""
 }) => {
+  const { settings } = useAuth();
   if (!lastPostAt) return <span className="text-muted small">—</span>;
 
-  const POSTS_PER_PAGE = 20;
+  const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
   let targetUrl = `/topic/${topicId}?goLast=1`;
   
   if (hasUnread) {
     if (lastReadOffset !== null) {
       const nextIndex = lastReadOffset + 1;
-      const targetPage = Math.ceil((nextIndex + 1) / POSTS_PER_PAGE);
+      const targetPage = Math.ceil((nextIndex + 1) / ITEMS_PER_PAGE);
       targetUrl = `/topic/${topicId}?page=${targetPage}&goLast=1`;
     }
   } else {
-    const lastPage = Math.max(1, Math.ceil(postsCount / POSTS_PER_PAGE));
+    const lastPage = Math.max(1, Math.ceil(postsCount / ITEMS_PER_PAGE));
     targetUrl = `/topic/${topicId}?page=${lastPage}&goLast=1`;
   }
 

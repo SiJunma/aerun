@@ -197,15 +197,25 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
         // Need topic title for category metadata
         const topicRef = db.collection("topics").doc(topic_id);
-        const topicSnap = await topicRef.get();
+        const [topicSnap, settingsSnap] = await Promise.all([
+            topicRef.get(),
+            db.collection("settings").doc("global").get()
+        ]);
+        
         if (!topicSnap.exists) return;
         const topicData = topicSnap.data();
-        const { category_id, title: topic_title } = topicData;
+        const { category_id, title: topic_title, posts_count: currentTopicPostCount = 0 } = topicData;
+
+        const settings = settingsSnap.exists ? settingsSnap.data() : {};
+        const maxPostsPerTopic = settings.maxPostsPerTopic ?? 1000;
+        
+        const newPostCount = currentTopicPostCount + 1;
+        const shouldLock = newPostCount >= maxPostsPerTopic;
 
         const timestamp = created_at || admin.firestore.FieldValue.serverTimestamp();
 
         // 1. Update Topic
-        batch.update(topicRef, {
+        const topicUpdates = {
             posts_count: admin.firestore.FieldValue.increment(1),
             last_post_at: timestamp,
             last_post_author: author_name,
@@ -213,7 +223,13 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
             last_post_author_avatar: author_avatar || null,
             last_post_is_character: !!is_character,
             last_post_author_character_id: author_character_id || null
-        });
+        };
+        
+        if (shouldLock) {
+            topicUpdates.is_locked = true;
+        }
+
+        batch.update(topicRef, topicUpdates);
 
         // 2. Update Category
         const catRef = db.collection("categories").doc(category_id);
