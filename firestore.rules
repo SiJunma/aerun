@@ -181,8 +181,9 @@ service cloud.firestore {
 
     // --- Reputation Logs ---
     match /reputation_logs/{logId} {
-      // Users can read logs (UI filters based on settings)
-      allow read: if true;
+      // Users can only read their own logs (either as target or voter) or admins can read all
+      // The rest is handled securely by the cloud function `getReputationLogs`
+      allow read: if isAdmin() || (isSignedIn() && (resource.data.target_id == request.auth.uid || resource.data.voter_id == request.auth.uid));
       // Any active user can vote (permissions defined by frontend); voter_id must match; cannot vote for self
       allow create: if isActive() 
         && request.resource.data.voter_id == request.auth.uid
@@ -238,10 +239,31 @@ service cloud.firestore {
       allow delete: if isActive() && (resource.data.user_id == request.auth.uid || isAdmin());
     }
 
+    function getRoleLevel(roleId) {
+      let systemLevels = { 'root': 100, 'admin': 90, 'moderator': 50, 'player': 10, 'spectator': 5, 'pending': 1, 'banned': 0 };
+      let defLevel = roleId in systemLevels ? systemLevels[roleId] : 0;
+      let roleData = exists(/databases/$(database)/documents/roles/$(roleId)) ? get(/databases/$(database)/documents/roles/$(roleId)).data : {};
+      return 'level' in roleData ? roleData.level : defLevel;
+    }
+
     // --- Roles ---
     match /roles/{roleId} {
       allow read: if true; // Allow reading for badge colors etc
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() || (
+        isActive() && 
+        hasPermission('manage_roles') && 
+        getRole() != roleId &&
+        getRoleLevel(getRole()) > getRoleLevel(roleId) &&
+        (!('level' in request.resource.data) || getRoleLevel(getRole()) > request.resource.data.level)
+      );
+      allow delete: if resource.data.is_system ? isAdmin() : (
+        isAdmin() || (
+          isActive() && 
+          hasPermission('manage_roles') && 
+          getRole() != roleId &&
+          getRoleLevel(getRole()) > getRoleLevel(roleId)
+        )
+      );
     }
 
     // --- Guest Activity (throttled unique guest tracking) ---

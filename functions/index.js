@@ -1,5 +1,6 @@
 const { onDocumentCreated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
@@ -588,8 +589,84 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
         });
 
         await batch.commit();
-        logger.info(`onUserCreated: Notified ${recipients.size} managers for user ${event.params.uid}`);
     } catch (error) {
         logger.error(`onUserCreated error (${event.params.uid}):`, error);
     }
 });
+
+/**
+ * getReputationLogs (Callable)
+ * Retrieves reputation logs for a user, securely filtering out private logs
+ * based on target user settings if the requester doesn't have permissions.
+ */
+exports.getReputationLogs = onCall(
+  { memory: '256MB', timeoutSeconds: 60 },
+  async (request) => {
+    const { targetUid } = request.data;
+    if (!targetUid || typeof targetUid !== 'string') {
+      throw new HttpsError('invalid-argument', 'targetUid must be a non-empty string');
+    }
+
+    const db = admin.firestore();
+    const requesterUid = request.auth ? request.auth.uid : null;
+    const isTargetUser = requesterUid === targetUid;
+
+    const promises = [db.collection('users').doc(targetUid).get()];
+    if (requesterUid) {
+      promises.push(db.collection('users').doc(requesterUid).get());
+    }
+    
+    const [targetUserDoc, userDoc] = await Promise.all(promises);
+    
+    const isRequesterAdmin = userDoc && userDoc.exists && ['root', 'admin'].includes(userDoc.data().role_id);
+    const isRequesterModerator = userDoc && userDoc.exists && userDoc.data().role_id === 'moderator';
+
+    if (!targetUserDoc.exists) {
+      throw new HttpsError('not-found', 'Target user not found');
+    }
+
+    const targetUserData = targetUserDoc.data();
+    const repShowHistory = targetUserData.settings?.rep_show_history;
+
+    if (
+      repShowHistory === false &&
+      !isTargetUser &&
+      !isRequesterAdmin &&
+      !isRequesterModerator
+    ) {
+      return { hidden: true, logs: [] };
+    }
+
+    const logsSnapshot = await db
+      .collection('reputation_logs')
+      .where('target_id', '==', targetUid)
+      .orderBy('created_at', 'desc')
+      .limit(50)
+      .get();
+
+    const logs = [];
+    const repShowComments = targetUserData.settings?.rep_show_comments;
+    const shouldHideComments =
+      repShowComments === false &&
+      !isTargetUser &&
+      !isRequesterAdmin &&
+      !isRequesterModerator;
+
+    logsSnapshot.forEach((logDoc) => {
+      const logData = { id: logDoc.id, ...logDoc.data() };
+      
+      // Convert timestamps to ISO string if needed, or send raw objects 
+      // (Admin SDK Timestamp can be sent over HttpsCallable, client gets it as string)
+      if (logData.created_at) {
+         logData.created_at = logData.created_at.toDate().toISOString();
+      }
+
+      if (shouldHideComments && logData.comment) {
+        logData.comment = '';
+      }
+      logs.push(logData);
+    });
+
+    return { hidden: false, logs };
+  }
+);

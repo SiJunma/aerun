@@ -10,7 +10,9 @@
     "deploy:test": "npm run build:test && firebase deploy --only \"hosting,firestore,functions\" --project staging",
     "build:prod": "vite build --mode production",
     "deploy:prod": "npm run build:prod && firebase deploy --only \"hosting,firestore,storage,functions\" --project default",
-    "lint": "eslint .",
+    "lint:js": "eslint .",
+    "lint:rules": "firebase emulators:exec --project demo-test --only firestore \"node -e \\\"console.log('Firestore rules OK')\\\"\"",
+    "lint": "npm run lint:js && npm run lint:rules",
     "preview": "vite preview"
   },
   "dependencies": {

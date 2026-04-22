@@ -23,6 +23,15 @@ import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
+const ROLE_LEVELS = {
+  'root': 100,
+  'admin': 90,
+  'moderator': 50,
+  'player': 10,
+  'spectator': 5,
+  'pending': 1,
+  'banned': 0,
+};
 
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
@@ -92,6 +101,18 @@ const AdminPage = () => {
       default: return false;
     }
   }, [hasPermission]);
+
+  const canEditRole = useCallback((targetRole) => {
+    if (isRootAdmin) return true;
+    if (targetRole.id === user?.role_id) return false;
+    if (!hasPermission(PERMISSIONS.MANAGE_ROLES)) return false;
+
+    const myRole = roles.find((r) => r.id === user?.role_id);
+    const myRoleLevel = myRole?.level ?? ROLE_LEVELS[user?.role_id] ?? 0;
+    const targetRoleLevel = targetRole.level ?? ROLE_LEVELS[targetRole.id] ?? 0;
+
+    return myRoleLevel > targetRoleLevel;
+  }, [isRootAdmin, user?.role_id, hasPermission, roles]);
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
@@ -477,7 +498,9 @@ const AdminPage = () => {
       const defaultPlayerRole = DEFAULT_ROLES.find(r => r.id === 'player');
       setRoleForm({
         name: '',
-        permissions: defaultPlayerRole ? [...defaultPlayerRole.permissions] : [],
+        permissions: defaultPlayerRole
+          ? defaultPlayerRole.permissions.filter(p => p !== PERMISSIONS.VIEW_MASTER_DICE)
+          : [],
         color: 'primary',
         base_role_id: 'player'
       });
@@ -1037,11 +1060,11 @@ const AdminPage = () => {
                   <td className="text-end">
                     {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
                       <>
-                        <Button variant="link" size="sm" onClick={() => handleOpenRoleModal(role)}>
+                        <Button variant="link" size="sm" disabled={!canEditRole(role)} onClick={() => handleOpenRoleModal(role)}>
                           {t('admin.roles.edit')}
                         </Button>
                         {!(role.is_system || ['admin', 'moderator', 'player', 'spectator'].includes(role.id)) && (
-                          <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteRole(role.id, role.is_system)}>
+                          <Button variant="link" size="sm" disabled={!canEditRole(role)} className={`text-danger ${!canEditRole(role) ? 'opacity-50' : ''}`} onClick={() => handleDeleteRole(role.id, role.is_system)}>
                             {t('admin.roles.delete')}
                           </Button>
                         )}

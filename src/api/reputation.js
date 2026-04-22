@@ -3,16 +3,14 @@ import {
   doc,
   runTransaction,
   query,
-  where,
-  orderBy,
-  onSnapshot,
-  serverTimestamp,
   getDocs,
   getDoc,
-  limit,
-  updateDoc
+  updateDoc,
+  serverTimestamp,
+  where
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../../firebase';
 import { logAdminAction } from './audit';
 
 /**
@@ -154,24 +152,13 @@ export const updateReputationComment = async (logId, newComment) => {
 };
 
 /**
- * subscribeToReputationLogs
- * Real-time list of reputation changes for a user.
+ * fetchReputationLogs
+ * Fetches reputation changes for a user securely through Cloud Functions.
  */
-export const subscribeToReputationLogs = (uid, callback) => {
-  const q = query(
-    collection(db, 'reputation_logs'),
-    where('target_id', '==', uid),
-    orderBy('created_at', 'desc'),
-    limit(50)
-  );
-
-  return onSnapshot(q, (snapshot) => {
-    const logs = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-    callback(logs);
-  });
+export const fetchReputationLogs = async (uid) => {
+  const getLogs = httpsCallable(functions, 'getReputationLogs');
+  const result = await getLogs({ targetUid: uid });
+  return result.data.logs || [];
 };
 
 /**

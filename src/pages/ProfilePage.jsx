@@ -15,7 +15,7 @@ import ConfirmModal from '../components/common/ConfirmModal';
 import { resolveField } from '../utils/text';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
-import { voteOnProfile, subscribeToReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
+import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
 import { db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import Timestamp from '../components/common/Timestamp';
@@ -124,7 +124,8 @@ const ProfilePage = () => {
     const unsubProfile = subscribeToUser(uid, (data) => {
       setViewedProfile(data);
     });
-    const unsubRep = subscribeToReputationLogs(uid, setRepLogs);
+    
+    fetchReputationLogs(uid).then(setRepLogs).catch(console.error);
     
     if (profile && profile.uid !== uid) {
       getProfileVote(profile.uid, uid).then(setMyVote).catch(console.error);
@@ -136,7 +137,6 @@ const ProfilePage = () => {
       unsubCats();
       unsubscribe();
       unsubProfile();
-      unsubRep();
     };
   }, [uid, profile]);
 
@@ -768,7 +768,7 @@ const ProfilePage = () => {
                             return (
                             <tr key={log.id}>
                               <td className="px-4 py-3 small text-muted">
-                                {log.created_at ? <Timestamp date={log.created_at.toDate()} /> : '...'}
+                                {log.created_at ? <Timestamp date={log.created_at?.toDate ? log.created_at.toDate() : new Date(log.created_at)} /> : '...'}
                               </td>
                               <td className="py-3 text-center">
                                 <OverlayTrigger
