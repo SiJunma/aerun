@@ -1,5 +1,6 @@
 import { db } from '../../firebase';
 import { logAdminAction } from './audit';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   collection,
   setDoc,
@@ -131,6 +132,38 @@ export const subscribeToPosts = (topicId, callback) => {
     },
     (err) => console.error('[subscribeToPosts]', err)
   );
+};
+
+export const fetchSecuredPosts = async (topicId) => {
+  try {
+    const functions = getFunctions();
+    const getSecured = httpsCallable(functions, 'getSecuredPosts');
+    const result = await getSecured({ topicId });
+    // result.data.posts will be dates in ISO string format, 
+    // but the app components (like BBCode) might expect Firebase Timestamp.
+    // Client-side, we should map them back or ensure the components handle string dates.
+    // Actually, BBCode and TopicPage use posts. To make it seamless:
+    const posts = result.data.posts || [];
+    return posts.map(p => {
+      // Mock toMillis() for ISO string sorting in case it's used elsewhere
+      const dateVal = p.created_at ? new Date(p.created_at) : null;
+      return {
+        ...p,
+        created_at: dateVal ? {
+          toDate: () => dateVal,
+          toMillis: () => dateVal.getTime(),
+          seconds: Math.floor(dateVal.getTime() / 1000)
+        } : null,
+        updated_at: p.updated_at ? {
+           toDate: () => new Date(p.updated_at),
+           toMillis: () => new Date(p.updated_at).getTime()
+        } : null
+      };
+    });
+  } catch (err) {
+    console.error('[fetchSecuredPosts]', err);
+    return [];
+  }
 };
 
 /**

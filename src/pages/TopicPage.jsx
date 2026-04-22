@@ -5,7 +5,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCategories } from '../api/categories';
 import {
-  subscribeToPosts, createPost, updatePost, deletePost, subscribeToTopic,
+  fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
   updateUser, updateTopic,
   deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft,
   subscribeToTopicDraft, deleteDraftPost, locatePost
@@ -118,15 +118,59 @@ const TopicPage = () => {
 
   const currentPage = queryPostPage || parseInt(searchParams.get('page') || '1', 10);
 
+  const isFetchingPostsRef = useRef(false);
+  const nextFetchNeededRef = useRef(false);
+  const prevTopicStatsRef = useRef(null);
+
+  const loadPosts = React.useCallback(async () => {
+    if (isFetchingPostsRef.current) {
+      nextFetchNeededRef.current = true;
+      return [];
+    }
+    isFetchingPostsRef.current = true;
+    try {
+      const data = await fetchSecuredPosts(id);
+      setPosts(data);
+      return data;
+    } catch (err) {
+      console.error(err);
+      return [];
+    } finally {
+      isFetchingPostsRef.current = false;
+      if (nextFetchNeededRef.current) {
+        nextFetchNeededRef.current = false;
+        loadPosts();
+      }
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (topic && prevTopicStatsRef.current) {
+      const prev = prevTopicStatsRef.current;
+      if (prev.id === topic.id) {
+        if (prev.posts_count !== topic.posts_count || prev.last_post_at !== topic.last_post_at) {
+          loadPosts();
+        }
+      }
+    }
+    if (topic) {
+      prevTopicStatsRef.current = {
+        id: topic.id,
+        posts_count: topic.posts_count,
+        last_post_at: topic.last_post_at
+      };
+    }
+  }, [topic, loadPosts]);
+
   useEffect(() => {
     setIsPageLoading(true);
-    const unsubPosts = subscribeToPosts(id, (data) => {
-      setPosts(data);
-      // Don't stop loading here if we expect a jump - the scroll controller will handle it
+
+    loadPosts().then(() => {
       if (!isJumpRequested || alreadyJumpedRef.current) {
         setIsPageLoading(false);
       }
     });
+
     const unsubTopic = subscribeToTopic(id, (data) => {
       setTopic(data);
       // Same here
@@ -136,10 +180,9 @@ const TopicPage = () => {
     });
 
     return () => {
-      unsubPosts();
       unsubTopic();
     };
-  }, [id, setIsPageLoading, searchParams, hash, isJumpRequested]);
+  }, [id, setIsPageLoading, searchParams, hash, isJumpRequested, loadPosts]);
 
   // Mark the topic as read with granular offset
   useEffect(() => {
@@ -677,6 +720,7 @@ const TopicPage = () => {
     try {
       const postData = buildPostData();
       const newPostId = await createPost(postData);
+      await loadPosts();
       // Mark as read immediately (server-side)
       markTopicRead(id);
       setReplyContent('');
@@ -778,6 +822,7 @@ const TopicPage = () => {
     recordActivity();
     try {
       await publishDraft(user.uid, id);
+      await loadPosts();
       markTopicRead(id);
       showToast(t('forum.draft_published'));
 
@@ -850,6 +895,7 @@ const TopicPage = () => {
           first_post_pinned: editPinFirstPost
         }, user.uid, topic.author_id);
       }
+      await loadPosts();
       setEditingPostId(null);
       setEditContent('');
       setEditCharacterId('');
@@ -883,6 +929,7 @@ const TopicPage = () => {
           }
         } else {
           await deletePost(deletingPost, user.uid);
+          await loadPosts();
         }
       }
       setDeletingPost(null);

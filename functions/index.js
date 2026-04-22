@@ -670,3 +670,65 @@ exports.getReputationLogs = onCall(
     return { hidden: false, logs };
   }
 );
+
+/**
+ * Fetch posts for a topic, stripping master dice values if the user lacks VIEW_MASTER_DICE permission.
+ */
+exports.getSecuredPosts = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const { topicId } = request.data;
+    if (!topicId) {
+      throw new HttpsError('invalid-argument', 'Missing topicId');
+    }
+
+    const uid = request.auth ? request.auth.uid : null;
+    const db = admin.firestore();
+    let canViewMasterDice = false;
+
+    if (uid) {
+      const userDoc = await db.collection("users").doc(uid).get();
+      if (userDoc.exists) {
+        const roleId = userDoc.data().role_id;
+        if (['root', 'admin', 'moderator'].includes(roleId)) {
+          canViewMasterDice = true;
+        } else {
+          const roleDoc = await db.collection("roles").doc(roleId).get();
+          if (roleDoc.exists) {
+            const perms = roleDoc.data().permissions || [];
+            if (perms.includes('view_master_dice')) {
+              canViewMasterDice = true;
+            }
+          }
+        }
+      }
+    }
+
+    const postsSnap = await db.collection('posts')
+      .where('topic_id', '==', topicId)
+      .orderBy('created_at', 'asc')
+      .get();
+
+    const posts = [];
+    postsSnap.forEach(doc => {
+      const data = doc.data();
+      data.id = doc.id;
+      
+      if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
+      if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
+
+      if (data.rolls) {
+        Object.keys(data.rolls).forEach(rId => {
+          const roll = data.rolls[rId];
+          // Hide dice value if it's a master roll, requester lacks permission, AND requester is NOT the author
+          if (roll.type === 'master' && !canViewMasterDice && data.author_id !== uid) {
+            roll.value = null; // scrub
+          }
+        });
+      }
+      posts.push(data);
+    });
+
+    return { posts };
+  }
+);

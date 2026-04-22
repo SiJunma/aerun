@@ -451,7 +451,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         if (!roll) return <span key={index}>[roll={rollId}]</span>;
 
         const isMaster = roll.type === 'master';
-        const canSee = !isMaster || (hasPermission && hasPermission(PERMISSIONS.VIEW_MASTER_DICE));
+        const canSee = !isMaster || roll.value !== null;
 
         if (!canSee) {
           return (
