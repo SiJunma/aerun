@@ -9,15 +9,13 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { subscribeToCategories } from '../api/categories';
-import { checkNicknameExists, subscribeToUserPosts } from '../api/forum';
+import { checkNicknameExists, fetchUserPosts } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
 import ConfirmModal from '../components/common/ConfirmModal';
 import { resolveField } from '../utils/text';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
-import { db } from '../../firebase';
-import { doc, getDoc } from 'firebase/firestore';
 import Timestamp from '../components/common/Timestamp';
 import BBCode from '../components/common/BBCode';
 
@@ -84,14 +82,17 @@ const ProfilePage = () => {
   const [repComment, setRepComment] = useState('');
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
+  const [totalRepLogs, setTotalRepLogs] = useState(0);
+  const [currentPageRep, setCurrentPageRep] = useState(1);
+  const [loadingRepLogs, setLoadingRepLogs] = useState(false);
+  const REP_PER_PAGE = 20;
   const [myVote, setMyVote] = useState(null);
   const [editingLogId, setEditingLogId] = useState(null);
   const [editLogComment, setEditLogComment] = useState('');
   const [savingLogComment, setSavingLogComment] = useState(false);
   const [categories, setCategories] = useState([]);
-  const [logTopicsInfo, setLogTopicsInfo] = useState({});
   const [userPosts, setUserPosts] = useState([]);
-  const [userPostsLimit] = useState(100); // Fetch more for pagination
+  const [totalUserPosts, setTotalUserPosts] = useState(0);
   const [currentPagePosts, setCurrentPagePosts] = useState(1);
   const [loadingUserPosts, setLoadingUserPosts] = useState(false);
   const [postFilter, setPostFilter] = useState('all');
@@ -125,8 +126,8 @@ const ProfilePage = () => {
       setViewedProfile(data);
     });
     
-    fetchReputationLogs(uid).then(setRepLogs).catch(console.error);
     
+
     if (profile && profile.uid !== uid) {
       getProfileVote(profile.uid, uid).then(setMyVote).catch(console.error);
     } else {
@@ -140,58 +141,50 @@ const ProfilePage = () => {
     };
   }, [uid, profile]);
 
-  // Subscribe to user posts when on 'posts' tab
+  // Fetch reputation logs paginated
   useEffect(() => {
-    if (!uid || activeTab !== 'posts') return;
-    setLoadingUserPosts(true);
-    const unsub = subscribeToUserPosts(uid, userPostsLimit, (posts) => {
-      setUserPosts(posts);
-      setLoadingUserPosts(false);
-    });
-    return () => unsub();
-  }, [uid, userPostsLimit, activeTab]);
+    if (!uid || activeTab !== 'reputation') return;
 
-  // Fetch topics associated with reputation logs to check category visibility
-  useEffect(() => {
-    const fetchMissingTopics = async () => {
-      const neededIds = [
-        ...new Set([
-          ...repLogs.map(l => l.topic_id),
-          ...userPosts.map(p => p.topic_id)
-        ].filter(Boolean))
-      ];
-      const newTopics = {};
-      let needsUpdate = false;
-
-      for (const tId of neededIds) {
-        if (!logTopicsInfo[tId]) {
-          try {
-            const snap = await getDoc(doc(db, 'topics', tId));
-            if (snap.exists()) {
-              const data = snap.data();
-              newTopics[tId] = { 
-                category_id: data.category_id,
-                title: data.title 
-              };
-              needsUpdate = true;
-            } else {
-              newTopics[tId] = { is_deleted: true };
-              needsUpdate = true;
-            }
-          } catch (e) {
-            console.error('Error fetching topic context', e);
-          }
+    let isMounted = true;
+    const fetchLogs = async () => {
+      setLoadingRepLogs(true);
+      try {
+        const result = await fetchReputationLogs(uid, currentPageRep, REP_PER_PAGE);
+        if (isMounted) {
+          setRepLogs(result.logs || []);
+          setTotalRepLogs(result.totalCount || 0);
         }
-      }
-
-      if (needsUpdate) {
-        setLogTopicsInfo(prev => ({ ...prev, ...newTopics }));
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (isMounted) setLoadingRepLogs(false);
       }
     };
-    if (repLogs.length > 0 || userPosts.length > 0) {
-      fetchMissingTopics();
-    }
-  }, [repLogs, userPosts, logTopicsInfo]);
+
+    fetchLogs();
+    return () => { isMounted = false; };
+  }, [uid, activeTab, currentPageRep]);
+
+  // Fetch user posts when on 'posts' tab, page changes, or filter changes
+  useEffect(() => {
+    if (!uid || activeTab !== 'posts') return;
+    
+    let isMounted = true;
+    const fetchPosts = async () => {
+      setLoadingUserPosts(true);
+      const result = await fetchUserPosts(uid, currentPagePosts, POSTS_PER_PAGE, postFilter);
+      if (isMounted) {
+        setUserPosts(result.posts);
+        setTotalUserPosts(result.totalCount);
+        setLoadingUserPosts(false);
+      }
+    };
+    
+    fetchPosts();
+    return () => { isMounted = false; };
+  }, [uid, activeTab, currentPagePosts, postFilter]);
+
+
 
   // Sync form data with profile (own or if admin/mod is editing)
   useEffect(() => {
@@ -342,6 +335,26 @@ const ProfilePage = () => {
     setSubmittingRep(true);
     try {
       await voteOnProfile(profile.uid, uid, repValue, repComment);
+
+      // Optimistic update for profile reputation
+      setViewedProfile(prev => ({
+        ...prev,
+        reputation: (prev?.reputation || 0) + repValue
+      }));
+
+      // Optimistic update for repLogs
+      setRepLogs(prev => [
+        {
+          id: 'temp-' + Date.now(),
+          voter_id: profile.uid,
+          voter_nickname: profile.nickname || profile.displayName || 'User',
+          value: repValue,
+          comment: repComment,
+          created_at: new Date()
+        },
+        ...prev
+      ]);
+
       setShowRepModal(false); // Close AFTER success
       setMyVote({ value: repValue, comment: repComment });
       setRepComment('');
@@ -429,7 +442,7 @@ const ProfilePage = () => {
                       }}
                     />
                     <h4 className="mb-1">{viewedProfile?.nickname || 'No Nickname'}</h4>
-                    <p className="text-muted small mb-0 text-truncate mx-auto" style={{ maxWidth: '250px' }}>
+                    <p className="text-muted small mb-0 mx-auto" style={{ maxWidth: '250px', wordBreak: 'break-word' }}>
                       {viewedProfile?.status_line || 'No status set'}
                     </p>
                   </>
@@ -516,7 +529,7 @@ const ProfilePage = () => {
                 id="profile-tabs"
                 className="mb-4 premium-tabs"
               >
-                {!isLimitedProfile && (viewedProfile?.bio || viewedProfile?.contacts || (profile?.uid && (viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests))) && (
+                {!isLimitedProfile && profile && (viewedProfile?.bio || viewedProfile?.contacts || viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests) && (
                   <Tab eventKey="about" title={t('profile.tab_about')}>
                     <Card className="shadow-sm border-0 bg-card">
                       <Card.Header className="py-3">
@@ -634,40 +647,49 @@ const ProfilePage = () => {
                                   e.target.src = 'https://ui-avatars.com/api/?name=?&background=666&color=fff';
                                 }}
                               />
-                              <div className="flex-grow-1 min-w-0 me-3" style={{ minWidth: 0, overflow: 'hidden' }}>
-                                <h6 className="mb-1 fw-bold text-truncate w-100">{char.name}</h6>
+                              <div className="flex-grow-1 me-3">
+                                <h6 className="mb-1 fw-bold">{char.name}</h6>
                                 {char.status_line ? (
-                                  <p className="text-muted small mb-0 text-truncate w-100" style={{ fontStyle: 'italic', opacity: 0.8 }}>
+                                  <p className="text-muted small mb-0" style={{ fontStyle: 'italic', opacity: 0.8, wordBreak: 'break-word' }}>
                                     {char.status_line}
                                   </p>
                                 ) : (
-                                  <p className="text-muted small mb-0 opacity-50 text-truncate w-100">
+                                  <p className="text-muted small mb-0 opacity-50">
                                     {lang === 'ru' ? 'Нет статуса' : 'No status'}
                                   </p>
                                 )}
                               </div>
-                              <div className="d-flex flex-column gap-1 align-items-end flex-shrink-0" style={{ minWidth: '70px' }}>
-                                  {(isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || hasPermission(PERMISSIONS.EDIT_OTHERS_MASK) ? (
-                                    <Button
-                                      variant="link"
-                                      size="sm"
-                                      className="text-decoration-none p-0 text-primary small fw-bold"
-                                      onClick={() => handleOpenModal(char)}
-                                    >
-                                      {t('profile.edit_character')}
-                                    </Button>
-                                  ) : null}
-                                  {(isOwn && hasPermission(PERMISSIONS.DELETE_SELF_MASK)) || hasPermission(PERMISSIONS.DELETE_OTHERS_MASK) ? (
-                                    <Button
-                                      variant="link"
-                                      size="sm"
-                                      className="text-decoration-none p-0 text-danger small"
-                                      onClick={() => handleDelete(char.id)}
-                                    >
-                                      {t('profile.delete_character')}
-                                    </Button>
-                                  ) : null}
-                                </div>
+                                {(() => {
+                                  const canEdit = (isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || hasPermission(PERMISSIONS.EDIT_OTHERS_MASK);
+                                  const canDelete = (isOwn && hasPermission(PERMISSIONS.DELETE_SELF_MASK)) || hasPermission(PERMISSIONS.DELETE_OTHERS_MASK);
+                                  
+                                  if (!canEdit && !canDelete) return null;
+
+                                  return (
+                                    <div className="d-flex flex-column gap-1 align-items-end flex-shrink-0">
+                                      {canEdit && (
+                                        <Button
+                                          variant="link"
+                                          size="sm"
+                                          className="text-decoration-none p-0 text-primary small fw-bold"
+                                          onClick={() => handleOpenModal(char)}
+                                        >
+                                          {t('profile.edit_character')}
+                                        </Button>
+                                      )}
+                                      {canDelete && (
+                                        <Button
+                                          variant="link"
+                                          size="sm"
+                                          className="text-decoration-none p-0 text-danger small"
+                                          onClick={() => handleDelete(char.id)}
+                                        >
+                                          {t('profile.delete_character')}
+                                        </Button>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                             </Card.Body>
                           </Card>
                         </Col>
@@ -698,28 +720,40 @@ const ProfilePage = () => {
                         <p className="mb-0">{t('profile.rep_history_hidden')}</p>
                       </div>
                     );
-                    const visibleRepLogs = repLogs.filter(log => {
-                      if (!log.topic_id) return true;
-                      const info = logTopicsInfo[log.topic_id];
-                      if (!info) return true; // Still loading/checking, keep it to show skeleton
-                      if (info.is_deleted) return false;
-                      const cat = categories.find(c => c.id === info.category_id);
-                      if (!cat) return false;
-                      return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
-                    });
+                    const totalPagesRep = Math.ceil(totalRepLogs / REP_PER_PAGE);
+                    const visibleRepLogs = repLogs;
+
+                    if (loadingRepLogs) {
+                      return (
+                        <div className="p-4 opacity-50">
+                          {Array.from({ length: 3 }).map((_, i) => (
+                            <div key={i} className="mb-3">
+                              <Skeleton width="60%" height="1.5rem" className="mb-2" />
+                              <Skeleton width="40%" height="0.8rem" />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
 
                     if (visibleRepLogs.length === 0) {
-                      const isStillLoading = repLogs.some(log => log.topic_id && !logTopicsInfo[log.topic_id]);
-                      if (!isStillLoading) {
-                        return (
-                          <div className="p-5 text-center text-muted">
-                            <p className="mb-0">{t('profile.no_rep_logs')}</p>
-                          </div>
-                        );
-                      }
+                      return (
+                        <div className="p-5 text-center text-muted">
+                          <p className="mb-0">{t('profile.no_rep_logs')}</p>
+                        </div>
+                      );
                     }
                     return (
-                    <div className="table-responsive">
+                    <div className="table-responsive rep-history-list">
+                      {totalPagesRep > 1 && (
+                        <div className="p-3 d-flex justify-content-center border-bottom">
+                          <ForumPagination 
+                            currentPage={currentPageRep}
+                            totalPages={totalPagesRep}
+                            onPageChange={setCurrentPageRep}
+                          />
+                        </div>
+                      )}
                       {historyAdminBypass && (
                         <div className="px-4 py-2 small text-warning opacity-75 d-flex align-items-center gap-1">
                           <Lock size={12}/> {t('profile.rep_history_admin_note')}
@@ -740,31 +774,7 @@ const ProfilePage = () => {
                         </thead>
                         <tbody>
                           {visibleRepLogs.map(log => {
-                            const isAllowed = (() => {
-                              if (!log.topic_id) return true;
-                              const info = logTopicsInfo[log.topic_id];
-                              if (!info) return null; // Still loading/checking
-                              if (info.is_deleted) return false;
-                              const cat = categories.find(c => c.id === info.category_id);
-                              if (!cat) return false;
-                              return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
-                            })();
-
-                            if (isAllowed === null && log.topic_id) {
-                              return (
-                                <tr key={log.id} className="opacity-50">
-                                  <td className="px-4 py-3"><Skeleton width="80px" height="1rem" /></td>
-                                  <td className="py-3 text-center"><Skeleton width="16px" height="16px" /></td>
-                                  <td className="py-3"><Skeleton width="100px" height="1rem" /></td>
-                                  <td className="py-3 text-center"><Skeleton width="40px" height="1.5rem" /></td>
-                                  <td className="py-3 px-2"><Skeleton width="150px" height="1rem" /></td>
-                                  {hasPermission(PERMISSIONS.DELETE_REPUTATION) && <td></td>}
-                                </tr>
-                              );
-                            }
-
-                            if (isAllowed === false) return null;
-
+                            const isAllowed = log.isAllowed !== false;
                             return (
                             <tr key={log.id}>
                               <td className="px-4 py-3 small text-muted">
@@ -919,7 +929,26 @@ const ProfilePage = () => {
                                         message: t('profile.rep_delete_confirm'),
                                         onConfirm: async () => {
                                           try {
+                                            const valueToDelete = log.value;
+                                            const postIdToDeleteFrom = log.post_id;
                                             await deleteReputation(log.id, profile.uid);
+                                            
+                                            // Optimistic update for logs and total reputation
+                                            setRepLogs(prev => prev.filter(l => l.id !== log.id));
+                                            setViewedProfile(prev => ({
+                                              ...prev,
+                                              reputation: (prev?.reputation || 0) - valueToDelete
+                                            }));
+
+                                            // Optimistic update for posts in the posts tab
+                                            if (postIdToDeleteFrom) {
+                                              setUserPosts(prev => prev.map(p => 
+                                                p.id === postIdToDeleteFrom 
+                                                  ? { ...p, reputation: (p.reputation || 0) - valueToDelete } 
+                                                  : p
+                                              ));
+                                            }
+
                                             showToast(lang === 'ru' ? 'Запись удалена' : 'Entry deleted');
                                           } catch (err) {
                                             console.error(err);
@@ -938,6 +967,15 @@ const ProfilePage = () => {
                           })}
                         </tbody>
                       </Table>
+                      {totalPagesRep > 1 && (
+                        <div className="p-3 d-flex justify-content-center border-top">
+                          <ForumPagination 
+                            currentPage={currentPageRep}
+                            totalPages={totalPagesRep}
+                            onPageChange={setCurrentPageRep}
+                          />
+                        </div>
+                      )}
                     </div>
                     );
                   })()}
@@ -995,40 +1033,17 @@ const ProfilePage = () => {
                   </Card.Header>
                   <Card.Body className="p-0">
                     {(() => {
-                      const filteredPosts = userPosts.filter(post => {
-                        if (postFilter === 'all') return true;
-                        if (postFilter === 'account') return !post.is_character;
-                        if (postFilter.startsWith('char_')) {
-                          const charId = postFilter.replace('char_', '');
-                          return post.is_character && post.author_character_id === charId;
-                        }
-                        return true;
-                      });
+                      const totalPagesPosts = Math.ceil(totalUserPosts / POSTS_PER_PAGE);
 
-                      const visiblePosts = filteredPosts.filter(post => {
-                        const topicInfo = logTopicsInfo[post.topic_id];
-                        if (!topicInfo) return true; // Still loading info, keep to show skeletons
-                        const category = topicInfo ? categories.find(c => c.id === topicInfo.category_id) : null;
-                        return topicInfo && category && hasPermission(PERMISSIONS.VIEW_FORUM, { category });
-                      });
-
-                      const totalPagesPosts = Math.ceil(visiblePosts.length / POSTS_PER_PAGE);
-
-                      if (visiblePosts.length === 0) {
-                        const isStillLoading = filteredPosts.some(post => !logTopicsInfo[post.topic_id]);
-                        if (!isStillLoading && !loadingUserPosts) {
-                          return (
-                            <div className="p-5 text-center text-muted">
-                              <p className="mb-0">{t('profile.no_posts_user')}</p>
-                            </div>
-                          );
-                        }
+                      if (userPosts.length === 0 && !loadingUserPosts) {
+                        return (
+                          <div className="p-5 text-center text-muted">
+                            <p className="mb-0">{t('profile.no_posts_user')}</p>
+                          </div>
+                        );
                       }
 
-                      const pagedPosts = visiblePosts.slice(
-                        (currentPagePosts - 1) * POSTS_PER_PAGE,
-                        currentPagePosts * POSTS_PER_PAGE
-                      );
+                      const pagedPosts = userPosts;
 
                       return (
                         <div className="posts-history-list">
@@ -1041,78 +1056,65 @@ const ProfilePage = () => {
                               />
                             </div>
                           )}
-                          {pagedPosts.map((post, idx) => {
-                            const topicInfo = logTopicsInfo[post.topic_id];
-                            const category = topicInfo ? categories.find(c => c.id === topicInfo.category_id) : null;
-                            const isAllowed = topicInfo && category && hasPermission(PERMISSIONS.VIEW_FORUM, { category });
-                            
-                            // If topic info is still loading, show a skeleton to prevent flicker/leak
-                            if (!topicInfo) {
+                          {loadingUserPosts ? (
+                            Array.from({ length: 3 }).map((_, i) => (
+                              <div key={i} className="p-4 border-bottom opacity-50">
+                                <Skeleton width="60%" height="1.5rem" className="mb-2" />
+                                <Skeleton width="40%" height="0.8rem" className="mb-3" />
+                                <Skeleton count={2} height="0.8rem" />
+                              </div>
+                            ))
+                          ) : (
+                            pagedPosts.map((post, idx) => {
+                              const category = categories.find(c => c.id === post.category_id);
+                              
+                              // Only show border-bottom if not the last item OR if pagination follows
+                              const isLastItem = idx === pagedPosts.length - 1;
+                              const showBorder = !isLastItem || totalPagesPosts > 1;
+
                               return (
-                                <div key={post.id} className="p-4 border-bottom opacity-50">
-                                  <Skeleton width="60%" height="1.5rem" className="mb-2" />
-                                  <Skeleton width="40%" height="0.8rem" className="mb-3" />
-                                  <Skeleton count={2} height="0.8rem" />
+                                <div key={post.id} className={`p-3 hover-bg-light transition-all ${showBorder ? 'border-bottom' : ''}`}>
+                                  <div className="d-flex justify-content-between align-items-start mb-2">
+                                    <div className="min-w-0">
+                                      <Link 
+                                        to={`/topic/${post.topic_id}?post=${post.id}`} 
+                                        className="fw-bold text-decoration-none d-block line-clamp-2"
+                                        style={{ fontSize: '1.1rem', lineHeight: '1.25' }}
+                                      >
+                                        {post.topic_title || '...'}
+                                      </Link>
+                                      <div className="d-flex align-items-center gap-2 mt-1">
+                                        {category && (
+                                          <Badge bg="secondary" className="opacity-75 fw-normal" style={{ fontSize: '0.7rem' }}>
+                                            {resolveField(category.name || category.title, lang)}
+                                          </Badge>
+                                        )}
+                                        <span className="text-muted small">
+                                          {post.created_at ? <Timestamp date={post.created_at.toDate()} /> : '...'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    {post.is_character && (
+                                      <Badge className="ms-2 badge-character">
+                                        {post.author_name}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="post-preview text-muted small text-break line-clamp-4">
+                                    <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
+                                  </div>
                                 </div>
                               );
-                            }
-
-                            if (!isAllowed) return null; // Hide restricted posts
-
-                            // Only show border-bottom if not the last item OR if pagination follows
-                            const isLastItem = idx === pagedPosts.length - 1;
-                            const showBorder = !isLastItem || totalPagesPosts > 1;
-
-                            return (
-                              <div key={post.id} className={`p-3 hover-bg-light transition-all ${showBorder ? 'border-bottom' : ''}`}>
-                                <div className="d-flex justify-content-between align-items-start mb-2">
-                                  <div className="min-w-0">
-                                    <Link 
-                                      to={`/topic/${post.topic_id}?post=${post.id}`} 
-                                      className="fw-bold text-decoration-none d-block line-clamp-2"
-                                      style={{ fontSize: '1.1rem', lineHeight: '1.25' }}
-                                    >
-                                      {topicInfo?.title || '...'}
-                                    </Link>
-                                    <div className="d-flex align-items-center gap-2 mt-1">
-                                      {category && (
-                                        <Badge bg="secondary" className="opacity-75 fw-normal" style={{ fontSize: '0.7rem' }}>
-                                          {resolveField(category.name || category.title, lang)}
-                                        </Badge>
-                                      )}
-                                      <span className="text-muted small">
-                                        {post.created_at ? <Timestamp date={post.created_at.toDate()} /> : '...'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  {post.is_character && (
-                                    <Badge className="ms-2 badge-character">
-                                      {post.author_name}
-                                    </Badge>
-                                  )}
-                                </div>
-                                <div className="post-preview text-muted small text-break line-clamp-4">
-                                  <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
-                                </div>
-                              </div>
-                            );
-                          })}
+                            })
+                          )}
                           
-                          {totalPagesPosts > 1 && (
+                          {!loadingUserPosts && totalPagesPosts > 1 && (
                             <div className="p-3 d-flex justify-content-center border-top">
                               <ForumPagination 
                                 currentPage={currentPagePosts}
                                 totalPages={totalPagesPosts}
                                 onPageChange={setCurrentPagePosts}
                               />
-                            </div>
-                          )}
-
-                          {filteredPosts.length >= userPostsLimit && postFilter === 'all' && (
-                            <div className="p-2 text-center text-muted small opacity-50 bg-light-subtle">
-                              {lang === 'ru' 
-                                ? 'Показаны последние 100 сообщений. Для доступа к более старым обратитесь к администратору для настройки индексов БД.' 
-                                : 'Showing latest 100 posts. For more, database indexes tuning is required.'}
                             </div>
                           )}
                         </div>

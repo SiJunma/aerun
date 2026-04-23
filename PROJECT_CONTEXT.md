@@ -289,7 +289,8 @@ This file serves as the master context for AI interaction, combining the current
     "GUEST_TICK_MS": "10 * 60 * 1000 (Guest pulse for online visibility limit)",
     "Pagination Limits": {
       "dms": "Limit 50 conversations, messages fetched using dynamic limitCount.",
-      "reputation_logs": "Limit 50 entries when viewing recent reputations on profile.",
+      "reputation_logs": "Server-side pagination via Cloud Function getReputationLogs. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=20. Logs for inaccessible/deleted topics are included but have isAllowed=false (topic_title and post_id stripped).",
+      "getUserPosts": "Server-side pagination via Cloud Function getUserPosts. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=10. Posts in inaccessible categories are excluded.",
       "audit_logs": "Default 50 entries fetched per batch."
     },
     "CHIEF_ADMIN_ID": "'root' (Absolute highest privilege role identifier overriable by VITE_ADMIN_EMAIL from .env)",
@@ -301,7 +302,8 @@ This file serves as the master context for AI interaction, combining the current
       "'guest'",
       "'pending'",
       "'banned'"
-    ]
+    ],
+    "Guest Role Note": "The 'guest' role is a REAL Firestore document in the 'roles' collection. It is used as the effectiveRole for unauthenticated (non-logged-in) users in Cloud Functions (getReputationLogs, getUserPosts). Do NOT substitute 'spectator' for 'guest' — they have different permission sets."
   },
   "authentication_and_security": {
     "providers": ["Google", "Email & Password"],

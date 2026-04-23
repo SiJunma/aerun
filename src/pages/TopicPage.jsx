@@ -636,6 +636,42 @@ const TopicPage = () => {
     setSubmittingRep(true);
     try {
       await voteOnPost(user.uid, repTargetPost.author_id, repTargetPost.id, id, repValue, repComment, topic?.title, repTargetPostNumber);
+      
+      // Optimistic update for posts
+      setPosts(prev => prev.map(p => 
+        p.id === repTargetPost.id 
+          ? { ...p, reputation: (p.reputation || 0) + repValue } 
+          : p
+      ));
+
+      // Optimistic update for first post if it's the target
+      setTopic(prev => {
+        if (prev?.first_post?.id === repTargetPost.id) {
+          return {
+            ...prev,
+            first_post: {
+              ...prev.first_post,
+              reputation: (prev.first_post.reputation || 0) + repValue
+            }
+          };
+        }
+        return prev;
+      });
+
+      // Optimistic update for authorStats
+      setAuthorStats(prev => {
+        if (!repTargetPost.author_id || !(repTargetPost.author_id in prev)) return prev;
+        const stats = prev[repTargetPost.author_id];
+        if (!stats) return prev;
+        return {
+          ...prev,
+          [repTargetPost.author_id]: {
+            ...stats,
+            reputation: (stats.reputation || 0) + repValue
+          }
+        };
+      });
+
       setShowRepModal(false); // Close AFTER success
       setMyVotes(prev => ({
         ...prev,

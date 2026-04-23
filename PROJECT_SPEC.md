@@ -24,7 +24,7 @@
   root_signature:       string,          // подпись «по умолчанию» для этого профиля
   role_id:              string,          // ref → коллекция roles
   status:               'pending' | 'active' | 'banned',
-  reputation_score:     number,          // денормализованный итог
+  reputation:           number,          // денормализованный итог
   post_count:           number,
   registered_at:        Timestamp,
   last_seen:            Timestamp,
@@ -125,7 +125,7 @@
   text:             string,       // HTML/Markdown (санитизированный)
   created_at:       Timestamp,
   edited_at:        Timestamp | null,
-  reputation_score: number,       // сумма лайков/дизлайков конкретно этого поста
+  reputation:       number,       // сумма лайков/дизлайков конкретно этого поста
   dice_data: {                    // null если кубик не бросался
     formula:    string,           // '2d10+5'
     result:     number,
@@ -136,7 +136,7 @@
 }
 ```
 
-### 2.7 Коллекция `reputation_log`
+### 2.7 Коллекция `reputation_logs`
 ```
 {
   target_user_id: string,
@@ -267,10 +267,10 @@ conversations/{conv_id}/messages/{msg_id}: {
 
 - Под каждым постом кнопки **+** / **−** (открывают модальное окно с полем комментария).
 - Запись попадает в `reputation_log` с `post_id` + `topic_id`.
-- `users.reputation_score` обновляется атомарно (Firebase `increment`).
-- `posts.reputation_score` — суммарный рейтинг конкретного поста (как лайки).
+- `users.reputation` обновляется атомарно (Firebase `increment`).
+- `posts.reputation` — суммарный рейтинг конкретного поста (как лайки).
 - **Ссылка «К посту»** из лога репутации → `/topic/:topic_id?post=post_id`.
-- `reputation_log` — **нельзя редактировать/удалять** напрямую (Firestore Rules), однако при удалении поста соответствующие записи лога очищаются транзакционно.
+- `reputation_logs` — **нельзя редактировать/удалять** напрямую (Firestore Rules), однако при удалении поста соответствующие записи лога очищаются транзакционно.
 - В профиле: просмотр истории репутации (кто, за что, сколько, ссылка). 
 ---
 

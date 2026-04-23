@@ -206,61 +206,63 @@ const NotificationsPage = () => {
               </div>
             </Col>
             <Col>
-              <div className="d-flex align-items-center gap-2 mb-2 line-height-1">
-                <span className="fw-bold small text-uppercase text-muted" style={{ letterSpacing: '1px', fontSize: '0.65rem' }}>
-                  {n.type === 'topic_reply' ? (
-                    (() => {
-                      const fullText = t('notifications.types.topic_reply', { count: payload.post_count, topic: '|||TOPIC|||' });
-                      const parts = fullText.split('|||TOPIC|||');
-                      return (
-                        <>
-                          {parts[0]}
-                          <Link 
-                            to={`/topic/${payload.topic_id}?post=${payload.last_post_id}`}
-                            className="text-primary text-decoration-none hover-underline"
-                            style={{ textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
-                            onClick={() => !n.read && handleMarkRead(null, n.id)}
-                          >
-                            {payload.topic_title}
-                          </Link>
-                          {parts[1]}
-                        </>
-                      );
-                    })()
-                  ) : n.type === 'post_quoted' ? (
-                    (() => {
-                      const fullText = t('notifications.types.post_quoted', { topic: '|||TOPIC|||' });
-                      const parts = fullText.split('|||TOPIC|||');
-                      return (
-                        <>
-                          {parts[0]}
-                          <Link 
-                            to={`/topic/${payload.topic_id}?post=${payload.post_id}`}
-                            className="text-primary text-decoration-none hover-underline"
-                            style={{ textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
-                            onClick={() => !n.read && handleMarkRead(null, n.id)}
-                          >
-                            {payload.topic_title}
-                          </Link>
-                          {parts[1]}
-                        </>
-                      );
-                    })()
-                  ) : (
-                    (meta?.labelKey ? t(meta.labelKey) : n.type)
+              <div className="d-flex align-items-center flex-wrap justify-content-between gap-2 mb-2 line-height-1">
+                <div className="d-flex align-items-center flex-wrap gap-2">
+                  <span className="fw-bold small text-uppercase text-muted" style={{ letterSpacing: '1px', fontSize: '0.65rem' }}>
+                    {n.type === 'topic_reply' ? (
+                      (() => {
+                        const fullText = t('notifications.types.topic_reply', { count: payload.post_count, topic: '|||TOPIC|||' });
+                        const parts = fullText.split('|||TOPIC|||');
+                        return (
+                          <>
+                            {parts[0]}
+                            <Link 
+                              to={`/topic/${payload.topic_id}?post=${payload.last_post_id}`}
+                              className="text-primary text-decoration-none hover-underline"
+                              style={{ textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
+                              onClick={() => !n.read && handleMarkRead(null, n.id)}
+                            >
+                              {payload.topic_title}
+                            </Link>
+                            {parts[1]}
+                          </>
+                        );
+                      })()
+                    ) : n.type === 'post_quoted' ? (
+                      (() => {
+                        const fullText = t('notifications.types.post_quoted', { topic: '|||TOPIC|||' });
+                        const parts = fullText.split('|||TOPIC|||');
+                        return (
+                          <>
+                            {parts[0]}
+                            <Link 
+                              to={`/topic/${payload.topic_id}?post=${payload.post_id}`}
+                              className="text-primary text-decoration-none hover-underline"
+                              style={{ textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
+                              onClick={() => !n.read && handleMarkRead(null, n.id)}
+                            >
+                              {payload.topic_title}
+                            </Link>
+                            {parts[1]}
+                          </>
+                        );
+                      })()
+                    ) : (
+                      (meta?.labelKey ? t(meta.labelKey) : n.type)
+                    )}
+                  </span>
+                  {!n.read && (
+                    <Badge 
+                      pill 
+                      className="text-uppercase px-2 badge-new"
+                    >
+                      {t('notifications.new_badge')}
+                    </Badge>
                   )}
-                </span>
-                {!n.read && (
-                  <Badge 
-                    pill 
-                    className="text-uppercase px-2 badge-new"
-                  >
-                    {t('notifications.new_badge')}
-                  </Badge>
-                )}
+                </div>
 
-                <div className="ms-auto d-flex align-items-center gap-3">
-                  <span className="text-muted small d-flex align-items-center gap-1" style={{ fontSize: '0.75rem' }}>
+                <div className="d-flex align-items-center gap-2 gap-md-3 mt-1 mt-md-0 ms-auto flex-shrink-0">
+                  <span className="text-muted small d-flex align-items-center gap-1" style={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
                     <Clock size={12} />
                     <Timestamp date={n.created_at} />
                   </span>
@@ -628,7 +630,7 @@ const NotificationsPage = () => {
         `}
       </style>
 
-      <div className="d-flex align-items-center justify-content-between mb-4">
+      <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
         <div className="d-flex align-items-center gap-3">
           <div className="icon-box">
             <Bell size={28} />
@@ -637,7 +639,7 @@ const NotificationsPage = () => {
             <h2 className="mb-0 fw-bold">{t('notifications.title')}</h2>
           </div>
         </div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2 ms-auto">
           {activeTab === 'active' && activeNotifs.length > 0 && (
             <Button 
               variant="outline-primary" 
@@ -652,7 +654,7 @@ const NotificationsPage = () => {
         </div>
       </div>
 
-      <div className="d-flex align-items-center justify-content-between mb-4">
+      <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
         <Nav variant="pills" className="gap-2">
           <Nav.Item>
             <Nav.Link 

@@ -602,7 +602,7 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
 exports.getReputationLogs = onCall(
   { memory: '256MB', timeoutSeconds: 60 },
   async (request) => {
-    const { targetUid } = request.data;
+    const { targetUid, page = 1, pageSize = 20 } = request.data;
     if (!targetUid || typeof targetUid !== 'string') {
       throw new HttpsError('invalid-argument', 'targetUid must be a non-empty string');
     }
@@ -634,14 +634,19 @@ exports.getReputationLogs = onCall(
       !isRequesterAdmin &&
       !isRequesterModerator
     ) {
-      return { hidden: true, logs: [] };
+      return { hidden: true, logs: [], totalCount: 0, hasMore: false };
     }
 
-    const logsSnapshot = await db
-      .collection('reputation_logs')
-      .where('target_id', '==', targetUid)
+    const query = db.collection('reputation_logs').where('target_id', '==', targetUid);
+    const countSnap = await query.count().get();
+    const totalCount = countSnap.data().count;
+
+    const startIndex = (page - 1) * pageSize;
+
+    const logsSnapshot = await query
       .orderBy('created_at', 'desc')
-      .limit(50)
+      .offset(startIndex)
+      .limit(pageSize)
       .get();
 
     const logs = [];
@@ -655,8 +660,6 @@ exports.getReputationLogs = onCall(
     logsSnapshot.forEach((logDoc) => {
       const logData = { id: logDoc.id, ...logDoc.data() };
       
-      // Convert timestamps to ISO string if needed, or send raw objects 
-      // (Admin SDK Timestamp can be sent over HttpsCallable, client gets it as string)
       if (logData.created_at) {
          logData.created_at = logData.created_at.toDate().toISOString();
       }
@@ -667,7 +670,86 @@ exports.getReputationLogs = onCall(
       logs.push(logData);
     });
 
-    return { hidden: false, logs };
+    // 1. Fetch Categories and Roles for permissions
+    const [categoriesSnap, rolesSnap] = await Promise.all([
+      db.collection('categories').get(),
+      db.collection('roles').get()
+    ]);
+    const categoriesMap = {};
+    categoriesSnap.forEach(d => categoriesMap[d.id] = d.data());
+    const rolesMap = {};
+    rolesSnap.forEach(d => rolesMap[d.id] = d.data());
+
+    let effectiveRole = 'guest';
+    if (userDoc && userDoc.exists) {
+      effectiveRole = userDoc.data().role_id || 'guest';
+    }
+
+    const hasViewPermission = (categoryId) => {
+      const category = categoriesMap[categoryId];
+      if (!category) return false;
+
+      const catPerms = category.permissions || {};
+      const allowedRoles = catPerms['view_forum'];
+
+      if (!allowedRoles) {
+        const roleData = rolesMap[effectiveRole];
+        const perms = roleData?.permissions || [];
+        return perms.includes('view_forum');
+      }
+
+      if (allowedRoles.includes(effectiveRole)) return true;
+      const roleData = rolesMap[effectiveRole];
+      if (roleData?.base_role_id && allowedRoles.includes(roleData.base_role_id)) return true;
+
+      return false;
+    };
+
+    // 2. Fetch Topics to check categories
+    const topicIds = [...new Set(logs.map(l => l.topic_id).filter(Boolean))];
+    const topicsMap = {};
+    
+    for (let i = 0; i < topicIds.length; i += 30) {
+      const chunk = topicIds.slice(i, i + 30);
+      const tSnap = await db.collection('topics')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      tSnap.forEach(d => topicsMap[d.id] = d.data());
+    }
+
+    // 3. Map visible logs and strip sensitive data for unauthorized topics
+    const processedLogs = logs.map(log => {
+      if (!log.topic_id) {
+        log.isAllowed = true;
+        return log;
+      }
+      
+      const topic = topicsMap[log.topic_id];
+      if (!topic) {
+        // Topic was deleted
+        log.isAllowed = false;
+        log.topic_title = '';
+        log.post_id = null;
+        return log;
+      }
+      
+      const allowed = hasViewPermission(topic.category_id);
+      if (!allowed) {
+        log.isAllowed = false;
+        log.topic_title = '';
+        log.post_id = null;
+      } else {
+        log.isAllowed = true;
+      }
+      return log;
+    });
+
+    return { 
+      hidden: false, 
+      logs: processedLogs,
+      totalCount,
+      hasMore: totalCount > startIndex + pageSize
+    };
   }
 );
 
@@ -716,6 +798,7 @@ exports.getSecuredPosts = onCall(
       
       if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
       if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
+      if (data.edited_at) data.edited_at = data.edited_at.toDate().toISOString();
 
       if (data.rolls) {
         Object.keys(data.rolls).forEach(rId => {
@@ -732,3 +815,151 @@ exports.getSecuredPosts = onCall(
     return { posts };
   }
 );
+
+/**
+ * getUserPosts (Callable)
+ * Securely retrieves posts by a specific user across all topics.
+ * Filters results on the server based on the requester's permissions for each category.
+ */
+exports.getUserPosts = onCall(
+  { memory: '256MB', timeoutSeconds: 60 },
+  async (request) => {
+    const { targetUid, page = 1, pageSize = 20, postFilter = 'all' } = request.data;
+    
+    if (!targetUid || typeof targetUid !== 'string') {
+      throw new HttpsError('invalid-argument', 'targetUid must be a non-empty string');
+    }
+
+    const db = admin.firestore();
+    const requesterUid = request.auth ? request.auth.uid : null;
+
+    // 1. Load requester role and global settings
+    let requesterRole = 'guest';
+    let isRestricted = false;
+    if (requesterUid) {
+      const userDoc = await db.collection("users").doc(requesterUid).get();
+      if (userDoc.exists) {
+        const userData = userDoc.data();
+        requesterRole = userData.role_id || 'player';
+        if (requesterRole === 'pending') isRestricted = true;
+      }
+    }
+
+    const settingsSnap = await db.collection("settings").doc("global").get();
+    const settings = settingsSnap.exists ? settingsSnap.data() : {};
+    const isWhitelistOff = !settings.whitelistMode;
+
+    // 2. Determine effective role (matching AuthProvider.jsx logic)
+    let effectiveRole = requesterRole;
+    if (isRestricted && isWhitelistOff) {
+      effectiveRole = 'spectator';
+    }
+
+    // 3. Load roles and categories for permission checking
+    const [rolesSnap, categoriesSnap] = await Promise.all([
+      db.collection("roles").get(),
+      db.collection("categories").get()
+    ]);
+
+    const rolesMap = {};
+    rolesSnap.forEach(d => rolesMap[d.id] = d.data());
+
+    const categoriesMap = {};
+    categoriesSnap.forEach(d => categoriesMap[d.id] = d.data());
+
+    // 4. Helper to check VIEW_FORUM permission
+    const hasViewPermission = (categoryId) => {
+      if (effectiveRole === 'root' || effectiveRole === 'admin') return true;
+      
+      const category = categoriesMap[categoryId];
+      if (!category) return false;
+
+      const catPerms = category.permissions || {};
+      const allowedRoles = catPerms['view_forum'];
+
+      if (!allowedRoles) {
+        // No override, use global role permissions
+        const roleData = rolesMap[effectiveRole];
+        const perms = roleData?.permissions || [];
+        return perms.includes('view_forum');
+      }
+
+      // Category override exists
+      if (allowedRoles.includes(effectiveRole)) return true;
+      // Check inheritance
+      const roleData = rolesMap[effectiveRole];
+      if (roleData?.base_role_id && allowedRoles.includes(roleData.base_role_id)) return true;
+
+      return false;
+    };
+
+    // 5. Build base query with optional character filter
+    let baseQuery = db.collection('posts').where('author_id', '==', targetUid);
+
+    if (postFilter === 'account') {
+      baseQuery = baseQuery.where('is_character', '==', false);
+    } else if (postFilter.startsWith('char_')) {
+      const charId = postFilter.replace('char_', '');
+      baseQuery = baseQuery.where('is_character', '==', true).where('author_character_id', '==', charId);
+    }
+
+    // 5a. Get total count for pagination UI
+    const countSnap = await baseQuery.count().get();
+    const totalCount = countSnap.data().count;
+
+    if (totalCount === 0) {
+      return { posts: [], totalCount: 0, hasMore: false };
+    }
+
+    const startIndex = (page - 1) * pageSize;
+
+    // 5b. Fetch only the current page
+    const postsSnap = await baseQuery
+      .orderBy('created_at', 'desc')
+      .offset(startIndex)
+      .limit(pageSize)
+      .get();
+
+    if (postsSnap.empty) {
+      return { posts: [], totalCount, hasMore: false };
+    }
+
+    // 6. Get unique topics to find their categories
+    const topicIds = [...new Set(postsSnap.docs.map(d => d.data().topic_id))];
+    const topicsMap = {};
+    
+    // Fetch topics in chunks of 30 (Firestore IN limit)
+    for (let i = 0; i < topicIds.length; i += 30) {
+      const chunk = topicIds.slice(i, i + 30);
+      const tSnap = await db.collection('topics')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      tSnap.forEach(d => topicsMap[d.id] = d.data());
+    }
+
+    // 7. Filter visible posts by category permission
+    const visiblePosts = [];
+    postsSnap.forEach(doc => {
+      const data = doc.data();
+      const topic = topicsMap[data.topic_id];
+      if (topic && hasViewPermission(topic.category_id)) {
+        const cleanPost = { 
+          id: doc.id, 
+          ...data,
+          topic_title: topic.title,
+          category_id: topic.category_id
+        };
+        if (cleanPost.created_at) cleanPost.created_at = cleanPost.created_at.toDate().toISOString();
+        if (cleanPost.updated_at) cleanPost.updated_at = cleanPost.updated_at.toDate().toISOString();
+        if (cleanPost.edited_at) cleanPost.edited_at = cleanPost.edited_at.toDate().toISOString();
+        visiblePosts.push(cleanPost);
+      }
+    });
+
+    return {
+      posts: visiblePosts,
+      totalCount,
+      hasMore: totalCount > startIndex + pageSize
+    };
+  }
+);

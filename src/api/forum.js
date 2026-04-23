@@ -18,7 +18,8 @@ import {
   limit,
   getDoc,
   writeBatch,
-  getCountFromServer
+  getCountFromServer,
+  Timestamp
 } from 'firebase/firestore';
 
 import { processDiceRolls } from '../utils/dice';
@@ -163,6 +164,46 @@ export const fetchSecuredPosts = async (topicId) => {
   } catch (err) {
     console.error('[fetchSecuredPosts]', err);
     return [];
+  }
+};
+
+/**
+ * Securely fetch user posts via Cloud Function.
+ */
+export const fetchUserPosts = async (targetUid, page = 1, pageSize = 20, postFilter = 'all') => {
+  try {
+    const functions = getFunctions();
+    const getUserPosts = httpsCallable(functions, 'getUserPosts');
+    const result = await getUserPosts({ targetUid, page, pageSize, postFilter });
+    
+    const posts = result.data.posts || [];
+    const mappedPosts = posts.map(p => {
+      // Map ISO strings back to Firestore-like Timestamp objects for component compatibility
+      const dateVal = p.created_at ? new Date(p.created_at) : null;
+      const updateVal = p.updated_at ? new Date(p.updated_at) : null;
+      
+      return {
+        ...p,
+        created_at: dateVal ? {
+          toDate: () => dateVal,
+          toMillis: () => dateVal.getTime(),
+          seconds: Math.floor(dateVal.getTime() / 1000)
+        } : null,
+        updated_at: updateVal ? {
+          toDate: () => updateVal,
+          toMillis: () => updateVal.getTime()
+        } : null
+      };
+    });
+
+    return {
+      posts: mappedPosts,
+      totalCount: result.data.totalCount || 0,
+      hasMore: result.data.hasMore || false
+    };
+  } catch (err) {
+    console.error('[fetchUserPosts]', err);
+    return { posts: [], totalCount: 0, hasMore: false };
   }
 };
 
