@@ -164,25 +164,36 @@ const TopicPage = () => {
 
   useEffect(() => {
     setIsPageLoading(true);
+    setPosts([]);
+    setTopic(null);
+    let topicReady = false;
+    let postsReady = false;
+
+    const checkReady = () => {
+      if (topicReady && postsReady) {
+        if (!isJumpRequested || alreadyJumpedRef.current) {
+          setIsPageLoading(false);
+        }
+      }
+    };
 
     loadPosts().then(() => {
-      if (!isJumpRequested || alreadyJumpedRef.current) {
-        setIsPageLoading(false);
-      }
+      postsReady = true;
+      checkReady();
     });
 
     const unsubTopic = subscribeToTopic(id, (data) => {
       setTopic(data);
-      // Same here
-      if (data && (!isJumpRequested || alreadyJumpedRef.current)) {
-        setIsPageLoading(false);
+      if (data) {
+        topicReady = true;
+        checkReady();
       }
     });
 
     return () => {
       unsubTopic();
     };
-  }, [id, setIsPageLoading, searchParams, hash, isJumpRequested, loadPosts]);
+  }, [id, isJumpRequested, loadPosts]);
 
   // Mark the topic as read with granular offset
   useEffect(() => {

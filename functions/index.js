@@ -1,4 +1,4 @@
-const { onDocumentCreated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
@@ -267,6 +267,43 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
     } catch (error) {
         logger.error(`onPostCreated error (${event.params.postId}):`, error);
+    }
+});
+
+/**
+ * onPostUpdated
+ * Syncs metadata to topic and category if the last post was updated.
+ */
+exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    // Check if author metadata changed
+    const metadataChanged =
+        before.author_name !== after.author_name ||
+        before.author_avatar !== after.author_avatar ||
+        before.is_character !== after.is_character ||
+        before.author_character_id !== after.author_character_id;
+
+    if (!metadataChanged) return;
+
+    try {
+        const db = admin.firestore();
+        const topicId = after.topic_id;
+
+        // Check if this post is the latest in the topic
+        const latestPostSnap = await db.collection("posts")
+            .where("topic_id", "==", topicId)
+            .orderBy("created_at", "desc")
+            .limit(1)
+            .get();
+
+        if (!latestPostSnap.empty && latestPostSnap.docs[0].id === event.params.postId) {
+            await syncTopicMetadata(db, topicId);
+            logger.info(`onPostUpdated: synced metadata for topic ${topicId} due to post ${event.params.postId} update`);
+        }
+    } catch (error) {
+        logger.error(`onPostUpdated error (${event.params.postId}):`, error);
     }
 });
 

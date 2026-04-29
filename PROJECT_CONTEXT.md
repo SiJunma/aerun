@@ -309,6 +309,17 @@ This file serves as the master context for AI interaction, combining the current
     "providers": ["Google", "Email & Password"],
     "account_linking": "Users can link Google or Password methods in their profile under the Security tab. To link a password to an existing Google account, users can specify a new password.",
     "email_validation": "When registering via email, a localized verification link is sent. If a user signs in with an unverified email, AuthProvider passes an `emailUnverified` context flag. The `PendingPage` and layout banners adapt to enforce email verification, temporarily restricting forum access."
+  },
+  "cloud_triggers": {
+    "posts": {
+      "onPostCreated": "Updates topic/category post counts and last_post metadata.",
+      "onPostDeleted": "Decrements topic/category post counts and recalculates last_post metadata.",
+      "onPostUpdated": "Detects author metadata changes (nickname, avatar, mask). If the updated post is the latest in its topic, triggers metadata sync for topic and category to ensure 'Last Message' info remains accurate."
+    }
+  },
+  "ux_patterns": {
+    "navigation": "App-wide ScrollToTop component ensures instant scroll to top on pathname changes (route transitions). Does not trigger on search parameter changes (pagination).",
+    "skeleton_loading": "TopicPage uses granular loading states (topicReady, postsReady) and resets local state on ID change to ensure skeleton persists until all critical data is fetched, preventing layout shifts or empty state flashes."
   }
 }
 ```

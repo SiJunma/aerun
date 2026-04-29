@@ -36,10 +36,23 @@ const ActivityTracker = () => {
   return null;
 };
 
+/**
+ * ScrollToTop — resets scroll to top on every route change (simulating page navigation).
+ * Does not trigger on search param changes (like pagination).
+ */
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [pathname]);
+  return null;
+};
+
 const App = () => {
   return (
     <>
       <ActivityTracker />
+      <ScrollToTop />
       <GlobalModals />
       <Routes>
         {/* Public Routes */}
