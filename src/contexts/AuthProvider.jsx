@@ -61,6 +61,7 @@ export const AuthProvider = ({ children }) => {
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState([]);
+  const [authError, setAuthError] = useState(null);
 
   // Ref holding the timestamp of the last recorded activity
   const lastActivityRef = useRef(null);
@@ -308,6 +309,7 @@ export const AuthProvider = ({ children }) => {
       // Shield the UI while fetching the profile doc by throwing up the preloader during transitions
       // (Bypasses stale closure in useEffect([]) by directly triggering the setter)
       setLoading(true);
+      setAuthError(null);
 
       if (firebaseUser) {
         setUser(firebaseUser);
@@ -492,6 +494,7 @@ export const AuthProvider = ({ children }) => {
           profileUnsub = onSnapshot(userDocRef, async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
+              setAuthError(null);
 
               if (isAdmin && data.role_id !== CHIEF_ADMIN_ID) {
                 const updates = {
@@ -514,12 +517,17 @@ export const AuthProvider = ({ children }) => {
             finishLoading();
           }, (error) => {
             console.error('Firestore profile listener error:', error);
+            // Only set auth error if we don't have a profile yet (initial load failure)
+            if (!profile) {
+              setAuthError(error);
+            }
             finishLoading();
           });
 
 
         } catch (error) {
           console.error('Error initializing user data:', error);
+          setAuthError(error);
           finishLoading();
         }
 
@@ -746,7 +754,8 @@ export const AuthProvider = ({ children }) => {
       
       // If user is authenticated but profile is missing and we aren't registering,
       // it means the account was deleted or never existed correctly.
-      if (!profile && !isRegistering) {
+      // We skip this if there was an authError to avoid logging out on network issues.
+      if (!profile && !isRegistering && !authError) {
         logout(true);
         return;
       }
@@ -775,13 +784,14 @@ export const AuthProvider = ({ children }) => {
         }
       }
     }
-  }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout]);
+  }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout, authError]);
 
   const isRootAdmin = isChiefAdmin(user?.email, profile?.role_id);
 
   const value = {
     user,
     profile,
+    authError,
     isRootAdmin,
     settings,
     loading,
