@@ -63,7 +63,10 @@ export const AuthProvider = ({ children }) => {
   const [roles, setRoles] = useState([]);
 
   // Ref holding the timestamp of the last recorded activity
-  const lastActivityRef = useRef(Date.now());
+  const lastActivityRef = useRef(null);
+  if (lastActivityRef.current === null) {
+    lastActivityRef.current = Date.now();
+  }
   // Ref holding the timestamp of the last database push (last_seen)
   const lastPushTimeRef = useRef(0);
 
@@ -289,7 +292,6 @@ export const AuthProvider = ({ children }) => {
     let profileUnsub;
     let readMapUnsub;
     let latestTopicsUnsub;
-    let lastSeenInterval;
 
 
     // Buffer to prevent preloader "flash" on fast loads
@@ -515,14 +517,6 @@ export const AuthProvider = ({ children }) => {
             finishLoading();
           });
 
-          // Periodic tick: only push last_seen if user was active recently
-          clearInterval(lastSeenInterval);
-          lastSeenInterval = setInterval(() => {
-            const idleMs = Date.now() - lastActivityRef.current;
-            if (idleMs < IDLE_TIMEOUT_MS && (Date.now() - lastPushTimeRef.current >= TICK_MS)) {
-              pushLastSeen(firebaseUser.uid);
-            }
-          }, TICK_MS / 2); // Check more frequently than the tick itself to catch status changes
 
         } catch (error) {
           console.error('Error initializing user data:', error);
@@ -539,7 +533,6 @@ export const AuthProvider = ({ children }) => {
         if (profileUnsub) profileUnsub();
         if (readMapUnsub) readMapUnsub();
         if (latestTopicsUnsub) latestTopicsUnsub();
-        clearInterval(lastSeenInterval);
       }
     });
 
@@ -553,10 +546,51 @@ export const AuthProvider = ({ children }) => {
       if (latestTopicsUnsub) latestTopicsUnsub();
       if (rolesUnsub) rolesUnsub();
       if (catsUnsub) catsUnsub();
-      clearInterval(lastSeenInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Heartbeat System: periodically update presence for both users and guests
+  useEffect(() => {
+    // Lightweight interaction tracking (throttled by recordActivity logic)
+    // This ensures that reading/scrolling also counts as activity, not just navigation.
+    const handleInteraction = () => recordActivity();
+    
+    window.addEventListener('mousedown', handleInteraction);
+    window.addEventListener('keydown', handleInteraction, { passive: true });
+    window.addEventListener('scroll', handleInteraction, { passive: true });
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const idleMs = now - lastActivityRef.current;
+      
+      // Stop heartbeat if truly idle (e.g. tab left open but no interaction for 15m)
+      if (idleMs >= IDLE_TIMEOUT_MS) return;
+
+      if (user) {
+        // User heartbeat (TICK_MS = 2 min)
+        if (now - lastPushTimeRef.current >= TICK_MS) {
+          pushLastSeen(user.uid);
+        }
+      } else {
+        // Guest heartbeat (GUEST_TICK_MS = 10 min)
+        const GUEST_TICK_MS = 10 * 60 * 1000;
+        const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0');
+        if (now - lastGuestPush >= GUEST_TICK_MS) {
+          const gid = getOrCreateGuestId();
+          apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity heartbeat]', err));
+          localStorage.setItem('last_guest_push', now.toString());
+        }
+      }
+    }, 60000); // Check every minute
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('mousedown', handleInteraction);
+      window.removeEventListener('keydown', handleInteraction);
+      window.removeEventListener('scroll', handleInteraction);
+    };
+  }, [user, pushLastSeen, getOrCreateGuestId, recordActivity]);
 
   const hasPermission = useCallback((perm, context = {}) => {
     // ── 1. GLOBAL SETTINGS OVERRIDES (Highest Priority for feature flags) ──

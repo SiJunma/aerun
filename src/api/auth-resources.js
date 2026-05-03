@@ -96,10 +96,12 @@ export const subscribeToUser = (uid, callback) => {
 };
 
 export const subscribeToActiveUsers = (callback) => {
-  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+  // Subscribe to a wider window (60 mins) and let the component filter for the active window (15 mins)
+  // This allows the "Online Now" list to update as people time out without a page refresh.
+  const ONE_HOUR_MS = 60 * 60 * 1000;
   const q = query(
     collection(db, 'users'), 
-    where('last_seen', '>=', new Date(Date.now() - FIFTEEN_MINS_MS))
+    where('last_seen', '>=', new Date(Date.now() - ONE_HOUR_MS))
   );
   
   return onSnapshot(q, (snapshot) => {
@@ -127,14 +129,16 @@ export const subscribeToDailyActiveUsers = (callback) => {
 };
 
 export const subscribeToActiveGuests = (callback) => {
-  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+  // Same as users: subscribe to 60 mins and filter on client
+  const ONE_HOUR_MS = 60 * 60 * 1000;
   const q = query(
     collection(db, 'guest_activity'),
-    where('last_seen', '>=', new Date(Date.now() - FIFTEEN_MINS_MS))
+    where('last_seen', '>=', new Date(Date.now() - ONE_HOUR_MS))
   );
 
   return onSnapshot(q, (snapshot) => {
-    callback(snapshot.size);
+    const guests = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    callback(guests);
   }, (err) => console.error('[subscribeToActiveGuests]', err));
 };
 

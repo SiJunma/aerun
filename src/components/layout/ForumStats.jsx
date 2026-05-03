@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
+import { useAuth } from '../../contexts/AuthProvider';
 import { subscribeToCategories } from '../../api/categories';
 import { subscribeToActiveUsers, subscribeToActiveGuests, subscribeToDailyActiveUsers, subscribeToAllUsers } from '../../api/auth-resources';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
@@ -10,18 +11,28 @@ import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 // Decoupled stats component
 const ForumStats = () => {
   const { t } = useI18n();
+  const { user } = useAuth();
   const [categories, setCategories] = useState([]);
-  const [activeUsers, setActiveUsers] = useState([]);
-  const [activeGuestsCount, setActiveGuestsCount] = useState(0);
+  const [activeUsersRaw, setActiveUsersRaw] = useState([]);
+  const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
-  const [allUsers, setAllUsers] = useState([]); // Keep for total count and newest member for now
+  const [allUsers, setAllUsers] = useState([]); 
+  
+  // States for filtered lists (sliding window)
+
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   
   useEffect(() => {
     const unsubCats = subscribeToCategories(setCategories);
-    const unsubActiveUsers = subscribeToActiveUsers(setActiveUsers);
-    const unsubGuests = subscribeToActiveGuests(setActiveGuestsCount);
+    const unsubActiveUsers = subscribeToActiveUsers(setActiveUsersRaw);
+    const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
     const unsubAllUsers = subscribeToAllUsers(setAllUsers);
     const unsubDailyUsers = subscribeToDailyActiveUsers(setDailyActiveUsers);
+    
+    // Timer to force re-filtering every 30 seconds (sliding window)
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 30000);
     
     return () => {
       unsubCats();
@@ -29,10 +40,34 @@ const ForumStats = () => {
       unsubGuests();
       unsubAllUsers();
       unsubDailyUsers();
+      clearInterval(timer);
     };
   }, []);
 
+  // Filter users and guests based on a 15-minute window relative to currentTime
+  const { onlineUsers, activeGuestsCount } = useMemo(() => {
+    const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+    const threshold = currentTime - FIFTEEN_MINS_MS;
+    
+    const filteredUsers = activeUsersRaw.filter(u => {
+      const lastSeenMs = u.last_seen?.toMillis?.() || 0;
+      return lastSeenMs >= threshold;
+    });
+    
+    const currentGuestId = localStorage.getItem('guest_id');
+    
+    const filteredGuests = activeGuestsRaw.filter(g => {
+      const lastSeenMs = g.last_seen?.toMillis?.() || 0;
+      // Exclude current guest ONLY if this specific session is already logged in
+      if (user && g.id === currentGuestId) return false;
+      return lastSeenMs >= threshold;
+    });
 
+    return {
+      onlineUsers: filteredUsers,
+      activeGuestsCount: filteredGuests.length
+    };
+  }, [activeUsersRaw, activeGuestsRaw, currentTime, user]);
 
   // Stats calculation
   const totalTopics = categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
@@ -45,9 +80,6 @@ const ForumStats = () => {
     const bTime = b.created_at?.toMillis?.() ?? 0;
     return bTime - aTime;
   })[0];
-
-  // Online users (already filtered by API)
-  const onlineUsers = activeUsers;
 
   return (
     <div className="forum-stats-section mt-5 mb-4">
