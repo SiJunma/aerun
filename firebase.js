@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
@@ -22,6 +22,10 @@ export const isStorageEnabled = !!firebaseConfig.storageBucket;
 
 // Initialize services
 export const auth = getAuth(app);
+// Explicitly set persistence to LOCAL so the session survives tab freezes,
+// browser restarts, and multi-tab scenarios (browsers with many open tabs
+// may otherwise discard the session token when throttling background tabs).
+setPersistence(auth, browserLocalPersistence).catch(e => console.warn('[Auth persistence]', e));
 export const db = getFirestore(app);
 export const storage = isStorageEnabled ? getStorage(app) : null;
 export const functions = getFunctions(app);

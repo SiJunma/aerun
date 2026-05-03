@@ -71,6 +71,13 @@ export const AuthProvider = ({ children }) => {
   // Ref holding the timestamp of the last database push (last_seen)
   const lastPushTimeRef = useRef(0);
 
+  // Listener Refs (persisted across renders for cleanup)
+  const profileUnsubRef = useRef(null);
+  const readMapUnsubRef = useRef(null);
+  const latestTopicsUnsubRef = useRef(null);
+  const rolesUnsubRef = useRef(null);
+  const catsUnsubRef = useRef(null);
+
   const pushLastSeen = useCallback((uid) => {
     if (!uid) return;
     setDoc(doc(db, 'users', uid), { last_seen: serverTimestamp() }, { merge: true })
@@ -290,11 +297,6 @@ export const AuthProvider = ({ children }) => {
     // Global Roles Listener (needed for unauthenticated guest permissions)
     const rolesUnsub = subscribeToRoles(setRoles);
 
-    let profileUnsub;
-    let readMapUnsub;
-    let latestTopicsUnsub;
-
-
     // Buffer to prevent preloader "flash" on fast loads
     const startLoadTime = Date.now();
     const minDisplayTime = 800;
@@ -310,6 +312,11 @@ export const AuthProvider = ({ children }) => {
       // (Bypasses stale closure in useEffect([]) by directly triggering the setter)
       setLoading(true);
       setAuthError(null);
+
+      // Cleanup previous listeners if Auth state changes (prevents leaks/races)
+      if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
+      if (readMapUnsubRef.current) { readMapUnsubRef.current(); readMapUnsubRef.current = null; }
+      if (latestTopicsUnsubRef.current) { latestTopicsUnsubRef.current(); latestTopicsUnsubRef.current = null; }
 
       if (firebaseUser) {
         setUser(firebaseUser);
@@ -486,12 +493,12 @@ export const AuthProvider = ({ children }) => {
           }
 
           // Subscribe to read map (all roles — everyone can read topics)
-          readMapUnsub = subscribeToReadMap(firebaseUser.uid, setReadMap);
+          readMapUnsubRef.current = subscribeToReadMap(firebaseUser.uid, setReadMap);
 
           // Subscribe to latest topics to track unread count (100 is enough for global badge)
-          latestTopicsUnsub = subscribeToLatestTopics(setLatestTopics, 100);
+          latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 100);
 
-          profileUnsub = onSnapshot(userDocRef, async (docSnap) => {
+          profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
               setAuthError(null);
@@ -512,14 +519,40 @@ export const AuthProvider = ({ children }) => {
                 }
               }
             } else {
-              setProfile(null);
+              // Guard: only nullify profile if we genuinely never had one.
+              // When a frozen tab is restored, Firestore may momentarily re-fire with
+              // !exists() before the SDK reconnects fully. Wiping profile here would
+              // trigger the auto-logout effect. We only set null on a confirmed deletion
+              // (i.e. no profile was ever loaded for this session).
+              if (!profileUnsubRef._hasLoadedOnce) {
+                setProfile(null);
+              } else {
+                console.warn('[AuthProvider] Snapshot fired !exists() but profile already loaded — ignoring (likely tab restore reconnect).');
+              }
             }
+            // Mark that we have successfully loaded at least once
+            profileUnsubRef._hasLoadedOnce = true;
             finishLoading();
           }, (error) => {
+            // Classify the error: transient network issues should never log the user out.
+            // Firebase uses 'unavailable' for network drops and transport errors.
+            const isTransient = !error?.code || 
+              error.code === 'unavailable' || 
+              error.code === 'unknown' ||
+              error.message === undefined ||
+              (error.name === undefined && error.message === undefined);
+
+            if (isTransient) {
+              // Log a warning but do NOT update authError — the SDK will reconnect automatically.
+              console.warn('[AuthProvider] Transient Firestore error (likely tab freeze/network blip) — ignoring:', error);
+              finishLoading();
+              return;
+            }
+
             console.error('Firestore profile listener error:', error);
-            // Only set auth error if we don't have a profile yet (initial load failure)
+            // Only set auth error for real, non-transient errors on initial load
             if (!profile) {
-              setAuthError(error);
+              setAuthError(error || new Error('Unknown Firestore Error'));
             }
             finishLoading();
           });
@@ -538,22 +571,25 @@ export const AuthProvider = ({ children }) => {
         setReadMap({});
         setLatestTopics([]);
         finishLoading();
-        if (profileUnsub) profileUnsub();
-        if (readMapUnsub) readMapUnsub();
-        if (latestTopicsUnsub) latestTopicsUnsub();
+        
+        if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
+        if (readMapUnsubRef.current) { readMapUnsubRef.current(); readMapUnsubRef.current = null; }
+        if (latestTopicsUnsubRef.current) { latestTopicsUnsubRef.current(); latestTopicsUnsubRef.current = null; }
       }
     });
 
+    rolesUnsubRef.current = rolesUnsub; // Keep track for cleanup
     let catsUnsub = subscribeToCategories(setCategories);
+    catsUnsubRef.current = catsUnsub;
 
     return () => {
       unsubGlobalSettings();
       unsubscribe();
-      if (profileUnsub) profileUnsub();
-      if (readMapUnsub) readMapUnsub();
-      if (latestTopicsUnsub) latestTopicsUnsub();
-      if (rolesUnsub) rolesUnsub();
-      if (catsUnsub) catsUnsub();
+      if (profileUnsubRef.current) profileUnsubRef.current();
+      if (readMapUnsubRef.current) readMapUnsubRef.current();
+      if (latestTopicsUnsubRef.current) latestTopicsUnsubRef.current();
+      if (rolesUnsubRef.current) rolesUnsubRef.current();
+      if (catsUnsubRef.current) catsUnsubRef.current();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -755,7 +791,12 @@ export const AuthProvider = ({ children }) => {
       // If user is authenticated but profile is missing and we aren't registering,
       // it means the account was deleted or never existed correctly.
       // We skip this if there was an authError to avoid logging out on network issues.
+      // We also check if profile is explicitly NULL (meaning the docSnap.exists() was false)
+      // to avoid triggering on a transient undefined state (though profile starts as null).
       if (!profile && !isRegistering && !authError) {
+        // Final guard: check if we just haven't loaded yet.
+        // If loading is false and authError is null and profile is null, it's a deletion.
+        console.warn('[AuthProvider] Profile missing for authenticated user. Triggering logout.');
         logout(true);
         return;
       }
