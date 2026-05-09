@@ -539,7 +539,7 @@ label.fw-bold {
   color: #ffffff !important;
   border-bottom: 1px solid var(--border-color) !important;
   padding: 1rem 1.25rem !important;
-  border-radius: 1rem 1rem 0 0 !important;
+  border-radius: 0.75rem 0.75rem !important;
   /* Top corners match card radius */
 }
 
@@ -2553,7 +2553,8 @@ a.badge.bg-danger:hover {
 @media (max-width: 991.98px) {
   .dm-fullscreen-card {
     border-radius: 1rem !important;
-    overflow: hidden !important; /* Fixes white corners */
+    overflow: hidden !important;
+    /* Fixes white corners */
     height: calc(100vh - 140px) !important;
     min-height: 500px !important;
     margin-bottom: 1rem;
@@ -2561,7 +2562,8 @@ a.badge.bg-danger:hover {
 
   .dm-chat-body {
     flex-direction: column;
-    overflow-y: auto !important; /* Entire body scrolls on mobile */
+    overflow-y: auto !important;
+    /* Entire body scrolls on mobile */
     overflow-x: hidden;
     flex: 1;
     min-height: 0;
@@ -2569,7 +2571,8 @@ a.badge.bg-danger:hover {
   }
 
   .dm-messages-col {
-    flex: 0 0 auto; /* Don't scroll separately */
+    flex: 0 0 auto;
+    /* Don't scroll separately */
     overflow-y: visible !important;
     height: auto;
     min-height: 0;
@@ -2582,7 +2585,8 @@ a.badge.bg-danger:hover {
     border-left: none;
     border-top: 1px solid var(--border-color);
     background: var(--card-bg);
-    margin-top: auto; /* Push to bottom of content if short */
+    margin-top: auto;
+    /* Push to bottom of content if short */
   }
 }
 
