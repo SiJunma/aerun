@@ -1937,6 +1937,8 @@ a.badge.bg-danger:hover {
   /* Always light on dark header background */
   border-bottom: 1px solid rgba(var(--primary-rgb), 0.1) !important;
   padding: 12px !important;
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
 }
 
 .stats-header .forum-header-text,
