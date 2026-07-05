@@ -141,18 +141,50 @@ const ProfilePage = () => {
     };
   }, [uid, profile]);
 
+  // Tracks if we've already done the initial seek for a deep-linked log
+  const didSeekRef = useRef(false);
+  const lastFetchedPageRef = useRef(null);
+
+  // Reset seek flag whenever the viewed profile changes
+  useEffect(() => { 
+    didSeekRef.current = false; 
+    lastFetchedPageRef.current = null;
+  }, [uid]);
+
   // Fetch reputation logs paginated
   useEffect(() => {
     if (!uid || activeTab !== 'reputation') return;
+
+    const highlightLog = searchParams.get('log');
+
+    // On the very first load when a deep-link ?log= is present, pass seekLogId
+    // so the function resolves the correct page automatically.
+    const seekLogId = (highlightLog && !didSeekRef.current) ? highlightLog : null;
+
+    // If we have already fetched this page as part of the seek resolution, skip fetching it again.
+    if (!seekLogId && lastFetchedPageRef.current === currentPageRep) {
+      lastFetchedPageRef.current = null;
+      return;
+    }
+
+    if (seekLogId) didSeekRef.current = true;
 
     let isMounted = true;
     const fetchLogs = async () => {
       setLoadingRepLogs(true);
       try {
-        const result = await fetchReputationLogs(uid, currentPageRep, REP_PER_PAGE);
+        const result = await fetchReputationLogs(uid, seekLogId ? 1 : currentPageRep, REP_PER_PAGE, seekLogId);
         if (isMounted) {
           setRepLogs(result.logs || []);
           setTotalRepLogs(result.totalCount || 0);
+          
+          if (result.page) {
+            lastFetchedPageRef.current = result.page;
+            // Sync page state if the function resolved a different page
+            if (result.page !== currentPageRep) {
+              setCurrentPageRep(result.page);
+            }
+          }
         }
       } catch (err) {
         console.error(err);
@@ -163,9 +195,9 @@ const ProfilePage = () => {
 
     fetchLogs();
     return () => { isMounted = false; };
-  }, [uid, activeTab, currentPageRep]);
+  }, [uid, activeTab, currentPageRep]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll to and highlight a specific reputation log if requested in URL
+  // Scroll to and highlight a specific reputation log after logs are rendered
   useEffect(() => {
     if (activeTab === 'reputation' && !loadingRepLogs && repLogs.length > 0) {
       const highlightLog = searchParams.get('log');

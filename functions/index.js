@@ -639,7 +639,7 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
 exports.getReputationLogs = onCall(
   { memory: '256MB', timeoutSeconds: 60 },
   async (request) => {
-    const { targetUid, page = 1, pageSize = 20 } = request.data;
+    const { targetUid, page = 1, pageSize = 20, seekLogId } = request.data;
     if (!targetUid || typeof targetUid !== 'string') {
       throw new HttpsError('invalid-argument', 'targetUid must be a non-empty string');
     }
@@ -678,7 +678,40 @@ exports.getReputationLogs = onCall(
     const countSnap = await query.count().get();
     const totalCount = countSnap.data().count;
 
-    const startIndex = (page - 1) * pageSize;
+    // If seekLogId is provided, resolve which page that log falls on.
+    // We fetch only the target document's timestamp, then count how many
+    // of this user's logs have a LATER timestamp (i.e. come before it in
+    // desc order). We do this without a composite index by fetching only
+    // __name__ fields in an ordered query up to the cursor.
+    let resolvedPage = page;
+    if (seekLogId && typeof seekLogId === 'string') {
+      try {
+        const seekDoc = await db.collection('reputation_logs').doc(seekLogId).get();
+        if (seekDoc.exists) {
+          const seekTs = seekDoc.data().created_at;
+          if (seekTs) {
+            // Count documents newer than seekTs using select() to minimise data transfer.
+            // This query uses only the `created_at` field (single-field index always exists).
+            // We deliberately do NOT combine with target_id to avoid needing a composite index.
+            // Instead fetch all docs for this user ordered by created_at desc and count until
+            // we pass the seekTs boundary. To keep this fast we use a cursor query.
+            const newerSnap = await db.collection('reputation_logs')
+              .where('target_id', '==', targetUid)
+              .orderBy('created_at', 'desc')
+              .endBefore(seekTs)
+              .select()          // fetch no fields — only doc refs, minimises read cost
+              .get();
+            const newerCount = newerSnap.size;
+            resolvedPage = Math.floor(newerCount / pageSize) + 1;
+          }
+        }
+      } catch (seekErr) {
+        // If seek fails for any reason, fall back to the requested page
+        logger.warn('[getReputationLogs] seekLogId resolution failed, falling back to page', page, seekErr.message);
+      }
+    }
+
+    const startIndex = (resolvedPage - 1) * pageSize;
 
     const logsSnapshot = await query
       .orderBy('created_at', 'desc')
@@ -787,6 +820,7 @@ exports.getReputationLogs = onCall(
       hidden: false, 
       logs: processedLogs,
       totalCount,
+      page: resolvedPage,
       hasMore: totalCount > startIndex + pageSize
     };
   }

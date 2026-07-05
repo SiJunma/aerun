@@ -155,9 +155,9 @@ export const updateReputationComment = async (logId, newComment) => {
  * fetchReputationLogs
  * Fetches reputation changes for a user securely through Cloud Functions.
  */
-export const fetchReputationLogs = async (uid, page = 1, pageSize = 20) => {
+export const fetchReputationLogs = async (uid, page = 1, pageSize = 20, seekLogId = null) => {
   const getLogs = httpsCallable(functions, 'getReputationLogs');
-  const result = await getLogs({ targetUid: uid, page, pageSize });
+  const result = await getLogs({ targetUid: uid, page, pageSize, ...(seekLogId ? { seekLogId } : {}) });
   return result.data;
 };
 
