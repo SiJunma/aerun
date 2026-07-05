@@ -165,6 +165,22 @@ const ProfilePage = () => {
     return () => { isMounted = false; };
   }, [uid, activeTab, currentPageRep]);
 
+  // Scroll to and highlight a specific reputation log if requested in URL
+  useEffect(() => {
+    if (activeTab === 'reputation' && !loadingRepLogs && repLogs.length > 0) {
+      const highlightLog = searchParams.get('log');
+      if (highlightLog) {
+        const timer = setTimeout(() => {
+          const el = document.getElementById(`rep-log-${highlightLog}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [activeTab, loadingRepLogs, repLogs, searchParams]);
+
   // Fetch user posts when on 'posts' tab, page changes, or filter changes
   useEffect(() => {
     if (!uid || activeTab !== 'posts') return;
@@ -776,7 +792,11 @@ const ProfilePage = () => {
                           {visibleRepLogs.map(log => {
                             const isAllowed = log.isAllowed !== false;
                             return (
-                            <tr key={log.id}>
+                            <tr 
+                              key={log.id} 
+                              id={`rep-log-${log.id}`}
+                              className={searchParams.get('log') === log.id ? 'highlight-rep-row' : ''}
+                            >
                               <td className="px-4 py-3 small text-muted">
                                 {log.created_at ? <Timestamp date={log.created_at?.toDate ? log.created_at.toDate() : new Date(log.created_at)} /> : '...'}
                               </td>

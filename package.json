@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:prod": "vite --mode production",
+    "dev:test": "vite --mode development",
     "build": "vite build",
     "build:test": "vite build --mode development",
     "deploy:test": "npm run build:test && firebase deploy --only \"hosting,firestore,functions\" --project staging",

@@ -101,6 +101,91 @@ const ColumnsStacker = ({ children, stackAt }) => {
   );
 };
 
+const parseStyleString = (styleStr) => {
+  if (!styleStr) return {};
+  const styleObj = {};
+  const declarations = styleStr.split(';');
+  declarations.forEach(decl => {
+    const trimmed = decl.trim();
+    if (!trimmed) return;
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx === -1) return;
+    const property = trimmed.substring(0, colonIdx).trim();
+    const value = trimmed.substring(colonIdx + 1).trim();
+    const camelProperty = property.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+    styleObj[camelProperty] = value;
+  });
+  return styleObj;
+};
+
+const safeHtmlToReact = (htmlStr, index) => {
+  if (typeof window === 'undefined') return htmlStr;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlStr, 'text/html');
+    
+    const domNodeToReact = (domNode, key) => {
+      // Text Node
+      if (domNode.nodeType === 3) {
+        return domNode.textContent;
+      }
+      // Element Node
+      if (domNode.nodeType === 1) {
+        const tagName = domNode.tagName.toLowerCase();
+        if (tagName === 'script' || tagName === 'noscript') {
+          return null;
+        }
+        
+        const attribs = { key };
+        for (let i = 0; i < domNode.attributes.length; i++) {
+          const attr = domNode.attributes[i];
+          const attrName = attr.name.toLowerCase();
+          const attrValue = attr.value;
+          
+          if (attrName.startsWith('on')) {
+            continue;
+          }
+          if (['href', 'src', 'action', 'formaction'].includes(attrName)) {
+            const sanitizedVal = attrValue.trim().toLowerCase();
+            if (sanitizedVal.startsWith('javascript:') || sanitizedVal.startsWith('data:text/html')) {
+              continue;
+            }
+          }
+          
+          let reactAttrName = attrName;
+          if (attrName === 'class') reactAttrName = 'className';
+          else if (attrName === 'for') reactAttrName = 'htmlFor';
+          else if (attrName === 'contenteditable') reactAttrName = 'contentEditable';
+          
+          if (attrName === 'style') {
+            attribs.style = parseStyleString(attrValue);
+            continue;
+          }
+          
+          attribs[reactAttrName] = attrValue;
+        }
+        
+        const childNodes = Array.from(domNode.childNodes);
+        const reactChildren = childNodes.map((child, i) => domNodeToReact(child, `${key}-${i}`)).filter(Boolean);
+        
+        if (tagName === 'style') {
+          return <style key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
+        }
+        
+        return React.createElement(tagName, attribs, ...reactChildren);
+      }
+      return null;
+    };
+    
+    const bodyChildren = Array.from(doc.body.childNodes);
+    const elements = bodyChildren.map((child, i) => domNodeToReact(child, `${index}-${i}`)).filter(Boolean);
+    return <React.Fragment key={index}>{elements}</React.Fragment>;
+  } catch (err) {
+    console.error('Error parsing HTML tag in BBCode:', err);
+    return htmlStr;
+  }
+};
+
 const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
   const { t, lang } = useI18n();
@@ -147,7 +232,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile', 'code'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -187,7 +272,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           // Update parent after potential stack pop
           parent = stack[stack.length - 1];
         }
-        const newNode = { type: 'tag', name: token.name, rawParams: token.rawParams, children: [] };
+        const newNode = { type: 'tag', name: token.name, rawParams: token.rawParams, rawTag: token.full, children: [] };
         parent.children.push(newNode);
         // Dice, Roll, and HR are self-closing tags (they don't have [/dice] or [/roll] or [/hr])
         if (token.name !== 'dice' && token.name !== 'roll' && token.name !== 'hr') {
@@ -198,7 +283,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code'];
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code', 'html'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
@@ -238,6 +323,14 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   function getTextContent(node) {
     if (typeof node === 'string') return node;
     return (node.children || []).map(getTextContent).join('');
+  }
+
+  function getRawContent(node) {
+    if (typeof node === 'string') return node;
+    const inner = (node.children || []).map(getRawContent).join('');
+    const closing = node.name !== 'dice' && node.name !== 'roll' && node.name !== 'hr';
+    const openTag = node.rawTag || `[${node.name}]`;
+    return `${openTag}${inner}${closing ? `[/${node.name}]` : ''}`;
   }
 
   function renderNode(node, index, disableAutoEmbed = false) {
@@ -312,6 +405,9 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       case 'i': return <em key={index}>{content}</em>;
       case 'u': return <u key={index}>{content}</u>;
       case 's': return <del key={index}>{content}</del>;
+      case 'sup': return <sup key={index}>{content}</sup>;
+      case 'sub': return <sub key={index}>{content}</sub>;
+      case 'abbr': return <abbr key={index} title={params.default || ''}>{content}</abbr>;
       case 'quote': {
         let rawAuthor = params.default || params.author || '';
         let authorName = rawAuthor;
@@ -393,7 +489,13 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       case 'color': return <span key={index} style={{ color: params.default || params.color }}>{content}</span>;
       case 'size': {
         const sz = params.default || params.size;
-        const sizeVal = (!sz || isNaN(sz)) ? sz : `${sz}%`;
+        let sizeVal = sz;
+        if (sz) {
+          const trimmed = sz.trim();
+          if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+            sizeVal = `${trimmed}px`;
+          }
+        }
         return <span key={index} style={{ fontSize: sizeVal }}>{content}</span>;
       }
       case 'columns': {
@@ -615,6 +717,10 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
             {content}
           </pre>
         );
+      }
+      case 'html': {
+        const rawHtml = (node.children || []).map(getRawContent).join('');
+        return safeHtmlToReact(rawHtml, index);
       }
       default: return <span key={index}>{content}</span>;
     }

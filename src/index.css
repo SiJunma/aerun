@@ -1532,6 +1532,179 @@ a.badge.bg-danger:hover {
   background-color: rgba(140, 113, 82, 0.1);
 }
 
+/* ── Reputation Hover Preview Popover ───────────────────────────────────── */
+.rep-preview-trigger {
+  display: inline-flex;
+  align-items: center;
+}
+
+.rep-preview-popover {
+  min-width: 180px;
+  max-width: 250px;
+  border: 1px solid var(--border-color) !important;
+  background-color: var(--card-bg) !important;
+  color: var(--text-color) !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+[data-theme='dark'] .rep-preview-popover {
+  background-color: var(--card-bg) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45) !important;
+}
+
+[data-theme='neutral'] .rep-preview-popover {
+  background-color: #fffcf5 !important;
+  border-color: rgba(140, 113, 82, 0.2) !important;
+}
+
+/* Popover Arrow colors positioning styling */
+.rep-preview-popover[data-popper-placement^="top"] .popover-arrow::before {
+  border-top-color: var(--border-color) !important;
+}
+.rep-preview-popover[data-popper-placement^="top"] .popover-arrow::after {
+  border-top-color: var(--card-bg) !important;
+}
+.rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::before {
+  border-bottom-color: var(--border-color) !important;
+}
+.rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::after {
+  border-bottom-color: var(--card-bg) !important;
+}
+
+/* Dark theme overrides */
+[data-theme='dark'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::before {
+  border-top-color: rgba(255, 255, 255, 0.1) !important;
+}
+[data-theme='dark'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::after {
+  border-top-color: var(--card-bg) !important;
+}
+[data-theme='dark'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::before {
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+}
+[data-theme='dark'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::after {
+  border-bottom-color: var(--card-bg) !important;
+}
+
+/* Neutral theme overrides */
+[data-theme='neutral'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::before {
+  border-top-color: rgba(140, 113, 82, 0.2) !important;
+}
+[data-theme='neutral'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::after {
+  border-top-color: #fffcf5 !important;
+}
+[data-theme='neutral'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::before {
+  border-bottom-color: rgba(140, 113, 82, 0.2) !important;
+}
+[data-theme='neutral'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::after {
+  border-bottom-color: #fffcf5 !important;
+}
+
+
+.rep-preview-inner {
+  padding: 0.25rem 0;
+}
+
+.rep-preview-title {
+  font-size: 0.73rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+}
+
+.rep-preview-status {
+  padding: 0.5rem 0.85rem;
+  opacity: 0.6;
+}
+
+.rep-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rep-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.85rem;
+  transition: background-color 0.15s ease;
+}
+
+.rep-preview-item:hover {
+  background-color: rgba(var(--primary-rgb, 13, 110, 253), 0.06);
+}
+
+.rep-preview-badge {
+  font-size: 0.65rem !important;
+  padding: 0.15rem 0.35rem !important;
+  border-radius: 4px !important;
+  min-width: 26px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.rep-preview-name {
+  font-size: 0.82rem;
+  color: var(--text-color);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+}
+
+a.rep-preview-name:hover {
+  color: var(--primary-color);
+  text-decoration: underline;
+}
+
+.rep-preview-more {
+  font-size: 0.72rem;
+  opacity: 0.5;
+  text-align: right;
+}
+
+.rep-preview-detail-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-color);
+  opacity: 0.6;
+  border-radius: 4px;
+  padding: 2px;
+  transition: all 0.15s ease;
+}
+
+.rep-preview-detail-link:hover {
+  color: var(--primary-color) !important;
+  opacity: 1;
+  background-color: rgba(var(--primary-rgb, 13, 110, 253), 0.1);
+}
+
+
+/* Highlight Animation for Reputation Table Row */
+.highlight-rep-row {
+  animation: highlight-row-fade 3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes highlight-row-fade {
+  0% {
+    background-color: rgba(230, 162, 60, 0.25) !important;
+  }
+  70% {
+    background-color: rgba(230, 162, 60, 0.15) !important;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+
 /* ── Tooltips — theme-aware premium styles ───────────────────────────────── */
 .tooltip-inner {
   padding: 0.5rem 0.85rem !important;

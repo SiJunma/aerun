@@ -723,6 +723,8 @@ exports.getReputationLogs = onCall(
     }
 
     const hasViewPermission = (categoryId) => {
+      if (effectiveRole === 'root' || effectiveRole === 'admin') return true;
+
       const category = categoriesMap[categoryId];
       if (!category) return false;
 
@@ -787,6 +789,93 @@ exports.getReputationLogs = onCall(
       totalCount,
       hasMore: totalCount > startIndex + pageSize
     };
+  }
+);
+
+/**
+ * getPostVoters (Callable)
+ * Returns up to `limit` voters for a specific post, respecting each voter's privacy settings.
+ * Anyone can call this; private users are shown as "Anonymous".
+ */
+exports.getPostVoters = onCall(
+  { memory: '256MB', timeoutSeconds: 30 },
+  async (request) => {
+    const { postId, limit: reqLimit = 10 } = request.data;
+    if (!postId || typeof postId !== 'string') {
+      throw new HttpsError('invalid-argument', 'postId must be a non-empty string');
+    }
+
+    const db = admin.firestore();
+    const requesterUid = request.auth ? request.auth.uid : null;
+
+    let isRequesterAdmin = false;
+    let isRequesterModerator = false;
+    if (requesterUid) {
+      const userDoc = await db.collection('users').doc(requesterUid).get();
+      if (userDoc.exists) {
+        const role = userDoc.data().role_id;
+        isRequesterAdmin = ['root', 'admin'].includes(role);
+        isRequesterModerator = role === 'moderator';
+      }
+    }
+
+    const maxLimit = Math.min(reqLimit, 50);
+
+    // Use only equality filter (no orderBy) to avoid needing a composite index.
+    // Sorting is done in-memory after fetch.
+    const logsSnap = await db.collection('reputation_logs')
+      .where('post_id', '==', postId)
+      .get();
+
+    if (logsSnap.empty) {
+      return { voters: [], total: 0 };
+    }
+
+    const total = logsSnap.size;
+
+    // Sort by created_at descending in memory, then take the requested limit
+    const sortedDocs = logsSnap.docs
+      .slice()
+      .sort((a, b) => {
+        const tsA = a.data().created_at?.toMillis?.() ?? 0;
+        const tsB = b.data().created_at?.toMillis?.() ?? 0;
+        return tsB - tsA;
+      })
+      .slice(0, maxLimit);
+
+    // Collect unique voter IDs from the slice
+    const voterIds = [...new Set(sortedDocs.map(d => d.data().voter_id).filter(Boolean))];
+
+    // Fetch voter profiles in one batch (max 30 per 'in' query)
+    const voterProfiles = {};
+    for (let i = 0; i < voterIds.length; i += 30) {
+      const chunk = voterIds.slice(i, i + 30);
+      const profilesSnap = await db.collection('users')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      profilesSnap.forEach(d => { voterProfiles[d.id] = d.data(); });
+    }
+
+    const voters = [];
+    sortedDocs.forEach(logDoc => {
+      const log = logDoc.data();
+      const voterData = voterProfiles[log.voter_id];
+      const showHistory = voterData?.settings?.rep_show_history;
+      const isPrivate = showHistory === false
+        && log.voter_id !== requesterUid
+        && !isRequesterAdmin
+        && !isRequesterModerator;
+
+      voters.push({
+        voter_id: isPrivate ? null : log.voter_id,
+        voter_nickname: isPrivate ? null : (log.voter_nickname || voterData?.nickname || 'User'),
+        value: log.value,
+        created_at: log.created_at ? log.created_at.toDate().toISOString() : null,
+      });
+    });
+
+    return { voters, total };
+
   }
 );
 

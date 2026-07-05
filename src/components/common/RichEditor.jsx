@@ -5,7 +5,7 @@ import {
   Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon,
   Quote, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard,
   Youtube, EyeOff, Minus, Smile, AlignLeft, AlignCenter, AlignRight,
-  AlignJustify, Keyboard, MoreHorizontal
+  AlignJustify, Keyboard, MoreHorizontal, Superscript, Subscript, HelpCircle, Code
 } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
@@ -40,6 +40,8 @@ const RichEditor = forwardRef(({
   const [columnsData, setColumnsData] = useState({ count: 2, stack: '768' });
   const [showHotkeysModal, setShowHotkeysModal] = useState(false);
   const [showSmilesModal, setShowSmilesModal] = useState(false);
+  const [showAbbrModal, setShowAbbrModal] = useState(false);
+  const [abbrData, setAbbrData] = useState({ text: '', title: '' });
 
   useImperativeHandle(ref, () => ({
     openHotkeysModal: () => setShowHotkeysModal(true)
@@ -259,15 +261,15 @@ const RichEditor = forwardRef(({
   // Responsive logic for toolbar overflow
   useEffect(() => {
     const groups = [
-      { id: 'style', priority: 1, width: 145 },
+      { id: 'style', priority: 1, width: 215 },
       { id: 'history', priority: 2, width: 85 },
       { id: 'smiles', priority: 3, width: 45 },
       { id: 'links', priority: 4, width: 45 },
       { id: 'typography', priority: 5, width: 100 },
       { id: 'align', priority: 6, width: 145 },
-      { id: 'inserts', priority: 7, width: 85 },
+      { id: 'inserts', priority: 7, width: 160 },
       { id: 'media', priority: 8, width: 85 },
-      { id: 'advanced', priority: 9, width: (showHide ? 45 : 0) + (showDice && !isEdit ? 45 : 0) + 75 } // Columns(45) + HR(30) + Hide(45?) + Dice(45?)
+      { id: 'advanced', priority: 9, width: (showHide ? 45 : 0) + (showDice && !isEdit ? 45 : 0) + 75 }
     ];
 
     const manualButtonWidth = 45;
@@ -397,6 +399,51 @@ const RichEditor = forwardRef(({
       if (!url) return;
       
       const replacement = `[url=${url}]${linkText || selected || 'link'}[/url]`;
+      const newValue = text.substring(0, start) + replacement + text.substring(end);
+
+      let newHistory = history.slice(0, historyIndex + 1);
+      if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
+      newHistory.push(newValue);
+      if (newHistory.length > 50) newHistory = newHistory.slice(newHistory.length - 50);
+      
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+      lastHistoryPushTime.current = Date.now();
+
+      isInternalUpdate.current = true;
+      onChange({ target: { value: newValue } });
+
+      textarea.focus();
+      const newCursorPos = start + replacement.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      textarea.scrollTop = currentScrollTop;
+    }, 0);
+  };
+
+  const openAbbrModal = () => {
+    const textarea = textareaRef.current;
+    const selected = textarea ? textarea.value.substring(textarea.selectionStart, textarea.selectionEnd) : '';
+    setAbbrData({ text: selected, title: '' });
+    setShowAbbrModal(true);
+  };
+
+  const handleAbbrSubmit = (e) => {
+    e.preventDefault();
+    const capturedAbbrData = { ...abbrData };
+    setShowAbbrModal(false);
+    setAbbrData({ text: '', title: '' });
+    setTimeout(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = latestValueRef.current;
+      const currentScrollTop = textarea.scrollTop;
+      const selected = text.substring(start, end);
+      const { title, text: abbrText } = capturedAbbrData;
+      if (!title) return;
+      
+      const replacement = `[abbr="${title}"]${abbrText || selected || 'text'}[/abbr]`;
       const newValue = text.substring(0, start) + replacement + text.substring(end);
 
       let newHistory = history.slice(0, historyIndex + 1);
@@ -614,6 +661,12 @@ const RichEditor = forwardRef(({
             <Dropdown.Item onClick={() => insertText('[s]', '[/s]')} className="d-flex align-items-center gap-2 py-2 px-3">
               <Strikethrough size={16} /> {lang === 'ru' ? 'Зачёркнутый' : 'Strikethrough'}
             </Dropdown.Item>
+            <Dropdown.Item onClick={() => insertText('[sup]', '[/sup]')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <Superscript size={16} /> {lang === 'ru' ? 'Надстрочный' : 'Superscript'}
+            </Dropdown.Item>
+            <Dropdown.Item onClick={() => insertText('[sub]', '[/sub]')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <Subscript size={16} /> {lang === 'ru' ? 'Подстрочный' : 'Subscript'}
+            </Dropdown.Item>
             <Dropdown.Divider />
           </>
         ) : (
@@ -622,6 +675,8 @@ const RichEditor = forwardRef(({
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[i]', '[/i]')} title="Italic (Ctrl+I)"><Italic size={16} /></Button>
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[u]', '[/u]')} title="Underline (Ctrl+U)"><Underline size={16} /></Button>
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[s]', '[/s]')} title="Strikethrough (Ctrl+S)"><Strikethrough size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[sup]', '[/sup]')} title="Superscript"><Superscript size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[sub]', '[/sub]')} title="Subscript"><Subscript size={16} /></Button>
           </div>
         );
       case 'history':
@@ -676,9 +731,19 @@ const RichEditor = forwardRef(({
           <div className="d-flex align-items-center gap-1">
             <Dropdown className="d-inline-block">
               <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title="Size"><ALargeSmall size={19} /></Dropdown.Toggle>
-              <Dropdown.Menu className="size-picker-menu shadow-sm border-0">
+              <Dropdown.Menu className="size-picker-menu shadow-sm border-0" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                <Dropdown.Header className="px-3 py-1 font-monospace text-uppercase" style={{ fontSize: '0.7rem', opacity: 0.7 }}>
+                  {lang === 'ru' ? 'Проценты' : 'Percent'}
+                </Dropdown.Header>
                 {[{label:'50%',v:'50%'},{label:'85%',v:'85%'},{label:'100%',v:'100%'},{label:'120%',v:'120%'},{label:'150%',v:'150%'},{label:'200%',v:'200%'}].map(s=>(
                   <Dropdown.Item key={s.v} onClick={()=>insertText(s.v,'','size')} className="small py-1 px-3"><span style={{fontSize:s.v}}>{s.label}</span></Dropdown.Item>
+                ))}
+                <Dropdown.Divider />
+                <Dropdown.Header className="px-3 py-1 font-monospace text-uppercase" style={{ fontSize: '0.7rem', opacity: 0.7 }}>
+                  {lang === 'ru' ? 'Пиксели' : 'Pixels'}
+                </Dropdown.Header>
+                {[{label:'9px',v:'9'},{label:'11px',v:'11'},{label:'12px',v:'12'},{label:'14px',v:'14'},{label:'16px',v:'16'},{label:'18px',v:'18'},{label:'20px',v:'20'},{label:'24px',v:'24'}].map(s=>(
+                  <Dropdown.Item key={s.v} onClick={()=>insertText(s.v,'','size')} className="small py-1 px-3"><span style={{fontSize:`${s.v}px`}}>{s.label}</span></Dropdown.Item>
                 ))}
               </Dropdown.Menu>
             </Dropdown>
@@ -724,11 +789,19 @@ const RichEditor = forwardRef(({
             <Dropdown.Item onClick={() => insertText('', '', 'spoiler')} className="d-flex align-items-center gap-2 py-2 px-3">
               <Clapperboard size={16} /> {lang === 'ru' ? 'Спойлер' : 'Spoiler'}
             </Dropdown.Item>
+            <Dropdown.Item onClick={openAbbrModal} className="d-flex align-items-center gap-2 py-2 px-3">
+              <HelpCircle size={16} /> {lang === 'ru' ? 'Аббревиатура / Подсказка' : 'Abbreviation / Tooltip'}
+            </Dropdown.Item>
+            <Dropdown.Item onClick={() => insertText('[html]', '[/html]')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <Code size={16} /> HTML
+            </Dropdown.Item>
           </>
         ) : (
           <div className="d-flex align-items-center gap-1">
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'quote')} title="Quote"><Quote size={16} /></Button>
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'spoiler')} title="Spoiler"><Clapperboard size={15} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={openAbbrModal} title={lang === 'ru' ? 'Аббревиатура / Подсказка' : 'Abbreviation / Tooltip'}><HelpCircle size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[html]', '[/html]')} title="HTML"><Code size={16} /></Button>
           </div>
         );
       case 'media':
@@ -888,6 +961,44 @@ const RichEditor = forwardRef(({
             required
             autoFocus
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleLinkSubmit(e); } }}
+          />
+        </Form.Group>
+      </ForumModal>
+
+      <ForumModal
+        show={showAbbrModal}
+        onHide={() => closeModalWithFocus(setShowAbbrModal)}
+        title={lang === 'ru' ? 'Вставить аббревиатуру / подсказку' : 'Insert Abbreviation / Tooltip'}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowAbbrModal)}>
+              {lang === 'ru' ? 'Отмена' : 'Cancel'}
+            </Button>
+            <Button variant="primary" onClick={handleAbbrSubmit}>
+              {lang === 'ru' ? 'Вставить' : 'Insert'}
+            </Button>
+          </>
+        }
+      >
+        <Form.Group className="mb-3">
+          <Form.Label>{lang === 'ru' ? 'Текст' : 'Text'}</Form.Label>
+          <Form.Control
+            type="text"
+            value={abbrData.text}
+            onChange={e => setAbbrData({ ...abbrData, text: e.target.value })}
+            placeholder={lang === 'ru' ? 'Слово или текст...' : 'Word or text...'}
+            autoFocus
+          />
+        </Form.Group>
+        <Form.Group>
+          <Form.Label>{lang === 'ru' ? 'Описание / Подсказка' : 'Description / Tooltip'}</Form.Label>
+          <Form.Control
+            type="text"
+            value={abbrData.title}
+            onChange={e => setAbbrData({ ...abbrData, title: e.target.value })}
+            placeholder={lang === 'ru' ? 'Значение или описание...' : 'Definition or explanation...'}
+            required
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAbbrSubmit(e); } }}
           />
         </Form.Group>
       </ForumModal>

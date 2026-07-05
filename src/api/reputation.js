@@ -162,6 +162,18 @@ export const fetchReputationLogs = async (uid, page = 1, pageSize = 20) => {
 };
 
 /**
+ * fetchPostVoters
+ * Fetches the list of users who voted on a specific post (via Cloud Function).
+ * Returns { voters: [{ voter_id, voter_nickname, value, created_at }], total }.
+ */
+export const fetchPostVoters = async (postId, limit = 10) => {
+  const getVoters = httpsCallable(functions, 'getPostVoters');
+  const result = await getVoters({ postId, limit });
+  return result.data;
+};
+
+
+/**
  * hasVotedOnPost
  * Quick check if user already voted on a post using the deterministic ID.
  */

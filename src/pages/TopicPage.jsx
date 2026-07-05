@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNotifications } from '../api/notifications';
 import { voteOnPost, getVotesInTopic, updateReputationComment } from '../api/reputation';
+import ReputationHoverPreview from '../components/common/ReputationHoverPreview';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
 import { resolveField } from '../utils/text';
@@ -1712,45 +1713,53 @@ const TopicPage = () => {
                       {/* Reputation / Voting Buttons */}
                       {settings?.enableReputation && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (
                         <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
-                          <div
-                            className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
-                            title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
-                              ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
-                              : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
-                            onClick={() => {
-                              const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                              if (post.author_id === profile?.uid || authorData?.status === 'banned') return;
+                          <ReputationHoverPreview
+                            postId={post.id}
+                            targetUid={post.author_id}
+                            lang={lang}
+                            disabled={!post.reputation}
+                          >
+                            <div
+                              className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
+                              title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
+                                ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
+                                : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
+                              onClick={() => {
+                                const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                                if (post.author_id === profile?.uid || authorData?.status === 'banned') return;
 
-                              // If user has permission to use (vote), show modal or toggle controls
-                              // If they DON'T have permission, they can still view details if they clicked an existing vote?
-                              // Actually, let's stick to the rule: if no role perm, can only read (see counter).
-                              if (!hasPermission(PERMISSIONS.USE_REPUTATION)) {
-                                // Maybe allow viewing info if there are votes?
+                                // If user has permission to use (vote), show modal or toggle controls
+                                // If they DON'T have permission, they can still view details if they clicked an existing vote?
+                                // Actually, let's stick to the rule: if no role perm, can only read (see counter).
+                                if (!hasPermission(PERMISSIONS.USE_REPUTATION)) {
+                                  // Maybe allow viewing info if there are votes?
+                                  if (myVotes[post.id]) {
+                                    setSelectedVote(myVotes[post.id]);
+                                    setShowVoteInfoModal(true);
+                                  }
+                                  return;
+                                }
+
                                 if (myVotes[post.id]) {
                                   setSelectedVote(myVotes[post.id]);
                                   setShowVoteInfoModal(true);
+                                } else if (settings?.reputationStyle === 'positive_only') {
+                                  handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
+                                } else {
+                                  setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
                                 }
-                                return;
-                              }
+                              }}
+                            >
+                              <Award size={14} className="text-accent" />
+                              <strong>{post.reputation || 0}</strong>
+                              {myVotes[post.id] && (
+                                <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
+                                  ({myVotes[post.id].value > 0 ? '+1' : '-1'})
+                                </span>
+                              )}
+                            </div>
+                          </ReputationHoverPreview>
 
-                              if (myVotes[post.id]) {
-                                setSelectedVote(myVotes[post.id]);
-                                setShowVoteInfoModal(true);
-                              } else if (settings?.reputationStyle === 'positive_only') {
-                                handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
-                              } else {
-                                setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
-                              }
-                            }}
-                          >
-                            <Award size={14} className="text-accent" />
-                            <strong>{post.reputation || 0}</strong>
-                            {myVotes[post.id] && (
-                              <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
-                                ({myVotes[post.id].value > 0 ? '+1' : '-1'})
-                              </span>
-                            )}
-                          </div>
 
                           {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (
                             <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
