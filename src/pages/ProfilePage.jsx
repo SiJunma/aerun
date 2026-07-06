@@ -16,6 +16,7 @@ import { resolveField } from '../utils/text';
 import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
+import { subscribeToDesigns } from '../api/designs';
 import Timestamp from '../components/common/Timestamp';
 import BBCode from '../components/common/BBCode';
 
@@ -78,8 +79,16 @@ const ProfilePage = () => {
 
   // Reputation Voting State
   const [showRepModal, setShowRepModal] = useState(false);
-  const [repValue, setRepValue] = useState(1);
   const [repComment, setRepComment] = useState('');
+  const [repValue, setRepValue] = useState(1);
+
+  const [designs, setDesigns] = useState([]);
+
+  useEffect(() => {
+    return subscribeToDesigns(setDesigns);
+  }, []);
+
+  const profileRef = useRef(null);
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
   const [totalRepLogs, setTotalRepLogs] = useState(0);
@@ -1445,6 +1454,28 @@ const ProfilePage = () => {
                             </Dropdown>
                           </Form.Group>
                         </Col>
+                        {settings?.allowUserCustomDesign && (
+                          <Col md={12}>
+                            <Form.Group className="mb-3">
+                              <Form.Label className="fw-bold">{t('profile.theme')} (Custom Designs)</Form.Label>
+                              <Form.Select 
+                                value={accountFormData.theme} 
+                                onChange={(e) => setAccountFormData({ ...accountFormData, theme: e.target.value })}
+                              >
+                                <option value="dark">{t('profile.theme_dark')}</option>
+                                <option value="light">{t('profile.theme_light')}</option>
+                                <option value="neutral">{t('profile.theme_neutral')}</option>
+                                {designs.filter(d => d.isActive && d.showInList).length > 0 && (
+                                  <optgroup label="Custom Designs">
+                                    {designs.filter(d => d.isActive && d.showInList).map(d => (
+                                      <option key={d.id} value={d.id}>{d.name}</option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                        )}
                       </Row>
 
                       {profile?.role_id !== 'spectator' && (

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useTheme } from '../../contexts/ThemeProvider';
+import { useDesign } from '../../contexts/DesignProvider';
 import { Bell, User, LogOut, MessageCircle, Palette, Check } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
 import { subscribeToDmList } from '../../api/dms';
@@ -14,6 +15,7 @@ const Navigation = () => {
   const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS } = useAuth();
   const { t, lang } = useI18n();
   const { theme, changeGuestTheme } = useTheme();
+  const { activeDesign } = useDesign();
   const navigate = useNavigate();
   const [adminUnread, setAdminUnread] = React.useState(0);
   const [userUnread, setUserUnread] = React.useState(0);
@@ -76,18 +78,23 @@ const Navigation = () => {
 
   // ── Dynamic browser tab title ───────────────────────────────
   React.useEffect(() => {
-    const rawName = settings?.forumName;
-    const baseName =
-      (typeof rawName === 'object' && rawName !== null)
-        ? (rawName[profile?.settings?.language] || rawName.ru || rawName.en || 'Forum')
-        : (rawName || 'Forum');
+    let baseName = 'Forum';
+    if (activeDesign?.forumTitle) {
+      baseName = activeDesign.forumTitle;
+    } else {
+      const rawName = settings?.forumName;
+      baseName =
+        (typeof rawName === 'object' && rawName !== null)
+          ? (rawName[profile?.settings?.language] || rawName.ru || rawName.en || 'Forum')
+          : (rawName || 'Forum');
+    }
 
     const totalBadge = totalUnread + dmUnread;
     document.title = totalBadge > 0 ? `(${totalBadge}) ${baseName}` : baseName;
 
     // When the component unmounts, restore a plain title
     return () => { document.title = baseName; };
-  }, [totalUnread, dmUnread, settings?.forumName, profile?.settings?.language]);
+  }, [totalUnread, dmUnread, settings?.forumName, profile?.settings?.language, activeDesign]);
 
   const handleLogout = async () => {
     await logout();
@@ -131,17 +138,19 @@ const Navigation = () => {
             )}
           </div>
           <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="d-flex align-items-center gap-2">
-            {settings?.logoUrl && (
+            {(activeDesign?.logoUrl || settings?.logoUrl) && (
               <img 
-                src={settings.logoUrl} 
+                src={activeDesign?.logoUrl || settings.logoUrl} 
                 alt="Logo" 
                 style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
               />
             )}
             <span>
-              {(typeof settings?.forumName === 'object' && settings.forumName !== null)
-                ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-                : (settings?.forumName || 'Aerun Forum')}
+              {activeDesign?.forumTitle ? activeDesign.forumTitle : (
+                (typeof settings?.forumName === 'object' && settings.forumName !== null)
+                  ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+                  : (settings?.forumName || 'Aerun Forum')
+              )}
             </span>
           </Navbar.Brand>
         </div>

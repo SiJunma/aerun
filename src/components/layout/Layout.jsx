@@ -3,6 +3,7 @@ import Navigation from './Navbar';
 import { Container, Alert, Button } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { useDesign } from '../../contexts/DesignProvider';
 import ForumBackground from './ForumBackground';
 import { useLocation, Link } from 'react-router-dom';
 import ScrollButtons from '../common/ScrollButtons';
@@ -10,25 +11,38 @@ import ScrollButtons from '../common/ScrollButtons';
 const Layout = ({ children }) => {
   const { settings, profile, PERMISSIONS, emailUnverified, resendVerificationEmail, checkVerificationStatus } = useAuth();
   const { lang, t } = useI18n();
+  const { activeDesign } = useDesign();
   const location = useLocation();
 
   // Update document title dynamically
   React.useEffect(() => {
-    const forumName = (typeof settings?.forumName === 'object' && settings.forumName !== null)
-      ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-      : (settings?.forumName || 'Aerun Forum');
+    let forumName = 'Aerun Forum';
+    if (activeDesign?.forumTitle) {
+      forumName = activeDesign.forumTitle;
+    } else {
+      forumName = (typeof settings?.forumName === 'object' && settings.forumName !== null)
+        ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+        : (settings?.forumName || 'Aerun Forum');
+    }
     document.title = forumName;
-  }, [settings, lang]);
+  }, [settings, lang, activeDesign]);
 
   const sanitizedBanner = useMemo(() => {
-    if (!settings?.welcomeMessage) return null;
-    try {
-      let rawHtml = '';
+    let rawHtml = '';
+
+    if (activeDesign?.welcomeMessage) {
+      rawHtml = activeDesign.welcomeMessage;
+    } else if (settings?.welcomeMessage) {
       if (typeof settings.welcomeMessage === 'object' && settings.welcomeMessage !== null) {
         rawHtml = settings.welcomeMessage[lang] || settings.welcomeMessage.en || '';
       } else {
         rawHtml = settings.welcomeMessage;
       }
+    }
+
+    if (!rawHtml) return null;
+
+    try {
 
       if (!rawHtml || typeof rawHtml !== 'string') {
         if (rawHtml && typeof rawHtml === 'object') {
@@ -47,7 +61,7 @@ const Layout = ({ children }) => {
       console.error('Error sanitizing banner:', e);
       return null;
     }
-  }, [settings?.welcomeMessage, lang]);
+  }, [settings?.welcomeMessage, activeDesign?.welcomeMessage, lang]);
 
   return (
     <>
@@ -96,9 +110,11 @@ const Layout = ({ children }) => {
         <Container>
           <p className="mb-0 small">
             &copy; {new Date().getFullYear()} {
-              (typeof settings?.forumName === 'object' && settings.forumName !== null)
-                ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-                : (settings?.forumName || 'Aerun Forum')
+              activeDesign?.forumTitle ? activeDesign.forumTitle : (
+                (typeof settings?.forumName === 'object' && settings.forumName !== null)
+                  ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+                  : (settings?.forumName || 'Aerun Forum')
+              )
             }
           </p>
         </Container>

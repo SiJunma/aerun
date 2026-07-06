@@ -9,6 +9,7 @@ import {
 import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
+import { subscribeToDesigns, createDesign, updateDesign, deleteDesign } from '../api/designs';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
 import Timestamp from '../components/common/Timestamp';
 import { InputGroup } from 'react-bootstrap';
@@ -16,13 +17,14 @@ import ForumModal from '../components/common/ForumModal';
 import {
   UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2,
   Search, Award, Pin, Lock, Settings, MessageSquareOff,
-  Bell, BellOff, ArrowRightLeft, Send, FilePen, User
+  Bell, BellOff, ArrowRightLeft, Send, FilePen, User, Palette, Copy, Eye, EyeOff
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
+import DesignsTab from '../components/admin/DesignsTab';
 const ROLE_LEVELS = {
   'root': 100,
   'admin': 90,
@@ -45,6 +47,7 @@ const AdminPage = () => {
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState('');
+  const [designs, setDesigns] = useState([]);
 
   // Modal State
   const [showCatModal, setShowCatModal] = useState(false);
@@ -69,6 +72,12 @@ const AdminPage = () => {
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState({ role_id: '' });
 
+  const [showDesignModal, setShowDesignModal] = useState(false);
+  const [editingDesign, setEditingDesign] = useState(null);
+  const [designForm, setDesignForm] = useState({
+    name: '', description: '', logoUrl: '', forumTitle: '',
+    welcomeMessage: '', css: '', js: '', showInList: true
+  });
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -94,6 +103,7 @@ const AdminPage = () => {
   const canAccessTab = useCallback((tab) => {
     switch (tab) {
       case 'settings': return hasPermission(PERMISSIONS.MANAGE_FORUM);
+      case 'designs': return hasPermission(PERMISSIONS.MANAGE_FORUM);
       case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
       case 'roles': return hasPermission(PERMISSIONS.MANAGE_ROLES);
       case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
@@ -116,7 +126,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
-      const tabs = ['settings', 'users', 'roles', 'categories', 'audit'];
+      const tabs = ['settings', 'designs', 'users', 'roles', 'categories', 'audit'];
       const firstAvailable = tabs.find(t => canAccessTab(t));
       if (firstAvailable) {
         setActiveTab(firstAvailable);
@@ -139,6 +149,8 @@ const AdminPage = () => {
     enableDice: true,
     allowGifAvatars: true,
     allowGifInPosts: true,
+    allowUserCustomDesign: true,
+    defaultDesignId: '',
     whitelistMode: true,
     requireApproval: true,
     logoUrl: '',
@@ -178,6 +190,8 @@ const AdminPage = () => {
           reputationStyle: data.reputationStyle || 'both',
           allowGifAvatars: data.allowGifAvatars ?? true,
           allowGifInPosts: data.allowGifInPosts ?? true,
+          allowUserCustomDesign: data.allowUserCustomDesign ?? true,
+          defaultDesignId: data.defaultDesignId || '',
           logoUrl: data.logoUrl || '',
           bgLight: data.bgLight || 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
           bgDark: data.bgDark || 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
@@ -189,12 +203,14 @@ const AdminPage = () => {
     const unsubCats = subscribeToCategories(setCategories);
     const unsubGroups = subscribeToCategoryGroups(setGroups);
     const unsubUsers = subscribeToAllUsers(setUsers);
+    const unsubDesigns = subscribeToDesigns(setDesigns);
 
     return () => {
       unsubSettings();
       unsubCats();
       unsubGroups();
       unsubUsers();
+      unsubDesigns();
     };
   }, []);
 
@@ -847,6 +863,37 @@ const AdminPage = () => {
             </div>
           </div>
 
+          <hr className="my-5" />
+          <h5 className="mb-4 text-primary">{t('admin.settings.design_section')}</h5>
+          <div className="ms-2">
+            <Form.Check
+              type="switch"
+              id="custom-design-switch"
+              label={t('admin.settings.allow_user_custom_design')}
+              className="mb-3 fw-bold"
+              checked={settings.allowUserCustomDesign ?? true}
+              onChange={(e) => setSettings({ ...settings, allowUserCustomDesign: e.target.checked })}
+            />
+            <div className="small text-muted mb-4 opacity-75">
+              {t('admin.settings.allow_user_custom_design_help')}
+            </div>
+            <Form.Group className="mb-4" controlId="defaultDesignId" style={{ maxWidth: '400px' }}>
+              <Form.Label className="fw-bold">{t('admin.settings.default_design')}</Form.Label>
+              <Form.Select
+                value={settings.defaultDesignId || ''}
+                onChange={(e) => setSettings({ ...settings, defaultDesignId: e.target.value })}
+              >
+                <option value="">{t('admin.settings.default_design_none')}</option>
+                {designs.filter(d => d.isActive).map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </Form.Select>
+              <div className="small text-muted mt-1 opacity-75">
+                {t('admin.settings.default_design_help')}
+              </div>
+            </Form.Group>
+          </div>
+
           <Button
             variant="primary"
             className="px-5"
@@ -1366,6 +1413,11 @@ const AdminPage = () => {
             <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">{t('admin.tabs.settings')}</Nav.Link>
           </Nav.Item>
         )}
+        {hasPermission(PERMISSIONS.MANAGE_FORUM) && (
+          <Nav.Item>
+            <Nav.Link eventKey="designs" className="px-4 fw-bold border-0">{t('admin.tabs.designs')}</Nav.Link>
+          </Nav.Item>
+        )}
         {(hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && (
           <Nav.Item>
             <Nav.Link eventKey="users" className="px-4 fw-bold border-0">{t('admin.tabs.users')}</Nav.Link>
@@ -1389,6 +1441,14 @@ const AdminPage = () => {
       </Nav>
 
       {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
+      {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_FORUM) && (
+        <DesignsTab 
+          designs={designs} 
+          settings={settings} 
+          updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
+          userId={user.uid}
+        />
+      )}
       {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
       {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
       {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}

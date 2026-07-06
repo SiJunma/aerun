@@ -173,6 +173,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // --- Custom Designs ---
+    match /designs/{designId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // --- Global Stats ---
     match /global_stats/{docId} {
       allow read: if true;

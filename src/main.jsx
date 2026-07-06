@@ -9,6 +9,7 @@ import { AuthProvider } from './contexts/AuthProvider'
 import { I18nProvider } from './contexts/I18nProvider'
 import { ThemeProvider } from './contexts/ThemeProvider'
 import { ToastProvider } from './contexts/ToastProvider'
+import { DesignProvider } from './contexts/DesignProvider'
 
 // Prevent harmless but noisy Firebase WebChannel internal errors from spamming the console
 const originalConsoleError = console.error;
@@ -26,9 +27,11 @@ createRoot(document.getElementById('root')).render(
       <AuthProvider>
         <I18nProvider>
           <ThemeProvider>
-            <ToastProvider>
-              <App />
-            </ToastProvider>
+            <DesignProvider>
+              <ToastProvider>
+                <App />
+              </ToastProvider>
+            </DesignProvider>
           </ThemeProvider>
         </I18nProvider>
       </AuthProvider>
