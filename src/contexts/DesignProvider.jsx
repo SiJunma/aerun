@@ -6,6 +6,8 @@ const DesignContext = createContext();
 
 export const useDesign = () => useContext(DesignContext);
 
+const BUILTIN_THEMES = ['dark', 'light', 'neutral'];
+
 export const DesignProvider = ({ children }) => {
   const { settings, profile } = useAuth();
   const [designs, setDesigns] = useState([]);
@@ -29,26 +31,37 @@ export const DesignProvider = ({ children }) => {
       targetId = profile.settings.theme;
     }
 
-    // Fallback to default
+    // Fallback to global default
     if (!targetId && settings?.defaultDesignId) {
       targetId = settings.defaultDesignId;
     }
 
     if (!targetId) return null;
 
+    // Built-in theme IDs ('dark','light','neutral') are valid defaults,
+    // but they don't have a custom design entry — return null to let
+    // ThemeProvider handle them via data-theme attribute.
+    if (BUILTIN_THEMES.includes(targetId) && targetId !== previewId) {
+      return null;
+    }
+
     const design = designs.find(d => d.id === targetId);
-    
+
     // Only allow inactive designs if we are previewing them explicitly
     if (design && (design.isActive || targetId === previewId)) {
       return design;
     }
 
-    // If the targeted design is inactive or deleted, fallback to default if it wasn't the default we were looking for
+    // Targeted design is inactive or deleted — try the global default
     if (settings?.defaultDesignId && targetId !== settings.defaultDesignId) {
-       const fallback = designs.find(d => d.id === settings.defaultDesignId);
-       if (fallback && fallback.isActive) return fallback;
+      const defaultId = settings.defaultDesignId;
+      // If the global default is also a built-in theme, return null gracefully
+      if (BUILTIN_THEMES.includes(defaultId)) return null;
+      const fallback = designs.find(d => d.id === defaultId);
+      if (fallback && fallback.isActive) return fallback;
     }
 
+    // No custom design found → let built-in theme apply
     return null;
   }, [designs, settings, profile?.settings?.theme, previewId]);
 

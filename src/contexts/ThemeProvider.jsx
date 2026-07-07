@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth } from './AuthProvider';
 
@@ -7,7 +6,15 @@ const ThemeContext = createContext();
 export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider = ({ children }) => {
-  const { profile } = useAuth();
+  const { profile, settings } = useAuth();
+  
+  const getFallbackTheme = useCallback(() => {
+    if (settings?.defaultDesignId && ['light', 'dark', 'neutral'].includes(settings.defaultDesignId)) {
+      return settings.defaultDesignId;
+    }
+    return 'dark';
+  }, [settings?.defaultDesignId]);
+
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('guest_theme') || 'dark';
   });
@@ -18,13 +25,25 @@ export const ThemeProvider = ({ children }) => {
       localStorage.setItem('guest_theme', profile.settings.theme);
     } else {
       // For guests or new users
-      setTheme(localStorage.getItem('guest_theme') || 'dark');
+      setTheme(localStorage.getItem('guest_theme') || getFallbackTheme());
     }
-  }, [profile]);
+  }, [profile, getFallbackTheme]);
 
   useEffect(() => {
-    document.body.setAttribute('data-theme', theme);
-  }, [theme]);
+    const isStandardTheme = ['light', 'dark', 'neutral'].includes(theme);
+    if (isStandardTheme) {
+      document.body.setAttribute('data-theme', theme);
+      document.body.removeAttribute('data-custom-design');
+    } else {
+      // If the theme is a custom design, we set the data-theme attribute to
+      // the standard base theme (usually 'dark', or light/neutral if the default design is light/neutral).
+      const baseTheme = (settings?.defaultDesignId && ['light', 'dark', 'neutral'].includes(settings.defaultDesignId))
+        ? settings.defaultDesignId
+        : 'dark';
+      document.body.setAttribute('data-theme', baseTheme);
+      document.body.setAttribute('data-custom-design', theme);
+    }
+  }, [theme, settings?.defaultDesignId]);
 
   const changeGuestTheme = useCallback((newTheme) => {
     setTheme(newTheme);

@@ -2,6 +2,7 @@ export const PERMISSIONS = {
   // Admin & System
   ADMIN_ACCESS: 'admin_access',
   MANAGE_FORUM: 'manage_forum',
+  MANAGE_DESIGNS: 'manage_designs',
   APPROVE_USERS: 'approve_users',
   BAN_USERS: 'ban_users',
   CHANGE_ROLES: 'change_roles',
@@ -49,6 +50,7 @@ export const CHIEF_ADMIN_ID = 'root';
 export const PERMISSION_LABELS = {
   [PERMISSIONS.ADMIN_ACCESS]: { en: 'Admin Panel Access', ru: 'Доступ к админке' },
   [PERMISSIONS.MANAGE_FORUM]: { en: 'Manage Forum Settings', ru: 'Настройки форума' },
+  [PERMISSIONS.MANAGE_DESIGNS]: { en: 'Manage Custom Designs', ru: 'Управление дизайнами' },
   [PERMISSIONS.APPROVE_USERS]: { en: 'Approve Users', ru: 'Одобрение пользователей' },
   [PERMISSIONS.BAN_USERS]: { en: 'Ban Users', ru: 'Блокировка пользователей' },
   [PERMISSIONS.CHANGE_ROLES]: { en: 'Change Roles', ru: 'Изменение ролей' },
@@ -97,6 +99,7 @@ export const PERMISSION_GROUPS = [
     permissions: [
       PERMISSIONS.ADMIN_ACCESS,
       PERMISSIONS.MANAGE_FORUM,
+      PERMISSIONS.MANAGE_DESIGNS,
       PERMISSIONS.APPROVE_USERS,
       PERMISSIONS.BAN_USERS,
       PERMISSIONS.DELETE_USERS,
@@ -182,6 +185,7 @@ export const DEFAULT_ROLES = [
     permissions: [
       PERMISSIONS.ADMIN_ACCESS,
       PERMISSIONS.MANAGE_FORUM,
+      PERMISSIONS.MANAGE_DESIGNS,
       PERMISSIONS.APPROVE_USERS,
       PERMISSIONS.BAN_USERS,
       PERMISSIONS.CHANGE_ROLES,

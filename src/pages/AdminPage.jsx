@@ -103,7 +103,7 @@ const AdminPage = () => {
   const canAccessTab = useCallback((tab) => {
     switch (tab) {
       case 'settings': return hasPermission(PERMISSIONS.MANAGE_FORUM);
-      case 'designs': return hasPermission(PERMISSIONS.MANAGE_FORUM);
+      case 'designs': return hasPermission(PERMISSIONS.MANAGE_DESIGNS);
       case 'users': return hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES);
       case 'roles': return hasPermission(PERMISSIONS.MANAGE_ROLES);
       case 'categories': return hasPermission(PERMISSIONS.MANAGE_CATEGORIES);
@@ -884,9 +884,18 @@ const AdminPage = () => {
                 onChange={(e) => setSettings({ ...settings, defaultDesignId: e.target.value })}
               >
                 <option value="">{t('admin.settings.default_design_none')}</option>
-                {designs.filter(d => d.isActive).map(d => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
+                <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
+                  <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
+                  <option value="light">{t('profile.theme_light') || 'Light'}</option>
+                  <option value="neutral">{t('profile.theme_neutral') || 'Neutral'}</option>
+                </optgroup>
+                {designs.filter(d => d.isActive).length > 0 && (
+                  <optgroup label={t('admin.settings.default_design_custom') || 'Custom Designs'}>
+                    {designs.filter(d => d.isActive).map(d => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </optgroup>
+                )}
               </Form.Select>
               <div className="small text-muted mt-1 opacity-75">
                 {t('admin.settings.default_design_help')}
@@ -1413,7 +1422,7 @@ const AdminPage = () => {
             <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">{t('admin.tabs.settings')}</Nav.Link>
           </Nav.Item>
         )}
-        {hasPermission(PERMISSIONS.MANAGE_FORUM) && (
+        {hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
           <Nav.Item>
             <Nav.Link eventKey="designs" className="px-4 fw-bold border-0">{t('admin.tabs.designs')}</Nav.Link>
           </Nav.Item>
@@ -1441,7 +1450,7 @@ const AdminPage = () => {
       </Nav>
 
       {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
-      {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_FORUM) && (
+      {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
         <DesignsTab 
           designs={designs} 
           settings={settings} 

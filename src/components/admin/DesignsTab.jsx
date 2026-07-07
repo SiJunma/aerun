@@ -177,14 +177,23 @@ const DesignsTab = ({ designs, settings, updateSettings, userId }) => {
           <Form.Group>
             <Form.Label className="fw-bold">{t('admin.designs.default_design')}</Form.Label>
             <Form.Select 
-              value={settings.defaultDesignId} 
+              value={settings.defaultDesignId || ''} 
               onChange={(e) => updateSettings({ ...settings, defaultDesignId: e.target.value })}
               className="w-auto min-w-200"
             >
-              <option value="">-- Built-in Theme --</option>
-              {designs.filter(d => d.isActive).map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
+              <option value="">{t('admin.settings.default_design_none') || '-- No override --'}</option>
+              <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
+                <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
+                <option value="light">{t('profile.theme_light') || 'Light'}</option>
+                <option value="neutral">{t('profile.theme_neutral') || 'Neutral'}</option>
+              </optgroup>
+              {designs.filter(d => d.isActive).length > 0 && (
+                <optgroup label={t('admin.settings.default_design_custom') || 'Custom Designs'}>
+                  {designs.filter(d => d.isActive).map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </Form.Select>
           </Form.Group>
         </Card.Body>
@@ -302,10 +311,18 @@ const DesignsTab = ({ designs, settings, updateSettings, userId }) => {
               value={deactivateModal.replacementId} 
               onChange={e => setDeactivateModal({ ...deactivateModal, replacementId: e.target.value })}
             >
-              <option value="">-- Built-in Theme --</option>
-              {designs.filter(d => d.isActive && d.id !== deactivateModal.designIdToDeactivate).map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
+              <optgroup label={t('admin.settings.default_design_builtin') || 'Built-in Themes'}>
+                <option value="dark">{t('profile.theme_dark') || 'Dark'}</option>
+                <option value="light">{t('profile.theme_light') || 'Light'}</option>
+                <option value="neutral">{t('profile.theme_neutral') || 'Neutral'}</option>
+              </optgroup>
+              {designs.filter(d => d.isActive && d.id !== deactivateModal.designIdToDeactivate).length > 0 && (
+                <optgroup label={t('admin.settings.default_design_custom') || 'Custom Designs'}>
+                  {designs.filter(d => d.isActive && d.id !== deactivateModal.designIdToDeactivate).map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </Form.Select>
           </Form.Group>
         </Modal.Body>

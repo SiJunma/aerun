@@ -1429,7 +1429,8 @@ const ProfilePage = () => {
                               >
                                 {accountFormData.theme === 'light' ? t('profile.theme_light') : 
                                  accountFormData.theme === 'dark' ? t('profile.theme_dark') : 
-                                 t('profile.theme_neutral')}
+                                 accountFormData.theme === 'neutral' ? t('profile.theme_neutral') :
+                                 designs.find(d => d.id === accountFormData.theme)?.name || accountFormData.theme || t('profile.theme_dark')}
                               </Dropdown.Toggle>
                               <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
                                 <Dropdown.Item 
@@ -1450,32 +1451,27 @@ const ProfilePage = () => {
                                 >
                                   {t('profile.theme_neutral')}
                                 </Dropdown.Item>
+                                {settings?.allowUserCustomDesign && designs.filter(d => d.isActive && d.showInList).length > 0 && (
+                                  <>
+                                    <Dropdown.Divider />
+                                    <Dropdown.Header className="small text-muted text-uppercase fw-bold opacity-75">
+                                      {lang === 'ru' ? 'Кастомные дизайны' : 'Custom Designs'}
+                                    </Dropdown.Header>
+                                    {designs.filter(d => d.isActive && d.showInList).map(d => (
+                                      <Dropdown.Item
+                                        key={d.id}
+                                        active={accountFormData.theme === d.id}
+                                        onClick={() => setAccountFormData({ ...accountFormData, theme: d.id })}
+                                      >
+                                        {d.name}
+                                      </Dropdown.Item>
+                                    ))}
+                                  </>
+                                )}
                               </Dropdown.Menu>
                             </Dropdown>
                           </Form.Group>
                         </Col>
-                        {settings?.allowUserCustomDesign && (
-                          <Col md={12}>
-                            <Form.Group className="mb-3">
-                              <Form.Label className="fw-bold">{t('profile.theme')} (Custom Designs)</Form.Label>
-                              <Form.Select 
-                                value={accountFormData.theme} 
-                                onChange={(e) => setAccountFormData({ ...accountFormData, theme: e.target.value })}
-                              >
-                                <option value="dark">{t('profile.theme_dark')}</option>
-                                <option value="light">{t('profile.theme_light')}</option>
-                                <option value="neutral">{t('profile.theme_neutral')}</option>
-                                {designs.filter(d => d.isActive && d.showInList).length > 0 && (
-                                  <optgroup label="Custom Designs">
-                                    {designs.filter(d => d.isActive && d.showInList).map(d => (
-                                      <option key={d.id} value={d.id}>{d.name}</option>
-                                    ))}
-                                  </optgroup>
-                                )}
-                              </Form.Select>
-                            </Form.Group>
-                          </Col>
-                        )}
                       </Row>
 
                       {profile?.role_id !== 'spectator' && (
