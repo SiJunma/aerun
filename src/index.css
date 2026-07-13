@@ -1268,6 +1268,51 @@ label.fw-bold {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
+/* ── MovePostsModal — post list rows ─────────────────────────────────────── */
+.move-posts-list {
+  border-color: var(--border-color) !important;
+}
+
+.move-post-row {
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.12s ease;
+  user-select: none;
+}
+
+.move-post-row:last-child {
+  border-bottom: none;
+}
+
+.move-post-row:not(.move-post-row--disabled):hover {
+  background-color: rgba(var(--primary-rgb), 0.05);
+}
+
+.move-post-row--selected {
+  background-color: rgba(var(--primary-rgb), 0.08) !important;
+  border-left: 3px solid var(--primary-color);
+}
+
+.move-post-row--disabled {
+  opacity: 0.45;
+}
+
+[data-theme='dark'] .move-post-row:not(.move-post-row--disabled):hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme='dark'] .move-post-row--selected {
+  background-color: rgba(var(--primary-rgb), 0.12) !important;
+}
+
+[data-theme='neutral'] .move-post-row:not(.move-post-row--disabled):hover {
+  background-color: rgba(140, 113, 82, 0.06);
+}
+
+[data-theme='neutral'] .move-post-row--selected {
+  background-color: rgba(140, 113, 82, 0.1) !important;
+  border-left-color: #8c7152;
+}
+
 /* Role Badges & Tags */
 .role-badge {
   display: inline-block;

@@ -630,6 +630,262 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
 };
 
 // Batch update topic fields (is_pinned, is_locked)
+/**
+ * Move a set of posts from their current topics to a target topic.
+ * Posts keep their original content and metadata; only topic_id changes.
+ * Counters for both source and target topics + their categories are updated.
+ *
+ * @param {string[]} postIds   IDs of posts to move
+ * @param {string}   targetTopicId  Destination topic ID
+ * @param {string}   performerId    UID of the moderator performing the action
+ */
+export const movePosts = async (postIds, targetTopicId, performerId) => {
+  if (!postIds || postIds.length === 0) return;
+
+  const targetTopicRef = doc(db, 'topics', targetTopicId);
+  const targetTopicSnap = await getDoc(targetTopicRef);
+  if (!targetTopicSnap.exists()) throw new Error('Target topic not found');
+  const targetTopicData = targetTopicSnap.data();
+  const targetCategoryId = targetTopicData.category_id;
+
+  // Get the target topic's first post (oldest post) to prevent moved posts from replacing it
+  const targetPostsQuery = query(
+    collection(db, 'posts'),
+    where('topic_id', '==', targetTopicId)
+  );
+  const targetPostsSnap = await getDocs(targetPostsQuery);
+  let targetFirstPost = null;
+  if (!targetPostsSnap.empty) {
+    const targetPostsList = targetPostsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    targetPostsList.sort((a, b) => {
+      const aTime = a.created_at?.toMillis?.() ?? 0;
+      const bTime = b.created_at?.toMillis?.() ?? 0;
+      return aTime - bTime; // oldest first
+    });
+    targetFirstPost = targetPostsList[0];
+  }
+
+  // Group posts by their source topic so we can update each source once
+  const sourceMap = {}; // { topicId: [postData, ...] }
+
+  for (const postId of postIds) {
+    const postSnap = await getDoc(doc(db, 'posts', postId));
+    if (!postSnap.exists()) continue;
+    const postData = { id: postId, ...postSnap.data() };
+    const srcId = postData.topic_id;
+    if (!sourceMap[srcId]) sourceMap[srcId] = [];
+    sourceMap[srcId].push(postData);
+  }
+
+  // For each source topic: move posts + update counters
+  for (const [sourceTopicId, sourcePosts] of Object.entries(sourceMap)) {
+    if (sourceTopicId === targetTopicId) continue; // already there
+
+    const count = sourcePosts.length;
+    const sourceTopicRef = doc(db, 'topics', sourceTopicId);
+    const sourceTopicSnap = await getDoc(sourceTopicRef);
+    const sourceCategoryId = sourceTopicSnap.exists() ? sourceTopicSnap.data().category_id : null;
+
+    // Batch: update each post's topic_id and make sure they don't precede the target's first post
+    const batch = writeBatch(db);
+
+    const sortedSourcePosts = [...sourcePosts].sort((a, b) => {
+      const aMs = a.created_at?.toMillis?.() ?? 0;
+      const bMs = b.created_at?.toMillis?.() ?? 0;
+      return aMs - bMs; // oldest first
+    });
+
+    const targetFirstPostMs = targetFirstPost?.created_at?.toMillis?.() ?? 0;
+    let nextAllowedMs = targetFirstPostMs + 1000; // 1 second after first post
+
+    for (const p of sortedSourcePosts) {
+      const postMs = p.created_at?.toMillis?.() ?? 0;
+      const updates = { topic_id: targetTopicId };
+
+      if (postMs <= targetFirstPostMs) {
+        // Adjust timestamp so it is chronologically after target's first post
+        updates.created_at = Timestamp.fromMillis(nextAllowedMs);
+        nextAllowedMs += 1000; // Increment for subsequent posts to maintain order
+      } else {
+        // Ensure chronological order is maintained and no overlap with shifted ones
+        if (postMs < nextAllowedMs) {
+          updates.created_at = Timestamp.fromMillis(nextAllowedMs);
+          nextAllowedMs += 1000;
+        } else {
+          nextAllowedMs = postMs + 1000;
+        }
+      }
+
+      batch.update(doc(db, 'posts', p.id), updates);
+    }
+
+    // Decrement source topic
+    batch.update(sourceTopicRef, { posts_count: increment(-count), updated_at: serverTimestamp() });
+    // Increment target topic
+    batch.update(targetTopicRef, { posts_count: increment(count), updated_at: serverTimestamp() });
+
+    // Update category posts counts if moved across different categories
+    if (sourceCategoryId && targetCategoryId && sourceCategoryId !== targetCategoryId) {
+      batch.update(doc(db, 'categories', sourceCategoryId), {
+        posts_count: increment(-count)
+      });
+      batch.update(doc(db, 'categories', targetCategoryId), {
+        posts_count: increment(count)
+      });
+    }
+
+    await batch.commit();
+
+    // Recalculate last_post for both topics (client-side sort to avoid composite index requirement)
+    const recalcTopicLastPost = async (topicId) => {
+      const q = query(
+        collection(db, 'posts'),
+        where('topic_id', '==', topicId)
+      );
+      const snap = await getDocs(q);
+      const tRef = doc(db, 'topics', topicId);
+      if (!snap.empty) {
+        const postsList = snap.docs.map(d => d.data());
+        postsList.sort((a, b) => {
+          const aTime = a.created_at?.toMillis?.() ?? 0;
+          const bTime = b.created_at?.toMillis?.() ?? 0;
+          return bTime - aTime; // Sort descending (newest first)
+        });
+        const latest = postsList[0];
+        await updateDoc(tRef, {
+          last_post_at: latest.created_at || null,
+          last_post_author: latest.author_name || null,
+          last_post_author_id: latest.author_id || null,
+          last_post_author_avatar: latest.author_avatar || null,
+          last_post_is_character: latest.is_character || false,
+          last_post_author_character_id: latest.author_character_id || null,
+        });
+      } else {
+        await updateDoc(tRef, {
+          last_post_at: null,
+          last_post_author: null,
+          last_post_author_id: null,
+          last_post_author_avatar: null,
+          last_post_is_character: null,
+          last_post_author_character_id: null,
+        });
+      }
+    };
+
+    await recalcTopicLastPost(sourceTopicId);
+    await recalcTopicLastPost(targetTopicId);
+
+    // Recalculate last_post for affected categories
+    const updateCatLastPost = async (catId) => {
+      const q = query(collection(db, 'topics'), where('category_id', '==', catId), orderBy('last_post_at', 'desc'), limit(1));
+      const snap = await getDocs(q);
+      const ref = doc(db, 'categories', catId);
+      if (!snap.empty) {
+        const top = snap.docs[0].data();
+        await updateDoc(ref, {
+          last_post_at: top.last_post_at || null,
+          last_post_author: top.last_post_author || null,
+          last_post_author_id: top.last_post_author_id || null,
+          last_post_topic_id: snap.docs[0].id || null,
+          last_post_topic_title: top.title || null,
+          last_post_is_character: top.last_post_is_character || false,
+          last_post_author_character_id: top.last_post_author_character_id || null,
+        });
+      } else {
+        await updateDoc(ref, {
+          last_post_at: null,
+          last_post_author: null,
+          last_post_author_id: null,
+          last_post_topic_id: null,
+          last_post_topic_title: null,
+          last_post_is_character: null,
+          last_post_author_character_id: null,
+        });
+      }
+    };
+
+    if (sourceCategoryId) await updateCatLastPost(sourceCategoryId);
+    if (targetCategoryId && targetCategoryId !== sourceCategoryId) await updateCatLastPost(targetCategoryId);
+
+    if (performerId) {
+      await logAdminAction('posts_moved', performerId, {
+        postIds: sourcePosts.map(p => p.id),
+        sourceTopicId,
+        targetTopicId,
+        count,
+      });
+    }
+  }
+};
+
+/**
+ * Create a new topic from a set of existing posts.
+ * The chronologically first post becomes the topic-starter; the rest become replies.
+ * Posts are moved (topic_id updated) just like movePosts.
+ *
+ * @param {string[]} postIds      IDs of posts to move into the new topic
+ * @param {{ title, description, category_id }} topicData  Metadata for the new topic
+ * @param {string}   performerId  UID of the moderator performing the action
+ * @returns {string} New topic ID
+ */
+export const createTopicFromPosts = async (postIds, topicData, performerId) => {
+  if (!postIds || postIds.length === 0) throw new Error('No posts selected');
+
+  // Fetch all posts and sort chronologically
+  const postSnaps = await Promise.all(postIds.map(id => getDoc(doc(db, 'posts', id))));
+  const validPosts = postSnaps
+    .filter(s => s.exists())
+    .map(s => ({ id: s.id, ...s.data() }))
+    .sort((a, b) => {
+      const aMs = a.created_at?.toMillis?.() ?? 0;
+      const bMs = b.created_at?.toMillis?.() ?? 0;
+      return aMs - bMs;
+    });
+
+  if (validPosts.length === 0) throw new Error('No valid posts found');
+
+  const firstPost = validPosts[0];
+
+  // Create the new topic (no first post yet — Cloud Function will handle counters)
+  const newTopicRef = doc(collection(db, 'topics'));
+  await setDoc(newTopicRef, {
+    category_id: topicData.category_id,
+    title: topicData.title,
+    description: topicData.description || '',
+    author_id: firstPost.author_id,
+    author_name: firstPost.author_name,
+    author_avatar: firstPost.author_avatar || '',
+    is_character: firstPost.is_character || false,
+    author_character_id: firstPost.author_character_id || null,
+    is_pinned: false,
+    is_locked: false,
+    views: 0,
+    reputation: 0,
+    posts_count: 0, // will be updated below
+    last_post_at: null,
+    last_post_author: null,
+    last_post_author_id: null,
+    last_post_author_avatar: null,
+    last_post_is_character: false,
+    last_post_author_character_id: null,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
+  });
+
+  // Move the posts into the new topic (reuse movePosts logic)
+  await movePosts(validPosts.map(p => p.id), newTopicRef.id, performerId);
+
+  if (performerId) {
+    await logAdminAction('topic_created_from_posts', performerId, {
+      newTopicId: newTopicRef.id,
+      title: topicData.title,
+      postIds: validPosts.map(p => p.id),
+    });
+  }
+
+  return newTopicRef.id;
+};
+
 export const batchUpdateTopics = async (topicIds, data, performerId) => {
   const promises = topicIds.map(async (id) => {
     const topicRef = doc(db, 'topics', id);

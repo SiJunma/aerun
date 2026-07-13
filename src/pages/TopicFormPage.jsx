@@ -10,12 +10,14 @@ import { createTopic, updateUser } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { resolveField } from '../utils/text';
+import { useToast } from '../contexts/ToastProvider';
 
 const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
   const { profile, user, recordActivity, markTopicRead, hasPermission, PERMISSIONS, settings } = useAuth();
+  const { showToast } = useToast();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -81,7 +83,17 @@ const TopicFormPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!title || !content || submitting) return;
+    if (submitting) return;
+
+    if (!title.trim()) {
+      showToast(lang === 'ru' ? 'Пожалуйста, введите заголовок темы' : 'Please enter a topic title', 'danger');
+      return;
+    }
+
+    if (!content.trim()) {
+      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      return;
+    }
 
     setSubmitting(true);
     recordActivity();

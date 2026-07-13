@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Button } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
-import { subscribeToCategories } from '../../api/categories';
+import { subscribeToCategories, subscribeToCategoryGroups } from '../../api/categories';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 import { resolveField } from '../../utils/text';
@@ -10,11 +10,14 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
   const { t, lang } = useI18n();
   const { hasPermission, PERMISSIONS } = useAuth();
   const [categories, setCategories] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [targetId, setTargetId] = useState('');
 
   useEffect(() => {
     if (show) {
-      return subscribeToCategories((cats) => {
+      setTargetId('');
+      
+      const unsubCats = subscribeToCategories((cats) => {
         const filtered = cats.filter(cat => {
           const isExcluded = excludeCategoryId && cat.id === excludeCategoryId;
           if (isExcluded) return false;
@@ -24,10 +27,17 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
         });
         setCategories(filtered);
       });
+
+      const unsubGroups = subscribeToCategoryGroups((grps) => {
+        setGroups(grps);
+      });
+
+      return () => {
+        unsubCats();
+        unsubGroups();
+      };
     }
   }, [show, excludeCategoryId, hasPermission, PERMISSIONS.VIEW_FORUM]);
-
-
 
   const handleConfirm = () => {
     if (targetId) {
@@ -35,6 +45,9 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
       onHide();
     }
   };
+
+  const groupsWithCats = groups.filter(g => categories.some(c => c.group_id === g.id));
+  const uncategorizedCats = categories.filter(c => !c.group_id || !groups.some(g => g.id === c.group_id));
 
   return (
     <ForumModal
@@ -54,20 +67,35 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
     >
       <div className="mb-3">
         {lang === 'ru' 
-          ? `Выберите категорию, в которую вы хотите перенести выбранные темы (${topicCount}):`
-          : `Select the target category for the selected topics (${topicCount}):`}
+          ? `Выберите форум, в который вы хотите перенести выбранные темы (${topicCount}):`
+          : `Select the target forum for the selected topics (${topicCount}):`}
       </div>
       <Form.Select 
         value={targetId} 
         onChange={(e) => setTargetId(e.target.value)}
         className="mb-2"
       >
-        <option value="">{lang === 'ru' ? 'Выберите категорию...' : 'Select category...'}</option>
-        {categories.map(cat => (
-          <option key={cat.id} value={cat.id}>
-            {resolveField(cat.title, lang)}
-          </option>
+        <option value="">{lang === 'ru' ? 'Выберите форум...' : 'Select forum...'}</option>
+        {groupsWithCats.map(group => (
+          <optgroup key={group.id} label={resolveField(group.title, lang)}>
+            {categories
+              .filter(cat => cat.group_id === group.id)
+              .map(cat => (
+                <option key={cat.id} value={cat.id}>
+                  {resolveField(cat.title, lang)}
+                </option>
+              ))}
+          </optgroup>
         ))}
+        {uncategorizedCats.length > 0 && (
+          <optgroup label={lang === 'ru' ? 'Без категории' : 'Uncategorized'}>
+            {uncategorizedCats.map(cat => (
+              <option key={cat.id} value={cat.id}>
+                {resolveField(cat.title, lang)}
+              </option>
+            ))}
+          </optgroup>
+        )}
       </Form.Select>
     </ForumModal>
   );

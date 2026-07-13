@@ -7,7 +7,7 @@ import { subscribeToCategories } from '../api/categories';
 import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
   updateUser, updateTopic,
-  deleteTopics, moveTopics, createDraftPost, updateDraftPost, publishDraft,
+  deleteTopics, moveTopics, movePosts, createDraftPost, updateDraftPost, publishDraft,
   subscribeToTopicDraft, deleteDraftPost, locatePost
 } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
@@ -15,6 +15,7 @@ import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
+import MovePostsModal from '../components/modals/MovePostsModal';
 import RichEditor from '../components/common/RichEditor';
 import BBCode from '../components/common/BBCode';
 import Timestamp from '../components/common/Timestamp';
@@ -93,8 +94,9 @@ const TopicPage = () => {
   const [togglingSub, setTogglingSub] = useState(false);
   const [unreadQuotes, setUnreadQuotes] = useState([]);
 
-  // Move Topic state
+  // Move Topic / Move Posts state
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [showMovePostsModal, setShowMovePostsModal] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [isPageLoading, setIsPageLoading] = useState(true);
 
@@ -755,9 +757,38 @@ const TopicPage = () => {
     }
   };
 
+  const handleMovePosts = async (postIds, targetTopicId) => {
+    try {
+      const isFirstPostMoved = posts.length > 0 && postIds.includes(posts[0].id);
+      const categoryId = topic?.category_id;
+
+      await movePosts(postIds, targetTopicId, user.uid);
+      showToast(t('forum.move_posts_success'));
+
+      if (isFirstPostMoved) {
+        if (categoryId) {
+          navigate(`/category/${categoryId}`);
+        } else {
+          navigate('/');
+        }
+      } else {
+        await loadPosts();
+      }
+    } catch (err) {
+      showToast(err.message, 'danger');
+      throw err; // let the modal keep submitting=false
+    }
+  };
+
   const handleReply = async (e) => {
     e?.preventDefault?.();
-    if (!replyContent.trim() || submitting) return;
+    if (submitting) return;
+
+    if (!replyContent.trim()) {
+      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      return;
+    }
+
     if (!user && !guestNickname.trim()) {
       showToast(lang === 'ru' ? 'Введите ваш никнейм' : 'Please enter your nickname', 'danger');
       return;
@@ -835,7 +866,11 @@ const TopicPage = () => {
   };
 
   const handleUpdateDraft = async () => {
-    if (!editContent.trim() || draftSaving) return;
+    if (draftSaving) return;
+    if (!editContent.trim()) {
+      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      return;
+    }
     setDraftSaving(true);
     try {
       const selectedChar = characters.find(c => c.id === editCharacterId);
@@ -916,7 +951,10 @@ const TopicPage = () => {
   };
 
   const handleSaveEdit = async (postId) => {
-    if (!editContent.trim()) return;
+    if (!editContent.trim()) {
+      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      return;
+    }
     recordActivity();
     try {
       const originalPost = posts.find(p => p.id === postId);
@@ -1232,6 +1270,15 @@ const TopicPage = () => {
                         >
                           <ArrowRightLeft size={14} />
                           {t('forum.move_topic')}
+                        </Dropdown.Item>
+                      )}
+                      {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
+                        <Dropdown.Item
+                          onClick={() => setShowMovePostsModal(true)}
+                          className="d-flex align-items-center gap-2"
+                        >
+                          <MessageSquare size={14} />
+                          {t('forum.move_posts')}
                         </Dropdown.Item>
                       )}
                       {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
@@ -2358,6 +2405,16 @@ const TopicPage = () => {
           onConfirm={handleMoveTopic}
           topicCount={1}
           excludeCategoryId={topic?.category_id}
+        />
+
+        {/* Move Posts Modal */}
+        <MovePostsModal
+          show={showMovePostsModal}
+          onHide={() => setShowMovePostsModal(false)}
+          posts={posts}
+          firstPostId={posts[0]?.id}
+          currentTopicId={id}
+          onConfirm={handleMovePosts}
         />
 
         <ForumModal
