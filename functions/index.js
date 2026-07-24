@@ -93,9 +93,257 @@ exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", as
         await batch.commit();
         logger.info(`Reputation reverted for deleted log ${snap.id}: target=${target_id}, value=${-value}`);
     } catch (error) {
-        logger.error(`Error reverting reputation for log ${snap.id}:`, error);
+      logger.error('Error rejecting character:', error);
+      throw new HttpsError('internal', 'Failed to reject character');
     }
-});
+  });
+
+/**
+ * locatePost (Callable)
+ * Resolves the page number of a given post inside a topic.
+ */
+exports.locatePost = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const { postId, itemsPerPage = 20 } = request.data;
+    if (!postId) return { found: false, reason: 'missing_post_id' };
+
+    const db = admin.firestore();
+    try {
+      const postSnap = await db.collection('posts').doc(postId).get();
+      if (!postSnap.exists) return { found: false, reason: 'not_found' };
+
+      const { topic_id: topicId, created_at: createdAt } = postSnap.data();
+      if (!topicId) return { found: false, reason: 'missing_topic_id' };
+
+      if (!createdAt) {
+        return { found: true, topicId, postId, page: 1, anchor: `#post-${postId}` };
+      }
+
+      const priorPostsQuery = db.collection('posts')
+        .where('topic_id', '==', topicId)
+        .where('created_at', '<', createdAt);
+
+      const countSnap = await priorPostsQuery.count().get();
+      const countBefore = countSnap.data().count;
+      const page = Math.floor(countBefore / itemsPerPage) + 1;
+
+      return { found: true, topicId, postId, page, anchor: `#post-${postId}` };
+    } catch (err) {
+      console.error('[locatePost]', err);
+      return { found: false, reason: 'error' };
+    }
+  }
+);
+
+/**
+ * locateUnreadPost (Callable)
+ * Resolves the page number of the first unread post in a topic based on lastVisitMs.
+ */
+exports.locateUnreadPost = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const { topicId, lastVisitMs, itemsPerPage = 20 } = request.data;
+    if (!topicId || !lastVisitMs) return { found: false, reason: 'missing_args' };
+
+    const db = admin.firestore();
+    try {
+      const priorPostsQuery = db.collection('posts')
+        .where('topic_id', '==', topicId)
+        .where('created_at', '<=', admin.firestore.Timestamp.fromMillis(lastVisitMs));
+
+      const countSnap = await priorPostsQuery.count().get();
+      const countBefore = countSnap.data().count;
+      
+      const unreadPage = Math.floor(countBefore / itemsPerPage) + 1;
+      return { found: true, page: unreadPage };
+    } catch (err) {
+      console.error('[locateUnreadPost]', err);
+      return { found: false, reason: 'error' };
+    }
+  }
+);
+
+/**
+ * getSecuredCategories (Callable)
+ * Retrieves categories the user has permission to view.
+ */
+exports.getSecuredCategories = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+
+    let requesterRole = 'guest';
+    let isRestricted = false;
+    
+    if (uid) {
+      const userDoc = await db.collection("users").doc(uid).get();
+      if (userDoc.exists) {
+        const uData = userDoc.data();
+        requesterRole = uData.role_id || 'player';
+        if (requesterRole === 'pending') isRestricted = true;
+      }
+    }
+
+    const settingsSnap = await db.collection("settings").doc("global").get();
+    const settings = settingsSnap.exists ? settingsSnap.data() : {};
+    const isWhitelistOff = !settings.whitelistMode;
+
+    let effectiveRole = requesterRole;
+    if (isRestricted && isWhitelistOff) effectiveRole = 'spectator';
+
+    const rolesSnap = await db.collection("roles").get();
+    const rolesMap = {};
+    rolesSnap.forEach(d => rolesMap[d.id] = d.data());
+
+    const categoriesSnap = await db.collection("categories").orderBy('order', 'asc').get();
+    const categories = [];
+
+    categoriesSnap.forEach(doc => {
+      const catData = doc.data();
+      catData.id = doc.id;
+
+      if (['root', 'admin'].includes(requesterRole)) {
+        categories.push(catData);
+        return;
+      }
+
+      const catPerms = catData.permissions || {};
+      const allowedRoles = catPerms['view_forum'];
+
+      let hasViewPerm = false;
+      if (!allowedRoles) {
+        const roleData = rolesMap[effectiveRole];
+        hasViewPerm = (roleData?.permissions || []).includes('view_forum');
+      } else {
+        if (allowedRoles.includes(effectiveRole)) {
+          hasViewPerm = true;
+        } else {
+          const roleData = rolesMap[effectiveRole];
+          if (roleData?.base_role_id && allowedRoles.includes(roleData.base_role_id)) {
+            hasViewPerm = true;
+          }
+        }
+      }
+
+      if (hasViewPerm) {
+        categories.push(catData);
+      }
+    });
+
+    return { categories };
+  }
+);
+
+/**
+ * getSecuredTopics (Callable)
+ * Retrieves topics for a category the user has permission to view.
+ */
+exports.getSecuredTopics = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const { categoryId, page = 1, pageSize = 20 } = request.data;
+    if (!categoryId) throw new HttpsError('invalid-argument', 'Missing categoryId');
+
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+
+    let requesterRole = 'guest';
+    let isRestricted = false;
+    
+    if (uid) {
+      const userDoc = await db.collection("users").doc(uid).get();
+      if (userDoc.exists) {
+        const uData = userDoc.data();
+        requesterRole = uData.role_id || 'player';
+        if (requesterRole === 'pending') isRestricted = true;
+      }
+    }
+
+    const catDoc = await db.collection("categories").doc(categoryId).get();
+    if (!catDoc.exists) throw new HttpsError('not-found', 'Category not found');
+    const catData = catDoc.data();
+
+    // Permissions check
+    let hasViewPerm = false;
+    if (['root', 'admin'].includes(requesterRole)) {
+      hasViewPerm = true;
+    } else {
+      const settingsSnap = await db.collection("settings").doc("global").get();
+      const settings = settingsSnap.exists ? settingsSnap.data() : {};
+      const isWhitelistOff = !settings.whitelistMode;
+      let effectiveRole = requesterRole;
+      if (isRestricted && isWhitelistOff) effectiveRole = 'spectator';
+
+      const catPerms = catData.permissions || {};
+      const allowedRoles = catPerms['view_forum'];
+
+      if (!allowedRoles) {
+        const roleDoc = await db.collection("roles").doc(effectiveRole).get();
+        if (roleDoc.exists && (roleDoc.data().permissions || []).includes('view_forum')) {
+          hasViewPerm = true;
+        }
+      } else {
+        if (allowedRoles.includes(effectiveRole)) {
+          hasViewPerm = true;
+        } else {
+          const roleDoc = await db.collection("roles").doc(effectiveRole).get();
+          if (roleDoc.exists && roleDoc.data().base_role_id && allowedRoles.includes(roleDoc.data().base_role_id)) {
+            hasViewPerm = true;
+          }
+        }
+      }
+    }
+
+    if (!hasViewPerm) {
+      throw new HttpsError('permission-denied', 'You do not have permission to view topics in this category.');
+    }
+
+    const startIndex = (page - 1) * pageSize;
+    
+    // 1. Fetch pinned topics (ignoring pagination limits for them, they are small in number)
+    const pinnedSnap = await db.collection("topics")
+      .where("category_id", "==", categoryId)
+      .where("is_pinned", "==", true)
+      .orderBy("last_post_at", "desc")
+      .get();
+      
+    const pinnedTopics = [];
+    pinnedSnap.forEach(doc => {
+      const data = doc.data();
+      data.id = doc.id;
+      if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
+      if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
+      if (data.last_post_at) data.last_post_at = data.last_post_at.toDate().toISOString();
+      pinnedTopics.push(data);
+    });
+
+    // 2. Fetch regular topics
+    const topicsSnap = await db.collection("topics")
+      .where("category_id", "==", categoryId)
+      .where("is_pinned", "==", false)
+      .orderBy("last_post_at", "desc")
+      .offset(startIndex)
+      .limit(pageSize)
+      .get();
+      
+    const topics = [];
+    topicsSnap.forEach(doc => {
+      const data = doc.data();
+      data.id = doc.id;
+      if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
+      if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
+      if (data.last_post_at) data.last_post_at = data.last_post_at.toDate().toISOString();
+      topics.push(data);
+    });
+
+    return { 
+      pinned: page === 1 ? pinnedTopics : [], // Only send pinned on page 1
+      topics
+    };
+  }
+);
 
 /**
  * onTopicCreated
@@ -919,36 +1167,82 @@ exports.getPostVoters = onCall(
 exports.getSecuredPosts = onCall(
   { enforceAppCheck: false, minInstances: 0 },
   async (request) => {
-    const { topicId } = request.data;
+    const { topicId, page = 1, pageSize = 20 } = request.data;
     if (!topicId) {
       throw new HttpsError('invalid-argument', 'Missing topicId');
     }
 
+    // 1. Fetch the topic to get category_id
+    const topicDoc = await db.collection('topics').doc(topicId).get();
+    if (!topicDoc.exists) {
+      throw new HttpsError('not-found', 'Topic not found');
+    }
+    const topicData = topicDoc.data();
+    const categoryId = topicData.category_id;
+
+    // 2. Fetch User Role & Post Count
     const uid = request.auth ? request.auth.uid : null;
-    const db = admin.firestore();
     let canViewMasterDice = false;
+    let canBypassHideTags = false;
+    let userPostCount = 0;
+    let requesterRole = 'guest';
 
     if (uid) {
       const userDoc = await db.collection("users").doc(uid).get();
       if (userDoc.exists) {
-        const roleId = userDoc.data().role_id;
-        if (['root', 'admin', 'moderator'].includes(roleId)) {
+        const uData = userDoc.data();
+        requesterRole = uData.role_id || 'player';
+        userPostCount = uData.post_count || 0;
+        
+        if (['root', 'admin', 'moderator'].includes(requesterRole)) {
           canViewMasterDice = true;
+          canBypassHideTags = true;
         } else {
-          const roleDoc = await db.collection("roles").doc(roleId).get();
+          const roleDoc = await db.collection("roles").doc(requesterRole).get();
           if (roleDoc.exists) {
             const perms = roleDoc.data().permissions || [];
-            if (perms.includes('view_master_dice')) {
-              canViewMasterDice = true;
-            }
+            if (perms.includes('view_master_dice')) canViewMasterDice = true;
+            if (perms.includes('bypass_hide_tags')) canBypassHideTags = true;
           }
         }
       }
     }
 
+    // 3. Determine Effective Role and Check view_forum permission
+    let isRestricted = requesterRole === 'pending';
+    const settingsSnap = await db.collection("settings").doc("global").get();
+    const settings = settingsSnap.exists ? settingsSnap.data() : {};
+    const isWhitelistOff = !settings.whitelistMode;
+    let effectiveRole = requesterRole;
+    if (isRestricted && isWhitelistOff) effectiveRole = 'spectator';
+
+    // Global permission map for efficient check
+    const rolesSnap = await db.collection("roles").get();
+    const rolesMap = {};
+    rolesSnap.forEach(d => rolesMap[d.id] = d.data());
+
+    const hasViewPermission = (catId) => {
+      if (['root', 'admin'].includes(requesterRole)) return true;
+      if (!catId) return true; // uncategorized topics are visible
+
+      const globalPerms = (rolesMap[effectiveRole]?.permissions || []);
+      if (globalPerms.includes('view_forum')) return true;
+
+      const categoryOverrides = rolesMap[effectiveRole]?.category_overrides || {};
+      const catPerms = categoryOverrides[catId] || [];
+      return catPerms.includes('view_forum');
+    };
+
+    if (!hasViewPermission(categoryId)) {
+      throw new HttpsError('permission-denied', 'You do not have permission to view posts in this category.');
+    }
+
+    const startIndex = (page - 1) * pageSize;
     const postsSnap = await db.collection('posts')
       .where('topic_id', '==', topicId)
       .orderBy('created_at', 'asc')
+      .offset(startIndex)
+      .limit(pageSize)
       .get();
 
     const posts = [];
@@ -969,6 +1263,42 @@ exports.getSecuredPosts = onCall(
           }
         });
       }
+
+      // [hide] scrubbing logic
+      if (data.content && typeof data.content === 'string') {
+        const isAuthor = data.author_id === uid;
+        if (!canBypassHideTags && !isAuthor) {
+          data.content = data.content.replace(/\[hide(?:=([^\]]+))?\]([\s\S]*?)\[\/hide\]/gi, (match, param, innerContent) => {
+            const val = param ? param.trim() : 'hidden';
+            let isVisible = false;
+
+            if (val === 'hidden') {
+              isVisible = false; // Only bypass can see this, which we already checked
+            } else if (val.startsWith('@')) {
+              // Addressed hide
+              const targetUid = val.substring(1).trim();
+              if (uid && uid === targetUid) isVisible = true;
+            } else {
+              // Post count hide
+              const threshold = parseInt(val, 10);
+              if (!isNaN(threshold)) {
+                if (userPostCount >= threshold) isVisible = true;
+              } else {
+                isVisible = true; // Fallback if param is garbage
+              }
+            }
+
+            if (isVisible) {
+              return match; // Return unchanged
+            } else {
+              // Replace with placeholder
+              const safeParam = val.replace(/\]/g, ''); // prevent BBCode breaking
+              return `[hide_secured=${safeParam}][/hide_secured]`;
+            }
+          });
+        }
+      }
+
       posts.push(data);
     });
 

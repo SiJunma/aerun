@@ -6,7 +6,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCategories } from '../api/categories';
 import { 
-  subscribeToTopics, 
+  fetchSecuredTopics, 
   batchUpdateTopics, 
   deleteTopics,
   moveTopics
@@ -28,7 +28,8 @@ const CategoryPage = () => {
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
-  const [topics, setTopics] = useState([]);
+  const [pinnedTopics, setPinnedTopics] = useState([]);
+  const [regularTopics, setRegularTopics] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Management State
@@ -42,22 +43,26 @@ const CategoryPage = () => {
 
   const isStaff = hasPermission(PERMISSIONS.MODERATE_CONTENT);
 
+  const loadTopics = async () => {
+    setLoading(true);
+    const result = await fetchSecuredTopics(id, currentPage, ITEMS_PER_PAGE);
+    setPinnedTopics(result.pinned || []);
+    setRegularTopics(result.topics || []);
+    setLoading(false);
+  };
+
   useEffect(() => {
     const unsubCat = subscribeToCategories((cats) => {
       const found = cats.find(c => c.id === id);
       if (found) setCategory(found);
     });
 
-    const unsubTopics = subscribeToTopics(id, (data) => {
-      setTopics(data);
-      setLoading(false);
-    });
+    loadTopics();
 
     return () => {
       unsubCat();
-      unsubTopics();
     };
-  }, [id]);
+  }, [id, currentPage]);
 
 
 
@@ -65,10 +70,8 @@ const CategoryPage = () => {
   const categoryTitle = category ? resolveField(category.title, lang) : <Skeleton width={150} height="1.5rem" />;
 
   // Pagination logic
-  const totalPages = Math.ceil(topics.length / ITEMS_PER_PAGE);
-  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
-  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentTopics = topics.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil((category?.topics_count || 0) / ITEMS_PER_PAGE) || 1;
+  const currentTopics = [...pinnedTopics, ...regularTopics];
 
   const handlePageChange = (page) => {
     setSearchParams({ page });
@@ -96,6 +99,7 @@ const CategoryPage = () => {
       showToast(lang === 'ru' 
           ? (pinned ? 'Темы закреплены' : 'Темы откреплены') 
           : (pinned ? 'Topics pinned' : 'Topics unpinned'), 'success');
+      loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
     }
@@ -108,6 +112,7 @@ const CategoryPage = () => {
       showToast(lang === 'ru' 
           ? (locked ? 'Темы закрыты' : 'Темы открыты') 
           : (locked ? 'Topics locked' : 'Topics unlocked'), 'success');
+      loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
     }
@@ -119,6 +124,7 @@ const CategoryPage = () => {
       await deleteTopics(selectedTopicIds, user.uid);
       showToast(lang === 'ru' ? 'Темы удалены' : 'Topics deleted', 'success');
       setSelectedTopicIds([]);
+      loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
     }
@@ -131,6 +137,7 @@ const CategoryPage = () => {
       showToast(lang === 'ru' ? 'Темы перенесены' : 'Topics moved', 'success');
       setSelectedTopicIds([]);
       setIsManaging(false);
+      loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
     }
@@ -188,7 +195,7 @@ const CategoryPage = () => {
         </div>
       </div>
 
-      <Card className={`mb-4 overflow-hidden forum-group-card ${!loading && topics.length === 0 ? '' : 'border-0 bg-transparent shadow-none'}`}>
+      <Card className={`mb-4 overflow-hidden forum-group-card ${!loading && currentTopics.length === 0 ? '' : 'border-0 bg-transparent shadow-none'}`}>
         {loading ? (
           <div className="p-0">
             <Table hover responsive className="mb-0 align-middle forum-table">
@@ -228,7 +235,7 @@ const CategoryPage = () => {
               </tbody>
             </Table>
           </div>
-        ) : topics.length === 0 ? (
+        ) : currentTopics.length === 0 ? (
           <div className="p-5 text-center">
             <div className="mb-3" style={{ fontSize: '3rem', opacity: 0.3 }}>💬</div>
             <h5 className="text-muted mb-2">

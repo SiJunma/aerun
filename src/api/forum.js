@@ -60,6 +60,18 @@ export const subscribeToTopic = (topicId, callback) => {
   });
 };
 
+export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) => {
+  try {
+    const functions = getFunctions();
+    const getSecured = httpsCallable(functions, 'getSecuredTopics');
+    const result = await getSecured({ categoryId, page, pageSize });
+    return result.data; // { pinned: [], topics: [] }
+  } catch (err) {
+    console.error('[fetchSecuredTopics]', err);
+    return { pinned: [], topics: [] };
+  }
+};
+
 // Most recent topic in a category — client-side sort to avoid needing a composite index
 export const subscribeToLastTopicInCategory = (categoryId, callback) => {
   const q = query(
@@ -103,6 +115,7 @@ export const createTopic = async (topicData, firstPostData) => {
       content: processedContent,
       rolls,
       topic_id: topicRef.id,
+      category_id: topicData.category_id,
       reputation: 0,
       created_at: serverTimestamp()
     });
@@ -135,11 +148,11 @@ export const subscribeToPosts = (topicId, callback) => {
   );
 };
 
-export const fetchSecuredPosts = async (topicId) => {
+export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20) => {
   try {
     const functions = getFunctions();
     const getSecured = httpsCallable(functions, 'getSecuredPosts');
-    const result = await getSecured({ topicId });
+    const result = await getSecured({ topicId, page, pageSize });
     // result.data.posts will be dates in ISO string format, 
     // but the app components (like BBCode) might expect Firebase Timestamp.
     // Client-side, we should map them back or ensure the components handle string dates.
@@ -331,35 +344,34 @@ export const locatePost = async (postId, itemsPerPage = 20) => {
   if (!postId) return { found: false, reason: 'missing_post_id' };
 
   try {
-    const postSnap = await getDoc(doc(db, 'posts', postId));
-    if (!postSnap.exists()) return { found: false, reason: 'not_found' };
-
-    const { topic_id: topicId, created_at: createdAt } = postSnap.data();
-    if (!topicId) return { found: false, reason: 'missing_topic_id' };
-
-    // created_at is null on a freshly committed post whose server timestamp
-    // hasn't propagated yet. A post with no timestamp is necessarily the
-    // newest one in the thread, so page 1 of a single-post view — or the
-    // last page in a multi-page view — is the correct fallback.
-    // We cannot use serverTimestamp() here: it is a write sentinel and
-    // Firestore rejects it as a query comparator.
-    if (!createdAt) {
-      return { found: true, topicId, postId, page: 1, anchor: `#post-${postId}` };
-    }
-
-    const priorPostsQuery = query(
-      collection(db, 'posts'),
-      where('topic_id', '==', topicId),
-      where('created_at', '<', createdAt)
-    );
-
-    const countSnap = await getCountFromServer(priorPostsQuery);
-    const countBefore = countSnap.data().count;
-    const page = Math.floor(countBefore / itemsPerPage) + 1;
-
-    return { found: true, topicId, postId, page, anchor: `#post-${postId}` };
+    const functions = getFunctions();
+    const locate = httpsCallable(functions, 'locatePost');
+    const result = await locate({ postId, itemsPerPage });
+    return result.data;
   } catch (err) {
     console.error('[locatePost]', err);
+    return { found: false, reason: 'error' };
+  }
+};
+
+/**
+ * Locate the page of the first unread post for a user in a topic.
+ *
+ * @param {string} topicId
+ * @param {number} lastVisitMs
+ * @param {number} itemsPerPage
+ * @returns {{ found: boolean, page?: number }}
+ */
+export const locateUnreadPost = async (topicId, lastVisitMs, itemsPerPage = 20) => {
+  if (!topicId || !lastVisitMs) return { found: false, reason: 'missing_args' };
+
+  try {
+    const functions = getFunctions();
+    const locate = httpsCallable(functions, 'locateUnreadPost');
+    const result = await locate({ topicId, lastVisitMs, itemsPerPage });
+    return result.data;
+  } catch (err) {
+    console.error('[locateUnreadPost]', err);
     return { found: false, reason: 'error' };
   }
 };

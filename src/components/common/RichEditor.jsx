@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
+import { db } from '../../../firebase';
+import { collection, query, orderBy, startAt, endAt, limit, getDocs } from 'firebase/firestore';
 
 const RichEditor = forwardRef(({
   value, onChange, placeholder, rows = 6, minHeight, id = 'rich-editor',
@@ -35,7 +37,9 @@ const RichEditor = forwardRef(({
   const [showDiceModal, setShowDiceModal] = useState(false);
   const [diceData, setDiceData] = useState({ sides: 6, type: 'normal' });
   const [showHideModal, setShowHideModal] = useState(false);
-  const [hideData, setHideData] = useState({ threshold: '10', type: 'posts' });
+  const [hideData, setHideData] = useState({ threshold: '10', type: 'posts', uid: '', username: '' });
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showColumnsModal, setShowColumnsModal] = useState(false);
   const [columnsData, setColumnsData] = useState({ count: 2, stack: '768' });
   const [showHotkeysModal, setShowHotkeysModal] = useState(false);
@@ -341,7 +345,7 @@ const RichEditor = forwardRef(({
         case 'KeyJ': e.preventDefault(); insertText('[justify]', '[/justify]'); break;
         case 'KeyK': e.preventDefault(); setShowLinkModal(true); break;
         case 'KeyG': e.preventDefault(); insertText('', '', 'spoiler'); break;
-        case 'KeyH': e.preventDefault(); setShowHideModal(true); break;
+        case 'KeyH': e.preventDefault(); openHideModal(); break;
         case 'KeyQ': e.preventDefault(); insertText('', '', 'quote'); break;
         case 'BracketLeft': e.preventDefault(); insertText('[code]', '[/code]', 'code'); break;
         case 'BracketRight': e.preventDefault(); insertText('[html]', '[/html]', 'html'); break;
@@ -544,6 +548,8 @@ const RichEditor = forwardRef(({
   const handleHideSubmit = (e) => {
     e.preventDefault();
     const capturedHideData = { ...hideData };
+    // Guard: addressed mode requires a selected user
+    if (capturedHideData.type === 'user' && !capturedHideData.uid) return;
     setShowHideModal(false);
     setTimeout(() => {
       const textarea = textareaRef.current;
@@ -554,7 +560,10 @@ const RichEditor = forwardRef(({
       const currentScrollTop = textarea.scrollTop;
       const selected = text.substring(start, end);
 
-      const val = capturedHideData.type === 'posts' ? (capturedHideData.threshold || '10') : 'hidden';
+      let val = 'hidden';
+      if (capturedHideData.type === 'posts') val = capturedHideData.threshold || '10';
+      else if (capturedHideData.type === 'user' && capturedHideData.uid) val = `@${capturedHideData.uid}`;
+
       const replacement = `[hide=${val}]${selected}[/hide]`;
       const newValue = text.substring(0, start) + replacement + text.substring(end);
 
@@ -578,6 +587,12 @@ const RichEditor = forwardRef(({
     }, 0);
   };
 
+  const openHideModal = () => {
+    setHideData({ threshold: '10', type: 'posts', uid: '', username: '' });
+    setUserSearchResults([]);
+    setShowHideModal(true);
+  };
+
   const handleColumnsSubmit = () => {
     const { count, stack } = columnsData;
     let before = `[columns${stack ? ` stack=${stack}` : ''}]\n[col]`;
@@ -588,6 +603,37 @@ const RichEditor = forwardRef(({
     after += `[/columns]`;
     insertText(before, after, 'columns');
     setShowColumnsModal(false);
+  };
+
+  const handleUserSearch = async (queryText) => {
+    setHideData(prev => ({ ...prev, username: queryText, uid: '' })); // clear uid when typing
+    if (!queryText || queryText.length < 2) {
+      setUserSearchResults([]);
+      return;
+    }
+    setIsSearchingUsers(true);
+    try {
+      // Very basic prefix search on nickname. Note: Case-sensitive in Firestore.
+      const q = query(
+        collection(db, 'users'),
+        orderBy('nickname'),
+        startAt(queryText),
+        endAt(queryText + '\uf8ff'),
+        limit(5)
+      );
+      const snap = await getDocs(q);
+      const results = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUserSearchResults(results);
+    } catch (err) {
+      console.error(err);
+      setUserSearchResults([]);
+    }
+    setIsSearchingUsers(false);
+  };
+
+  const selectUser = (user) => {
+    setHideData(prev => ({ ...prev, username: user.nickname, uid: user.id }));
+    setUserSearchResults([]);
   };
 
   const hotkeyGroups = [
@@ -834,7 +880,7 @@ const RichEditor = forwardRef(({
               <Columns size={16} /> {lang === 'ru' ? 'Колонки' : 'Columns'}
             </Dropdown.Item>
             {showHide && (
-              <Dropdown.Item onClick={() => setShowHideModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
+              <Dropdown.Item onClick={openHideModal} className="d-flex align-items-center gap-2 py-2 px-3">
                 <EyeOff size={16} /> {lang === 'ru' ? 'Скрыть под хайдом' : 'Hide'}
               </Dropdown.Item>
             )}
@@ -851,7 +897,7 @@ const RichEditor = forwardRef(({
           <div className="d-flex align-items-center gap-1">
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowColumnsModal(true)} title="Columns"><Columns size={16} /></Button>
             {showHide && (
-              <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowHideModal(true)} title="Hide"><EyeOff size={16} /></Button>
+              <Button variant="light" size="sm" className="p-1 px-2" onClick={openHideModal} title="Hide"><EyeOff size={16} /></Button>
             )}
             {showDice && !isEdit && (
               <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowDiceModal(true)} title="Roll Dice"><Dices size={16} /></Button>
@@ -1131,6 +1177,7 @@ const RichEditor = forwardRef(({
       >
         <Form onSubmit={handleHideSubmit}>
           <div className="mb-3 p-3 rounded" style={{ backgroundColor: 'rgba(var(--primary-rgb, 13, 110, 253), 0.05)', border: '1px solid var(--border-color)' }}>
+            {/* Threshold Mode */}
             <Form.Check
               type="radio"
               id="hide-type-posts"
@@ -1141,7 +1188,7 @@ const RichEditor = forwardRef(({
               className="fw-bold mb-2 cursor-pointer"
             />
             {hideData.type === 'posts' && (
-              <div className="ms-4">
+              <div className="ms-4 mb-3">
                 <Form.Control
                   type="number"
                   value={hideData.threshold}
@@ -1155,6 +1202,58 @@ const RichEditor = forwardRef(({
               </div>
             )}
 
+            {/* Addressed Mode */}
+            <Form.Check
+              type="radio"
+              id="hide-type-user"
+              label={lang === 'ru' ? 'Адресный (для конкретного пользователя)' : 'Addressed (for a specific user)'}
+              name="hideType"
+              checked={hideData.type === 'user'}
+              onChange={() => setHideData(prev => ({ ...prev, type: 'user' }))}
+              className="fw-bold mb-2 cursor-pointer"
+            />
+            {hideData.type === 'user' && (
+              <div className="ms-4 mb-3 position-relative">
+                <Form.Control
+                  type="text"
+                  placeholder={lang === 'ru' ? 'Введите никнейм...' : 'Type a nickname...'}
+                  value={hideData.username}
+                  onChange={(e) => handleUserSearch(e.target.value)}
+                  className="modal-section-themed"
+                  autoComplete="off"
+                />
+                {isSearchingUsers && <div className="small text-muted mt-1">{lang === 'ru' ? 'Поиск...' : 'Searching...'}</div>}
+                {!isSearchingUsers && userSearchResults.length > 0 && (
+                  <div className="position-absolute w-100 mt-1 shadow-sm rounded border bg-white" style={{ zIndex: 1000, maxHeight: '200px', overflowY: 'auto' }}>
+                    {userSearchResults.map(u => (
+                      <div 
+                        key={u.id} 
+                        className="p-2 cursor-pointer dropdown-item d-flex align-items-center gap-2"
+                        onClick={() => selectUser(u)}
+                      >
+                        <div style={{ width: 24, height: 24, borderRadius: '50%', backgroundColor: 'var(--bs-gray-300)', overflow: 'hidden' }}>
+                          {u.avatar_url ? (
+                            <img src={u.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <div className="d-flex align-items-center justify-content-center h-100 text-white small fw-bold">
+                              {u.nickname?.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <span className="fw-semibold text-dark">{u.nickname}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {hideData.uid && (
+                  <div className="small text-success mt-1">
+                    {lang === 'ru' ? 'Пользователь выбран.' : 'User selected.'}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Hidden Mode */}
             <Form.Check
               type="radio"
               id="hide-type-hidden"
@@ -1162,13 +1261,13 @@ const RichEditor = forwardRef(({
               name="hideType"
               checked={hideData.type === 'hidden'}
               onChange={() => setHideData(prev => ({ ...prev, type: 'hidden' }))}
-              className="fw-bold mt-3 cursor-pointer"
+              className="fw-bold cursor-pointer"
             />
           </div>
           <p className="small text-muted mb-0">
             {lang === 'ru'
-              ? 'Текст внутри тега будет скрыт от пользователей, не соответствующих условиям.'
-              : 'Text inside the tag will be hidden from users who do not meet the requirements.'}
+              ? 'Текст внутри тега будет скрыт от пользователей, не соответствующих условиям. Администраторы всегда видят скрытый контент.'
+              : 'Text inside the tag will be hidden from users who do not meet the requirements. Administrators can always see hidden content.'}
           </p>
         </Form>
       </ForumModal>

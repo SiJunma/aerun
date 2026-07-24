@@ -121,9 +121,9 @@ service cloud.firestore {
 
     // --- Categories ---
     match /categories/{catId} {
-      allow read: if true;
+      allow get: if isAdmin() || hasCategoryPermission(catId, 'view_forum');
+      allow list: if isAdmin();
       allow create, delete: if isAdmin();
-      // Counter updates and last_post metadata are now server-side only (Cloud Functions)
       allow update: if isAdmin()
         || ((isActive() || !isSignedIn()) && !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
@@ -131,7 +131,8 @@ service cloud.firestore {
 
     // --- Topics ---
     match /topics/{topicId} {
-      allow read: if true;
+      allow get: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
+      allow list: if isAdmin();
       // Active users or Guests (if allowed) can create topics
       allow create: if isAdmin() || canCreateTopic(request.resource.data.category_id);
       // Author or admin can edit; counter bumps and metadata are handled by server triggers
@@ -147,7 +148,7 @@ service cloud.firestore {
 
     // --- Posts ---
     match /posts/{postId} {
-      allow read: if true;
+      allow read: if isAdmin();
       // Active users or Guests (if allowed) can create posts
       allow create: if isAdmin() || canPostToTopic(request.resource.data.topic_id);
       allow update: if isAdmin()

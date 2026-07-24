@@ -53,11 +53,31 @@ export const deleteCategoryGroup = async (id, performerId) => {
 
 // ── Categories ──────────────────────────────────────────────────────────────
 
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
 export const subscribeToCategories = (callback) => {
-  const q = query(collection(db, 'categories'), orderBy('order', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
+  let isSubscribed = true;
+  
+  const fetchCats = async () => {
+    try {
+      const functions = getFunctions();
+      const getSecured = httpsCallable(functions, 'getSecuredCategories');
+      const result = await getSecured();
+      if (isSubscribed) {
+        callback(result.data.categories || []);
+      }
+    } catch (err) {
+      console.error('[subscribeToCategories]', err);
+      if (isSubscribed) callback([]);
+    }
+  };
+
+  fetchCats();
+
+  // Return unsubscribe
+  return () => {
+    isSubscribed = false;
+  };
 };
 
 export const addCategory = async (catData, performerId) => {

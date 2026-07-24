@@ -207,7 +207,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   });
 
   // 1. Tokenize the text into text chunks and tags
-  const tokenRegex = /\[(\/?)([a-zA-Z*]+)(?:[\s=]([^\]]*))?\]/g;
+  const tokenRegex = /\[(\/?)([a-zA-Z0-9_*]+)(?:[\s=]([^\]]*))?\]/g;
   const tokens = [];
   let lastIndex = 0;
   let match;
@@ -232,7 +232,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'left', 'center', 'right', 'justify'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hide_secured', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'left', 'center', 'right', 'justify'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -283,7 +283,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code', 'html'];
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code', 'html', 'hide', 'hide_secured'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
@@ -634,6 +634,35 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         }
         return <a key={index} href={urlRaw} target="_blank" rel="noopener noreferrer">{urlRaw}</a>;
       }
+      case 'hide_secured': {
+        const threshold = params.default || 'hidden';
+        
+        let hint = t('forum.hide_moderator_only');
+        if (threshold.startsWith('@')) {
+          hint = lang === 'ru' ? 'Скрыто (только для адресата)' : 'Hidden (for addressee only)';
+        } else if (threshold !== 'hidden') {
+          const thresholdNum = parseInt(threshold, 10);
+          const userPosts = profile?.post_count || profile?.postCount || user?.post_count || user?.postCount || 0;
+          if (!isNaN(thresholdNum)) {
+            const remainingPosts = thresholdNum - userPosts;
+            hint = remainingPosts > 0 
+                    ? t('forum.hide_posts_remaining', { n: remainingPosts }) 
+                    : t('forum.hide_posts_needed', { n: thresholdNum });
+          }
+        }
+
+        return (
+          <div key={index} className="bbcode-hide-placeholder shadow-sm">
+            <div className="bbcode-hide-placeholder-icon">
+              <EyeOff size={24} />
+            </div>
+            <div className="bbcode-hide-placeholder-info">
+              <div className="bbcode-hide-placeholder-title">{t('forum.hidden_content')}</div>
+              <div className="bbcode-hide-placeholder-hint">{hint}</div>
+            </div>
+          </div>
+        );
+      }
       case 'hide': {
         if (isDM) return node.children.map(renderNode);
 
@@ -647,6 +676,9 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         if (!isVisible) {
           if (threshold === 'hidden') {
             isVisible = false;
+          } else if (threshold.startsWith('@')) {
+            const targetUid = threshold.substring(1).trim();
+            if (user && user.uid === targetUid) isVisible = true;
           } else {
             thresholdNum = parseInt(threshold, 10);
             if (!isNaN(thresholdNum)) {
@@ -657,12 +689,17 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           }
         }
 
+        // The server ALREADY strips hidden content. 
+        // If this tag still has its content in a live post, it means the server deemed it visible to the current user.
+        // However, we still do local checks just in case (e.g., local preview while editing).
         if (isVisible) {
           return (
             <div key={index} className="bbcode-hide-container">
               <div className="bbcode-hide-header">
-                <EyeOff size={14} /> {t('forum.hidden_content')} {isVisible && user && user.uid !== authorId && (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) && <span className="opacity-50 ms-1">(Admin View)</span>}
+                <EyeOff size={14} /> {t('forum.hidden_content')} 
+                {isVisible && user && user.uid !== authorId && (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) && <span className="opacity-50 ms-1">(Admin View)</span>}
                 {user && user.uid === authorId && <span className="opacity-50 ms-1">({lang === 'ru' ? 'Автор' : 'Author'})</span>}
+                {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({lang === 'ru' ? 'Адресно' : 'Addressed'})</span>}
               </div>
               <div className="bbcode-hide-content">
                 {node.children.map(renderNode)}
@@ -670,7 +707,16 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
             </div>
           );
         } else {
+          // If we fail the local check (e.g. previewing own post but not author yet?), fallback placeholder
           const remainingPosts = thresholdNum - userPosts;
+          let hint = t('forum.hide_moderator_only');
+          if (threshold.startsWith('@')) hint = lang === 'ru' ? 'Скрыто (только для адресата)' : 'Hidden (for addressee only)';
+          else if (threshold !== 'hidden') {
+             hint = remainingPosts > 0 
+                    ? t('forum.hide_posts_remaining', { n: remainingPosts }) 
+                    : t('forum.hide_posts_needed', { n: thresholdNum });
+          }
+
           return (
             <div key={index} className="bbcode-hide-placeholder shadow-sm">
               <div className="bbcode-hide-placeholder-icon">
@@ -678,14 +724,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
               </div>
               <div className="bbcode-hide-placeholder-info">
                 <div className="bbcode-hide-placeholder-title">{t('forum.hidden_content')}</div>
-                <div className="bbcode-hide-placeholder-hint">
-                  {threshold === 'hidden' 
-                    ? t('forum.hide_moderator_only') 
-                    : (remainingPosts > 0 
-                        ? t('forum.hide_posts_remaining', { n: remainingPosts }) 
-                        : t('forum.hide_posts_needed', { n: thresholdNum }))
-                  }
-                </div>
+                <div className="bbcode-hide-placeholder-hint">{hint}</div>
               </div>
             </div>
           );

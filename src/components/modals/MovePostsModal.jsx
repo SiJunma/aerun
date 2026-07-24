@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Form, Button, Badge } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
 import { subscribeToCategories, subscribeToCategoryGroups } from '../../api/categories';
-import { subscribeToTopics } from '../../api/forum';
+import { fetchSecuredTopics } from '../../api/forum';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 import { resolveField } from '../../utils/text';
@@ -83,7 +83,7 @@ const MovePostsModal = ({
     return () => { unsubCats(); unsubGroups(); };
   }, [show, hasPermission, PERMISSIONS.VIEW_FORUM]);
 
-  // Subscribe to topics when a forum is selected
+  // Fetch topics when a forum is selected
   useEffect(() => {
     if (!targetCategoryId) {
       setTopics([]);
@@ -91,13 +91,23 @@ const MovePostsModal = ({
       return;
     }
     setLoadingTopics(true);
-    const unsub = subscribeToTopics(targetCategoryId, (topicList) => {
+    let isActive = true;
+
+    fetchSecuredTopics(targetCategoryId, 1, 50).then(result => {
+      if (!isActive) return;
+      const combined = [...(result.pinned || []), ...(result.topics || [])];
       // Exclude current topic from the target list
-      const filtered = topicList.filter(tp => tp.id !== currentTopicId);
+      const filtered = combined.filter(tp => tp.id !== currentTopicId);
       setTopics(filtered);
       setLoadingTopics(false);
+    }).catch(err => {
+      if (!isActive) return;
+      console.error(err);
+      setTopics([]);
+      setLoadingTopics(false);
     });
-    return () => unsub();
+
+    return () => { isActive = false; };
   }, [targetCategoryId, currentTopicId]);
 
   // ── Post pagination ─────────────────────────────────────────────────────────

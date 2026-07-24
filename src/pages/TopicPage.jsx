@@ -8,7 +8,7 @@ import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
   updateUser, updateTopic,
   deleteTopics, moveTopics, movePosts, createDraftPost, updateDraftPost, publishDraft,
-  subscribeToTopicDraft, deleteDraftPost, locatePost
+  subscribeToTopicDraft, deleteDraftPost, locatePost, locateUnreadPost
 } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
 import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
@@ -110,16 +110,7 @@ const TopicPage = () => {
   const MAX_CHARS = settings?.maxCharsPerPost ?? 15000;
   const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
 
-  // Determine current page based on ?post=ID OR ?page=N
-  const queryPostPage = React.useMemo(() => {
-    const postId = searchParams.get('post');
-    if (!postId || posts.length === 0) return null;
-    const index = posts.findIndex(p => p.id === postId);
-    if (index === -1) return null;
-    return Math.floor(index / ITEMS_PER_PAGE) + 1;
-  }, [searchParams, posts, ITEMS_PER_PAGE]);
-
-  const currentPage = queryPostPage || parseInt(searchParams.get('page') || '1', 10);
+  const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   const isFetchingPostsRef = useRef(false);
   const nextFetchNeededRef = useRef(false);
@@ -132,7 +123,7 @@ const TopicPage = () => {
     }
     isFetchingPostsRef.current = true;
     try {
-      const data = await fetchSecuredPosts(id);
+      const data = await fetchSecuredPosts(id, currentPage, ITEMS_PER_PAGE);
       setPosts(data);
       return data;
     } catch (err) {
@@ -145,7 +136,7 @@ const TopicPage = () => {
         loadPosts();
       }
     }
-  }, [id]);
+  }, [id, currentPage, ITEMS_PER_PAGE]);
 
   useEffect(() => {
     if (topic && prevTopicStatsRef.current) {
@@ -165,11 +156,20 @@ const TopicPage = () => {
     }
   }, [topic, loadPosts]);
 
+  const currentTopicIdRef = useRef(id);
+  const jumpTargetPageRef = useRef(null);
+
   useEffect(() => {
     setIsPageLoading(true);
+    
+    // Only clear topic if navigating to a DIFFERENT topic
+    if (currentTopicIdRef.current !== id) {
+      setTopic(null);
+      currentTopicIdRef.current = id;
+    }
+    
     setPosts([]);
-    setTopic(null);
-    let topicReady = false;
+    let topicReady = topic !== null;
     let postsReady = false;
 
     const checkReady = () => {
@@ -180,10 +180,16 @@ const TopicPage = () => {
       }
     };
 
-    loadPosts().then(() => {
-      postsReady = true;
-      checkReady();
-    });
+    const isPendingJump = isJumpRequested && !alreadyJumpedRef.current;
+    
+    if (!isPendingJump || jumpTargetPageRef.current === currentPage) {
+      loadPosts().then(() => {
+        postsReady = true;
+        checkReady();
+      });
+    } else {
+      // Defer loadPosts until jumpTargetPageRef matches currentPage
+    }
 
     const unsubTopic = subscribeToTopic(id, (data) => {
       setTopic(data);
@@ -196,7 +202,7 @@ const TopicPage = () => {
     return () => {
       unsubTopic();
     };
-  }, [id, isJumpRequested, loadPosts]);
+  }, [id, currentPage, isJumpRequested, loadPosts]);
 
   // Mark the topic as read with granular offset
   useEffect(() => {
@@ -360,7 +366,7 @@ const TopicPage = () => {
 
   useEffect(() => {
     // 1. Topics not yet loaded
-    if (posts.length === 0) {
+    if (posts.length === 0 || !topic) {
       return;
     }
 
@@ -373,14 +379,7 @@ const TopicPage = () => {
     if (queryPostId) {
       const postIndex = posts.findIndex(p => p.id === queryPostId);
       if (postIndex !== -1) {
-        targetPage = Math.floor(postIndex / ITEMS_PER_PAGE) + 1;
-        if (currentPage !== targetPage) {
-          setSearchParams(prev => {
-            prev.set('page', targetPage);
-            return prev;
-          }, { preventScrollReset: true });
-          return;
-        }
+        targetPage = currentPage;
         targetId = `post-${queryPostId}`;
         scrollBlock = 'center';
       } else if (!alreadyJumpedRef.current) {
@@ -390,6 +389,7 @@ const TopicPage = () => {
           if (result.found) {
             if (result.topicId === id) {
               if (result.page !== currentPage) {
+                jumpTargetPageRef.current = result.page;
                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
               } else {
                 setIsPageLoading(false);
@@ -428,49 +428,78 @@ const TopicPage = () => {
       const postId = hash.replace('#post-', '');
       const postIndex = posts.findIndex(p => p.id === postId);
       if (postIndex !== -1) {
-        targetPage = Math.ceil((postIndex + 1) / ITEMS_PER_PAGE);
-        if (currentPage !== targetPage) {
-          navigate({
-            search: `?page=${targetPage}${goLast ? '&goLast=0' : ''}`,
-            hash: hash
-          }, { preventScrollReset: true });
-          return;
-        }
+        targetPage = currentPage;
         targetId = hash.substring(1);
+      } else if (!alreadyJumpedRef.current) {
+        alreadyJumpedRef.current = true;
+        locatePost(postId, ITEMS_PER_PAGE).then(result => {
+           if (result.found && result.topicId === id) {
+              if (result.page !== currentPage) {
+                 jumpTargetPageRef.current = result.page;
+                 setSearchParams({ page: result.page }, { preventScrollReset: true });
+                 // hash stays in window.location.hash natively
+              } else {
+                 setIsPageLoading(false);
+                 alreadyJumpedRef.current = true;
+              }
+           } else {
+              setIsPageLoading(false);
+              alreadyJumpedRef.current = true;
+           }
+        }).catch(() => {
+           setIsPageLoading(false);
+           alreadyJumpedRef.current = true;
+        });
+        return;
       }
     }
     // Priority 3: goLast (New unread or bottom)
     else if (goLast && !alreadyJumpedRef.current) {
-      let finalTargetPage = Math.ceil(posts.length / ITEMS_PER_PAGE) || 1;
-      let finalTargetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
-
-      if (user) {
+      if (user && (initialVisitRef.current[id] !== undefined || readMap[id] !== undefined)) {
         const lastVisitRaw = initialVisitRef.current[id] ?? readMap[id];
-        const previouslyVisited = lastVisitRaw !== undefined;
+        const registrationMs = profile?.created_at?.toMillis?.() || 0;
+        const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
+        const lastVisit = Math.max(
+          lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0),
+          registrationMs
+        );
 
-        if (previouslyVisited) {
-          const registrationMs = profile?.created_at?.toMillis?.() || 0;
-          // lastVisitRaw can be: Firestore Timestamp, plain number, or { timestamp, offset } object
-          // Must normalize before using — same pattern as TopicRow and AuthProvider
-          const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-          const lastVisit = Math.max(
-            lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0),
-            registrationMs
-          );
-          const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
+        const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
 
-          if (unreadIndex !== -1) {
-            finalTargetPage = Math.ceil((unreadIndex + 1) / ITEMS_PER_PAGE);
-            finalTargetId = `post-${posts[unreadIndex].id}`;
-          }
+        if (unreadIndex !== -1) {
+          targetId = `post-${posts[unreadIndex].id}`;
+        } else {
+          alreadyJumpedRef.current = true;
+          locateUnreadPost(id, lastVisit, ITEMS_PER_PAGE).then(result => {
+            const finalTargetPage = result.found ? result.page : (Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE) || 1);
+            if (currentPage !== finalTargetPage) {
+              jumpTargetPageRef.current = finalTargetPage;
+              setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
+            } else {
+              const lastPost = posts.length > 0 ? posts[posts.length - 1] : null;
+              if (lastPost) {
+                targetId = `post-${lastPost.id}`;
+                const el = document.getElementById(targetId);
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }
+              setIsPageLoading(false);
+              alreadyJumpedRef.current = true;
+            }
+          }).catch(() => {
+            setIsPageLoading(false);
+            alreadyJumpedRef.current = true;
+          });
+          return;
         }
+      } else {
+        const finalTargetPage = Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE) || 1;
+        if (currentPage !== finalTargetPage) {
+          jumpTargetPageRef.current = finalTargetPage;
+          setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
+          return;
+        }
+        targetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
       }
-
-      if (currentPage !== finalTargetPage) {
-        setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
-        return;
-      }
-      targetId = finalTargetId;
     }
 
     // 2. Perform the actual scroll
@@ -834,6 +863,7 @@ const TopicPage = () => {
     const selectedChar = characters.find(c => c.id === selectedCharacterId);
     return {
       topic_id: id,
+      category_id: topic?.category_id,
       content: replyContent.trim(),
       author_id: user?.uid || null,
       author_name: selectedChar ? selectedChar.name : (profile?.nickname || guestNickname.trim() || user?.displayName || profile?.email?.split('@')[0] || 'Guest'),
@@ -1129,12 +1159,13 @@ const TopicPage = () => {
   const categoryTitle = category ? resolveField(category.title, lang) : '...';
   const hasDraft = !!myDraft;
 
-  // Pagination logic — since drafts are separate, posts only contains published posts
+  // Pagination logic — server-side: `posts` already contains only the current page.
+  // `totalPages` is derived from the topic's authoritative posts_count counter.
   const realPosts = posts;
-  const totalPages = Math.ceil(realPosts.length / ITEMS_PER_PAGE);
-  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
-  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentPosts = realPosts.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil((topic?.posts_count ?? realPosts.length) / ITEMS_PER_PAGE) || 1;
+  // indexOfFirstItem is used only for post numbering (e.g. "#42")
+  const indexOfFirstItem = (currentPage - 1) * ITEMS_PER_PAGE;
+  const currentPosts = realPosts; // Already the correct page from the server
   const isOnLastPage = currentPage >= totalPages || totalPages === 0;
 
   const handlePageChange = (page, isFromBottom = false) => {
@@ -1607,11 +1638,17 @@ const TopicPage = () => {
                           className="text-decoration-none text-muted hover-link"
                           onClick={(e) => {
                             e.preventDefault();
-                            const url = `${window.location.origin}${window.location.pathname}${window.location.search}#post-${post.id}`;
+                            const params = new URLSearchParams(searchParams);
+                            params.delete('goLast');
+                            const newSearch = params.toString() ? `?${params.toString()}` : '';
+                            const url = `${window.location.origin}${window.location.pathname}${newSearch}#post-${post.id}`;
                             navigator.clipboard.writeText(url);
                             showToast(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
-                            // Also navigate for classic behavior
-                            window.location.hash = `post-${post.id}`;
+                            
+                            navigate({
+                              search: newSearch,
+                              hash: `#post-${post.id}`
+                            }, { replace: true, preventScrollReset: true });
                           }}
                         >
                           <Timestamp date={post.created_at} className="text-muted" />
