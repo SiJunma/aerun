@@ -80,6 +80,13 @@ export const subscribeToCategories = (callback) => {
   };
 };
 
+export const subscribeToAllCategories = (callback) => {
+  const q = query(collection(db, 'categories'), orderBy('order', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+  });
+};
+
 export const addCategory = async (catData, performerId) => {
   // Normalize: replace null values with undefined so Firestore doesn't store them as null
   const permissions = {};

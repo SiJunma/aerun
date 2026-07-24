@@ -366,7 +366,13 @@ const TopicPage = () => {
 
   useEffect(() => {
     // 1. Topics not yet loaded
-    if (posts.length === 0 || !topic) {
+    if (!topic) {
+      return;
+    }
+
+    // If posts are not loaded, we can only proceed if a jump is requested (to resolve the page)
+    const isJumpRequestedLocal = !!(searchParams.get('post') || goLast || hash.startsWith('#post-'));
+    if (posts.length === 0 && !isJumpRequestedLocal) {
       return;
     }
 
@@ -382,18 +388,18 @@ const TopicPage = () => {
         targetPage = currentPage;
         targetId = `post-${queryPostId}`;
         scrollBlock = 'center';
-      } else if (!alreadyJumpedRef.current) {
+      } else if (jumpTargetPageRef.current !== currentPage) {
         // Post not found on the current page - try to locate it across the database
-        alreadyJumpedRef.current = true;
         locatePost(queryPostId, ITEMS_PER_PAGE).then(result => {
           if (result.found) {
             if (result.topicId === id) {
               if (result.page !== currentPage) {
                 jumpTargetPageRef.current = result.page;
+                alreadyJumpedRef.current = false;
                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
               } else {
-                setIsPageLoading(false);
-                alreadyJumpedRef.current = true;
+                jumpTargetPageRef.current = currentPage;
+                loadPosts();
               }
             } else {
               navigate(`/topic/${result.topicId}?post=${queryPostId}`);
@@ -421,6 +427,10 @@ const TopicPage = () => {
           alreadyJumpedRef.current = true;
         });
         return;
+      } else if (posts.length > 0) {
+         // Post was not found even after ensuring current page loaded. Probably deleted.
+         alreadyJumpedRef.current = true;
+         setIsPageLoading(false);
       }
     }
     // Priority 2: #post-ID (Legacy anchors)
@@ -430,17 +440,17 @@ const TopicPage = () => {
       if (postIndex !== -1) {
         targetPage = currentPage;
         targetId = hash.substring(1);
-      } else if (!alreadyJumpedRef.current) {
-        alreadyJumpedRef.current = true;
+      } else if (jumpTargetPageRef.current !== currentPage) {
         locatePost(postId, ITEMS_PER_PAGE).then(result => {
            if (result.found && result.topicId === id) {
               if (result.page !== currentPage) {
                  jumpTargetPageRef.current = result.page;
+                 alreadyJumpedRef.current = false;
                  setSearchParams({ page: result.page }, { preventScrollReset: true });
                  // hash stays in window.location.hash natively
               } else {
-                 setIsPageLoading(false);
-                 alreadyJumpedRef.current = true;
+                 jumpTargetPageRef.current = currentPage;
+                 loadPosts();
               }
            } else {
               setIsPageLoading(false);
@@ -451,6 +461,9 @@ const TopicPage = () => {
            alreadyJumpedRef.current = true;
         });
         return;
+      } else if (posts.length > 0) {
+        alreadyJumpedRef.current = true;
+        setIsPageLoading(false);
       }
     }
     // Priority 3: goLast (New unread or bottom)
@@ -468,28 +481,25 @@ const TopicPage = () => {
 
         if (unreadIndex !== -1) {
           targetId = `post-${posts[unreadIndex].id}`;
-        } else {
-          alreadyJumpedRef.current = true;
+        } else if (jumpTargetPageRef.current !== currentPage) {
           locateUnreadPost(id, lastVisit, ITEMS_PER_PAGE).then(result => {
             const finalTargetPage = result.found ? result.page : (Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE) || 1);
             if (currentPage !== finalTargetPage) {
               jumpTargetPageRef.current = finalTargetPage;
+              alreadyJumpedRef.current = false;
               setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
             } else {
-              const lastPost = posts.length > 0 ? posts[posts.length - 1] : null;
-              if (lastPost) {
-                targetId = `post-${lastPost.id}`;
-                const el = document.getElementById(targetId);
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }
-              setIsPageLoading(false);
-              alreadyJumpedRef.current = true;
+              jumpTargetPageRef.current = currentPage;
+              loadPosts();
             }
           }).catch(() => {
             setIsPageLoading(false);
             alreadyJumpedRef.current = true;
           });
           return;
+        } else if (posts.length > 0) {
+          // Posts are loaded for the target page, but unread index is still -1. Fallback to bottom.
+          targetId = `post-${posts[posts.length - 1].id}`;
         }
       } else {
         const finalTargetPage = Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE) || 1;
@@ -534,13 +544,15 @@ const TopicPage = () => {
       setTimeout(tryScroll, 100);
     } else {
       if (isJumpRequested || searchParams.get('post') || goLast) {
-        setIsPageLoading(false);
-        alreadyJumpedRef.current = true;
+        if (posts.length > 0) {
+          setIsPageLoading(false);
+          alreadyJumpedRef.current = true;
+        }
       } else if (posts.length > 0) {
         setIsPageLoading(false);
       }
     }
-  }, [posts, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE]);
+  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE]);
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
@@ -834,8 +846,8 @@ const TopicPage = () => {
       setReplyContent('');
 
       // Calculate where the new post will be
-      const newTotalPosts = posts.length + 1;
-      const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE);
+      const newTotalPosts = (topic?.posts_count || 0) + 1;
+      const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
 
       if (targetPage !== currentPage) {
         setSearchParams({ page: targetPage });

@@ -204,6 +204,10 @@ exports.getSecuredCategories = onCall(
       const catData = doc.data();
       catData.id = doc.id;
 
+      if (catData.created_at) catData.created_at = catData.created_at.toDate().toISOString();
+      if (catData.updated_at) catData.updated_at = catData.updated_at.toDate().toISOString();
+      if (catData.last_post_at) catData.last_post_at = catData.last_post_at.toDate().toISOString();
+
       if (['root', 'admin'].includes(requesterRole)) {
         categories.push(catData);
         return;
@@ -319,23 +323,29 @@ exports.getSecuredTopics = onCall(
       pinnedTopics.push(data);
     });
 
-    // 2. Fetch regular topics
+    // 2. Fetch regular topics (we omit is_pinned filter to include legacy topics missing the field)
+    // We add a small buffer to the limit to account for pinned topics that we will filter out.
     const topicsSnap = await db.collection("topics")
       .where("category_id", "==", categoryId)
-      .where("is_pinned", "==", false)
       .orderBy("last_post_at", "desc")
       .offset(startIndex)
-      .limit(pageSize)
+      .limit(pageSize + 5)
       .get();
       
+    const pinnedIds = new Set(pinnedTopics.map(t => t.id));
     const topics = [];
     topicsSnap.forEach(doc => {
+      if (pinnedIds.has(doc.id)) return; // filter out pinned topics in memory
+      
       const data = doc.data();
       data.id = doc.id;
       if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
       if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
       if (data.last_post_at) data.last_post_at = data.last_post_at.toDate().toISOString();
-      topics.push(data);
+      
+      if (topics.length < pageSize) {
+          topics.push(data);
+      }
     });
 
     return { 
@@ -1173,6 +1183,7 @@ exports.getSecuredPosts = onCall(
     }
 
     // 1. Fetch the topic to get category_id
+    const db = admin.firestore();
     const topicDoc = await db.collection('topics').doc(topicId).get();
     if (!topicDoc.exists) {
       throw new HttpsError('not-found', 'Topic not found');
@@ -1245,11 +1256,43 @@ exports.getSecuredPosts = onCall(
       .limit(pageSize)
       .get();
 
-    const posts = [];
+    // Pass 1: Collect raw posts and scan for UIDs in [hide] tags
+    const rawPosts = [];
+    const addresseeUids = new Set();
+    const uidScanRegex = /\[hide=@([^\]\s]+)/gi;
+
     postsSnap.forEach(doc => {
       const data = doc.data();
       data.id = doc.id;
-      
+      rawPosts.push(data);
+
+      if (data.content && typeof data.content === 'string') {
+        const isAuthor = data.author_id === uid;
+        if (!canBypassHideTags && !isAuthor) {
+          let scanMatch;
+          while ((scanMatch = uidScanRegex.exec(data.content)) !== null) {
+            addresseeUids.add(scanMatch[1]);
+          }
+        }
+      }
+    });
+
+    // Pass 2: Batch-fetch current nicknames for all addressee UIDs
+    const addresseeNicknames = {};
+    if (addresseeUids.size > 0) {
+      const uidArr = [...addresseeUids];
+      for (let i = 0; i < uidArr.length; i += 30) {
+        const chunk = uidArr.slice(i, i + 30);
+        const usersSnap = await db.collection('users')
+          .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+          .get();
+        usersSnap.forEach(d => { addresseeNicknames[d.id] = d.data().nickname || ''; });
+      }
+    }
+
+    // Pass 3: Process posts and scrub hide tags
+    const posts = [];
+    for (const data of rawPosts) {
       if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
       if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
       if (data.edited_at) data.edited_at = data.edited_at.toDate().toISOString();
@@ -1257,50 +1300,52 @@ exports.getSecuredPosts = onCall(
       if (data.rolls) {
         Object.keys(data.rolls).forEach(rId => {
           const roll = data.rolls[rId];
-          // Hide dice value if it's a master roll, requester lacks permission, AND requester is NOT the author
           if (roll.type === 'master' && !canViewMasterDice && data.author_id !== uid) {
-            roll.value = null; // scrub
+            roll.value = null; 
           }
         });
       }
 
-      // [hide] scrubbing logic
       if (data.content && typeof data.content === 'string') {
         const isAuthor = data.author_id === uid;
         if (!canBypassHideTags && !isAuthor) {
-          data.content = data.content.replace(/\[hide(?:=([^\]]+))?\]([\s\S]*?)\[\/hide\]/gi, (match, param, innerContent) => {
-            const val = param ? param.trim() : 'hidden';
+          data.content = data.content.replace(/\[hide(?:=([^\]]+))?\]([\s\S]*?)\[\/hide\]/gi, (match, param) => {
+            const fullParam = param ? param.trim() : 'hidden';
+            const baseVal = fullParam.split(/\s+/)[0]; 
             let isVisible = false;
 
-            if (val === 'hidden') {
-              isVisible = false; // Only bypass can see this, which we already checked
-            } else if (val.startsWith('@')) {
-              // Addressed hide
-              const targetUid = val.substring(1).trim();
+            if (baseVal === 'hidden') {
+              isVisible = false;
+            } else if (baseVal.startsWith('@')) {
+              const targetUid = baseVal.substring(1);
               if (uid && uid === targetUid) isVisible = true;
             } else {
-              // Post count hide
-              const threshold = parseInt(val, 10);
+              const threshold = parseInt(baseVal, 10);
               if (!isNaN(threshold)) {
                 if (userPostCount >= threshold) isVisible = true;
               } else {
-                isVisible = true; // Fallback if param is garbage
+                isVisible = true; 
               }
             }
 
             if (isVisible) {
-              return match; // Return unchanged
+              return match; 
             } else {
-              // Replace with placeholder
-              const safeParam = val.replace(/\]/g, ''); // prevent BBCode breaking
-              return `[hide_secured=${safeParam}][/hide_secured]`;
+              const safeBase = baseVal.replace(/\]/g, ''); 
+              let nickParam = '';
+              if (safeBase.startsWith('@')) {
+                const targetUid = safeBase.substring(1);
+                const nick = addresseeNicknames[targetUid];
+                if (nick) nickParam = ` nick="${nick.replace(/"/g, '')}"`;
+              }
+              return `[hide_secured=${safeBase}${nickParam}][/hide_secured]`;
             }
           });
         }
       }
 
       posts.push(data);
-    });
+    }
 
     return { posts };
   }

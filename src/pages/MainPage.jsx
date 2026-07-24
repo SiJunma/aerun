@@ -166,7 +166,9 @@ const MainPage = () => {
                               const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
                               const registrationMs = profile?.created_at?.toMillis?.() || 0;
                               const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-                              const lastPostMs = cat.last_post_at?.toMillis?.() ?? 0;
+                              const lastPostMs = cat.last_post_at 
+                                ? (cat.last_post_at.toMillis ? cat.last_post_at.toMillis() : new Date(cat.last_post_at).getTime())
+                                : 0;
                               const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
                               return (

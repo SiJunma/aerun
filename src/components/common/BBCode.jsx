@@ -289,10 +289,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
     for (let i = 0; i < result.length; i++) {
       const node = result[i];
       if (typeof node !== 'string' && blockTags.includes(node.name)) {
-        // Absorption: remove ONE newline before and after
-        if (i > 0 && typeof result[i - 1] === 'string') {
-          result[i - 1] = result[i - 1].replace(/\r?\n\s*$/, '');
-        }
+        // Absorption: remove ONE newline after the block tag
         if (i < result.length - 1 && typeof result[i + 1] === 'string') {
           result[i + 1] = result[i + 1].replace(/^\r?\n/, '');
         }
@@ -639,7 +636,8 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         
         let hint = t('forum.hide_moderator_only');
         if (threshold.startsWith('@')) {
-          hint = lang === 'ru' ? 'Скрыто (только для адресата)' : 'Hidden (for addressee only)';
+          const nickText = params.nick ? `: ${params.nick}` : '';
+          hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
         } else if (threshold !== 'hidden') {
           const thresholdNum = parseInt(threshold, 10);
           const userPosts = profile?.post_count || profile?.postCount || user?.post_count || user?.postCount || 0;
@@ -698,8 +696,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
               <div className="bbcode-hide-header">
                 <EyeOff size={14} /> {t('forum.hidden_content')} 
                 {isVisible && user && user.uid !== authorId && (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) && <span className="opacity-50 ms-1">(Admin View)</span>}
-                {user && user.uid === authorId && <span className="opacity-50 ms-1">({lang === 'ru' ? 'Автор' : 'Author'})</span>}
-                {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({lang === 'ru' ? 'Адресно' : 'Addressed'})</span>}
+                {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({lang === 'ru' ? 'Адресно' : 'Addressed'}{params.nick ? `: ${params.nick}` : ''})</span>}
               </div>
               <div className="bbcode-hide-content">
                 {node.children.map(renderNode)}
@@ -710,7 +707,10 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           // If we fail the local check (e.g. previewing own post but not author yet?), fallback placeholder
           const remainingPosts = thresholdNum - userPosts;
           let hint = t('forum.hide_moderator_only');
-          if (threshold.startsWith('@')) hint = lang === 'ru' ? 'Скрыто (только для адресата)' : 'Hidden (for addressee only)';
+          if (threshold.startsWith('@')) {
+             const nickText = params.nick ? `: ${params.nick}` : '';
+             hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
+          }
           else if (threshold !== 'hidden') {
              hint = remainingPosts > 0 
                     ? t('forum.hide_posts_remaining', { n: remainingPosts }) 

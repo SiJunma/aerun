@@ -6,7 +6,7 @@ import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
   updateUserRole, addRole, updateRole, deleteRole
 } from '../api/admin';
-import { subscribeToCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
+import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns, createDesign, updateDesign, deleteDesign } from '../api/designs';
@@ -200,7 +200,7 @@ const AdminPage = () => {
         setSettings(migrated);
       }
     });
-    const unsubCats = subscribeToCategories(setCategories);
+    const unsubCats = subscribeToAllCategories(setCategories);
     const unsubGroups = subscribeToCategoryGroups(setGroups);
     const unsubUsers = subscribeToAllUsers(setUsers);
     const unsubDesigns = subscribeToDesigns(setDesigns);
@@ -256,7 +256,7 @@ const AdminPage = () => {
     }
   };
 
-  const handleOpenCatModal = (cat = null) => {
+  const handleOpenCatModal = (cat = null, prefillGroupId = null) => {
     if (cat) {
       setEditingCat(cat.id);
       setCatForm({
@@ -276,11 +276,27 @@ const AdminPage = () => {
           .map(r => r.id),
         'guest'
       ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+
+      let initialGroupId = groups[0]?.id || '';
+      let initialOrder = categories.length + 1;
+
+      if (prefillGroupId !== null) {
+        if (prefillGroupId === 'unassigned') {
+          initialGroupId = '';
+          const unassignedCats = categories.filter(c => !groups.find(g => g.id === c.group_id));
+          initialOrder = unassignedCats.length > 0 ? Math.max(...unassignedCats.map(c => c.order || 0)) + 1 : 1;
+        } else {
+          initialGroupId = prefillGroupId;
+          const groupCats = categories.filter(c => c.group_id === prefillGroupId);
+          initialOrder = groupCats.length > 0 ? Math.max(...groupCats.map(c => c.order || 0)) + 1 : 1;
+        }
+      }
+
       setCatForm({
         title: { en: '', ru: '' },
         description: { en: '', ru: '' },
-        order: categories.length + 1,
-        group_id: groups[0]?.id || '',
+        order: initialOrder,
+        group_id: initialGroupId,
         permissions: {
           [PERMISSIONS.VIEW_FORUM]: defaultViewRoles
         }
@@ -1182,51 +1198,112 @@ const AdminPage = () => {
         <Card.Body className="p-4">
           <div className="d-flex justify-content-between mb-4">
             <h5 className="mb-0">{t('admin.categories.title')}</h5>
-            {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-              <Button variant="primary" size="sm" onClick={() => handleOpenCatModal()}>{t('admin.categories.create_btn')}</Button>
-            )}
           </div>
           <Table hover responsive>
             <thead>
               <tr>
                 <th style={{ width: '80px' }}>{t('admin.categories.table_order')}</th>
-                <th>{t('admin.categories.modal_group_select')}</th>
                 <th>{t('admin.categories.table_title')}</th>
                 <th>{t('admin.categories.table_stats')}</th>
                 <th className="text-end">{t('admin.categories.table_actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {categories.map(cat => {
-                const group = groups.find(g => g.id === cat.group_id);
+              {groups.map(group => {
+                const groupCats = categories.filter(c => c.group_id === group.id).sort((a, b) => a.order - b.order);
                 return (
-                  <tr key={cat.id} className="align-middle">
-                    <td>{cat.order}</td>
-                    <td>
-                      <span className="group-badge">
-                        {group ? (group.title?.[currentLang] || group.title?.en) : t('admin.categories.group_unassigned')}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="fw-bold">
-                        {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
-                      </div>
-                      <div className="small text-muted">
-                        {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
-                      </div>
-                    </td>
-                    <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
-                    <td className="text-end">
-                      {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                        <>
-                          <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
-                          <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
+                  <React.Fragment key={group.id}>
+                    <tr className="table-active">
+                      <td colSpan="3" className="fw-bold align-middle">
+                        {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
+                      </td>
+                      <td className="text-end">
+                        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                          <Button variant="outline-primary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, group.id)}>
+                            <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                    {groupCats.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="text-center text-muted py-3 small">
+                          {currentLang === 'ru' ? 'Нет форумов в этой категории' : 'No forums in this category'}
+                        </td>
+                      </tr>
+                    ) : groupCats.map(cat => (
+                      <tr key={cat.id} className="align-middle">
+                        <td>{cat.order}</td>
+                        <td>
+                          <div className="fw-bold">
+                            {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                          </div>
+                          <div className="small text-muted">
+                            {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                          </div>
+                        </td>
+                        <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
+                        <td className="text-end">
+                          {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                            <>
+                              <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
+                              <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
                 );
               })}
+              {(() => {
+                const unassignedCats = categories.filter(c => !groups.find(g => g.id === c.group_id)).sort((a, b) => a.order - b.order);
+                if (unassignedCats.length === 0 && groups.length > 0) return null;
+                return (
+                  <React.Fragment>
+                    <tr className="table-active">
+                      <td colSpan="3" className="fw-bold text-muted align-middle">
+                        {t('admin.categories.group_unassigned')}
+                      </td>
+                      <td className="text-end">
+                        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                          <Button variant="outline-secondary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, 'unassigned')}>
+                            <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                    {unassignedCats.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="text-center text-muted py-3 small">
+                          {currentLang === 'ru' ? 'Нет нераспределенных форумов' : 'No unassigned forums'}
+                        </td>
+                      </tr>
+                    ) : unassignedCats.map(cat => (
+                      <tr key={cat.id} className="align-middle">
+                        <td>{cat.order}</td>
+                        <td>
+                          <div className="fw-bold">
+                            {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                          </div>
+                          <div className="small text-muted">
+                            {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                          </div>
+                        </td>
+                        <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
+                        <td className="text-end">
+                          {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                            <>
+                              <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
+                              <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })()}
             </tbody>
           </Table>
         </Card.Body>

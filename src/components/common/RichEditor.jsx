@@ -192,11 +192,6 @@ const RichEditor = forwardRef(({
         
         if (nlCount === 0) {
           replacement = '\n' + before + (selected || '') + after;
-        } else if (nlCount > 1) {
-          // Collapse multiple newlines to one
-          replacement = before + (selected || '') + after;
-          // Trim the extra newlines from preText
-          preText = text.substring(0, j + 2); 
         } else {
           replacement = before + (selected || '') + after;
         }
@@ -229,24 +224,24 @@ const RichEditor = forwardRef(({
 
       if (selected.length === 0) {
         if (type === 'bullet') {
-          cursorStart = start + (replacement.includes('\n[list]') ? 1 : 0) + '[list]\n[*] '.length;
+          cursorStart = preText.length + (replacement.includes('\n[list]') ? 1 : 0) + '[list]\n[*] '.length;
           cursorEnd = cursorStart;
         } else if (type === 'quote') {
-          cursorStart = start + (replacement.startsWith('\n') ? 1 : 0) + '[quote]'.length;
+          cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + '[quote]'.length;
           cursorEnd = cursorStart;
         } else if (type === 'spoiler') {
           const defaultTitle = lang === 'ru' ? 'Спойлер' : 'Spoiler';
-          cursorStart = start + (replacement.startsWith('\n') ? 1 : 0) + `[spoiler="${defaultTitle}"]`.length;
+          cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + `[spoiler="${defaultTitle}"]`.length;
           cursorEnd = cursorStart;
         } else if (before && after) {
-          cursorStart = start + (replacement.startsWith('\n') ? 1 : 0) + before.length;
+          cursorStart = preText.length + (replacement.startsWith('\n') ? 1 : 0) + before.length;
           cursorEnd = cursorStart;
         } else {
-          cursorStart = start + replacement.length;
+          cursorStart = preText.length + replacement.length;
           cursorEnd = cursorStart;
         }
       } else {
-        cursorStart = start + replacement.length;
+        cursorStart = preText.length + replacement.length;
         cursorEnd = cursorStart;
       }
 
@@ -561,10 +556,16 @@ const RichEditor = forwardRef(({
       const selected = text.substring(start, end);
 
       let val = 'hidden';
+      let extraParams = '';
       if (capturedHideData.type === 'posts') val = capturedHideData.threshold || '10';
-      else if (capturedHideData.type === 'user' && capturedHideData.uid) val = `@${capturedHideData.uid}`;
+      else if (capturedHideData.type === 'user' && capturedHideData.uid) {
+        val = `@${capturedHideData.uid}`;
+        if (capturedHideData.username) extraParams = ` nick="${capturedHideData.username}"`;
+      }
 
-      const replacement = `[hide=${val}]${selected}[/hide]`;
+      const prefix = `[hide=${val}${extraParams}]`;
+      const suffix = `[/hide]`;
+      const replacement = `${prefix}${selected}${suffix}`;
       const newValue = text.substring(0, start) + replacement + text.substring(end);
 
       let newHistory = history.slice(0, historyIndex + 1);
@@ -580,8 +581,8 @@ const RichEditor = forwardRef(({
       onChange({ target: { value: newValue } });
 
       textarea.focus();
-      const newCursorPos = start + `[hide=${val}]`.length + selected.length + `[/hide]`.length;
-      const cursorPos = selected.length > 0 ? newCursorPos : start + `[hide=${val}]`.length;
+      const newCursorPos = start + prefix.length + selected.length + suffix.length;
+      const cursorPos = selected.length > 0 ? newCursorPos : start + prefix.length;
       textarea.setSelectionRange(cursorPos, cursorPos);
       textarea.scrollTop = currentScrollTop;
     }, 0);

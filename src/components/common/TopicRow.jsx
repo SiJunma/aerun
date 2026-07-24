@@ -28,7 +28,9 @@ const TopicRow = ({
   const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
   const registrationMs = profile?.created_at?.toMillis?.() || 0;
   const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-  const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
+  const lastPostMs = topic.last_post_at 
+    ? (topic.last_post_at.toMillis ? topic.last_post_at.toMillis() : new Date(topic.last_post_at).getTime()) 
+    : 0;
   const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
   const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
