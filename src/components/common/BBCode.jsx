@@ -232,7 +232,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html'];
+  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'left', 'center', 'right', 'justify'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -477,12 +477,20 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{lang === 'ru' ? 'GIF-изображение' : 'GIF Image'}: {imgUrl}]</a>;
         }
 
+        const imgStyle = { maxHeight: '500px' };
+        if (params.width) {
+          imgStyle.maxWidth = params.width;
+          if (params.width.includes('%')) {
+             imgStyle.width = '100%';
+          }
+        }
+
         return <img
           key={index}
           src={imgUrl}
-          className="img-fluid rounded my-2 shadow-sm"
-          style={{ maxHeight: '500px' }}
-          alt={params.default || "user post"}
+          className="img-fluid rounded my-2 shadow-sm bbcode-img"
+          style={imgStyle}
+          alt={params.alt || params.default || "user post"}
           onError={(e) => { e.target.onerror = null; e.target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="%23f8f9fa" /><text x="50" y="50" font-family="Arial" font-size="12" fill="%23dc3545" text-anchor="middle" dominant-baseline="central">Image Not Found</text></svg>'; }}
         />;
       }

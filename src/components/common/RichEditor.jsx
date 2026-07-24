@@ -31,7 +31,7 @@ const RichEditor = forwardRef(({
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [linkData, setLinkData] = useState({ text: '', url: 'https://' });
-  const [imageData, setImageData] = useState({ alt: '', url: 'https://' });
+  const [imageData, setImageData] = useState({ alt: '', url: 'https://', width: '' });
   const [showDiceModal, setShowDiceModal] = useState(false);
   const [diceData, setDiceData] = useState({ sides: 6, type: 'normal' });
   const [showHideModal, setShowHideModal] = useState(false);
@@ -187,17 +187,17 @@ const RichEditor = forwardRef(({
         }
         
         if (nlCount === 0) {
-          replacement = '\n' + before + (selected || '...') + after;
+          replacement = '\n' + before + (selected || '') + after;
         } else if (nlCount > 1) {
           // Collapse multiple newlines to one
-          replacement = before + (selected || '...') + after;
+          replacement = before + (selected || '') + after;
           // Trim the extra newlines from preText
           preText = text.substring(0, j + 2); 
         } else {
-          replacement = before + (selected || '...') + after;
+          replacement = before + (selected || '') + after;
         }
       } else {
-        replacement = before + (selected || '...') + after;
+        replacement = before + (selected || '') + after;
       }
     } else if (type === 'size') {
       replacement = `[size=${before}]${selected || (lang === 'ru' ? 'размер' : 'size')}[/size]`;
@@ -469,7 +469,7 @@ const RichEditor = forwardRef(({
     e.preventDefault();
     const capturedImageData = { ...imageData };
     setShowImageModal(false);
-    setImageData({ alt: '', url: 'https://' });
+    setImageData({ alt: '', url: 'https://', width: '' });
     setTimeout(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
@@ -478,7 +478,14 @@ const RichEditor = forwardRef(({
       const text = latestValueRef.current;
       const currentScrollTop = textarea.scrollTop;
       const url = capturedImageData.url;
-      const prefix = capturedImageData.alt.trim() ? `[img=${capturedImageData.alt.trim()}]` : '[img]';
+      let prefix = '[img';
+      if (capturedImageData.alt.trim() && !capturedImageData.width?.trim()) {
+        prefix += `=${capturedImageData.alt.trim()}]`;
+      } else {
+        if (capturedImageData.alt.trim()) prefix += ` alt="${capturedImageData.alt.trim()}"`;
+        if (capturedImageData.width?.trim()) prefix += ` width="${capturedImageData.width.trim()}"`;
+        prefix += ']';
+      }
       const replacement = prefix + url + '[/img]';
       const newValue = text.substring(0, start) + replacement + text.substring(end);
 
@@ -1025,6 +1032,15 @@ const RichEditor = forwardRef(({
             value={imageData.alt}
             onChange={e => setImageData({ ...imageData, alt: e.target.value })}
             placeholder={lang === 'ru' ? 'Описание...' : 'Description...'}
+          />
+        </Form.Group>
+        <Form.Group className="mb-3">
+          <Form.Label>{lang === 'ru' ? 'Ширина (px или %)' : 'Width (px or %)'}</Form.Label>
+          <Form.Control
+            type="text"
+            value={imageData.width || ''}
+            onChange={e => setImageData({ ...imageData, width: e.target.value })}
+            placeholder={lang === 'ru' ? 'Например: 100px или 50%' : 'e.g. 100px or 50%'}
           />
         </Form.Group>
         <Form.Group>
