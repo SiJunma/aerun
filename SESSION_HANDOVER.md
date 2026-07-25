@@ -1,33 +1,43 @@
-# Session Handover: Aerun Forum Architectural Hardening & UI Polish
+# Session Handover: Guest Permission Fix
 
-**Date**: 2026-04-18
-**Status**: Architecture Hardened + RichEditor UX Finalized 🚀
+**Date**: 2026-07-25
+**Status**: Deployed ✅
 
-## 📋 Project State Summary
-We have completed the architectural transition of core forum logic to Cloud Functions and significantly hardened the **RichEditor** component's UI and BBCode rendering.
+## 📋 Bug Fixed This Session
 
-### Done & Deployed:
-1.  **Architecture**: Firestore rules now block client-side metadata writes. Counters and notifications are handled by server-side triggers.
-2.  **RichEditor BBCode**:
-    *   Implemented strict **newline absorption** for block tags (`[quote]`, `[code]`, `[spoiler]`).
-    *   Added full support for the `[code]` tag with theme-aware syntax highlighting (light/dark/neutral).
-    *   Fixed `[spoiler]` and `[quote]` buttons to auto-populate default text.
-3.  **RichEditor Interaction**:
-    *   Fixed `Ctrl + Enter` crash (undefined `e` object).
-    *   Relocated "Hotkeys" button for accessibility; hidden on mobile.
-4.  **DM Chat UI**:
-    *   Fixed **clipping** of editor dropdowns in the Private Messages column by adjusting `overflow` rules.
-    *   Refactored **Smiles Picker**: When accessed from the "More" menu on narrow screens, it now opens in a separate **Centered Modal** instead of being awkwardly embedded.
+### Guest `permission-denied` on public topics
 
-## 🛠️ Infrastructure Notes
-*   **Workflow**: The local agent handles file operations; the remote MCP agent (if used) focuses on architectural analysis.
-*   **Cleanup**: Today's `dist` folder has been cleaned.
-*   **Linting**: Project is clean (`npm run lint` passes).
+**Symptom**: Guests (incognito) got `FirebaseError: [code=permission-denied]` when opening any topic.
+
+**Root causes (3 fixes applied)**:
+
+1. **`posts` — `allow read: if isAdmin()` only**  
+   Posts were completely unreadable by non-admins. Fixed to use `hasCategoryPermission`.
+
+2. **`topics` — `allow list: if isAdmin()` only**  
+   `subscribeToTopics()` (query with `where('category_id', ...)`) uses `list` op. Fixed to use `hasCategoryPermission`.
+
+3. **`hasCategoryPermission` fallback bug** ← *root cause*  
+   When `view_forum` was not set explicitly at category level, the fallback was:
+   ```js
+   isSignedIn() && hasPermission(permission)  // always false for guests
+   ```
+   Fixed to check the `/roles/{roleId}` document directly, so guests whose global `guest` role has `view_forum` pass correctly:
+   ```js
+   role == 'root' || (
+     exists(.../roles/$(role)) &&
+     permission in get(.../roles/$(role)).data.permissions
+   )
+   ```
+
+**Key insight**: The `guest` role has **no global permissions by default** — access to specific categories is granted via category-level `permissions.view_forum` overrides that include `'guest'`. The fallback only matters when a category omits `view_forum` and relies on the global role document.
+
+## 🏗️ Architecture Notes
+
+- `subscribeToCategories` → Cloud Function (`getSecuredCategories`) — unaffected by rules
+- `fetchSecuredPosts` → Cloud Function — unaffected by rules  
+- `subscribeToTopic(topicId)` → direct Firestore `get` — now covered by fixed `allow get`
+- `subscribeToPosts` is **not used** in TopicPage (uses Cloud Function instead)
 
 ## ⏭️ Next Steps
-1.  **Portion 3: Post Location Logic**: Finalize standardizing how notifications redirect to specific post IDs.
-2.  **Reputation Audit**: Verify that all reputation sources (likes, replies, etc.) are correctly covered by server-side triggers without client-side overlap.
-3.  **Mobile Polish**: Continued verification of the new Smiles Modal on actual mobile devices if possible.
-
----
-*Good luck with the next session!*
+- В личных сообщениях ограничение символов для сообщение должно слушать глобальную настройку лимита символов для постов (сейчас хардкод 2000 символов).
