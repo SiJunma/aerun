@@ -68,8 +68,13 @@ service cloud.firestore {
       let catPerms = get(/databases/$(database)/documents/categories/$(catId)).data.permissions;
       // If the permission is not set at category level → fall back to global role check
       // (mirrors frontend hasPermission() fallback, where missing catPerm = use role default)
+      // NOTE: We check the role document directly so that guests with a global 'view_forum'
+      // permission in the 'guest' role document can also pass (isSignedIn() would block them).
       return !(permission in catPerms)
-        ? (isSignedIn() && hasPermission(permission))
+        ? (role == 'root' || (
+            exists(/databases/$(database)/documents/roles/$(role)) &&
+            permission in get(/databases/$(database)/documents/roles/$(role)).data.permissions
+          ))
         : (role in catPerms[permission]);
     }
 
@@ -132,7 +137,7 @@ service cloud.firestore {
     // --- Topics ---
     match /topics/{topicId} {
       allow get: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
-      allow list: if isAdmin();
+      allow list: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
       // Active users or Guests (if allowed) can create topics
       allow create: if isAdmin() || canCreateTopic(request.resource.data.category_id);
       // Author or admin can edit; counter bumps and metadata are handled by server triggers
@@ -148,7 +153,7 @@ service cloud.firestore {
 
     // --- Posts ---
     match /posts/{postId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
       // Active users or Guests (if allowed) can create posts
       allow create: if isAdmin() || canPostToTopic(request.resource.data.topic_id);
       allow update: if isAdmin()
