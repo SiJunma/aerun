@@ -1,3 +1,4 @@
+const { loadContext, hasViewForum, getRequester } = require("./permissions");
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
@@ -7,7 +8,7 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 // Ensure only a reasonable amount of instances run at once to manage billing safely
-setGlobalOptions({ maxInstances: 10 });
+setGlobalOptions({ maxInstances: 10,  enforceAppCheck: true });
 
 /**
  * Atomic Reputation Handler (Create)
@@ -27,6 +28,21 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
 
     try {
         const db = admin.firestore();
+
+        // Firestore triggers are at-least-once: a redelivery would increment twice.
+        // Claim the log first; the update does not re-fire onDocumentCreated.
+        const logRef = db.collection("reputation_logs").doc(snap.id);
+        const claimed = await db.runTransaction(async (tx) => {
+            const cur = await tx.get(logRef);
+            if (!cur.exists || cur.data().applied === true) return false;
+            tx.update(logRef, { applied: true });
+            return true;
+        });
+        if (!claimed) {
+            logger.info(`onReputationLogCreated: log ${snap.id} already applied, skipping`);
+            return;
+        }
+
         const batch = db.batch();
 
         // 1. Update target user reputation
@@ -66,6 +82,7 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
 /**
  * Atomic Reputation Handler (Delete)
  * Fired when a reputation_log is deleted. Reverts the reputation change.
+ * Sole owner of the revert — onPostDeleted must not duplicate it.
  */
 exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", async (event) => {
     const snap = event.data;
@@ -74,29 +91,27 @@ exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", as
     const log = snap.data();
     const { target_id, post_id, value } = log;
 
-    if (!target_id || typeof value !== 'number') return;
+    if (!target_id || typeof value !== 'number' || value === 0) return;
 
     try {
         const db = admin.firestore();
         const batch = db.batch();
 
-        // 1. Revert target user reputation
-        const userRef = db.collection("users").doc(target_id);
-        batch.update(userRef, { reputation: admin.firestore.FieldValue.increment(-value) });
-
-        // 2. Revert associated post reputation
+        // batch.update() on a missing document aborts the WHOLE commit, and both
+        // the post and the user may already be gone by the time this fires.
+        const userQueued = await queueIncrement(batch, db.collection("users").doc(target_id), "reputation", -value);
         if (post_id) {
-            const postRef = db.collection("posts").doc(post_id);
-            batch.update(postRef, { reputation: admin.firestore.FieldValue.increment(-value) });
+            await queueIncrement(batch, db.collection("posts").doc(post_id), "reputation", -value);
         }
 
         await batch.commit();
-        logger.info(`Reputation reverted for deleted log ${snap.id}: target=${target_id}, value=${-value}`);
+        logger.info(`Reputation reverted for deleted log ${snap.id}: target=${target_id}, value=${-value}, user=${userQueued}`);
     } catch (error) {
-      logger.error('Error rejecting character:', error);
-      throw new HttpsError('internal', 'Failed to reject character');
+        // Background triggers must never throw HttpsError — it means nothing outside
+        // a callable and just produces an unhandled rejection.
+        logger.error(`Error reverting reputation log ${snap.id}:`, error);
     }
-  });
+});
 
 /**
  * locatePost (Callable)
@@ -240,6 +255,15 @@ exports.getSecuredCategories = onCall(
   }
 );
 
+/** Firestore Timestamps are not JSON-serialisable over the callable protocol. */
+function serializeTopic(doc) {
+    const data = { id: doc.id, ...doc.data() };
+    ['created_at', 'updated_at', 'last_post_at'].forEach(k => {
+        if (data[k]?.toDate) data[k] = data[k].toDate().toISOString();
+    });
+    return data;
+}
+
 /**
  * getSecuredTopics (Callable)
  * Retrieves topics for a category the user has permission to view.
@@ -306,52 +330,41 @@ exports.getSecuredTopics = onCall(
 
     const startIndex = (page - 1) * pageSize;
     
-    // 1. Fetch pinned topics (ignoring pagination limits for them, they are small in number)
-    const pinnedSnap = await db.collection("topics")
-      .where("category_id", "==", categoryId)
-      .where("is_pinned", "==", true)
-      .orderBy("last_post_at", "desc")
-      .get();
-      
+    // 1. Pinned topics (page 1 only, small in number)
     const pinnedTopics = [];
-    pinnedSnap.forEach(doc => {
-      const data = doc.data();
-      data.id = doc.id;
-      if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
-      if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
-      if (data.last_post_at) data.last_post_at = data.last_post_at.toDate().toISOString();
-      pinnedTopics.push(data);
-    });
+    if (page === 1) {
+      const pinnedSnap = await db.collection("topics")
+        .where("category_id", "==", categoryId)
+        .where("is_pinned", "==", true)
+        .orderBy("last_post_at", "desc")
+        .get();
+      pinnedSnap.forEach(doc => pinnedTopics.push(serializeTopic(doc)));
+    }
 
-    // 2. Fetch regular topics (we omit is_pinned filter to include legacy topics missing the field)
-    // We add a small buffer to the limit to account for pinned topics that we will filter out.
-    const topicsSnap = await db.collection("topics")
-      .where("category_id", "==", categoryId)
-      .orderBy("last_post_at", "desc")
-      .offset(startIndex)
-      .limit(pageSize + 5)
-      .get();
-      
-    const pinnedIds = new Set(pinnedTopics.map(t => t.id));
+    // 2. Regular topics — pinned excluded IN THE QUERY. Filtering after
+    //    offset()+limit() silently dropped a topic for every pinned one that
+    //    happened to fall inside the window.
+    //    Requires is_pinned on every document: backfill legacy topics once with
+    //    { is_pinned: false } — Firestore skips documents where the field is absent.
+    const [countSnap, topicsSnap] = await Promise.all([
+      db.collection("topics")
+        .where("category_id", "==", categoryId)
+        .where("is_pinned", "==", false)
+        .count().get(),
+      db.collection("topics")
+        .where("category_id", "==", categoryId)
+        .where("is_pinned", "==", false)
+        .orderBy("last_post_at", "desc")
+        .offset(startIndex)
+        .limit(pageSize)
+        .get()
+    ]);
+
     const topics = [];
-    topicsSnap.forEach(doc => {
-      if (pinnedIds.has(doc.id)) return; // filter out pinned topics in memory
-      
-      const data = doc.data();
-      data.id = doc.id;
-      if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
-      if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
-      if (data.last_post_at) data.last_post_at = data.last_post_at.toDate().toISOString();
-      
-      if (topics.length < pageSize) {
-          topics.push(data);
-      }
-    });
+    topicsSnap.forEach(doc => topics.push(serializeTopic(doc)));
+    const totalCount = countSnap.data().count;
 
-    return { 
-      pinned: page === 1 ? pinnedTopics : [], // Only send pinned on page 1
-      topics
-    };
+    return { pinned: pinnedTopics, topics, totalCount, hasMore: totalCount > startIndex + pageSize };
   }
 );
 
@@ -411,6 +424,20 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
         }
 
         await batch.commit();
+
+        // 2b. Cascade-delete posts. onPostDeleted skips topic/category counters
+        //     once the topic is gone, so the -posts_count above stays correct —
+        //     but only because the topic is deleted FIRST. Do not delete posts
+        //     from the client.
+        const postsSnap = await db.collection("posts")
+            .where("topic_id", "==", event.params.topicId)
+            .get();
+        for (let i = 0; i < postsSnap.docs.length; i += 400) {
+            const chunk = db.batch();
+            postsSnap.docs.slice(i, i + 400).forEach(d => chunk.delete(d.ref));
+            await chunk.commit();
+        }
+        logger.info(`onTopicDeleted: cascade-deleted ${postsSnap.size} posts for topic ${event.params.topicId}`);
 
         // 3. Notifications Cleanup (Chunked)
         const notifSnap = await db.collection("notifications")
@@ -576,44 +603,51 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
         const subscribers = subSnap.docs.map(d => d.data().user_id).filter(uid => uid !== authorId);
 
         if (subscribers.length > 0) {
-            for (const recipientUid of subscribers) {
-                await db.runTransaction(async (transaction) => {
-                    // Check for existing unread topic_reply notification
-                    const q = db.collection("notifications")
-                        .where("recipient_uid", "==", recipientUid)
-                        .where("type", "==", "topic_reply")
-                        .where("payload.topic_id", "==", topicId)
-                        .where("read", "==", false)
-                        .where("archived", "==", false)
-                        .limit(1);
-                    
-                    const existingSnap = await transaction.get(q);
 
-                    if (!existingSnap.empty) {
-                        const existingDoc = existingSnap.docs[0];
-                        transaction.update(existingDoc.ref, {
-                            "payload.post_count": admin.firestore.FieldValue.increment(1),
-                            "payload.last_post_id": postId,
-                            created_at: admin.firestore.FieldValue.serverTimestamp()
-                        });
-                    } else {
-                        transaction.set(db.collection("notifications").doc(), {
-                            recipient_uid: recipientUid,
-                            type: "topic_reply",
-                            read: false,
-                            archived: false,
-                            payload: {
-                                topic_id: topicId,
-                                topic_title: topicTitle,
-                                first_post_id: postId,
-                                last_post_id: postId,
-                                post_count: 1
-                            },
-                            created_at: admin.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
-                });
-            }
+            // The transaction query below needs this composite index:
+            // notifications: recipient_uid ASC, type ASC, payload.topic_id ASC, read ASC, archived ASC
+            // Without it EVERY reply notification fails, and the catch at the bottom
+            // hides it — verify in firestore.indexes.json.
+            const CHUNK = 10;
+            for (let i = 0; i < subscribers.length; i += CHUNK) {
+              await Promise.all(subscribers.slice(i, i + CHUNK).map(recipientUid =>
+                db.runTransaction(async (transaction) => {
+                  // Check for existing unread topic_reply notification
+                  const q = db.collection("notifications")
+                      .where("recipient_uid", "==", recipientUid)
+                      .where("type", "==", "topic_reply")
+                      .where("payload.topic_id", "==", topicId)
+                      .where("read", "==", false)
+                      .where("archived", "==", false)
+                      .limit(1);
+                  
+                  const existingSnap = await transaction.get(q);
+
+                  if (!existingSnap.empty) {
+                      const existingDoc = existingSnap.docs[0];
+                      transaction.update(existingDoc.ref, {
+                          "payload.post_count": admin.firestore.FieldValue.increment(1),
+                          "payload.last_post_id": postId,
+                          created_at: admin.firestore.FieldValue.serverTimestamp()
+                      });
+                  } else {
+                      transaction.set(db.collection("notifications").doc(), {
+                          recipient_uid: recipientUid,
+                          type: "topic_reply",
+                          read: false,
+                          archived: false,
+                          payload: {
+                              topic_id: topicId,
+                              topic_title: topicTitle,
+                              first_post_id: postId,
+                              last_post_id: postId,
+                              post_count: 1
+                          },
+                          created_at: admin.firestore.FieldValue.serverTimestamp()
+                      });
+                  }
+                })
+            ));
         }
 
         // 2. Quote Notifications
@@ -679,19 +713,11 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
         }
 
         // 2. Revert Reputation Logs
+        //    Do NOT revert reputation here — onReputationLogDeleted owns that.
+        //    Doing both decremented the author twice whenever the batch did not
+        //    fail outright on the already-deleted post document.
         const logsSnap = await db.collection("reputation_logs").where("post_id", "==", event.params.postId).get();
-        if (!logsSnap.empty) {
-            let totalVal = 0;
-            logsSnap.forEach(l => {
-                const val = l.data().value || 0;
-                totalVal += val;
-                batch.delete(l.ref);
-            });
-            if (author_id) {
-                const userRef = db.collection("users").doc(author_id);
-                batch.update(userRef, { reputation: admin.firestore.FieldValue.increment(-totalVal) });
-            }
-        }
+        logsSnap.forEach(l => batch.delete(l.ref));
 
         await batch.commit();
 
@@ -727,8 +753,10 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
             await batchPost.commit();
         }
 
-        // 4. Metadata Sync (Fallback)
-        await syncTopicMetadata(db, topic_id);
+        // 4. Metadata Sync (Fallback) — pointless when the whole topic is going away.
+        if (topicSnap.exists) {
+            await syncTopicMetadata(db, topic_id);
+        }
 
         
         logger.info(`onPostDeleted cleanup for ${event.params.postId} successful.`);
@@ -736,6 +764,18 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
         logger.error(`onPostDeleted error (${event.params.postId}):`, error);
     }
 });
+
+/**
+ * Queues an increment onto a batch only if the target document still exists.
+ * batch.update() on a missing document fails the entire commit, which is how
+ * counter updates were silently lost when an author or post had been deleted.
+ */
+async function queueIncrement(batch, ref, field, delta) {
+    const snap = await ref.get();
+    if (!snap.exists) return false;
+    batch.update(ref, { [field]: admin.firestore.FieldValue.increment(delta) });
+    return true;
+}
 
 /**
  * syncTopicMetadata
@@ -837,23 +877,21 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
         // 1. Find roles with user-management permissions
         const rolesSnap = await db.collection("roles").get();
         const eligibleRoleIds = [];
-        const USER_MGMT_PERMS = ["APPROVE_USERS", "BAN_USERS", "DELETE_USERS"];
+        const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
 
         rolesSnap.forEach(doc => {
-            const data = doc.data();
-            const perms = data.permissions || [];
+            const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
             if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
                 eligibleRoleIds.push(doc.id);
             }
         });
 
-        // 2. Collect recipients
+        // 2. Collect recipients (chunked: 'in' takes at most 30 values,
+        //    the old slice(0, 30) silently dropped everything past the 30th role)
         const recipients = new Set();
-        
-        // managers
-        if (eligibleRoleIds.length > 0) {
+        for (let i = 0; i < eligibleRoleIds.length; i += 30) {
             const usersSnap = await db.collection("users")
-                .where("role_id", "in", eligibleRoleIds.slice(0, 30))
+                .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
                 .get();
             usersSnap.forEach(u => recipients.add(u.id));
         }
@@ -948,19 +986,14 @@ exports.getReputationLogs = onCall(
         if (seekDoc.exists) {
           const seekTs = seekDoc.data().created_at;
           if (seekTs) {
-            // Count documents newer than seekTs using select() to minimise data transfer.
-            // This query uses only the `created_at` field (single-field index always exists).
-            // We deliberately do NOT combine with target_id to avoid needing a composite index.
-            // Instead fetch all docs for this user ordered by created_at desc and count until
-            // we pass the seekTs boundary. To keep this fast we use a cursor query.
+
             const newerSnap = await db.collection('reputation_logs')
               .where('target_id', '==', targetUid)
               .orderBy('created_at', 'desc')
               .endBefore(seekTs)
-              .select()          // fetch no fields — only doc refs, minimises read cost
+              .count()   // 1/1000 of a read per document instead of a full read each
               .get();
-            const newerCount = newerSnap.size;
-            resolvedPage = Math.floor(newerCount / pageSize) + 1;
+            resolvedPage = Math.floor(newerSnap.data().count / pageSize) + 1;
           }
         }
       } catch (seekErr) {
@@ -1113,28 +1146,14 @@ exports.getPostVoters = onCall(
 
     const maxLimit = Math.min(reqLimit, 50);
 
-    // Use only equality filter (no orderBy) to avoid needing a composite index.
-    // Sorting is done in-memory after fetch.
-    const logsSnap = await db.collection('reputation_logs')
-      .where('post_id', '==', postId)
-      .get();
-
-    if (logsSnap.empty) {
-      return { voters: [], total: 0 };
-    }
-
-    const total = logsSnap.size;
-
-    // Sort by created_at descending in memory, then take the requested limit
-    const sortedDocs = logsSnap.docs
-      .slice()
-      .sort((a, b) => {
-        const tsA = a.data().created_at?.toMillis?.() ?? 0;
-        const tsB = b.data().created_at?.toMillis?.() ?? 0;
-        return tsB - tsA;
-      })
-      .slice(0, maxLimit);
-
+    const baseQuery = db.collection('reputation_logs').where('post_id', '==', postId);
+    const [countSnap, logsSnap] = await Promise.all([
+      baseQuery.count().get(),
+      baseQuery.orderBy('created_at', 'desc').limit(maxLimit).get()   // needs composite index (post_id, created_at desc)
+    ]);
+    const total = countSnap.data().count;
+    if (logsSnap.empty) return { voters: [], total };
+    const sortedDocs = logsSnap.docs;   // already ordered by the query
     // Collect unique voter IDs from the slice
     const voterIds = [...new Set(sortedDocs.map(d => d.data().voter_id).filter(Boolean))];
 
@@ -1191,41 +1210,28 @@ exports.getSecuredPosts = onCall(
     const topicData = topicDoc.data();
     const categoryId = topicData.category_id;
 
-    // 2. Fetch User Role & Post Count
+    // 2. Requester role, permissions and post count (single user read)
     const uid = request.auth ? request.auth.uid : null;
+    const ctx = await loadContext(db);
+    const requester = await getRequester(db, uid);
+    const requesterRole = requester.role;
+    const userPostCount = requester.data.post_count || 0;
+
     let canViewMasterDice = false;
     let canBypassHideTags = false;
-    let userPostCount = 0;
-    let requesterRole = 'guest';
-
-    if (uid) {
-      const userDoc = await db.collection("users").doc(uid).get();
-      if (userDoc.exists) {
-        const uData = userDoc.data();
-        requesterRole = uData.role_id || 'player';
-        userPostCount = uData.post_count || 0;
-        
-        if (['root', 'admin', 'moderator'].includes(requesterRole)) {
-          canViewMasterDice = true;
-          canBypassHideTags = true;
-        } else {
-          const roleDoc = await db.collection("roles").doc(requesterRole).get();
-          if (roleDoc.exists) {
-            const perms = roleDoc.data().permissions || [];
-            if (perms.includes('view_master_dice')) canViewMasterDice = true;
-            if (perms.includes('bypass_hide_tags')) canBypassHideTags = true;
-          }
-        }
-      }
+    if (['root', 'admin', 'moderator'].includes(requesterRole)) {
+      canViewMasterDice = true;
+      canBypassHideTags = true;
+    } else {
+      const perms = (ctx.roles[requesterRole]?.permissions) || [];
+      canViewMasterDice = perms.includes('view_master_dice');
+      canBypassHideTags = perms.includes('bypass_hide_tags');
     }
 
-    // 3. Determine Effective Role and Check view_forum permission
-    let isRestricted = requesterRole === 'pending';
-    const settingsSnap = await db.collection("settings").doc("global").get();
-    const settings = settingsSnap.exists ? settingsSnap.data() : {};
-    const isWhitelistOff = !settings.whitelistMode;
-    let effectiveRole = requesterRole;
-    if (isRestricted && isWhitelistOff) effectiveRole = 'spectator';
+    // 3. Shared view_forum check — same rule as every other callable
+    if (!hasViewForum(requesterRole, categoryId, ctx)) {
+      throw new HttpsError('permission-denied', 'You do not have permission to view posts in this category.');
+    }
 
     // Global permission map for efficient check
     const rolesSnap = await db.collection("roles").get();
@@ -1497,4 +1503,4 @@ exports.getUserPosts = onCall(
       hasMore: totalCount > startIndex + pageSize
     };
   }
-);
+);
