@@ -274,8 +274,10 @@ service cloud.firestore {
 
     // --- Guest Activity ---
     match /guest_activity/{sessionId} {
+      // Anyone can read guest activity (needed for online-now stats in ForumStats)
       allow read: if true;
-      allow create, update: if request.resource.data.keys().hasAny(['last_seen', 'user_agent', 'created_at']);
+      allow create: if request.resource.data.keys().hasAny(['last_seen', 'user_agent', 'created_at', 'first_seen', 'path']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'path', 'user_agent']);
       allow delete: if isAdmin();
     }
 
@@ -335,16 +337,7 @@ service cloud.firestore {
       );
     }
 
-    // --- Guest Activity (throttled unique guest tracking) ---
-    match /guest_activity/{guestId} {
-      // Aggregate guest count should be read from global_stats, not by listing this collection.
-      allow read: if isAdmin();
-      allow create: if request.resource.data.keys().hasOnly(['first_seen', 'last_seen', 'path'])
-        && request.resource.data.last_seen == request.time;
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'path'])
-        && request.resource.data.last_seen == request.time;
-      allow delete: if isAdmin();
-    }
+
 
     // --- Direct Messages ---
     // Only active participants can read/write conversations and messages.

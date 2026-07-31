@@ -50,15 +50,23 @@ export const markAllTopicsRead = async (uid, topicIds) => {
 
 // ── Latest Content ─────────────────────────────────────────────────────────
 
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
 export const subscribeToLatestTopics = (callback, limitCount = 50) => {
-  const q = query(
-    collection(db, 'topics'),
-    orderBy('last_post_at', 'desc'),
-    limit(limitCount)
-  );
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
+  let isSubscribed = true;
+  const fetchTopics = async () => {
+    try {
+      const functions = getFunctions();
+      const getGlobalTopics = httpsCallable(functions, 'getSecuredGlobalTopics');
+      const result = await getGlobalTopics({ orderByField: 'last_post_at', limitCount });
+      if (isSubscribed) callback(result.data.topics || []);
+    } catch (err) {
+      console.error('[subscribeToLatestTopics]', err);
+      if (isSubscribed) callback([]);
+    }
+  };
+  fetchTopics();
+  return () => { isSubscribed = false; };
 };
 
 // ── Guest Activity ──────────────────────────────────────────────────────────
@@ -79,14 +87,20 @@ export const deleteGuestActivity = async (guestId) => {
 // ── Statistics & Global Content ─────────────────────────────────────────────
 
 export const subscribeToTopTopics = (callback, limitCount = 50) => {
-  const q = query(
-    collection(db, 'topics'),
-    orderBy('posts_count', 'desc'),
-    limit(limitCount)
-  );
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  }, (err) => console.error('[subscribeToTopTopics]', err));
+  let isSubscribed = true;
+  const fetchTopics = async () => {
+    try {
+      const functions = getFunctions();
+      const getGlobalTopics = httpsCallable(functions, 'getSecuredGlobalTopics');
+      const result = await getGlobalTopics({ orderByField: 'posts_count', limitCount });
+      if (isSubscribed) callback(result.data.topics || []);
+    } catch (err) {
+      console.error('[subscribeToTopTopics]', err);
+      if (isSubscribed) callback([]);
+    }
+  };
+  fetchTopics();
+  return () => { isSubscribed = false; };
 };
 
 export const subscribeToUser = (uid, callback) => {

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { Folder, MessageSquare, FileText } from 'lucide-react';
-import { subscribeToCategories, subscribeToCategoryGroups } from '../api/categories';
+import { subscribeToCategoryGroups } from '../api/categories';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
@@ -13,30 +13,19 @@ import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, profile, readMap, hasPermission, PERMISSIONS } = useAuth();
-  const [categories, setCategories] = useState([]);
+  const { user, profile, readMap, hasPermission, PERMISSIONS, categories } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
     setPageTitle('');
-    let catsLoaded = false;
-    let groupsLoaded = false;
-
-    const unsubCats = subscribeToCategories((data) => {
-      setCategories(data);
-      catsLoaded = true;
-      if (groupsLoaded) setLoading(false);
-    });
     const unsubGroups = subscribeToCategoryGroups((data) => {
       setGroups(data);
-      groupsLoaded = true;
-      if (catsLoaded) setLoading(false);
+      setLoading(false);
     });
 
     return () => {
-      unsubCats();
       unsubGroups();
     };
   }, []);
@@ -46,11 +35,13 @@ const MainPage = () => {
   // to prevent a flash of content with wrong permissions (profile=null → role='player', then
   // flips to 'pending' once profile arrives and categories may disappear).
   const profileLoading = !!user && profile === null;
+  // Categories now come from AuthProvider context — treat as loading until they arrive
+  const catsLoading = categories.length === 0;
 
   return (
     <div className="pt-5 pb-4">
 
-      {loading || profileLoading ? (
+      {loading || profileLoading || catsLoading ? (
         <Card className="shadow-sm border-0">
           <div className="p-0">
             <Table responsive className="mb-0 align-middle">

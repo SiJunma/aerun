@@ -369,6 +369,51 @@ exports.getSecuredTopics = onCall(
 );
 
 /**
+ * getSecuredGlobalTopics (Callable)
+ * Retrieves global topics across all allowed categories, sorted by a field.
+ * Used for "New Replies" and "Active Topics" pages.
+ */
+exports.getSecuredGlobalTopics = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const { orderByField = 'last_post_at', limitCount = 50 } = request.data;
+    const db = admin.firestore();
+    const requester = await getRequester(db, request.auth?.uid);
+    const ctx = await loadContext(db);
+
+    const isAllowed = (catId) => hasViewForum(requester.role, catId, ctx);
+
+    let allTopics = [];
+    let lastDoc = null;
+    const BATCH_SIZE = Math.max(limitCount, 100); // fetch in batches
+
+    while (allTopics.length < limitCount) {
+      let q = db.collection('topics').orderBy(orderByField, 'desc').limit(BATCH_SIZE);
+      if (lastDoc) {
+        q = q.startAfter(lastDoc);
+      }
+      
+      const snap = await q.get();
+      // No more documents — stop fetching
+      if (snap.empty) break;
+
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (isAllowed(data.category_id)) {
+          allTopics.push(serializeTopic(doc));
+        }
+      });
+      
+      // If this batch returned fewer docs than requested, we've hit the end of the collection
+      if (snap.size < BATCH_SIZE) break;
+
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+
+    return { topics: allTopics.slice(0, limitCount) };
+  }
+);
+/**
  * onTopicCreated
  * Increments topics_count for category and author.
  */

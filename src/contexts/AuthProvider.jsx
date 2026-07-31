@@ -727,7 +727,8 @@ export const AuthProvider = ({ children }) => {
       const lastVisitValue = entry?.timestamp || entry;
       const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
       const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
+      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 
+                         (typeof topic.last_post_at === 'string' ? new Date(topic.last_post_at).getTime() : 0);
 
       return lastPostMs > effectiveLastVisitMs;
     }).length;
@@ -837,6 +838,7 @@ export const AuthProvider = ({ children }) => {
     settings,
     loading,
     readMap,
+    categories,
     unreadTopicsCount,
     isMarkingAllRead,
     markTopicRead,
