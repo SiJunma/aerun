@@ -8,7 +8,7 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 // Ensure only a reasonable amount of instances run at once to manage billing safely
-setGlobalOptions({ maxInstances: 10,  enforceAppCheck: true });
+setGlobalOptions({ maxInstances: 10,  enforceAppCheck: true, memory: "512MiB" });
 
 /**
  * Atomic Reputation Handler (Create)
@@ -695,6 +695,56 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                 }
             }
         }
+
+        // 3. Mention Notifications
+        if (content) {
+            const mentionRegex = /\[b\]([^\[]+)\[\/b\],/gi;
+            const mentionedNames = new Set();
+            let mMatch;
+            while ((mMatch = mentionRegex.exec(content)) !== null) {
+                mentionedNames.add(mMatch[1].trim());
+            }
+
+            if (mentionedNames.size > 0) {
+                for (const name of mentionedNames) {
+                    let recipientUid = null;
+                    
+                    const userSnap = await db.collection("users").where("nickname", "==", name).limit(1).get();
+                    if (!userSnap.empty) {
+                        recipientUid = userSnap.docs[0].id;
+                    } else {
+                        const charSnap = await db.collection("characters").where("name", "==", name).limit(1).get();
+                        if (!charSnap.empty) {
+                            recipientUid = charSnap.docs[0].data().owner_id;
+                        }
+                    }
+
+                    if (recipientUid && recipientUid !== authorId) {
+                        // Avoid duplicates if multiple mentions of same user
+                        const q = db.collection("notifications")
+                            .where("recipient_uid", "==", recipientUid)
+                            .where("type", "==", "post_mentioned")
+                            .where("payload.post_id", "==", postId)
+                            .limit(1);
+                        const existingSnap = await q.get();
+                        if (existingSnap.empty) {
+                            await db.collection("notifications").add({
+                                recipient_uid: recipientUid,
+                                type: "post_mentioned",
+                                read: false,
+                                archived: false,
+                                payload: {
+                                    topic_id: topicId,
+                                    topic_title: topicTitle,
+                                    post_id: postId
+                                },
+                                created_at: admin.firestore.FieldValue.serverTimestamp()
+                            });
+                        }
+                    }
+                }
+            }
+        }
     } catch (err) {
         logger.error(`handlePostNotifications error for post ${postId}:`, err);
     }
@@ -1040,7 +1090,7 @@ exports.getReputationLogs = onCall(
          logData.created_at = logData.created_at.toDate().toISOString();
       }
 
-      if (shouldHideComments && logData.comment) {
+      if (shouldHideComments && logData.comment && logData.voter_id !== requesterUid) {
         logData.comment = '';
       }
       logs.push(logData);

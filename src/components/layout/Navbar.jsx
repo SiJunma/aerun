@@ -10,6 +10,7 @@ import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../
 import { subscribeToDmList } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
+import { usePageTitle } from '../../contexts/TitleProvider';
 
 const Navigation = () => {
   const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS } = useAuth();
@@ -23,6 +24,7 @@ const Navigation = () => {
   const [expanded, setExpanded] = React.useState(false);
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [authModalMode, setAuthModalMode] = React.useState('login');
+  const { setUnreadCount } = usePageTitle();
 
   const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
@@ -65,6 +67,7 @@ const Navigation = () => {
   }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES, profile?.role_id]);
 
   const totalUnread = adminUnread + userUnread;
+  const totalBadge = totalUnread + dmUnread;
 
   // ── Play sound when new notification arrives ─────────────────────
   const prevTotalUnreadRef = useRef(totalUnread);
@@ -76,25 +79,10 @@ const Navigation = () => {
     prevTotalUnreadRef.current = totalUnread;
   }, [totalUnread, profile?.settings?.sound?.enabled, profile?.settings?.sound?.volume]);
 
-  // ── Dynamic browser tab title ───────────────────────────────
+  // Update unread count in TitleProvider
   React.useEffect(() => {
-    let baseName = 'Forum';
-    if (activeDesign?.forumTitle) {
-      baseName = activeDesign.forumTitle;
-    } else {
-      const rawName = settings?.forumName;
-      baseName =
-        (typeof rawName === 'object' && rawName !== null)
-          ? (rawName[profile?.settings?.language] || rawName.ru || rawName.en || 'Forum')
-          : (rawName || 'Forum');
-    }
-
-    const totalBadge = totalUnread + dmUnread;
-    document.title = totalBadge > 0 ? `(${totalBadge}) ${baseName}` : baseName;
-
-    // When the component unmounts, restore a plain title
-    return () => { document.title = baseName; };
-  }, [totalUnread, dmUnread, settings?.forumName, profile?.settings?.language, activeDesign]);
+    setUnreadCount(totalBadge);
+  }, [totalBadge, setUnreadCount]);
 
   const handleLogout = async () => {
     await logout();

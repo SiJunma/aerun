@@ -25,6 +25,8 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
 import DesignsTab from '../components/admin/DesignsTab';
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const ROLE_LEVELS = {
   'root': 100,
   'admin': 90,
@@ -39,6 +41,7 @@ const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
   const { user, hasPermission, roles, isRootAdmin } = useAuth();
   const { showToast } = useToast();
+  const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
@@ -48,6 +51,10 @@ const AdminPage = () => {
   const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState('');
   const [designs, setDesigns] = useState([]);
+
+  useEffect(() => {
+    setPageTitle(t('admin.title', 'Admin Panel'));
+  }, [setPageTitle, t]);
 
   // Modal State
   const [showCatModal, setShowCatModal] = useState(false);

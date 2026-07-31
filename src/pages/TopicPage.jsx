@@ -37,7 +37,7 @@ import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import ForumCharacterBadge from '../components/common/ForumCharacterBadge';
 import Skeleton from '../components/common/Skeleton';
 import { useToast } from '../contexts/ToastProvider';
-
+import { usePageTitle } from '../contexts/TitleProvider';
 
 const TopicPage = () => {
   const { id } = useParams();
@@ -46,6 +46,7 @@ const TopicPage = () => {
   const { t, lang } = useI18n();
   const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, PERMISSIONS, settings } = useAuth();
   const { showToast } = useToast();
+  const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
   const [guestNickname, setGuestNickname] = useState('');
@@ -153,8 +154,9 @@ const TopicPage = () => {
         posts_count: topic.posts_count,
         last_post_at: topic.last_post_at
       };
+      setPageTitle(topic.title);
     }
-  }, [topic, loadPosts]);
+  }, [topic, loadPosts, setPageTitle]);
 
   const currentTopicIdRef = useRef(id);
   const jumpTargetPageRef = useRef(null);
@@ -221,12 +223,12 @@ const TopicPage = () => {
     return () => unsub();
   }, [user, id]);
 
-  // Track unread quote notifications and clear them via IntersectionObserver
+  // Track unread quote and mention notifications and clear them via IntersectionObserver
   useEffect(() => {
     if (!user || !id) return;
     const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
       const activeQuotes = notifs.filter(n =>
-        !n.read && n.type === 'post_quoted' && n.payload?.topic_id === id
+        !n.read && (n.type === 'post_quoted' || n.type === 'post_mentioned') && n.payload?.topic_id === id
       );
       setUnreadQuotes(activeQuotes);
     });
@@ -544,11 +546,11 @@ const TopicPage = () => {
       setTimeout(tryScroll, 100);
     } else {
       if (isJumpRequested || searchParams.get('post') || goLast) {
-        if (posts.length > 0) {
+        if (posts.length > 0 || !isFetchingPostsRef.current) {
           setIsPageLoading(false);
           alreadyJumpedRef.current = true;
         }
-      } else if (posts.length > 0) {
+      } else if (posts.length > 0 || !isFetchingPostsRef.current) {
         setIsPageLoading(false);
       }
     }

@@ -18,19 +18,18 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() 
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && (getUser().data.role_id == 'admin' || getUser().data.role_id == 'root');
+        && (getUser().data.get('role_id', 'player') == 'admin' || getUser().data.get('role_id', 'player') == 'root');
     }
 
-    // Active = authenticated + profile exists + role is not pending/banned
     function isActive() {
-      return isSignedIn()
+      return isSignedIn() 
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && getUser().data.role_id != 'pending' 
-        && getUser().data.role_id != 'banned';
+        && getUser().data.get('role_id', 'player') != 'pending' 
+        && getUser().data.get('role_id', 'player') != 'banned';
     }
 
     function hasPermission(permission) {
-      let roleId = getUser().data.role_id;
+      let roleId = getUser().data.get('role_id', 'player');
       return roleId == 'root' || 
         (exists(/databases/$(database)/documents/roles/$(roleId)) && 
          permission in get(/databases/$(database)/documents/roles/$(roleId)).data.permissions);
@@ -52,15 +51,15 @@ service cloud.firestore {
     }
 
     function getRole() {
-      return !isSignedIn() ? 'guest' : getUser().data.role_id;
+      return !isSignedIn() ? 'guest' : getUser().data.get('role_id', 'player');
     }
 
     function isBanned() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'banned';
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.get('role_id', 'player') == 'banned';
     }
 
     function isPending() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'pending';
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.get('role_id', 'player') == 'pending';
     }
 
     function hasCategoryPermission(catId, permission) {
@@ -104,8 +103,8 @@ service cloud.firestore {
 
       // User can edit own profile (except protected fields); admin can edit anyone; 
       // reputation and post_count are now server-side only (Cloud Functions)
-      allow update: if (isAdmin() && (getUser().data.role_id == 'root'
-        || (resource.data.role_id != 'root' && request.resource.data.role_id != 'root')))
+      allow update: if (isAdmin() && (getUser().data.get('role_id', 'player') == 'root'
+        || (resource.data.get('role_id', 'player') != 'root' && request.resource.data.get('role_id', 'player') != 'root')))
         || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_id', 'post_count', 'reputation', 'created_at', 'previous_role_id', 'admin_message']))
         || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'last_selected_character_id']));
         
@@ -128,6 +127,18 @@ service cloud.firestore {
       allow read: if true;
       allow create: if (isActive() && isOwner(userId)) || isAdmin();
       allow update, delete: if (isOwner(userId) && isActive()) || isAdmin();
+    }
+
+    // --- User sub-collection readmap ---
+    // Stores read progress per topic; only the owner should be able to read/write
+    match /users/{userId}/readmap/{docId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // --- User sub-collection drafts ---
+    // Post drafts; only accessible by the author
+    match /users/{userId}/drafts/{draftId} {
+      allow read, write: if isOwner(userId) || isAdmin();
     }
 
     // --- Category Groups ---
@@ -228,13 +239,17 @@ service cloud.firestore {
       ));
        // Any active user can vote; voter_id must match; cannot vote for self.
       // Deterministic doc id kills duplicate votes at the rules level.
+      // logId = uid_post_postId for post votes, uid_user_targetId for profile votes
       allow create: if isActive()
         && request.resource.data.voter_id == request.auth.uid
         && request.resource.data.target_id != request.auth.uid
-        && logId == request.resource.data.post_id + '_' + request.auth.uid
-        && request.resource.data.value in [-1, 1]
-        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'banned'
-        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'pending';
+        && (request.resource.data.value == 1 || request.resource.data.value == -1)
+        && (
+          logId == request.auth.uid + '_post_' + request.resource.data.get('post_id', '') ||
+          logId == request.auth.uid + '_user_' + request.resource.data.target_id
+        )
+        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.get('role_id', 'player') != 'banned'
+        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.get('role_id', 'player') != 'pending';
       // Logs are immutable except for admins, or the voter modifying their comment
        allow update: if isAdmin()
         || (isActive() && resource.data.voter_id == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comment']));
@@ -253,8 +268,15 @@ service cloud.firestore {
         && request.resource.data.actor_uid == request.auth.uid;
       allow read: if isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && getUser().data.role_id in ['admin', 'root', 'moderator'];
+        && getUser().data.get('role_id', 'player') in ['admin', 'root', 'moderator'];
       allow update, delete: if isAdmin();
+    }
+
+    // --- Guest Activity ---
+    match /guest_activity/{sessionId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAny(['last_seen', 'user_agent', 'created_at']);
+      allow delete: if isAdmin();
     }
 
     // --- Notifications ---

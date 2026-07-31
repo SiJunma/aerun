@@ -772,13 +772,15 @@ const ProfilePage = () => {
                     const historyAdminBypass = viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && canOverride;
                     const commentsAdminBypass = viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && canOverride;
 
-                    if (historyHidden) return (
+                    const totalPagesRep = Math.ceil(totalRepLogs / REP_PER_PAGE);
+                    // If history is hidden, non-admins can only see their own logs
+                    const visibleRepLogs = historyHidden ? repLogs.filter(l => l.voter_id === profile?.uid) : repLogs;
+
+                    if (historyHidden && visibleRepLogs.length === 0) return (
                       <div className="p-5 text-center text-muted">
                         <p className="mb-0">{t('profile.rep_history_hidden')}</p>
                       </div>
                     );
-                    const totalPagesRep = Math.ceil(totalRepLogs / REP_PER_PAGE);
-                    const visibleRepLogs = repLogs;
 
                     if (loadingRepLogs) {
                       return (
@@ -904,7 +906,7 @@ const ProfilePage = () => {
                                 </OverlayTrigger>
                               </td>
                               <td className="py-3 rep-comment-cell">
-                                {commentsHidden ? (
+                                {(commentsHidden && log.voter_id !== profile?.uid) ? (
                                   <span className="text-muted small italic">{t('profile.rep_comments_hidden')}</span>
                                 ) : (
                                   editingLogId === log.id ? (

@@ -9,6 +9,7 @@ import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
 import { resolveField } from '../utils/text';
+import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
@@ -16,8 +17,10 @@ const MainPage = () => {
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
+    setPageTitle('');
     let catsLoaded = false;
     let groupsLoaded = false;
 
