@@ -378,18 +378,21 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
     const topic = snap.data();
     const { category_id, author_id } = topic;
 
+    if (!category_id) {
+        logger.warn(`onTopicCreated: topic ${event.params.topicId} has no category_id — skipping counter update`);
+        return;
+    }
+
     try {
         const db = admin.firestore();
         const batch = db.batch();
 
-        // 1. Category topics_count
-        const catRef = db.collection("categories").doc(category_id);
-        batch.update(catRef, { topics_count: admin.firestore.FieldValue.increment(1) });
+        // 1. Category topics_count — guard: category may have been deleted
+        await queueIncrement(batch, db.collection("categories").doc(category_id), "topics_count", 1);
 
-        // 2. User topics_count (if not guest)
+        // 2. User topics_count (if not guest) — guard: user may have been deleted
         if (author_id) {
-            const userRef = db.collection("users").doc(author_id);
-            batch.update(userRef, { topics_count: admin.firestore.FieldValue.increment(1) });
+            await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", 1);
         }
 
         await batch.commit();
@@ -412,15 +415,22 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
         const db = admin.firestore();
         const batch = db.batch();
 
-        const catRef = db.collection("categories").doc(category_id);
-        batch.update(catRef, {
-            topics_count: admin.firestore.FieldValue.increment(-1),
-            posts_count: admin.firestore.FieldValue.increment(-posts_count)
-        });
+        // Guard: category may have already been deleted.
+        // queueIncrement returns false if the doc is missing, so we reuse
+        // that signal to also skip the posts_count decrement.
+        if (category_id) {
+            const catRef = db.collection("categories").doc(category_id);
+            const catExists = await queueIncrement(batch, catRef, "topics_count", -1);
+            if (catExists) {
+                batch.update(catRef, {
+                    posts_count: admin.firestore.FieldValue.increment(-posts_count)
+                });
+            }
+        }
 
+        // Guard: user may have been deleted
         if (author_id) {
-            const userRef = db.collection("users").doc(author_id);
-            batch.update(userRef, { topics_count: admin.firestore.FieldValue.increment(-1) });
+            await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", -1);
         }
 
         await batch.commit();
@@ -500,7 +510,7 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
         const timestamp = created_at || admin.firestore.FieldValue.serverTimestamp();
 
-        // 1. Update Topic
+        // 1. Update Topic (topic is confirmed to exist above)
         const topicUpdates = {
             posts_count: admin.firestore.FieldValue.increment(1),
             last_post_at: timestamp,
@@ -517,24 +527,28 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
         batch.update(topicRef, topicUpdates);
 
-        // 2. Update Category
-        const catRef = db.collection("categories").doc(category_id);
-        batch.update(catRef, {
-            posts_count: admin.firestore.FieldValue.increment(1),
-            last_post_at: timestamp,
-            last_post_author: author_name,
-            last_post_author_id: author_id || null,
-            last_post_author_avatar: author_avatar || null,
-            last_post_topic_id: topic_id,
-            last_post_topic_title: topic_title,
-            last_post_is_character: !!is_character,
-            last_post_author_character_id: author_character_id || null
-        });
+        // 2. Update Category — guard: category may have been deleted
+        if (category_id) {
+            const catRef = db.collection("categories").doc(category_id);
+            const catSnap = await catRef.get();
+            if (catSnap.exists) {
+                batch.update(catRef, {
+                    posts_count: admin.firestore.FieldValue.increment(1),
+                    last_post_at: timestamp,
+                    last_post_author: author_name,
+                    last_post_author_id: author_id || null,
+                    last_post_author_avatar: author_avatar || null,
+                    last_post_topic_id: topic_id,
+                    last_post_topic_title: topic_title,
+                    last_post_is_character: !!is_character,
+                    last_post_author_character_id: author_character_id || null
+                });
+            }
+        }
 
-        // 3. Update User (if not guest)
+        // 3. Update User (if not guest) — guard: user may have been deleted
         if (author_id) {
-            const userRef = db.collection("users").doc(author_id);
-            batch.update(userRef, { post_count: admin.firestore.FieldValue.increment(1) });
+            await queueIncrement(batch, db.collection("users").doc(author_id), "post_count", 1);
         }
 
         await batch.commit();
@@ -648,7 +662,8 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                   }
                 })
             ));
-        }
+            }
+        } // end if (subscribers.length > 0)
 
         // 2. Quote Notifications
         if (content) {
@@ -1041,9 +1056,13 @@ exports.getReputationLogs = onCall(
     const rolesMap = {};
     rolesSnap.forEach(d => rolesMap[d.id] = d.data());
 
+    // Apply pending→spectator downgrade to match AuthProvider and other callables
     let effectiveRole = 'guest';
     if (userDoc && userDoc.exists) {
-      effectiveRole = userDoc.data().role_id || 'guest';
+      const rawRole = userDoc.data().role_id || 'guest';
+      const settingsSnap = await db.collection('settings').doc('global').get();
+      const settings = settingsSnap.exists ? settingsSnap.data() : {};
+      effectiveRole = (rawRole === 'pending' && !settings.whitelistMode) ? 'spectator' : rawRole;
     }
 
     const hasViewPermission = (categoryId) => {
@@ -1230,27 +1249,6 @@ exports.getSecuredPosts = onCall(
 
     // 3. Shared view_forum check — same rule as every other callable
     if (!hasViewForum(requesterRole, categoryId, ctx)) {
-      throw new HttpsError('permission-denied', 'You do not have permission to view posts in this category.');
-    }
-
-    // Global permission map for efficient check
-    const rolesSnap = await db.collection("roles").get();
-    const rolesMap = {};
-    rolesSnap.forEach(d => rolesMap[d.id] = d.data());
-
-    const hasViewPermission = (catId) => {
-      if (['root', 'admin'].includes(requesterRole)) return true;
-      if (!catId) return true; // uncategorized topics are visible
-
-      const globalPerms = (rolesMap[effectiveRole]?.permissions || []);
-      if (globalPerms.includes('view_forum')) return true;
-
-      const categoryOverrides = rolesMap[effectiveRole]?.category_overrides || {};
-      const catPerms = categoryOverrides[catId] || [];
-      return catPerms.includes('view_forum');
-    };
-
-    if (!hasViewPermission(categoryId)) {
       throw new HttpsError('permission-denied', 'You do not have permission to view posts in this category.');
     }
 
