@@ -29,7 +29,7 @@ const NewRepliesPage = () => {
       return;
     }
 
-    const unsubTopics = subscribeToLatestTopics(allowedCategories, (data) => {
+    const unsubTopics = subscribeToLatestTopics((data) => {
       setTopics(data);
       setLoading(false);
     }, 200);

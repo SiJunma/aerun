@@ -9,14 +9,17 @@ import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
 import { resolveField } from '../utils/text';
+import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
   const { user, profile, readMap, hasPermission, PERMISSIONS, categories } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
+    setPageTitle('');
     const unsubGroups = subscribeToCategoryGroups((data) => {
       setGroups(data);
       setLoading(false);
@@ -32,11 +35,13 @@ const MainPage = () => {
   // to prevent a flash of content with wrong permissions (profile=null → role='player', then
   // flips to 'pending' once profile arrives and categories may disappear).
   const profileLoading = !!user && profile === null;
+  // Categories now come from AuthProvider context — treat as loading until they arrive
+  const catsLoading = categories.length === 0;
 
   return (
     <div className="pt-5 pb-4">
 
-      {loading || profileLoading ? (
+      {loading || profileLoading || catsLoading ? (
         <Card className="shadow-sm border-0">
           <div className="p-0">
             <Table responsive className="mb-0 align-middle">

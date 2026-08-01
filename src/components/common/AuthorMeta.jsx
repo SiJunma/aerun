@@ -11,7 +11,8 @@ const AuthorMeta = ({
   authorName,
   authorAvatar,
   showAvatar = true,
-  className = ""
+  className = "",
+  onClick
 }) => {
   const formatTime = (dateValue) => {
     if (!dateValue) return '—';
@@ -47,6 +48,7 @@ const AuthorMeta = ({
           isCharacter={isCharacter}
           fallbackName={authorName}
           className="fw-semibold text-secondary"
+          onClick={onClick}
         />
       </div>
     </div>

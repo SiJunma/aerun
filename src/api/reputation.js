@@ -121,7 +121,6 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
       target_id: targetUid,
       value: value,
       comment: comment || '',
-      post_id: null,
       created_at: serverTimestamp()
     });
   });

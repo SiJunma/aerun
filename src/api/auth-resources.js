@@ -50,52 +50,23 @@ export const markAllTopicsRead = async (uid, topicIds) => {
 
 // ── Latest Content ─────────────────────────────────────────────────────────
 
-export const subscribeToLatestTopics = (categoryIds, callback, limitCount = 50) => {
-  if (!categoryIds || categoryIds.length === 0) {
-    callback([]);
-    return () => {};
-  }
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
-  const chunks = [];
-  for (let i = 0; i < categoryIds.length; i += 30) {
-    chunks.push(categoryIds.slice(i, i + 30));
-  }
-
-  const unsubs = [];
-  const resultsMap = new Map();
-  let initializedChunks = 0;
-
-  chunks.forEach((chunk, index) => {
-    const q = query(
-      collection(db, 'topics'),
-      where('category_id', 'in', chunk),
-      orderBy('last_post_at', 'desc'),
-      limit(limitCount)
-    );
-    
-    const unsub = onSnapshot(q, (snapshot) => {
-      resultsMap.set(index, snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      
-      let allTopics = [];
-      resultsMap.forEach(topics => {
-        allTopics = allTopics.concat(topics);
-      });
-      
-      allTopics.sort((a, b) => {
-        const tA = a.last_post_at?.toMillis?.() || Date.parse(a.last_post_at) || 0;
-        const tB = b.last_post_at?.toMillis?.() || Date.parse(b.last_post_at) || 0;
-        return tB - tA;
-      });
-      
-      callback(allTopics.slice(0, limitCount));
-    }, (err) => console.error(`[subscribeToLatestTopics] Error in chunk ${index}:`, err));
-    
-    unsubs.push(unsub);
-  });
-
-  return () => {
-    unsubs.forEach(unsub => unsub());
+export const subscribeToLatestTopics = (callback, limitCount = 50) => {
+  let isSubscribed = true;
+  const fetchTopics = async () => {
+    try {
+      const functions = getFunctions();
+      const getGlobalTopics = httpsCallable(functions, 'getSecuredGlobalTopics');
+      const result = await getGlobalTopics({ orderByField: 'last_post_at', limitCount });
+      if (isSubscribed) callback(result.data.topics || []);
+    } catch (err) {
+      console.error('[subscribeToLatestTopics]', err);
+      if (isSubscribed) callback([]);
+    }
   };
+  fetchTopics();
+  return () => { isSubscribed = false; };
 };
 
 // ── Guest Activity ──────────────────────────────────────────────────────────
@@ -116,14 +87,20 @@ export const deleteGuestActivity = async (guestId) => {
 // ── Statistics & Global Content ─────────────────────────────────────────────
 
 export const subscribeToTopTopics = (callback, limitCount = 50) => {
-  const q = query(
-    collection(db, 'topics'),
-    orderBy('posts_count', 'desc'),
-    limit(limitCount)
-  );
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  }, (err) => console.error('[subscribeToTopTopics]', err));
+  let isSubscribed = true;
+  const fetchTopics = async () => {
+    try {
+      const functions = getFunctions();
+      const getGlobalTopics = httpsCallable(functions, 'getSecuredGlobalTopics');
+      const result = await getGlobalTopics({ orderByField: 'posts_count', limitCount });
+      if (isSubscribed) callback(result.data.topics || []);
+    } catch (err) {
+      console.error('[subscribeToTopTopics]', err);
+      if (isSubscribed) callback([]);
+    }
+  };
+  fetchTopics();
+  return () => { isSubscribed = false; };
 };
 
 export const subscribeToUser = (uid, callback) => {

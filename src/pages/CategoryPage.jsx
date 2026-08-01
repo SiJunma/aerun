@@ -19,12 +19,14 @@ import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
 import { resolveField } from '../utils/text';
 import { useToast } from '../contexts/ToastProvider';
+import { usePageTitle } from '../contexts/TitleProvider';
 
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
   const { user, hasPermission, PERMISSIONS, categories } = useAuth();
   const { showToast } = useToast();
+  const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
   const [pinnedTopics, setPinnedTopics] = useState([]);
@@ -42,25 +44,39 @@ const CategoryPage = () => {
 
   const isStaff = hasPermission(PERMISSIONS.MODERATE_CONTENT);
 
-  const loadTopics = async () => {
-    setLoading(true);
+  const prevCatStatsRef = React.useRef(null);
+
+  const loadTopics = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     const result = await fetchSecuredTopics(id, currentPage, ITEMS_PER_PAGE);
     setPinnedTopics(result.pinned || []);
     setRegularTopics(result.topics || []);
-    setLoading(false);
+    if (showLoading) setLoading(false);
   };
 
   useEffect(() => {
     const found = categories.find(c => c.id === id);
-    if (found) setCategory(found);
+    if (found) {
+      setCategory(found);
+      const currentStats = `${found.topics_count}_${found.posts_count}_${found.last_post_at?.toMillis ? found.last_post_at.toMillis() : found.last_post_at}`;
+      if (prevCatStatsRef.current !== null && prevCatStatsRef.current !== currentStats) {
+        loadTopics(false);
+      }
+      prevCatStatsRef.current = currentStats;
+    }
   }, [id, categories]);
 
   useEffect(() => {
-    loadTopics();
-  }, [id, currentPage]);
+    loadTopics(true);
+  }, [id, currentPage, lang, setPageTitle]);
 
-
-
+  useEffect(() => {
+    if (category) {
+      setPageTitle(resolveField(category.title, lang));
+    } else {
+      setPageTitle('');
+    }
+  }, [category, lang, setPageTitle]);
 
   const categoryTitle = category ? resolveField(category.title, lang) : <Skeleton width={150} height="1.5rem" />;
 

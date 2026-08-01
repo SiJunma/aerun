@@ -18,19 +18,18 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() 
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && (getUser().data.role_id == 'admin' || getUser().data.role_id == 'root');
+        && (getUser().data.get('role_id', 'player') == 'admin' || getUser().data.get('role_id', 'player') == 'root');
     }
 
-    // Active = authenticated + profile exists + role is not pending/banned
     function isActive() {
-      return isSignedIn()
+      return isSignedIn() 
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && getUser().data.get('role_id', 'player') != 'pending' 
         && getUser().data.get('role_id', 'player') != 'banned';
     }
 
     function hasPermission(permission) {
-      let roleId = getUser().data.role_id;
+      let roleId = getUser().data.get('role_id', 'player');
       return roleId == 'root' || 
         (exists(/databases/$(database)/documents/roles/$(roleId)) && 
          permission in get(/databases/$(database)/documents/roles/$(roleId)).data.permissions);
@@ -52,24 +51,18 @@ service cloud.firestore {
     }
 
     function getRole() {
-      return !isSignedIn() ? 'guest' : getUser().data.role_id;
+      return !isSignedIn() ? 'guest' : getUser().data.get('role_id', 'player');
     }
 
-    function isBanned() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'banned';
-    }
-
-    function isPending() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUser().data.role_id == 'pending';
-    }
 
     function hasCategoryPermission(catId, permission) {
       let role = getRole();
-      let catPerms = get(/databases/$(database)/documents/categories/$(catId)).data.permissions;
-      // If the permission is not set at category level → fall back to global role check
-      // (mirrors frontend hasPermission() fallback, where missing catPerm = use role default)
-      // NOTE: We check the role document directly so that guests with a global 'view_forum'
-      // permission in the 'guest' role document can also pass (isSignedIn() would block them).
+      let catData = exists(/databases/$(database)/documents/categories/$(catId))
+        ? get(/databases/$(database)/documents/categories/$(catId)).data
+        : {};
+      let catPerms = 'permissions' in catData ? catData.permissions : {};
+      // If the permission is not set at category level -> fall back to the global
+      // role document (so a 'guest' role with 'view_forum' still passes).
       return !(permission in catPerms)
         ? (role == 'root' || (
             exists(/databases/$(database)/documents/roles/$(role)) &&
@@ -79,27 +72,35 @@ service cloud.firestore {
     }
 
     function canCreateTopic(catId) {
-      return (isActive() || !isSignedIn()) && !isBanned() && !isPending() && hasCategoryPermission(catId, 'create_topic');
+      return (isActive() || !isSignedIn()) && hasCategoryPermission(catId, 'create_topic');
     }
 
     function canPostToTopic(topicId) {
       let tData = getTopicData(topicId);
-      return (isActive() || !isSignedIn()) && !isBanned() && !isPending() && 
-             hasCategoryPermission(tData.category_id, 'post_reply') && 
-             (!('is_locked' in tData) || tData.is_locked == false) &&
-             (tData.posts_count < 1000);
+      // The post limit is enforced by onPostCreated, which locks the topic when
+      // settings.maxPostsPerTopic is reached — so is_locked is the only gate here.
+      return isActive()
+        && hasCategoryPermission(tData.category_id, 'post_reply')
+        && (!('is_locked' in tData) || tData.is_locked == false);
     }
 
     // --- Users ---
     match /users/{userId} {
       // Allow read for everyone in public mode (profiles are public)
       allow read: if true;
-      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() 
+        && request.auth.uid == userId
+        && request.resource.data.role_id in ['pending', 'spectator']
+        && request.resource.data.get('post_count', 0) == 0
+        && request.resource.data.get('reputation', 0) == 0;
+
       // User can edit own profile (except protected fields); admin can edit anyone; 
       // reputation and post_count are now server-side only (Cloud Functions)
-      allow update: if isAdmin()
-        || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_id', 'post_count', 'reputation', 'join_date']))
+      allow update: if (isAdmin() && (getUser().data.get('role_id', 'player') == 'root'
+        || (resource.data.get('role_id', 'player') != 'root' && request.resource.data.get('role_id', 'player') != 'root')))
+        || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_id', 'post_count', 'reputation', 'created_at', 'previous_role_id', 'admin_message']))
         || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'last_selected_character_id']));
+        
       allow delete: if isAdmin(); // Added to allow rejecting pending users
     }
 
@@ -108,7 +109,10 @@ service cloud.firestore {
     match /characters/{charId} {
       allow read: if true;
       allow create: if isActive() && (request.resource.data.owner_id == request.auth.uid || isAdmin());
-      allow update, delete: if isActive() && (resource.data.owner_id == request.auth.uid || isAdmin());
+      allow update: if isAdmin()
+        || (isActive() && resource.data.owner_id == request.auth.uid
+            && request.resource.data.owner_id == resource.data.owner_id);
+      allow delete: if isActive() && (resource.data.owner_id == request.auth.uid || isAdmin());
     }
 
     // --- User sub-collection characters ---
@@ -116,6 +120,18 @@ service cloud.firestore {
       allow read: if true;
       allow create: if (isActive() && isOwner(userId)) || isAdmin();
       allow update, delete: if (isOwner(userId) && isActive()) || isAdmin();
+    }
+
+    // --- User sub-collection readmap ---
+    // Stores read progress per topic; only the owner should be able to read/write
+    match /users/{userId}/readmap/{docId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // --- User sub-collection drafts ---
+    // Post drafts; only accessible by the author
+    match /users/{userId}/drafts/{draftId} {
+      allow read, write: if isOwner(userId) || isAdmin();
     }
 
     // --- Category Groups ---
@@ -129,37 +145,49 @@ service cloud.firestore {
       allow get: if isAdmin() || hasCategoryPermission(catId, 'view_forum');
       allow list: if isAdmin();
       allow create, delete: if isAdmin();
-      allow update: if isAdmin()
-        || ((isActive() || !isSignedIn()) && !request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
+      // All category counters and metadata are now written by Cloud Functions (Admin SDK).
+      // No client path needs to update a category document.
+      allow update: if isAdmin();
     }
 
     // --- Topics ---
     match /topics/{topicId} {
       allow get: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
       allow list: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
-      // Active users or Guests (if allowed) can create topics
-      allow create: if isAdmin() || canCreateTopic(request.resource.data.category_id);
-      // Author or admin can edit; counter bumps and metadata are handled by server triggers
-      allow update: if isAdmin()
-        || ((isActive() || !isSignedIn()) && (
-          (isSignedIn() && resource.data.author_id == request.auth.uid && !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_is_character', 'last_post_author_character_id']))
-          || (request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['views']))
-        ));
+
+      allow create: if (isAdmin() || canCreateTopic(request.resource.data.category_id))
+        && (!isSignedIn() || request.resource.data.author_id == request.auth.uid)
+        && request.resource.data.created_at == request.time;
+
+      // Author may only edit content — not moderation flags, counters or ownership.
+      allow update: if isAdmin() || canModerateContent()
+        || (isActive() && resource.data.author_id == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['title', 'content', 'updated_at', 'edited_at', 'edited_by', 'tags']))
+        || ((isActive() || !isSignedIn())
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])
+            && request.resource.data.views == resource.data.views + 1);
+
       allow delete: if canModerateContent() || (isActive() && resource.data.author_id == request.auth.uid && isTopicOpen(topicId));
     }
 
     // --- Posts ---
-    match /posts/{postId} {
+     match /posts/{postId} {
       allow read: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
-      // Active users or Guests (if allowed) can create posts
-      allow create: if isAdmin() || canPostToTopic(request.resource.data.topic_id);
-      allow update: if isAdmin()
-        || (isActive() && (
-          resource.data.author_id == request.auth.uid
-        ));
+
+      allow create: if (isAdmin() || canPostToTopic(request.resource.data.topic_id))
+        && (!isSignedIn() || request.resource.data.author_id == request.auth.uid)
+        && request.resource.data.category_id == getTopicData(request.resource.data.topic_id).category_id
+        && request.resource.data.created_at == request.time;
+
+      allow update: if isAdmin() || canModerateContent()
+        // 'reputation' is owned by onReputationLogCreated / onReputationLogDeleted.
+        // 'rolls' is excluded on purpose — re-writing dice results is cheating.
+        || (isActive() && resource.data.author_id == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['content', 'edited_at', 'author_name', 'author_avatar',
+                           'is_character', 'author_character_id']));
+
       allow delete: if canModerateContent() || (isActive() && resource.data.author_id == request.auth.uid && isTopicOpen(resource.data.topic_id));
     }
 
@@ -188,7 +216,8 @@ service cloud.firestore {
     // --- Global Stats ---
     match /global_stats/{docId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      // Counters are denormalized server-side; clients must not rewrite them.
+      allow write: if isAdmin();
     }
 
     // --- Reputation Logs ---
@@ -201,31 +230,48 @@ service cloud.firestore {
         resource.data.target_id == request.auth.uid || 
         resource.data.voter_id == request.auth.uid
       ));
-      // Any active user can vote (permissions defined by frontend); voter_id must match; cannot vote for self
-      allow create: if isActive() 
+       // Any active user can vote; voter_id must match; cannot vote for self.
+      // Deterministic doc id kills duplicate votes at the rules level.
+      // logId = uid_post_postId for post votes, uid_user_targetId for profile votes
+      allow create: if isActive()
         && request.resource.data.voter_id == request.auth.uid
         && request.resource.data.target_id != request.auth.uid
-        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'banned'
-        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.role_id != 'pending';
+        && (request.resource.data.value == 1 || request.resource.data.value == -1)
+        && (
+          logId == request.auth.uid + '_post_' + request.resource.data.get('post_id', '') ||
+          logId == request.auth.uid + '_user_' + request.resource.data.target_id
+        )
+        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.get('role_id', 'player') != 'banned'
+        && get(/databases/$(database)/documents/users/$(request.resource.data.target_id)).data.get('role_id', 'player') != 'pending';
       // Logs are immutable except for admins, or the voter modifying their comment
-      allow update: if isAdmin()
+       allow update: if isAdmin()
         || (isActive() && resource.data.voter_id == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comment']));
       allow delete: if isAdmin()
-        || (isSignedIn()
-          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          && getUser().data.role_id == 'moderator')
-        || (isActive() 
+        || canModerateContent()
+        || (isActive()
           && resource.data.target_id == request.auth.uid
           && !existsAfter(/databases/$(database)/documents/posts/$(resource.data.post_id)));
     }
 
     // --- Audit Logs ---
     match /audit_logs/{logId} {
-      allow create: if isSignedIn();
-      allow read: if isSignedIn() 
+      // Client-written audit entries are only trustworthy if the actor is pinned
+      // to the caller. Ideally set this to `false` and write logs from Cloud Functions.
+      allow create: if isActive()
+        && request.resource.data.actor_uid == request.auth.uid;
+      allow read: if isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && getUser().data.role_id in ['admin', 'root', 'moderator'];
+        && getUser().data.get('role_id', 'player') in ['admin', 'root', 'moderator'];
       allow update, delete: if isAdmin();
+    }
+
+    // --- Guest Activity ---
+    match /guest_activity/{sessionId} {
+      // Anyone can read guest activity (needed for online-now stats in ForumStats)
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasAny(['last_seen', 'user_agent', 'created_at', 'first_seen', 'path']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'path', 'user_agent']);
+      allow delete: if isAdmin();
     }
 
     // --- Notifications ---
@@ -251,7 +297,8 @@ service cloud.firestore {
 
     // --- Topic Subscriptions ---
     match /topic_subscriptions/{subId} {
-      allow read: if isActive();
+      // Client queries must be scoped: where('user_id', '==', uid)
+      allow read: if isAdmin() || (isActive() && resource.data.user_id == request.auth.uid);
       allow create: if isActive() && request.resource.data.user_id == request.auth.uid;
       allow delete: if isActive() && (resource.data.user_id == request.auth.uid || isAdmin());
     }
@@ -283,28 +330,27 @@ service cloud.firestore {
       );
     }
 
-    // --- Guest Activity (throttled unique guest tracking) ---
-    match /guest_activity/{guestId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if true;
-      allow delete: if true;
-    }
+
 
     // --- Direct Messages ---
     // Only active participants can read/write conversations and messages.
     match /dms/{convId} {
-      // Allow read even if doc doesn't exist yet (resource == null for non-existent docs)
-      allow read: if isActive() && (resource == null || request.auth.uid in resource.data.get('participants', []));
-      allow create: if isActive() && request.auth.uid in request.resource.data.get('participants', []);
-      allow update: if isActive() && request.auth.uid in resource.data.get('participants', []);
+      allow read: if isActive() && (resource == null || request.auth.uid in resource.data.participants);
+      allow create: if isActive() && request.auth.uid in request.resource.data.participants;
+      // Participants are fixed at creation — otherwise anyone in the thread
+      // could add a third party or remove the other side.
+      allow update: if isActive()
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.participants == resource.data.participants;
 
       match /messages/{msgId} {
         allow read: if isActive()
-          && request.auth.uid in get(/databases/$(database)/documents/dms/$(convId)).data.get('participants', []);
+          && request.auth.uid in get(/databases/$(database)/documents/dms/$(convId)).data.participants;
         allow create: if isActive()
           && request.resource.data.sender_uid == request.auth.uid
-          && request.auth.uid in get(/databases/$(database)/documents/dms/$(convId)).data.get('participants', []);
+          && request.auth.uid in get(/databases/$(database)/documents/dms/$(convId)).data.participants
+          && request.resource.data.content.size() <= 5000;
+        // update/delete intentionally denied: messages are immutable.
       }
     }
   }

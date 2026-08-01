@@ -1,0 +1,66 @@
+const admin = require("firebase-admin");
+
+const TTL_MS = 60 * 1000;
+let cache = { at: 0, roles: null, categories: null, settings: null };
+
+/**
+ * roles/categories/settings are tiny and change rarely, but every callable was
+ * re-reading all three on every single invocation. Cache them per instance.
+ */
+async function loadContext(db) {
+  const now = Date.now();
+  if (cache.roles && now - cache.at < TTL_MS) return cache;
+
+  const [rolesSnap, catsSnap, settingsSnap] = await Promise.all([
+    db.collection("roles").get(),
+    db.collection("categories").get(),
+    db.collection("settings").doc("global").get(),
+  ]);
+
+  const roles = {};
+  rolesSnap.forEach(d => { roles[d.id] = d.data(); });
+  const categories = {};
+  catsSnap.forEach(d => { categories[d.id] = d.data(); });
+
+  cache = { at: now, roles, categories, settings: settingsSnap.exists ? settingsSnap.data() : {} };
+  return cache;
+}
+
+/** Mirrors AuthProvider: a pending user is treated as a spectator while whitelistMode is off. */
+function effectiveRole(roleId, settings) {
+  if (roleId === "pending" && !settings.whitelistMode) return "spectator";
+  return roleId || "guest";
+}
+
+/**
+ * THE single implementation of view_forum:
+ *   category override wins -> otherwise the role's global permission list,
+ *   base_role_id inheritance honoured in both branches.
+ * A missing category denies (getSecuredPosts used to allow it — decide once).
+ */
+function hasViewForum(rawRole, categoryId, ctx) {
+  if (rawRole === "root" || rawRole === "admin") return true;
+  if (!categoryId) return false;
+
+  const role = effectiveRole(rawRole, ctx.settings);
+  const roleData = ctx.roles[role] || {};
+  const category = ctx.categories[categoryId];
+  if (!category) return false;
+
+  const allowed = (category.permissions || {}).view_forum;
+  if (!allowed) return (roleData.permissions || []).includes("view_forum");
+
+  if (allowed.includes(role)) return true;
+  if (roleData.base_role_id && allowed.includes(roleData.base_role_id)) return true;
+  return false;
+}
+
+async function getRequester(db, uid) {
+  if (!uid) return { uid: null, role: "guest", data: {} };
+  const snap = await db.collection("users").doc(uid).get();
+  if (!snap.exists) return { uid, role: "guest", data: {} };
+  const data = snap.data();
+  return { uid, role: data.role_id || "player", data };
+}
+
+module.exports = { loadContext, effectiveRole, hasViewForum, getRequester };

@@ -4,8 +4,10 @@ import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
-import { subscribeToActiveUsers, subscribeToActiveGuests, subscribeToDailyActiveUsers, subscribeToAllUsers } from '../../api/auth-resources';
+import { subscribeToActiveUsers, subscribeToActiveGuests, subscribeToDailyActiveUsers } from '../../api/auth-resources';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
+import { db } from '../../../firebase';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 // Decoupled stats component
 const ForumStats = () => {
@@ -14,17 +16,27 @@ const ForumStats = () => {
   const [activeUsersRaw, setActiveUsersRaw] = useState([]);
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
-  const [allUsers, setAllUsers] = useState([]); 
+  const [allUsers, setAllUsers] = useState([]);
   
-  // States for filtered lists (sliding window)
-
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   
   useEffect(() => {
     const unsubActiveUsers = subscribeToActiveUsers(setActiveUsersRaw);
     const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
-    const unsubAllUsers = subscribeToAllUsers(setAllUsers);
     const unsubDailyUsers = subscribeToDailyActiveUsers(setDailyActiveUsers);
+    
+    // Fetch all users once (not real-time — last_seen changes trigger expensive full re-reads)
+    const fetchAllUsers = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'users'), orderBy('nickname', 'asc')));
+        setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (err) {
+        console.error('[ForumStats] fetchAllUsers error:', err);
+      }
+    };
+    fetchAllUsers();
+    // Refresh user count every 5 minutes (not real-time)
+    const refreshInterval = setInterval(fetchAllUsers, 5 * 60 * 1000);
     
     // Timer to force re-filtering every 30 seconds (sliding window)
     const timer = setInterval(() => {
@@ -34,9 +46,9 @@ const ForumStats = () => {
     return () => {
       unsubActiveUsers();
       unsubGuests();
-      unsubAllUsers();
       unsubDailyUsers();
       clearInterval(timer);
+      clearInterval(refreshInterval);
     };
   }, []);
 

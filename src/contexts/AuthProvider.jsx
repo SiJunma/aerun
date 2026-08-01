@@ -721,7 +721,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     // Subscribe to latest topics to track unread count (100 is enough for global badge)
-    latestTopicsUnsubRef.current = subscribeToLatestTopics(allowedCategories, setLatestTopics, 100);
+    latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 100);
 
     return () => {
       if (latestTopicsUnsubRef.current) {
@@ -754,7 +754,8 @@ export const AuthProvider = ({ children }) => {
       const lastVisitValue = entry?.timestamp || entry;
       const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
       const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 0;
+      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 
+                         (typeof topic.last_post_at === 'string' ? new Date(topic.last_post_at).getTime() : 0);
 
       return lastPostMs > effectiveLastVisitMs;
     }).length;
