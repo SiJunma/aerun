@@ -57,34 +57,18 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 
 export const subscribeToCategories = (callback) => {
   let isSubscribed = true;
-  let unsubs = [];
-  
+
   const fetchCats = async () => {
     try {
       const functions = getFunctions();
       const getSecured = httpsCallable(functions, 'getSecuredCategories');
       const result = await getSecured();
+
       if (!isSubscribed) return;
+
       const cats = result.data.categories || [];
-      if (cats.length === 0) {
-        callback([]);
-        return;
-      }
-      
-      const catMap = {};
-      cats.forEach(c => { catMap[c.id] = c; });
-      callback(Object.values(catMap).sort((a, b) => a.order - b.order));
-      
-      cats.forEach(c => {
-        const unsub = onSnapshot(doc(db, 'categories', c.id), (docSnap) => {
-          if (!isSubscribed) return;
-          if (docSnap.exists()) {
-            catMap[c.id] = { id: docSnap.id, ...docSnap.data() };
-            callback(Object.values(catMap).sort((a, b) => a.order - b.order));
-          }
-        });
-        unsubs.push(unsub);
-      });
+      const sortedCats = cats.sort((a, b) => (a.order || 0) - (b.order || 0));
+      callback(sortedCats);
     } catch (err) {
       console.error('[subscribeToCategories]', err);
       if (isSubscribed) callback([]);
@@ -93,10 +77,9 @@ export const subscribeToCategories = (callback) => {
 
   fetchCats();
 
-  // Return unsubscribe
+  // Возвращаем чистую отписку для React
   return () => {
     isSubscribed = false;
-    unsubs.forEach(u => u());
   };
 };
 

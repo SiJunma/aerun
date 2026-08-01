@@ -42,13 +42,13 @@ export const updateGlobalSettings = async (settings, performerId) => {
     try {
       const pendingQuery = query(collection(db, 'users'), where('role_id', '==', 'pending'));
       const snap = await getDocs(pendingQuery);
-      
+
       if (!snap.empty) {
         const batch = writeBatch(db);
         snap.forEach(userDoc => {
-          batch.update(userDoc.ref, { 
-            role_id: 'player', 
-            updated_at: serverTimestamp() 
+          batch.update(userDoc.ref, {
+            role_id: 'player',
+            updated_at: serverTimestamp()
           });
         });
         await batch.commit();
@@ -115,14 +115,29 @@ export const updateUserRole = async (uid, roleId, performerId) => {
   await logAdminAction('user_role_updated', performerId, { targetId: uid, roleId });
 };
 
-// --- Role Management ---
+// Оптимизированная версия (разовый запрос без постоянного сокета):
 export const subscribeToRoles = (callback) => {
-  const q = query(collection(db, 'roles'), orderBy('name', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    // id: d.id must come LAST so the real Firestore document ID always wins
-    // over any stale `id` field that may have been stored inside the document data
-    callback(snapshot.docs.map(d => ({ ...d.data(), id: d.id })));
-  });
+  let isSubscribed = true;
+
+  const fetchRoles = async () => {
+    try {
+      const q = query(collection(db, 'roles'), orderBy('name', 'asc'));
+      const snapshot = await getDocs(q);
+
+      if (!isSubscribed) return;
+
+      const rolesData = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+      callback(rolesData);
+    } catch (err) {
+      console.error('[subscribeToRoles]', err);
+    }
+  };
+
+  fetchRoles();
+
+  return () => {
+    isSubscribed = false;
+  };
 };
 
 export const addRole = async (roleData, performerId) => {

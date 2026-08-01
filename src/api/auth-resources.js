@@ -9,7 +9,8 @@ import {
   orderBy,
   where,
   limit,
-  deleteDoc
+  deleteDoc,
+  getDocs
 } from 'firebase/firestore';
 
 // ── Read Map (server-side "last visit" tracking) ─────────────────────────────
@@ -17,19 +18,20 @@ import {
 export const recordTopicVisit = async (uid, topicId, offset = null) => {
   if (!uid || !topicId) return;
   const ref = doc(db, 'users', uid, 'readmap', 'topics');
-  
+
   // If offset is provided, store as object; otherwise store as flat timestamp for compatibility
-  const value = offset !== null 
-    ? { timestamp: serverTimestamp(), offset } 
+  const value = offset !== null
+    ? { timestamp: serverTimestamp(), offset }
     : serverTimestamp();
-    
+
   await setDoc(ref, { [topicId]: value }, { merge: true });
 };
 
+// Оптимизированный ReadMap (без includeMetadataChanges)
 export const subscribeToReadMap = (uid, callback) => {
-  if (!uid) { callback({}); return () => {}; }
+  if (!uid) { callback({}); return () => { }; }
   const ref = doc(db, 'users', uid, 'readmap', 'topics');
-  return onSnapshot(ref, { includeMetadataChanges: true }, snap => {
+  return onSnapshot(ref, snap => {
     callback(snap.exists() ? snap.data({ serverTimestamps: 'estimate' }) : {});
   }, err => {
     if (err.code !== 'permission-denied') {
@@ -109,56 +111,98 @@ export const subscribeToUser = (uid, callback) => {
   });
 };
 
+// Пользователи онлайн (ОДНОКРАТНЫЙ запрос вместо onSnapshot)
 export const subscribeToActiveUsers = (callback) => {
-  // Subscribe to a wider window (60 mins) and let the component filter for the active window (15 mins)
-  // This allows the "Online Now" list to update as people time out without a page refresh.
-  const ONE_HOUR_MS = 60 * 60 * 1000;
-  const q = query(
-    collection(db, 'users'), 
-    where('last_seen', '>=', new Date(Date.now() - ONE_HOUR_MS))
-  );
-  
-  return onSnapshot(q, (snapshot) => {
-    const users = snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(u => u.status !== 'banned');
-    users.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
-    callback(users);
-  }, (err) => console.error('[subscribeToActiveUsers]', err));
+  let isSubscribed = true;
+  const fetchActive = async () => {
+    try {
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+      const q = query(
+        collection(db, 'users'),
+        where('last_seen', '>=', new Date(Date.now() - ONE_HOUR_MS))
+      );
+      const snapshot = await getDocs(q);
+      if (!isSubscribed) return;
+
+      const users = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(u => u.status !== 'banned');
+      users.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
+      callback(users);
+    } catch (err) {
+      console.error('[subscribeToActiveUsers]', err);
+    }
+  };
+
+  fetchActive();
+  return () => { isSubscribed = false; };
 };
 
+// Активные за 24 часа (ОДНОКРАТНЫЙ запрос)
 export const subscribeToDailyActiveUsers = (callback) => {
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  const q = query(
-    collection(db, 'users'),
-    where('last_seen', '>=', new Date(Date.now() - ONE_DAY_MS))
-  );
-  return onSnapshot(q, (snapshot) => {
-    const users = snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(u => u.role_id !== 'banned' && u.role_id !== 'pending');
-    users.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
-    callback(users);
-  }, (err) => console.error('[subscribeToDailyActiveUsers]', err));
+  let isSubscribed = true;
+  const fetchDaily = async () => {
+    try {
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      const q = query(
+        collection(db, 'users'),
+        where('last_seen', '>=', new Date(Date.now() - ONE_DAY_MS))
+      );
+      const snapshot = await getDocs(q);
+      if (!isSubscribed) return;
+
+      const users = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(u => u.role_id !== 'banned' && u.role_id !== 'pending');
+      users.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
+      callback(users);
+    } catch (err) {
+      console.error('[subscribeToDailyActiveUsers]', err);
+    }
+  };
+
+  fetchDaily();
+  return () => { isSubscribed = false; };
 };
 
+// Гости (ОДНОКРАТНЫЙ запрос)
 export const subscribeToActiveGuests = (callback) => {
-  // Same as users: subscribe to 60 mins and filter on client
-  const ONE_HOUR_MS = 60 * 60 * 1000;
-  const q = query(
-    collection(db, 'guest_activity'),
-    where('last_seen', '>=', new Date(Date.now() - ONE_HOUR_MS))
-  );
+  let isSubscribed = true;
+  const fetchGuests = async () => {
+    try {
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+      const q = query(
+        collection(db, 'guest_activity'),
+        where('last_seen', '>=', new Date(Date.now() - ONE_HOUR_MS))
+      );
+      const snapshot = await getDocs(q);
+      if (!isSubscribed) return;
 
-  return onSnapshot(q, (snapshot) => {
-    const guests = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    callback(guests);
-  }, (err) => console.error('[subscribeToActiveGuests]', err));
+      const guests = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      callback(guests);
+    } catch (err) {
+      console.error('[subscribeToActiveGuests]', err);
+    }
+  };
+
+  fetchGuests();
+  return () => { isSubscribed = false; };
 };
 
+// Все пользователи (Разовый запрос)
 export const subscribeToAllUsers = (callback) => {
-  const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
+  let isSubscribed = true;
+  const fetchAll = async () => {
+    try {
+      const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
+      const snapshot = await getDocs(q);
+      if (!isSubscribed) return;
+      callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      console.error('[subscribeToAllUsers]', err);
+    }
+  };
+
+  fetchAll();
+  return () => { isSubscribed = false; };
 };

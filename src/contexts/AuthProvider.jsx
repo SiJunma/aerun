@@ -20,12 +20,13 @@ import {
   query,
   where,
   getDocs,
-  limit
+  limit,
+  orderBy
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
 import { markTopicNotificationsRead } from '../api/notifications';
-import { 
+import {
   markAllTopicsRead,
   recordGuestActivity as apiRecordGuestActivity,
   deleteGuestActivity as apiDeleteGuestActivity,
@@ -206,7 +207,7 @@ export const AuthProvider = ({ children }) => {
       }
       localStorage.removeItem('last_guest_push');
       await signOut(auth);
-      
+
       // Immediately record guest activity so they show up in "Online now" as a guest
       const gid = getOrCreateGuestId();
       await apiRecordGuestActivity(gid);
@@ -245,11 +246,11 @@ export const AuthProvider = ({ children }) => {
     }
 
     await setDoc(userDocRef, updatedData, { merge: true });
-    
+
     if (!isSelf) {
       await logAdminAction('user_profile_edited_by_admin', user.uid, { targetId: finalUid });
     }
-    
+
     if (isSelf) {
       setProfile(prev => ({
         ...prev,
@@ -263,7 +264,7 @@ export const AuthProvider = ({ children }) => {
     const unsubGlobalSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const migrated = { 
+        const migrated = {
           ...data,
           forumName: data.forumName || 'Aerun Forum',
           welcomeMessage: data.welcomeMessage || '',
@@ -344,9 +345,9 @@ export const AuthProvider = ({ children }) => {
             // Fetch fresh global settings specifically for the registration check
             const globalSettingsSnap = await getDoc(doc(db, 'settings', 'global'));
             const globalSettings = globalSettingsSnap.exists() ? globalSettingsSnap.data() : null;
-            
+
             const registrationEnabled = globalSettings?.registrationEnabled !== false;
-            
+
             // 1. Check if registration is allowed (admin is always allowed)
             if (!registrationEnabled && !isAdmin) {
               console.warn('[Registration] Blocked: registration is disabled.');
@@ -368,7 +369,7 @@ export const AuthProvider = ({ children }) => {
 
             const pendingNickname = sessionStorage.getItem('pending_nickname');
             const pendingMessage = sessionStorage.getItem('pending_message');
-            
+
             let chosenNickname = (pendingNickname && typeof pendingNickname === 'string') ? pendingNickname.trim() : null;
             let finalNickname = chosenNickname;
 
@@ -379,7 +380,7 @@ export const AuthProvider = ({ children }) => {
             const checkNicknameAvailability = async (name) => {
               try {
                 const qAvailability = query(
-                  collection(db, 'users'), 
+                  collection(db, 'users'),
                   where('nickname', '==', name),
                   limit(1)
                 );
@@ -432,33 +433,33 @@ export const AuthProvider = ({ children }) => {
               }
             };
             await setDoc(userDocRef, newUser);
-            
+
             // Cleanup session
             sessionStorage.removeItem('pending_nickname');
             sessionStorage.removeItem('pending_message');
             sessionStorage.removeItem('is_registering');
 
             // Log registration to audit log
-            await logAdminAction('user_registered', firebaseUser.uid, { 
-              email: firebaseUser.email, 
+            await logAdminAction('user_registered', firebaseUser.uid, {
+              email: firebaseUser.email,
               nickname: finalNickname,
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
             const data = userDoc.data();
-            
+
             // Auto-upgrade pending users who just verified their email
             if (usesPassword && firebaseUser.emailVerified && data.role_id === 'pending') {
-               try {
-                   const globalSnap = await getDoc(doc(db, 'settings', 'global'));
-                   const reqAppr = globalSnap.exists() ? globalSnap.data().requireApproval : false;
-                   if (!reqAppr) {
-                       await updateDoc(userDocRef, { role_id: 'player' });
-                       data.role_id = 'player';
-                   }
-               } catch (e) {
-                   console.error('[Auto-upgrade role error]', e);
-               }
+              try {
+                const globalSnap = await getDoc(doc(db, 'settings', 'global'));
+                const reqAppr = globalSnap.exists() ? globalSnap.data().requireApproval : false;
+                if (!reqAppr) {
+                  await updateDoc(userDocRef, { role_id: 'player' });
+                  data.role_id = 'player';
+                }
+              } catch (e) {
+                console.error('[Auto-upgrade role error]', e);
+              }
             }
 
             // Login counts as activity — update immediately
@@ -474,7 +475,7 @@ export const AuthProvider = ({ children }) => {
           // Seed system roles with fixed IDs if they don't exist yet (admin-only, safe to call repeatedly)
           if (isAdmin) {
             seedSystemRoles(DEFAULT_ROLES).catch(err => console.warn('[seedSystemRoles]', err));
-            
+
             // Also seed global settings if they are missing
             const globalSettingsRef = doc(db, 'settings', 'global');
             const globalSettingsSnap = await getDoc(globalSettingsRef);
@@ -533,8 +534,8 @@ export const AuthProvider = ({ children }) => {
           }, (error) => {
             // Classify the error: transient network issues should never log the user out.
             // Firebase uses 'unavailable' for network drops and transport errors.
-            const isTransient = !error?.code || 
-              error.code === 'unavailable' || 
+            const isTransient = !error?.code ||
+              error.code === 'unavailable' ||
               error.code === 'unknown' ||
               error.message === undefined ||
               (error.name === undefined && error.message === undefined);
@@ -568,7 +569,7 @@ export const AuthProvider = ({ children }) => {
         setReadMap({});
         setLatestTopics([]);
         finishLoading();
-        
+
         if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
         if (readMapUnsubRef.current) { readMapUnsubRef.current(); readMapUnsubRef.current = null; }
         if (latestTopicsUnsubRef.current) { latestTopicsUnsubRef.current(); latestTopicsUnsubRef.current = null; }
@@ -596,7 +597,7 @@ export const AuthProvider = ({ children }) => {
     // Lightweight interaction tracking (throttled by recordActivity logic)
     // This ensures that reading/scrolling also counts as activity, not just navigation.
     const handleInteraction = () => recordActivity();
-    
+
     window.addEventListener('mousedown', handleInteraction);
     window.addEventListener('keydown', handleInteraction, { passive: true });
     window.addEventListener('scroll', handleInteraction, { passive: true });
@@ -604,7 +605,7 @@ export const AuthProvider = ({ children }) => {
     const interval = setInterval(() => {
       const now = Date.now();
       const idleMs = now - lastActivityRef.current;
-      
+
       // Stop heartbeat if truly idle (e.g. tab left open but no interaction for 15m)
       if (idleMs >= IDLE_TIMEOUT_MS) return;
 
@@ -624,7 +625,7 @@ export const AuthProvider = ({ children }) => {
         }
       }
     }, 60000); // Check every minute
-    
+
     return () => {
       clearInterval(interval);
       window.removeEventListener('mousedown', handleInteraction);
@@ -667,8 +668,8 @@ export const AuthProvider = ({ children }) => {
     // (spectator has VIEW_FORUM globally, but no posting rights).
     // When whitelistMode is ON, they are strictly locked down.
     const effectiveRoleId = (isRestricted && isWhitelistOff)
-        ? 'spectator'
-        : (profile?.role_id || (user ? 'player' : 'guest'));
+      ? 'spectator'
+      : (profile?.role_id || (user ? 'player' : 'guest'));
 
     if (effectiveRoleId === CHIEF_ADMIN_ID) return true;
 
@@ -682,11 +683,11 @@ export const AuthProvider = ({ children }) => {
         const allowedRoles = catPerms[perm];
         // Check if user's own role is allowed
         if (allowedRoles.includes(effectiveRoleId)) return true;
-        
+
         // Check if user's role inherits from a base role that is allowed
         const userRole = roles.find(r => r.id === effectiveRoleId);
         if (userRole?.base_role_id && allowedRoles.includes(userRole.base_role_id)) return true;
-        
+
         return false;
       }
     }
@@ -700,24 +701,23 @@ export const AuthProvider = ({ children }) => {
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
-  // Effect for Latest Topics Subscription
+  // Загрузка 1 раз без WebSocket / WebChannel подписки
   useEffect(() => {
-    // Wait for full auth initialization (both user and profile)
-    if (loading) return;
+    if (loading || !user) return;
 
-    if (latestTopicsUnsubRef.current) {
-      latestTopicsUnsubRef.current();
-    }
-
-    // Fetch latest topics to track unread count (100 is enough for global badge)
-    latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 100);
-
-    return () => {
-      if (latestTopicsUnsubRef.current) {
-        latestTopicsUnsubRef.current();
-        latestTopicsUnsubRef.current = null;
+    // Обычный getDocs вместо onSnapshot (импортируйте getDocs, query, collection, limit, orderBy)
+    const fetchTopicsOnce = async () => {
+      try {
+        const q = query(collection(db, 'topics'), orderBy('last_post_at', 'desc'), limit(30));
+        const snap = await getDocs(q);
+        const topics = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setLatestTopics(topics);
+      } catch (e) {
+        console.warn('[Fetch topics once error]', e);
       }
     };
+
+    fetchTopicsOnce();
   }, [loading, user?.uid]);
 
   useEffect(() => {
@@ -743,8 +743,8 @@ export const AuthProvider = ({ children }) => {
       const lastVisitValue = entry?.timestamp || entry;
       const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
       const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-      const lastPostMs = topic.last_post_at?.toMillis?.() ?? 
-                         (typeof topic.last_post_at === 'string' ? new Date(topic.last_post_at).getTime() : 0);
+      const lastPostMs = topic.last_post_at?.toMillis?.() ??
+        (typeof topic.last_post_at === 'string' ? new Date(topic.last_post_at).getTime() : 0);
 
       return lastPostMs > effectiveLastVisitMs;
     }).length;
@@ -778,7 +778,7 @@ export const AuthProvider = ({ children }) => {
    */
   const markAllRead = useCallback(async () => {
     if (!user || latestTopics.length === 0 || isMarkingAllRead) return;
-    
+
     setIsMarkingAllRead(true);
     try {
       // Optimistic local update
@@ -788,7 +788,7 @@ export const AuthProvider = ({ children }) => {
         newReadMap[t.id] = now;
         return t.id;
       });
-      
+
       setReadMap(newReadMap);
       await markAllTopicsRead(user.uid, topicIds);
     } catch (err) {
@@ -804,7 +804,7 @@ export const AuthProvider = ({ children }) => {
   React.useEffect(() => {
     if (user && !loading) {
       const isRegistering = sessionStorage.getItem('is_registering') === 'true';
-      
+
       // If user is authenticated but profile is missing and we aren't registering,
       // it means the account was deleted or never existed correctly.
       // We skip this if there was an authError to avoid logging out on network issues.
@@ -821,19 +821,19 @@ export const AuthProvider = ({ children }) => {
       if (profile) {
         const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
         const isBanned = profile.role_id === 'banned';
-        
+
         // Maintenance applies if ON and whitelist is active
         const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
 
         if (isBanned) {
           if (!sessionStorage.getItem('banned_login_logged')) {
-            logAdminAction('banned_user_login_attempt', user.uid, { 
-              email: user.email, 
-              nickname: profile.nickname 
+            logAdminAction('banned_user_login_attempt', user.uid, {
+              email: user.email,
+              nickname: profile.nickname
             }).catch(console.error);
             sessionStorage.setItem('banned_login_logged', 'true');
           }
-          
+
           sessionStorage.setItem('banned_logout', 'true');
           logout(true); // skipPresenceCleanup = true to avoid permission error loop
         } else if (isMaintenanceStrict && !isAdmin) {
