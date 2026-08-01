@@ -55,12 +55,10 @@ service cloud.firestore {
     }
 
 
-    function hasCategoryPermission(catId, permission) {
+    function hasCategoryDataPermission(catData, permission) {
       let role = getRole();
-      let catData = exists(/databases/$(database)/documents/categories/$(catId))
-        ? get(/databases/$(database)/documents/categories/$(catId)).data
-        : {};
       let catPerms = 'permissions' in catData ? catData.permissions : {};
+      
       // If the permission is not set at category level -> fall back to the global
       // role document (so a 'guest' role with 'view_forum' still passes).
       return !(permission in catPerms)
@@ -69,6 +67,13 @@ service cloud.firestore {
             permission in get(/databases/$(database)/documents/roles/$(role)).data.permissions
           ))
         : (role in catPerms[permission]);
+    }
+
+    function hasCategoryPermission(catId, permission) {
+      let catData = exists(/databases/$(database)/documents/categories/$(catId))
+        ? get(/databases/$(database)/documents/categories/$(catId)).data
+        : {};
+      return hasCategoryDataPermission(catData, permission);
     }
 
     function canCreateTopic(catId) {
@@ -142,7 +147,7 @@ service cloud.firestore {
 
     // --- Categories ---
     match /categories/{catId} {
-      allow get: if isAdmin() || hasCategoryPermission(catId, 'view_forum');
+      allow get: if isAdmin() || hasCategoryDataPermission(resource.data, 'view_forum');
       allow list: if isAdmin();
       allow create, delete: if isAdmin();
       // All category counters and metadata are now written by Cloud Functions (Admin SDK).

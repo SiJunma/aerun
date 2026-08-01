@@ -700,27 +700,16 @@ export const AuthProvider = ({ children }) => {
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
-  // Effect for Latest Topics Subscription (depends on categories and permissions)
-  // Placed AFTER hasPermission declaration to avoid TDZ error
+  // Effect for Latest Topics Subscription
   useEffect(() => {
-    // Only subscribe once categories are loaded
-    if (categories.length === 0) return;
-
-    // Check which categories user has permission to see
-    const allowedCategories = categories
-      .filter(c => hasPermission(PERMISSIONS.VIEW_FORUM, { category: c }))
-      .map(c => c.id);
-
-    if (allowedCategories.length === 0) {
-      setLatestTopics([]);
-      return;
-    }
+    // Wait for full auth initialization (both user and profile)
+    if (loading) return;
 
     if (latestTopicsUnsubRef.current) {
       latestTopicsUnsubRef.current();
     }
 
-    // Subscribe to latest topics to track unread count (100 is enough for global badge)
+    // Fetch latest topics to track unread count (100 is enough for global badge)
     latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 100);
 
     return () => {
@@ -729,7 +718,7 @@ export const AuthProvider = ({ children }) => {
         latestTopicsUnsubRef.current = null;
       }
     };
-  }, [categories, profile, user, hasPermission]);
+  }, [loading, user?.uid]);
 
   useEffect(() => {
     if (!user || latestTopics.length === 0) {
