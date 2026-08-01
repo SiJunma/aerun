@@ -299,6 +299,7 @@ export const translations = {
         new_registration: "New Registration",
         topic_reply: "{count} new replies in {topic}",
         post_quoted: "Your post was quoted in {topic}",
+        post_mentioned: "You were mentioned in {topic}",
         reputation_change: "Reputation change"
       },
       reputation_increased: "Your reputation was increased by {user}",
@@ -923,6 +924,7 @@ export const translations = {
         new_registration: "Новая регистрация",
         topic_reply: "{count} новых ответов в теме {topic}",
         post_quoted: "Ваш пост процитировали в {topic}",
+        post_mentioned: "Вас упомянули в {topic}",
         reputation_change: "Изменение репутации"
       },
       reputation_increased: "Вам повысили репутацию. Автор: {user}",

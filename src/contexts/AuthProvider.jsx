@@ -495,9 +495,6 @@ export const AuthProvider = ({ children }) => {
           // Subscribe to read map (all roles — everyone can read topics)
           readMapUnsubRef.current = subscribeToReadMap(firebaseUser.uid, setReadMap);
 
-          // Subscribe to latest topics to track unread count (100 is enough for global badge)
-          latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 100);
-
           profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
@@ -703,7 +700,37 @@ export const AuthProvider = ({ children }) => {
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
-  // Calculate unreadTopicsCount whenever readMap or latestTopics change
+  // Effect for Latest Topics Subscription (depends on categories and permissions)
+  // Placed AFTER hasPermission declaration to avoid TDZ error
+  useEffect(() => {
+    // Only subscribe once categories are loaded
+    if (categories.length === 0) return;
+
+    // Check which categories user has permission to see
+    const allowedCategories = categories
+      .filter(c => hasPermission(PERMISSIONS.VIEW_FORUM, { category: c }))
+      .map(c => c.id);
+
+    if (allowedCategories.length === 0) {
+      setLatestTopics([]);
+      return;
+    }
+
+    if (latestTopicsUnsubRef.current) {
+      latestTopicsUnsubRef.current();
+    }
+
+    // Subscribe to latest topics to track unread count (100 is enough for global badge)
+    latestTopicsUnsubRef.current = subscribeToLatestTopics(allowedCategories, setLatestTopics, 100);
+
+    return () => {
+      if (latestTopicsUnsubRef.current) {
+        latestTopicsUnsubRef.current();
+        latestTopicsUnsubRef.current = null;
+      }
+    };
+  }, [categories, profile, user, hasPermission]);
+
   useEffect(() => {
     if (!user || latestTopics.length === 0) {
       setUnreadTopicsCount(0);

@@ -22,16 +22,29 @@ const NewRepliesPage = () => {
 
   useEffect(() => {
     const unsubCats = subscribeToCategories(setCategories);
-    const unsubTopics = subscribeToLatestTopics((data) => {
+    return () => unsubCats();
+  }, []);
+
+  useEffect(() => {
+    if (categories.length === 0) return;
+    
+    const allowedCategories = categories.filter(c => hasPermission(PERMISSIONS.VIEW_FORUM, { category: c })).map(c => c.id);
+    
+    if (allowedCategories.length === 0) {
+      setTopics([]);
+      setLoading(false);
+      return;
+    }
+
+    const unsubTopics = subscribeToLatestTopics(allowedCategories, (data) => {
       setTopics(data);
       setLoading(false);
-    }, 200); // Fetch top 200 recent topics
+    }, 200);
 
     return () => {
-      unsubCats();
       unsubTopics();
     };
-  }, []);
+  }, [categories, hasPermission]);
 
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);

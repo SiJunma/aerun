@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, Row, Col, Nav } from 'react-bootstrap';
-import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare, TrendingUp, TrendingDown, Quote } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -38,6 +38,16 @@ const TYPE_META = {
     // Dynamic icon, set in render
     labelKey: 'notifications.types.reputation_change',
     color: 'success'
+  },
+  post_mentioned: {
+    icon: <AtSign size={18} />,
+    labelKey: 'notifications.types.post_mentioned',
+    color: 'secondary'
+  },
+  POST_MENTIONED: {
+    icon: <AtSign size={18} />,
+    labelKey: 'notifications.types.post_mentioned',
+    color: 'secondary'
   }
 };
 
@@ -100,8 +110,10 @@ const NotificationsPage = () => {
   // Client-side filter: respect user's in_app notification preferences
   const notifSettings = profile?.settings?.notifications;
   const filterByPrefs = (n) => {
+    const isMention = n.type === 'POST_MENTIONED' || n.type === 'post_mentioned';
     if (n.type === 'topic_reply'       && notifSettings?.topic_reply?.in_app       === false) return false;
     if (n.type === 'post_quoted'       && notifSettings?.post_quoted?.in_app       === false) return false;
+    if (isMention                      && notifSettings?.post_quoted?.in_app       === false) return false; // Reuse post_quoted setting for mentions
     if (n.type === 'reputation_change' && notifSettings?.reputation_change?.in_app === false) return false;
     if (n.type === 'new_registration'  && notifSettings?.new_registration?.in_app  === false) return false;
     return true;
@@ -228,9 +240,10 @@ const NotificationsPage = () => {
                           </>
                         );
                       })()
-                    ) : n.type === 'post_quoted' ? (
+                    ) : (n.type === 'post_quoted' || n.type === 'post_mentioned' || n.type === 'POST_MENTIONED') ? (
                       (() => {
-                        const fullText = t('notifications.types.post_quoted', { topic: '|||TOPIC|||' });
+                        const typeKey = n.type === 'post_quoted' ? 'post_quoted' : 'post_mentioned';
+                        const fullText = t(`notifications.types.${typeKey}`, { topic: '|||TOPIC|||' });
                         const parts = fullText.split('|||TOPIC|||');
                         return (
                           <>
@@ -348,7 +361,7 @@ const NotificationsPage = () => {
                   </div>
                 </div>
               )}
-              {n.type === 'post_quoted' && payload && (
+              {(n.type === 'post_quoted' || n.type === 'post_mentioned' || n.type === 'POST_MENTIONED') && payload && (
                 <div className="ps-0 ps-md-1">
                   <div className="mt-3 d-flex align-items-center">
                     <Link 
