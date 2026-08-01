@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToCategories } from '../api/categories';
 import { subscribeToTopTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -11,20 +10,17 @@ import { resolveField } from '../utils/text';
 
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
-  const { user, hasPermission, PERMISSIONS } = useAuth();
+  const { user, hasPermission, PERMISSIONS, categories } = useAuth();
   const [topics, setTopics] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubCats = subscribeToCategories(setCategories);
     const unsubTopics = subscribeToTopTopics((data) => {
       setTopics(data);
       setLoading(false);
     }, 50); // Show top 50 topics
 
     return () => {
-      unsubCats();
       unsubTopics();
     };
   }, []);

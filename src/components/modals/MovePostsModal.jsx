@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Button, Badge } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
-import { subscribeToCategories, subscribeToCategoryGroups } from '../../api/categories';
+import { subscribeToCategoryGroups } from '../../api/categories';
 import { fetchSecuredTopics } from '../../api/forum';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -38,7 +38,7 @@ const MovePostsModal = ({
   onConfirm,
 }) => {
   const { t, lang } = useI18n();
-  const { hasPermission, PERMISSIONS } = useAuth();
+  const { hasPermission, PERMISSIONS, categories: allCategories } = useAuth();
 
   // ── Post selection ──────────────────────────────────────────────────────────
   const [selectedPostIds, setSelectedPostIds] = useState(new Set());
@@ -69,19 +69,18 @@ const MovePostsModal = ({
   useEffect(() => {
     if (!show) return;
 
-    const unsubCats = subscribeToCategories((cats) => {
-      const filtered = cats.filter(cat =>
-        hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat })
-      );
-      setCategories(filtered);
-    });
+    // Filter from context
+    const filtered = allCategories.filter(cat =>
+      hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat })
+    );
+    setCategories(filtered);
 
     const unsubGroups = subscribeToCategoryGroups((grps) => {
       setGroups(grps);
     });
 
-    return () => { unsubCats(); unsubGroups(); };
-  }, [show, hasPermission, PERMISSIONS.VIEW_FORUM]);
+    return () => { unsubGroups(); };
+  }, [show, hasPermission, PERMISSIONS.VIEW_FORUM, allCategories]);
 
   // Fetch topics when a forum is selected
   useEffect(() => {

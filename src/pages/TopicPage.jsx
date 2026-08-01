@@ -3,7 +3,6 @@ import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'reac
 import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Pagination, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToCategories } from '../api/categories';
 import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
   updateUser, updateTopic,
@@ -44,7 +43,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, PERMISSIONS, settings } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, PERMISSIONS, settings, categories } = useAuth();
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
@@ -286,14 +285,11 @@ const TopicPage = () => {
   }, [profile?.last_selected_character_id]);
 
   useEffect(() => {
-    const unsubCat = subscribeToCategories((cats) => {
-      if (topic?.category_id) {
-        const found = cats.find(c => c.id === topic.category_id);
-        if (found) setCategory(found);
-      }
-    });
-    return () => unsubCat();
-  }, [topic?.category_id]);
+    if (topic?.category_id) {
+      const found = categories.find(c => c.id === topic.category_id);
+      if (found) setCategory(found);
+    }
+  }, [topic?.category_id, categories]);
 
   // Draft Auto-save
   const DRAFT_KEY = `reply_draft_${id}`;
@@ -840,27 +836,40 @@ const TopicPage = () => {
     try {
       const postData = buildPostData();
       const newPostId = await createPost(postData);
-      await loadPosts();
       // Mark as read immediately (server-side)
       markTopicRead(id);
       setReplyContent('');
 
-      // Calculate where the new post will be
-      const newTotalPosts = (topic?.posts_count || 0) + 1;
+      // Calculate where the new post will land.
+      // Use the locally-known number of posts (currentPage offset + loaded posts)
+      // rather than topic.posts_count which is updated asynchronously by Cloud Functions.
+      const postsBeforeNew = (currentPage - 1) * ITEMS_PER_PAGE + posts.length;
+      const newTotalPosts = postsBeforeNew + 1;
       const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
 
       if (targetPage !== currentPage) {
+        // Navigate to the page where the new post appears, then scroll to it
         setSearchParams({ page: targetPage });
+        setTimeout(() => {
+          const element = document.getElementById(`post-${newPostId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('highlight-new-post');
+            setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
+          }
+        }, 800);
+      } else {
+        // Already on the correct page — reload posts and scroll
+        await loadPosts();
+        setTimeout(() => {
+          const element = document.getElementById(`post-${newPostId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('highlight-new-post');
+            setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
+          }
+        }, 500);
       }
-
-      setTimeout(() => {
-        const element = document.getElementById(`post-${newPostId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          element.classList.add('highlight-new-post');
-          setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
-        }
-      }, 500);
 
     } catch (err) {
       console.error(err);

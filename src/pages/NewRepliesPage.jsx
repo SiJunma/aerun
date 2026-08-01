@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToCategories } from '../api/categories';
 import { subscribeToLatestTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
 import ForumPagination from '../components/common/ForumPagination';
@@ -11,19 +10,13 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
 const NewRepliesPage = () => {
   const { t, lang } = useI18n();
-  const { user, markAllRead, isMarkingAllRead, unreadTopicsCount, hasPermission, PERMISSIONS } = useAuth();
+  const { user, markAllRead, isMarkingAllRead, unreadTopicsCount, hasPermission, PERMISSIONS, categories } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [topics, setTopics] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
-
-  useEffect(() => {
-    const unsubCats = subscribeToCategories(setCategories);
-    return () => unsubCats();
-  }, []);
 
   useEffect(() => {
     if (categories.length === 0) return;

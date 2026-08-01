@@ -8,7 +8,6 @@ import { playNotificationSound } from '../utils/notificationSound';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
-import { subscribeToCategories } from '../api/categories';
 import { checkNicknameExists, fetchUserPosts } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -30,7 +29,7 @@ import SecurityTab from '../components/profile/SecurityTab';
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
-  const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity } = useAuth();
+  const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity, categories } = useAuth();
   const { showToast } = useToast();
 
   const [characters, setCharacters] = useState([]);
@@ -99,7 +98,6 @@ const ProfilePage = () => {
   const [editingLogId, setEditingLogId] = useState(null);
   const [editLogComment, setEditLogComment] = useState('');
   const [savingLogComment, setSavingLogComment] = useState(false);
-  const [categories, setCategories] = useState([]);
   const [userPosts, setUserPosts] = useState([]);
   const [totalUserPosts, setTotalUserPosts] = useState(0);
   const [currentPagePosts, setCurrentPagePosts] = useState(1);
@@ -129,7 +127,6 @@ const ProfilePage = () => {
   const lastInitUidRef = useRef(null);
 
   useEffect(() => {
-    const unsubCats = subscribeToCategories(setCategories);
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
     const unsubProfile = subscribeToUser(uid, (data) => {
       setViewedProfile(data);
@@ -144,7 +141,6 @@ const ProfilePage = () => {
     }
 
     return () => {
-      unsubCats();
       unsubscribe();
       unsubProfile();
     };

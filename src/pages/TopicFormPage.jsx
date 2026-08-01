@@ -5,7 +5,6 @@ import { User } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCharacters } from '../api/character';
-import { subscribeToCategories } from '../api/categories';
 import { createTopic, updateUser } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -16,7 +15,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, hasPermission, PERMISSIONS, settings } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, hasPermission, PERMISSIONS, settings, categories } = useAuth();
   const { showToast } = useToast();
 
   const [title, setTitle] = useState('');
@@ -34,10 +33,10 @@ const TopicFormPage = () => {
   useEffect(() => {
     if (user) {
       const unsubChars = subscribeToCharacters(user.uid, setCharacters);
-      const unsubCats = subscribeToCategories((cats) => {
-        const found = cats.find(c => c.id === categoryId);
-        if (found) setCategory(found);
-      });
+
+      // Find category from context
+      const found = categories.find(c => c.id === categoryId);
+      if (found) setCategory(found);
 
       // Load draft once on mount
       if (!draftLoaded) {
@@ -57,10 +56,9 @@ const TopicFormPage = () => {
 
       return () => {
         unsubChars();
-        unsubCats();
       };
     }
-  }, [user, categoryId, draftLoaded, DRAFT_KEY]);
+  }, [user, categoryId, draftLoaded, DRAFT_KEY, categories]);
 
   // Save draft whenever fields change
   useEffect(() => {

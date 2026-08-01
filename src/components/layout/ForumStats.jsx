@@ -4,15 +4,13 @@ import { Card, Row, Col } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
-import { subscribeToCategories } from '../../api/categories';
 import { subscribeToActiveUsers, subscribeToActiveGuests, subscribeToDailyActiveUsers, subscribeToAllUsers } from '../../api/auth-resources';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 // Decoupled stats component
 const ForumStats = () => {
   const { t } = useI18n();
-  const { user } = useAuth();
-  const [categories, setCategories] = useState([]);
+  const { user, categories } = useAuth();
   const [activeUsersRaw, setActiveUsersRaw] = useState([]);
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
@@ -23,7 +21,6 @@ const ForumStats = () => {
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   
   useEffect(() => {
-    const unsubCats = subscribeToCategories(setCategories);
     const unsubActiveUsers = subscribeToActiveUsers(setActiveUsersRaw);
     const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
     const unsubAllUsers = subscribeToAllUsers(setAllUsers);
@@ -35,7 +32,6 @@ const ForumStats = () => {
     }, 30000);
     
     return () => {
-      unsubCats();
       unsubActiveUsers();
       unsubGuests();
       unsubAllUsers();

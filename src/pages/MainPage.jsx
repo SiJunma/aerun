@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { Folder, MessageSquare, FileText } from 'lucide-react';
-import { subscribeToCategories, subscribeToCategoryGroups } from '../api/categories';
+import { subscribeToCategoryGroups } from '../api/categories';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
@@ -12,28 +12,17 @@ import { resolveField } from '../utils/text';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, profile, readMap, hasPermission, PERMISSIONS } = useAuth();
-  const [categories, setCategories] = useState([]);
+  const { user, profile, readMap, hasPermission, PERMISSIONS, categories } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let catsLoaded = false;
-    let groupsLoaded = false;
-
-    const unsubCats = subscribeToCategories((data) => {
-      setCategories(data);
-      catsLoaded = true;
-      if (groupsLoaded) setLoading(false);
-    });
     const unsubGroups = subscribeToCategoryGroups((data) => {
       setGroups(data);
-      groupsLoaded = true;
-      if (catsLoaded) setLoading(false);
+      setLoading(false);
     });
 
     return () => {
-      unsubCats();
       unsubGroups();
     };
   }, []);

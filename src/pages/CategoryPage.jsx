@@ -4,7 +4,6 @@ import { Container, Card, Table, Button, Badge, Row, Col, Form } from 'react-boo
 import { Trash2, Move, Settings, PinOff, Pin, Lock, PlusCircle, Search, MessageSquare, Clock, Filter, FolderInput, Unlock, CheckCircle } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToCategories } from '../api/categories';
 import { 
   fetchSecuredTopics, 
   batchUpdateTopics, 
@@ -24,7 +23,7 @@ import { useToast } from '../contexts/ToastProvider';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user, hasPermission, PERMISSIONS } = useAuth();
+  const { user, hasPermission, PERMISSIONS, categories } = useAuth();
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState(null);
@@ -52,16 +51,12 @@ const CategoryPage = () => {
   };
 
   useEffect(() => {
-    const unsubCat = subscribeToCategories((cats) => {
-      const found = cats.find(c => c.id === id);
-      if (found) setCategory(found);
-    });
+    const found = categories.find(c => c.id === id);
+    if (found) setCategory(found);
+  }, [id, categories]);
 
+  useEffect(() => {
     loadTopics();
-
-    return () => {
-      unsubCat();
-    };
   }, [id, currentPage]);
 
 

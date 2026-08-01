@@ -864,6 +864,7 @@ export const AuthProvider = ({ children }) => {
     settings,
     loading,
     readMap,
+    categories,
     unreadTopicsCount,
     isMarkingAllRead,
     markTopicRead,
