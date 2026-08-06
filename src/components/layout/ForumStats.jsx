@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Row, Col } from 'react-bootstrap';
+import { Card } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -9,7 +9,6 @@ import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 import { db } from '../../../firebase';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
-// Decoupled stats component
 const ForumStats = () => {
   const { t } = useI18n();
   const { user, categories } = useAuth();
@@ -24,8 +23,21 @@ const ForumStats = () => {
     const unsubActiveUsers = subscribeToActiveUsers(setActiveUsersRaw);
     const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
     const unsubDailyUsers = subscribeToDailyActiveUsers(setDailyActiveUsers);
+
+    // Слушаем локальное событие разлогина, чтобы мгновенно выкинуть юзера из списка
+    const handlePresenceUpdated = (e) => {
+      const removedUid = e.detail?.removedUid;
+      if (removedUid) {
+        setActiveUsersRaw(prev => prev.filter(u => u.id !== removedUid));
+        setDailyActiveUsers(prev => prev.filter(u => u.id !== removedUid));
+      } else {
+        // Или перезапрашиваем актуальный список
+        subscribeToActiveUsers(setActiveUsersRaw);
+      }
+    };
+
+    window.addEventListener('presence_updated', handlePresenceUpdated);
     
-    // Fetch all users once (not real-time — last_seen changes trigger expensive full re-reads)
     const fetchAllUsers = async () => {
       try {
         const snap = await getDocs(query(collection(db, 'users'), orderBy('nickname', 'asc')));
@@ -35,10 +47,9 @@ const ForumStats = () => {
       }
     };
     fetchAllUsers();
-    // Refresh user count every 5 minutes (not real-time)
+    
     const refreshInterval = setInterval(fetchAllUsers, 5 * 60 * 1000);
     
-    // Timer to force re-filtering every 30 seconds (sliding window)
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 30000);
@@ -47,42 +58,35 @@ const ForumStats = () => {
       unsubActiveUsers();
       unsubGuests();
       unsubDailyUsers();
-      clearInterval(timer);
-      clearInterval(refreshInterval);
+      // clearInterval(timer);
+      // clearInterval(refreshInterval);
+      window.removeEventListener('presence_updated', handlePresenceUpdated);
     };
   }, []);
 
-  // Filter users and guests based on a 15-minute window relative to currentTime
+  // Берем пользователей напрямую из activeUsersRaw (они уже отфильтрованы по 15 минутам в api)
   const { onlineUsers, activeGuestsCount } = useMemo(() => {
     const FIFTEEN_MINS_MS = 15 * 60 * 1000;
     const threshold = currentTime - FIFTEEN_MINS_MS;
-    
-    const filteredUsers = activeUsersRaw.filter(u => {
-      const lastSeenMs = u.last_seen?.toMillis?.() || 0;
-      return lastSeenMs >= threshold;
-    });
     
     const currentGuestId = localStorage.getItem('guest_id');
     
     const filteredGuests = activeGuestsRaw.filter(g => {
       const lastSeenMs = g.last_seen?.toMillis?.() || 0;
-      // Exclude current guest ONLY if this specific session is already logged in
       if (user && g.id === currentGuestId) return false;
       return lastSeenMs >= threshold;
     });
 
     return {
-      onlineUsers: filteredUsers,
+      onlineUsers: activeUsersRaw, // <-- ВАЖНОЕ ИСПРАВЛЕНИЕ: Используем массив из api напрямую!
       activeGuestsCount: filteredGuests.length
     };
   }, [activeUsersRaw, activeGuestsRaw, currentTime, user]);
 
-  // Stats calculation
   const totalTopics = categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
   const totalPosts = categories.reduce((sum, cat) => sum + (cat.posts_count || 0), 0);
   const totalUsers = allUsers.length;
   
-  // Newest user (sorted by created_at desc)
   const newestUser = [...allUsers].sort((a, b) => {
     const aTime = a.created_at?.toMillis?.() ?? 0;
     const bTime = b.created_at?.toMillis?.() ?? 0;
@@ -99,7 +103,6 @@ const ForumStats = () => {
         <TrendingUp size={14} className="text-primary opacity-75" />
       </Card.Header>
       <Card.Body className="p-0">
-        {/* Main Stats Row - Single Line */}
         <div className="stats-grid p-2 px-3 border-bottom">
           <div className="d-flex flex-wrap align-items-center gap-4 stats-row-compact">
             <div className="d-flex align-items-center gap-2 stats-item">
@@ -191,7 +194,6 @@ const ForumStats = () => {
             )}
           </div>
         </div>
-
 
         {/* Footer Links */}
         <div className="stats-footer p-1 px-3 border-top d-flex justify-content-between align-items-center flex-wrap gap-2">

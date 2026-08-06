@@ -316,3 +316,20 @@ export const handlePostDeletionNotifications = async (topicId) => {
   });
   await batch.commit();
 };
+
+export const fetchUnreadTopicNotifications = async (uid, topicId) => {
+  if (!uid || !topicId) return [];
+  try {
+    const q = query(
+      collection(db, 'notifications'),
+      where('recipient_uid', '==', uid),
+      where('read', '==', false),
+      where('payload.topic_id', '==', topicId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.error('[fetchUnreadTopicNotifications]', err);
+    return [];
+  }
+};

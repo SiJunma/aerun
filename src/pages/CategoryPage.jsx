@@ -58,11 +58,6 @@ const CategoryPage = () => {
     const found = categories.find(c => c.id === id);
     if (found) {
       setCategory(found);
-      const currentStats = `${found.topics_count}_${found.posts_count}_${found.last_post_at?.toMillis ? found.last_post_at.toMillis() : found.last_post_at}`;
-      if (prevCatStatsRef.current !== null && prevCatStatsRef.current !== currentStats) {
-        loadTopics(false);
-      }
-      prevCatStatsRef.current = currentStats;
     }
   }, [id, categories]);
 

@@ -9,8 +9,14 @@ import {
   deleteTopics, moveTopics, movePosts, createDraftPost, updateDraftPost, publishDraft,
   subscribeToTopicDraft, deleteDraftPost, locatePost, locateUnreadPost
 } from '../api/forum';
-import { subscribeToUser } from '../api/auth-resources';
-import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
+
+// import { subscribeToUser } from '../api/auth-resources';
+// import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { subscribeToCharacters } from '../api/character';
+import { fetchUnreadTopicNotifications } from '../api/notifications';
+
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
@@ -225,13 +231,12 @@ const TopicPage = () => {
   // Track unread quote and mention notifications and clear them via IntersectionObserver
   useEffect(() => {
     if (!user || !id) return;
-    const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
+    fetchUnreadTopicNotifications(user.uid, id).then(notifs => {
       const activeQuotes = notifs.filter(n =>
-        !n.read && (n.type === 'post_quoted' || n.type === 'post_mentioned') && n.payload?.topic_id === id
+        n.type === 'post_quoted' || n.type === 'post_mentioned' || n.type === 'POST_MENTIONED'
       );
       setUnreadQuotes(activeQuotes);
     });
-    return () => unsub();
   }, [user, id]);
 
   useEffect(() => {
@@ -313,34 +318,45 @@ const TopicPage = () => {
 
   // Subscribe to author stats for each unique author in posts
   useEffect(() => {
-    if (posts.length === 0) return;
-    const uniqueAuthorIds = [...new Set(posts.map(p => p.author_id).filter(id => id !== null))];
-    const unsubs = uniqueAuthorIds.map(uid => {
-      return subscribeToUser(uid, (data) => {
-        // We store 'null' explicitly to signal that the fetch finished but returned no user (Deleted)
-        setAuthorStats(prev => ({ ...prev, [uid]: data || null }));
-      });
+  if (posts.length === 0) return;
+    const uniqueAuthorIds = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
+
+    uniqueAuthorIds.forEach(async (uid) => {
+      // Если профиль автора уже есть в стейте, не запрашиваем повторно
+      if (authorStats[uid] !== undefined) return;
+
+      try {
+        const userSnap = await getDoc(doc(db, 'users', uid));
+        setAuthorStats(prev => ({
+          ...prev,
+          [uid]: userSnap.exists() ? { id: userSnap.id, ...userSnap.data() } : null
+        }));
+      } catch (err) {
+        console.error('[fetchUser error]', err);
+      }
     });
-    return () => unsubs.forEach(unsub => unsub());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length > 0 ? [...new Set(posts.map(p => p.author_id).filter(id => id !== null))].join(',') : '']);
+  }, [posts]);
 
   // Subscribe to character masks
   useEffect(() => {
-    if (posts.length === 0) return;
+  if (posts.length === 0) return;
     const characterMasks = posts.filter(p => p.is_character && p.author_character_id);
-    const uniqueMasks = [...new Set(characterMasks.map(p => `${p.author_id}_${p.author_character_id}`))];
 
-    const unsubs = uniqueMasks.map(key => {
-      const [uid, charId] = key.split('_');
-      return subscribeToCharacter(uid, charId, (data) => {
-        setMaskStats(prev => ({ ...prev, [charId]: data || null }));
-      });
+    characterMasks.forEach(async (p) => {
+      const { author_id: uid, author_character_id: charId } = p;
+      if (!uid || !charId || maskStats[charId] !== undefined) return;
+
+      try {
+        const charSnap = await getDoc(doc(db, 'users', uid, 'characters', charId));
+        setMaskStats(prev => ({
+          ...prev,
+          [charId]: charSnap.exists() ? { id: charSnap.id, ...charSnap.data() } : null
+        }));
+      } catch (err) {
+        console.error('[fetchCharacter error]', err);
+      }
     });
-
-    return () => unsubs.forEach(unsub => unsub());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length > 0 ? [...new Set(posts.filter(p => p.is_character).map(p => p.author_character_id))].join(',') : '']);
+  }, [posts]);
 
 
 

@@ -16,10 +16,12 @@ import {
   updateDoc,
   onSnapshot,
   serverTimestamp,
+  Timestamp,
   collection,
   query,
   where,
   getDocs,
+  deleteDoc,
   limit,
   orderBy
 } from 'firebase/firestore';
@@ -80,13 +82,14 @@ export const AuthProvider = ({ children }) => {
   const catsUnsubRef = useRef(null);
 
   const pushLastSeen = useCallback((uid) => {
-    if (!uid) return;
-    setDoc(doc(db, 'users', uid), { last_seen: serverTimestamp() }, { merge: true })
+    // Не отправляем пинг, если пользователь прямо сейчас выходит из аккаунта
+    if (!uid || loggingOutRef.current) return;
+
+    setDoc(doc(db, 'user_presence', uid), { last_seen: Timestamp.now() }, { merge: true })
       .then(() => {
         lastPushTimeRef.current = Date.now();
       })
       .catch((e) => {
-        // Silent on permission-denied during login/logout transitions
         if (e.code !== 'permission-denied') {
           console.warn('[last_seen update]', e);
         }
@@ -112,15 +115,22 @@ export const AuthProvider = ({ children }) => {
     lastActivityRef.current = now;
 
     if (user) {
-      // For registered users: push immediately if we haven't pushed in a while (TICK_MS)
-      // or if we were definitively "idle" (IDLE_TIMEOUT_MS)
+      // 1. Если пользователь авторизован, но остался старый guest_id — удаляем его запись из guest_activity
+      const gid = localStorage.getItem('guest_id');
+      if (gid) {
+        apiDeleteGuestActivity(gid).catch(err => console.warn('[deleteGuestActivity error]', err));
+        localStorage.removeItem('guest_id');
+        localStorage.removeItem('last_guest_push');
+      }
+
+      // 2. Пушим активность пользователя
       if (now - lastPushTimeRef.current >= TICK_MS || idleMs >= IDLE_TIMEOUT_MS) {
         pushLastSeen(user.uid);
       }
     } else {
-      // For guests: push throttled to 10 minutes (GUEST_TICK_MS)
+      // Для гостей: пинг раз в 10 минут
       const GUEST_TICK_MS = 10 * 60 * 1000;
-      const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0');
+      const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0', 10);
       if (now - lastGuestPush >= GUEST_TICK_MS) {
         const gid = getOrCreateGuestId();
         apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity]', err));
@@ -193,24 +203,26 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const uid = user?.uid || auth.currentUser?.uid;
+
       if (uid && !skipPresenceCleanup) {
         try {
-          // Set last_seen to 16 minutes ago to immediately remove from "Online Now" list (15 min threshold)
-          const sixteenMinsAgo = new Date(Date.now() - 16 * 60 * 1000);
-          await updateDoc(doc(db, 'users', uid), { last_seen: sixteenMinsAgo });
+          await deleteDoc(doc(db, 'user_presence', uid));
+          console.log('[logout] Успешно удалена запись присутствия для:', uid);
+          
+          // Отправляем локальное событие в браузер для моментального обновления UI без запросов в сеть
+          window.dispatchEvent(new CustomEvent('presence_updated', { detail: { removedUid: uid } }));
         } catch (e) {
-          // Only log if it's not a permission error (which can happen during logout transition)
-          if (e.code !== 'permission-denied') {
-            console.warn('[logout presence cleanup]', e);
-          }
+          console.warn('[logout presence cleanup error]', e);
         }
       }
+
       localStorage.removeItem('last_guest_push');
       await signOut(auth);
 
-      // Immediately record guest activity so they show up in "Online now" as a guest
       const gid = getOrCreateGuestId();
       await apiRecordGuestActivity(gid);
+    } catch (err) {
+      console.error('[logout error]', err);
     } finally {
       loggingOutRef.current = false;
     }
@@ -331,11 +343,16 @@ export const AuthProvider = ({ children }) => {
 
         const userDocRef = doc(db, 'users', firebaseUser.uid);
 
-        // De-register as guest if was one
+        // 1. Полностью удаляем гостевую сессию из базы и локального хранилища
         const gid = localStorage.getItem('guest_id');
         if (gid) {
-          apiDeleteGuestActivity(gid);
+          apiDeleteGuestActivity(gid).catch(err => console.warn('[deleteGuestActivity error]', err));
+          localStorage.removeItem('guest_id');
+          localStorage.removeItem('last_guest_push');
         }
+
+        // 2. Мгновенно отправляем свой статус онлайн в user_presence
+        pushLastSeen(firebaseUser.uid);
 
         try {
           const userDoc = await getDoc(userDocRef);
@@ -701,23 +718,18 @@ export const AuthProvider = ({ children }) => {
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
-  // Загрузка 1 раз без WebSocket / WebChannel подписки
+// Безопасный разовый вызов через Callable Function
   useEffect(() => {
     if (loading || !user) return;
 
-    // Обычный getDocs вместо onSnapshot (импортируйте getDocs, query, collection, limit, orderBy)
-    const fetchTopicsOnce = async () => {
-      try {
-        const q = query(collection(db, 'topics'), orderBy('last_post_at', 'desc'), limit(30));
-        const snap = await getDocs(q);
-        const topics = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    let isMounted = true;
+    subscribeToLatestTopics((topics) => {
+      if (isMounted) {
         setLatestTopics(topics);
-      } catch (e) {
-        console.warn('[Fetch topics once error]', e);
       }
-    };
+    }, 30);
 
-    fetchTopicsOnce();
+    return () => { isMounted = false; };
   }, [loading, user?.uid]);
 
   useEffect(() => {

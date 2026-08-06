@@ -272,11 +272,11 @@ service cloud.firestore {
 
     // --- Guest Activity ---
     match /guest_activity/{sessionId} {
-      // Anyone can read guest activity (needed for online-now stats in ForumStats)
       allow read: if true;
       allow create: if request.resource.data.keys().hasAny(['last_seen', 'user_agent', 'created_at', 'first_seen', 'path']);
       allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'path', 'user_agent']);
-      allow delete: if isAdmin();
+      // Любой пользователь (и гость, и обычный юзер) может удалить гостевую сессию
+      allow delete: if true; 
     }
 
     // --- Notifications ---
@@ -298,6 +298,13 @@ service cloud.firestore {
 
       // Only admins may hard-delete notifications.
       allow delete: if isAdmin();
+    }
+
+    // --- User Presence ---
+    match /user_presence/{userId} {
+      allow read: if true;
+      allow write: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isSignedIn() && request.auth.uid == userId;
     }
 
     // --- Topic Subscriptions ---
