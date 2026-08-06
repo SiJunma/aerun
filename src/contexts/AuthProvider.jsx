@@ -363,32 +363,24 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
           if (!userDoc.exists()) {
             const isRegistering = sessionStorage.getItem('is_registering') === 'true';
 
-            // ЖЕСТКАЯ ЗАЩИТА: Создаем нового пользователя ТОЛЬКО если он зашел через страницу регистрации
-            if (!isRegistering && !isAdmin) {
-              console.error('[AuthProvider] Документ профиля не найден в базе, но это не регистрация! Создание дубликата заблокировано.');
+            // ЖЕСТКИЙ ЗАПРЕТ: Профиль создается ТОЛЬКО если пользователь прямо сейчас на странице регистрации
+            if (!isRegistering) {
+              console.warn('[AuthProvider] Документ профиля не найден в базе при восстановительном входе. Авто-создание заблокировано.');
+              // Если это действительно был баг сниппета кэша Firestore, он сам переподключится.
+              // Мы НЕ вызываем setDoc!
               finishLoading();
               return;
             }
-            
-            // Fetch fresh global settings specifically for the registration check
+
+            // Ниже идет логика ТОЛЬКО для реальной регистрации новых пользователей:
             const globalSettingsSnap = await getDoc(doc(db, 'settings', 'global'));
             const globalSettings = globalSettingsSnap.exists() ? globalSettingsSnap.data() : null;
 
             const registrationEnabled = globalSettings?.registrationEnabled !== false;
 
-            // 1. Check if registration is allowed (admin is always allowed)
             if (!registrationEnabled && !isAdmin) {
               console.warn('[Registration] Blocked: registration is disabled.');
               sessionStorage.setItem('auth_error', 'registration_disabled');
-              await signOut(auth);
-              finishLoading();
-              return;
-            }
-
-            // 2. Prevent Bypass (используем уже объявленную выше переменную isRegistering)
-            if (!isRegistering && !isAdmin) {
-              console.warn('[Registration] Blocked: attempt to bypass registration page.');
-              sessionStorage.setItem('auth_error', 'need_registration');
               await signOut(auth);
               finishLoading();
               return;
@@ -400,8 +392,6 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
             let chosenNickname = (pendingNickname && typeof pendingNickname === 'string') ? pendingNickname.trim() : null;
             let finalNickname = chosenNickname;
 
-            // Small delay to allow Auth state to fully settle before Firestore queries
-            // (Known workaround for internal SDK assertion errors during auth transitions)
             await new Promise(resolve => setTimeout(resolve, 500));
 
             const checkNicknameAvailability = async (name) => {
@@ -415,17 +405,14 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
                 return snap.empty;
               } catch (e) {
                 console.error('[checkNicknameAvailability error]', e);
-                return true; // Default to available on error to avoid blocking registration
+                return true;
               }
             };
 
             if (!finalNickname) {
-              // Always generate a random one if nothing was provided (privacy)
-              // Add a bit of extra randomness to avoid NEEDING a query check here
               const randomSuffix = Math.random().toString(36).substring(2, 6);
               finalNickname = `${generateRandomNickname()}-${randomSuffix}`;
             } else {
-              // Check if the user-provided nickname is taken
               const isAvailable = await checkNicknameAvailability(finalNickname);
               if (!isAvailable) {
                 console.warn('[Registration] Blocked: nickname already taken:', finalNickname);
@@ -459,20 +446,21 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
                 member_view_style: 'table'
               }
             };
-            await setDoc(userDocRef, newUser);
 
-            // Cleanup session
+            // Используем merge: true на всякий случай, чтобы никогда не затирать существующие документы!
+            await setDoc(userDocRef, newUser, { merge: true });
+
             sessionStorage.removeItem('pending_nickname');
             sessionStorage.removeItem('pending_message');
             sessionStorage.removeItem('is_registering');
 
-            // Log registration to audit log
             await logAdminAction('user_registered', firebaseUser.uid, {
               email: firebaseUser.email,
               nickname: finalNickname,
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
+            // Существующий пользователь найден — обновляем только профиль
             const data = userDoc.data();
 
             // Auto-upgrade pending users who just verified their email
