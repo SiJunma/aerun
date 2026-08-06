@@ -1,0 +1,32 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // 1. Для путей users/{userId}/... (где сейчас падает ваша загрузка аватара)
+    match /users/{userId}/{allPaths=**} {
+      allow read: if true; // Публичное чтение аватарок
+      allow write: if request.auth != null 
+                   && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024 // Увеличили лимит до 5MB
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // 2. Ваши старые правила для /avatars/ (сохранены без изменений)
+    match /avatars/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+                   && request.auth.uid == userId
+                   && request.resource.size < 500 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+    
+    // 3. Ваши старые правила для /characters/ (сохранены без изменений)
+    match /characters/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+                   && request.auth.uid == userId
+                   && request.resource.size < 500 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
