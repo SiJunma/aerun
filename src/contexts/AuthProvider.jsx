@@ -197,7 +197,7 @@ export const AuthProvider = ({ children }) => {
 
   const loggingOutRef = useRef(false);
 
-const logout = useCallback(async (skipPresenceCleanup = false) => {
+  const logout = useCallback(async (skipPresenceCleanup = false) => {
     if (loggingOutRef.current) return;
     loggingOutRef.current = true;
 
@@ -293,7 +293,6 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
         if (!data.bgNeutral) migrated.bgNeutral = 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop';
         setSettings(migrated);
       } else {
-        // Provide minimal defaults so the app doesn't crash if the document is missing
         setSettings({
           forumName: 'Aerun Forum',
           maintenanceMode: false,
@@ -307,10 +306,8 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
       }
     }, (err) => console.error('[GlobalSettings Listener]', err));
 
-    // Global Roles Listener (needed for unauthenticated guest permissions)
     const rolesUnsub = subscribeToRoles(setRoles);
 
-    // Buffer to prevent preloader "flash" on fast loads
     const startLoadTime = Date.now();
     const minDisplayTime = 800;
 
@@ -321,12 +318,9 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      // Shield the UI while fetching the profile doc by throwing up the preloader during transitions
-      // (Bypasses stale closure in useEffect([]) by directly triggering the setter)
       setLoading(true);
       setAuthError(null);
 
-      // Cleanup previous listeners if Auth state changes (prevents leaks/races)
       if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
       if (readMapUnsubRef.current) { readMapUnsubRef.current(); readMapUnsubRef.current = null; }
       if (latestTopicsUnsubRef.current) { latestTopicsUnsubRef.current(); latestTopicsUnsubRef.current = null; }
@@ -335,17 +329,11 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
         setUser(firebaseUser);
 
         const usesPassword = firebaseUser.providerData.some(p => p.providerId === 'password');
-        if (usesPassword && !firebaseUser.emailVerified) {
-          setEmailUnverified(true);
-        } else {
-          setEmailUnverified(false);
-        }
+        setEmailUnverified(usesPassword && !firebaseUser.emailVerified);
 
         const userDocRef = doc(db, 'users', firebaseUser.uid);
-        // Записываем дату последнего входа в профиль (1 запись за сессию)
-        updateDoc(userDocRef, { last_seen: serverTimestamp() }).catch(console.warn);
 
-        // 1. Полностью удаляем гостевую сессию из базы и локального хранилища
+        // 1. Очищаем гостевую сессию
         const gid = localStorage.getItem('guest_id');
         if (gid) {
           apiDeleteGuestActivity(gid).catch(err => console.warn('[deleteGuestActivity error]', err));
@@ -353,7 +341,7 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
           localStorage.removeItem('last_guest_push');
         }
 
-        // 2. Мгновенно отправляем свой статус онлайн в user_presence
+        // 2. Пушим онлайн в user_presence
         pushLastSeen(firebaseUser.uid);
 
         try {
@@ -363,16 +351,14 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
           if (!userDoc.exists()) {
             const isRegistering = sessionStorage.getItem('is_registering') === 'true';
 
-            // ЖЕСТКИЙ ЗАПРЕТ: Профиль создается ТОЛЬКО если пользователь прямо сейчас на странице регистрации
+            // ЖЕСТКИЙ ЗАПРЕТ: Если нет флага регистрации — НИКОГДА НЕ ВЫЗЫВАЕМ setDoc
             if (!isRegistering) {
-              console.warn('[AuthProvider] Документ профиля не найден в базе при восстановительном входе. Авто-создание заблокировано.');
-              // Если это действительно был баг сниппета кэша Firestore, он сам переподключится.
-              // Мы НЕ вызываем setDoc!
+              console.warn('[AuthProvider] Документ профиля временно не найден в кэше Firestore. Запись заблокирована.');
               finishLoading();
               return;
             }
 
-            // Ниже идет логика ТОЛЬКО для реальной регистрации новых пользователей:
+            // Логика создания НОВОГО пользователя при явной регистрации:
             const globalSettingsSnap = await getDoc(doc(db, 'settings', 'global'));
             const globalSettings = globalSettingsSnap.exists() ? globalSettingsSnap.data() : null;
 
@@ -390,38 +376,7 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
             const pendingMessage = sessionStorage.getItem('pending_message');
 
             let chosenNickname = (pendingNickname && typeof pendingNickname === 'string') ? pendingNickname.trim() : null;
-            let finalNickname = chosenNickname;
-
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            const checkNicknameAvailability = async (name) => {
-              try {
-                const qAvailability = query(
-                  collection(db, 'users'),
-                  where('nickname', '==', name),
-                  limit(1)
-                );
-                const snap = await getDocs(qAvailability);
-                return snap.empty;
-              } catch (e) {
-                console.error('[checkNicknameAvailability error]', e);
-                return true;
-              }
-            };
-
-            if (!finalNickname) {
-              const randomSuffix = Math.random().toString(36).substring(2, 6);
-              finalNickname = `${generateRandomNickname()}-${randomSuffix}`;
-            } else {
-              const isAvailable = await checkNicknameAvailability(finalNickname);
-              if (!isAvailable) {
-                console.warn('[Registration] Blocked: nickname already taken:', finalNickname);
-                sessionStorage.setItem('auth_error', 'nickname_taken_at_registration');
-                await signOut(auth);
-                finishLoading();
-                return;
-              }
-            }
+            let finalNickname = chosenNickname || `${generateRandomNickname()}-${Math.random().toString(36).substring(2, 6)}`;
 
             const defaultAvatar = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(finalNickname)}`;
 
@@ -437,17 +392,11 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
               settings: {
                 theme: localStorage.getItem('guest_theme') || 'dark',
-                language: (() => {
-                  const saved = localStorage.getItem('language');
-                  if (saved && (saved === 'ru' || saved === 'en')) return saved;
-                  const browserLang = (navigator.language || navigator.userLanguage || '').toLowerCase();
-                  return browserLang.startsWith('ru') ? 'ru' : 'en';
-                })(),
+                language: 'ru',
                 member_view_style: 'table'
               }
             };
 
-            // Используем merge: true на всякий случай, чтобы никогда не затирать существующие документы!
             await setDoc(userDocRef, newUser, { merge: true });
 
             sessionStorage.removeItem('pending_nickname');
@@ -460,10 +409,11 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
-            // Существующий пользователь найден — обновляем только профиль
+            // ОБНОВЛЯЕМ last_seen ТОЛЬКО КОГДА ДОКУМЕНТ ТОЧНО СУЩЕСТВУЕТ
+            updateDoc(userDocRef, { last_seen: serverTimestamp() }).catch(console.warn);
+
             const data = userDoc.data();
 
-            // Auto-upgrade pending users who just verified their email
             if (usesPassword && firebaseUser.emailVerified && data.role_id === 'pending') {
               try {
                 const globalSnap = await getDoc(doc(db, 'settings', 'global'));
@@ -477,21 +427,17 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
               }
             }
 
-            // Login counts as activity — update immediately
             lastActivityRef.current = Date.now();
             pushLastSeen(firebaseUser.uid);
 
-            // If an admin logs in, ensure they don't see the maintenance logout modal
             if (isAdmin) {
               sessionStorage.removeItem('maintenance_logout');
             }
           }
 
-          // Seed system roles with fixed IDs if they don't exist yet (admin-only, safe to call repeatedly)
           if (isAdmin) {
             seedSystemRoles(DEFAULT_ROLES).catch(err => console.warn('[seedSystemRoles]', err));
 
-            // Also seed global settings if they are missing
             const globalSettingsRef = doc(db, 'settings', 'global');
             const globalSettingsSnap = await getDoc(globalSettingsRef);
             if (!globalSettingsSnap.exists()) {
@@ -508,7 +454,6 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
             }
           }
 
-          // Subscribe to read map (all roles — everyone can read topics)
           readMapUnsubRef.current = subscribeToReadMap(firebaseUser.uid, setReadMap);
 
           profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
@@ -517,59 +462,38 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
               setAuthError(null);
 
               if (isAdmin && data.role_id !== CHIEF_ADMIN_ID) {
-                const updates = {
-                  role_id: CHIEF_ADMIN_ID,
-                  last_seen: serverTimestamp()
-                };
-                await setDoc(userDocRef, updates, { merge: true });
+                await setDoc(userDocRef, { role_id: CHIEF_ADMIN_ID, last_seen: serverTimestamp() }, { merge: true });
               } else {
                 setProfile({ id: docSnap.id, ...data });
-                // Keep public settings/global in sync with admin's current nickname
-                // so RegisterPage can display it without requiring auth
                 if (isAdmin && data.nickname && firebaseUser && data.nickname !== settings?.adminNickname) {
                   setDoc(doc(db, 'settings', 'global'), { adminNickname: data.nickname }, { merge: true })
                     .catch(err => console.warn('[adminNickname sync]', err));
                 }
               }
             } else {
-              // Guard: only nullify profile if we genuinely never had one.
-              // When a frozen tab is restored, Firestore may momentarily re-fire with
-              // !exists() before the SDK reconnects fully. Wiping profile here would
-              // trigger the auto-logout effect. We only set null on a confirmed deletion
-              // (i.e. no profile was ever loaded for this session).
               if (!profileUnsubRef._hasLoadedOnce) {
                 setProfile(null);
-              } else {
-                console.warn('[AuthProvider] Snapshot fired !exists() but profile already loaded — ignoring (likely tab restore reconnect).');
               }
             }
-            // Mark that we have successfully loaded at least once
             profileUnsubRef._hasLoadedOnce = true;
             finishLoading();
           }, (error) => {
-            // Classify the error: transient network issues should never log the user out.
-            // Firebase uses 'unavailable' for network drops and transport errors.
             const isTransient = !error?.code ||
               error.code === 'unavailable' ||
               error.code === 'unknown' ||
-              error.message === undefined ||
-              (error.name === undefined && error.message === undefined);
+              error.message === undefined;
 
             if (isTransient) {
-              // Log a warning but do NOT update authError — the SDK will reconnect automatically.
-              console.warn('[AuthProvider] Transient Firestore error (likely tab freeze/network blip) — ignoring:', error);
               finishLoading();
               return;
             }
 
             console.error('Firestore profile listener error:', error);
-            // Only set auth error for real, non-transient errors on initial load
             if (!profile) {
               setAuthError(error || new Error('Unknown Firestore Error'));
             }
             finishLoading();
           });
-
 
         } catch (error) {
           console.error('Error initializing user data:', error);
@@ -591,7 +515,7 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
       }
     });
 
-    rolesUnsubRef.current = rolesUnsub; // Keep track for cleanup
+    rolesUnsubRef.current = rolesUnsub;
     let catsUnsub = subscribeToCategories(setCategories);
     catsUnsubRef.current = catsUnsub;
 
@@ -604,13 +528,9 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
       if (rolesUnsubRef.current) rolesUnsubRef.current();
       if (catsUnsubRef.current) catsUnsubRef.current();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Heartbeat System: periodically update presence for both users and guests
   useEffect(() => {
-    // Lightweight interaction tracking (throttled by recordActivity logic)
-    // This ensures that reading/scrolling also counts as activity, not just navigation.
     const handleInteraction = () => recordActivity();
 
     window.addEventListener('mousedown', handleInteraction);
@@ -621,25 +541,22 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
       const now = Date.now();
       const idleMs = now - lastActivityRef.current;
 
-      // Stop heartbeat if truly idle (e.g. tab left open but no interaction for 15m)
       if (idleMs >= IDLE_TIMEOUT_MS) return;
 
       if (user) {
-        // User heartbeat (TICK_MS = 2 min)
         if (now - lastPushTimeRef.current >= TICK_MS) {
           pushLastSeen(user.uid);
         }
       } else {
-        // Guest heartbeat (GUEST_TICK_MS = 10 min)
         const GUEST_TICK_MS = 10 * 60 * 1000;
-        const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0');
+        const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0', 10);
         if (now - lastGuestPush >= GUEST_TICK_MS) {
           const gid = getOrCreateGuestId();
           apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity heartbeat]', err));
           localStorage.setItem('last_guest_push', now.toString());
         }
       }
-    }, 60000); // Check every minute
+    }, 60000);
 
     return () => {
       clearInterval(interval);
@@ -650,23 +567,17 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
   }, [user, pushLastSeen, getOrCreateGuestId, recordActivity]);
 
   const hasPermission = useCallback((perm, context = {}) => {
-    // ── 1. GLOBAL SETTINGS OVERRIDES (Highest Priority for feature flags) ──
     if (settings) {
       if (perm === PERMISSIONS.USE_DICE && settings.enableDice === false) return false;
       if (perm === PERMISSIONS.USE_MASKS && settings.enableCharacters === false) return false;
       if (perm === PERMISSIONS.USE_REPUTATION && settings.enableReputation === false) return false;
     }
 
-    // ── 2. CHIEF ADMIN: bypasses ALL other checks (including category overrides) ──
     const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
     if (adminEmail && user?.email === adminEmail) return true;
 
-    // If the user is logged in but profile hasn't arrived from Firestore yet,
-    // deny everything to avoid a flash of content that disappears once the real
-    // profile (e.g. status='pending') is applied.
     if (user && profile === null) return false;
 
-    // Unverified password accounts are restricted even if they have 'player' role
     const isPending = profile?.role_id === 'pending';
     const usesPassword = user?.providerData.some(p => p.providerId === 'password');
     const isUnverified = usesPassword && !user?.emailVerified;
@@ -679,27 +590,18 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
     }
 
     const isWhitelistOff = !settings?.whitelistMode;
-    // When whitelistMode is OFF, restricted users (pending or unverified player) get spectator-level read access
-    // (spectator has VIEW_FORUM globally, but no posting rights).
-    // When whitelistMode is ON, they are strictly locked down.
     const effectiveRoleId = (isRestricted && isWhitelistOff)
       ? 'spectator'
       : (profile?.role_id || (user ? 'player' : 'guest'));
 
     if (effectiveRoleId === CHIEF_ADMIN_ID) return true;
 
-    // ── 3. CATEGORY-LEVEL OVERRIDES ──
-    // If a category object is passed in context, and the category has permission overrides
-    // for the requested permission, those override the global role permissions.
     if (context?.category) {
       const catPerms = context.category.permissions;
       if (catPerms && catPerms[perm] !== undefined && catPerms[perm] !== null) {
-        // catPerms[perm] is an array of allowed role IDs.
         const allowedRoles = catPerms[perm];
-        // Check if user's own role is allowed
         if (allowedRoles.includes(effectiveRoleId)) return true;
 
-        // Check if user's role inherits from a base role that is allowed
         const userRole = roles.find(r => r.id === effectiveRoleId);
         if (userRole?.base_role_id && allowedRoles.includes(userRole.base_role_id)) return true;
 
@@ -707,16 +609,12 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
       }
     }
 
-    // ── 4. GLOBAL ROLE PERMISSIONS (Baseline) ──
-    // Restricted users with whitelist ON: no permissions at all (except profile editing above).
-    // Restricted users with whitelist OFF: fall through to spectator's global permissions (VIEW_FORUM only).
     if (isRestricted && !isWhitelistOff) return false;
 
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
-// Безопасный разовый вызов через Callable Function
   useEffect(() => {
     if (loading || !user) return;
 
@@ -736,19 +634,14 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
       return;
     }
 
-    // New user baseline: topics updated before registration are treated as read
     const registrationMs = profile?.created_at?.toMillis?.() || 0;
 
     const count = latestTopics.filter(topic => {
-      // 1. FILTER BY PERMISSIONS
-      // Ensure the user actually has permission to see the category this topic belongs to
       const category = categories.find(c => c.id === topic.category_id);
       if (!category || !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) return false;
 
-      // 2. EXCLUDE OWN POSTS
       if (topic.last_post_author_id === user.uid) return false;
 
-      // 3. COMPARE TIMESTAMPS
       const entry = readMap[topic.id];
       const lastVisitValue = entry?.timestamp || entry;
       const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
@@ -762,14 +655,8 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
     setUnreadTopicsCount(count);
   }, [user, profile, latestTopics, readMap, categories, hasPermission]);
 
-  /**
-   * Mark a topic as read for the current user.
-   * Optimistically updates local readMap, then persists to Firestore.
-   * Works for all roles (admin, moderator, player, spectator).
-   */
   const markTopicRead = useCallback(async (topicId, offset = null) => {
     if (!user || !topicId) return;
-    // Optimistic local update
     const now = Date.now();
     const value = offset !== null ? { timestamp: now, offset } : now;
     setReadMap(prev => ({ ...prev, [topicId]: value }));
@@ -783,15 +670,11 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
     }
   }, [user, profile?.role_id]);
 
-  /**
-   * Mark all fetched topics as read.
-   */
   const markAllRead = useCallback(async () => {
     if (!user || latestTopics.length === 0 || isMarkingAllRead) return;
 
     setIsMarkingAllRead(true);
     try {
-      // Optimistic local update
       const now = Date.now();
       const newReadMap = { ...readMap };
       const topicIds = latestTopics.map(t => {
@@ -808,21 +691,11 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
     }
   }, [user, latestTopics, readMap, isMarkingAllRead]);
 
-
-
-  // Monitoring maintenance mode / status to force logout
   React.useEffect(() => {
     if (user && !loading) {
       const isRegistering = sessionStorage.getItem('is_registering') === 'true';
 
-      // If user is authenticated but profile is missing and we aren't registering,
-      // it means the account was deleted or never existed correctly.
-      // We skip this if there was an authError to avoid logging out on network issues.
-      // We also check if profile is explicitly NULL (meaning the docSnap.exists() was false)
-      // to avoid triggering on a transient undefined state (though profile starts as null).
       if (!profile && !isRegistering && !authError) {
-        // Final guard: check if we just haven't loaded yet.
-        // If loading is false and authError is null and profile is null, it's a deletion.
         console.warn('[AuthProvider] Profile missing for authenticated user. Triggering logout.');
         logout(true);
         return;
@@ -832,7 +705,6 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
         const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
         const isBanned = profile.role_id === 'banned';
 
-        // Maintenance applies if ON and whitelist is active
         const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
 
         if (isBanned) {
@@ -845,7 +717,7 @@ const logout = useCallback(async (skipPresenceCleanup = false) => {
           }
 
           sessionStorage.setItem('banned_logout', 'true');
-          logout(true); // skipPresenceCleanup = true to avoid permission error loop
+          logout(true);
         } else if (isMaintenanceStrict && !isAdmin) {
           sessionStorage.setItem('maintenance_logout', 'true');
           logout();
