@@ -197,7 +197,7 @@ export const AuthProvider = ({ children }) => {
 
   const loggingOutRef = useRef(false);
 
-  const logout = useCallback(async (skipPresenceCleanup = false) => {
+const logout = useCallback(async (skipPresenceCleanup = false) => {
     if (loggingOutRef.current) return;
     loggingOutRef.current = true;
 
@@ -206,10 +206,10 @@ export const AuthProvider = ({ children }) => {
 
       if (uid && !skipPresenceCleanup) {
         try {
+          // Полностью стираем из онлайна
           await deleteDoc(doc(db, 'user_presence', uid));
           console.log('[logout] Успешно удалена запись присутствия для:', uid);
           
-          // Отправляем локальное событие в браузер для моментального обновления UI без запросов в сеть
           window.dispatchEvent(new CustomEvent('presence_updated', { detail: { removedUid: uid } }));
         } catch (e) {
           console.warn('[logout presence cleanup error]', e);
@@ -342,6 +342,8 @@ export const AuthProvider = ({ children }) => {
         }
 
         const userDocRef = doc(db, 'users', firebaseUser.uid);
+        // Записываем дату последнего входа в профиль (1 запись за сессию)
+        updateDoc(userDocRef, { last_seen: serverTimestamp() }).catch(console.warn);
 
         // 1. Полностью удаляем гостевую сессию из базы и локального хранилища
         const gid = localStorage.getItem('guest_id');
@@ -359,6 +361,15 @@ export const AuthProvider = ({ children }) => {
           const isAdmin = firebaseUser.email === import.meta.env.VITE_ADMIN_EMAIL;
 
           if (!userDoc.exists()) {
+            const isRegistering = sessionStorage.getItem('is_registering') === 'true';
+
+            // ЖЕСТКАЯ ЗАЩИТА: Создаем нового пользователя ТОЛЬКО если он зашел через страницу регистрации
+            if (!isRegistering && !isAdmin) {
+              console.error('[AuthProvider] Документ профиля не найден в базе, но это не регистрация! Создание дубликата заблокировано.');
+              finishLoading();
+              return;
+            }
+            
             // Fetch fresh global settings specifically for the registration check
             const globalSettingsSnap = await getDoc(doc(db, 'settings', 'global'));
             const globalSettings = globalSettingsSnap.exists() ? globalSettingsSnap.data() : null;
@@ -374,8 +385,7 @@ export const AuthProvider = ({ children }) => {
               return;
             }
 
-            // 2. Prevent Bypass: Check if user came from /register (admin is always allowed)
-            const isRegistering = sessionStorage.getItem('is_registering') === 'true';
+            // 2. Prevent Bypass (используем уже объявленную выше переменную isRegistering)
             if (!isRegistering && !isAdmin) {
               console.warn('[Registration] Blocked: attempt to bypass registration page.');
               sessionStorage.setItem('auth_error', 'need_registration');

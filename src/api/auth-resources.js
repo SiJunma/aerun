@@ -119,38 +119,30 @@ export const subscribeToActiveUsers = (callback) => {
 
   const fetchActive = async () => {
     try {
-      // Берем запас в 20 минут вместо 15, чтобы исключить рассинхрон часов
-      const TWENTY_MINS_MS = 20 * 60 * 1000;
-      const thresholdTimestamp = Timestamp.fromMillis(Date.now() - TWENTY_MINS_MS);
+      const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+      const thresholdTimestamp = Timestamp.fromMillis(Date.now() - FIFTEEN_MINS_MS);
 
-      // 1. Получаем список документов из user_presence
       const presenceQ = query(
         collection(db, 'user_presence'),
         where('last_seen', '>=', thresholdTimestamp)
       );
-      
       const presenceSnap = await getDocs(presenceQ);
 
       if (!isSubscribed) return;
 
       const activeUids = presenceSnap.docs.map(d => d.id);
-
       if (activeUids.length === 0) {
         callback([]);
         return;
       }
 
-      // 2. Разово запрашиваем профиль каждого пользователя
       const usersList = [];
       await Promise.all(
         activeUids.map(async (uid) => {
           try {
             const userSnap = await getDoc(doc(db, 'users', uid));
-            if (userSnap.exists()) {
-              const uData = userSnap.data();
-              if (uData.role_id !== 'banned') {
-                usersList.push({ id: userSnap.id, ...uData });
-              }
+            if (userSnap.exists() && userSnap.data().role_id !== 'banned') {
+              usersList.push({ id: userSnap.id, ...userSnap.data() });
             }
           } catch (e) {
             console.warn('[fetchActiveUser doc error]', e);
@@ -159,80 +151,42 @@ export const subscribeToActiveUsers = (callback) => {
       );
 
       usersList.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
-      
-      if (isSubscribed) {
-        callback(usersList);
-      }
+      if (isSubscribed) callback(usersList);
     } catch (err) {
       console.error('[subscribeToActiveUsers error]', err);
     }
   };
 
-  // Небольшой таймаут 200мс гарантирует, что pushLastSeen при старте страницы успеет отправиться в сеть
   const timer = setTimeout(fetchActive, 200);
-  
   return () => { 
     isSubscribed = false; 
     clearTimeout(timer);
   };
 };
-// Активные за 24 часа (ОДНОКРАТНЫЙ запрос)
-// Активные за 24 часа (ОДНОКРАТНЫЙ запрос)
-export const subscribeToDailyActiveUsers = (callback) => {
-  let isSubscribed = true;
 
-  const fetchDaily = async () => {
-    try {
-      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-      const thresholdTimestamp = Timestamp.fromMillis(Date.now() - ONE_DAY_MS);
+// Разовый запрос активных за последние 24 часа пользователей
+export const fetchDailyActiveUsers = async () => {
+  try {
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const thresholdTimestamp = Timestamp.fromMillis(Date.now() - ONE_DAY_MS);
 
-      // 1. Берем активность за последние 24 часа из user_presence
-      const presenceQ = query(
-        collection(db, 'user_presence'),
-        where('last_seen', '>=', thresholdTimestamp)
-      );
-      const presenceSnap = await getDocs(presenceQ);
+    // Запрашиваем коллекцию users напрямую по дате последнего логина
+    const q = query(
+      collection(db, 'users'),
+      where('last_seen', '>=', thresholdTimestamp)
+    );
+    const snap = await getDocs(q);
 
-      if (!isSubscribed) return;
+    const usersList = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(u => u.role_id !== 'banned' && u.role_id !== 'pending');
 
-      const activeUids = presenceSnap.docs.map(d => d.id);
-
-      if (activeUids.length === 0) {
-        callback([]);
-        return;
-      }
-
-      // 2. Разово вытягиваем их профили
-      const usersList = [];
-      await Promise.all(
-        activeUids.map(async (uid) => {
-          try {
-            const userSnap = await getDoc(doc(db, 'users', uid));
-            if (userSnap.exists()) {
-              const uData = userSnap.data();
-              if (uData.role_id !== 'banned' && uData.role_id !== 'pending') {
-                usersList.push({ id: userSnap.id, ...uData });
-              }
-            }
-          } catch (e) {
-            console.warn('[fetchDailyActiveUser doc error]', e);
-          }
-        })
-      );
-
-      usersList.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
-      
-      if (isSubscribed) {
-        callback(usersList);
-      }
-    } catch (err) {
-      console.error('[subscribeToDailyActiveUsers error]', err);
-    }
-  };
-
-  fetchDaily();
-  
-  return () => { isSubscribed = false; };
+    usersList.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
+    return usersList;
+  } catch (err) {
+    console.error('[fetchDailyActiveUsers error]', err);
+    return [];
+  }
 };
 
 // Гости (ОДНОКРАТНЫЙ запрос)
