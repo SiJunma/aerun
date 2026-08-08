@@ -26,11 +26,14 @@ import Skeleton from '../components/common/Skeleton';
 import SecurityTab from '../components/profile/SecurityTab';
 
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
   const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity, categories } = useAuth();
   const { showToast } = useToast();
+  const { setPageTitle } = usePageTitle();
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -130,9 +133,10 @@ const ProfilePage = () => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
     const unsubProfile = subscribeToUser(uid, (data) => {
       setViewedProfile(data);
+      if (data) {
+        setPageTitle(data.nickname || data.email || t('profile.title', 'Профиль'));
+      }
     });
-    
-    
 
     if (profile && profile.uid !== uid) {
       getProfileVote(profile.uid, uid).then(setMyVote).catch(console.error);
@@ -144,7 +148,7 @@ const ProfilePage = () => {
       unsubscribe();
       unsubProfile();
     };
-  }, [uid, profile]);
+  }, [uid, profile, setPageTitle, t]);
 
   // Tracks if we've already done the initial seek for a deep-linked log
   const didSeekRef = useRef(false);

@@ -50,7 +50,17 @@ export const I18nProvider = ({ children }) => {
     }
   };
 
-  const t = (path, params = {}) => {
+  const t = (path, params = {}, fallback = null) => {
+    let fallbackText = null;
+    let actualParams = params;
+
+    if (typeof params === 'string') {
+      fallbackText = params;
+      actualParams = (typeof fallback === 'object' && fallback !== null) ? fallback : {};
+    } else if (typeof fallback === 'string') {
+      fallbackText = fallback;
+    }
+
     const keys = path.split('.');
     let result = translations[lang];
 
@@ -62,23 +72,23 @@ export const I18nProvider = ({ children }) => {
 
     // Fallback to English if translation missing in current language
     if (!result && lang !== 'en') {
-      let fallback = translations['en'];
+      let fallbackDict = translations['en'];
       for (const key of keys) {
-        if (fallback) fallback = fallback[key];
+        if (fallbackDict) fallbackDict = fallbackDict[key];
       }
-      result = fallback;
+      result = fallbackDict;
     }
 
     if (typeof result === 'string') {
-      // Basic interpolation: replace {key} with params[key]
-      Object.keys(params).forEach(key => {
+      // Basic interpolation: replace {key} with actualParams[key]
+      Object.keys(actualParams).forEach(key => {
         const regex = new RegExp(`{${key}}`, 'g');
-        result = result.replace(regex, params[key]);
+        result = result.replace(regex, actualParams[key]);
       });
       return result;
     }
 
-    return result || path;
+    return fallbackText || result || path;
   };
 
   const value = {

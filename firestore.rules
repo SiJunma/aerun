@@ -296,8 +296,8 @@ service cloud.firestore {
                  && request.resource.data.diff(resource.data)
                       .affectedKeys().hasOnly(['read', 'archived']);
 
-      // Only admins may hard-delete notifications.
-      allow delete: if isAdmin();
+      // Users may delete their own notifications; admins may delete any.
+      allow delete: if isAdmin() || (isActive() && resource.data.recipient_uid == request.auth.uid);
     }
 
     // --- User Presence ---
@@ -353,7 +353,8 @@ service cloud.firestore {
       // could add a third party or remove the other side.
       allow update: if isActive()
         && request.auth.uid in resource.data.participants
-        && request.resource.data.participants == resource.data.participants;
+        && request.resource.data.participants.hasAll(resource.data.participants)
+        && request.resource.data.participants.size() == resource.data.participants.size();
 
       match /messages/{msgId} {
         allow read: if isActive()
@@ -361,7 +362,7 @@ service cloud.firestore {
         allow create: if isActive()
           && request.resource.data.sender_uid == request.auth.uid
           && request.auth.uid in get(/databases/$(database)/documents/dms/$(convId)).data.participants
-          && request.resource.data.content.size() <= 5000;
+          && (!('text' in request.resource.data) || request.resource.data.text.size() <= 5000);
         // update/delete intentionally denied: messages are immutable.
       }
     }

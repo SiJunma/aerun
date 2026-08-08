@@ -5,11 +5,18 @@ import { Hammer, LogOut, ChevronLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const MaintenancePage = () => {
   const { user, profile, hasPermission, PERMISSIONS, logout, settings } = useAuth();
   const { lang } = useI18n();
+  const { setPageTitle } = usePageTitle();
   const location = useLocation();
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+    setPageTitle(lang === 'ru' ? 'Технические работы' : 'Maintenance Mode');
+  }, [setPageTitle, lang]);
 
   React.useEffect(() => {
     if (settings && !settings.whitelistMode) {

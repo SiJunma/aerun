@@ -156,6 +156,7 @@ const MainPage = () => {
 
                             {(() => {
                               const lastVisitRaw = readMap[cat.last_post_topic_id];
+                              const lastReadOffset = lastVisitRaw?.offset ?? null;
                               const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
                               const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
                               const registrationMs = profile?.created_at?.toMillis?.() || 0;
@@ -175,6 +176,8 @@ const MainPage = () => {
                                   authorName={cat.last_post_author}
                                   authorAvatar={cat.last_post_author_avatar}
                                   hasUnread={hasUnread}
+                                  lastReadOffset={lastReadOffset}
+                                  postsCount={cat.last_post_topic_posts_count || null}
                                   lang={lang}
                                 />
                               );

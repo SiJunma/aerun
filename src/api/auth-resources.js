@@ -56,20 +56,23 @@ export const markAllTopicsRead = async (uid, topicIds) => {
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
+export const fetchLatestTopics = async (limitCount = 50) => {
+  try {
+    const functions = getFunctions();
+    const getGlobalTopics = httpsCallable(functions, 'getSecuredGlobalTopics');
+    const result = await getGlobalTopics({ orderByField: 'last_post_at', limitCount });
+    return result.data.topics || [];
+  } catch (err) {
+    console.error('[fetchLatestTopics]', err);
+    return [];
+  }
+};
+
 export const subscribeToLatestTopics = (callback, limitCount = 50) => {
   let isSubscribed = true;
-  const fetchTopics = async () => {
-    try {
-      const functions = getFunctions();
-      const getGlobalTopics = httpsCallable(functions, 'getSecuredGlobalTopics');
-      const result = await getGlobalTopics({ orderByField: 'last_post_at', limitCount });
-      if (isSubscribed) callback(result.data.topics || []);
-    } catch (err) {
-      console.error('[subscribeToLatestTopics]', err);
-      if (isSubscribed) callback([]);
-    }
-  };
-  fetchTopics();
+  fetchLatestTopics(limitCount).then(topics => {
+    if (isSubscribed) callback(topics);
+  });
   return () => { isSubscribed = false; };
 };
 
@@ -162,6 +165,25 @@ export const subscribeToActiveUsers = (callback) => {
     isSubscribed = false; 
     clearTimeout(timer);
   };
+};
+
+/**
+ * Real-time listener for active user UIDs from user_presence (last 15 mins).
+ * Returns a Set of active UIDs with zero extra fetches for profile data.
+ */
+export const subscribeToActiveUserIds = (callback) => {
+  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+  const thresholdTimestamp = Timestamp.fromMillis(Date.now() - FIFTEEN_MINS_MS);
+
+  const presenceQ = query(
+    collection(db, 'user_presence'),
+    where('last_seen', '>=', thresholdTimestamp)
+  );
+
+  return onSnapshot(presenceQ, (presenceSnap) => {
+    const activeUids = new Set(presenceSnap.docs.map(d => d.id));
+    callback(activeUids);
+  }, (err) => console.error('[subscribeToActiveUserIds error]', err));
 };
 
 // Разовый запрос активных за последние 24 часа пользователей

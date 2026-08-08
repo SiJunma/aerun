@@ -5,11 +5,18 @@ import { Container, Card } from 'react-bootstrap';
 import LoginForm from '../components/auth/LoginForm';
 import { useI18n } from '../contexts/I18nProvider';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const LoginPage = () => {
   const { user, profile, settings, hasPermission, PERMISSIONS } = useAuth();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const { setPageTitle } = usePageTitle();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
+
+  React.useEffect(() => {
+    setPageTitle(t('auth.login', 'Вход'));
+  }, [setPageTitle, t, lang]);
 
   if (user) {
     if (!profile) return null; // Wait for profile to load before redirecting

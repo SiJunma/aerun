@@ -8,12 +8,19 @@ import TopicRow from '../components/common/TopicRow';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const NewRepliesPage = () => {
   const { t, lang } = useI18n();
   const { user, markAllRead, isMarkingAllRead, unreadTopicsCount, hasPermission, PERMISSIONS, categories } = useAuth();
+  const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setPageTitle(t('nav.new_replies', 'Новые ответы'));
+  }, [setPageTitle, t, lang]);
 
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);

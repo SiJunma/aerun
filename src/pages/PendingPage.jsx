@@ -3,9 +3,12 @@ import { Card, Button } from 'react-bootstrap';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const PendingPage = () => {
   const { logout, profile, emailUnverified, resendVerificationEmail, checkVerificationStatus } = useAuth();
   const { translations } = useI18n(); // Access raw translations if needed, or just force key
+  const { setPageTitle } = usePageTitle();
 
   // Force English for this page as requested
   const t = (path) => {
@@ -16,6 +19,10 @@ const PendingPage = () => {
     }
     return result || path;
   };
+
+  React.useEffect(() => {
+    setPageTitle(emailUnverified ? (t('gatekeeper.pending_email_title') || 'Verify Email') : (t('gatekeeper.pending_title') || 'Pending Approval'));
+  }, [setPageTitle, emailUnverified]);
 
   React.useEffect(() => {
     if (profile && profile.status === 'active') {

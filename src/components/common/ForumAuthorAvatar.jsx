@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+
+// Simple in-memory cache for avatar URLs (key: userId)
+const avatarCache = new Map();
 import { Image } from 'react-bootstrap';
 import { subscribeToUser } from '../../api/auth-resources';
 import { subscribeToCharacter } from '../../api/character';
@@ -33,26 +36,37 @@ const ForumAuthorAvatar = ({
 
   useEffect(() => {
     if (!userId) {
-      setTimeout(() => setLoading(false), 0);
+      setLoading(false);
       return;
     }
 
-    setTimeout(() => setLoading(true), 0);
-    let unsub;
+    const cacheKey = isCharacter && characterId ? `char_${characterId}` : `user_${userId}`;
 
-    if (isCharacter && characterId) {
-      unsub = subscribeToCharacter(userId, characterId, (charData) => {
-        setAvatarUrl(charData?.avatar_url || null);
-        setLoading(false);
-      });
+    if (avatarCache.has(cacheKey)) {
+      setAvatarUrl(avatarCache.get(cacheKey));
+      setLoading(false);
     } else {
-      unsub = subscribeToUser(userId, (userData) => {
-        setAvatarUrl(userData?.avatar_url || null);
-        setLoading(false);
-      });
+      setLoading(true);
+      let unsub;
+      
+      if (isCharacter && characterId) {
+        unsub = subscribeToCharacter(userId, characterId, (charData) => {
+          const avatar = charData?.avatar_url || null;
+          setAvatarUrl(avatar);
+          setLoading(false);
+          avatarCache.set(cacheKey, avatar);
+        });
+      } else {
+        unsub = subscribeToUser(userId, (userData) => {
+          const avatar = userData?.avatar_url || null;
+          setAvatarUrl(avatar);
+          setLoading(false);
+          avatarCache.set(cacheKey, avatar);
+        });
+      }
+      
+      return () => unsub?.();
     }
-
-    return () => unsub?.();
   }, [userId, characterId, isCharacter]);
 
   if (loading) {
@@ -79,6 +93,8 @@ const ForumAuthorAvatar = ({
         roundedCircle={roundedCircle}
         width={size}
         height={size}
+        loading="lazy"
+        decoding="async"
         className={className}
         style={{ objectFit: 'cover', display: 'block' }}
         alt={fallbackName || 'Avatar'}

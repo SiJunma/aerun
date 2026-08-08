@@ -29,10 +29,13 @@ import { PERMISSIONS } from '../../constants/permissions';
  */
 const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTargetProfile }) => {
   const { t, lang } = useI18n();
-  const { profile, hasPermission } = useAuth();
+  const { profile, settings, hasPermission } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const myUid = profile?.uid;
+
+  const MAX_CHARS = settings?.maxCharsPerPost ?? 15000;
+  const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
 
   // ── Inbox state ──────────────────────────────────────────────────────────
   const [conversations, setConversations] = useState([]);
@@ -150,6 +153,17 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // ── Send message ─────────────────────────────────────────────────────────
   const handleSend = async () => {
     if (!messageText.trim() || !activeChatId || !activePeer) return;
+
+    if (computedMaxChars && messageText.length > computedMaxChars) {
+      showToast(
+        lang === 'ru'
+          ? `Cообщение превышает лимит в ${computedMaxChars} символов`
+          : `Message exceeds the ${computedMaxChars} character limit`,
+        'danger'
+      );
+      return;
+    }
+
     setSending(true);
     try {
       await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid);
@@ -379,7 +393,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   onChange={(e) => setMessageText(e.target.value)}
                   placeholder={t('dm.placeholder')}
                   minHeight="120px"
-                  maxLength={2000}
+                  maxLength={computedMaxChars}
                   showDice={hasPermission && hasPermission(PERMISSIONS.USE_DICE)}
                   hideDiceType={true}
                   isEdit={false}

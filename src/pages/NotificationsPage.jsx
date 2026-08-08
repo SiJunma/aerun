@@ -1,20 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Card, Badge, Button, Row, Col, Nav } from 'react-bootstrap';
-import { Bell, BellOff, CheckCheck, UserCheck, Clock, FlaskConical, Archive, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign } from 'lucide-react';
+import { Container, Card, Badge, Button, Row, Col } from 'react-bootstrap';
+import { Bell, BellOff, CheckCheck, UserCheck, Clock, Trash2, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
+import { usePageTitle } from '../contexts/TitleProvider';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import {
   subscribeToAdminNotifications,
   subscribeToUserNotifications,
   markNotificationRead,
-  archiveNotification,
-  archiveAllAdminNotifications,
-  archiveAllUserNotifications
+  deleteNotification,
+  deleteAllAdminNotifications,
+  deleteAllUserNotifications
 } from '../api/notifications';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import ForumPagination from '../components/common/ForumPagination';
 import Timestamp from '../components/common/Timestamp';
+import { useToast } from '../contexts/ToastProvider';
 
 const TYPE_META = {
   new_registration: {
@@ -51,22 +53,14 @@ const TYPE_META = {
   }
 };
 
-
-
-import { useToast } from '../contexts/ToastProvider';
-
 const NotificationsPage = () => {
   const { profile, recordActivity, hasPermission, PERMISSIONS, isRootAdmin } = useAuth();
   const { t, lang } = useI18n();
   const { showToast } = useToast();
-  const [searchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'active'; // 'active' or 'archived'
-  const [archivingId, setArchivingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   const [adminActive, setAdminActive] = useState([]);
-  const [adminArchived, setAdminArchived] = useState([]);
   const [userActive, setUserActive] = useState([]);
-  const [userArchived, setUserArchived] = useState([]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -77,33 +71,31 @@ const NotificationsPage = () => {
     || hasPermission(PERMISSIONS.BAN_USERS)
     || hasPermission(PERMISSIONS.DELETE_USERS);
 
+  const { setPageTitle } = usePageTitle();
+
+  useEffect(() => {
+    setPageTitle(t('notifications.title', 'Уведомления'));
+  }, [setPageTitle, t, lang]);
+
   useEffect(() => {
     if (!profile?.uid) return;
     
     let unsubAdminActive = () => {};
-    let unsubAdminArchive = () => {};
     let unsubUserActive = () => {};
-    let unsubUserArchive = () => {};
 
-    // Personal Notifications
+    // Personal Notifications (limit 100 newest)
     unsubUserActive = subscribeToUserNotifications(profile.uid, (notifs) => {
       setUserActive(notifs);
-    }, false);
-    unsubUserArchive = subscribeToUserNotifications(profile.uid, (notifs) => {
-      setUserArchived(notifs);
-    }, true);
+    });
 
     // Admin broadcast notifications (backward-compat: legacy recipient_uid=null docs)
     if (canManageUsers) {
-      unsubAdminActive = subscribeToAdminNotifications(setAdminActive, false);
-      unsubAdminArchive = subscribeToAdminNotifications(setAdminArchived, true);
+      unsubAdminActive = subscribeToAdminNotifications(setAdminActive);
     }
 
     return () => {
       unsubUserActive();
-      unsubUserArchive();
       unsubAdminActive();
-      unsubAdminArchive();
     };
   }, [canManageUsers, profile?.uid]);
 
@@ -122,64 +114,57 @@ const NotificationsPage = () => {
   const activeNotifs = [...adminActive, ...userActive]
     .filter(filterByPrefs)
     .sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
-  const archivedNotifs = [...adminArchived, ...userArchived]
-    .filter(filterByPrefs)
-    .sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
-
-
-  // Reset pagination on tab switch
-  useEffect(() => {
-    setTimeout(() => setCurrentPage(1), 0);
-  }, [activeTab]);
 
   const handleMarkRead = (e, id) => {
     if (e) e.stopPropagation();
     recordActivity();
     markNotificationRead(id)
-      .catch(err => showToast(err.message, 'danger'));
+      .catch(err => {
+        console.error('[markNotificationRead]', err);
+        showToast(err.message, 'danger');
+      });
   };
 
-  const handleArchive = (e, id) => {
-    e.stopPropagation();
+  const handleDelete = (e, id) => {
+    if (e) e.stopPropagation();
     recordActivity();
     
     // Trigger animation first
-    setArchivingId(id);
+    setDeletingId(id);
     
     // Wait for animation to finish before calling API
     setTimeout(() => {
-      archiveNotification(id)
+      deleteNotification(id)
         .then(() => {
-          showToast(t('notifications.archived_toast'));
-          setArchivingId(null);
+          showToast(t('notifications.deleted_toast', 'Уведомление удалено'));
+          setDeletingId(null);
         })
         .catch(err => {
+          console.error('[deleteNotification]', err);
           showToast(err.message, 'danger');
-          setArchivingId(null);
+          setDeletingId(null);
         });
     }, 300);
   };
 
-  const handleArchiveAll = async () => {
+  const handleDeleteAll = async () => {
     recordActivity();
     try {
       if (canManageUsers) {
-        await archiveAllAdminNotifications();
+        await deleteAllAdminNotifications();
       }
       if (profile?.uid) {
-        await archiveAllUserNotifications(profile.uid);
+        await deleteAllUserNotifications(profile.uid);
       }
-      showToast(t('notifications.archived_all_toast'));
+      showToast(t('notifications.deleted_all_toast', 'Все уведомления удалены'));
     } catch (err) {
+      console.error('[deleteAllNotifications]', err);
       showToast(err.message, 'danger');
     }
   };
 
-
   const unreadCount = activeNotifs.filter(n => !n.read).length;
-  const archivedCount = archivedNotifs.length;
-
-  const currentSet = activeTab === 'active' ? activeNotifs : archivedNotifs;
+  const currentSet = activeNotifs;
 
   // Pagination logic
   const totalPages = Math.ceil(currentSet.length / itemsPerPage);
@@ -194,14 +179,14 @@ const NotificationsPage = () => {
   const renderNotification = (n, idx) => {
     const meta = TYPE_META[n.type];
     const { payload } = n;
-    const isArchiving = archivingId === n.id;
+    const isDeleting = deletingId === n.id;
     // Reverse numbering: newest (top) gets the highest number
     const globalIndex = currentSet.length - ((currentPage - 1) * itemsPerPage + idx);
 
     return (
       <Card
         key={n.id}
-        className={`mb-3 notification-card border-1 ${!n.read ? 'unread-notif' : 'read-notif'} shadow-sm ${isArchiving ? 'archiving-exit' : ''}`}
+        className={`mb-3 notification-card border-1 ${!n.read ? 'unread-notif' : 'read-notif'} shadow-sm ${isDeleting ? 'archiving-exit' : ''}`}
       >
         <Card.Body className="py-3 px-4 position-relative">
           <Row className="align-items-start g-3">
@@ -280,16 +265,14 @@ const NotificationsPage = () => {
                     <Timestamp date={n.created_at} />
                   </span>
                   
-                  {activeTab === 'active' && (
-                    <Button 
-                      variant="link" 
-                      className="p-0 text-muted archive-btn d-flex align-items-center"
-                      onClick={(e) => handleArchive(e, n.id)}
-                      title={t('notifications.archive')}
-                    >
-                      <X size={18} />
-                    </Button>
-                  )}
+                  <Button 
+                    variant="link" 
+                    className="p-0 text-muted archive-btn d-flex align-items-center"
+                    onClick={(e) => handleDelete(e, n.id)}
+                    title={t('notifications.delete', 'Удалить')}
+                  >
+                    <X size={18} />
+                  </Button>
                 </div>
               </div>
 
@@ -322,7 +305,7 @@ const NotificationsPage = () => {
                       {t('notifications.manage_users')}
                     </Link>
 
-                    {!n.read && activeTab === 'active' && (
+                    {!n.read && (
                       <Button 
                         variant="link" 
                         size="sm" 
@@ -347,7 +330,7 @@ const NotificationsPage = () => {
                       {lang === 'ru' ? 'Перейти к сообщению →' : 'Go to message →'}
                     </Link>
 
-                    {!n.read && activeTab === 'active' && (
+                    {!n.read && (
                       <Button 
                         variant="link" 
                         size="sm" 
@@ -372,7 +355,7 @@ const NotificationsPage = () => {
                       {lang === 'ru' ? 'Перейти к сообщению →' : 'Go to message →'}
                     </Link>
 
-                    {!n.read && activeTab === 'active' && (
+                    {!n.read && (
                       <Button 
                         variant="link" 
                         size="sm" 
@@ -422,7 +405,7 @@ const NotificationsPage = () => {
                       </Link>
                     )}
 
-                    {!n.read && activeTab === 'active' && (
+                    {!n.read && (
                       <Button 
                         variant="link" 
                         size="sm" 
@@ -486,26 +469,6 @@ const NotificationsPage = () => {
           .archive-btn:hover {
             color: var(--bs-danger) !important;
           }
-          .nav-pills .nav-link {
-            color: var(--text-color);
-            opacity: 1;
-            font-weight: 500;
-            border-radius: 20px;
-            padding: 8px 16px;
-            transition: all 0.2s ease;
-            border: 1px solid transparent !important;
-          }
-          .nav-pills .nav-link.active {
-            background-color: var(--primary-color) !important;
-            border-color: var(--primary-color) !important;
-            color: var(--bg-color) !important;
-            opacity: 1;
-          }
-          .nav-pills .nav-link:hover:not(.active) {
-            background-color: var(--input-bg);
-            border-color: var(--border-color) !important;
-            opacity: 1;
-          }
           .archiving-exit {
             transform: translateX(30px);
             opacity: 0;
@@ -568,60 +531,6 @@ const NotificationsPage = () => {
           .icon-box:hover {
             opacity: 1;
           }
-          .tab-badge {
-            background-color: var(--primary-color) !important;
-            color: var(--bg-color) !important;
-            border: 1px solid var(--primary-color) !important;
-            font-size: 0.8rem;
-            margin-left: 6px;
-            font-weight: 700;
-            padding: 0.1rem 0.5rem;
-            opacity: 1;
-            min-width: 1.8rem;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .tab-badge.archived-badge {
-            background-color: rgba(255, 255, 255, 0.3) !important;
-            backdrop-filter: blur(4px);
-            color: #000 !important;
-            border-color: rgba(0, 0, 0, 0.1) !important;
-          }
-          [data-theme='dark'] .tab-badge.archived-badge {
-            background-color: rgba(255, 255, 255, 0.15) !important;
-            color: #fff !important;
-            border-color: rgba(255, 255, 255, 0.1) !important;
-          }
-          [data-theme='neutral'] .tab-badge.archived-badge {
-            background-color: rgba(255, 255, 255, 0.2) !important;
-            color: #433422 !important;
-            border-color: rgba(67, 52, 34, 0.1) !important;
-          }
-          .nav-pills .nav-link.active .tab-badge {
-            background-color: rgba(0, 0, 0, 0.15) !important;
-            color: inherit !important;
-            border-color: rgba(0, 0, 0, 0.1) !important;
-            box-shadow: none;
-          }
-          [data-theme='dark'] .nav-pills .nav-link.active .tab-badge {
-            background-color: rgba(0, 0, 0, 0.1) !important;
-            color: #000 !important;
-            border-color: rgba(0, 0, 0, 0.1) !important;
-          }
-          [data-theme='light'] .nav-pills .nav-link.active .tab-badge {
-            background-color: rgba(255, 255, 255, 0.2) !important;
-            color: #fff !important;
-            border-color: rgba(255, 255, 255, 0.3) !important;
-          }
-          [data-theme='neutral'] .nav-pills .nav-link.active .tab-badge {
-            background-color: rgba(255, 255, 255, 0.15) !important;
-            color: #fdfaf3 !important;
-            border-color: rgba(255, 255, 255, 0.2) !important;
-          }
-          .nav-pills .nav-link.active .tab-badge.archived-badge {
-            opacity: 1;
-          }
           .empty-state-card {
             background: rgba(255, 255, 255, 0.4) !important;
             backdrop-filter: blur(10px);
@@ -649,90 +558,69 @@ const NotificationsPage = () => {
             <Bell size={28} />
           </div>
           <div>
-            <h2 className="mb-0 fw-bold">{t('notifications.title')}</h2>
+            <h2 className="mb-0 fw-bold d-flex align-items-center gap-2">
+              {t('notifications.title')}
+              {unreadCount > 0 && (
+                <Badge pill bg="primary" style={{ fontSize: '0.85rem' }}>
+                  {unreadCount}
+                </Badge>
+              )}
+            </h2>
           </div>
         </div>
         <div className="d-flex gap-2 ms-auto">
-          {activeTab === 'active' && activeNotifs.length > 0 && (
+          {activeNotifs.length > 0 && (
             <Button 
-              variant="outline-primary" 
+              variant="outline-danger" 
               size="sm" 
-              onClick={handleArchiveAll} 
+              onClick={handleDeleteAll} 
               className="d-flex align-items-center gap-2 px-3 rounded-pill"
             >
-              <Archive size={14} />
-              {t('notifications.archive_all')}
+              <Trash2 size={14} />
+              {t('notifications.delete_all', 'Очистить все')}
             </Button>
           )}
         </div>
       </div>
 
-      <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
-        <Nav variant="pills" className="gap-2">
-          <Nav.Item>
-            <Nav.Link 
-              as={Link}
-              to="/notifications?tab=active"
-              active={activeTab === 'active'} 
-              className="d-flex align-items-center gap-2"
-            >
-              {t('notifications.tab_active')} 
-              {unreadCount > 0 && (
-                <Badge pill className="tab-badge">{unreadCount}</Badge>
-              )}
-            </Nav.Link>
-          </Nav.Item>
-          <Nav.Item>
-            <Nav.Link 
-              as={Link}
-              to="/notifications?tab=archived"
-              active={activeTab === 'archived'} 
-              className="d-flex align-items-center gap-2"
-            >
-              {t('notifications.tab_archived')}
-              {archivedCount > 0 && (
-                <Badge pill className="tab-badge archived-badge">{archivedCount}</Badge>
-              )}
-            </Nav.Link>
-          </Nav.Item>
-        </Nav>
-
-        {currentSet.length > 0 && (
+      {currentSet.length > 0 && totalPages > 1 && (
+        <div className="d-flex justify-content-end mb-3">
           <ForumPagination
             currentPage={currentPage}
             totalPages={totalPages}
             onPageChange={handlePageChange}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       {currentSet.length === 0 ? (
         <Card className="text-center py-5 border-1 empty-state-card shadow-sm">
           <Card.Body>
             <div className="mb-4 empty-state-icon text-muted">
-              {activeTab === 'active' ? <BellOff size={64} strokeWidth={1} /> : <Archive size={64} strokeWidth={1} />}
+              <BellOff size={64} strokeWidth={1} />
             </div>
             <h4 className="fw-light mb-2 text-muted">
-              {activeTab === 'active' ? t('notifications.no_notifications') : t('notifications.archive_empty')}
+              {t('notifications.no_notifications')}
             </h4>
-            {activeTab === 'active' && <p className="text-muted mb-0 small">{t('notifications.we_will_notify')}</p>}
+            <p className="text-muted mb-0 small">{t('notifications.we_will_notify')}</p>
           </Card.Body>
         </Card>
       ) : (
         <>
-
           <div className="notifications-list mb-4">
             {currentItems.map((n, idx) => renderNotification(n, idx))}
           </div>
           
-          <div className="d-flex justify-content-center mt-5 mb-4">
-            <ForumPagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={handlePageChange}
-              centered
-            />
-          </div>
+          {totalPages > 1 && (
+            <div className="d-flex justify-content-center mt-5 mb-4">
+              <ForumPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+                centered
+              />
+            </div>
+          )}
         </>
       )}
 

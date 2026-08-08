@@ -3,9 +3,12 @@ import { Card, Button } from 'react-bootstrap';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const BannedPage = () => {
   const { logout } = useAuth();
   const { translations } = useI18n();
+  const { setPageTitle } = usePageTitle();
 
   // Force English for this page as requested
   const t = (path) => {
@@ -18,9 +21,8 @@ const BannedPage = () => {
   };
 
   React.useEffect(() => {
-    // No automatic redirection away from BannedPage based on whitelistMode.
-    // The user stays here until they logout or are unbanned.
-  }, []);
+    setPageTitle(t('gatekeeper.banned_title') || 'Access Banned');
+  }, [setPageTitle]);
 
   return (
     <div className="d-flex align-items-center justify-content-center py-5" style={{ minHeight: '60vh' }}>

@@ -24,14 +24,20 @@ export const subscribeToTopicStatus = (topicId, userId, callback) => {
     callback(false);
     return () => {};
   }
+
+  let isSubscribed = true;
   const q = query(
     collection(db, 'topic_subscriptions'),
     where('topic_id', '==', topicId),
     where('user_id', '==', userId)
   );
-  return onSnapshot(q, (snap) => {
-    callback(!snap.empty);
-  });
+
+  getDocs(q)
+    .then(snap => { if (isSubscribed) callback(!snap.empty); })
+    .catch(err => console.error('[subscribeToTopicStatus]', err));
+
+  // Возвращаем функцию-заглушку (совместимость с useEffect cleanup)
+  return () => { isSubscribed = false; };
 };
 
 export const toggleSubscription = async (topicId, userId) => {

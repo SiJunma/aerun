@@ -11,12 +11,19 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { resolveField } from '../utils/text';
 import { useToast } from '../contexts/ToastProvider';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
   const { profile, user, recordActivity, markTopicRead, hasPermission, PERMISSIONS, settings, categories } = useAuth();
   const { showToast } = useToast();
+  const { setPageTitle } = usePageTitle();
+
+  useEffect(() => {
+    setPageTitle(t('topic.create_topic', 'Создание темы'));
+  }, [setPageTitle, t, lang]);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');

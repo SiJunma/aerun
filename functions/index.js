@@ -585,6 +585,7 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
                     last_post_author_avatar: author_avatar || null,
                     last_post_topic_id: topic_id,
                     last_post_topic_title: topic_title,
+                    last_post_topic_posts_count: newPostCount,
                     last_post_is_character: !!is_character,
                     last_post_author_character_id: author_character_id || null
                 });
@@ -948,6 +949,7 @@ async function syncCategoryMetadata(db, categoryId) {
             last_post_author_avatar: lt.last_post_author_avatar || null,
             last_post_topic_id: ltId,
             last_post_topic_title: lt.title,
+            last_post_topic_posts_count: lt.posts_count || null,
             last_post_is_character: lt.last_post_is_character || false,
             last_post_author_character_id: lt.last_post_author_character_id || null
         });
@@ -1446,7 +1448,26 @@ exports.getSecuredPosts = onCall(
       posts.push(data);
     }
 
-    return { posts };
+    // Pinned first post: if the topic has first_post_pinned and we're on page 2+,
+    // fetch the actual first post of the topic and return it alongside the page posts.
+    let pinnedPost = null;
+    if (topicData.first_post_pinned && page > 1) {
+      const firstPostSnap = await db.collection('posts')
+        .where('topic_id', '==', topicId)
+        .orderBy('created_at', 'asc')
+        .limit(1)
+        .get();
+      if (!firstPostSnap.empty) {
+        const fpData = firstPostSnap.docs[0].data();
+        fpData.id = firstPostSnap.docs[0].id;
+        if (fpData.created_at) fpData.created_at = fpData.created_at.toDate().toISOString();
+        if (fpData.updated_at) fpData.updated_at = fpData.updated_at.toDate().toISOString();
+        if (fpData.edited_at) fpData.edited_at = fpData.edited_at.toDate().toISOString();
+        pinnedPost = fpData;
+      }
+    }
+
+    return { posts, pinnedPost };
   }
 );
 

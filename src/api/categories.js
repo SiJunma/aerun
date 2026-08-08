@@ -4,6 +4,7 @@ import {
   collection,
   addDoc,
   doc,
+  getDocs,
   onSnapshot,
   query,
   orderBy,
@@ -15,11 +16,41 @@ import {
 
 // ── Category Groups ──────────────────────────────────────────────────────────
 
+const CAT_GROUPS_CACHE_KEY = 'aerun_cat_groups';
+const CAT_GROUPS_TTL_MS = 60 * 60 * 1000; // 1 час
+
 export const subscribeToCategoryGroups = (callback) => {
-  const q = query(collection(db, 'category_groups'), orderBy('order', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
+  let isSubscribed = true;
+
+  const fetchGroups = async () => {
+    // 1. Пробуем localStorage
+    try {
+      const raw = localStorage.getItem(CAT_GROUPS_CACHE_KEY);
+      if (raw) {
+        const { data, ts } = JSON.parse(raw);
+        if (Date.now() - ts < CAT_GROUPS_TTL_MS) {
+          if (isSubscribed) callback(data);
+          return;
+        }
+      }
+    } catch { /* Кэш повреждён — читаем свежие данные */ }
+
+    // 2. Идём в Firestore
+    try {
+      const q = query(collection(db, 'category_groups'), orderBy('order', 'asc'));
+      const snapshot = await getDocs(q);
+      if (!isSubscribed) return;
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      localStorage.setItem(CAT_GROUPS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+      callback(data);
+    } catch (err) {
+      console.error('[subscribeToCategoryGroups]', err);
+      if (isSubscribed) callback([]);
+    }
+  };
+
+  fetchGroups();
+  return () => { isSubscribed = false; };
 };
 
 export const addCategoryGroup = async (groupData, performerId) => {
@@ -32,6 +63,7 @@ export const addCategoryGroup = async (groupData, performerId) => {
     targetId: ref.id,
     title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
   });
+  localStorage.removeItem(CAT_GROUPS_CACHE_KEY); // Сброс кэша
   return ref.id;
 };
 
@@ -44,38 +76,38 @@ export const updateCategoryGroup = async (id, groupData, performerId) => {
     targetId: id,
     title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
   });
+  localStorage.removeItem(CAT_GROUPS_CACHE_KEY); // Сброс кэша
 };
 
 export const deleteCategoryGroup = async (id, performerId) => {
   await deleteDoc(doc(db, 'category_groups', id));
   await logAdminAction('category_group_deleted', performerId, { targetId: id });
+  localStorage.removeItem(CAT_GROUPS_CACHE_KEY); // Сброс кэша
 };
 
 // ── Categories ──────────────────────────────────────────────────────────────
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
+export const fetchSecuredCategories = async () => {
+  try {
+    const functions = getFunctions();
+    const getSecured = httpsCallable(functions, 'getSecuredCategories');
+    const result = await getSecured();
+    const cats = result.data.categories || [];
+    return cats.sort((a, b) => (a.order || 0) - (b.order || 0));
+  } catch (err) {
+    console.error('[fetchSecuredCategories]', err);
+    return [];
+  }
+};
+
 export const subscribeToCategories = (callback) => {
   let isSubscribed = true;
 
-  const fetchCats = async () => {
-    try {
-      const functions = getFunctions();
-      const getSecured = httpsCallable(functions, 'getSecuredCategories');
-      const result = await getSecured();
-
-      if (!isSubscribed) return;
-
-      const cats = result.data.categories || [];
-      const sortedCats = cats.sort((a, b) => (a.order || 0) - (b.order || 0));
-      callback(sortedCats);
-    } catch (err) {
-      console.error('[subscribeToCategories]', err);
-      if (isSubscribed) callback([]);
-    }
-  };
-
-  fetchCats();
+  fetchSecuredCategories().then(cats => {
+    if (isSubscribed) callback(cats);
+  });
 
   // Возвращаем чистую отписку для React
   return () => {

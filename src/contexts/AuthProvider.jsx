@@ -13,7 +13,6 @@ import {
   doc,
   getDoc,
   setDoc,
-  updateDoc,
   onSnapshot,
   serverTimestamp,
   Timestamp,
@@ -34,9 +33,11 @@ import {
   deleteGuestActivity as apiDeleteGuestActivity,
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
-  subscribeToLatestTopics
+  subscribeToLatestTopics,
+  fetchLatestTopics,
+  subscribeToActiveUserIds
 } from '../api/auth-resources';
-import { subscribeToCategories } from '../api/categories';
+import { subscribeToCategories, fetchSecuredCategories } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -65,6 +66,7 @@ export const AuthProvider = ({ children }) => {
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState([]);
   const [authError, setAuthError] = useState(null);
+  const [activeUserIds, setActiveUserIds] = useState(new Set());
 
   // Ref holding the timestamp of the last recorded activity
   const lastActivityRef = useRef(null);
@@ -409,8 +411,9 @@ export const AuthProvider = ({ children }) => {
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
-            // ОБНОВЛЯЕМ last_seen ТОЛЬКО КОГДА ДОКУМЕНТ ТОЧНО СУЩЕСТВУЕТ
-            updateDoc(userDocRef, { last_seen: serverTimestamp() }).catch(console.warn);
+            // last_seen пишется только в user_presence/{uid} через pushLastSeen ниже.
+            // Запись в users/{uid}.last_seen убрана — она вызывала лишнее срабатывание
+            // профиль-слушателя (profileUnsubRef) при каждом логине.
 
             const data = userDoc.data();
 
@@ -615,6 +618,27 @@ export const AuthProvider = ({ children }) => {
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
+  const refreshForumState = useCallback(async () => {
+    try {
+      const [cats, topics] = await Promise.all([
+        fetchSecuredCategories(),
+        fetchLatestTopics(50)
+      ]);
+      setCategories(cats);
+      setLatestTopics(topics);
+    } catch (err) {
+      console.error('[refreshForumState]', err);
+    }
+  }, []);
+
+  // Periodic quiet refresh of categories & latest topics (every 60s)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshForumState();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [refreshForumState]);
+
   useEffect(() => {
     if (loading || !user) return;
 
@@ -658,10 +682,23 @@ export const AuthProvider = ({ children }) => {
   const markTopicRead = useCallback(async (topicId, offset = null) => {
     if (!user || !topicId) return;
     const now = Date.now();
-    const value = offset !== null ? { timestamp: now, offset } : now;
+    
+    // Calculate the final offset using the current readMap state to avoid async closure issues
+    const currentReadMap = readMap[topicId];
+    const prevOffset = currentReadMap?.offset ?? -1;
+    
+    // Do not allow offset to decrease
+    if (offset !== null && offset < prevOffset) return;
+    
+    // If no new offset is provided, but we had one, preserve it
+    const finalOffset = offset !== null ? offset : (prevOffset !== -1 ? prevOffset : null);
+    
+    const value = finalOffset !== null ? { timestamp: now, offset: finalOffset } : now;
+    
     setReadMap(prev => ({ ...prev, [topicId]: value }));
+
     try {
-      await apiRecordTopicVisit(user.uid, topicId, offset);
+      await apiRecordTopicVisit(user.uid, topicId, finalOffset);
       if (profile?.role_id !== 'pending' && profile?.role_id !== 'banned') {
         await markTopicNotificationsRead(user.uid, topicId);
       }
@@ -726,11 +763,22 @@ export const AuthProvider = ({ children }) => {
     }
   }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout, authError]);
 
+  useEffect(() => {
+    const unsub = subscribeToActiveUserIds(setActiveUserIds);
+    return () => unsub();
+  }, []);
+
+  const isUserOnline = useCallback((uid) => {
+    if (!uid) return false;
+    return activeUserIds.has(uid);
+  }, [activeUserIds]);
+
   const isRootAdmin = isChiefAdmin(user?.email, profile?.role_id);
 
   const value = {
     user,
     profile,
+    setProfile,
     authError,
     isRootAdmin,
     settings,
@@ -753,8 +801,11 @@ export const AuthProvider = ({ children }) => {
     updateSettings,
     updateProfile,
     recordActivity,
+    refreshForumState,
     hasPermission,
     roles,
+    activeUserIds,
+    isUserOnline,
     PERMISSIONS,
     DEFAULT_ROLES
   };

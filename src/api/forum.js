@@ -53,11 +53,30 @@ export const subscribeToTopics = (categoryId, callback) => {
   );
 };
 
-// Single topic by ID
-export const subscribeToTopic = (topicId, callback) => {
-  return onSnapshot(doc(db, 'topics', topicId), (snapshot) => {
-    callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
-  });
+// Single topic by ID with quiet polling (no persistent WebSocket)
+export const subscribeToTopic = (topicId, callback, pollIntervalMs = 30000) => {
+  let isSubscribed = true;
+
+  const fetchTopicData = async () => {
+    try {
+      const snap = await getDoc(doc(db, 'topics', topicId));
+      if (!isSubscribed) return;
+      callback(snap.exists() ? { id: snap.id, ...snap.data() } : null, null);
+    } catch (err) {
+      console.error('[subscribeToTopic]', err);
+      if (!isSubscribed) return;
+      callback(null, err);
+    }
+  };
+
+  fetchTopicData();
+
+  const intervalId = setInterval(fetchTopicData, pollIntervalMs);
+
+  return () => {
+    isSubscribed = false;
+    clearInterval(intervalId);
+  };
 };
 
 export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) => {
@@ -153,13 +172,7 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20) => {
     const functions = getFunctions();
     const getSecured = httpsCallable(functions, 'getSecuredPosts');
     const result = await getSecured({ topicId, page, pageSize });
-    // result.data.posts will be dates in ISO string format, 
-    // but the app components (like BBCode) might expect Firebase Timestamp.
-    // Client-side, we should map them back or ensure the components handle string dates.
-    // Actually, BBCode and TopicPage use posts. To make it seamless:
-    const posts = result.data.posts || [];
-    return posts.map(p => {
-      // Mock toMillis() for ISO string sorting in case it's used elsewhere
+    const normalizePost = (p) => {
       const dateVal = p.created_at ? new Date(p.created_at) : null;
       return {
         ...p,
@@ -173,10 +186,13 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20) => {
            toMillis: () => new Date(p.updated_at).getTime()
         } : null
       };
-    });
+    };
+    const posts = (result.data.posts || []).map(normalizePost);
+    const pinnedPost = result.data.pinnedPost ? normalizePost(result.data.pinnedPost) : null;
+    return { posts, pinnedPost };
   } catch (err) {
     console.error('[fetchSecuredPosts]', err);
-    return [];
+    throw err;
   }
 };
 
@@ -546,6 +562,7 @@ export const deleteTopics = async (topicIds, performerId) => {
           last_post_author_avatar: latestTopic.last_post_author_avatar || null,
           last_post_topic_id: latestTopic.id || null,
           last_post_topic_title: latestTopic.title || null,
+          last_post_topic_posts_count: latestTopic.posts_count || null,
           last_post_is_character: latestTopic.last_post_is_character || false,
           last_post_author_character_id: latestTopic.last_post_author_character_id || null
         });
@@ -620,6 +637,7 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
           last_post_author_id: top.last_post_author_id || null,
           last_post_topic_id: snap.docs[0].id || null,
           last_post_topic_title: top.title || null,
+          last_post_topic_posts_count: top.posts_count || null,
           last_post_is_character: top.last_post_is_character || false,
           last_post_author_character_id: top.last_post_author_character_id || null
         });

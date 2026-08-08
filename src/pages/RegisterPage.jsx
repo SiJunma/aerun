@@ -5,11 +5,18 @@ import { Container, Card } from 'react-bootstrap';
 import RegisterForm from '../components/auth/RegisterForm';
 import { useI18n } from '../contexts/I18nProvider';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const RegisterPage = () => {
   const { user, settings, hasPermission, PERMISSIONS } = useAuth();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const { setPageTitle } = usePageTitle();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
+
+  React.useEffect(() => {
+    setPageTitle(t('auth.register', 'Регистрация'));
+  }, [setPageTitle, t, lang]);
   
   if (user) {
     // If admin logs in/registers, don't send them back to the maintenance/pending page

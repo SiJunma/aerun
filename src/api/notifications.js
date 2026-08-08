@@ -7,6 +7,7 @@ import {
   query,
   orderBy,
   where,
+  limit,
   updateDoc,
   getDocs,
   writeBatch,
@@ -127,47 +128,74 @@ export const notifyUserManagers = async (type, payload) => {
 // ── Subscribe ────────────────────────────────────────────────────────────────
 
 /**
- * Subscribe to admin-broadcast notifications (recipient_uid === null).
- * @param {boolean} archived - filter by archived status
+ * Subscribe to admin-broadcast notifications (recipient_uid === null), limit to 100 newest.
  */
-export const subscribeToAdminNotifications = (callback, archived = false) => {
+export const subscribeToAdminNotifications = (callback) => {
   const q = query(
     collection(db, 'notifications'),
-    where('recipient_uid', '==', null),
-    where('archived', '==', archived),
-    orderBy('created_at', 'desc')
+    where('recipient_uid', '==', null)
   );
   return onSnapshot(q, (snap) => {
-    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    notifs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
+    callback(notifs.slice(0, 100));
   }, (err) => console.error('[subscribeToAdminNotifications]', err));
 };
 
 /**
- * Subscribe to personal notifications for a specific user.
+ * Subscribe to personal notifications for a specific user, limit to 100 newest.
  */
-export const subscribeToUserNotifications = (uid, callback, archived = false) => {
+export const subscribeToUserNotifications = (uid, callback) => {
   const q = query(
     collection(db, 'notifications'),
-    where('recipient_uid', '==', uid),
-    where('archived', '==', archived),
-    orderBy('created_at', 'desc')
+    where('recipient_uid', '==', uid)
   );
+  
+  // При подписке также периодически чистим уведомления свыше 100 штук
+  pruneUserNotifications(uid).catch(err => console.warn('[pruneUserNotifications]', err));
+
   return onSnapshot(q, (snap) => {
-    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    notifs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
+    callback(notifs.slice(0, 100));
   }, (err) => console.error('[subscribeToUserNotifications]', err));
 };
 
-// ── Mark read ────────────────────────────────────────────────────────────────
+/**
+ * Автоматическое удаление уведомлений пользователя старше 100 последних.
+ */
+export const pruneUserNotifications = async (uid) => {
+  if (!uid) return;
+  try {
+    const q = query(
+      collection(db, 'notifications'),
+      where('recipient_uid', '==', uid)
+    );
+    const snap = await getDocs(q);
+    if (snap.docs.length > 100) {
+      const docs = snap.docs.map(d => ({ ref: d.ref, ...d.data() }));
+      docs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
+      const docsToDelete = docs.slice(100);
+      const batch = writeBatch(db);
+      docsToDelete.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('[pruneUserNotifications error]', err);
+  }
+};
+
+// ── Mark read & Delete ────────────────────────────────────────────────────────
 
 export const markNotificationRead = async (id) => {
   await updateDoc(doc(db, 'notifications', id), { read: true });
 };
 
 export const markTopicNotificationsRead = async (uid, topicId) => {
+  if (!uid || !topicId) return;
   const q = query(
     collection(db, 'notifications'),
     where('recipient_uid', '==', uid),
-    where('type', '==', 'topic_reply'),
     where('read', '==', false),
     where('payload.topic_id', '==', topicId)
   );
@@ -192,9 +220,13 @@ export const clearOrphanedPostNotifications = async (uid, postId) => {
   await batch.commit();
 };
 
-export const archiveNotification = async (id) => {
-  await updateDoc(doc(db, 'notifications', id), { archived: true, read: true });
+export const deleteNotification = async (id) => {
+  const { deleteDoc } = await import('firebase/firestore');
+  await deleteDoc(doc(db, 'notifications', id));
 };
+
+// Backwards compatibility alias
+export const archiveNotification = deleteNotification;
 
 /**
  * Mark all unread admin-broadcast notifications as read.
@@ -203,7 +235,6 @@ export const markAllAdminNotificationsRead = async () => {
   const q = query(
     collection(db, 'notifications'),
     where('recipient_uid', '==', null),
-    where('archived', '==', false),
     where('read', '==', false)
   );
   const snap = await getDocs(q);
@@ -213,31 +244,35 @@ export const markAllAdminNotificationsRead = async () => {
   await batch.commit();
 };
 
-export const archiveAllAdminNotifications = async () => {
+export const deleteAllAdminNotifications = async () => {
   const q = query(
     collection(db, 'notifications'),
-    where('recipient_uid', '==', null),
-    where('archived', '==', false)
+    where('recipient_uid', '==', null)
   );
   const snap = await getDocs(q);
   if (snap.empty) return;
   const batch = writeBatch(db);
-  snap.docs.forEach(d => batch.update(d.ref, { archived: true, read: true }));
+  snap.docs.forEach(d => batch.delete(d.ref));
   await batch.commit();
 };
 
-export const archiveAllUserNotifications = async (uid) => {
+// Backwards compatibility alias
+export const archiveAllAdminNotifications = deleteAllAdminNotifications;
+
+export const deleteAllUserNotifications = async (uid) => {
   const q = query(
     collection(db, 'notifications'),
-    where('recipient_uid', '==', uid),
-    where('archived', '==', false)
+    where('recipient_uid', '==', uid)
   );
   const snap = await getDocs(q);
   if (snap.empty) return;
   const batch = writeBatch(db);
-  snap.docs.forEach(d => batch.update(d.ref, { archived: true, read: true }));
+  snap.docs.forEach(d => batch.delete(d.ref));
   await batch.commit();
 };
+
+// Backwards compatibility alias
+export const archiveAllUserNotifications = deleteAllUserNotifications;
 
 // ── Merging Helpers ──────────────────────────────────────────────────────────
 

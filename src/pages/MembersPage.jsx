@@ -18,13 +18,20 @@ const ROLE_PRIORITY = {
   'pending': 20
 };
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const MembersPage = () => {
   const { t, lang } = useI18n();
   const { profile, updateSettings, settings } = useAuth();
+  const { setPageTitle } = usePageTitle();
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('nickname');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'desc'
+
+  useEffect(() => {
+    setPageTitle(t('nav.members', 'Участники'));
+  }, [setPageTitle, t, lang]);
   
   // Use profile setting with a fallback to local state for instant UI update
   const [isStacked, setIsStacked] = useState(profile?.settings?.member_view_style === 'stacked');

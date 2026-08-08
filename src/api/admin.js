@@ -115,11 +115,26 @@ export const updateUserRole = async (uid, roleId, performerId) => {
   await logAdminAction('user_role_updated', performerId, { targetId: uid, roleId });
 };
 
-// Оптимизированная версия (разовый запрос без постоянного сокета):
+// In-memory кэш ролей для текущей сессии.
+// Роли меняются крайне редко (только через AdminPage), поэтому кэш безопасен.
+let _rolesCache = null;
+
+/** Принудительно сбросить кэш ролей (вызывать после addRole/updateRole/deleteRole). */
+export const invalidateRolesCache = () => {
+  _rolesCache = null;
+};
+
+// Оптимизированная версия с in-memory кэшем сессии:
 export const subscribeToRoles = (callback) => {
   let isSubscribed = true;
 
   const fetchRoles = async () => {
+    // Если кэш заполнен — немедленно отдаём его, без сетевого запроса
+    if (_rolesCache) {
+      if (isSubscribed) callback(_rolesCache);
+      return;
+    }
+
     try {
       const q = query(collection(db, 'roles'), orderBy('name', 'asc'));
       const snapshot = await getDocs(q);
@@ -127,6 +142,7 @@ export const subscribeToRoles = (callback) => {
       if (!isSubscribed) return;
 
       const rolesData = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+      _rolesCache = rolesData;
       callback(rolesData);
     } catch (err) {
       console.error('[subscribeToRoles]', err);

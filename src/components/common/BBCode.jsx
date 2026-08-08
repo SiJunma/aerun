@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Dices, EyeOff, Reply } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -187,6 +187,7 @@ const safeHtmlToReact = (htmlStr, index) => {
 };
 
 const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
+  const navigate = useNavigate();
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
   const { t, lang } = useI18n();
   if (typeof children !== 'string') return children;
@@ -429,17 +430,29 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
             {(authorName || postId) && (
               <div className="bbcode-quote-header fw-bold small mb-1 pb-2 border-bottom d-flex align-items-center" style={{ color: 'var(--primary-color)', lineHeight: '1.2' }}>
                 {postId ? (
-                    <Link
-                    to={topicId ? `/topic/${topicId}?post=${postId}` : `?post=${postId}`}
-                    preventScrollReset={true}
+                    <a
+                    href={topicId ? `/topic/${topicId}?post=${postId}` : `?post=${postId}`}
                     className="text-decoration-none d-flex align-items-center gap-1"
-                    style={{ color: 'inherit', userSelect: 'text' }}
+                    style={{ color: 'inherit', userSelect: 'text', cursor: 'pointer' }}
                     draggable="false"
                     title={lang === 'ru' ? 'Перейти к сообщению' : 'Go to message'}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const el = document.getElementById(`post-${postId}`);
+                      if (el) {
+                        // Post is on this page — just scroll, no navigation
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.classList.add('highlight-new-post');
+                        setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
+                      } else {
+                        // Post is on another page — navigate via router
+                        navigate(topicId ? `/topic/${topicId}?post=${postId}` : `?post=${postId}`);
+                      }
+                    }}
                   >
                     {authorName ? `${authorName} ${t('forum.wrote')}:` : `${t('forum.quote')}:`}
                     <Reply size={14} className="opacity-50 flex-shrink-0" />
-                  </Link>
+                  </a>
                 ) : (
                   <span>
                     {authorName ? `${authorName} ${t('forum.wrote')}:` : `${t('forum.quote')}:`}
@@ -485,6 +498,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         return <img
           key={index}
           src={imgUrl}
+          loading="lazy"
           className="img-fluid rounded my-2 shadow-sm bbcode-img"
           style={imgStyle}
           alt={params.alt || params.default || "user post"}

@@ -4,6 +4,9 @@ import { Container } from 'react-bootstrap';
 import { useAuth } from '../contexts/AuthProvider';
 import DirectMessages from '../components/dm/DirectMessages';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+import { useI18n } from '../contexts/I18nProvider';
+
 /**
  * MessagesPage
  * Route /messages         → inbox (own conversations)
@@ -12,6 +15,12 @@ import DirectMessages from '../components/dm/DirectMessages';
 const MessagesPage = () => {
   const { uid: targetUid } = useParams();
   const { profile } = useAuth();
+  const { setPageTitle } = usePageTitle();
+  const { t, lang } = useI18n();
+
+  React.useEffect(() => {
+    setPageTitle(t('messages.title', 'Сообщения'));
+  }, [setPageTitle, t, lang]);
 
   if (!profile) return null;
 

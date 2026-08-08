@@ -4,7 +4,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole
+  updateUserRole, addRole, updateRole, deleteRole, invalidateRolesCache
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
@@ -556,6 +556,7 @@ const AdminPage = () => {
       } else {
         await addRole(roleForm, user.uid);
       }
+      invalidateRolesCache(); // Сбрасываем кэш, чтобы свежие роли загрузились при следующем визите
       showToast(t('admin.roles.toast_saved'), 'success');
       setShowRoleModal(false);
     } catch (err) {
@@ -574,6 +575,7 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteRole(id, isSystem, user.uid);
+          invalidateRolesCache(); // Сбрасываем кэш после удаления
           showToast(t('admin.roles.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);

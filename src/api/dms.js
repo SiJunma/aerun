@@ -28,11 +28,12 @@ export const getConversationId = (uid1, uid2) =>
  * Only participant info is merged; lastMessage/unread are set by sendDmMessage.
  */
 export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirProfile) => {
-  const convId = getConversationId(myUid, theirUid);
+  const participants = [myUid, theirUid].sort();
+  const convId = participants.join('_');
   const convRef = doc(db, 'dms', convId);
 
   await setDoc(convRef, {
-    participants: [myUid, theirUid],
+    participants,
     participantNames: {
       [myUid]: myProfile?.nickname || 'User',
       [theirUid]: theirProfile?.nickname || 'User',

@@ -288,10 +288,14 @@ export const translations = {
       archive_empty: "Archive is empty",
       we_will_notify: "We'll notify you when something important happens.",
       archive_all: "Archive All",
+      delete_all: "Clear All",
       mark_as_read: "Mark as Read",
       archive: "Archive",
+      delete: "Delete",
       archived_toast: "Moved to archive",
+      deleted_toast: "Notification deleted",
       archived_all_toast: "All notifications archived",
+      deleted_all_toast: "All notifications deleted",
       marked_read_toast: "Marked as read",
       manage_users: "Manage Users →",
       new_badge: "New",
@@ -337,6 +341,7 @@ export const translations = {
       yesterday: "Yesterday"
     },
     admin: {
+      title: "Admin Panel",
       dashboard: "Admin Dashboard",
       tabs: {
         settings: "Settings",
@@ -913,10 +918,14 @@ export const translations = {
       archive_empty: "Архив пуст",
       we_will_notify: "Мы сообщим вам, когда произойдет что-то важное.",
       archive_all: "Архивировать все",
+      delete_all: "Очистить все",
       mark_as_read: "Прочитать",
       archive: "В архив",
+      delete: "Удалить",
       archived_toast: "Отправлено в архив",
+      deleted_toast: "Уведомление удалено",
       archived_all_toast: "Все уведомления архивированы",
+      deleted_all_toast: "Все уведомления удалены",
       marked_read_toast: "Отмечено как прочитанное",
       manage_users: "К управлению пользователями →",
       new_badge: "Новое",
@@ -962,6 +971,7 @@ export const translations = {
       yesterday: "Вчера"
     },
     admin: {
+      title: "Панель управления",
       dashboard: "Панель управления",
       tabs: {
         settings: "Настройки",

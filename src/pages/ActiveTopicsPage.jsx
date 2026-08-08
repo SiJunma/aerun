@@ -8,11 +8,18 @@ import TopicRow from '../components/common/TopicRow';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { resolveField } from '../utils/text';
 
+import { usePageTitle } from '../contexts/TitleProvider';
+
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
   const { user, hasPermission, PERMISSIONS, categories } = useAuth();
+  const { setPageTitle } = usePageTitle();
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setPageTitle(t('nav.active_topics', 'Активные темы'));
+  }, [setPageTitle, t, lang]);
 
   useEffect(() => {
     const unsubTopics = subscribeToTopTopics((data) => {

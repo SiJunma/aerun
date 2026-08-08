@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
@@ -26,7 +26,11 @@ export const auth = getAuth(app);
 // browser restarts, and multi-tab scenarios (browsers with many open tabs
 // may otherwise discard the session token when throttling background tabs).
 setPersistence(auth, browserLocalPersistence).catch(e => console.warn('[Auth persistence]', e));
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
 export const storage = isStorageEnabled ? getStorage(app) : null;
 export const functions = getFunctions(app);
 export const googleProvider = new GoogleAuthProvider();

@@ -10,8 +10,6 @@ import {
   subscribeToTopicDraft, deleteDraftPost, locatePost, locateUnreadPost
 } from '../api/forum';
 
-// import { subscribeToUser } from '../api/auth-resources';
-// import { subscribeToCharacters, subscribeToCharacter } from '../api/character';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { subscribeToCharacters } from '../api/character';
@@ -49,7 +47,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, readMap, hasPermission, PERMISSIONS, settings, categories } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, refreshForumState, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,6 +58,7 @@ const TopicPage = () => {
   const [topic, setTopic] = useState(null);
   const [category, setCategory] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [pinnedFirstPost, setPinnedFirstPost] = useState(null);
   const [myDraft, setMyDraft] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [authorStats, setAuthorStats] = useState({}); // { uid: { post_count: N } }
@@ -122,6 +121,8 @@ const TopicPage = () => {
   const nextFetchNeededRef = useRef(false);
   const prevTopicStatsRef = useRef(null);
 
+  const [accessError, setAccessError] = React.useState(null);
+
   const loadPosts = React.useCallback(async () => {
     if (isFetchingPostsRef.current) {
       nextFetchNeededRef.current = true;
@@ -129,11 +130,16 @@ const TopicPage = () => {
     }
     isFetchingPostsRef.current = true;
     try {
-      const data = await fetchSecuredPosts(id, currentPage, ITEMS_PER_PAGE);
+      const { posts: data, pinnedPost } = await fetchSecuredPosts(id, currentPage, ITEMS_PER_PAGE);
       setPosts(data);
+      setPinnedFirstPost(pinnedPost || null);
       return data;
     } catch (err) {
       console.error(err);
+      if (err?.message?.includes('permission') || err?.message?.includes('403') || err?.code === 'permission-denied') {
+        setAccessError(err.message || 'Access denied');
+        setIsPageLoading(false);
+      }
       return [];
     } finally {
       isFetchingPostsRef.current = false;
@@ -167,15 +173,27 @@ const TopicPage = () => {
   const jumpTargetPageRef = useRef(null);
 
   useEffect(() => {
+    // Reset loading state and clear posts before loading the new page
     setIsPageLoading(true);
-    
+    setPosts([]);
+    // Use a micro‑task delay so React can render the empty state before the async load completes.
+    // This guarantees that the inline skeleton (posts‑container) becomes visible even when
+    // `loadPosts` returns synchronously from cache.
+    setTimeout(() => {
+      loadPosts().then(() => {
+        // `loadPosts` resolves and updates `posts`. The `checkReady` logic inside the original
+        // effect will set `isPageLoading` to false when both topic and posts are ready.
+        // No further action needed here.
+      });
+    }, 0);
+    // Note: we deliberately do NOT call `loadPosts()` directly here to avoid React's state batching.
+
     // Only clear topic if navigating to a DIFFERENT topic
     if (currentTopicIdRef.current !== id) {
       setTopic(null);
       currentTopicIdRef.current = id;
     }
     
-    setPosts([]);
     let topicReady = topic !== null;
     let postsReady = false;
 
@@ -187,18 +205,12 @@ const TopicPage = () => {
       }
     };
 
-    const isPendingJump = isJumpRequested && !alreadyJumpedRef.current;
-    
-    if (!isPendingJump || jumpTargetPageRef.current === currentPage) {
-      loadPosts().then(() => {
-        postsReady = true;
-        checkReady();
-      });
-    } else {
-      // Defer loadPosts until jumpTargetPageRef matches currentPage
-    }
-
-    const unsubTopic = subscribeToTopic(id, (data) => {
+    const unsubTopic = subscribeToTopic(id, (data, err) => {
+      if (err) {
+        setAccessError(err.message || 'Access denied');
+        setIsPageLoading(false);
+        return;
+      }
       setTopic(data);
       if (data) {
         topicReady = true;
@@ -231,12 +243,15 @@ const TopicPage = () => {
   // Track unread quote and mention notifications and clear them via IntersectionObserver
   useEffect(() => {
     if (!user || !id) return;
-    fetchUnreadTopicNotifications(user.uid, id).then(notifs => {
+    const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
       const activeQuotes = notifs.filter(n =>
-        n.type === 'post_quoted' || n.type === 'post_mentioned' || n.type === 'POST_MENTIONED'
+        !n.read &&
+        n.payload?.topic_id === id &&
+        (n.type === 'post_quoted' || n.type === 'post_mentioned' || n.type === 'POST_MENTIONED')
       );
       setUnreadQuotes(activeQuotes);
     });
+    return () => unsub();
   }, [user, id]);
 
   useEffect(() => {
@@ -371,6 +386,11 @@ const TopicPage = () => {
     alreadyJumpedRef.current = false;
   }, [id, locationKey]);
 
+  // Reset jumpTargetPageRef ONLY when the topic changes, so we don't clear it during our own redirects
+  useEffect(() => {
+    jumpTargetPageRef.current = null;
+  }, [id]);
+
   // Capture initial visit state once per topic change
   useEffect(() => {
     if (user && id && readMap[id] !== undefined && initialVisitRef.current[id] === undefined) {
@@ -497,7 +517,8 @@ const TopicPage = () => {
           targetId = `post-${posts[unreadIndex].id}`;
         } else if (jumpTargetPageRef.current !== currentPage) {
           locateUnreadPost(id, lastVisit, ITEMS_PER_PAGE).then(result => {
-            const finalTargetPage = result.found ? result.page : (Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE) || 1);
+            const totalPages = Math.max(1, Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE));
+            const finalTargetPage = result.found ? Math.min(result.page, totalPages) : totalPages;
             if (currentPage !== finalTargetPage) {
               jumpTargetPageRef.current = finalTargetPage;
               alreadyJumpedRef.current = false;
@@ -671,16 +692,11 @@ const TopicPage = () => {
     return (stats && stats.nickname) ? (stats.settings?.signature || '') : (post.author_signature || '');
   };
 
-  const FIFTEEN_MINS_MS = 15 * 60 * 1000;
   const isAuthorOnline = (post) => {
+    if (!post?.author_id) return false;
     // Own posts: current user is always online while viewing
     if (post.author_id === user?.uid) return true;
-    const stats = authorStats[post.author_id];
-    if (!stats?.last_seen) return false;
-    const lastSeenMs = stats.last_seen?.toMillis
-      ? stats.last_seen.toMillis()
-      : (typeof stats.last_seen === 'number' ? stats.last_seen : 0);
-    return (Date.now() - lastSeenMs) < FIFTEEN_MINS_MS;
+    return isUserOnline(post.author_id);
   };
 
 
@@ -854,9 +870,21 @@ const TopicPage = () => {
     try {
       const postData = buildPostData();
       const newPostId = await createPost(postData);
+      // Client-side post count updates
+      if (user?.uid) {
+        setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
+        setAuthorStats(prev => ({
+          ...prev,
+          [user.uid]: {
+            ...(prev[user.uid] || {}),
+            post_count: ((prev[user.uid]?.post_count) || 0) + 1
+          }
+        }));
+      }
       // Mark as read immediately (server-side)
       markTopicRead(id);
       setReplyContent('');
+      refreshForumState();
 
       // Calculate where the new post will land.
       // Use the locally-known number of posts (currentPage offset + loaded posts)
@@ -1083,7 +1111,20 @@ const TopicPage = () => {
             return;
           }
         } else {
+          const delAuthorId = deletingPost.author_id;
           await deletePost(deletingPost, user.uid);
+          if (delAuthorId) {
+            if (delAuthorId === user?.uid) {
+              setProfile(prev => prev ? { ...prev, post_count: Math.max(0, (prev.post_count || 0) - 1) } : prev);
+            }
+            setAuthorStats(prev => prev[delAuthorId] ? {
+              ...prev,
+              [delAuthorId]: {
+                ...prev[delAuthorId],
+                post_count: Math.max(0, (prev[delAuthorId].post_count || 0) - 1)
+              }
+            } : prev);
+          }
           await loadPosts();
         }
       }
@@ -1179,8 +1220,21 @@ const TopicPage = () => {
     </Container>
   );
 
-  // Only show the skeleton alone if we have no topic data OR if we're on the absolute first-load of the database.
-  if (!topic || (isPageLoading && posts.length === 0)) {
+  // Show access denied page if either subscribeToTopic or loadPosts failed with permissions
+  if (accessError) {
+    return (
+      <Container className="py-5 text-center">
+        <h3 className="text-muted">{lang === 'ru' ? 'Доступ запрещён' : 'Access Denied'}</h3>
+        <p className="text-muted">{lang === 'ru' ? 'У вас нет прав для просмотра этой темы.' : 'You do not have permission to view this topic.'}</p>
+        <Button as={Link} to="/" variant="outline-primary" className="mt-3">
+          {lang === 'ru' ? 'На главную' : 'Go Home'}
+        </Button>
+      </Container>
+    );
+  }
+
+  // Full-page skeleton only when topic data hasn't loaded at all (first visit)
+  if (!topic) {
     return <TopicPageSkeleton />;
   }
 
@@ -1381,8 +1435,8 @@ const TopicPage = () => {
         </div>
 
         {/* Pinned First Post — shown on pages 2+ when topic.first_post_pinned is true */}
-        {topic.first_post_pinned && currentPage > 1 && posts.length > 0 && (() => {
-          const firstPost = posts[0];
+        {topic.first_post_pinned && currentPage > 1 && pinnedFirstPost && (() => {
+          const firstPost = pinnedFirstPost;
           return (
             <Card
               key="pinned-first-post"
@@ -1517,7 +1571,35 @@ const TopicPage = () => {
 
         {/* Posts */}
         <div className="posts-container">
-          {currentPosts.map((post, index) => (
+          {currentPosts.length === 0 && isPageLoading ? (
+            /* Inline skeleton while page posts are loading (pagination) */
+            [...Array(3)].map((_, i) => (
+              <Card key={`skel-${i}`} className="mb-4 post-card shadow-sm border-0 overflow-hidden skeleton-fade-in">
+                <Row className="g-0">
+                  <Col md={3} lg={2} className="author-sidebar p-3 d-none d-md-block text-center border-end" style={{ minHeight: '200px' }}>
+                    <Skeleton variant="avatar" width={80} height={80} className="mb-3 mx-auto rounded-circle" />
+                    <Skeleton width="70%" height="1.2rem" className="mb-2 mx-auto" />
+                    <Skeleton width="50%" height="0.8rem" className="mx-auto" />
+                  </Col>
+                  <Col md={9} lg={10} className="p-4">
+                    <div className="d-flex justify-content-between mb-4">
+                      <Skeleton width="25%" height="1rem" />
+                      <Skeleton width="40px" height="1rem" />
+                    </div>
+                    <div>
+                      <Skeleton width="100%" height="1rem" className="mb-2" />
+                      <Skeleton width="100%" height="1rem" className="mb-2" />
+                      <Skeleton width="85%" height="1rem" className="mb-2" />
+                      <Skeleton width="40%" height="1rem" />
+                    </div>
+                    <div className="mt-5 pt-3 border-top">
+                      <Skeleton width="150px" height="1.5rem" />
+                    </div>
+                  </Col>
+                </Row>
+              </Card>
+            ))
+          ) : currentPosts.map((post, index) => (
             <Card key={post.id} id={`post-${post.id}`} className="mb-4 shadow-sm border-0 post-card">
               <Card.Body className="p-0">
                 <div className="d-flex flex-column flex-md-row flex-md-nowrap">
