@@ -49,8 +49,8 @@ export const useAuth = () => useContext(AuthContext);
 
 // How long without any activity before we stop updating last_seen (15 min)
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
-// How often we check & potentially push last_seen (2 min)
-const TICK_MS = 2 * 60 * 1000;
+// How often we check & potentially push last_seen (5 min)
+const TICK_MS = 5 * 60 * 1000;
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -92,8 +92,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const pushLastSeen = useCallback((uid) => {
-    // Не отправляем пинг, если пользователь прямо сейчас выходит из аккаунта
-    if (!uid || loggingOutRef.current) return;
+    // Не отправляем пинг, если пользователь выходит или вкладка в фоновом режиме
+    if (!uid || loggingOutRef.current || document.hidden) return;
 
     const now = Timestamp.now();
     // Обновляем присутствие в user_presence и last_seen в профиле пользователя
@@ -646,13 +646,8 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // Periodic quiet refresh of categories & latest topics (every 60s)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refreshForumState();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [refreshForumState]);
+  // refreshForumState вызывается только при необходимости (создание тем/постов или переход)
+  // Удалена периодическая фоновая подгрузка 50 тем каждые 60с, создававшая десятки тысяч чтений в час
 
   useEffect(() => {
     if (loading || !user) return;
@@ -792,12 +787,12 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     // Единственный источник данных об онлайн-пользователях — периодический опрос.
-    // ForumStats читает activeUsers из контекста, TopicPage использует activeUserIds.
-    // Нет дублирующих подписок — нет лишних чтений Firestore.
+    // Не выполняем запросы, если вкладка работает в фоновом режиме (document.hidden).
     let isMounted = true;
     let currentUnsub = null;
 
     const refresh = () => {
+      if (document.hidden) return;
       if (currentUnsub) currentUnsub();
       currentUnsub = refreshActiveUsers();
     };
@@ -805,10 +800,21 @@ export const AuthProvider = ({ children }) => {
     refresh();
     const interval = setInterval(refresh, TICK_MS);
 
+    // При возвращении на вкладку мгновенно обновляем онлайн и статичные данные
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        refresh();
+        if (user?.uid) pushLastSeen(user.uid);
+        refreshForumState();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       isMounted = false;
       if (currentUnsub) currentUnsub();
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [refreshActiveUsers]);
 
