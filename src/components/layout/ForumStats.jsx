@@ -5,7 +5,6 @@ import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-reac
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 import { 
-  subscribeToActiveUsers, 
   subscribeToActiveGuests, 
   fetchDailyActiveUsers 
 } from '../../api/auth-resources';
@@ -15,8 +14,8 @@ import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 const ForumStats = () => {
   const { t } = useI18n();
-  const { user, categories } = useAuth();
-  const [activeUsersRaw, setActiveUsersRaw] = useState([]);
+  const { user, categories, activeUsers } = useAuth();
+
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
@@ -24,11 +23,10 @@ const ForumStats = () => {
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   
   useEffect(() => {
-    // 1. Онлайн пользователи и гости
-    const unsubActiveUsers = subscribeToActiveUsers(setActiveUsersRaw);
+    // Гости онлайн (локально — только ForumStats их отображает)
     const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
 
-    // 2. Периодическая загрузка (суточные юзеры + общий список всех участников)
+    // Периодическая загрузка (суточные юзеры + общий список всех участников)
     const loadPeriodicStats = async () => {
       try {
         const daily = await fetchDailyActiveUsers();
@@ -43,21 +41,7 @@ const ForumStats = () => {
 
     loadPeriodicStats();
 
-    // 3. Быстрое удаление выходящего пользователя из стейта без запросов в базу
-    const handlePresenceUpdated = (e) => {
-      const removedOnlineUid = e.detail?.removedOnlineUid;
-      if (removedOnlineUid) {
-        // Убираем ТОЛЬКО из онлайна сейчас
-        setActiveUsersRaw(prev => prev.filter(u => u.id !== removedOnlineUid));
-        // dailyActiveUsers НЕ трогаем — пользователь заходил сегодня!
-      } else {
-        subscribeToActiveUsers(setActiveUsersRaw);
-      }
-    };
-
-    window.addEventListener('presence_updated', handlePresenceUpdated);
-
-    // Интервал обновления статичных счетчиков (раз в 5 минут)
+    // Интервал обновления статичных счётчиков (раз в 5 минут)
     const refreshInterval = setInterval(loadPeriodicStats, 5 * 60 * 1000);
     
     // Таймер для скользящего окна отсечения гостей (раз в 30 секунд)
@@ -66,13 +50,12 @@ const ForumStats = () => {
     }, 30000);
     
     return () => {
-      unsubActiveUsers();
       unsubGuests();
       clearInterval(timer);
       clearInterval(refreshInterval);
-      window.removeEventListener('presence_updated', handlePresenceUpdated);
     };
   }, []);
+
 
   // Онлайн пользователи и гости
   const { onlineUsers, activeGuestsCount } = useMemo(() => {
@@ -87,10 +70,10 @@ const ForumStats = () => {
     });
 
     return {
-      onlineUsers: activeUsersRaw,
+      onlineUsers: activeUsers,
       activeGuestsCount: filteredGuests.length
     };
-  }, [activeUsersRaw, activeGuestsRaw, currentTime, user]);
+  }, [activeUsers, activeGuestsRaw, currentTime, user]);
 
   const totalTopics = categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
   const totalPosts = categories.reduce((sum, cat) => sum + (cat.posts_count || 0), 0);

@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -35,7 +35,7 @@ import {
   recordTopicVisit as apiRecordTopicVisit,
   subscribeToLatestTopics,
   fetchLatestTopics,
-  subscribeToActiveUserIds
+  subscribeToActiveUsers
 } from '../api/auth-resources';
 import { subscribeToCategories, fetchSecuredCategories } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
@@ -66,7 +66,9 @@ export const AuthProvider = ({ children }) => {
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState([]);
   const [authError, setAuthError] = useState(null);
-  const [activeUserIds, setActiveUserIds] = useState(new Set());
+  const [activeUsers, setActiveUsers] = useState([]);
+  // Производный Set UIDs — пересчитывается только при изменении списка
+  const activeUserIds = useMemo(() => new Set(activeUsers.map(u => u.id)), [activeUsers]);
 
   // Ref holding the timestamp of the last recorded activity
   const lastActivityRef = useRef(null);
@@ -87,7 +89,12 @@ export const AuthProvider = ({ children }) => {
     // Не отправляем пинг, если пользователь прямо сейчас выходит из аккаунта
     if (!uid || loggingOutRef.current) return;
 
-    setDoc(doc(db, 'user_presence', uid), { last_seen: Timestamp.now() }, { merge: true })
+    const now = Timestamp.now();
+    // Обновляем присутствие в user_presence и last_seen в профиле пользователя
+    Promise.all([
+      setDoc(doc(db, 'user_presence', uid), { last_seen: now }, { merge: true }),
+      setDoc(doc(db, 'users', uid), { last_seen: now }, { merge: true })
+    ])
       .then(() => {
         lastPushTimeRef.current = Date.now();
       })
@@ -212,7 +219,8 @@ export const AuthProvider = ({ children }) => {
           await deleteDoc(doc(db, 'user_presence', uid));
           console.log('[logout] Успешно удалена запись присутствия для:', uid);
           
-          window.dispatchEvent(new CustomEvent('presence_updated', { detail: { removedUid: uid } }));
+          // Убираем напрямую из стейта — без лишнего DOM-события
+          setActiveUsers(prev => prev.filter(u => u.id !== uid));
         } catch (e) {
           console.warn('[logout presence cleanup error]', e);
         }
@@ -764,8 +772,27 @@ export const AuthProvider = ({ children }) => {
   }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout, authError]);
 
   useEffect(() => {
-    const unsub = subscribeToActiveUserIds(setActiveUserIds);
-    return () => unsub();
+    // Единственный источник данных об онлайн-пользователях — периодический опрос.
+    // ForumStats читает activeUsers из контекста, TopicPage использует activeUserIds.
+    // Нет дублирующих подписок — нет лишних чтений Firestore.
+    let isMounted = true;
+    let currentUnsub = null;
+
+    const refresh = () => {
+      if (currentUnsub) currentUnsub();
+      currentUnsub = subscribeToActiveUsers((users) => {
+        if (isMounted) setActiveUsers(users);
+      });
+    };
+
+    refresh();
+    const interval = setInterval(refresh, TICK_MS);
+
+    return () => {
+      isMounted = false;
+      if (currentUnsub) currentUnsub();
+      clearInterval(interval);
+    };
   }, []);
 
   const isUserOnline = useCallback((uid) => {
@@ -804,6 +831,7 @@ export const AuthProvider = ({ children }) => {
     refreshForumState,
     hasPermission,
     roles,
+    activeUsers,
     activeUserIds,
     isUserOnline,
     PERMISSIONS,

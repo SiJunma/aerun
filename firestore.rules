@@ -104,7 +104,7 @@ service cloud.firestore {
       allow update: if (isAdmin() && (getUser().data.get('role_id', 'player') == 'root'
         || (resource.data.get('role_id', 'player') != 'root' && request.resource.data.get('role_id', 'player') != 'root')))
         || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_id', 'post_count', 'reputation', 'created_at', 'previous_role_id', 'admin_message']))
-        || (isActive() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'last_selected_character_id']));
+        || (isSignedIn() && request.auth.uid == userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'last_selected_character_id']));
         
       allow delete: if isAdmin(); // Added to allow rejecting pending users
     }
