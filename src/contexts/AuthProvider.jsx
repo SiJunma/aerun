@@ -85,6 +85,12 @@ export const AuthProvider = ({ children }) => {
   const rolesUnsubRef = useRef(null);
   const catsUnsubRef = useRef(null);
 
+  const refreshActiveUsers = useCallback(() => {
+    return subscribeToActiveUsers((users) => {
+      setActiveUsers(users);
+    });
+  }, []);
+
   const pushLastSeen = useCallback((uid) => {
     // Не отправляем пинг, если пользователь прямо сейчас выходит из аккаунта
     if (!uid || loggingOutRef.current) return;
@@ -97,13 +103,14 @@ export const AuthProvider = ({ children }) => {
     ])
       .then(() => {
         lastPushTimeRef.current = Date.now();
+        refreshActiveUsers();
       })
       .catch((e) => {
         if (e.code !== 'permission-denied') {
           console.warn('[last_seen update]', e);
         }
       });
-  }, []);
+  }, [refreshActiveUsers]);
 
   const getOrCreateGuestId = useCallback(() => {
     let gid = localStorage.getItem('guest_id');
@@ -772,6 +779,18 @@ export const AuthProvider = ({ children }) => {
   }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout, authError]);
 
   useEffect(() => {
+    // Автоматическое добавление авторизованного пользователя в онлайн-список при загрузке его профиля
+    if (profile && profile.id && profile.role_id !== 'banned') {
+      setActiveUsers(prev => {
+        if (prev.some(u => u.id === profile.id)) return prev;
+        const updated = [...prev, profile];
+        updated.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
+        return updated;
+      });
+    }
+  }, [profile]);
+
+  useEffect(() => {
     // Единственный источник данных об онлайн-пользователях — периодический опрос.
     // ForumStats читает activeUsers из контекста, TopicPage использует activeUserIds.
     // Нет дублирующих подписок — нет лишних чтений Firestore.
@@ -780,9 +799,7 @@ export const AuthProvider = ({ children }) => {
 
     const refresh = () => {
       if (currentUnsub) currentUnsub();
-      currentUnsub = subscribeToActiveUsers((users) => {
-        if (isMounted) setActiveUsers(users);
-      });
+      currentUnsub = refreshActiveUsers();
     };
 
     refresh();
@@ -793,7 +810,7 @@ export const AuthProvider = ({ children }) => {
       if (currentUnsub) currentUnsub();
       clearInterval(interval);
     };
-  }, []);
+  }, [refreshActiveUsers]);
 
   const isUserOnline = useCallback((uid) => {
     if (!uid) return false;
