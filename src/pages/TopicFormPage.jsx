@@ -120,7 +120,8 @@ const TopicFormPage = () => {
         author_role_id: profile?.role_id || 'player',
         is_character: !!selectedChar,
         author_character_id: selectedCharacterId || null,
-        first_post_pinned: pinFirstPost
+        first_post_pinned: pinFirstPost,
+        is_pinned: false
       };
 
       const firstPostData = {
