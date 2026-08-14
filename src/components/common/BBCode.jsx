@@ -123,7 +123,7 @@ const safeHtmlToReact = (htmlStr, index) => {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlStr, 'text/html');
-    
+
     const domNodeToReact = (domNode, key) => {
       // Text Node
       if (domNode.nodeType === 3) {
@@ -135,13 +135,13 @@ const safeHtmlToReact = (htmlStr, index) => {
         if (tagName === 'script' || tagName === 'noscript') {
           return null;
         }
-        
+
         const attribs = { key };
         for (let i = 0; i < domNode.attributes.length; i++) {
           const attr = domNode.attributes[i];
           const attrName = attr.name.toLowerCase();
           const attrValue = attr.value;
-          
+
           if (attrName.startsWith('on')) {
             continue;
           }
@@ -151,32 +151,32 @@ const safeHtmlToReact = (htmlStr, index) => {
               continue;
             }
           }
-          
+
           let reactAttrName = attrName;
           if (attrName === 'class') reactAttrName = 'className';
           else if (attrName === 'for') reactAttrName = 'htmlFor';
           else if (attrName === 'contenteditable') reactAttrName = 'contentEditable';
-          
+
           if (attrName === 'style') {
             attribs.style = parseStyleString(attrValue);
             continue;
           }
-          
+
           attribs[reactAttrName] = attrValue;
         }
-        
+
         const childNodes = Array.from(domNode.childNodes);
         const reactChildren = childNodes.map((child, i) => domNodeToReact(child, `${key}-${i}`)).filter(Boolean);
-        
+
         if (tagName === 'style') {
           return <style key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
         }
-        
+
         return React.createElement(tagName, attribs, ...reactChildren);
       }
       return null;
     };
-    
+
     const bodyChildren = Array.from(doc.body.childNodes);
     const elements = bodyChildren.map((child, i) => domNodeToReact(child, `${index}-${i}`)).filter(Boolean);
     return <React.Fragment key={index}>{elements}</React.Fragment>;
@@ -191,12 +191,12 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
   const { t, lang } = useI18n();
   if (typeof children !== 'string') return children;
-  
+
   // 0. Preprocess text to wrap smile shortcodes into [smile] tags
   // We use a single regex to avoid overlapping matches and multi-pass issues
   const sortedCodes = Object.keys(ALL_SMILES_MAP).sort((a, b) => b.length - a.length);
   const smileRegex = new RegExp(sortedCodes.map(code => code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
-  
+
   const textWithSmiles = children.replace(smileRegex, (match, offset, fullText) => {
     // Check if it's already wrapped in [smile] tags (user manually typed it)
     const before = fullText.substring(0, offset);
@@ -415,7 +415,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
         if (rawAuthor.startsWith('#p')) {
           const parts = rawAuthor.split(',');
           postId = parts[0].substring(2);
-          
+
           // Check for topic ID (t456 format)
           if (parts[1] && parts[1].startsWith('t')) {
             topicId = parts[1].substring(1);
@@ -430,7 +430,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
             {(authorName || postId) && (
               <div className="bbcode-quote-header fw-bold small mb-1 pb-2 border-bottom d-flex align-items-center" style={{ color: 'var(--primary-color)', lineHeight: '1.2' }}>
                 {postId ? (
-                    <a
+                  <a
                     href={topicId ? `/topic/${topicId}?post=${postId}` : `?post=${postId}`}
                     className="text-decoration-none d-flex align-items-center gap-1"
                     style={{ color: 'inherit', userSelect: 'text', cursor: 'pointer' }}
@@ -487,12 +487,10 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{lang === 'ru' ? 'GIF-изображение' : 'GIF Image'}: {imgUrl}]</a>;
         }
 
-        const imgStyle = { maxHeight: '500px' };
+        const imgStyle = {};
         if (params.width) {
           imgStyle.maxWidth = params.width;
-          if (params.width.includes('%')) {
-             imgStyle.width = '100%';
-          }
+          imgStyle.width = '100%';
         }
 
         return <img
@@ -647,7 +645,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       }
       case 'hide_secured': {
         const threshold = params.default || 'hidden';
-        
+
         let hint = t('forum.hide_moderator_only');
         if (threshold.startsWith('@')) {
           const nickText = params.nick ? `: ${params.nick}` : '';
@@ -657,9 +655,9 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           const userPosts = profile?.post_count || profile?.postCount || user?.post_count || user?.postCount || 0;
           if (!isNaN(thresholdNum)) {
             const remainingPosts = thresholdNum - userPosts;
-            hint = remainingPosts > 0 
-                    ? t('forum.hide_posts_remaining', { n: remainingPosts }) 
-                    : t('forum.hide_posts_needed', { n: thresholdNum });
+            hint = remainingPosts > 0
+              ? t('forum.hide_posts_remaining', { n: remainingPosts })
+              : t('forum.hide_posts_needed', { n: thresholdNum });
           }
         }
 
@@ -708,7 +706,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           return (
             <div key={index} className="bbcode-hide-container">
               <div className="bbcode-hide-header">
-                <EyeOff size={14} /> {t('forum.hidden_content')} 
+                <EyeOff size={14} /> {t('forum.hidden_content')}
                 {isVisible && user && user.uid !== authorId && (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) && <span className="opacity-50 ms-1">(Admin View)</span>}
                 {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({lang === 'ru' ? 'Адресно' : 'Addressed'}{params.nick ? `: ${params.nick}` : ''})</span>}
               </div>
@@ -722,13 +720,13 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
           const remainingPosts = thresholdNum - userPosts;
           let hint = t('forum.hide_moderator_only');
           if (threshold.startsWith('@')) {
-             const nickText = params.nick ? `: ${params.nick}` : '';
-             hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
+            const nickText = params.nick ? `: ${params.nick}` : '';
+            hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
           }
           else if (threshold !== 'hidden') {
-             hint = remainingPosts > 0 
-                    ? t('forum.hide_posts_remaining', { n: remainingPosts }) 
-                    : t('forum.hide_posts_needed', { n: thresholdNum });
+            hint = remainingPosts > 0
+              ? t('forum.hide_posts_remaining', { n: remainingPosts })
+              : t('forum.hide_posts_needed', { n: thresholdNum });
           }
 
           return (
@@ -756,7 +754,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
             alt={code}
             title={code}
             className="bbcode-smile d-inline-block"
-            style={{ 
+            style={{
               height: 'auto',
               width: 'auto',
               maxWidth: 'none',
