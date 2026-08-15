@@ -37,7 +37,7 @@ import {
   fetchLatestTopics,
   subscribeToActiveUsers
 } from '../api/auth-resources';
-import { subscribeToCategories, fetchSecuredCategories, fetchSecuredMainPageData } from '../api/categories';
+import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -533,8 +533,6 @@ export const AuthProvider = ({ children }) => {
     });
 
     rolesUnsubRef.current = rolesUnsub;
-    let catsUnsub = subscribeToCategories(setCategories);
-    catsUnsubRef.current = catsUnsub;
 
     return () => {
       unsubGlobalSettings();
@@ -543,7 +541,6 @@ export const AuthProvider = ({ children }) => {
       if (readMapUnsubRef.current) readMapUnsubRef.current();
       if (latestTopicsUnsubRef.current) latestTopicsUnsubRef.current();
       if (rolesUnsubRef.current) rolesUnsubRef.current();
-      if (catsUnsubRef.current) catsUnsubRef.current();
     };
   }, []);
 

@@ -184,6 +184,26 @@ const TopicPage = () => {
         }
         setPosts(data);
         setPinnedFirstPost(pinnedPost || null);
+        setAuthorStats(prev => {
+          const next = { ...prev };
+          data.forEach(p => {
+            if (p.author_id) {
+              const serverPostCount = p.author_posts_count ?? 0;
+              const cachedPostCount = next[p.author_id]?.post_count ?? 0;
+              // For the current user: server may return stale post_count because
+              // onPostCreated trigger hasn't run yet — keep the higher (optimistic) value.
+              const postCount = p.author_id === user?.uid
+                ? Math.max(serverPostCount, cachedPostCount)
+                : serverPostCount || cachedPostCount;
+              next[p.author_id] = {
+                ...(next[p.author_id] || {}),
+                post_count: postCount,
+                reputation: p.author_reputation ?? next[p.author_id]?.reputation ?? 0
+              };
+            }
+          });
+          return next;
+        });
       }
       return data;
     } catch (err) {
@@ -376,26 +396,8 @@ const TopicPage = () => {
     }
   }, [replyContent, DRAFT_KEY]);
 
-  // Subscribe to author stats for each unique author in posts
-  useEffect(() => {
-  if (posts.length === 0) return;
-    const uniqueAuthorIds = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
-
-    uniqueAuthorIds.forEach(async (uid) => {
-      // Если профиль автора уже есть в стейте, не запрашиваем повторно
-      if (authorStats[uid] !== undefined) return;
-
-      try {
-        const userSnap = await getDoc(doc(db, 'users', uid));
-        setAuthorStats(prev => ({
-          ...prev,
-          [uid]: userSnap.exists() ? { id: userSnap.id, ...userSnap.data() } : null
-        }));
-      } catch (err) {
-        console.error('[fetchUser error]', err);
-      }
-    });
-  }, [posts]);
+  // authorStats are populated from getSecuredPosts server hydration (author_posts_count, author_reputation)
+  // No extra Firestore reads needed per author
 
   // Subscribe to character masks
   useEffect(() => {
@@ -1679,22 +1681,14 @@ const TopicPage = () => {
                       {/* 4. Posts Count */}
                       {post.author_id && (
                         <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
-                          {t('profile.posts_count')}: {authorStats[post.author_id] !== undefined ? (
-                            <strong>{authorStats[post.author_id]?.post_count || 0}</strong>
-                          ) : (
-                            <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
-                          )}
+                          {t('profile.posts_count')}: <strong>{authorStats[post.author_id]?.post_count ?? post.author_posts_count ?? 0}</strong>
                         </div>
                       )}
 
                       {/* 5. Reputation */}
                       {post.author_id && (
                         <div className="text-muted" style={{ fontSize: '0.775rem' }}>
-                          {t('profile.reputation')}: {authorStats[post.author_id] !== undefined ? (
-                            <strong>{authorStats[post.author_id]?.reputation || 0}</strong>
-                          ) : (
-                            <span className="skeleton ms-1 d-inline-block" style={{ width: '25px', height: '14px' }}></span>
-                          )}
+                          {t('profile.reputation')}: <strong>{authorStats[post.author_id]?.reputation ?? post.author_reputation ?? 0}</strong>
                         </div>
                       )}
 
@@ -1760,20 +1754,12 @@ const TopicPage = () => {
                         <div className="d-flex flex-column align-items-end gap-1">
                           {post.author_id && (
                             <div className="text-muted author-res-stat">
-                              {lang === 'ru' ? 'Постов' : 'Posts'}: {authorStats[post.author_id] !== undefined ? (
-                                <strong className="ms-1">{authorStats[post.author_id]?.post_count || 0}</strong>
-                              ) : (
-                                <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
-                              )}
+                              {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{authorStats[post.author_id]?.post_count ?? post.author_posts_count ?? 0}</strong>
                             </div>
                           )}
                           {post.author_id && (
                             <div className="text-muted author-res-stat">
-                              {lang === 'ru' ? 'Реп' : 'Rep'}: {authorStats[post.author_id] !== undefined ? (
-                                <strong className="ms-1">{authorStats[post.author_id]?.reputation || 0}</strong>
-                              ) : (
-                                <span className="skeleton ms-1 d-inline-block" style={{ width: '20px', height: '12px' }}></span>
-                              )}
+                              {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{authorStats[post.author_id]?.reputation ?? post.author_reputation ?? 0}</strong>
                             </div>
                           )}
                           <div className="author-res-info-lite text-end">
