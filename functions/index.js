@@ -1454,7 +1454,19 @@ exports.getSecuredPosts = onCall(
       throw new HttpsError('permission-denied', 'You do not have permission to view posts in this category.');
     }
 
-    const startIndex = (page - 1) * pageSize;
+    let resolvedPage = 1;
+    if (page === 'last' || page === 'latest') {
+      const countSnap = await db.collection('posts')
+        .where('topic_id', '==', topicId)
+        .count()
+        .get();
+      const totalPosts = countSnap.data().count;
+      resolvedPage = Math.max(1, Math.ceil(totalPosts / pageSize));
+    } else {
+      resolvedPage = parseInt(page, 10) || 1;
+    }
+
+    const startIndex = (resolvedPage - 1) * pageSize;
     const postsSnap = await db.collection('posts')
       .where('topic_id', '==', topicId)
       .orderBy('created_at', 'asc')
@@ -1556,7 +1568,7 @@ exports.getSecuredPosts = onCall(
     // Pinned first post: if the topic has first_post_pinned and we're on page 2+,
     // fetch the actual first post of the topic and return it alongside the page posts.
     let pinnedPost = null;
-    if (topicData.first_post_pinned && page > 1) {
+    if (topicData.first_post_pinned && resolvedPage > 1) {
       const firstPostSnap = await db.collection('posts')
         .where('topic_id', '==', topicId)
         .orderBy('created_at', 'asc')
@@ -1577,7 +1589,7 @@ exports.getSecuredPosts = onCall(
       await hydrateAuthorProfiles(db, [pinnedPost]);
     }
 
-    return { posts, pinnedPost };
+    return { posts, pinnedPost, page: resolvedPage };
   }
 );
 

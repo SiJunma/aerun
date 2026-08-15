@@ -189,7 +189,7 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20) => {
     };
     const posts = (result.data.posts || []).map(normalizePost);
     const pinnedPost = result.data.pinnedPost ? normalizePost(result.data.pinnedPost) : null;
-    return { posts, pinnedPost };
+    return { posts, pinnedPost, page: result.data.page || page };
   } catch (err) {
     console.error('[fetchSecuredPosts]', err);
     throw err;

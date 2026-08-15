@@ -116,23 +116,52 @@ const TopicPage = () => {
   const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
 
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+
+  const topicRef = useRef(topic);
+  topicRef.current = topic;
 
   const isFetchingPostsRef = useRef(false);
-  const nextFetchNeededRef = useRef(false);
   const prevTopicStatsRef = useRef(null);
 
   const [accessError, setAccessError] = React.useState(null);
 
-  const loadPosts = React.useCallback(async () => {
-    if (isFetchingPostsRef.current) {
-      nextFetchNeededRef.current = true;
+  const loadPosts = React.useCallback(async (overridePage) => {
+    let pageToFetch = overridePage !== undefined ? overridePage : currentPageRef.current;
+    if (overridePage === undefined && goLast && !searchParams.get('page')) {
+      pageToFetch = 'last';
+    }
+
+    if (isFetchingPostsRef.current === pageToFetch) {
       return [];
     }
-    isFetchingPostsRef.current = true;
+    isFetchingPostsRef.current = pageToFetch;
     try {
-      const { posts: data, pinnedPost } = await fetchSecuredPosts(id, currentPage, ITEMS_PER_PAGE);
-      setPosts(data);
-      setPinnedFirstPost(pinnedPost || null);
+      const { posts: data, pinnedPost, page: resolvedPage } = await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE);
+
+      if (resolvedPage && pageToFetch === 'last') {
+        jumpTargetPageRef.current = resolvedPage;
+        setSearchParams(prev => {
+          const p = new URLSearchParams(prev);
+          p.set('page', resolvedPage.toString());
+          return p;
+        }, { replace: true, preventScrollReset: true });
+      }
+
+      const activePage = resolvedPage || pageToFetch;
+      if (currentPageRef.current === activePage || pageToFetch === 'last') {
+        const curTopic = topicRef.current;
+        if (data.length === 0 && activePage > 1 && curTopic) {
+          const validMaxPage = Math.max(1, Math.ceil((curTopic.posts_count || 1) / ITEMS_PER_PAGE));
+          if (activePage > validMaxPage) {
+            setSearchParams({ page: validMaxPage }, { replace: true });
+            return [];
+          }
+        }
+        setPosts(data);
+        setPinnedFirstPost(pinnedPost || null);
+      }
       return data;
     } catch (err) {
       console.error(err);
@@ -142,13 +171,11 @@ const TopicPage = () => {
       }
       return [];
     } finally {
-      isFetchingPostsRef.current = false;
-      if (nextFetchNeededRef.current) {
-        nextFetchNeededRef.current = false;
-        loadPosts();
+      if (isFetchingPostsRef.current === pageToFetch) {
+        isFetchingPostsRef.current = false;
       }
     }
-  }, [id, currentPage, ITEMS_PER_PAGE]);
+  }, [id, ITEMS_PER_PAGE, goLast, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (topic && prevTopicStatsRef.current) {
@@ -888,26 +915,28 @@ const TopicPage = () => {
       refreshForumState();
 
       // Calculate where the new post will land.
-      // Use the locally-known number of posts (currentPage offset + loaded posts)
-      // rather than topic.posts_count which is updated asynchronously by Cloud Functions.
       const postsBeforeNew = (currentPage - 1) * ITEMS_PER_PAGE + posts.length;
       const newTotalPosts = postsBeforeNew + 1;
       const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
 
+      // Immediately update local topic state so posts_count and pagination UI update instantly
+      setTopic(prev => prev ? {
+        ...prev,
+        posts_count: Math.max(newTotalPosts, (prev.posts_count || 0) + 1),
+        last_post_at: new Date().toISOString()
+      } : prev);
+
+      if (prevTopicStatsRef.current) {
+        prevTopicStatsRef.current.posts_count = Math.max(newTotalPosts, (prevTopicStatsRef.current.posts_count || 0) + 1);
+        prevTopicStatsRef.current.last_post_at = new Date().toISOString();
+      }
+
       if (targetPage !== currentPage) {
-        // Navigate to the page where the new post appears, then scroll to it
-        setSearchParams({ page: targetPage });
-        setTimeout(() => {
-          const element = document.getElementById(`post-${newPostId}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            element.classList.add('highlight-new-post');
-            setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
-          }
-        }, 800);
+        alreadyJumpedRef.current = false;
+        setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
       } else {
         // Already on the correct page — reload posts and scroll
-        await loadPosts();
+        await loadPosts(currentPage);
         setTimeout(() => {
           const element = document.getElementById(`post-${newPostId}`);
           if (element) {
@@ -915,7 +944,7 @@ const TopicPage = () => {
             element.classList.add('highlight-new-post');
             setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
           }
-        }, 500);
+        }, 300);
       }
 
     } catch (err) {
@@ -1003,31 +1032,30 @@ const TopicPage = () => {
     recordActivity();
     try {
       await publishDraft(user.uid, id);
-      await loadPosts();
       markTopicRead(id);
       showToast(t('forum.draft_published'));
 
-      setTimeout(() => {
-        const newTotal = posts.length + 1;
-        const lastPage = Math.ceil(newTotal / ITEMS_PER_PAGE);
+      const postsBeforeNew = (currentPage - 1) * ITEMS_PER_PAGE + posts.length;
+      const newTotalPosts = postsBeforeNew + 1;
+      const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
 
-        if (lastPage !== currentPage) {
-          setSearchParams({ page: lastPage });
-        }
+      setTopic(prev => prev ? {
+        ...prev,
+        posts_count: Math.max(newTotalPosts, (prev.posts_count || 0) + 1),
+        last_post_at: new Date().toISOString()
+      } : prev);
 
-        setTimeout(() => {
-          const postsContainer = document.querySelector('.posts-container');
-          if (postsContainer) {
-            const elements = postsContainer.querySelectorAll('.post-card');
-            if (elements.length > 0) {
-              const lastPost = elements[elements.length - 1];
-              lastPost.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              lastPost.classList.add('highlight-new-post');
-              setTimeout(() => lastPost.classList.remove('highlight-new-post'), 1000);
-            }
-          }
-        }, 500);
-      }, 400);
+      if (prevTopicStatsRef.current) {
+        prevTopicStatsRef.current.posts_count = Math.max(newTotalPosts, (prevTopicStatsRef.current.posts_count || 0) + 1);
+        prevTopicStatsRef.current.last_post_at = new Date().toISOString();
+      }
+
+      if (targetPage !== currentPage) {
+        alreadyJumpedRef.current = false;
+        setSearchParams({ page: targetPage, goLast: '1' }, { preventScrollReset: true });
+      } else {
+        await loadPosts(currentPage);
+      }
     } catch (err) {
       console.error(err);
       showToast(err.message || t('forum.draft_publish_error'), 'danger');
@@ -1756,21 +1784,13 @@ const TopicPage = () => {
                     <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
                       <small className="text-muted">
                         <a
-                          href={`#post-${post.id}`}
+                          href={`/topic/${id}?post=${post.id}`}
                           className="text-decoration-none text-muted hover-link"
                           onClick={(e) => {
                             e.preventDefault();
-                            const params = new URLSearchParams(searchParams);
-                            params.delete('goLast');
-                            const newSearch = params.toString() ? `?${params.toString()}` : '';
-                            const url = `${window.location.origin}${window.location.pathname}${newSearch}#post-${post.id}`;
+                            const url = `${window.location.origin}/topic/${id}?post=${post.id}`;
                             navigator.clipboard.writeText(url);
                             showToast(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
-                            
-                            navigate({
-                              search: newSearch,
-                              hash: `#post-${post.id}`
-                            }, { replace: true, preventScrollReset: true });
                           }}
                         >
                           <Timestamp date={post.created_at} className="text-muted" />

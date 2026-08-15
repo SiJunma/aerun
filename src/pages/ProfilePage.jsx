@@ -896,7 +896,7 @@ const ProfilePage = () => {
                                   <Badge
                                     bg={log.value > 0 ? 'success' : 'danger'}
                                     as={(log.topic_id && isAllowed) ? Link : 'span'}
-                                    to={(log.topic_id && isAllowed) ? `/topic/${log.topic_id}${log.post_id ? `#post-${log.post_id}` : ''}` : undefined}
+                                    to={(log.topic_id && isAllowed) ? `/topic/${log.topic_id}${log.post_id ? `?post=${log.post_id}` : ''}` : undefined}
                                     className={log.topic_id ? 'text-decoration-none d-inline-flex align-items-center gap-1' : 'd-inline-flex align-items-center gap-1'}
                                     style={{ cursor: (log.topic_id && isAllowed) ? 'pointer' : 'default', padding: '0.4em 0.6em' }}
                                   >
