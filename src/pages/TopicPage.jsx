@@ -809,6 +809,7 @@ const TopicPage = () => {
     setTogglingSub(true);
     try {
       const active = await toggleSubscription(id, user.uid);
+      setIsSubscribed(active);
       showToast(active ? t('notifications.followed_toast') : t('notifications.unfollowed_toast'));
     } catch (err) {
       showToast(err.message, 'danger');

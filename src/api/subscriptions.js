@@ -7,7 +7,8 @@ import {
   query,
   where,
   getDocs,
-  serverTimestamp
+  serverTimestamp,
+  documentId
 } from 'firebase/firestore';
 
 /**
@@ -70,4 +71,39 @@ export const getTopicSubscribers = async (topicId) => {
   const q = query(collection(db, 'topic_subscriptions'), where('topic_id', '==', topicId));
   const snap = await getDocs(q);
   return snap.docs.map(d => d.data().user_id);
+};
+
+export const fetchUserSubscribedTopics = async (userId) => {
+  if (!userId) return [];
+  const q = query(
+    collection(db, 'topic_subscriptions'),
+    where('user_id', '==', userId)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return [];
+
+  const topicIds = [...new Set(snap.docs.map(d => d.data().topic_id).filter(Boolean))];
+  if (topicIds.length === 0) return [];
+
+  const topicsMap = {};
+  for (let i = 0; i < topicIds.length; i += 30) {
+    const chunk = topicIds.slice(i, i + 30);
+    const tQuery = query(
+      collection(db, 'topics'),
+      where(documentId(), 'in', chunk)
+    );
+    const tSnap = await getDocs(tQuery);
+    tSnap.forEach(doc => {
+      topicsMap[doc.id] = { id: doc.id, ...doc.data() };
+    });
+  }
+
+  const result = topicIds.map(id => topicsMap[id]).filter(Boolean);
+  result.sort((a, b) => {
+    const aTime = a.last_post_at?.toMillis?.() || 0;
+    const bTime = b.last_post_at?.toMillis?.() || 0;
+    return bTime - aTime;
+  });
+
+  return result;
 };

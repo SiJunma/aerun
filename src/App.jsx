@@ -17,6 +17,7 @@ import MaintenancePage from './pages/MaintenancePage';
 import NotificationsPage from './pages/NotificationsPage';
 import ActiveTopicsPage from './pages/ActiveTopicsPage';
 import NewRepliesPage from './pages/NewRepliesPage';
+import SubscriptionsPage from './pages/SubscriptionsPage';
 import MessagesPage from './pages/MessagesPage';
 import { useAuth } from './contexts/AuthProvider';
 import GlobalModals from './components/common/GlobalModals';
@@ -73,6 +74,7 @@ const App = () => {
         <Route path="/messages/:uid" element={<ProtectedRoute requireDm><Layout><MessagesPage /></Layout></ProtectedRoute>} />
         <Route path="/active-topics" element={<ProtectedRoute allowGuest><Layout><ActiveTopicsPage /></Layout></ProtectedRoute>} />
         <Route path="/new-replies" element={<ProtectedRoute><Layout><NewRepliesPage /></Layout></ProtectedRoute>} />
+        <Route path="/subscriptions" element={<ProtectedRoute><Layout><SubscriptionsPage /></Layout></ProtectedRoute>} />
 
         {/* Posting-required Routes (spectators blocked) */}
         <Route path="/category/:categoryId/new-topic" element={<ProtectedRoute requirePosting><Layout><TopicFormPage /></Layout></ProtectedRoute>} />

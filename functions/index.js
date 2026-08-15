@@ -265,6 +265,105 @@ function serializeTopic(doc) {
 }
 
 /**
+ * Hydrates author & character profile metadata dynamically for a list of posts or topics.
+ * Fetches current nicknames, avatars, statuses, signatures, and roles from Firestore in a single batch read.
+ */
+async function hydrateAuthorProfiles(db, items) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+
+  try {
+    const uids = new Set();
+    const charRequests = [];
+
+    items.forEach(item => {
+      if (item.author_id) uids.add(item.author_id);
+      if (item.last_post_author_id) uids.add(item.last_post_author_id);
+
+      if (item.is_character && item.author_id && item.author_character_id) {
+        charRequests.push({ uid: item.author_id, charId: item.author_character_id });
+      }
+      if (item.last_post_is_character && item.last_post_author_id && item.last_post_author_character_id) {
+        charRequests.push({ uid: item.last_post_author_id, charId: item.last_post_author_character_id });
+      }
+    });
+
+    const uidArr = [...uids];
+    const userProfiles = {};
+    if (uidArr.length > 0) {
+      for (let i = 0; i < uidArr.length; i += 30) {
+        const chunk = uidArr.slice(i, i + 30);
+        const snap = await db.collection('users')
+          .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+          .get();
+        snap.forEach(d => { userProfiles[d.id] = d.data(); });
+      }
+    }
+
+    const charProfiles = {};
+    if (charRequests.length > 0) {
+      await Promise.all(charRequests.map(async ({ uid, charId }) => {
+        const key = `${uid}_${charId}`;
+        if (charProfiles[key]) return;
+        try {
+          const charSnap = await db.collection('users').doc(uid).collection('characters').doc(charId).get();
+          if (charSnap.exists) {
+            charProfiles[key] = charSnap.data();
+          }
+        } catch (err) {
+          logger.warn(`[hydrateAuthorProfiles] Error fetching character ${key}:`, err);
+        }
+      }));
+    }
+
+    items.forEach(item => {
+      if (item.author_id && userProfiles[item.author_id]) {
+        const u = userProfiles[item.author_id];
+        item.author_role_id = u.role_id || item.author_role_id;
+        item.author_status_line = u.status_line !== undefined ? u.status_line : (item.author_status_line || '');
+        item.author_signature = u.signature !== undefined ? u.signature : (item.author_signature || '');
+        item.author_posts_count = u.post_count !== undefined ? u.post_count : (item.author_posts_count || 0);
+        item.author_reputation = u.reputation !== undefined ? u.reputation : (item.author_reputation || 0);
+
+        if (!item.is_character) {
+          if (u.nickname) item.author_name = u.nickname;
+          if (u.avatar_url) item.author_avatar = u.avatar_url;
+        }
+      }
+
+      if (item.is_character && item.author_id && item.author_character_id) {
+        const key = `${item.author_id}_${item.author_character_id}`;
+        if (charProfiles[key]) {
+          const c = charProfiles[key];
+          if (c.name) item.author_name = c.name;
+          if (c.avatar_url) item.author_avatar = c.avatar_url;
+        }
+      }
+
+      if (item.last_post_author_id && userProfiles[item.last_post_author_id]) {
+        const u = userProfiles[item.last_post_author_id];
+        if (!item.last_post_is_character) {
+          if (u.nickname) item.last_post_author = u.nickname;
+          if (u.avatar_url) item.last_post_author_avatar = u.avatar_url;
+        }
+      }
+
+      if (item.last_post_is_character && item.last_post_author_id && item.last_post_author_character_id) {
+        const key = `${item.last_post_author_id}_${item.last_post_author_character_id}`;
+        if (charProfiles[key]) {
+          const c = charProfiles[key];
+          if (c.name) item.last_post_author = c.name;
+          if (c.avatar_url) item.last_post_author_avatar = c.avatar_url;
+        }
+      }
+    });
+  } catch (err) {
+    logger.error('[hydrateAuthorProfiles error]', err);
+  }
+
+  return items;
+}
+
+/**
  * getSecuredTopics (Callable)
  * Retrieves topics for a category the user has permission to view.
  */
@@ -364,6 +463,9 @@ exports.getSecuredTopics = onCall(
     topicsSnap.forEach(doc => topics.push(serializeTopic(doc)));
     const totalCount = countSnap.data().count;
 
+    await hydrateAuthorProfiles(db, pinnedTopics);
+    await hydrateAuthorProfiles(db, topics);
+
     return { pinned: pinnedTopics, topics, totalCount, hasMore: totalCount > startIndex + pageSize };
   }
 );
@@ -410,7 +512,10 @@ exports.getSecuredGlobalTopics = onCall(
       lastDoc = snap.docs[snap.docs.length - 1];
     }
 
-    return { topics: allTopics.slice(0, limitCount) };
+    const resultTopics = allTopics.slice(0, limitCount);
+    await hydrateAuthorProfiles(db, resultTopics);
+
+    return { topics: resultTopics };
   }
 );
 /**
@@ -1467,6 +1572,11 @@ exports.getSecuredPosts = onCall(
       }
     }
 
+    await hydrateAuthorProfiles(db, posts);
+    if (pinnedPost) {
+      await hydrateAuthorProfiles(db, [pinnedPost]);
+    }
+
     return { posts, pinnedPost };
   }
 );
@@ -1610,6 +1720,8 @@ exports.getUserPosts = onCall(
         visiblePosts.push(cleanPost);
       }
     });
+
+    await hydrateAuthorProfiles(db, visiblePosts);
 
     return {
       posts: visiblePosts,
