@@ -116,6 +116,9 @@ export const subscribeToUser = (uid, callback) => {
   });
 };
 
+const userProfileCache = new Map(); // uid -> { data, ts }
+const USER_PROFILE_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 // Пользователи онлайн (ОДНОКРАТНЫЙ запрос вместо onSnapshot)
 export const subscribeToActiveUsers = (callback) => {
   let isSubscribed = true;
@@ -140,12 +143,26 @@ export const subscribeToActiveUsers = (callback) => {
       }
 
       const usersList = [];
+      const now = Date.now();
+
       await Promise.all(
         activeUids.map(async (uid) => {
           try {
+            const cached = userProfileCache.get(uid);
+            if (cached && (now - cached.ts < USER_PROFILE_CACHE_TTL)) {
+              if (cached.data.role_id !== 'banned') {
+                usersList.push(cached.data);
+              }
+              return;
+            }
+
             const userSnap = await getDoc(doc(db, 'users', uid));
-            if (userSnap.exists() && userSnap.data().role_id !== 'banned') {
-              usersList.push({ id: userSnap.id, ...userSnap.data() });
+            if (userSnap.exists()) {
+              const uData = { id: userSnap.id, ...userSnap.data() };
+              userProfileCache.set(uid, { data: uData, ts: now });
+              if (uData.role_id !== 'banned') {
+                usersList.push(uData);
+              }
             }
           } catch (e) {
             console.warn('[fetchActiveUser doc error]', e);

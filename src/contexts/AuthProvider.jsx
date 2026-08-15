@@ -96,11 +96,8 @@ export const AuthProvider = ({ children }) => {
     if (!uid || loggingOutRef.current || document.hidden) return;
 
     const now = Timestamp.now();
-    // Обновляем присутствие в user_presence и last_seen в профиле пользователя
-    Promise.all([
-      setDoc(doc(db, 'user_presence', uid), { last_seen: now }, { merge: true }),
-      setDoc(doc(db, 'users', uid), { last_seen: now }, { merge: true })
-    ])
+    // Обновляем присутствие ТОЛЬКО в user_presence (без перезаписи профиля users/{uid})
+    setDoc(doc(db, 'user_presence', uid), { last_seen: now }, { merge: true })
       .then(() => {
         lastPushTimeRef.current = Date.now();
         refreshActiveUsers();

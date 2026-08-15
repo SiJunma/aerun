@@ -128,27 +128,29 @@ export const notifyUserManagers = async (type, payload) => {
 // ── Subscribe ────────────────────────────────────────────────────────────────
 
 /**
- * Subscribe to admin-broadcast notifications (recipient_uid === null), limit to 100 newest.
+ * Subscribe to admin-broadcast notifications (recipient_uid === null), limit to 50 newest.
  */
 export const subscribeToAdminNotifications = (callback) => {
   const q = query(
     collection(db, 'notifications'),
-    where('recipient_uid', '==', null)
+    where('recipient_uid', '==', null),
+    limit(50)
   );
   return onSnapshot(q, (snap) => {
     const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     notifs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
-    callback(notifs.slice(0, 100));
+    callback(notifs);
   }, (err) => console.error('[subscribeToAdminNotifications]', err));
 };
 
 /**
- * Subscribe to personal notifications for a specific user, limit to 100 newest.
+ * Subscribe to personal notifications for a specific user, limit to 50 newest.
  */
 export const subscribeToUserNotifications = (uid, callback) => {
   const q = query(
     collection(db, 'notifications'),
-    where('recipient_uid', '==', uid)
+    where('recipient_uid', '==', uid),
+    limit(50)
   );
   
   // При подписке также периодически чистим уведомления свыше 100 штук
@@ -157,7 +159,7 @@ export const subscribeToUserNotifications = (uid, callback) => {
   return onSnapshot(q, (snap) => {
     const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     notifs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
-    callback(notifs.slice(0, 100));
+    callback(notifs);
   }, (err) => console.error('[subscribeToUserNotifications]', err));
 };
 

@@ -1,23 +1,13 @@
-import React, { useState, useEffect } from 'react';
-
-// Simple in-memory cache for avatar URLs (key: userId)
-const avatarCache = new Map();
+import React from 'react';
 import { Image } from 'react-bootstrap';
-import { subscribeToUser } from '../../api/auth-resources';
-import { subscribeToCharacter } from '../../api/character';
 import { useI18n } from '../../contexts/I18nProvider';
 
+// In-memory cache for avatar URLs
+const avatarCache = new Map();
+
 /**
- * Shared component to display an author's avatar with live updates.
- * Handles both users and character masks.
- *
- * Props:
- *   userId       {string}  — The UID of the author/owner
- *   characterId  {string?} — The ID of the character mask (if any)
- *   isCharacter  {boolean} — Whether to show character avatar
- *   fallbackName {string}  — Used for ui-avatars if no image found
- *   size         {number}  — Size in pixels
- *   className    {string?} — Extra CSS classes
+ * Shared component to display an author's avatar.
+ * Uses the frozen/provided avatar directly without spawning real-time Firestore listeners.
  */
 const ForumAuthorAvatar = ({
   userId,
@@ -31,55 +21,15 @@ const ForumAuthorAvatar = ({
   isOnline = false,
 }) => {
   const { lang } = useI18n();
-  const [avatarUrl, setAvatarUrl] = useState(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
-
-    const cacheKey = isCharacter && characterId ? `char_${characterId}` : `user_${userId}`;
-
-    if (avatarCache.has(cacheKey)) {
-      setAvatarUrl(avatarCache.get(cacheKey));
-      setLoading(false);
-    } else {
-      setLoading(true);
-      let unsub;
-      
-      if (isCharacter && characterId) {
-        unsub = subscribeToCharacter(userId, characterId, (charData) => {
-          const avatar = charData?.avatar_url || null;
-          setAvatarUrl(avatar);
-          setLoading(false);
-          avatarCache.set(cacheKey, avatar);
-        });
-      } else {
-        unsub = subscribeToUser(userId, (userData) => {
-          const avatar = userData?.avatar_url || null;
-          setAvatarUrl(avatar);
-          setLoading(false);
-          avatarCache.set(cacheKey, avatar);
-        });
-      }
-      
-      return () => unsub?.();
-    }
-  }, [userId, characterId, isCharacter]);
-
-  if (loading) {
-    return (
-      <div 
-        className={`skeleton skeleton-avatar ${className}`} 
-        style={{ width: size, height: size, borderRadius: roundedCircle ? '50%' : '0.5rem' }} 
-      />
-    );
+  const cacheKey = isCharacter && characterId ? `char_${characterId}` : `user_${userId}`;
+  if (initialAvatar && cacheKey) {
+    avatarCache.set(cacheKey, initialAvatar);
   }
 
+  const cachedAvatar = avatarCache.get(cacheKey);
   const placeholder = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName || 'Guest')}&size=${size}`;
-  const finalAvatar = avatarUrl || initialAvatar || placeholder;
+  const finalAvatar = initialAvatar || cachedAvatar || placeholder;
 
   // Dot size scales with avatar: small avatars get a smaller dot
   const dotSize = size >= 80 ? 12 : size >= 48 ? 10 : 8;
@@ -116,3 +66,4 @@ const ForumAuthorAvatar = ({
 };
 
 export default ForumAuthorAvatar;
+
