@@ -14,59 +14,22 @@ import { collection, getDocs, query, orderBy, limit, getCountFromServer } from '
 
 const ForumStats = () => {
   const { t } = useI18n();
-  const { user, categories, activeUsers } = useAuth();
+  const { user, categories, activeUsers, forumStats, dailyActiveUsers: contextDailyUsers } = useAuth();
 
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
-  const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
-  const [totalUsersCount, setTotalUsersCount] = useState(0);
-  const [newestUser, setNewestUser] = useState(null);
-  
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   
   useEffect(() => {
     const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
 
-    const loadPeriodicStats = async () => {
-      // Статистику не обновляем, если вкладка в фоновом режиме
-      if (document.hidden) return;
-      try {
-        const [daily, countSnap, newestSnap] = await Promise.all([
-          fetchDailyActiveUsers(),
-          getCountFromServer(collection(db, 'users')),
-          getDocs(query(collection(db, 'users'), orderBy('created_at', 'desc'), limit(1)))
-        ]);
-
-        setDailyActiveUsers(daily);
-        setTotalUsersCount(countSnap.data().count);
-        if (!newestSnap.empty) {
-          const docSnap = newestSnap.docs[0];
-          setNewestUser({ id: docSnap.id, ...docSnap.data() });
-        }
-      } catch (err) {
-        console.error('[ForumStats] loadPeriodicStats error:', err);
-      }
-    };
-
-    loadPeriodicStats();
-
-    // Интервал обновления статичных счётчиков (раз в 10 минут)
-    const refreshInterval = setInterval(loadPeriodicStats, 10 * 60 * 1000);
-    
     // Таймер для скользящего окна отсечения гостей (раз в 30 секунд)
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 30000);
-    
-    const handleVisibility = () => {
-      if (!document.hidden) loadPeriodicStats();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       unsubGuests();
       clearInterval(timer);
-      clearInterval(refreshInterval);
-      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 
@@ -78,7 +41,7 @@ const ForumStats = () => {
     const currentGuestId = localStorage.getItem('guest_id');
     
     const filteredGuests = activeGuestsRaw.filter(g => {
-      const lastSeenMs = g.last_seen?.toMillis?.() || 0;
+      const lastSeenMs = g.last_seen?.toMillis?.() || (typeof g.last_seen === 'string' ? new Date(g.last_seen).getTime() : 0);
       if (user && g.id === currentGuestId) return false;
       return lastSeenMs >= threshold;
     });
@@ -89,9 +52,11 @@ const ForumStats = () => {
     };
   }, [activeUsers, activeGuestsRaw, currentTime, user]);
 
-  const totalTopics = categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
-  const totalPosts = categories.reduce((sum, cat) => sum + (cat.posts_count || 0), 0);
-  const totalUsers = totalUsersCount;
+  const dailyActiveUsers = contextDailyUsers || [];
+  const totalTopics = forumStats?.totalTopics ?? categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
+  const totalPosts = forumStats?.totalPosts ?? categories.reduce((sum, cat) => sum + (cat.posts_count || 0), 0);
+  const totalUsers = forumStats?.totalUsers ?? 0;
+  const newestUser = forumStats?.newestUser ?? null;
 
   return (
     <div className="forum-stats-section mt-5 mb-4">

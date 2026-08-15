@@ -167,11 +167,11 @@ export const subscribeToPosts = (topicId, callback) => {
   );
 };
 
-export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20) => {
+export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null) => {
   try {
     const functions = getFunctions();
     const getSecured = httpsCallable(functions, 'getSecuredPosts');
-    const result = await getSecured({ topicId, page, pageSize });
+    const result = await getSecured({ topicId, page, pageSize, lastVisit });
     const normalizePost = (p) => {
       const dateVal = p.created_at ? new Date(p.created_at) : null;
       return {
@@ -189,7 +189,8 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20) => {
     };
     const posts = (result.data.posts || []).map(normalizePost);
     const pinnedPost = result.data.pinnedPost ? normalizePost(result.data.pinnedPost) : null;
-    return { posts, pinnedPost, page: result.data.page || page };
+    const lastPost = result.data.lastPost ? normalizePost(result.data.lastPost) : null;
+    return { posts, pinnedPost, page: result.data.page || page, lastPost };
   } catch (err) {
     console.error('[fetchSecuredPosts]', err);
     throw err;

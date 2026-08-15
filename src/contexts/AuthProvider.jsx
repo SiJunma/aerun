@@ -37,7 +37,7 @@ import {
   fetchLatestTopics,
   subscribeToActiveUsers
 } from '../api/auth-resources';
-import { subscribeToCategories, fetchSecuredCategories } from '../api/categories';
+import { subscribeToCategories, fetchSecuredCategories, fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -62,6 +62,8 @@ export const AuthProvider = ({ children }) => {
   const [readMap, setReadMap] = useState({});
   const [latestTopics, setLatestTopics] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [forumStats, setForumStats] = useState(null);
+  const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState([]);
@@ -630,34 +632,88 @@ export const AuthProvider = ({ children }) => {
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
+  const updateLocalTopicLastPost = useCallback((topicId, categoryId, topicTitle, lastPost, postsCount) => {
+    if (!topicId || !lastPost) return;
+
+    const lastPostDateIso = lastPost.created_at?.toMillis ? new Date(lastPost.created_at.toMillis()).toISOString() : (typeof lastPost.created_at === 'string' ? lastPost.created_at : new Date().toISOString());
+
+    setLatestTopics(prevTopics => {
+      const index = prevTopics.findIndex(t => t.id === topicId);
+      const updatedTopicData = {
+        id: topicId,
+        category_id: categoryId,
+        title: topicTitle,
+        last_post_id: lastPost.id,
+        last_post_at: lastPostDateIso,
+        last_post_author_id: lastPost.author_id,
+        last_post_author: lastPost.author_name || 'User',
+        last_post_author_avatar: lastPost.author_avatar || '',
+        last_post_author_role_id: lastPost.author_role_id || 'player',
+        last_post_is_character: !!lastPost.is_character,
+        last_post_author_character_id: lastPost.author_character_id || null,
+        posts_count: postsCount
+      };
+
+      if (index !== -1) {
+        const newArr = [...prevTopics];
+        newArr[index] = { ...newArr[index], ...updatedTopicData };
+        newArr.sort((a, b) => new Date(b.last_post_at).getTime() - new Date(a.last_post_at).getTime());
+        return newArr;
+      } else {
+        const newArr = [updatedTopicData, ...prevTopics];
+        newArr.sort((a, b) => new Date(b.last_post_at).getTime() - new Date(a.last_post_at).getTime());
+        return newArr.slice(0, 50);
+      }
+    });
+
+    if (categoryId) {
+      setCategories(prevCats => {
+        return prevCats.map(cat => {
+          if (cat.id === categoryId) {
+            const isSameTopic = cat.last_post_topic_id === topicId;
+            const currentLastMs = cat.last_post_at ? (cat.last_post_at.toMillis ? cat.last_post_at.toMillis() : new Date(cat.last_post_at).getTime()) : 0;
+            const newLastMs = new Date(lastPostDateIso).getTime();
+
+            // If the category's last post is from THIS topic, update it ALWAYS (even when deleting a post makes lastPost earlier).
+            // Otherwise, update if the new post timestamp is newer.
+            if (isSameTopic || newLastMs >= currentLastMs) {
+              return {
+                ...cat,
+                last_post_topic_id: topicId,
+                last_post_topic_title: topicTitle,
+                last_post_at: lastPostDateIso,
+                last_post_author_id: lastPost.author_id,
+                last_post_author: lastPost.author_name || 'User',
+                last_post_author_avatar: lastPost.author_avatar || '',
+                last_post_author_role_id: lastPost.author_role_id || 'player',
+                last_post_is_character: !!lastPost.is_character,
+                last_post_author_character_id: lastPost.author_character_id || null,
+                last_post_topic_posts_count: postsCount
+              };
+            }
+          }
+          return cat;
+        });
+      });
+    }
+  }, []);
+
   const refreshForumState = useCallback(async () => {
     try {
-      const [cats, topics] = await Promise.all([
-        fetchSecuredCategories(),
-        fetchLatestTopics(50)
-      ]);
-      setCategories(cats);
-      setLatestTopics(topics);
+      const data = await fetchSecuredMainPageData();
+      if (data.categories) setCategories(data.categories);
+      if (data.latestTopics) setLatestTopics(data.latestTopics);
+      if (data.stats) setForumStats(data.stats);
+      if (data.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
     } catch (err) {
       console.error('[refreshForumState]', err);
     }
   }, []);
 
-  // refreshForumState вызывается только при необходимости (создание тем/постов или переход)
-  // Удалена периодическая фоновая подгрузка 50 тем каждые 60с, создававшая десятки тысяч чтений в час
-
   useEffect(() => {
     if (loading || !user) return;
-
-    let isMounted = true;
-    subscribeToLatestTopics((topics) => {
-      if (isMounted) {
-        setLatestTopics(topics);
-      }
-    }, 30);
-
-    return () => { isMounted = false; };
-  }, [loading, user?.uid]);
+    refreshForumState();
+  }, [loading, user?.uid, refreshForumState]);
 
   useEffect(() => {
     if (!user || latestTopics.length === 0) {
@@ -752,14 +808,6 @@ export const AuthProvider = ({ children }) => {
         const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
 
         if (isBanned) {
-          if (!sessionStorage.getItem('banned_login_logged')) {
-            logAdminAction('banned_user_login_attempt', user.uid, {
-              email: user.email,
-              nickname: profile.nickname
-            }).catch(console.error);
-            sessionStorage.setItem('banned_login_logged', 'true');
-          }
-
           sessionStorage.setItem('banned_logout', 'true');
           logout(true);
         } else if (isMaintenanceStrict && !isAdmin) {
@@ -849,6 +897,9 @@ export const AuthProvider = ({ children }) => {
     updateProfile,
     recordActivity,
     refreshForumState,
+    forumStats,
+    dailyActiveUsers,
+    updateLocalTopicLastPost,
     hasPermission,
     roles,
     activeUsers,

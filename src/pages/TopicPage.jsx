@@ -47,7 +47,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, setProfile, user, recordActivity, markTopicRead, refreshForumState, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, refreshForumState, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -119,6 +119,12 @@ const TopicPage = () => {
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
 
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+
+  const readMapRef = useRef(readMap);
+  readMapRef.current = readMap;
+
   const topicRef = useRef(topic);
   topicRef.current = topic;
 
@@ -128,9 +134,20 @@ const TopicPage = () => {
   const [accessError, setAccessError] = React.useState(null);
 
   const loadPosts = React.useCallback(async (overridePage) => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasPageParam = urlParams.has('page');
+    const isGoLast = urlParams.get('goLast') === '1';
+
     let pageToFetch = overridePage !== undefined ? overridePage : currentPageRef.current;
-    if (overridePage === undefined && goLast && !searchParams.get('page')) {
+    let lastVisitMs = null;
+
+    if (overridePage === undefined && isGoLast && !hasPageParam) {
       pageToFetch = 'last';
+      const lastVisitRaw = initialVisitRef.current[id] ?? readMapRef.current[id];
+      const regMs = profileRef.current?.created_at?.toMillis?.() || 0;
+      const lastVisitVal = lastVisitRaw?.timestamp || lastVisitRaw;
+      const rawMs = lastVisitVal?.toMillis ? lastVisitVal.toMillis() : (typeof lastVisitVal === 'number' ? lastVisitVal : 0);
+      lastVisitMs = Math.max(rawMs, regMs) || null;
     }
 
     if (isFetchingPostsRef.current === pageToFetch) {
@@ -138,15 +155,19 @@ const TopicPage = () => {
     }
     isFetchingPostsRef.current = pageToFetch;
     try {
-      const { posts: data, pinnedPost, page: resolvedPage } = await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE);
+      const { posts: data, pinnedPost, page: resolvedPage, lastPost } = await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE, lastVisitMs);
+
+      if (lastPost && topicRef.current) {
+        updateLocalTopicLastPost(id, topicRef.current.category_id, topicRef.current.title, lastPost, topicRef.current.posts_count);
+      }
 
       if (resolvedPage && pageToFetch === 'last') {
         jumpTargetPageRef.current = resolvedPage;
-        setSearchParams(prev => {
-          const p = new URLSearchParams(prev);
-          p.set('page', resolvedPage.toString());
-          return p;
-        }, { replace: true, preventScrollReset: true });
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        if (currentUrlParams.get('page') !== resolvedPage.toString()) {
+          currentUrlParams.set('page', resolvedPage.toString());
+          window.history.replaceState(null, '', `${window.location.pathname}?${currentUrlParams.toString()}`);
+        }
       }
 
       const activePage = resolvedPage || pageToFetch;
@@ -155,7 +176,9 @@ const TopicPage = () => {
         if (data.length === 0 && activePage > 1 && curTopic) {
           const validMaxPage = Math.max(1, Math.ceil((curTopic.posts_count || 1) / ITEMS_PER_PAGE));
           if (activePage > validMaxPage) {
-            setSearchParams({ page: validMaxPage }, { replace: true });
+            const p = new URLSearchParams(window.location.search);
+            p.set('page', validMaxPage.toString());
+            window.history.replaceState(null, '', `${window.location.pathname}?${p.toString()}`);
             return [];
           }
         }
@@ -175,14 +198,17 @@ const TopicPage = () => {
         isFetchingPostsRef.current = false;
       }
     }
-  }, [id, ITEMS_PER_PAGE, goLast, searchParams, setSearchParams]);
+  }, [id, ITEMS_PER_PAGE]);
 
   useEffect(() => {
     if (topic && prevTopicStatsRef.current) {
       const prev = prevTopicStatsRef.current;
       if (prev.id === topic.id) {
         if (prev.posts_count !== topic.posts_count || prev.last_post_at !== topic.last_post_at) {
-          loadPosts();
+          const maxPage = Math.max(1, Math.ceil((topic.posts_count || 1) / ITEMS_PER_PAGE));
+          if (currentPageRef.current === maxPage) {
+            loadPosts();
+          }
         }
       }
     }
@@ -194,7 +220,7 @@ const TopicPage = () => {
       };
       setPageTitle(topic.title);
     }
-  }, [topic, loadPosts, setPageTitle]);
+  }, [topic?.id, topic?.posts_count, topic?.last_post_at, loadPosts, setPageTitle, ITEMS_PER_PAGE]);
 
   const currentTopicIdRef = useRef(id);
   const jumpTargetPageRef = useRef(null);
@@ -203,17 +229,9 @@ const TopicPage = () => {
     // Reset loading state and clear posts before loading the new page
     setIsPageLoading(true);
     setPosts([]);
-    // Use a micro‑task delay so React can render the empty state before the async load completes.
-    // This guarantees that the inline skeleton (posts‑container) becomes visible even when
-    // `loadPosts` returns synchronously from cache.
     setTimeout(() => {
-      loadPosts().then(() => {
-        // `loadPosts` resolves and updates `posts`. The `checkReady` logic inside the original
-        // effect will set `isPageLoading` to false when both topic and posts are ready.
-        // No further action needed here.
-      });
+      loadPosts();
     }, 0);
-    // Note: we deliberately do NOT call `loadPosts()` directly here to avoid React's state batching.
 
     // Only clear topic if navigating to a DIFFERENT topic
     if (currentTopicIdRef.current !== id) {
@@ -248,7 +266,7 @@ const TopicPage = () => {
     return () => {
       unsubTopic();
     };
-  }, [id, currentPage, isJumpRequested, loadPosts]);
+  }, [id, currentPage]);
 
   // Mark the topic as read with granular offset
   useEffect(() => {
@@ -542,25 +560,8 @@ const TopicPage = () => {
 
         if (unreadIndex !== -1) {
           targetId = `post-${posts[unreadIndex].id}`;
-        } else if (jumpTargetPageRef.current !== currentPage) {
-          locateUnreadPost(id, lastVisit, ITEMS_PER_PAGE).then(result => {
-            const totalPages = Math.max(1, Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE));
-            const finalTargetPage = result.found ? Math.min(result.page, totalPages) : totalPages;
-            if (currentPage !== finalTargetPage) {
-              jumpTargetPageRef.current = finalTargetPage;
-              alreadyJumpedRef.current = false;
-              setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
-            } else {
-              jumpTargetPageRef.current = currentPage;
-              loadPosts();
-            }
-          }).catch(() => {
-            setIsPageLoading(false);
-            alreadyJumpedRef.current = true;
-          });
-          return;
         } else if (posts.length > 0) {
-          // Posts are loaded for the target page, but unread index is still -1. Fallback to bottom.
+          // All posts read or on last page: target the last post on screen
           targetId = `post-${posts[posts.length - 1].id}`;
         }
       } else {
@@ -912,7 +913,6 @@ const TopicPage = () => {
       // Mark as read immediately (server-side)
       markTopicRead(id);
       setReplyContent('');
-      refreshForumState();
 
       // Calculate where the new post will land.
       const postsBeforeNew = (currentPage - 1) * ITEMS_PER_PAGE + posts.length;
@@ -1381,13 +1381,16 @@ const TopicPage = () => {
                       {hasPermission(PERMISSIONS.PIN_TOPICS) && (
                         <Dropdown.Item
                           onClick={async () => {
+                            const newPinned = !topic.is_pinned;
+                            setTopic(prev => prev ? { ...prev, is_pinned: newPinned } : prev);
                             try {
-                              await updateTopic(id, { is_pinned: !topic.is_pinned });
+                              await updateTopic(id, { is_pinned: newPinned });
                               showToast(lang === 'ru'
-                                ? (topic.is_pinned ? 'Тема откреплена' : 'Тема закреплена')
-                                : (topic.is_pinned ? 'Topic unpinned' : 'Topic pinned')
+                                ? (newPinned ? 'Тема закреплена' : 'Тема откреплена')
+                                : (newPinned ? 'Topic pinned' : 'Topic unpinned')
                               );
                             } catch (error) {
+                              setTopic(prev => prev ? { ...prev, is_pinned: !newPinned } : prev);
                               showToast(error.message, 'danger');
                             }
                           }}
@@ -1400,13 +1403,16 @@ const TopicPage = () => {
                       {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
                         <Dropdown.Item
                           onClick={async () => {
+                            const newLocked = !topic.is_locked;
+                            setTopic(prev => prev ? { ...prev, is_locked: newLocked } : prev);
                             try {
-                              await updateTopic(id, { is_locked: !topic.is_locked });
+                              await updateTopic(id, { is_locked: newLocked });
                               showToast(lang === 'ru'
-                                ? (topic.is_locked ? 'Тема открыта' : 'Тема закрыта')
-                                : (topic.is_locked ? 'Topic unlocked' : 'Topic locked')
+                                ? (newLocked ? 'Тема закрыта' : 'Тема открыта')
+                                : (newLocked ? 'Topic locked' : 'Topic unlocked')
                               );
                             } catch (error) {
+                              setTopic(prev => prev ? { ...prev, is_locked: !newLocked } : prev);
                               showToast(error.message, 'danger');
                             }
                           }}

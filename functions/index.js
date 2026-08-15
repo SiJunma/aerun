@@ -1,5 +1,6 @@
 const { loadContext, hasViewForum, getRequester } = require("./permissions");
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
@@ -516,6 +517,108 @@ exports.getSecuredGlobalTopics = onCall(
     await hydrateAuthorProfiles(db, resultTopics);
 
     return { topics: resultTopics };
+  }
+);
+
+/**
+ * getSecuredMainPageData (Callable)
+ * Combines categories, latest topics, forum statistics, and 24h active users
+ * into a single unified payload to minimize client network roundtrips.
+ */
+exports.getSecuredMainPageData = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    const requester = await getRequester(db, uid);
+    const ctx = await loadContext(db);
+
+    const isAllowed = (catId) => hasViewForum(requester.role, catId, ctx);
+
+    // 1. Categories
+    const categoriesSnap = await db.collection("categories").orderBy('order', 'asc').get();
+    const categories = [];
+    categoriesSnap.forEach(doc => {
+      const catData = doc.data();
+      catData.id = doc.id;
+      if (catData.created_at?.toDate) catData.created_at = catData.created_at.toDate().toISOString();
+      if (catData.updated_at?.toDate) catData.updated_at = catData.updated_at.toDate().toISOString();
+      if (catData.last_post_at?.toDate) catData.last_post_at = catData.last_post_at.toDate().toISOString();
+
+      if (isAllowed(catData.id)) {
+        categories.push(catData);
+      }
+    });
+
+    // 2. Latest Topics (top 50)
+    let allTopics = [];
+    let lastDoc = null;
+    while (allTopics.length < 50) {
+      let q = db.collection('topics').orderBy('last_post_at', 'desc').limit(50);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (isAllowed(data.category_id)) {
+          allTopics.push(serializeTopic(doc));
+        }
+      });
+      if (snap.size < 50) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+    const latestTopics = allTopics.slice(0, 50);
+
+    // 3. Forum Statistics — calculate total topics & posts from already-fetched categories
+    const totalTopics = categories.reduce((sum, c) => sum + (c.topics_count || 0), 0);
+    const totalPosts = categories.reduce((sum, c) => sum + (c.posts_count || 0), 0);
+
+    const [usersCountSnap, newestUserSnap] = await Promise.all([
+      db.collection('users').count().get(),
+      db.collection('users').orderBy('created_at', 'desc').limit(1).get()
+    ]);
+
+    let newestUser = null;
+    if (!newestUserSnap.empty) {
+      const nu = newestUserSnap.docs[0].data();
+      newestUser = {
+        id: newestUserSnap.docs[0].id,
+        nickname: nu.nickname || 'User',
+        avatar_url: nu.avatar_url || '',
+        role_id: nu.role_id || 'player',
+        created_at: nu.created_at?.toDate ? nu.created_at.toDate().toISOString() : null
+      };
+    }
+
+    const stats = {
+      totalUsers: usersCountSnap.data().count,
+      totalTopics,
+      totalPosts,
+      newestUser
+    };
+
+    // 4. Daily Active Users (visited in last 24h)
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const thresholdDate = new Date(Date.now() - ONE_DAY_MS);
+    const dailySnap = await db.collection('users')
+      .where('last_seen', '>=', thresholdDate)
+      .limit(100)
+      .get();
+
+    const dailyActiveUsers = dailySnap.docs.map(doc => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        nickname: d.nickname || 'User',
+        avatar_url: d.avatar_url || '',
+        role_id: d.role_id || 'player',
+        status_line: d.status_line || '',
+        last_seen: d.last_seen?.toDate ? d.last_seen.toDate().toISOString() : null
+      };
+    });
+
+    return { categories, latestTopics, stats, dailyActiveUsers };
   }
 );
 /**
@@ -1080,6 +1183,96 @@ exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
 });
 
 /**
+ * User Presence Triggers
+ * Automatically updates users/{uid}.last_seen when presence documents are created, updated, or deleted.
+ */
+exports.onUserPresenceCreated = onDocumentCreated("user_presence/{uid}", async (event) => {
+  const uid = event.params.uid;
+  if (!uid) return;
+
+  try {
+    const db = admin.firestore();
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (userSnap.exists) {
+      await userRef.update({
+        last_seen: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+  } catch (err) {
+    logger.error(`[onUserPresenceCreated] error for ${uid}`, err);
+  }
+});
+
+exports.onUserPresenceUpdated = onDocumentUpdated("user_presence/{uid}", async (event) => {
+  const uid = event.params.uid;
+  if (!uid) return;
+
+  try {
+    const db = admin.firestore();
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (userSnap.exists) {
+      const userData = userSnap.data();
+      const lastSeenMs = userData.last_seen ? userData.last_seen.toMillis() : 0;
+      const FIFTEEN_MINS_MS = 15 * 60 * 1000;
+
+      // Throttle updates: only update users/{uid}.last_seen if it hasn't been updated in 15 minutes
+      if (Date.now() - lastSeenMs > FIFTEEN_MINS_MS) {
+        await userRef.update({
+          last_seen: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+    }
+  } catch (err) {
+    logger.error(`[onUserPresenceUpdated] error for ${uid}`, err);
+  }
+});
+
+exports.onUserPresenceDeleted = onDocumentDeleted("user_presence/{uid}", async (event) => {
+  const uid = event.params.uid;
+  if (!uid) return;
+
+  try {
+    const db = admin.firestore();
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (userSnap.exists) {
+      await userRef.update({
+        last_seen: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+  } catch (err) {
+    logger.error(`[onUserPresenceDeleted] error for ${uid}`, err);
+  }
+});
+
+/**
+ * Scheduled cleanup for expired user_presence documents (older than 15 minutes).
+ * Deleting expired presence docs triggers onUserPresenceDeleted, setting final last_seen.
+ */
+exports.cleanupExpiredPresence = onSchedule("every 15 minutes", async () => {
+  try {
+    const db = admin.firestore();
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 15 * 60 * 1000);
+    const snap = await db.collection("user_presence")
+      .where("last_seen", "<", cutoff)
+      .get();
+
+    if (snap.empty) return;
+
+    const batch = db.batch();
+    snap.docs.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+    logger.info(`[cleanupExpiredPresence] Cleaned up ${snap.size} expired presence records`);
+  } catch (err) {
+    logger.error("[cleanupExpiredPresence] error", err);
+  }
+});
+
+/**
  * onUserCreated
  * Triggers when a new user document is created.
  * Notifies all admins and user managers about the registration.
@@ -1417,7 +1610,7 @@ exports.getPostVoters = onCall(
 exports.getSecuredPosts = onCall(
   { enforceAppCheck: false, minInstances: 0 },
   async (request) => {
-    const { topicId, page = 1, pageSize = 20 } = request.data;
+    const { topicId, page = 1, pageSize = 20, lastVisit } = request.data;
     if (!topicId) {
       throw new HttpsError('invalid-argument', 'Missing topicId');
     }
@@ -1455,13 +1648,33 @@ exports.getSecuredPosts = onCall(
     }
 
     let resolvedPage = 1;
-    if (page === 'last' || page === 'latest') {
+    if (page === 'last' || page === 'latest' || page === 'unread') {
       const countSnap = await db.collection('posts')
         .where('topic_id', '==', topicId)
         .count()
         .get();
       const totalPosts = countSnap.data().count;
-      resolvedPage = Math.max(1, Math.ceil(totalPosts / pageSize));
+
+      if (lastVisit) {
+        const lastVisitDate = new Date(lastVisit);
+        if (!isNaN(lastVisitDate.getTime())) {
+          const countBeforeSnap = await db.collection('posts')
+            .where('topic_id', '==', topicId)
+            .where('created_at', '<=', lastVisitDate)
+            .count()
+            .get();
+          const countBefore = countBeforeSnap.data().count;
+          if (countBefore < totalPosts) {
+            resolvedPage = Math.max(1, Math.ceil((countBefore + 1) / pageSize));
+          } else {
+            resolvedPage = Math.max(1, Math.ceil(totalPosts / pageSize));
+          }
+        } else {
+          resolvedPage = Math.max(1, Math.ceil(totalPosts / pageSize));
+        }
+      } else {
+        resolvedPage = Math.max(1, Math.ceil(totalPosts / pageSize));
+      }
     } else {
       resolvedPage = parseInt(page, 10) || 1;
     }
@@ -1589,7 +1802,24 @@ exports.getSecuredPosts = onCall(
       await hydrateAuthorProfiles(db, [pinnedPost]);
     }
 
-    return { posts, pinnedPost, page: resolvedPage };
+    // Fetch latest post of the topic so front-end can update main page / category state locally without extra queries
+    let lastPost = null;
+    const lastPostSnap = await db.collection('posts')
+      .where('topic_id', '==', topicId)
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .get();
+    if (!lastPostSnap.empty) {
+      const lpData = lastPostSnap.docs[0].data();
+      lpData.id = lastPostSnap.docs[0].id;
+      if (lpData.created_at) lpData.created_at = lpData.created_at.toDate().toISOString();
+      if (lpData.updated_at) lpData.updated_at = lpData.updated_at.toDate().toISOString();
+      if (lpData.edited_at) lpData.edited_at = lpData.edited_at.toDate().toISOString();
+      lastPost = lpData;
+      await hydrateAuthorProfiles(db, [lastPost]);
+    }
+
+    return { posts, pinnedPost, page: resolvedPage, lastPost };
   }
 );
 

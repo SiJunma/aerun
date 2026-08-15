@@ -102,6 +102,18 @@ export const fetchSecuredCategories = async () => {
   }
 };
 
+export const fetchSecuredMainPageData = async () => {
+  try {
+    const functions = getFunctions();
+    const getMainPage = httpsCallable(functions, 'getSecuredMainPageData');
+    const result = await getMainPage();
+    return result.data;
+  } catch (err) {
+    console.error('[fetchSecuredMainPageData]', err);
+    return { categories: [], latestTopics: [], stats: null, dailyActiveUsers: [] };
+  }
+};
+
 export const subscribeToCategories = (callback) => {
   let isSubscribed = true;
 

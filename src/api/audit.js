@@ -15,6 +15,7 @@ export const logAdminAction = async (actionType, performerId, details = {}) => {
     await addDoc(collection(db, 'audit_logs'), {
       action_type: actionType,
       performer_id: performerId,
+      actor_uid: performerId, // required by Firestore security rule: actor_uid == request.auth.uid
       details,
       created_at: serverTimestamp(),
     });
