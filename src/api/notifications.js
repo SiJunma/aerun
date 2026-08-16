@@ -134,7 +134,8 @@ export const subscribeToAdminNotifications = (callback) => {
   const q = query(
     collection(db, 'notifications'),
     where('recipient_uid', '==', null),
-    limit(50)
+    orderBy('created_at', 'desc'),
+    limit(100)
   );
   return onSnapshot(q, (snap) => {
     const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -144,13 +145,14 @@ export const subscribeToAdminNotifications = (callback) => {
 };
 
 /**
- * Subscribe to personal notifications for a specific user, limit to 50 newest.
+ * Subscribe to personal notifications for a specific user, limit to 100 newest.
  */
 export const subscribeToUserNotifications = (uid, callback) => {
   const q = query(
     collection(db, 'notifications'),
     where('recipient_uid', '==', uid),
-    limit(50)
+    orderBy('created_at', 'desc'),
+    limit(100)
   );
   
   // При подписке также периодически чистим уведомления свыше 100 штук

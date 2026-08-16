@@ -48,12 +48,12 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
 
         // 1. Update target user reputation
         const userRef = db.collection("users").doc(target_id);
-        batch.update(userRef, { reputation: admin.firestore.FieldValue.increment(value) });
+        await queueIncrement(batch, userRef, "reputation", value);
 
         // 2. Update associated post reputation (if post_id exists)
         if (post_id) {
             const postRef = db.collection("posts").doc(post_id);
-            batch.update(postRef, { reputation: admin.firestore.FieldValue.increment(value) });
+            await queueIncrement(batch, postRef, "reputation", value);
         }
 
         // 3. Create notification
@@ -871,35 +871,29 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
         const subscribers = subSnap.docs.map(d => d.data().user_id).filter(uid => uid !== authorId);
 
         if (subscribers.length > 0) {
-
-            // The transaction query below needs this composite index:
-            // notifications: recipient_uid ASC, type ASC, payload.topic_id ASC, read ASC, archived ASC
-            // Without it EVERY reply notification fails, and the catch at the bottom
-            // hides it — verify in firestore.indexes.json.
             const CHUNK = 10;
             for (let i = 0; i < subscribers.length; i += CHUNK) {
-              await Promise.all(subscribers.slice(i, i + CHUNK).map(recipientUid =>
-                db.runTransaction(async (transaction) => {
+              await Promise.all(subscribers.slice(i, i + CHUNK).map(async (recipientUid) => {
+                try {
                   // Check for existing unread topic_reply notification
                   const q = db.collection("notifications")
                       .where("recipient_uid", "==", recipientUid)
                       .where("type", "==", "topic_reply")
-                      .where("payload.topic_id", "==", topicId)
                       .where("read", "==", false)
-                      .where("archived", "==", false)
+                      .where("payload.topic_id", "==", topicId)
                       .limit(1);
                   
-                  const existingSnap = await transaction.get(q);
+                  const existingSnap = await q.get();
 
                   if (!existingSnap.empty) {
                       const existingDoc = existingSnap.docs[0];
-                      transaction.update(existingDoc.ref, {
+                      await existingDoc.ref.update({
                           "payload.post_count": admin.firestore.FieldValue.increment(1),
                           "payload.last_post_id": postId,
                           created_at: admin.firestore.FieldValue.serverTimestamp()
                       });
                   } else {
-                      transaction.set(db.collection("notifications").doc(), {
+                      await db.collection("notifications").add({
                           recipient_uid: recipientUid,
                           type: "topic_reply",
                           read: false,
@@ -914,8 +908,10 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                           created_at: admin.firestore.FieldValue.serverTimestamp()
                       });
                   }
-                })
-            ));
+                } catch (subErr) {
+                  logger.error(`Failed to send topic notification to ${recipientUid}:`, subErr);
+                }
+              }));
             }
         } // end if (subscribers.length > 0)
 
