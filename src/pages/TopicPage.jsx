@@ -245,30 +245,13 @@ const TopicPage = () => {
   const currentTopicIdRef = useRef(id);
   const jumpTargetPageRef = useRef(null);
 
+  // Subscribe to topic document (only on topic id change)
   useEffect(() => {
-    // Reset loading state and clear posts before loading the new page
-    setIsPageLoading(true);
-    setPosts([]);
-    setTimeout(() => {
-      loadPosts();
-    }, 0);
-
     // Only clear topic if navigating to a DIFFERENT topic
     if (currentTopicIdRef.current !== id) {
       setTopic(null);
       currentTopicIdRef.current = id;
     }
-    
-    let topicReady = topic !== null;
-    let postsReady = false;
-
-    const checkReady = () => {
-      if (topicReady && postsReady) {
-        if (!isJumpRequested || alreadyJumpedRef.current) {
-          setIsPageLoading(false);
-        }
-      }
-    };
 
     const unsubTopic = subscribeToTopic(id, (data, err) => {
       if (err) {
@@ -276,17 +259,28 @@ const TopicPage = () => {
         setIsPageLoading(false);
         return;
       }
-      setTopic(data);
       if (data) {
-        topicReady = true;
-        checkReady();
+        setTopic(prev => {
+          if (!prev) return data;
+          return {
+            ...data,
+            posts_count: Math.max(prev.posts_count || 0, data.posts_count || 0)
+          };
+        });
       }
     });
 
     return () => {
       unsubTopic();
     };
-  }, [id, currentPage]);
+  }, [id]);
+
+  // Load posts whenever topic id or page changes
+  useEffect(() => {
+    setIsPageLoading(true);
+    setPosts([]);
+    loadPosts();
+  }, [id, currentPage, loadPosts]);
 
   // Mark the topic as read with granular offset
   useEffect(() => {
@@ -917,8 +911,8 @@ const TopicPage = () => {
       setReplyContent('');
 
       // Calculate where the new post will land.
-      const postsBeforeNew = (currentPage - 1) * ITEMS_PER_PAGE + posts.length;
-      const newTotalPosts = postsBeforeNew + 1;
+      const currentTotal = Math.max(topic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
+      const newTotalPosts = currentTotal + 1;
       const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
 
       // Immediately update local topic state so posts_count and pagination UI update instantly
@@ -935,6 +929,7 @@ const TopicPage = () => {
 
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
+        jumpTargetPageRef.current = targetPage;
         setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
       } else {
         // Already on the correct page — reload posts and scroll
@@ -1286,7 +1281,8 @@ const TopicPage = () => {
   // Pagination logic — server-side: `posts` already contains only the current page.
   // `totalPages` is derived from the topic's authoritative posts_count counter.
   const realPosts = posts;
-  const totalPages = Math.ceil((topic?.posts_count ?? realPosts.length) / ITEMS_PER_PAGE) || 1;
+  const effectivePostsCount = Math.max(topic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + realPosts.length);
+  const totalPages = Math.max(currentPage, Math.ceil(effectivePostsCount / ITEMS_PER_PAGE) || 1);
   // indexOfFirstItem is used only for post numbering (e.g. "#42")
   const indexOfFirstItem = (currentPage - 1) * ITEMS_PER_PAGE;
   const currentPosts = realPosts; // Already the correct page from the server
