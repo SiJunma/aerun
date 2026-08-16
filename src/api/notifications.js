@@ -125,108 +125,55 @@ export const notifyUserManagers = async (type, payload) => {
   await batch.commit();
 };
 
-// ── Subscribe ────────────────────────────────────────────────────────────────
+import {
+  subscribeToUserNotifications as subscribeToUserNotificationsRtdb,
+  subscribeToAdminNotifications as subscribeToAdminNotificationsRtdb,
+  markNotificationRead as markNotificationReadRtdb,
+  markTopicNotificationsRead as markTopicNotificationsReadRtdb,
+  markAllNotificationsRead as markAllNotificationsReadRtdb,
+  deleteNotification as deleteNotificationRtdb
+} from './rtdb-notifications';
+
+// ── Subscribe (Delegated to RTDB for 0 Firestore read costs) ─────────────────
 
 /**
- * Subscribe to admin-broadcast notifications (recipient_uid === null), limit to 50 newest.
+ * Subscribe to admin-broadcast notifications via RTDB.
  */
 export const subscribeToAdminNotifications = (callback) => {
-  const q = query(
-    collection(db, 'notifications'),
-    where('recipient_uid', '==', null),
-    orderBy('created_at', 'desc'),
-    limit(100)
-  );
-  return onSnapshot(q, (snap) => {
-    const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    notifs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
-    callback(notifs);
-  }, (err) => console.error('[subscribeToAdminNotifications]', err));
+  return subscribeToAdminNotificationsRtdb(callback);
 };
 
 /**
- * Subscribe to personal notifications for a specific user, limit to 100 newest.
+ * Subscribe to personal notifications for a specific user via RTDB (0 Firestore reads).
  */
 export const subscribeToUserNotifications = (uid, callback) => {
-  const q = query(
-    collection(db, 'notifications'),
-    where('recipient_uid', '==', uid),
-    orderBy('created_at', 'desc'),
-    limit(100)
-  );
-  
-  // При подписке также периодически чистим уведомления свыше 100 штук
-  pruneUserNotifications(uid).catch(err => console.warn('[pruneUserNotifications]', err));
-
-  return onSnapshot(q, (snap) => {
-    const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    notifs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
-    callback(notifs);
-  }, (err) => console.error('[subscribeToUserNotifications]', err));
-};
-
-/**
- * Автоматическое удаление уведомлений пользователя старше 100 последних.
- */
-export const pruneUserNotifications = async (uid) => {
-  if (!uid) return;
-  try {
-    const q = query(
-      collection(db, 'notifications'),
-      where('recipient_uid', '==', uid)
-    );
-    const snap = await getDocs(q);
-    if (snap.docs.length > 100) {
-      const docs = snap.docs.map(d => ({ ref: d.ref, ...d.data() }));
-      docs.sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
-      const docsToDelete = docs.slice(100);
-      const batch = writeBatch(db);
-      docsToDelete.forEach(d => batch.delete(d.ref));
-      await batch.commit();
-    }
-  } catch (err) {
-    console.warn('[pruneUserNotifications error]', err);
-  }
+  return subscribeToUserNotificationsRtdb(uid, callback);
 };
 
 // ── Mark read & Delete ────────────────────────────────────────────────────────
 
-export const markNotificationRead = async (id) => {
-  await updateDoc(doc(db, 'notifications', id), { read: true });
+export const markNotificationRead = async (id, uid = null, isAdmin = false) => {
+  await markNotificationReadRtdb(uid, id, isAdmin);
+  try {
+    await updateDoc(doc(db, 'notifications', id), { read: true }).catch(() => {});
+  } catch (e) {}
 };
 
-export const markTopicNotificationsRead = async (uid, topicId) => {
+export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {
   if (!uid || !topicId) return;
-  const q = query(
-    collection(db, 'notifications'),
-    where('recipient_uid', '==', uid),
-    where('read', '==', false),
-    where('payload.topic_id', '==', topicId)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return;
-  const batch = writeBatch(db);
-  snap.docs.forEach(d => batch.update(d.ref, { read: true }));
-  await batch.commit();
+  await markTopicNotificationsReadRtdb(uid, topicId, notifs);
 };
 
 export const clearOrphanedPostNotifications = async (uid, postId) => {
-  const q = query(
-    collection(db, 'notifications'),
-    where('recipient_uid', '==', uid),
-    where('read', '==', false),
-    where('payload.post_id', '==', postId)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return;
-  const batch = writeBatch(db);
-  snap.docs.forEach(d => batch.update(d.ref, { read: true }));
-  await batch.commit();
+  if (!uid || !postId) return;
 };
 
-export const deleteNotification = async (id) => {
-  const { deleteDoc } = await import('firebase/firestore');
-  await deleteDoc(doc(db, 'notifications', id));
+export const deleteNotification = async (id, uid = null, isAdmin = false) => {
+  await deleteNotificationRtdb(uid, id, isAdmin);
+  try {
+    const { deleteDoc } = await import('firebase/firestore');
+    await deleteDoc(doc(db, 'notifications', id)).catch(() => {});
+  } catch (e) {}
 };
 
 // Backwards compatibility alias

@@ -4,13 +4,9 @@ import { Card } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
-import { 
-  subscribeToActiveGuests, 
-  fetchDailyActiveUsers 
-} from '../../api/auth-resources';
+import { subscribeToActiveGuests } from '../../api/auth-resources';
+import { subscribeToDailyActiveUsers } from '../../api/rtdb-presence';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
-import { db } from '../../../firebase';
-import { collection, getDocs, query, orderBy, limit, getCountFromServer } from 'firebase/firestore';
 
 const ForumStats = () => {
   const { t } = useI18n();
@@ -18,9 +14,11 @@ const ForumStats = () => {
 
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [dailyFromRtdb, setDailyFromRtdb] = useState([]);
   
   useEffect(() => {
     const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
+    const unsubDaily = subscribeToDailyActiveUsers(setDailyFromRtdb);
 
     // Таймер для скользящего окна отсечения гостей (раз в 30 секунд)
     const timer = setInterval(() => {
@@ -29,6 +27,7 @@ const ForumStats = () => {
 
     return () => {
       unsubGuests();
+      unsubDaily();
       clearInterval(timer);
     };
   }, []);
@@ -52,7 +51,8 @@ const ForumStats = () => {
     };
   }, [activeUsers, activeGuestsRaw, currentTime, user]);
 
-  const dailyActiveUsers = contextDailyUsers || [];
+  // Prefer RTDB-sourced daily active users (0 Firestore reads), fall back to context
+  const dailyActiveUsers = dailyFromRtdb.length > 0 ? dailyFromRtdb : (contextDailyUsers || []);
   const totalTopics = forumStats?.totalTopics ?? categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
   const totalPosts = forumStats?.totalPosts ?? categories.reduce((sum, cat) => sum + (cat.posts_count || 0), 0);
   const totalUsers = forumStats?.totalUsers ?? 0;

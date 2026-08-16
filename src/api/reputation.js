@@ -1,7 +1,7 @@
 import {
   collection,
   doc,
-  runTransaction,
+  setDoc,
   query,
   getDocs,
   getDoc,
@@ -16,47 +16,26 @@ import { logAdminAction } from './audit';
 /**
  * voteOnPost
  * Allows a user to vote on a specific post.
- * Uses a transaction to ensure atomic updates and 1-vote limit.
+ * Writes directly to reputation_logs with a deterministic ID (0 client-side reads).
  */
-export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, comment, topicTitle, postNumber) => {
+export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, comment, topicTitle, postNumber, voterNickname = 'User') => {
   if (!targetUid) throw new Error('Cannot vote on guest posts.');
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
   const voteId = `${voterUid}_post_${postId}`;
   const logRef = doc(db, 'reputation_logs', voteId);
-  const voterRef = doc(db, 'users', voterUid);
-  const userRef = doc(db, 'users', targetUid);
 
-  await runTransaction(db, async (transaction) => {
-    const logDoc = await transaction.get(logRef);
-    if (logDoc.exists()) {
-      throw new Error('Already voted on this post.');
-    }
-
-    const voterDoc = await transaction.get(voterRef);
-    const voterNickname = voterDoc.exists() ? voterDoc.data().nickname : 'User';
-
-    const userDoc = await transaction.get(userRef);
-    if (!userDoc.exists()) throw new Error('Target user not found.');
-
-    const targetRole = userDoc.data().role_id;
-    if (targetRole === 'banned' || targetRole === 'pending') {
-      throw new Error('Голосование за этого пользователя запрещено.');
-    }
-
-    // 1. Create log entry
-    transaction.set(logRef, {
-      voter_id: voterUid,
-      voter_nickname: voterNickname,
-      target_id: targetUid,
-      post_id: postId,
-      topic_id: topicId,
-      topic_title: topicTitle || '',
-      post_number: postNumber || null,
-      value: value,
-      comment: comment || '',
-      created_at: serverTimestamp()
-    });
+  await setDoc(logRef, {
+    voter_id: voterUid,
+    voter_nickname: voterNickname || 'User',
+    target_id: targetUid,
+    post_id: postId,
+    topic_id: topicId,
+    topic_title: topicTitle || '',
+    post_number: postNumber || null,
+    value: value,
+    comment: comment || '',
+    created_at: serverTimestamp()
   });
 };
 
@@ -88,41 +67,21 @@ export const getVotesInTopic = async (voterUid, topicId) => {
 /**
  * voteOnProfile
  * Allows a user to vote on another's profile with a comment.
- * Uses a deterministic ID to enforce 1-vote limit per profile.
+ * Uses a deterministic ID to enforce 1-vote limit per profile (0 client-side reads).
  */
-export const voteOnProfile = async (voterUid, targetUid, value, comment) => {
+export const voteOnProfile = async (voterUid, targetUid, value, comment, voterNickname = 'User') => {
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
   const voteId = `${voterUid}_user_${targetUid}`;
   const logRef = doc(db, 'reputation_logs', voteId);
-  const voterRef = doc(db, 'users', voterUid);
-  const userRef = doc(db, 'users', targetUid);
 
-  await runTransaction(db, async (transaction) => {
-    const logDoc = await transaction.get(logRef);
-    if (logDoc.exists()) {
-      throw new Error('Already voted on this profile.');
-    }
-
-    const voterDoc = await transaction.get(voterRef);
-    const voterNickname = voterDoc.exists() ? voterDoc.data().nickname : 'User';
-
-    const userDoc = await transaction.get(userRef);
-    if (!userDoc.exists()) throw new Error('Target user not found.');
-
-    const targetRole = userDoc.data().role_id;
-    if (targetRole === 'banned' || targetRole === 'pending') {
-      throw new Error('Голосование за этого пользователя запрещено.');
-    }
-
-    transaction.set(logRef, {
-      voter_id: voterUid,
-      voter_nickname: voterNickname,
-      target_id: targetUid,
-      value: value,
-      comment: comment || '',
-      created_at: serverTimestamp()
-    });
+  await setDoc(logRef, {
+    voter_id: voterUid,
+    voter_nickname: voterNickname || 'User',
+    target_id: targetUid,
+    value: value,
+    comment: comment || '',
+    created_at: serverTimestamp()
   });
 };
 

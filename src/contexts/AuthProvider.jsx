@@ -34,9 +34,13 @@ import {
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
   subscribeToLatestTopics,
-  fetchLatestTopics,
-  subscribeToActiveUsers
+  fetchLatestTopics
 } from '../api/auth-resources';
+import {
+  initRtdbPresence,
+  setRtdbOffline,
+  subscribeToOnlineUsers
+} from '../api/rtdb-presence';
 import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
@@ -87,29 +91,17 @@ export const AuthProvider = ({ children }) => {
   const rolesUnsubRef = useRef(null);
   const catsUnsubRef = useRef(null);
 
-  const refreshActiveUsers = useCallback(() => {
-    return subscribeToActiveUsers((users) => {
-      setActiveUsers(users);
-    });
+  // RTDB Presence initialization
+  useEffect(() => {
+    if (user?.uid && profile) {
+      return initRtdbPresence(user.uid, profile);
+    }
+  }, [user?.uid, profile?.nickname, profile?.avatar_url, profile?.role_id]);
+
+  // Real-time Online Users subscription from RTDB (0 Firestore reads)
+  useEffect(() => {
+    return subscribeToOnlineUsers(setActiveUsers);
   }, []);
-
-  const pushLastSeen = useCallback((uid) => {
-    // Не отправляем пинг, если пользователь выходит или вкладка в фоновом режиме
-    if (!uid || loggingOutRef.current || document.hidden) return;
-
-    const now = Timestamp.now();
-    // Обновляем присутствие ТОЛЬКО в user_presence (без перезаписи профиля users/{uid})
-    setDoc(doc(db, 'user_presence', uid), { last_seen: now }, { merge: true })
-      .then(() => {
-        lastPushTimeRef.current = Date.now();
-        refreshActiveUsers();
-      })
-      .catch((e) => {
-        if (e.code !== 'permission-denied') {
-          console.warn('[last_seen update]', e);
-        }
-      });
-  }, [refreshActiveUsers]);
 
   const getOrCreateGuestId = useCallback(() => {
     let gid = localStorage.getItem('guest_id');
@@ -137,11 +129,6 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('guest_id');
         localStorage.removeItem('last_guest_push');
       }
-
-      // 2. Пушим активность пользователя
-      if (now - lastPushTimeRef.current >= TICK_MS || idleMs >= IDLE_TIMEOUT_MS) {
-        pushLastSeen(user.uid);
-      }
     } else {
       // Для гостей: пинг раз в 10 минут
       const GUEST_TICK_MS = 10 * 60 * 1000;
@@ -152,7 +139,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('last_guest_push', now.toString());
       }
     }
-  }, [user, pushLastSeen, getOrCreateGuestId]);
+  }, [user, getOrCreateGuestId]);
 
   const loginWithGoogle = () => {
     return signInWithPopup(auth, googleProvider);
@@ -221,11 +208,8 @@ export const AuthProvider = ({ children }) => {
 
       if (uid && !skipPresenceCleanup) {
         try {
-          // Полностью стираем из онлайна
-          await deleteDoc(doc(db, 'user_presence', uid));
-          console.log('[logout] Успешно удалена запись присутствия для:', uid);
-          
-          // Убираем напрямую из стейта — без лишнего DOM-события
+          await setRtdbOffline(uid);
+          await deleteDoc(doc(db, 'user_presence', uid)).catch(() => {});
           setActiveUsers(prev => prev.filter(u => u.id !== uid));
         } catch (e) {
           console.warn('[logout presence cleanup error]', e);
@@ -357,9 +341,6 @@ export const AuthProvider = ({ children }) => {
           localStorage.removeItem('last_guest_push');
         }
 
-        // 2. Пушим онлайн в user_presence
-        pushLastSeen(firebaseUser.uid);
-
         try {
           const userDoc = await getDoc(userDocRef);
           const isAdmin = firebaseUser.email === import.meta.env.VITE_ADMIN_EMAIL;
@@ -425,10 +406,6 @@ export const AuthProvider = ({ children }) => {
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));
           } else {
-            // last_seen пишется только в user_presence/{uid} через pushLastSeen ниже.
-            // Запись в users/{uid}.last_seen убрана — она вызывала лишнее срабатывание
-            // профиль-слушателя (profileUnsubRef) при каждом логине.
-
             const data = userDoc.data();
 
             if (usesPassword && firebaseUser.emailVerified && data.role_id === 'pending') {
@@ -445,7 +422,6 @@ export const AuthProvider = ({ children }) => {
             }
 
             lastActivityRef.current = Date.now();
-            pushLastSeen(firebaseUser.uid);
 
             if (isAdmin) {
               sessionStorage.removeItem('maintenance_logout');
@@ -545,40 +521,22 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    const handleInteraction = () => recordActivity();
-
-    window.addEventListener('mousedown', handleInteraction);
-    window.addEventListener('keydown', handleInteraction, { passive: true });
-    window.addEventListener('scroll', handleInteraction, { passive: true });
-
+    if (user) return;
     const interval = setInterval(() => {
       const now = Date.now();
-      const idleMs = now - lastActivityRef.current;
-
-      if (idleMs >= IDLE_TIMEOUT_MS) return;
-
-      if (user) {
-        if (now - lastPushTimeRef.current >= TICK_MS) {
-          pushLastSeen(user.uid);
-        }
-      } else {
-        const GUEST_TICK_MS = 10 * 60 * 1000;
-        const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0', 10);
-        if (now - lastGuestPush >= GUEST_TICK_MS) {
-          const gid = getOrCreateGuestId();
-          apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity heartbeat]', err));
-          localStorage.setItem('last_guest_push', now.toString());
-        }
+      const GUEST_TICK_MS = 10 * 60 * 1000;
+      const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0', 10);
+      if (now - lastGuestPush >= GUEST_TICK_MS) {
+        const gid = getOrCreateGuestId();
+        apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity heartbeat]', err));
+        localStorage.setItem('last_guest_push', now.toString());
       }
     }, 60000);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener('mousedown', handleInteraction);
-      window.removeEventListener('keydown', handleInteraction);
-      window.removeEventListener('scroll', handleInteraction);
     };
-  }, [user, pushLastSeen, getOrCreateGuestId, recordActivity]);
+  }, [user, getOrCreateGuestId]);
 
   const hasPermission = useCallback((perm, context = {}) => {
     if (settings) {
@@ -695,7 +653,15 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const refreshForumState = useCallback(async () => {
+  const lastForumRefreshTimeRef = useRef(0);
+  const FORUM_REFRESH_COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown
+
+  const refreshForumState = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (!force && (now - lastForumRefreshTimeRef.current < FORUM_REFRESH_COOLDOWN_MS)) {
+      return;
+    }
+    lastForumRefreshTimeRef.current = now;
     try {
       const data = await fetchSecuredMainPageData();
       if (data.categories) setCategories(data.categories);
@@ -708,8 +674,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (loading || !user) return;
-    refreshForumState();
+    if (loading) return;
+    refreshForumState(true);
   }, [loading, user?.uid, refreshForumState]);
 
   useEffect(() => {
@@ -747,8 +713,8 @@ export const AuthProvider = ({ children }) => {
     const currentReadMap = readMap[topicId];
     const prevOffset = currentReadMap?.offset ?? -1;
     
-    // Do not allow offset to decrease
-    if (offset !== null && offset < prevOffset) return;
+    // Do not allow offset to decrease or re-trigger if already at or past this offset
+    if (offset !== null && offset <= prevOffset) return;
     
     // If no new offset is provided, but we had one, preserve it
     const finalOffset = offset !== null ? offset : (prevOffset !== -1 ? prevOffset : null);
@@ -765,7 +731,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error('[markTopicRead]', err);
     }
-  }, [user, profile?.role_id]);
+  }, [user, profile?.role_id, readMap]);
 
   const markAllRead = useCallback(async () => {
     if (!user || latestTopics.length === 0 || isMarkingAllRead) return;
@@ -816,49 +782,18 @@ export const AuthProvider = ({ children }) => {
   }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout, authError]);
 
   useEffect(() => {
-    // Автоматическое добавление авторизованного пользователя в онлайн-список при загрузке его профиля
-    if (profile && profile.id && profile.role_id !== 'banned') {
-      setActiveUsers(prev => {
-        if (prev.some(u => u.id === profile.id)) return prev;
-        const updated = [...prev, profile];
-        updated.sort((a, b) => (a.nickname || '').localeCompare(b.nickname || ''));
-        return updated;
-      });
-    }
-  }, [profile]);
-
-  useEffect(() => {
-    // Единственный источник данных об онлайн-пользователях — периодический опрос.
-    // Не выполняем запросы, если вкладка работает в фоновом режиме (document.hidden).
-    let isMounted = true;
-    let currentUnsub = null;
-
-    const refresh = () => {
-      if (document.hidden) return;
-      if (currentUnsub) currentUnsub();
-      currentUnsub = refreshActiveUsers();
-    };
-
-    refresh();
-    const interval = setInterval(refresh, TICK_MS);
-
-    // При возвращении на вкладку мгновенно обновляем онлайн и статичные данные
+    // При возвращении на вкладку обновляем статичные данные форума (с соблюдением 5-минутного cooldown)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        refresh();
-        if (user?.uid) pushLastSeen(user.uid);
-        refreshForumState();
+        refreshForumState(false);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      isMounted = false;
-      if (currentUnsub) currentUnsub();
-      clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [refreshActiveUsers]);
+  }, [refreshForumState]);
 
   const isUserOnline = useCallback((uid) => {
     if (!uid) return false;

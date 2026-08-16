@@ -391,7 +391,7 @@ const ProfilePage = () => {
 
     setSubmittingRep(true);
     try {
-      await voteOnProfile(profile.uid, uid, repValue, repComment);
+      await voteOnProfile(profile.uid, uid, repValue, repComment, profile.nickname || 'User');
 
       // Optimistic update for profile reputation
       setViewedProfile(prev => ({
@@ -536,7 +536,7 @@ const ProfilePage = () => {
                       <div className="fw-bold fs-5 text-accent">
                         {!viewedProfile ? <Skeleton width="30px" height="1.5rem" /> : (viewedProfile?.reputation || 0)}
                       </div>
-                      {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && (
+                      {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && viewedProfile?.role_id !== 'pending' && (
                         <div className="d-flex gap-1 align-items-center">
                           {!myVote ? (
                             <>
@@ -766,11 +766,12 @@ const ProfilePage = () => {
                 </Card.Header>
                 <Card.Body className="p-0">
                   {(() => {
+                    const isGuest = !profile?.uid;
                     const canOverride = hasPermission(PERMISSIONS.DELETE_REPUTATION) || hasPermission(PERMISSIONS.ADMIN_ACCESS);
                     const historyHidden = viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && !canOverride;
-                    const commentsHidden = viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && !canOverride;
-                    const historyAdminBypass = viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && canOverride;
-                    const commentsAdminBypass = viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && canOverride;
+                    const commentsHidden = isGuest || (viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && !canOverride);
+                    const historyAdminBypass = !isGuest && viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && canOverride;
+                    const commentsAdminBypass = !isGuest && viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && canOverride;
 
                     const totalPagesRep = Math.ceil(totalRepLogs / REP_PER_PAGE);
                     // If history is hidden, non-admins can only see their own logs
@@ -906,7 +907,9 @@ const ProfilePage = () => {
                                 </OverlayTrigger>
                               </td>
                               <td className="py-3 rep-comment-cell">
-                                {(commentsHidden && log.voter_id !== profile?.uid) ? (
+                                {isGuest ? (
+                                  <span className="text-muted small italic">{t('profile.rep_comments_guest_hidden')}</span>
+                                ) : (commentsHidden && log.voter_id !== profile?.uid) ? (
                                   <span className="text-muted small italic">{t('profile.rep_comments_hidden')}</span>
                                 ) : (
                                   editingLogId === log.id ? (

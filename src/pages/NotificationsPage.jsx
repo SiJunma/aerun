@@ -111,14 +111,21 @@ const NotificationsPage = () => {
     return true;
   };
 
+  const getNotifTs = (item) => {
+    if (!item?.created_at) return 0;
+    if (typeof item.created_at === 'number') return item.created_at;
+    if (typeof item.created_at?.toMillis === 'function') return item.created_at.toMillis();
+    return 0;
+  };
+
   const activeNotifs = [...adminActive, ...userActive]
     .filter(filterByPrefs)
-    .sort((a, b) => (b.created_at?.toMillis?.() || 0) - (a.created_at?.toMillis?.() || 0));
+    .sort((a, b) => getNotifTs(b) - getNotifTs(a));
 
   const handleMarkRead = (e, id) => {
     if (e) e.stopPropagation();
     recordActivity();
-    markNotificationRead(id)
+    markNotificationRead(id, profile?.uid)
       .catch(err => {
         console.error('[markNotificationRead]', err);
         showToast(err.message, 'danger');
@@ -134,7 +141,7 @@ const NotificationsPage = () => {
     
     // Wait for animation to finish before calling API
     setTimeout(() => {
-      deleteNotification(id)
+      deleteNotification(id, profile?.uid)
         .then(() => {
           showToast(t('notifications.deleted_toast', 'Уведомление удалено'));
           setDeletingId(null);

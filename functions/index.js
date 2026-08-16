@@ -11,6 +11,38 @@ admin.initializeApp();
 // Ensure only a reasonable amount of instances run at once to manage billing safely
 setGlobalOptions({ maxInstances: 10,  enforceAppCheck: true, memory: "512MiB" });
 
+async function sendRtdbNotification(recipientUid, notifData) {
+  if (!recipientUid) return;
+  try {
+    const rtdb = admin.database();
+    const notifsRef = rtdb.ref(`notifications/${recipientUid}`).push();
+    await notifsRef.set({
+      id: notifsRef.key,
+      recipient_uid: recipientUid,
+      read: false,
+      created_at: Date.now(),
+      ...notifData
+    });
+  } catch (err) {
+    logger.warn('[sendRtdbNotification err]', err);
+  }
+}
+
+async function sendRtdbAdminNotification(notifData) {
+  try {
+    const rtdb = admin.database();
+    const adminRef = rtdb.ref('admin_notifications').push();
+    await adminRef.set({
+      id: adminRef.key,
+      read: false,
+      created_at: Date.now(),
+      ...notifData
+    });
+  } catch (err) {
+    logger.warn('[sendRtdbAdminNotification err]', err);
+  }
+}
+
 /**
  * Atomic Reputation Handler (Create)
  * Fired when a reputation_log is created.
@@ -56,24 +88,32 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
             await queueIncrement(batch, postRef, "reputation", value);
         }
 
-        // 3. Create notification
+        // 3. Create notification (Firestore backup)
         const notifRef = db.collection("notifications").doc();
+        const notifPayload = {
+            voter_nickname: log.voter_nickname || "User",
+            value: value,
+            topic_id: log.topic_id || null,
+            post_id: log.post_id || null,
+            comment: log.comment || ""
+        };
         batch.set(notifRef, {
             recipient_uid: target_id,
             type: "reputation_change",
             read: false,
             archived: false,
-            payload: {
-                voter_nickname: log.voter_nickname || "User",
-                value: value,
-                topic_id: log.topic_id || null,
-                post_id: log.post_id || null,
-                comment: log.comment || ""
-            },
+            payload: notifPayload,
             created_at: admin.firestore.FieldValue.serverTimestamp()
         });
 
         await batch.commit();
+
+        // 4. Send real-time RTDB notification (instant & 0 Firestore read cost for client)
+        await sendRtdbNotification(target_id, {
+            type: "reputation_change",
+            payload: notifPayload
+        });
+
         logger.info(`Reputation applied for log ${snap.id}: target=${target_id}, value=${value}`);
     } catch (error) {
         logger.error(`Error processing reputation log ${snap.id}:`, error);
@@ -265,50 +305,84 @@ function serializeTopic(doc) {
     return data;
 }
 
+// Server-side in-memory caches to save 90%+ Firestore reads across callable invocations
+const serverUserCache = new Map(); // uid -> { data, ts }
+const serverCharCache = new Map(); // key -> { data, ts }
+const SERVER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Hydrates author & character profile metadata dynamically for a list of posts or topics.
- * Fetches current nicknames, avatars, statuses, signatures, and roles from Firestore in a single batch read.
+ * Fetches current nicknames, avatars, statuses, signatures, and roles using server-side in-memory caching.
  */
 async function hydrateAuthorProfiles(db, items) {
   if (!Array.isArray(items) || items.length === 0) return items;
 
   try {
-    const uids = new Set();
-    const charRequests = [];
+    const now = Date.now();
+    const missingUids = new Set();
+    const missingCharRequests = [];
+    const userProfiles = {};
+    const charProfiles = {};
 
     items.forEach(item => {
-      if (item.author_id) uids.add(item.author_id);
-      if (item.last_post_author_id) uids.add(item.last_post_author_id);
+      // 1. Author UIDs
+      [item.author_id, item.last_post_author_id].forEach(uid => {
+        if (!uid) return;
+        const cached = serverUserCache.get(uid);
+        if (cached && (now - cached.ts < SERVER_CACHE_TTL)) {
+          userProfiles[uid] = cached.data;
+        } else {
+          missingUids.add(uid);
+        }
+      });
 
+      // 2. Character requests
       if (item.is_character && item.author_id && item.author_character_id) {
-        charRequests.push({ uid: item.author_id, charId: item.author_character_id });
+        const key = `${item.author_id}_${item.author_character_id}`;
+        const cached = serverCharCache.get(key);
+        if (cached && (now - cached.ts < SERVER_CACHE_TTL)) {
+          charProfiles[key] = cached.data;
+        } else {
+          missingCharRequests.push({ uid: item.author_id, charId: item.author_character_id, key });
+        }
       }
       if (item.last_post_is_character && item.last_post_author_id && item.last_post_author_character_id) {
-        charRequests.push({ uid: item.last_post_author_id, charId: item.last_post_author_character_id });
+        const key = `${item.last_post_author_id}_${item.last_post_author_character_id}`;
+        const cached = serverCharCache.get(key);
+        if (cached && (now - cached.ts < SERVER_CACHE_TTL)) {
+          charProfiles[key] = cached.data;
+        } else {
+          missingCharRequests.push({ uid: item.last_post_author_id, charId: item.last_post_author_character_id, key });
+        }
       }
     });
 
-    const uidArr = [...uids];
-    const userProfiles = {};
-    if (uidArr.length > 0) {
-      for (let i = 0; i < uidArr.length; i += 30) {
-        const chunk = uidArr.slice(i, i + 30);
+    // Batch fetch missing users
+    const missingUidArr = [...missingUids];
+    if (missingUidArr.length > 0) {
+      for (let i = 0; i < missingUidArr.length; i += 30) {
+        const chunk = missingUidArr.slice(i, i + 30);
         const snap = await db.collection('users')
           .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
           .get();
-        snap.forEach(d => { userProfiles[d.id] = d.data(); });
+        snap.forEach(d => {
+          const dData = d.data();
+          userProfiles[d.id] = dData;
+          serverUserCache.set(d.id, { data: dData, ts: now });
+        });
       }
     }
 
-    const charProfiles = {};
-    if (charRequests.length > 0) {
-      await Promise.all(charRequests.map(async ({ uid, charId }) => {
-        const key = `${uid}_${charId}`;
+    // Batch fetch missing characters
+    if (missingCharRequests.length > 0) {
+      await Promise.all(missingCharRequests.map(async ({ uid, charId, key }) => {
         if (charProfiles[key]) return;
         try {
           const charSnap = await db.collection('users').doc(uid).collection('characters').doc(charId).get();
           if (charSnap.exists) {
-            charProfiles[key] = charSnap.data();
+            const cData = charSnap.data();
+            charProfiles[key] = cData;
+            serverCharCache.set(key, { data: cData, ts: now });
           }
         } catch (err) {
           logger.warn(`[hydrateAuthorProfiles] Error fetching character ${key}:`, err);
@@ -570,60 +644,67 @@ exports.getSecuredMainPageData = onCall(
     }
     const latestTopics = allTopics.slice(0, 50);
 
-    // 3. Forum Statistics — calculate total topics & posts from already-fetched categories
-    const totalTopics = categories.reduce((sum, c) => sum + (c.topics_count || 0), 0);
-    const totalPosts = categories.reduce((sum, c) => sum + (c.posts_count || 0), 0);
-
-    const [usersCountSnap, newestUserSnap] = await Promise.all([
-      db.collection('users').count().get(),
-      db.collection('users').orderBy('created_at', 'desc').limit(1).get()
-    ]);
-
-    let newestUser = null;
-    if (!newestUserSnap.empty) {
-      const nu = newestUserSnap.docs[0].data();
-      newestUser = {
-        id: newestUserSnap.docs[0].id,
-        nickname: nu.nickname || 'User',
-        avatar_url: nu.avatar_url || '',
-        role_id: nu.role_id || 'player',
-        created_at: nu.created_at?.toDate ? nu.created_at.toDate().toISOString() : null
+    // 3. Forum Statistics — read pre-aggregated global stats document
+    let stats = null;
+    try {
+      const globalStatsSnap = await db.collection("forum_stats").doc("global").get();
+      if (globalStatsSnap.exists) {
+        const gs = globalStatsSnap.data();
+        stats = {
+          totalTopics: gs.total_topics ?? categories.reduce((sum, c) => sum + (c.topics_count || 0), 0),
+          totalPosts: gs.total_posts ?? categories.reduce((sum, c) => sum + (c.posts_count || 0), 0),
+          totalUsers: gs.total_users ?? 0,
+          newestUser: gs.newest_user || null
+        };
+      } else {
+        // First-time fallback calculation
+        const totalTopics = categories.reduce((sum, c) => sum + (c.topics_count || 0), 0);
+        const totalPosts = categories.reduce((sum, c) => sum + (c.posts_count || 0), 0);
+        const [usersCountSnap, newestUserSnap] = await Promise.all([
+          db.collection('users').count().get(),
+          db.collection('users').orderBy('created_at', 'desc').limit(1).get()
+        ]);
+        let newestUser = null;
+        if (!newestUserSnap.empty) {
+          const nu = newestUserSnap.docs[0].data();
+          newestUser = {
+            id: newestUserSnap.docs[0].id,
+            nickname: nu.nickname || 'User',
+            avatar_url: nu.avatar_url || '',
+            role_id: nu.role_id || 'player',
+            created_at: nu.created_at?.toDate ? nu.created_at.toDate().toISOString() : null
+          };
+        }
+        stats = {
+          totalUsers: usersCountSnap.data().count,
+          totalTopics,
+          totalPosts,
+          newestUser
+        };
+        await db.collection("forum_stats").doc("global").set({
+          total_topics: totalTopics,
+          total_posts: totalPosts,
+          total_users: stats.totalUsers,
+          newest_user: newestUser
+        }, { merge: true });
+      }
+    } catch (statsErr) {
+      logger.warn('[getSecuredMainPageData] Stats read error:', statsErr);
+      stats = {
+        totalTopics: categories.reduce((sum, c) => sum + (c.topics_count || 0), 0),
+        totalPosts: categories.reduce((sum, c) => sum + (c.posts_count || 0), 0),
+        totalUsers: 0,
+        newestUser: null
       };
     }
 
-    const stats = {
-      totalUsers: usersCountSnap.data().count,
-      totalTopics,
-      totalPosts,
-      newestUser
-    };
-
-    // 4. Daily Active Users (visited in last 24h)
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    const thresholdDate = new Date(Date.now() - ONE_DAY_MS);
-    const dailySnap = await db.collection('users')
-      .where('last_seen', '>=', thresholdDate)
-      .limit(100)
-      .get();
-
-    const dailyActiveUsers = dailySnap.docs.map(doc => {
-      const d = doc.data();
-      return {
-        id: doc.id,
-        nickname: d.nickname || 'User',
-        avatar_url: d.avatar_url || '',
-        role_id: d.role_id || 'player',
-        status_line: d.status_line || '',
-        last_seen: d.last_seen?.toDate ? d.last_seen.toDate().toISOString() : null
-      };
-    });
-
-    return { categories, latestTopics, stats, dailyActiveUsers };
+    return { categories, latestTopics, stats, dailyActiveUsers: [] };
   }
 );
+
 /**
  * onTopicCreated
- * Increments topics_count for category and author.
+ * Increments topics_count for category and author, and updates forum_stats/global.
  */
 exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => {
     const snap = event.data;
@@ -648,6 +729,10 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
             await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", 1);
         }
 
+        // 3. Global pre-aggregated statistics
+        const globalStatsRef = db.collection("forum_stats").doc("global");
+        batch.set(globalStatsRef, { total_topics: admin.firestore.FieldValue.increment(1) }, { merge: true });
+
         await batch.commit();
     } catch (error) {
         logger.error(`onTopicCreated error (${event.params.topicId}):`, error);
@@ -656,7 +741,7 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
 
 /**
  * onTopicDeleted
- * Decrements topics_count. Rollback category posts_count using stored topic count.
+ * Decrements topics_count. Rollback category posts_count and updates forum_stats/global.
  */
 exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => {
     const snap = event.data;
@@ -685,6 +770,13 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
         if (author_id) {
             await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", -1);
         }
+
+        // Global pre-aggregated statistics
+        const globalStatsRef = db.collection("forum_stats").doc("global");
+        batch.set(globalStatsRef, {
+            total_topics: admin.firestore.FieldValue.increment(-1),
+            total_posts: admin.firestore.FieldValue.increment(-posts_count)
+        }, { merge: true });
 
         await batch.commit();
 
@@ -731,7 +823,7 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
 
 /**
  * onPostCreated
- * Handles posts_count increments across topic, category, and user.
+ * Handles posts_count increments across topic, category, user, and forum_stats/global.
  * Syncs last_post metadata to topic and category.
  */
 exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
@@ -805,9 +897,13 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
             await queueIncrement(batch, db.collection("users").doc(author_id), "post_count", 1);
         }
 
+        // 4. Global pre-aggregated statistics
+        const globalStatsRef = db.collection("forum_stats").doc("global");
+        batch.set(globalStatsRef, { total_posts: admin.firestore.FieldValue.increment(1) }, { merge: true });
+
         await batch.commit();
 
-        // 4. Notifications (Background)
+        // 5. Notifications (Background)
         // We do this AFTER the main counters are committed for speed
         await handlePostNotifications(db, {
             postId: event.params.postId,
@@ -862,7 +958,7 @@ exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
 
 /**
  * handlePostNotifications
- * Logic migrated from client-side forum.js
+ * Dispatches notifications across both Firestore and Realtime Database (RTDB).
  */
 async function handlePostNotifications(db, { postId, topicId, authorId, topicTitle, content }) {
     try {
@@ -875,7 +971,21 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
             for (let i = 0; i < subscribers.length; i += CHUNK) {
               await Promise.all(subscribers.slice(i, i + CHUNK).map(async (recipientUid) => {
                 try {
-                  // Check for existing unread topic_reply notification
+                  const replyPayload = {
+                      topic_id: topicId,
+                      topic_title: topicTitle,
+                      first_post_id: postId,
+                      last_post_id: postId,
+                      post_count: 1
+                  };
+
+                  // Send real-time RTDB notification (0 Firestore read cost for client)
+                  await sendRtdbNotification(recipientUid, {
+                      type: "topic_reply",
+                      payload: replyPayload
+                  });
+
+                  // Check for existing unread topic_reply notification in Firestore backup
                   const q = db.collection("notifications")
                       .where("recipient_uid", "==", recipientUid)
                       .where("type", "==", "topic_reply")
@@ -898,13 +1008,7 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                           type: "topic_reply",
                           read: false,
                           archived: false,
-                          payload: {
-                              topic_id: topicId,
-                              topic_title: topicTitle,
-                              first_post_id: postId,
-                              last_post_id: postId,
-                              post_count: 1
-                          },
+                          payload: replyPayload,
                           created_at: admin.firestore.FieldValue.serverTimestamp()
                       });
                   }
@@ -929,16 +1033,23 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                 if (qPostSnap.exists) {
                     const qAuthorId = qPostSnap.data().author_id;
                     if (qAuthorId && qAuthorId !== authorId) {
+                        const quotePayload = {
+                            topic_id: topicId,
+                            topic_title: topicTitle,
+                            post_id: postId
+                        };
+
+                        await sendRtdbNotification(qAuthorId, {
+                            type: "post_quoted",
+                            payload: quotePayload
+                        });
+
                         await db.collection("notifications").add({
                             recipient_uid: qAuthorId,
                             type: "post_quoted",
                             read: false,
                             archived: false,
-                            payload: {
-                                topic_id: topicId,
-                                topic_title: topicTitle,
-                                post_id: postId
-                            },
+                            payload: quotePayload,
                             created_at: admin.firestore.FieldValue.serverTimestamp()
                         });
                     }
@@ -970,7 +1081,17 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                     }
 
                     if (recipientUid && recipientUid !== authorId) {
-                        // Avoid duplicates if multiple mentions of same user
+                        const mentionPayload = {
+                            topic_id: topicId,
+                            topic_title: topicTitle,
+                            post_id: postId
+                        };
+
+                        await sendRtdbNotification(recipientUid, {
+                            type: "post_mentioned",
+                            payload: mentionPayload
+                        });
+
                         const q = db.collection("notifications")
                             .where("recipient_uid", "==", recipientUid)
                             .where("type", "==", "post_mentioned")
@@ -983,11 +1104,7 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                                 type: "post_mentioned",
                                 read: false,
                                 archived: false,
-                                payload: {
-                                    topic_id: topicId,
-                                    topic_title: topicTitle,
-                                    post_id: postId
-                                },
+                                payload: mentionPayload,
                                 created_at: admin.firestore.FieldValue.serverTimestamp()
                             });
                         }
@@ -1001,8 +1118,129 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
 }
 
 /**
+ * Scheduled sync of RTDB presence to Firestore users/{uid}.last_seen (every 15 minutes).
+ * Performs a single batch write for all active users — 0 trigger loops!
+ */
+exports.syncPresenceToFirestore = onSchedule("every 15 minutes", async () => {
+  try {
+    const rtdb = admin.database();
+    const db = admin.firestore();
+    const snapshot = await rtdb.ref("status").once("value");
+    const statuses = snapshot.val();
+    if (!statuses) return;
+
+    const cutoff = Date.now() - 30 * 60 * 1000; // active in last 30 min
+    const batch = db.batch();
+    let count = 0;
+
+    Object.keys(statuses).forEach((uid) => {
+      const u = statuses[uid];
+      if (u && (u.state === 'online' || (u.last_seen && u.last_seen > cutoff))) {
+        const userRef = db.collection("users").doc(uid);
+        batch.set(userRef, {
+          last_seen: admin.firestore.Timestamp.fromMillis(u.last_seen || Date.now())
+        }, { merge: true });
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      logger.info(`[syncPresenceToFirestore] Synced ${count} user last_seen records to Firestore`);
+    }
+  } catch (err) {
+    logger.warn("[syncPresenceToFirestore error]", err);
+  }
+});
+
+/**
+ * onUserCreated
+ * Triggers when a new user document is created.
+ * Updates forum_stats/global and notifies admins via RTDB & Firestore.
+ */
+exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const newUser = snap.data();
+    const db = admin.firestore();
+
+    try {
+        // Update global forum statistics
+        const globalStatsRef = db.collection("forum_stats").doc("global");
+        await globalStatsRef.set({
+            total_users: admin.firestore.FieldValue.increment(1),
+            newest_user: {
+                id: event.params.uid,
+                nickname: newUser.nickname || "User",
+                avatar_url: newUser.avatar_url || "",
+                role_id: newUser.role_id || "player",
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+            }
+        }, { merge: true });
+
+        // 1. Find roles with user-management permissions
+        const rolesSnap = await db.collection("roles").get();
+        const eligibleRoleIds = [];
+        const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
+
+        rolesSnap.forEach(doc => {
+            const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
+            if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
+                eligibleRoleIds.push(doc.id);
+            }
+        });
+
+        // 2. Collect recipients
+        const recipients = new Set();
+        for (let i = 0; i < eligibleRoleIds.length; i += 30) {
+            const usersSnap = await db.collection("users")
+                .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
+                .get();
+            usersSnap.forEach(u => recipients.add(u.id));
+        }
+
+        // Always notify role_id === 'root'
+        const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
+        rootSnap.forEach(u => recipients.add(u.id));
+
+        if (recipients.size === 0) return;
+
+        const notifPayload = {
+            uid: event.params.uid,
+            nickname: newUser.nickname,
+            email: newUser.email,
+            admin_message: newUser.admin_message || null
+        };
+
+        // Send real-time RTDB admin notification
+        await sendRtdbAdminNotification({
+            type: "new_registration",
+            payload: notifPayload
+        });
+
+        // 3. Create notifications in Firestore backup
+        const batch = db.batch();
+        recipients.forEach(uid => {
+            const notifRef = db.collection("notifications").doc();
+            batch.set(notifRef, {
+                recipient_uid: uid,
+                type: "new_registration",
+                read: false,
+                archived: false,
+                payload: notifPayload,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+            });
+        });
+
+        await batch.commit();
+    } catch (error) {
+        logger.error(`onUserCreated error (${event.params.uid}):`, error);
+    }
+});
+
+/**
  * onPostDeleted
- * Decrements posts_count and REVERTS reputation.
+ * Decrements posts_count and updates forum_stats/global.
  */
 exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
     const snap = event.data;
@@ -1026,6 +1264,10 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
         if (author_id) {
             batch.update(db.collection("users").doc(author_id), { post_count: admin.firestore.FieldValue.increment(-1) });
         }
+
+        // Global pre-aggregated statistics
+        const globalStatsRef = db.collection("forum_stats").doc("global");
+        batch.set(globalStatsRef, { total_posts: admin.firestore.FieldValue.increment(-1) }, { merge: true });
 
         // 2. Revert Reputation Logs
         //    Do NOT revert reputation here — onReputationLogDeleted owns that.
@@ -1172,75 +1414,14 @@ exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
     const deletedUid = event.params.userId;
     try {
         await admin.auth().deleteUser(deletedUid);
+        const db = admin.firestore();
+        await db.collection("forum_stats").doc("global").set({
+            total_users: admin.firestore.FieldValue.increment(-1)
+        }, { merge: true });
         logger.info(`Successfully deleted auth user: ${deletedUid}`);
     } catch (error) {
         logger.error(`Error deleting auth user ${deletedUid}:`, error);
     }
-});
-
-/**
- * User Presence Triggers
- * Automatically updates users/{uid}.last_seen when presence documents are created, updated, or deleted.
- */
-exports.onUserPresenceCreated = onDocumentCreated("user_presence/{uid}", async (event) => {
-  const uid = event.params.uid;
-  if (!uid) return;
-
-  try {
-    const db = admin.firestore();
-    const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-    if (userSnap.exists) {
-      await userRef.update({
-        last_seen: admin.firestore.FieldValue.serverTimestamp()
-      });
-    }
-  } catch (err) {
-    logger.error(`[onUserPresenceCreated] error for ${uid}`, err);
-  }
-});
-
-exports.onUserPresenceUpdated = onDocumentUpdated("user_presence/{uid}", async (event) => {
-  const uid = event.params.uid;
-  if (!uid) return;
-
-  try {
-    const db = admin.firestore();
-    const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-    if (userSnap.exists) {
-      const userData = userSnap.data();
-      const lastSeenMs = userData.last_seen ? userData.last_seen.toMillis() : 0;
-      const FIFTEEN_MINS_MS = 15 * 60 * 1000;
-
-      // Throttle updates: only update users/{uid}.last_seen if it hasn't been updated in 15 minutes
-      if (Date.now() - lastSeenMs > FIFTEEN_MINS_MS) {
-        await userRef.update({
-          last_seen: admin.firestore.FieldValue.serverTimestamp()
-        });
-      }
-    }
-  } catch (err) {
-    logger.error(`[onUserPresenceUpdated] error for ${uid}`, err);
-  }
-});
-
-exports.onUserPresenceDeleted = onDocumentDeleted("user_presence/{uid}", async (event) => {
-  const uid = event.params.uid;
-  if (!uid) return;
-
-  try {
-    const db = admin.firestore();
-    const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-    if (userSnap.exists) {
-      await userRef.update({
-        last_seen: admin.firestore.FieldValue.serverTimestamp()
-      });
-    }
-  } catch (err) {
-    logger.error(`[onUserPresenceDeleted] error for ${uid}`, err);
-  }
 });
 
 /**
@@ -1271,7 +1452,7 @@ exports.cleanupExpiredPresence = onSchedule("every 15 minutes", async () => {
 /**
  * onUserCreated
  * Triggers when a new user document is created.
- * Notifies all admins and user managers about the registration.
+ * Updates forum_stats/global and notifies admins.
  */
 exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
     const snap = event.data;
@@ -1280,6 +1461,19 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
     const db = admin.firestore();
 
     try {
+        // Update global forum statistics
+        const globalStatsRef = db.collection("forum_stats").doc("global");
+        await globalStatsRef.set({
+            total_users: admin.firestore.FieldValue.increment(1),
+            newest_user: {
+                id: event.params.uid,
+                nickname: newUser.nickname || "User",
+                avatar_url: newUser.avatar_url || "",
+                role_id: newUser.role_id || "player",
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+            }
+        }, { merge: true });
+
         // 1. Find roles with user-management permissions
         const rolesSnap = await db.collection("roles").get();
         const eligibleRoleIds = [];
@@ -1292,8 +1486,7 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
             }
         });
 
-        // 2. Collect recipients (chunked: 'in' takes at most 30 values,
-        //    the old slice(0, 30) silently dropped everything past the 30th role)
+        // 2. Collect recipients
         const recipients = new Set();
         for (let i = 0; i < eligibleRoleIds.length; i += 30) {
             const usersSnap = await db.collection("users")
@@ -1417,12 +1610,14 @@ exports.getReputationLogs = onCall(
       .get();
 
     const logs = [];
+    const isGuest = !requesterUid;
     const repShowComments = targetUserData.settings?.rep_show_comments;
     const shouldHideComments =
-      repShowComments === false &&
+      isGuest ||
+      (repShowComments === false &&
       !isTargetUser &&
       !isRequesterAdmin &&
-      !isRequesterModerator;
+      !isRequesterModerator);
 
     logsSnapshot.forEach((logDoc) => {
       const logData = { id: logDoc.id, ...logDoc.data() };

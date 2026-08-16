@@ -163,11 +163,13 @@ const TopicPage = () => {
 
       if (resolvedPage && pageToFetch === 'last') {
         jumpTargetPageRef.current = resolvedPage;
-        const currentUrlParams = new URLSearchParams(window.location.search);
-        if (currentUrlParams.get('page') !== resolvedPage.toString()) {
-          currentUrlParams.set('page', resolvedPage.toString());
-          window.history.replaceState(null, '', `${window.location.pathname}?${currentUrlParams.toString()}`);
-        }
+        setSearchParams(prev => {
+          const next = new URLSearchParams(prev);
+          if (next.get('page') !== resolvedPage.toString()) {
+            next.set('page', resolvedPage.toString());
+          }
+          return next;
+        }, { replace: true, preventScrollReset: true });
       }
 
       const activePage = resolvedPage || pageToFetch;
@@ -393,15 +395,20 @@ const TopicPage = () => {
   // authorStats are populated from getSecuredPosts server hydration (author_posts_count, author_reputation)
   // No extra Firestore reads needed per author
 
-  // Subscribe to character masks
+  // Fetch character masks with deduplication
   useEffect(() => {
-  if (posts.length === 0) return;
+    if (posts.length === 0) return;
     const characterMasks = posts.filter(p => p.is_character && p.author_character_id);
+    const uniqueChars = new Map();
+    characterMasks.forEach(p => {
+      if (p.author_id && p.author_character_id && maskStats[p.author_character_id] === undefined) {
+        uniqueChars.set(p.author_character_id, p.author_id);
+      }
+    });
 
-    characterMasks.forEach(async (p) => {
-      const { author_id: uid, author_character_id: charId } = p;
-      if (!uid || !charId || maskStats[charId] !== undefined) return;
+    if (uniqueChars.size === 0) return;
 
+    uniqueChars.forEach(async (uid, charId) => {
       try {
         const charSnap = await getDoc(doc(db, 'users', uid, 'characters', charId));
         setMaskStats(prev => ({
@@ -412,7 +419,7 @@ const TopicPage = () => {
         console.error('[fetchCharacter error]', err);
       }
     });
-  }, [posts]);
+  }, [posts, maskStats]);
 
 
 
@@ -561,11 +568,14 @@ const TopicPage = () => {
           targetId = `post-${posts[posts.length - 1].id}`;
         }
       } else {
-        const finalTargetPage = Math.ceil((topic?.posts_count || 1) / ITEMS_PER_PAGE) || 1;
-        if (currentPage !== finalTargetPage) {
-          jumpTargetPageRef.current = finalTargetPage;
-          setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
-          return;
+        const hasExplicitPage = searchParams.has('page');
+        if (!hasExplicitPage && topic?.posts_count) {
+          const finalTargetPage = Math.ceil(topic.posts_count / ITEMS_PER_PAGE) || 1;
+          if (currentPage !== finalTargetPage) {
+            jumpTargetPageRef.current = finalTargetPage;
+            setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
+            return;
+          }
         }
         targetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
       }
@@ -744,7 +754,17 @@ const TopicPage = () => {
     if (!repTargetPost || !user) return;
     setSubmittingRep(true);
     try {
-      await voteOnPost(user.uid, repTargetPost.author_id, repTargetPost.id, id, repValue, repComment, topic?.title, repTargetPostNumber);
+      await voteOnPost(
+        user.uid,
+        repTargetPost.author_id,
+        repTargetPost.id,
+        id,
+        repValue,
+        repComment,
+        topic?.title,
+        repTargetPostNumber,
+        profile?.nickname || 'User'
+      );
       
       // Optimistic update for posts
       setPosts(prev => prev.map(p => 
@@ -1934,13 +1954,13 @@ const TopicPage = () => {
                             disabled={!post.reputation}
                           >
                             <div
-                              className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' ? 'rep-trigger' : ''}`}
-                              title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned'
+                              className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'pending' ? 'rep-trigger' : ''}`}
+                              title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'pending'
                                 ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
                                 : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
                               onClick={() => {
                                 const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                                if (post.author_id === profile?.uid || authorData?.status === 'banned') return;
+                                if (post.author_id === profile?.uid || authorData?.status === 'banned' || authorData?.role_id === 'banned' || authorData?.role_id === 'pending') return;
 
                                 // If user has permission to use (vote), show modal or toggle controls
                                 // If they DON'T have permission, they can still view details if they clicked an existing vote?

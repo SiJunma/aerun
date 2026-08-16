@@ -3,6 +3,7 @@ import { Overlay, Popover, Badge } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { MessageSquare } from 'lucide-react';
 import { fetchPostVoters } from '../../api/reputation';
+import { useAuth } from '../../contexts/AuthProvider';
 
 /**
  * ReputationHoverPreview
@@ -17,6 +18,7 @@ import { fetchPostVoters } from '../../api/reputation';
  *  - disabled      {boolean}  – if true, no overlay is shown (just renders children)
  */
 const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disabled = false }) => {
+  const { user } = useAuth();
   const [show, setShow] = useState(false);
   const [voters, setVoters] = useState(null);   // null = not fetched, [] = empty
   const [total, setTotal] = useState(0);
@@ -138,7 +140,7 @@ const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disa
                         >
                           {v.voter_nickname || v.voter_id}
                         </Link>
-                        {targetUid && (
+                        {targetUid && user && (
                           <Link
                             to={`/profile/${targetUid}?tab=reputation&log=${v.voter_id}_post_${postId}`}
                             className="rep-preview-detail-link ms-auto"
