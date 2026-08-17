@@ -97,17 +97,38 @@ export const updateRtdbActiveCharacter = async (uid, characterData) => {
 };
 
 /**
- * Sets user status to offline manually (called on logout, before signOut).
- * Cancels the server-side onDisconnect hook to prevent a double-write,
- * then explicitly writes offline while the token is still valid.
- * Returns a promise so the caller can await it before signOut().
+ * Sets user status to online in RTDB when user resumes activity.
  */
-export const setRtdbOffline = async (uid) => {
+export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
   if (!uid || !rtdb) return;
   try {
     const userStatusRef = ref(rtdb, `status/${uid}`);
-    // Cancel any pending server-side onDisconnect (avoid double-write)
-    if (activeDisconnectCancel) {
+    await update(userStatusRef, {
+      state: 'online',
+      last_seen: serverTimestamp(),
+      ...(profile?.nickname ? { nickname: profile.nickname } : {}),
+      ...(profile?.avatar_url !== undefined ? { avatar_url: profile.avatar_url } : {}),
+      ...(profile?.role_id ? { role_id: profile.role_id } : {}),
+      ...(profile?.post_count !== undefined ? { post_count: profile.post_count } : {}),
+      ...(profile?.status_line !== undefined ? { status_line: profile.status_line } : {}),
+      ...(profile?.signature !== undefined ? { signature: profile.signature } : {})
+    });
+  } catch (err) {
+    console.warn('[setRtdbOnline err]', err);
+  }
+};
+
+/**
+ * Sets user status to offline manually (called on idle timeout or logout).
+ * @param {string} uid
+ * @param {boolean} isLogout - If true, cancels the server-side onDisconnect hook before sign out.
+ */
+export const setRtdbOffline = async (uid, isLogout = false) => {
+  if (!uid || !rtdb) return;
+  try {
+    const userStatusRef = ref(rtdb, `status/${uid}`);
+    // Cancel any pending server-side onDisconnect if explicit logout (avoid double-write)
+    if (isLogout && activeDisconnectCancel) {
       activeDisconnectCancel();
       activeDisconnectCancel = null;
     }

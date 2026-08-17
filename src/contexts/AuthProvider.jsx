@@ -38,6 +38,7 @@ import {
 } from '../api/auth-resources';
 import {
   initRtdbPresence,
+  setRtdbOnline,
   setRtdbOffline,
   subscribeToOnlineUsers
 } from '../api/rtdb-presence';
@@ -53,8 +54,8 @@ const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
-// How long without any activity before we stop updating last_seen (15 min)
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+// How long without any activity before switching status to offline (5 min)
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 // How often we check & potentially push last_seen (5 min)
 const TICK_MS = 5 * 60 * 1000;
 
@@ -84,6 +85,8 @@ export const AuthProvider = ({ children }) => {
   if (lastActivityRef.current === null) {
     lastActivityRef.current = Date.now();
   }
+  // Ref tracking if the current user is marked 'online' in RTDB
+  const isRtdbOnlineRef = useRef(true);
   // Ref holding the timestamp of the last database push (last_seen)
   const lastPushTimeRef = useRef(0);
 
@@ -97,6 +100,7 @@ export const AuthProvider = ({ children }) => {
   // RTDB Presence initialization
   useEffect(() => {
     if (user?.uid && profile) {
+      isRtdbOnlineRef.current = true;
       return initRtdbPresence(user.uid, profile);
     }
   }, [user?.uid, profile?.nickname, profile?.avatar_url, profile?.role_id, profile?.status_line, profile?.signature, profile?.post_count]);
@@ -126,14 +130,19 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * recordActivity — call this whenever the user does something meaningful
-   * (page navigation, posting a reply, creating a topic, etc.)
+   * (page navigation, posting a reply, creating a topic, clicks/typing, etc.)
    */
   const recordActivity = useCallback(() => {
     const now = Date.now();
-    const idleMs = now - lastActivityRef.current;
     lastActivityRef.current = now;
 
-    if (user) {
+    if (user?.uid && profile) {
+      // If user was offline due to inactivity/idle, bring them back online in RTDB
+      if (!isRtdbOnlineRef.current) {
+        isRtdbOnlineRef.current = true;
+        setRtdbOnline(user.uid, profile).catch(err => console.warn('[setRtdbOnline resume err]', err));
+      }
+
       // 1. Если пользователь авторизован, но остался старый guest_id — удаляем его запись из guest_activity
       const gid = localStorage.getItem('guest_id');
       if (gid) {
@@ -151,7 +160,41 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('last_guest_push', now.toString());
       }
     }
-  }, [user, getOrCreateGuestId]);
+  }, [user, profile, getOrCreateGuestId]);
+
+  // Inactivity detection: auto-switch to 'offline' after 5 minutes of no actions
+  useEffect(() => {
+    if (!user?.uid || !profile) return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const idleTime = now - (lastActivityRef.current || now);
+      if (idleTime >= IDLE_TIMEOUT_MS && isRtdbOnlineRef.current) {
+        isRtdbOnlineRef.current = false;
+        setRtdbOffline(user.uid, false).catch(err => console.warn('[setRtdbOffline idle err]', err));
+      }
+    }, 15000);
+
+    let throttleTimer = null;
+    const onUserInteraction = () => {
+      if (!throttleTimer) {
+        recordActivity();
+        throttleTimer = setTimeout(() => {
+          throttleTimer = null;
+        }, 10000); // Throttle to at most once per 10 seconds
+      }
+    };
+
+    window.addEventListener('click', onUserInteraction, { passive: true });
+    window.addEventListener('keydown', onUserInteraction, { passive: true });
+
+    return () => {
+      clearInterval(interval);
+      if (throttleTimer) clearTimeout(throttleTimer);
+      window.removeEventListener('click', onUserInteraction);
+      window.removeEventListener('keydown', onUserInteraction);
+    };
+  }, [user?.uid, profile, recordActivity]);
 
   const loginWithGoogle = () => {
     return signInWithPopup(auth, googleProvider);
@@ -220,7 +263,7 @@ export const AuthProvider = ({ children }) => {
 
       if (uid && !skipPresenceCleanup) {
         try {
-          await setRtdbOffline(uid);
+          await setRtdbOffline(uid, true); // isLogout=true cancels the onDisconnect hook
           await deleteDoc(doc(db, 'user_presence', uid)).catch(() => {});
           setActiveUsers(prev => prev.filter(u => u.id !== uid));
         } catch (e) {
