@@ -55,7 +55,7 @@ const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
 
 // How long without any activity before switching status to offline (5 min)
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes of inactivity before going offline
 // How often we check & potentially push last_seen (5 min)
 const TICK_MS = 5 * 60 * 1000;
 
@@ -162,7 +162,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user, profile, getOrCreateGuestId]);
 
-  // Inactivity detection: auto-switch to 'offline' after 5 minutes of no actions
+  // Inactivity detection: auto-switch to 'offline' after 15 minutes of no clicks/keydown
   useEffect(() => {
     if (!user?.uid || !profile) return;
 
@@ -173,7 +173,7 @@ export const AuthProvider = ({ children }) => {
         isRtdbOnlineRef.current = false;
         setRtdbOffline(user.uid, false).catch(err => console.warn('[setRtdbOffline idle err]', err));
       }
-    }, 15000);
+    }, 5 * 60 * 1000);
 
     let throttleTimer = null;
     const onUserInteraction = () => {
