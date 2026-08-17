@@ -252,6 +252,23 @@ const NotificationsPage = () => {
                           </>
                         );
                       })()
+                    ) : n.type === 'reputation_change' && payload?.topic_title ? (
+                      (() => {
+                        const typeLabel = meta?.labelKey ? t(meta.labelKey) : n.type;
+                        return (
+                          <>
+                            {typeLabel} {lang === 'ru' ? 'в теме ' : 'in topic '}
+                            <Link 
+                              to={`/topic/${payload.topic_id}?post=${payload.post_id || ''}`}
+                              className="text-primary text-decoration-none hover-underline"
+                              style={{ textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
+                              onClick={() => !n.read && handleMarkRead(null, n.id)}
+                            >
+                              {payload.topic_title}
+                            </Link>
+                          </>
+                        );
+                      })()
                     ) : (
                       (meta?.labelKey ? t(meta.labelKey) : n.type)
                     )}
@@ -400,7 +417,7 @@ const NotificationsPage = () => {
                         className="text-decoration-none small fw-bold text-primary"
                         onClick={() => !n.read && handleMarkRead(null, n.id)}
                       >
-                        {t('notifications.view_post')}
+                        {payload.topic_title ? `${t('notifications.view_post')} → ${payload.topic_title}` : t('notifications.view_post')}
                       </Link>
                     ) : (
                       <Link 

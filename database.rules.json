@@ -15,6 +15,24 @@
     "admin_notifications": {
       ".read": "auth != null",
       ".write": "auth != null"
+    },
+    "dm_unread": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null"
+      }
+    },
+    "main_page_cache": {
+      ".read": false,
+      ".write": false
+    },
+    "topic_posts_cache": {
+      ".read": false,
+      ".write": false
+    },
+    "session_perms": {
+      ".read": false,
+      ".write": false
     }
   }
 }

@@ -248,6 +248,91 @@ This file serves as the master context for AI interaction, combining the current
           }
         }
       }
+    },
+    "rtdb": {
+      "nodes": {
+        "status": {
+          "description": "Live presence tracking node.",
+          "fields": {
+            "$uid": {
+              "state": "string ('online' | 'offline')",
+              "uid": "string",
+              "nickname": "string",
+              "avatar_url": "string",
+              "role_id": "string",
+              "post_count": "number",
+              "status_line": "string",
+              "signature": "string",
+              "active_character": "object (null or { id, name, avatar_url })",
+              "last_seen": "number (serverTimestamp ms)"
+            }
+          }
+        },
+        "notifications": {
+          "description": "Per-user real-time notification node (instant push without Firestore read costs).",
+          "fields": {
+            "$uid": {
+              "$notifId": {
+                "id": "string",
+                "type": "string",
+                "read": "boolean",
+                "payload": "object",
+                "created_at": "number (ms)"
+              }
+            }
+          }
+        },
+        "admin_notifications": {
+          "description": "Real-time admin alert stream (registrations, reports).",
+          "fields": {
+            "$notifId": {
+              "id": "string",
+              "type": "string",
+              "read": "boolean",
+              "payload": "object",
+              "created_at": "number (ms)"
+            }
+          }
+        },
+        "dm_unread": {
+          "description": "Real-time unread DM counts and conversation highlights.",
+          "fields": {
+            "$uid": {
+              "total": "number",
+              "conversations": {
+                "$convId": {
+                  "unread_count": "number",
+                  "last_message": "string",
+                  "sender_uid": "string",
+                  "timestamp": "number (ms)"
+                }
+              }
+            }
+          }
+        },
+        "main_page_cache": {
+          "description": "Cached categories and global stats for the home page (0 Firestore reads, updated by Cloud Functions).",
+          "fields": {
+            "categories": "object (maps catId to full category metadata and last_post_* info)",
+            "stats": "object (total_topics, total_posts, total_users, newest_user_*, updated_at)"
+          }
+        },
+        "topic_posts_cache": {
+          "description": "Cached last 3 pages of posts for active topics (<24h activity).",
+          "fields": {
+            "$topicId": {
+              "meta": "object (category_id, cache_size, last_post_at, posts_count)",
+              "posts": "object (maps postId to post payload)"
+            }
+          }
+        },
+        "session_perms": {
+          "description": "Cached permission checks per user/guest for fast server-side filtering.",
+          "fields": {
+            "$uid": "object (allowed_category_ids: array, role_id: string, expires_at: number)"
+          }
+        }
+      }
     }
   },
   "react_contexts": {

@@ -43,6 +43,143 @@ async function sendRtdbAdminNotification(notifData) {
   }
 }
 
+// ── RTDB Caching Helpers ───────────────────────────────────────────────────────
+
+async function updateRtdbMainPageCategory(catId, updates) {
+  if (!catId) return;
+  try {
+    const rtdb = admin.database();
+    await rtdb.ref(`main_page_cache/categories/${catId}`).update(updates);
+  } catch (err) {
+    logger.warn(`[updateRtdbMainPageCategory] ${catId} err:`, err);
+  }
+}
+
+async function removeRtdbMainPageCategory(catId) {
+  if (!catId) return;
+  try {
+    const rtdb = admin.database();
+    await rtdb.ref(`main_page_cache/categories/${catId}`).remove();
+  } catch (err) {
+    logger.warn(`[removeRtdbMainPageCategory] ${catId} err:`, err);
+  }
+}
+
+async function mirrorPostToRtdbCache(topicId, postId, postData, postsPerPage = 20) {
+  if (!topicId || !postId) return;
+  try {
+    const rtdb = admin.database();
+    const topicRef = rtdb.ref(`topic_posts_cache/${topicId}`);
+    const cacheSize = (postsPerPage || 20) * 3;
+
+    const createdAtMs = postData.created_at?.toMillis 
+      ? postData.created_at.toMillis() 
+      : (postData.created_at ? new Date(postData.created_at).getTime() : Date.now());
+    const editedAtMs = postData.edited_at?.toMillis 
+      ? postData.edited_at.toMillis() 
+      : (postData.edited_at ? new Date(postData.edited_at).getTime() : null);
+
+    const postPayload = {
+      id: postId,
+      topic_id: topicId,
+      author_id: postData.author_id || null,
+      author_name: postData.author_name || 'User',
+      author_avatar: postData.author_avatar || '',
+      is_character: !!postData.is_character,
+      author_character_id: postData.author_character_id || null,
+      content: postData.content || '',
+      rolls: postData.rolls || null,
+      reputation: postData.reputation || 0,
+      created_at: createdAtMs,
+      edited_at: editedAtMs
+    };
+
+    // Save post into cache
+    await topicRef.child(`posts/${postId}`).set(postPayload);
+    await topicRef.child('meta').update({
+      last_post_at: createdAtMs,
+      cache_size: cacheSize,
+      category_id: postData.category_id || null
+    });
+
+    // Trim old posts if count > cacheSize
+    const postsSnap = await topicRef.child('posts').orderByChild('created_at').once('value');
+    if (postsSnap.exists()) {
+      const count = postsSnap.numChildren();
+      if (count > cacheSize) {
+        let toRemove = count - cacheSize;
+        postsSnap.forEach(child => {
+          if (toRemove > 0) {
+            child.ref.remove().catch(() => {});
+            toRemove--;
+          }
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn(`[mirrorPostToRtdbCache] topic=${topicId} err:`, err);
+  }
+}
+
+async function removePostFromRtdbCache(topicId, postId) {
+  if (!topicId || !postId) return;
+  try {
+    const rtdb = admin.database();
+    await rtdb.ref(`topic_posts_cache/${topicId}/posts/${postId}`).remove();
+  } catch (err) {
+    logger.warn(`[removePostFromRtdbCache] topic=${topicId} post=${postId} err:`, err);
+  }
+}
+
+async function updatePostInRtdbCache(topicId, postId, updates) {
+  if (!topicId || !postId) return;
+  try {
+    const rtdb = admin.database();
+    const postRef = rtdb.ref(`topic_posts_cache/${topicId}/posts/${postId}`);
+    const snap = await postRef.once('value');
+    if (snap.exists()) {
+      await postRef.update(updates);
+    }
+  } catch (err) {
+    logger.warn(`[updatePostInRtdbCache] topic=${topicId} post=${postId} err:`, err);
+  }
+}
+
+async function getSessionPerms(db, uid, userRole) {
+  const rtdb = admin.database();
+  const key = uid || 'guest';
+  const permsRef = rtdb.ref(`session_perms/${key}`);
+
+  try {
+    const snap = await permsRef.once('value');
+    const cached = snap.val();
+    const now = Date.now();
+    if (cached && cached.expires_at > now && cached.role_id === userRole) {
+      return new Set(cached.allowed_category_ids || []);
+    }
+  } catch (err) {
+    logger.warn('[getSessionPerms read err]', err);
+  }
+
+  // Calculate permissions
+  const ctx = await loadContext(db);
+  const allowed = [];
+  Object.keys(ctx.categories).forEach(catId => {
+    if (hasViewForum(userRole, catId, ctx)) {
+      allowed.push(catId);
+    }
+  });
+
+  const expiresAt = Date.now() + (uid ? 30 * 60 * 1000 : 60 * 60 * 1000);
+  permsRef.set({
+    allowed_category_ids: allowed,
+    role_id: userRole,
+    expires_at: expiresAt
+  }).catch(() => {});
+
+  return new Set(allowed);
+}
+
 /**
  * Atomic Reputation Handler (Create)
  * Fired when a reputation_log is created.
@@ -88,12 +225,26 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
             await queueIncrement(batch, postRef, "reputation", value);
         }
 
-        // 3. Create notification (Firestore backup)
+        // 3. Resolve topic_title if missing from log
+        let topicTitle = log.topic_title || null;
+        if (!topicTitle && log.topic_id) {
+            try {
+                const tSnap = await db.collection("topics").doc(log.topic_id).get();
+                if (tSnap.exists) {
+                    topicTitle = tSnap.data().title || null;
+                }
+            } catch (tErr) {
+                logger.warn(`[onReputationLogCreated] Could not resolve topic title for ${log.topic_id}:`, tErr);
+            }
+        }
+
+        // 4. Create notification (Firestore backup)
         const notifRef = db.collection("notifications").doc();
         const notifPayload = {
             voter_nickname: log.voter_nickname || "User",
             value: value,
             topic_id: log.topic_id || null,
+            topic_title: topicTitle,
             post_id: log.post_id || null,
             comment: log.comment || ""
         };
@@ -108,7 +259,7 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
 
         await batch.commit();
 
-        // 4. Send real-time RTDB notification (instant & 0 Firestore read cost for client)
+        // 5. Send real-time RTDB notification (instant & 0 Firestore read cost for client)
         await sendRtdbNotification(target_id, {
             type: "reputation_change",
             payload: notifPayload
@@ -596,8 +747,9 @@ exports.getSecuredGlobalTopics = onCall(
 
 /**
  * getSecuredMainPageData (Callable)
- * Combines categories, latest topics, forum statistics, and 24h active users
- * into a single unified payload to minimize client network roundtrips.
+ * Combines categories and forum statistics into a single unified payload.
+ * Reads primarily from RTDB main_page_cache with zero Firestore reads,
+ * filters via session_perms, and falls back to Firestore on first run.
  */
 exports.getSecuredMainPageData = onCall(
   { enforceAppCheck: false, minInstances: 0 },
@@ -605,106 +757,102 @@ exports.getSecuredMainPageData = onCall(
     const db = admin.firestore();
     const uid = request.auth ? request.auth.uid : null;
     const requester = await getRequester(db, uid);
-    const ctx = await loadContext(db);
+    const rtdb = admin.database();
 
-    const isAllowed = (catId) => hasViewForum(requester.role, catId, ctx);
+    // 1. Check RTDB main_page_cache
+    let rtdbCategories = null;
+    let rtdbStats = null;
 
-    // 1. Categories
-    const categoriesSnap = await db.collection("categories").orderBy('order', 'asc').get();
-    const categories = [];
-    categoriesSnap.forEach(doc => {
-      const catData = doc.data();
-      catData.id = doc.id;
-      if (catData.created_at?.toDate) catData.created_at = catData.created_at.toDate().toISOString();
-      if (catData.updated_at?.toDate) catData.updated_at = catData.updated_at.toDate().toISOString();
-      if (catData.last_post_at?.toDate) catData.last_post_at = catData.last_post_at.toDate().toISOString();
-
-      if (isAllowed(catData.id)) {
-        categories.push(catData);
-      }
-    });
-
-    // 2. Latest Topics (top 50)
-    let allTopics = [];
-    let lastDoc = null;
-    while (allTopics.length < 50) {
-      let q = db.collection('topics').orderBy('last_post_at', 'desc').limit(50);
-      if (lastDoc) q = q.startAfter(lastDoc);
-      const snap = await q.get();
-      if (snap.empty) break;
-
-      snap.forEach(doc => {
-        const data = doc.data();
-        if (isAllowed(data.category_id)) {
-          allTopics.push(serializeTopic(doc));
-        }
-      });
-      if (snap.size < 50) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-    }
-    const latestTopics = allTopics.slice(0, 50);
-
-    // 3. Forum Statistics — read pre-aggregated global stats document
-    let stats = null;
     try {
-      const globalStatsSnap = await db.collection("forum_stats").doc("global").get();
-      if (globalStatsSnap.exists) {
-        const gs = globalStatsSnap.data();
-        stats = {
-          totalTopics: gs.total_topics ?? categories.reduce((sum, c) => sum + (c.topics_count || 0), 0),
-          totalPosts: gs.total_posts ?? categories.reduce((sum, c) => sum + (c.posts_count || 0), 0),
-          totalUsers: gs.total_users ?? 0,
-          newestUser: gs.newest_user || null
-        };
-      } else {
-        // First-time fallback calculation
-        const totalTopics = categories.reduce((sum, c) => sum + (c.topics_count || 0), 0);
-        const totalPosts = categories.reduce((sum, c) => sum + (c.posts_count || 0), 0);
-        const [usersCountSnap, newestUserSnap] = await Promise.all([
-          db.collection('users').count().get(),
-          db.collection('users').orderBy('created_at', 'desc').limit(1).get()
-        ]);
-        let newestUser = null;
-        if (!newestUserSnap.empty) {
-          const nu = newestUserSnap.docs[0].data();
-          newestUser = {
-            id: newestUserSnap.docs[0].id,
-            nickname: nu.nickname || 'User',
-            avatar_url: nu.avatar_url || '',
-            role_id: nu.role_id || 'player',
-            created_at: nu.created_at?.toDate ? nu.created_at.toDate().toISOString() : null
+      const [catSnap, statsSnap] = await Promise.all([
+        rtdb.ref('main_page_cache/categories').once('value'),
+        rtdb.ref('main_page_cache/stats').once('value')
+      ]);
+      rtdbCategories = catSnap.val();
+      rtdbStats = statsSnap.val();
+    } catch (err) {
+      logger.warn('[getSecuredMainPageData RTDB read err]', err);
+    }
+
+    // Fallback if RTDB categories cache is empty: populate from Firestore!
+    if (!rtdbCategories || Object.keys(rtdbCategories).length === 0) {
+      const categoriesSnap = await db.collection("categories").orderBy('order', 'asc').get();
+      rtdbCategories = {};
+      const catBatch = {};
+
+      categoriesSnap.forEach(doc => {
+        const catData = doc.data();
+        catData.id = doc.id;
+        if (catData.created_at?.toDate) catData.created_at = catData.created_at.toDate().toISOString();
+        if (catData.updated_at?.toDate) catData.updated_at = catData.updated_at.toDate().toISOString();
+        if (catData.last_post_at?.toDate) catData.last_post_at = catData.last_post_at.toDate().toISOString();
+        rtdbCategories[doc.id] = catData;
+        catBatch[doc.id] = catData;
+      });
+
+      rtdb.ref('main_page_cache/categories').set(catBatch).catch(() => {});
+    }
+
+    // Fallback if RTDB stats cache is empty: populate from Firestore!
+    if (!rtdbStats) {
+      try {
+        const globalStatsSnap = await db.collection("forum_stats").doc("global").get();
+        if (globalStatsSnap.exists) {
+          const gs = globalStatsSnap.data();
+          const catsList = Object.values(rtdbCategories);
+          rtdbStats = {
+            total_topics: gs.total_topics ?? catsList.reduce((sum, c) => sum + (c.topics_count || 0), 0),
+            total_posts: gs.total_posts ?? catsList.reduce((sum, c) => sum + (c.posts_count || 0), 0),
+            total_users: gs.total_users ?? 0,
+            newest_user_id: gs.newest_user?.id || null,
+            newest_user_nickname: gs.newest_user?.nickname || null,
+            newest_user_role_id: gs.newest_user?.role_id || null,
+            updated_at: Date.now()
+          };
+        } else {
+          const catsList = Object.values(rtdbCategories);
+          const usersCountSnap = await db.collection('users').count().get();
+          rtdbStats = {
+            total_topics: catsList.reduce((sum, c) => sum + (c.topics_count || 0), 0),
+            total_posts: catsList.reduce((sum, c) => sum + (c.posts_count || 0), 0),
+            total_users: usersCountSnap.data().count,
+            newest_user_id: null,
+            newest_user_nickname: null,
+            newest_user_role_id: null,
+            updated_at: Date.now()
           };
         }
-        stats = {
-          totalUsers: usersCountSnap.data().count,
-          totalTopics,
-          totalPosts,
-          newestUser
-        };
-        await db.collection("forum_stats").doc("global").set({
-          total_topics: totalTopics,
-          total_posts: totalPosts,
-          total_users: stats.totalUsers,
-          newest_user: newestUser
-        }, { merge: true });
+        rtdb.ref('main_page_cache/stats').set(rtdbStats).catch(() => {});
+      } catch (err) {
+        logger.warn('[getSecuredMainPageData stats fallback err]', err);
       }
-    } catch (statsErr) {
-      logger.warn('[getSecuredMainPageData] Stats read error:', statsErr);
-      stats = {
-        totalTopics: categories.reduce((sum, c) => sum + (c.topics_count || 0), 0),
-        totalPosts: categories.reduce((sum, c) => sum + (c.posts_count || 0), 0),
-        totalUsers: 0,
-        newestUser: null
-      };
     }
 
-    return { categories, latestTopics, stats, dailyActiveUsers: [] };
+    // 2. Filter allowed categories using session_perms
+    const allowedCatIds = await getSessionPerms(db, uid, requester.role);
+
+    const categories = Object.values(rtdbCategories)
+      .filter(cat => allowedCatIds.has(cat.id))
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    const stats = {
+      totalTopics: rtdbStats?.total_topics ?? 0,
+      totalPosts: rtdbStats?.total_posts ?? 0,
+      totalUsers: rtdbStats?.total_users ?? 0,
+      newestUser: rtdbStats?.newest_user_nickname ? {
+        id: rtdbStats.newest_user_id,
+        nickname: rtdbStats.newest_user_nickname,
+        role_id: rtdbStats.newest_user_role_id
+      } : null
+    };
+
+    return { categories, latestTopics: [], stats, dailyActiveUsers: [] };
   }
 );
 
 /**
  * onTopicCreated
- * Increments topics_count for category and author, and updates forum_stats/global.
+ * Increments topics_count for category, author, updates forum_stats/global and RTDB main_page_cache.
  */
 exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => {
     const snap = event.data;
@@ -734,6 +882,14 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
         batch.set(globalStatsRef, { total_topics: admin.firestore.FieldValue.increment(1) }, { merge: true });
 
         await batch.commit();
+
+        // 4. Update RTDB main_page_cache
+        updateRtdbMainPageCategory(category_id, {
+            topics_count: admin.database.ServerValue.increment(1)
+        });
+        admin.database().ref('main_page_cache/stats').update({
+            total_topics: admin.database.ServerValue.increment(1)
+        }).catch(() => {});
     } catch (error) {
         logger.error(`onTopicCreated error (${event.params.topicId}):`, error);
     }
@@ -741,7 +897,8 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
 
 /**
  * onTopicDeleted
- * Decrements topics_count. Rollback category posts_count and updates forum_stats/global.
+ * Decrements topics_count. Rollback category posts_count, updates forum_stats/global,
+ * cleans up RTDB topic_posts_cache and updates main_page_cache.
  */
 exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => {
     const snap = event.data;
@@ -754,8 +911,6 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
         const batch = db.batch();
 
         // Guard: category may have already been deleted.
-        // queueIncrement returns false if the doc is missing, so we reuse
-        // that signal to also skip the posts_count decrement.
         if (category_id) {
             const catRef = db.collection("categories").doc(category_id);
             const catExists = await queueIncrement(batch, catRef, "topics_count", -1);
@@ -780,10 +935,7 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
 
         await batch.commit();
 
-        // 2b. Cascade-delete posts. onPostDeleted skips topic/category counters
-        //     once the topic is gone, so the -posts_count above stays correct —
-        //     but only because the topic is deleted FIRST. Do not delete posts
-        //     from the client.
+        // 2b. Cascade-delete posts in Firestore
         const postsSnap = await db.collection("posts")
             .where("topic_id", "==", event.params.topicId)
             .get();
@@ -815,6 +967,19 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
             await syncCategoryMetadata(db, category_id);
         }
 
+        // 5. RTDB Updates: main_page_cache and topic_posts_cache
+        if (category_id) {
+            updateRtdbMainPageCategory(category_id, {
+                topics_count: admin.database.ServerValue.increment(-1),
+                posts_count: admin.database.ServerValue.increment(-posts_count)
+            });
+        }
+        admin.database().ref(`topic_posts_cache/${event.params.topicId}`).remove().catch(() => {});
+        admin.database().ref('main_page_cache/stats').update({
+            total_topics: admin.database.ServerValue.increment(-1),
+            total_posts: admin.database.ServerValue.increment(-posts_count)
+        }).catch(() => {});
+
         logger.info(`onTopicDeleted cleanup for ${event.params.topicId} successful.`);
     } catch (error) {
         logger.error(`onTopicDeleted error (${event.params.topicId}):`, error);
@@ -824,7 +989,7 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
 /**
  * onPostCreated
  * Handles posts_count increments across topic, category, user, and forum_stats/global.
- * Syncs last_post metadata to topic and category.
+ * Syncs last_post metadata to topic and category, and mirrors to RTDB caches.
  */
 exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
     const snap = event.data;
@@ -849,11 +1014,13 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
         const settings = settingsSnap.exists ? settingsSnap.data() : {};
         const maxPostsPerTopic = settings.maxPostsPerTopic ?? 1000;
+        const postsPerPage = settings.postsPerPage ?? 20;
         
         const newPostCount = currentTopicPostCount + 1;
         const shouldLock = newPostCount >= maxPostsPerTopic;
 
         const timestamp = created_at || admin.firestore.FieldValue.serverTimestamp();
+        const timestampIso = (created_at?.toDate ? created_at.toDate() : new Date()).toISOString();
 
         // 1. Update Topic (topic is confirmed to exist above)
         const topicUpdates = {
@@ -903,8 +1070,30 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
         await batch.commit();
 
-        // 5. Notifications (Background)
-        // We do this AFTER the main counters are committed for speed
+        // 5. Mirror to RTDB Caches (main_page_cache, topic_posts_cache)
+        if (category_id) {
+            updateRtdbMainPageCategory(category_id, {
+                posts_count: admin.database.ServerValue.increment(1),
+                last_post_at: timestampIso,
+                last_post_author: author_name,
+                last_post_author_id: author_id || null,
+                last_post_author_avatar: author_avatar || null,
+                last_post_topic_id: topic_id,
+                last_post_topic_title: topic_title,
+                last_post_topic_posts_count: newPostCount,
+                last_post_is_character: !!is_character,
+                last_post_author_character_id: author_character_id || null
+            });
+        }
+
+        admin.database().ref('main_page_cache/stats').update({
+            total_posts: admin.database.ServerValue.increment(1)
+        }).catch(() => {});
+
+        // Mirror post to topic_posts_cache (last 3 pages)
+        mirrorPostToRtdbCache(topic_id, event.params.postId, { ...post, category_id }, postsPerPage);
+
+        // 6. Notifications (Background)
         await handlePostNotifications(db, {
             postId: event.params.postId,
             topicId: topic_id,
@@ -921,11 +1110,24 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
 /**
  * onPostUpdated
- * Syncs metadata to topic and category if the last post was updated.
+ * Syncs metadata to topic and category if the last post was updated,
+ * and updates RTDB topic_posts_cache.
  */
 exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
+
+    // Update in RTDB topic_posts_cache
+    updatePostInRtdbCache(after.topic_id, event.params.postId, {
+        content: after.content || '',
+        rolls: after.rolls || null,
+        reputation: after.reputation || 0,
+        edited_at: Date.now(),
+        author_name: after.author_name || 'User',
+        author_avatar: after.author_avatar || '',
+        is_character: !!after.is_character,
+        author_character_id: after.author_character_id || null
+    });
 
     // Check if author metadata changed
     const metadataChanged =
@@ -1797,6 +1999,7 @@ exports.getPostVoters = onCall(
 
 /**
  * Fetch posts for a topic, stripping master dice values if the user lacks VIEW_MASTER_DICE permission.
+ * Checks RTDB topic_posts_cache for the last 3 pages of active topics to save Firestore reads.
  */
 exports.getSecuredPosts = onCall(
   { enforceAppCheck: false, minInstances: 0 },
@@ -1806,7 +2009,7 @@ exports.getSecuredPosts = onCall(
       throw new HttpsError('invalid-argument', 'Missing topicId');
     }
 
-    // 1. Fetch the topic to get category_id
+    // 1. Fetch the topic to get category_id and posts_count
     const db = admin.firestore();
     const topicDoc = await db.collection('topics').doc(topicId).get();
     if (!topicDoc.exists) {
@@ -1814,6 +2017,7 @@ exports.getSecuredPosts = onCall(
     }
     const topicData = topicDoc.data();
     const categoryId = topicData.category_id;
+    const totalPosts = topicData.posts_count || 0;
 
     // 2. Requester role, permissions and post count (single user read)
     const uid = request.auth ? request.auth.uid : null;
@@ -1833,19 +2037,13 @@ exports.getSecuredPosts = onCall(
       canBypassHideTags = perms.includes('bypass_hide_tags');
     }
 
-    // 3. Shared view_forum check — same rule as every other callable
+    // 3. Shared view_forum check
     if (!hasViewForum(requesterRole, categoryId, ctx)) {
       throw new HttpsError('permission-denied', 'You do not have permission to view posts in this category.');
     }
 
     let resolvedPage = 1;
     if (page === 'last' || page === 'latest' || page === 'unread') {
-      const countSnap = await db.collection('posts')
-        .where('topic_id', '==', topicId)
-        .count()
-        .get();
-      const totalPosts = countSnap.data().count;
-
       if (lastVisit) {
         const lastVisitDate = new Date(lastVisit);
         if (!isNaN(lastVisitDate.getTime())) {
@@ -1871,23 +2069,66 @@ exports.getSecuredPosts = onCall(
     }
 
     const startIndex = (resolvedPage - 1) * pageSize;
-    const postsSnap = await db.collection('posts')
-      .where('topic_id', '==', topicId)
-      .orderBy('created_at', 'asc')
-      .offset(startIndex)
-      .limit(pageSize)
-      .get();
+    const totalPages = Math.max(1, Math.ceil(totalPosts / pageSize));
+    const isTailPage = resolvedPage >= Math.max(1, totalPages - 2);
 
-    // Pass 1: Collect raw posts and scan for UIDs in [hide] tags
-    const rawPosts = [];
+    let rawPosts = [];
+    let usedRtdbCache = false;
+
+    // 4. Try RTDB topic_posts_cache if requesting one of the last 3 pages
+    if (isTailPage && totalPosts > 0) {
+      try {
+        const rtdb = admin.database();
+        const postsSnap = await rtdb.ref(`topic_posts_cache/${topicId}/posts`)
+          .orderByChild('created_at')
+          .once('value');
+
+        if (postsSnap.exists()) {
+          const cachedPosts = [];
+          postsSnap.forEach(child => {
+            const p = child.val();
+            p.id = child.key;
+            cachedPosts.push(p);
+          });
+
+          // Offset of the first cached post in global topic sequence
+          const cachedStartOffset = Math.max(0, totalPosts - cachedPosts.length);
+          if (startIndex >= cachedStartOffset && startIndex < totalPosts) {
+            const sliceStart = startIndex - cachedStartOffset;
+            const sliceEnd = sliceStart + pageSize;
+            rawPosts = cachedPosts.slice(sliceStart, sliceEnd);
+            if (rawPosts.length > 0) {
+              usedRtdbCache = true;
+            }
+          }
+        }
+      } catch (rtdbErr) {
+        logger.warn(`[getSecuredPosts RTDB cache read err for ${topicId}]`, rtdbErr);
+      }
+    }
+
+    // 5. Fallback to Firestore if RTDB cache miss
+    if (!usedRtdbCache || rawPosts.length === 0) {
+      const postsSnap = await db.collection('posts')
+        .where('topic_id', '==', topicId)
+        .orderBy('created_at', 'asc')
+        .offset(startIndex)
+        .limit(pageSize)
+        .get();
+
+      rawPosts = [];
+      postsSnap.forEach(doc => {
+        const data = doc.data();
+        data.id = doc.id;
+        rawPosts.push(data);
+      });
+    }
+
+    // Pass 1: Scan for UIDs in [hide] tags
     const addresseeUids = new Set();
     const uidScanRegex = /\[hide=@([^\]\s]+)/gi;
 
-    postsSnap.forEach(doc => {
-      const data = doc.data();
-      data.id = doc.id;
-      rawPosts.push(data);
-
+    rawPosts.forEach(data => {
       if (data.content && typeof data.content === 'string') {
         const isAuthor = data.author_id === uid;
         if (!canBypassHideTags && !isAuthor) {
@@ -1915,23 +2156,36 @@ exports.getSecuredPosts = onCall(
     // Pass 3: Process posts and scrub hide tags
     const posts = [];
     for (const data of rawPosts) {
-      if (data.created_at) data.created_at = data.created_at.toDate().toISOString();
-      if (data.updated_at) data.updated_at = data.updated_at.toDate().toISOString();
-      if (data.edited_at) data.edited_at = data.edited_at.toDate().toISOString();
+      const p = { ...data };
+      if (p.created_at?.toDate) {
+        p.created_at = p.created_at.toDate().toISOString();
+      } else if (typeof p.created_at === 'number') {
+        p.created_at = new Date(p.created_at).toISOString();
+      }
+      if (p.updated_at?.toDate) {
+        p.updated_at = p.updated_at.toDate().toISOString();
+      } else if (typeof p.updated_at === 'number') {
+        p.updated_at = new Date(p.updated_at).toISOString();
+      }
+      if (p.edited_at?.toDate) {
+        p.edited_at = p.edited_at.toDate().toISOString();
+      } else if (typeof p.edited_at === 'number') {
+        p.edited_at = new Date(p.edited_at).toISOString();
+      }
 
-      if (data.rolls) {
-        Object.keys(data.rolls).forEach(rId => {
-          const roll = data.rolls[rId];
-          if (roll.type === 'master' && !canViewMasterDice && data.author_id !== uid) {
+      if (p.rolls) {
+        Object.keys(p.rolls).forEach(rId => {
+          const roll = p.rolls[rId];
+          if (roll.type === 'master' && !canViewMasterDice && p.author_id !== uid) {
             roll.value = null; 
           }
         });
       }
 
-      if (data.content && typeof data.content === 'string') {
-        const isAuthor = data.author_id === uid;
+      if (p.content && typeof p.content === 'string') {
+        const isAuthor = p.author_id === uid;
         if (!canBypassHideTags && !isAuthor) {
-          data.content = data.content.replace(/\[hide(?:=([^\]]+))?\]([\s\S]*?)\[\/hide\]/gi, (match, param) => {
+          p.content = p.content.replace(/\[hide(?:=([^\]]+))?\]([\s\S]*?)\[\/hide\]/gi, (match, param) => {
             const fullParam = param ? param.trim() : 'hidden';
             const baseVal = fullParam.split(/\s+/)[0]; 
             let isVisible = false;
@@ -1966,11 +2220,10 @@ exports.getSecuredPosts = onCall(
         }
       }
 
-      posts.push(data);
+      posts.push(p);
     }
 
-    // Pinned first post: if the topic has first_post_pinned and we're on page 2+,
-    // fetch the actual first post of the topic and return it alongside the page posts.
+    // Pinned first post
     let pinnedPost = null;
     if (topicData.first_post_pinned && resolvedPage > 1) {
       const firstPostSnap = await db.collection('posts')
@@ -1981,9 +2234,9 @@ exports.getSecuredPosts = onCall(
       if (!firstPostSnap.empty) {
         const fpData = firstPostSnap.docs[0].data();
         fpData.id = firstPostSnap.docs[0].id;
-        if (fpData.created_at) fpData.created_at = fpData.created_at.toDate().toISOString();
-        if (fpData.updated_at) fpData.updated_at = fpData.updated_at.toDate().toISOString();
-        if (fpData.edited_at) fpData.edited_at = fpData.edited_at.toDate().toISOString();
+        if (fpData.created_at) fpData.created_at = fpData.created_at.toDate ? fpData.created_at.toDate().toISOString() : new Date(fpData.created_at).toISOString();
+        if (fpData.updated_at) fpData.updated_at = fpData.updated_at.toDate ? fpData.updated_at.toDate().toISOString() : new Date(fpData.updated_at).toISOString();
+        if (fpData.edited_at) fpData.edited_at = fpData.edited_at.toDate ? fpData.edited_at.toDate().toISOString() : new Date(fpData.edited_at).toISOString();
         pinnedPost = fpData;
       }
     }
@@ -1993,26 +2246,131 @@ exports.getSecuredPosts = onCall(
       await hydrateAuthorProfiles(db, [pinnedPost]);
     }
 
-    // Fetch latest post of the topic so front-end can update main page / category state locally without extra queries
+    // Latest post of the topic
     let lastPost = null;
-    const lastPostSnap = await db.collection('posts')
-      .where('topic_id', '==', topicId)
-      .orderBy('created_at', 'desc')
-      .limit(1)
-      .get();
-    if (!lastPostSnap.empty) {
-      const lpData = lastPostSnap.docs[0].data();
-      lpData.id = lastPostSnap.docs[0].id;
-      if (lpData.created_at) lpData.created_at = lpData.created_at.toDate().toISOString();
-      if (lpData.updated_at) lpData.updated_at = lpData.updated_at.toDate().toISOString();
-      if (lpData.edited_at) lpData.edited_at = lpData.edited_at.toDate().toISOString();
-      lastPost = lpData;
-      await hydrateAuthorProfiles(db, [lastPost]);
+    if (posts.length > 0 && resolvedPage === totalPages) {
+      lastPost = posts[posts.length - 1];
+    } else {
+      const lastPostSnap = await db.collection('posts')
+        .where('topic_id', '==', topicId)
+        .orderBy('created_at', 'desc')
+        .limit(1)
+        .get();
+      if (!lastPostSnap.empty) {
+        const lpData = lastPostSnap.docs[0].data();
+        lpData.id = lastPostSnap.docs[0].id;
+        if (lpData.created_at) lpData.created_at = lpData.created_at.toDate ? lpData.created_at.toDate().toISOString() : new Date(lpData.created_at).toISOString();
+        if (lpData.updated_at) lpData.updated_at = lpData.updated_at.toDate ? lpData.updated_at.toDate().toISOString() : new Date(lpData.updated_at).toISOString();
+        if (lpData.edited_at) lpData.edited_at = lpData.edited_at.toDate ? lpData.edited_at.toDate().toISOString() : new Date(lpData.edited_at).toISOString();
+        lastPost = lpData;
+        await hydrateAuthorProfiles(db, [lastPost]);
+      }
     }
 
     return { posts, pinnedPost, page: resolvedPage, lastPost };
   }
 );
+
+/**
+ * onDmMessageCreated
+ * Triggers when a new DM message is created. Updates unread counter in RTDB (dm_unread/{recipientUid}).
+ */
+exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", async (event) => {
+  const snap = event.data;
+  if (!snap) return;
+  const msg = snap.data();
+  const { sender_uid, text, timestamp } = msg;
+  const convId = event.params.convId;
+
+  try {
+    const db = admin.firestore();
+    const convDoc = await db.collection("dms").doc(convId).get();
+    if (!convDoc.exists) return;
+    const convData = convDoc.data();
+    const participants = convData.participants || [];
+    const recipientUid = participants.find(u => u !== sender_uid);
+
+    if (!recipientUid) return;
+
+    const rtdb = admin.database();
+    const unreadRef = rtdb.ref(`dm_unread/${recipientUid}/conversations/${convId}`);
+    
+    await unreadRef.transaction((current) => {
+      const prevCount = (current && current.unread_count) || 0;
+      return {
+        unread_count: prevCount + 1,
+        last_message: (text || '').substring(0, 100),
+        sender_uid: sender_uid,
+        timestamp: timestamp?.toMillis ? timestamp.toMillis() : Date.now()
+      };
+    });
+
+    const convsSnap = await rtdb.ref(`dm_unread/${recipientUid}/conversations`).once('value');
+    let total = 0;
+    convsSnap.forEach(child => {
+      total += (child.val()?.unread_count || 0);
+    });
+    await rtdb.ref(`dm_unread/${recipientUid}/total`).set(total);
+
+  } catch (err) {
+    logger.error(`[onDmMessageCreated] conv=${convId} err:`, err);
+  }
+});
+
+/**
+ * Scheduled sync of forum stats to RTDB main_page_cache/stats (every 2 hours).
+ */
+exports.syncForumStatsToRtdb = onSchedule("every 2 hours", async () => {
+  try {
+    const db = admin.firestore();
+    const rtdb = admin.database();
+    const globalStatsSnap = await db.collection("forum_stats").doc("global").get();
+    if (globalStatsSnap.exists) {
+      const gs = globalStatsSnap.data();
+      const statsPayload = {
+        total_topics: gs.total_topics ?? 0,
+        total_posts: gs.total_posts ?? 0,
+        total_users: gs.total_users ?? 0,
+        newest_user_id: gs.newest_user?.id || null,
+        newest_user_nickname: gs.newest_user?.nickname || null,
+        newest_user_role_id: gs.newest_user?.role_id || null,
+        updated_at: Date.now()
+      };
+      await rtdb.ref("main_page_cache/stats").set(statsPayload);
+      logger.info("[syncForumStatsToRtdb] Synced stats to RTDB");
+    }
+  } catch (err) {
+    logger.warn("[syncForumStatsToRtdb err]", err);
+  }
+});
+
+/**
+ * Scheduled cleanup of stale topic posts cache (>24h since last activity).
+ */
+exports.cleanupStaleTopicPostsCache = onSchedule("every 1 hours", async () => {
+  try {
+    const rtdb = admin.database();
+    const cacheSnap = await rtdb.ref("topic_posts_cache").once("value");
+    if (!cacheSnap.exists()) return;
+
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const removals = [];
+
+    cacheSnap.forEach(child => {
+      const meta = child.child("meta").val();
+      if (meta && meta.last_post_at && meta.last_post_at < cutoff) {
+        removals.push(child.ref.remove());
+      }
+    });
+
+    if (removals.length > 0) {
+      await Promise.all(removals);
+      logger.info(`[cleanupStaleTopicPostsCache] Cleaned up ${removals.length} stale topic post caches`);
+    }
+  } catch (err) {
+    logger.warn("[cleanupStaleTopicPostsCache err]", err);
+  }
+});
 
 /**
  * getUserPosts (Callable)

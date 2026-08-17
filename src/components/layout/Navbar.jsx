@@ -6,8 +6,8 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { useTheme } from '../../contexts/ThemeProvider';
 import { useDesign } from '../../contexts/DesignProvider';
 import { Bell, User, LogOut, MessageCircle, Palette, Check } from 'lucide-react';
-import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/notifications';
-import { subscribeToDmList } from '../../api/dms';
+import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/rtdb-notifications';
+import { subscribeToDmUnread } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
 import { usePageTitle } from '../../contexts/TitleProvider';
@@ -28,7 +28,7 @@ const Navigation = () => {
 
   const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
-  // Subscribe to notifications
+  // Subscribe to notifications via RTDB (0 Firestore reads)
   React.useEffect(() => {
     if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') return;
 
@@ -53,15 +53,14 @@ const Navigation = () => {
     };
   }, [isAdmin, user?.uid, profile?.role_id]);
 
-  // Subscribe to DM unread count
+  // Subscribe to DM unread count via RTDB (0 Firestore reads)
   React.useEffect(() => {
-    if (!hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) || profile?.role_id === 'pending') {
+    if (!user?.uid || !hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) || profile?.role_id === 'pending') {
       setDmUnread(0);
       return;
     }
-    const unsub = subscribeToDmList(user.uid, (convs) => {
-      const total = convs.reduce((sum, c) => sum + (c.unread?.[user.uid] || 0), 0);
-      setDmUnread(total);
+    const unsub = subscribeToDmUnread(user.uid, (data) => {
+      setDmUnread(data?.total || 0);
     });
     return () => unsub();
   }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES, profile?.role_id]);
@@ -69,15 +68,21 @@ const Navigation = () => {
   const totalUnread = adminUnread + userUnread;
   const totalBadge = totalUnread + dmUnread;
 
-  // ── Play sound when new notification arrives ─────────────────────
-  const prevTotalUnreadRef = useRef(totalUnread);
+  // ── Play sound when new notification or DM arrives ───────────────
+  const prevTotalBadgeRef = useRef(null);
   React.useEffect(() => {
-    const prev = prevTotalUnreadRef.current;
-    if (totalUnread > prev && profile?.settings?.sound?.enabled) {
-      playNotificationSound(profile.settings.sound.volume ?? 40);
+    // Skip sound on initial page load / initial state hydration
+    if (prevTotalBadgeRef.current === null) {
+      prevTotalBadgeRef.current = totalBadge;
+      return;
     }
-    prevTotalUnreadRef.current = totalUnread;
-  }, [totalUnread, profile?.settings?.sound?.enabled, profile?.settings?.sound?.volume]);
+    const prev = prevTotalBadgeRef.current;
+    const isSoundEnabled = profile?.settings?.sound?.enabled !== false;
+    if (totalBadge > prev && isSoundEnabled) {
+      playNotificationSound(profile?.settings?.sound?.volume ?? 40);
+    }
+    prevTotalBadgeRef.current = totalBadge;
+  }, [totalBadge, profile?.settings?.sound?.enabled, profile?.settings?.sound?.volume]);
 
   // Update unread count in TitleProvider
   React.useEffect(() => {

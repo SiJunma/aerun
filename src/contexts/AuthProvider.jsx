@@ -41,6 +41,8 @@ import {
   setRtdbOffline,
   subscribeToOnlineUsers
 } from '../api/rtdb-presence';
+import { subscribeToDmUnread } from '../api/dms';
+import { clearAllDmCache } from '../api/dm-cache';
 import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
@@ -69,6 +71,7 @@ export const AuthProvider = ({ children }) => {
   const [forumStats, setForumStats] = useState(null);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
+  const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {} });
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState([]);
   const [authError, setAuthError] = useState(null);
@@ -96,12 +99,21 @@ export const AuthProvider = ({ children }) => {
     if (user?.uid && profile) {
       return initRtdbPresence(user.uid, profile);
     }
-  }, [user?.uid, profile?.nickname, profile?.avatar_url, profile?.role_id]);
+  }, [user?.uid, profile?.nickname, profile?.avatar_url, profile?.role_id, profile?.status_line, profile?.signature, profile?.post_count]);
 
   // Real-time Online Users subscription from RTDB (0 Firestore reads)
   useEffect(() => {
     return subscribeToOnlineUsers(setActiveUsers);
   }, []);
+
+  // Real-time DM Unread subscription from RTDB (0 Firestore reads)
+  useEffect(() => {
+    if (user?.uid) {
+      return subscribeToDmUnread(user.uid, setDmUnread);
+    } else {
+      setDmUnread({ total: 0, conversations: {} });
+    }
+  }, [user?.uid]);
 
   const getOrCreateGuestId = useCallback(() => {
     let gid = localStorage.getItem('guest_id');
@@ -217,6 +229,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       localStorage.removeItem('last_guest_push');
+      clearAllDmCache();
       await signOut(auth);
 
       const gid = getOrCreateGuestId();
@@ -813,6 +826,7 @@ export const AuthProvider = ({ children }) => {
     readMap,
     categories,
     unreadTopicsCount,
+    dmUnread,
     isMarkingAllRead,
     markTopicRead,
     markAllRead,

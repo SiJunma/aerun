@@ -14,8 +14,9 @@ let activeDisconnectCancel = null; // stores cancel fn for current onDisconnect
 /**
  * Initializes real-time presence tracking for an authenticated user.
  * Automatically sets status to 'online' on connect, and 'offline' on disconnect.
+ * Enriches status with post_count, status_line, signature, and active_character.
  */
-export const initRtdbPresence = (uid, profile) => {
+export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
   if (activePresenceUnsub) {
     activePresenceUnsub();
     activePresenceUnsub = null;
@@ -44,22 +45,27 @@ export const initRtdbPresence = (uid, profile) => {
           })
           .catch((err) => console.warn('[RTDB onDisconnect err]', err));
 
-        // Set online status
+        // Set online status with enriched fields
         set(userStatusRef, {
           state: 'online',
           uid,
           nickname: profile?.nickname || 'User',
           avatar_url: profile?.avatar_url || '',
           role_id: profile?.role_id || 'player',
+          post_count: profile?.post_count || 0,
+          status_line: profile?.status_line || '',
+          signature: profile?.signature || '',
+          active_character: activeCharacter ? {
+            id: activeCharacter.id || activeCharacter._id,
+            name: activeCharacter.name || '',
+            avatar_url: activeCharacter.avatar_url || ''
+          } : null,
           last_seen: serverTimestamp()
         }).catch((err) => console.warn('[RTDB set online err]', err));
       }
     });
 
     // Cleanup: ONLY unsubscribe the listener.
-    // Do NOT write to RTDB here — React cleanup runs after signOut(),
-    // at which point the auth token is gone and write → permission_denied.
-    // The onDisconnect hook registered above fires on the server automatically.
     activePresenceUnsub = () => {
       unsubConnected();
     };
@@ -68,6 +74,25 @@ export const initRtdbPresence = (uid, profile) => {
   } catch (err) {
     console.warn('[initRtdbPresence err]', err);
     return () => {};
+  }
+};
+
+/**
+ * Updates the active mask/character in RTDB immediately when user switches character.
+ */
+export const updateRtdbActiveCharacter = async (uid, characterData) => {
+  if (!uid || !rtdb) return;
+  try {
+    const userStatusRef = ref(rtdb, `status/${uid}`);
+    await update(userStatusRef, {
+      active_character: characterData ? {
+        id: characterData.id || characterData._id,
+        name: characterData.name || '',
+        avatar_url: characterData.avatar_url || ''
+      } : null
+    });
+  } catch (err) {
+    console.warn('[updateRtdbActiveCharacter err]', err);
   }
 };
 
@@ -123,6 +148,10 @@ export const subscribeToOnlineUsers = (callback) => {
             nickname: u.nickname || 'User',
             avatar_url: u.avatar_url || '',
             role_id: u.role_id || 'player',
+            post_count: u.post_count || 0,
+            status_line: u.status_line || '',
+            signature: u.signature || '',
+            active_character: u.active_character || null,
             last_seen: u.last_seen
           });
         }
@@ -197,6 +226,10 @@ export const subscribeToDailyActiveUsers = (callback) => {
             nickname: u.nickname || 'User',
             avatar_url: u.avatar_url || '',
             role_id: u.role_id || 'player',
+            post_count: u.post_count || 0,
+            status_line: u.status_line || '',
+            signature: u.signature || '',
+            active_character: u.active_character || null,
             last_seen: u.last_seen
           });
         }
