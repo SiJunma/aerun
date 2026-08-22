@@ -21,24 +21,32 @@ const LastPostInfo = ({
   if (!lastPostAt) return <span className="text-muted small">—</span>;
 
   const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
+  // Всего страниц в теме
+  const totalTopicPages = Math.max(1, Math.ceil((postsCount || 1) / ITEMS_PER_PAGE));
+
   let targetUrl = `/topic/${topicId}?goLast=1`;
-  
+
   if (hasUnread) {
     if (lastReadOffset !== null) {
-      const nextIndex = lastReadOffset + 1;
-      const targetPage = Math.ceil((nextIndex + 1) / ITEMS_PER_PAGE);
+      // Номер первого непрочитанного сообщения (1-based)
+      const firstUnreadMsgNum = lastReadOffset + 2;
+      // Рассчитываем страницу, но НЕ даем ей превысить существующее кол-во страниц
+      const targetPage = Math.min(
+        totalTopicPages,
+        Math.max(1, Math.ceil(firstUnreadMsgNum / ITEMS_PER_PAGE))
+      );
       targetUrl = `/topic/${topicId}?page=${targetPage}&goLast=1`;
     }
   } else {
-    const lastPage = Math.max(1, Math.ceil(postsCount / ITEMS_PER_PAGE));
-    targetUrl = `/topic/${topicId}?page=${lastPage}&goLast=1`;
+    // Если все прочитано — ведет на последнюю существующую страницу
+    targetUrl = `/topic/${topicId}?page=${totalTopicPages}&goLast=1`;
   }
 
   return (
     <Link
       to={targetUrl}
       className={`text-decoration-none d-flex align-items-center gap-1 text-muted last-post-link-meta ${className}`}
-      title={hasUnread 
+      title={hasUnread
         ? (lang === 'ru' ? 'К первому непрочитанному сообщению' : 'To first unread message')
         : (lang === 'ru' ? 'К последнему сообщению' : 'To last message')
       }

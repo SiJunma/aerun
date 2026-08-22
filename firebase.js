@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
 import { getDatabase } from 'firebase/database';
@@ -29,9 +29,7 @@ export const auth = getAuth(app);
 // may otherwise discard the session token when throttling background tabs).
 setPersistence(auth, browserLocalPersistence).catch(e => console.warn('[Auth persistence]', e));
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
+  localCache: memoryLocalCache()
 });
 export const rtdb = getDatabase(app);
 export const storage = isStorageEnabled ? getStorage(app) : null;

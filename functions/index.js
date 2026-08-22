@@ -9,7 +9,7 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 // Ensure only a reasonable amount of instances run at once to manage billing safely
-setGlobalOptions({ maxInstances: 10,  enforceAppCheck: true, memory: "512MiB" });
+setGlobalOptions({ maxInstances: 10, enforceAppCheck: true, memory: "512MiB" });
 
 async function sendRtdbNotification(recipientUid, notifData) {
   if (!recipientUid) return;
@@ -72,11 +72,16 @@ async function mirrorPostToRtdbCache(topicId, postId, postData, postsPerPage = 2
     const topicRef = rtdb.ref(`topic_posts_cache/${topicId}`);
     const cacheSize = (postsPerPage || 20) * 3;
 
-    const createdAtMs = postData.created_at?.toMillis 
-      ? postData.created_at.toMillis() 
-      : (postData.created_at ? new Date(postData.created_at).getTime() : Date.now());
-    const editedAtMs = postData.edited_at?.toMillis 
-      ? postData.edited_at.toMillis() 
+    // Гарантируем корректный числовой timestamp для сортировки в RTDB
+    let createdAtMs = Date.now();
+    if (postData.created_at?.toMillis) {
+      createdAtMs = postData.created_at.toMillis();
+    } else if (postData.created_at && !isNaN(new Date(postData.created_at).getTime())) {
+      createdAtMs = new Date(postData.created_at).getTime();
+    }
+
+    const editedAtMs = postData.edited_at?.toMillis
+      ? postData.edited_at.toMillis()
       : (postData.edited_at ? new Date(postData.edited_at).getTime() : null);
 
     const postPayload = {
@@ -94,15 +99,18 @@ async function mirrorPostToRtdbCache(topicId, postId, postData, postsPerPage = 2
       edited_at: editedAtMs
     };
 
-    // Save post into cache
+    // 1. Сохраняем пост в RTDB
     await topicRef.child(`posts/${postId}`).set(postPayload);
+
+    // 2. Обновляем метаданные темы для слушателей
     await topicRef.child('meta').update({
       last_post_at: createdAtMs,
+      last_post_id: postId,
       cache_size: cacheSize,
       category_id: postData.category_id || null
     });
 
-    // Trim old posts if count > cacheSize
+    // 3. Подрезаем старые посты, если их больше размера кэша (3 страницы)
     const postsSnap = await topicRef.child('posts').orderByChild('created_at').once('value');
     if (postsSnap.exists()) {
       const count = postsSnap.numChildren();
@@ -110,7 +118,7 @@ async function mirrorPostToRtdbCache(topicId, postId, postData, postsPerPage = 2
         let toRemove = count - cacheSize;
         postsSnap.forEach(child => {
           if (toRemove > 0) {
-            child.ref.remove().catch(() => {});
+            child.ref.remove().catch(() => { });
             toRemove--;
           }
         });
@@ -175,7 +183,7 @@ async function getSessionPerms(db, uid, userRole) {
     allowed_category_ids: allowed,
     role_id: userRole,
     expires_at: expiresAt
-  }).catch(() => {});
+  }).catch(() => { });
 
   return new Set(allowed);
 }
@@ -185,90 +193,90 @@ async function getSessionPerms(db, uid, userRole) {
  * Fired when a reputation_log is created.
  */
 exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
+  const snap = event.data;
+  if (!snap) return;
 
-    const log = snap.data();
-    const { target_id, post_id, value } = log;
+  const log = snap.data();
+  const { target_id, post_id, value } = log;
 
-    if (!target_id || typeof value !== 'number') {
-        logger.error(`onReputationLogCreated: Malformed log document ${snap.id}`, log);
-        return;
+  if (!target_id || typeof value !== 'number') {
+    logger.error(`onReputationLogCreated: Malformed log document ${snap.id}`, log);
+    return;
+  }
+
+  try {
+    const db = admin.firestore();
+
+    // Firestore triggers are at-least-once: a redelivery would increment twice.
+    // Claim the log first; the update does not re-fire onDocumentCreated.
+    const logRef = db.collection("reputation_logs").doc(snap.id);
+    const claimed = await db.runTransaction(async (tx) => {
+      const cur = await tx.get(logRef);
+      if (!cur.exists || cur.data().applied === true) return false;
+      tx.update(logRef, { applied: true });
+      return true;
+    });
+    if (!claimed) {
+      logger.info(`onReputationLogCreated: log ${snap.id} already applied, skipping`);
+      return;
     }
 
-    try {
-        const db = admin.firestore();
+    const batch = db.batch();
 
-        // Firestore triggers are at-least-once: a redelivery would increment twice.
-        // Claim the log first; the update does not re-fire onDocumentCreated.
-        const logRef = db.collection("reputation_logs").doc(snap.id);
-        const claimed = await db.runTransaction(async (tx) => {
-            const cur = await tx.get(logRef);
-            if (!cur.exists || cur.data().applied === true) return false;
-            tx.update(logRef, { applied: true });
-            return true;
-        });
-        if (!claimed) {
-            logger.info(`onReputationLogCreated: log ${snap.id} already applied, skipping`);
-            return;
-        }
+    // 1. Update target user reputation
+    const userRef = db.collection("users").doc(target_id);
+    await queueIncrement(batch, userRef, "reputation", value);
 
-        const batch = db.batch();
-
-        // 1. Update target user reputation
-        const userRef = db.collection("users").doc(target_id);
-        await queueIncrement(batch, userRef, "reputation", value);
-
-        // 2. Update associated post reputation (if post_id exists)
-        if (post_id) {
-            const postRef = db.collection("posts").doc(post_id);
-            await queueIncrement(batch, postRef, "reputation", value);
-        }
-
-        // 3. Resolve topic_title if missing from log
-        let topicTitle = log.topic_title || null;
-        if (!topicTitle && log.topic_id) {
-            try {
-                const tSnap = await db.collection("topics").doc(log.topic_id).get();
-                if (tSnap.exists) {
-                    topicTitle = tSnap.data().title || null;
-                }
-            } catch (tErr) {
-                logger.warn(`[onReputationLogCreated] Could not resolve topic title for ${log.topic_id}:`, tErr);
-            }
-        }
-
-        // 4. Create notification (Firestore backup)
-        const notifRef = db.collection("notifications").doc();
-        const notifPayload = {
-            voter_nickname: log.voter_nickname || "User",
-            value: value,
-            topic_id: log.topic_id || null,
-            topic_title: topicTitle,
-            post_id: log.post_id || null,
-            comment: log.comment || ""
-        };
-        batch.set(notifRef, {
-            recipient_uid: target_id,
-            type: "reputation_change",
-            read: false,
-            archived: false,
-            payload: notifPayload,
-            created_at: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        await batch.commit();
-
-        // 5. Send real-time RTDB notification (instant & 0 Firestore read cost for client)
-        await sendRtdbNotification(target_id, {
-            type: "reputation_change",
-            payload: notifPayload
-        });
-
-        logger.info(`Reputation applied for log ${snap.id}: target=${target_id}, value=${value}`);
-    } catch (error) {
-        logger.error(`Error processing reputation log ${snap.id}:`, error);
+    // 2. Update associated post reputation (if post_id exists)
+    if (post_id) {
+      const postRef = db.collection("posts").doc(post_id);
+      await queueIncrement(batch, postRef, "reputation", value);
     }
+
+    // 3. Resolve topic_title if missing from log
+    let topicTitle = log.topic_title || null;
+    if (!topicTitle && log.topic_id) {
+      try {
+        const tSnap = await db.collection("topics").doc(log.topic_id).get();
+        if (tSnap.exists) {
+          topicTitle = tSnap.data().title || null;
+        }
+      } catch (tErr) {
+        logger.warn(`[onReputationLogCreated] Could not resolve topic title for ${log.topic_id}:`, tErr);
+      }
+    }
+
+    // 4. Create notification (Firestore backup)
+    const notifRef = db.collection("notifications").doc();
+    const notifPayload = {
+      voter_nickname: log.voter_nickname || "User",
+      value: value,
+      topic_id: log.topic_id || null,
+      topic_title: topicTitle,
+      post_id: log.post_id || null,
+      comment: log.comment || ""
+    };
+    batch.set(notifRef, {
+      recipient_uid: target_id,
+      type: "reputation_change",
+      read: false,
+      archived: false,
+      payload: notifPayload,
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    await batch.commit();
+
+    // 5. Send real-time RTDB notification (instant & 0 Firestore read cost for client)
+    await sendRtdbNotification(target_id, {
+      type: "reputation_change",
+      payload: notifPayload
+    });
+
+    logger.info(`Reputation applied for log ${snap.id}: target=${target_id}, value=${value}`);
+  } catch (error) {
+    logger.error(`Error processing reputation log ${snap.id}:`, error);
+  }
 });
 
 /**
@@ -277,32 +285,32 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
  * Sole owner of the revert — onPostDeleted must not duplicate it.
  */
 exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
+  const snap = event.data;
+  if (!snap) return;
 
-    const log = snap.data();
-    const { target_id, post_id, value } = log;
+  const log = snap.data();
+  const { target_id, post_id, value } = log;
 
-    if (!target_id || typeof value !== 'number' || value === 0) return;
+  if (!target_id || typeof value !== 'number' || value === 0) return;
 
-    try {
-        const db = admin.firestore();
-        const batch = db.batch();
+  try {
+    const db = admin.firestore();
+    const batch = db.batch();
 
-        // batch.update() on a missing document aborts the WHOLE commit, and both
-        // the post and the user may already be gone by the time this fires.
-        const userQueued = await queueIncrement(batch, db.collection("users").doc(target_id), "reputation", -value);
-        if (post_id) {
-            await queueIncrement(batch, db.collection("posts").doc(post_id), "reputation", -value);
-        }
-
-        await batch.commit();
-        logger.info(`Reputation reverted for deleted log ${snap.id}: target=${target_id}, value=${-value}, user=${userQueued}`);
-    } catch (error) {
-        // Background triggers must never throw HttpsError — it means nothing outside
-        // a callable and just produces an unhandled rejection.
-        logger.error(`Error reverting reputation log ${snap.id}:`, error);
+    // batch.update() on a missing document aborts the WHOLE commit, and both
+    // the post and the user may already be gone by the time this fires.
+    const userQueued = await queueIncrement(batch, db.collection("users").doc(target_id), "reputation", -value);
+    if (post_id) {
+      await queueIncrement(batch, db.collection("posts").doc(post_id), "reputation", -value);
     }
+
+    await batch.commit();
+    logger.info(`Reputation reverted for deleted log ${snap.id}: target=${target_id}, value=${-value}, user=${userQueued}`);
+  } catch (error) {
+    // Background triggers must never throw HttpsError — it means nothing outside
+    // a callable and just produces an unhandled rejection.
+    logger.error(`Error reverting reputation log ${snap.id}:`, error);
+  }
 });
 
 /**
@@ -327,13 +335,17 @@ exports.locatePost = onCall(
         return { found: true, topicId, postId, page: 1, anchor: `#post-${postId}` };
       }
 
+      // 1. Считаем сколько постов идет ДО целевого поста (0-based count)
       const priorPostsQuery = db.collection('posts')
         .where('topic_id', '==', topicId)
         .where('created_at', '<', createdAt);
 
       const countSnap = await priorPostsQuery.count().get();
       const countBefore = countSnap.data().count;
-      const page = Math.floor(countBefore / itemsPerPage) + 1;
+
+      // 2. ИСПРАВЛЕНИЕ: Номер сообщения по порядку = countBefore + 1
+      // Считаем 1-based страницу (Math.ceil от 1-based номера)
+      const page = Math.max(1, Math.ceil((countBefore + 1) / itemsPerPage));
 
       return { found: true, topicId, postId, page, anchor: `#post-${postId}` };
     } catch (err) {
@@ -361,8 +373,9 @@ exports.locateUnreadPost = onCall(
 
       const countSnap = await priorPostsQuery.count().get();
       const countBefore = countSnap.data().count;
-      
-      const unreadPage = Math.floor(countBefore / itemsPerPage) + 1;
+
+      // ИСПРАВЛЕНИЕ: Переводим в 1-based страницу
+      const unreadPage = Math.max(1, Math.ceil((countBefore + 1) / itemsPerPage));
       return { found: true, page: unreadPage };
     } catch (err) {
       console.error('[locateUnreadPost]', err);
@@ -383,7 +396,7 @@ exports.getSecuredCategories = onCall(
 
     let requesterRole = 'guest';
     let isRestricted = false;
-    
+
     if (uid) {
       const userDoc = await db.collection("users").doc(uid).get();
       if (userDoc.exists) {
@@ -449,11 +462,11 @@ exports.getSecuredCategories = onCall(
 
 /** Firestore Timestamps are not JSON-serialisable over the callable protocol. */
 function serializeTopic(doc) {
-    const data = { id: doc.id, ...doc.data() };
-    ['created_at', 'updated_at', 'last_post_at'].forEach(k => {
-        if (data[k]?.toDate) data[k] = data[k].toDate().toISOString();
-    });
-    return data;
+  const data = { id: doc.id, ...doc.data() };
+  ['created_at', 'updated_at', 'last_post_at'].forEach(k => {
+    if (data[k]?.toDate) data[k] = data[k].toDate().toISOString();
+  });
+  return data;
 }
 
 // Server-side in-memory caches to save 90%+ Firestore reads across callable invocations
@@ -604,7 +617,7 @@ exports.getSecuredTopics = onCall(
 
     let requesterRole = 'guest';
     let isRestricted = false;
-    
+
     if (uid) {
       const userDoc = await db.collection("users").doc(uid).get();
       if (userDoc.exists) {
@@ -654,7 +667,7 @@ exports.getSecuredTopics = onCall(
     }
 
     const startIndex = (page - 1) * pageSize;
-    
+
     // 1. Pinned topics (page 1 only, small in number)
     const pinnedTopics = [];
     if (page === 1) {
@@ -720,7 +733,7 @@ exports.getSecuredGlobalTopics = onCall(
       if (lastDoc) {
         q = q.startAfter(lastDoc);
       }
-      
+
       const snap = await q.get();
       // No more documents — stop fetching
       if (snap.empty) break;
@@ -731,7 +744,7 @@ exports.getSecuredGlobalTopics = onCall(
           allTopics.push(serializeTopic(doc));
         }
       });
-      
+
       // If this batch returned fewer docs than requested, we've hit the end of the collection
       if (snap.size < BATCH_SIZE) break;
 
@@ -790,7 +803,7 @@ exports.getSecuredMainPageData = onCall(
         catBatch[doc.id] = catData;
       });
 
-      rtdb.ref('main_page_cache/categories').set(catBatch).catch(() => {});
+      rtdb.ref('main_page_cache/categories').set(catBatch).catch(() => { });
     }
 
     // Fallback if RTDB stats cache is empty: populate from Firestore!
@@ -822,7 +835,7 @@ exports.getSecuredMainPageData = onCall(
             updated_at: Date.now()
           };
         }
-        rtdb.ref('main_page_cache/stats').set(rtdbStats).catch(() => {});
+        rtdb.ref('main_page_cache/stats').set(rtdbStats).catch(() => { });
       } catch (err) {
         logger.warn('[getSecuredMainPageData stats fallback err]', err);
       }
@@ -855,44 +868,44 @@ exports.getSecuredMainPageData = onCall(
  * Increments topics_count for category, author, updates forum_stats/global and RTDB main_page_cache.
  */
 exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const topic = snap.data();
-    const { category_id, author_id } = topic;
+  const snap = event.data;
+  if (!snap) return;
+  const topic = snap.data();
+  const { category_id, author_id } = topic;
 
-    if (!category_id) {
-        logger.warn(`onTopicCreated: topic ${event.params.topicId} has no category_id — skipping counter update`);
-        return;
+  if (!category_id) {
+    logger.warn(`onTopicCreated: topic ${event.params.topicId} has no category_id — skipping counter update`);
+    return;
+  }
+
+  try {
+    const db = admin.firestore();
+    const batch = db.batch();
+
+    // 1. Category topics_count — guard: category may have been deleted
+    await queueIncrement(batch, db.collection("categories").doc(category_id), "topics_count", 1);
+
+    // 2. User topics_count (if not guest) — guard: user may have been deleted
+    if (author_id) {
+      await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", 1);
     }
 
-    try {
-        const db = admin.firestore();
-        const batch = db.batch();
+    // 3. Global pre-aggregated statistics
+    const globalStatsRef = db.collection("forum_stats").doc("global");
+    batch.set(globalStatsRef, { total_topics: admin.firestore.FieldValue.increment(1) }, { merge: true });
 
-        // 1. Category topics_count — guard: category may have been deleted
-        await queueIncrement(batch, db.collection("categories").doc(category_id), "topics_count", 1);
+    await batch.commit();
 
-        // 2. User topics_count (if not guest) — guard: user may have been deleted
-        if (author_id) {
-            await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", 1);
-        }
-
-        // 3. Global pre-aggregated statistics
-        const globalStatsRef = db.collection("forum_stats").doc("global");
-        batch.set(globalStatsRef, { total_topics: admin.firestore.FieldValue.increment(1) }, { merge: true });
-
-        await batch.commit();
-
-        // 4. Update RTDB main_page_cache
-        updateRtdbMainPageCategory(category_id, {
-            topics_count: admin.database.ServerValue.increment(1)
-        });
-        admin.database().ref('main_page_cache/stats').update({
-            total_topics: admin.database.ServerValue.increment(1)
-        }).catch(() => {});
-    } catch (error) {
-        logger.error(`onTopicCreated error (${event.params.topicId}):`, error);
-    }
+    // 4. Update RTDB main_page_cache
+    updateRtdbMainPageCategory(category_id, {
+      topics_count: admin.database.ServerValue.increment(1)
+    });
+    admin.database().ref('main_page_cache/stats').update({
+      total_topics: admin.database.ServerValue.increment(1)
+    }).catch(() => { });
+  } catch (error) {
+    logger.error(`onTopicCreated error (${event.params.topicId}):`, error);
+  }
 });
 
 /**
@@ -901,89 +914,89 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
  * cleans up RTDB topic_posts_cache and updates main_page_cache.
  */
 exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const topic = snap.data();
-    const { category_id, author_id, posts_count = 0 } = topic;
+  const snap = event.data;
+  if (!snap) return;
+  const topic = snap.data();
+  const { category_id, author_id, posts_count = 0 } = topic;
 
-    try {
-        const db = admin.firestore();
-        const batch = db.batch();
+  try {
+    const db = admin.firestore();
+    const batch = db.batch();
 
-        // Guard: category may have already been deleted.
-        if (category_id) {
-            const catRef = db.collection("categories").doc(category_id);
-            const catExists = await queueIncrement(batch, catRef, "topics_count", -1);
-            if (catExists) {
-                batch.update(catRef, {
-                    posts_count: admin.firestore.FieldValue.increment(-posts_count)
-                });
-            }
-        }
-
-        // Guard: user may have been deleted
-        if (author_id) {
-            await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", -1);
-        }
-
-        // Global pre-aggregated statistics
-        const globalStatsRef = db.collection("forum_stats").doc("global");
-        batch.set(globalStatsRef, {
-            total_topics: admin.firestore.FieldValue.increment(-1),
-            total_posts: admin.firestore.FieldValue.increment(-posts_count)
-        }, { merge: true });
-
-        await batch.commit();
-
-        // 2b. Cascade-delete posts in Firestore
-        const postsSnap = await db.collection("posts")
-            .where("topic_id", "==", event.params.topicId)
-            .get();
-        for (let i = 0; i < postsSnap.docs.length; i += 400) {
-            const chunk = db.batch();
-            postsSnap.docs.slice(i, i + 400).forEach(d => chunk.delete(d.ref));
-            await chunk.commit();
-        }
-        logger.info(`onTopicDeleted: cascade-deleted ${postsSnap.size} posts for topic ${event.params.topicId}`);
-
-        // 3. Notifications Cleanup (Chunked)
-        const notifSnap = await db.collection("notifications")
-            .where("payload.topic_id", "==", event.params.topicId)
-            .get();
-
-        if (!notifSnap.empty) {
-            const BATCH_LIMIT = 500;
-            const docs = notifSnap.docs;
-            for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
-                const chunkBatch = db.batch();
-                docs.slice(i, i + BATCH_LIMIT).forEach(d => chunkBatch.delete(d.ref));
-                await chunkBatch.commit();
-            }
-            logger.info(`onTopicDeleted: deleted ${docs.length} notifications for topic ${event.params.topicId}`);
-        }
-
-        // 4. Metadata Sync (Fallback)
-        if (category_id) {
-            await syncCategoryMetadata(db, category_id);
-        }
-
-        // 5. RTDB Updates: main_page_cache and topic_posts_cache
-        if (category_id) {
-            updateRtdbMainPageCategory(category_id, {
-                topics_count: admin.database.ServerValue.increment(-1),
-                posts_count: admin.database.ServerValue.increment(-posts_count)
-            });
-        }
-        admin.database().ref(`topic_posts_cache/${event.params.topicId}`).remove().catch(() => {});
-        admin.database().ref('main_page_cache/stats').update({
-            total_topics: admin.database.ServerValue.increment(-1),
-            total_posts: admin.database.ServerValue.increment(-posts_count)
-        }).catch(() => {});
-
-        logger.info(`onTopicDeleted cleanup for ${event.params.topicId} successful.`);
-    } catch (error) {
-        logger.error(`onTopicDeleted error (${event.params.topicId}):`, error);
+    // Guard: category may have already been deleted.
+    if (category_id) {
+      const catRef = db.collection("categories").doc(category_id);
+      const catExists = await queueIncrement(batch, catRef, "topics_count", -1);
+      if (catExists) {
+        batch.update(catRef, {
+          posts_count: admin.firestore.FieldValue.increment(-posts_count)
+        });
+      }
     }
+
+    // Guard: user may have been deleted
+    if (author_id) {
+      await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", -1);
+    }
+
+    // Global pre-aggregated statistics
+    const globalStatsRef = db.collection("forum_stats").doc("global");
+    batch.set(globalStatsRef, {
+      total_topics: admin.firestore.FieldValue.increment(-1),
+      total_posts: admin.firestore.FieldValue.increment(-posts_count)
+    }, { merge: true });
+
+    await batch.commit();
+
+    // 2b. Cascade-delete posts in Firestore
+    const postsSnap = await db.collection("posts")
+      .where("topic_id", "==", event.params.topicId)
+      .get();
+    for (let i = 0; i < postsSnap.docs.length; i += 400) {
+      const chunk = db.batch();
+      postsSnap.docs.slice(i, i + 400).forEach(d => chunk.delete(d.ref));
+      await chunk.commit();
+    }
+    logger.info(`onTopicDeleted: cascade-deleted ${postsSnap.size} posts for topic ${event.params.topicId}`);
+
+    // 3. Notifications Cleanup (Chunked)
+    const notifSnap = await db.collection("notifications")
+      .where("payload.topic_id", "==", event.params.topicId)
+      .get();
+
+    if (!notifSnap.empty) {
+      const BATCH_LIMIT = 500;
+      const docs = notifSnap.docs;
+      for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+        const chunkBatch = db.batch();
+        docs.slice(i, i + BATCH_LIMIT).forEach(d => chunkBatch.delete(d.ref));
+        await chunkBatch.commit();
+      }
+      logger.info(`onTopicDeleted: deleted ${docs.length} notifications for topic ${event.params.topicId}`);
+    }
+
+    // 4. Metadata Sync (Fallback)
+    if (category_id) {
+      await syncCategoryMetadata(db, category_id);
+    }
+
+    // 5. RTDB Updates: main_page_cache and topic_posts_cache
+    if (category_id) {
+      updateRtdbMainPageCategory(category_id, {
+        topics_count: admin.database.ServerValue.increment(-1),
+        posts_count: admin.database.ServerValue.increment(-posts_count)
+      });
+    }
+    admin.database().ref(`topic_posts_cache/${event.params.topicId}`).remove().catch(() => { });
+    admin.database().ref('main_page_cache/stats').update({
+      total_topics: admin.database.ServerValue.increment(-1),
+      total_posts: admin.database.ServerValue.increment(-posts_count)
+    }).catch(() => { });
+
+    logger.info(`onTopicDeleted cleanup for ${event.params.topicId} successful.`);
+  } catch (error) {
+    logger.error(`onTopicDeleted error (${event.params.topicId}):`, error);
+  }
 });
 
 /**
@@ -992,170 +1005,199 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
  * Syncs last_post metadata to topic and category, and mirrors to RTDB caches.
  */
 exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const post = snap.data();
-    const { topic_id, author_id, author_name, is_character, author_character_id, author_avatar, created_at } = post;
+  const snap = event.data;
+  if (!snap) return;
+  const post = snap.data();
+  const { topic_id, author_id, author_name, is_character, author_character_id, author_avatar, created_at } = post;
 
-    try {
-        const db = admin.firestore();
-        const batch = db.batch();
+  try {
+    const db = admin.firestore();
+    const batch = db.batch();
 
-        // Need topic title for category metadata
-        const topicRef = db.collection("topics").doc(topic_id);
-        const [topicSnap, settingsSnap] = await Promise.all([
-            topicRef.get(),
-            db.collection("settings").doc("global").get()
-        ]);
-        
-        if (!topicSnap.exists) return;
-        const topicData = topicSnap.data();
-        const { category_id, title: topic_title, posts_count: currentTopicPostCount = 0 } = topicData;
+    // Need topic title for category metadata
+    const topicRef = db.collection("topics").doc(topic_id);
+    const [topicSnap, settingsSnap] = await Promise.all([
+      topicRef.get(),
+      db.collection("settings").doc("global").get()
+    ]);
 
-        const settings = settingsSnap.exists ? settingsSnap.data() : {};
-        const maxPostsPerTopic = settings.maxPostsPerTopic ?? 1000;
-        const postsPerPage = settings.postsPerPage ?? 20;
-        
-        const newPostCount = currentTopicPostCount + 1;
-        const shouldLock = newPostCount >= maxPostsPerTopic;
+    if (!topicSnap.exists) return;
+    const topicData = topicSnap.data();
+    const { category_id, title: topic_title, posts_count: currentTopicPostCount = 0 } = topicData;
 
-        const timestamp = created_at || admin.firestore.FieldValue.serverTimestamp();
-        const timestampIso = (created_at?.toDate ? created_at.toDate() : new Date()).toISOString();
+    const settings = settingsSnap.exists ? settingsSnap.data() : {};
+    const maxPostsPerTopic = settings.maxPostsPerTopic ?? 1000;
+    const postsPerPage = settings.postsPerPage ?? 20;
 
-        // 1. Update Topic (topic is confirmed to exist above)
-        const topicUpdates = {
-            posts_count: admin.firestore.FieldValue.increment(1),
-            last_post_at: timestamp,
-            last_post_author: author_name,
-            last_post_author_id: author_id || null,
-            last_post_author_avatar: author_avatar || null,
-            last_post_is_character: !!is_character,
-            last_post_author_character_id: author_character_id || null
-        };
-        
-        if (shouldLock) {
-            topicUpdates.is_locked = true;
-        }
+    const newPostCount = currentTopicPostCount + 1;
+    const shouldLock = newPostCount >= maxPostsPerTopic;
 
-        batch.update(topicRef, topicUpdates);
+    const timestamp = created_at || admin.firestore.FieldValue.serverTimestamp();
+    const timestampIso = (created_at?.toDate ? created_at.toDate() : new Date()).toISOString();
 
-        // 2. Update Category — guard: category may have been deleted
-        if (category_id) {
-            const catRef = db.collection("categories").doc(category_id);
-            const catSnap = await catRef.get();
-            if (catSnap.exists) {
-                batch.update(catRef, {
-                    posts_count: admin.firestore.FieldValue.increment(1),
-                    last_post_at: timestamp,
-                    last_post_author: author_name,
-                    last_post_author_id: author_id || null,
-                    last_post_author_avatar: author_avatar || null,
-                    last_post_topic_id: topic_id,
-                    last_post_topic_title: topic_title,
-                    last_post_topic_posts_count: newPostCount,
-                    last_post_is_character: !!is_character,
-                    last_post_author_character_id: author_character_id || null
-                });
-            }
-        }
+    // 1. Update Topic (topic is confirmed to exist above)
+    const topicUpdates = {
+      posts_count: admin.firestore.FieldValue.increment(1),
+      last_post_at: timestamp,
+      last_post_author: author_name,
+      last_post_author_id: author_id || null,
+      last_post_author_avatar: author_avatar || null,
+      last_post_is_character: !!is_character,
+      last_post_author_character_id: author_character_id || null
+    };
 
-        // 3. Update User (if not guest) — guard: user may have been deleted
-        if (author_id) {
-            await queueIncrement(batch, db.collection("users").doc(author_id), "post_count", 1);
-        }
-
-        // 4. Global pre-aggregated statistics
-        const globalStatsRef = db.collection("forum_stats").doc("global");
-        batch.set(globalStatsRef, { total_posts: admin.firestore.FieldValue.increment(1) }, { merge: true });
-
-        await batch.commit();
-
-        // 5. Mirror to RTDB Caches (main_page_cache, topic_posts_cache)
-        if (category_id) {
-            updateRtdbMainPageCategory(category_id, {
-                posts_count: admin.database.ServerValue.increment(1),
-                last_post_at: timestampIso,
-                last_post_author: author_name,
-                last_post_author_id: author_id || null,
-                last_post_author_avatar: author_avatar || null,
-                last_post_topic_id: topic_id,
-                last_post_topic_title: topic_title,
-                last_post_topic_posts_count: newPostCount,
-                last_post_is_character: !!is_character,
-                last_post_author_character_id: author_character_id || null
-            });
-        }
-
-        admin.database().ref('main_page_cache/stats').update({
-            total_posts: admin.database.ServerValue.increment(1)
-        }).catch(() => {});
-
-        // Mirror post to topic_posts_cache (last 3 pages)
-        mirrorPostToRtdbCache(topic_id, event.params.postId, { ...post, category_id }, postsPerPage);
-
-        // 6. Notifications (Background)
-        await handlePostNotifications(db, {
-            postId: event.params.postId,
-            topicId: topic_id,
-            authorId: author_id,
-            authorName: author_name,
-            topicTitle: topic_title,
-            content: post.content
-        });
-
-    } catch (error) {
-        logger.error(`onPostCreated error (${event.params.postId}):`, error);
+    if (shouldLock) {
+      topicUpdates.is_locked = true;
     }
+
+    batch.update(topicRef, topicUpdates);
+
+    // 2. Update Category — guard: category may have been deleted
+    if (category_id) {
+      const catRef = db.collection("categories").doc(category_id);
+      const catSnap = await catRef.get();
+      if (catSnap.exists) {
+        batch.update(catRef, {
+          posts_count: admin.firestore.FieldValue.increment(1),
+          last_post_at: timestamp,
+          last_post_author: author_name,
+          last_post_author_id: author_id || null,
+          last_post_author_avatar: author_avatar || null,
+          last_post_topic_id: topic_id,
+          last_post_topic_title: topic_title,
+          last_post_topic_posts_count: newPostCount,
+          last_post_is_character: !!is_character,
+          last_post_author_character_id: author_character_id || null
+        });
+      }
+    }
+
+    // 3. Update User (if not guest) — guard: user may have been deleted
+    if (author_id) {
+      await queueIncrement(batch, db.collection("users").doc(author_id), "post_count", 1);
+    }
+
+    // 4. Global pre-aggregated statistics
+    const globalStatsRef = db.collection("forum_stats").doc("global");
+    batch.set(globalStatsRef, { total_posts: admin.firestore.FieldValue.increment(1) }, { merge: true });
+
+    await batch.commit();
+
+    // 5. Mirror to RTDB Caches (main_page_cache, topic_posts_cache)
+    if (category_id) {
+      updateRtdbMainPageCategory(category_id, {
+        posts_count: admin.database.ServerValue.increment(1),
+        last_post_at: timestampIso,
+        last_post_author: author_name,
+        last_post_author_id: author_id || null,
+        last_post_author_avatar: author_avatar || null,
+        last_post_topic_id: topic_id,
+        last_post_topic_title: topic_title,
+        last_post_topic_posts_count: newPostCount,
+        last_post_is_character: !!is_character,
+        last_post_author_character_id: author_character_id || null
+      });
+    }
+
+    admin.database().ref('main_page_cache/stats').update({
+      total_posts: admin.database.ServerValue.increment(1)
+    }).catch(() => { });
+
+    const nowMs = Date.now();
+
+    // Mirror post to topic_posts_cache (last 3 pages)
+    mirrorPostToRtdbCache(
+      topic_id,
+      event.params.postId,
+      {
+        ...post,
+        category_id,
+        created_at: nowMs // Передаем строго текущее время сервера в ms
+      },
+      postsPerPage
+    );
+
+    // 6. Notifications (Background)
+    await handlePostNotifications(db, {
+      postId: event.params.postId,
+      topicId: topic_id,
+      authorId: author_id,
+      authorName: author_name,
+      topicTitle: topic_title,
+      content: post.content
+    });
+
+  } catch (error) {
+    logger.error(`onPostCreated error (${event.params.postId}):`, error);
+  }
 });
 
 /**
  * onPostUpdated
- * Syncs metadata to topic and category if the last post was updated,
- * and updates RTDB topic_posts_cache.
+ * Syncs updated post content and metadata to RTDB topic_posts_cache
+ * and topic/category metadata if this was the last post.
  */
 exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
-    const before = event.data.before.data();
-    const after = event.data.after.data();
+  const before = event.data.before.data();
+  const after = event.data.after.data();
 
-    // Update in RTDB topic_posts_cache
-    updatePostInRtdbCache(after.topic_id, event.params.postId, {
-        content: after.content || '',
-        rolls: after.rolls || null,
-        reputation: after.reputation || 0,
-        edited_at: Date.now(),
-        author_name: after.author_name || 'User',
-        author_avatar: after.author_avatar || '',
-        is_character: !!after.is_character,
-        author_character_id: after.author_character_id || null
-    });
-
-    // Check if author metadata changed
-    const metadataChanged =
-        before.author_name !== after.author_name ||
-        before.author_avatar !== after.author_avatar ||
-        before.is_character !== after.is_character ||
-        before.author_character_id !== after.author_character_id;
-
-    if (!metadataChanged) return;
-
+  // 1. Check if post was moved to a different topic
+  if (before.topic_id && after.topic_id && before.topic_id !== after.topic_id) {
     try {
-        const db = admin.firestore();
-        const topicId = after.topic_id;
-
-        // Check if this post is the latest in the topic
-        const latestPostSnap = await db.collection("posts")
-            .where("topic_id", "==", topicId)
-            .orderBy("created_at", "desc")
-            .limit(1)
-            .get();
-
-        if (!latestPostSnap.empty && latestPostSnap.docs[0].id === event.params.postId) {
-            await syncTopicMetadata(db, topicId);
-            logger.info(`onPostUpdated: synced metadata for topic ${topicId} due to post ${event.params.postId} update`);
-        }
-    } catch (error) {
-        logger.error(`onPostUpdated error (${event.params.postId}):`, error);
+      const db = admin.firestore();
+      // Remove from old topic RTDB cache
+      await removePostFromRtdbCache(before.topic_id, event.params.postId);
+      // Mirror to new topic RTDB cache
+      await mirrorPostToRtdbCache(after.topic_id, event.params.postId, after);
+      // Sync topic and category metadata for both topics
+      await syncTopicMetadata(db, before.topic_id);
+      await syncTopicMetadata(db, after.topic_id);
+      logger.info(`onPostUpdated: moved post ${event.params.postId} from topic ${before.topic_id} to ${after.topic_id}`);
+      return;
+    } catch (moveErr) {
+      logger.error(`onPostUpdated move error for ${event.params.postId}:`, moveErr);
     }
+  }
+
+  // 2. Regular post update: update RTDB cache
+  await updatePostInRtdbCache(after.topic_id, event.params.postId, {
+    content: after.content || '',
+    rolls: after.rolls || null,
+    reputation: after.reputation || 0,
+    edited_at: Date.now(),
+    author_name: after.author_name || 'User',
+    author_avatar: after.author_avatar || '',
+    is_character: !!after.is_character,
+    author_character_id: after.author_character_id || null
+  });
+
+  // 3. Check if author metadata changed
+  const metadataChanged =
+    before.author_name !== after.author_name ||
+    before.author_avatar !== after.author_avatar ||
+    before.is_character !== after.is_character ||
+    before.author_character_id !== after.author_character_id;
+
+  if (!metadataChanged) return;
+
+  try {
+    const db = admin.firestore();
+    const topicId = after.topic_id;
+
+    // Check if this post is the latest in the topic
+    const latestPostSnap = await db.collection("posts")
+      .where("topic_id", "==", topicId)
+      .orderBy("created_at", "desc")
+      .limit(1)
+      .get();
+
+    if (!latestPostSnap.empty && latestPostSnap.docs[0].id === event.params.postId) {
+      await syncTopicMetadata(db, topicId);
+      logger.info(`onPostUpdated: synced metadata for topic ${topicId} due to post ${event.params.postId} update`);
+    }
+  } catch (error) {
+    logger.error(`onPostUpdated error (${event.params.postId}):`, error);
+  }
 });
 
 /**
@@ -1163,160 +1205,160 @@ exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
  * Dispatches notifications across both Firestore and Realtime Database (RTDB).
  */
 async function handlePostNotifications(db, { postId, topicId, authorId, topicTitle, content }) {
-    try {
-        // 1. Topic Reply Notifications
-        const subSnap = await db.collection("topic_subscriptions").where("topic_id", "==", topicId).get();
-        const subscribers = subSnap.docs.map(d => d.data().user_id).filter(uid => uid !== authorId);
+  try {
+    // 1. Topic Reply Notifications
+    const subSnap = await db.collection("topic_subscriptions").where("topic_id", "==", topicId).get();
+    const subscribers = subSnap.docs.map(d => d.data().user_id).filter(uid => uid !== authorId);
 
-        if (subscribers.length > 0) {
-            const CHUNK = 10;
-            for (let i = 0; i < subscribers.length; i += CHUNK) {
-              await Promise.all(subscribers.slice(i, i + CHUNK).map(async (recipientUid) => {
-                try {
-                  const replyPayload = {
-                      topic_id: topicId,
-                      topic_title: topicTitle,
-                      first_post_id: postId,
-                      last_post_id: postId,
-                      post_count: 1
-                  };
+    if (subscribers.length > 0) {
+      const CHUNK = 10;
+      for (let i = 0; i < subscribers.length; i += CHUNK) {
+        await Promise.all(subscribers.slice(i, i + CHUNK).map(async (recipientUid) => {
+          try {
+            const replyPayload = {
+              topic_id: topicId,
+              topic_title: topicTitle,
+              first_post_id: postId,
+              last_post_id: postId,
+              post_count: 1
+            };
 
-                  // Send real-time RTDB notification (0 Firestore read cost for client)
-                  await sendRtdbNotification(recipientUid, {
-                      type: "topic_reply",
-                      payload: replyPayload
-                  });
+            // Send real-time RTDB notification (0 Firestore read cost for client)
+            await sendRtdbNotification(recipientUid, {
+              type: "topic_reply",
+              payload: replyPayload
+            });
 
-                  // Check for existing unread topic_reply notification in Firestore backup
-                  const q = db.collection("notifications")
-                      .where("recipient_uid", "==", recipientUid)
-                      .where("type", "==", "topic_reply")
-                      .where("read", "==", false)
-                      .where("payload.topic_id", "==", topicId)
-                      .limit(1);
-                  
-                  const existingSnap = await q.get();
+            // Check for existing unread topic_reply notification in Firestore backup
+            const q = db.collection("notifications")
+              .where("recipient_uid", "==", recipientUid)
+              .where("type", "==", "topic_reply")
+              .where("read", "==", false)
+              .where("payload.topic_id", "==", topicId)
+              .limit(1);
 
-                  if (!existingSnap.empty) {
-                      const existingDoc = existingSnap.docs[0];
-                      await existingDoc.ref.update({
-                          "payload.post_count": admin.firestore.FieldValue.increment(1),
-                          "payload.last_post_id": postId,
-                          created_at: admin.firestore.FieldValue.serverTimestamp()
-                      });
-                  } else {
-                      await db.collection("notifications").add({
-                          recipient_uid: recipientUid,
-                          type: "topic_reply",
-                          read: false,
-                          archived: false,
-                          payload: replyPayload,
-                          created_at: admin.firestore.FieldValue.serverTimestamp()
-                      });
-                  }
-                } catch (subErr) {
-                  logger.error(`Failed to send topic notification to ${recipientUid}:`, subErr);
-                }
-              }));
+            const existingSnap = await q.get();
+
+            if (!existingSnap.empty) {
+              const existingDoc = existingSnap.docs[0];
+              await existingDoc.ref.update({
+                "payload.post_count": admin.firestore.FieldValue.increment(1),
+                "payload.last_post_id": postId,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+            } else {
+              await db.collection("notifications").add({
+                recipient_uid: recipientUid,
+                type: "topic_reply",
+                read: false,
+                archived: false,
+                payload: replyPayload,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
             }
-        } // end if (subscribers.length > 0)
+          } catch (subErr) {
+            logger.error(`Failed to send topic notification to ${recipientUid}:`, subErr);
+          }
+        }));
+      }
+    } // end if (subscribers.length > 0)
 
-        // 2. Quote Notifications
-        if (content) {
-            const quoteRegex = /\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]+),([^\]]+)"\]/gi;
-            const quotedPostIds = new Set();
-            let match;
-            while ((match = quoteRegex.exec(content)) !== null) {
-                quotedPostIds.add(match[1]);
-            }
+    // 2. Quote Notifications
+    if (content) {
+      const quoteRegex = /\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]+),([^\]]+)"\]/gi;
+      const quotedPostIds = new Set();
+      let match;
+      while ((match = quoteRegex.exec(content)) !== null) {
+        quotedPostIds.add(match[1]);
+      }
 
-            for (const qPostId of quotedPostIds) {
-                const qPostSnap = await db.collection("posts").doc(qPostId).get();
-                if (qPostSnap.exists) {
-                    const qAuthorId = qPostSnap.data().author_id;
-                    if (qAuthorId && qAuthorId !== authorId) {
-                        const quotePayload = {
-                            topic_id: topicId,
-                            topic_title: topicTitle,
-                            post_id: postId
-                        };
+      for (const qPostId of quotedPostIds) {
+        const qPostSnap = await db.collection("posts").doc(qPostId).get();
+        if (qPostSnap.exists) {
+          const qAuthorId = qPostSnap.data().author_id;
+          if (qAuthorId && qAuthorId !== authorId) {
+            const quotePayload = {
+              topic_id: topicId,
+              topic_title: topicTitle,
+              post_id: postId
+            };
 
-                        await sendRtdbNotification(qAuthorId, {
-                            type: "post_quoted",
-                            payload: quotePayload
-                        });
+            await sendRtdbNotification(qAuthorId, {
+              type: "post_quoted",
+              payload: quotePayload
+            });
 
-                        await db.collection("notifications").add({
-                            recipient_uid: qAuthorId,
-                            type: "post_quoted",
-                            read: false,
-                            archived: false,
-                            payload: quotePayload,
-                            created_at: admin.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
-                }
-            }
+            await db.collection("notifications").add({
+              recipient_uid: qAuthorId,
+              type: "post_quoted",
+              read: false,
+              archived: false,
+              payload: quotePayload,
+              created_at: admin.firestore.FieldValue.serverTimestamp()
+            });
+          }
         }
-
-        // 3. Mention Notifications
-        if (content) {
-            const mentionRegex = /\[b\]([^\[]+)\[\/b\],/gi;
-            const mentionedNames = new Set();
-            let mMatch;
-            while ((mMatch = mentionRegex.exec(content)) !== null) {
-                mentionedNames.add(mMatch[1].trim());
-            }
-
-            if (mentionedNames.size > 0) {
-                for (const name of mentionedNames) {
-                    let recipientUid = null;
-                    
-                    const userSnap = await db.collection("users").where("nickname", "==", name).limit(1).get();
-                    if (!userSnap.empty) {
-                        recipientUid = userSnap.docs[0].id;
-                    } else {
-                        const charSnap = await db.collection("characters").where("name", "==", name).limit(1).get();
-                        if (!charSnap.empty) {
-                            recipientUid = charSnap.docs[0].data().owner_id;
-                        }
-                    }
-
-                    if (recipientUid && recipientUid !== authorId) {
-                        const mentionPayload = {
-                            topic_id: topicId,
-                            topic_title: topicTitle,
-                            post_id: postId
-                        };
-
-                        await sendRtdbNotification(recipientUid, {
-                            type: "post_mentioned",
-                            payload: mentionPayload
-                        });
-
-                        const q = db.collection("notifications")
-                            .where("recipient_uid", "==", recipientUid)
-                            .where("type", "==", "post_mentioned")
-                            .where("payload.post_id", "==", postId)
-                            .limit(1);
-                        const existingSnap = await q.get();
-                        if (existingSnap.empty) {
-                            await db.collection("notifications").add({
-                                recipient_uid: recipientUid,
-                                type: "post_mentioned",
-                                read: false,
-                                archived: false,
-                                payload: mentionPayload,
-                                created_at: admin.firestore.FieldValue.serverTimestamp()
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    } catch (err) {
-        logger.error(`handlePostNotifications error for post ${postId}:`, err);
+      }
     }
+
+    // 3. Mention Notifications
+    if (content) {
+      const mentionRegex = /\[b\]([^\[]+)\[\/b\],/gi;
+      const mentionedNames = new Set();
+      let mMatch;
+      while ((mMatch = mentionRegex.exec(content)) !== null) {
+        mentionedNames.add(mMatch[1].trim());
+      }
+
+      if (mentionedNames.size > 0) {
+        for (const name of mentionedNames) {
+          let recipientUid = null;
+
+          const userSnap = await db.collection("users").where("nickname", "==", name).limit(1).get();
+          if (!userSnap.empty) {
+            recipientUid = userSnap.docs[0].id;
+          } else {
+            const charSnap = await db.collection("characters").where("name", "==", name).limit(1).get();
+            if (!charSnap.empty) {
+              recipientUid = charSnap.docs[0].data().owner_id;
+            }
+          }
+
+          if (recipientUid && recipientUid !== authorId) {
+            const mentionPayload = {
+              topic_id: topicId,
+              topic_title: topicTitle,
+              post_id: postId
+            };
+
+            await sendRtdbNotification(recipientUid, {
+              type: "post_mentioned",
+              payload: mentionPayload
+            });
+
+            const q = db.collection("notifications")
+              .where("recipient_uid", "==", recipientUid)
+              .where("type", "==", "post_mentioned")
+              .where("payload.post_id", "==", postId)
+              .limit(1);
+            const existingSnap = await q.get();
+            if (existingSnap.empty) {
+              await db.collection("notifications").add({
+                recipient_uid: recipientUid,
+                type: "post_mentioned",
+                read: false,
+                archived: false,
+                payload: mentionPayload,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.error(`handlePostNotifications error for post ${postId}:`, err);
+  }
 }
 
 /**
@@ -1331,16 +1373,22 @@ exports.syncPresenceToFirestore = onSchedule("every 15 minutes", async () => {
     const statuses = snapshot.val();
     if (!statuses) return;
 
-    const cutoff = Date.now() - 30 * 60 * 1000; // active in last 30 min
+    // Sync last_activity to Firestore users.last_seen.
+    // last_activity is the persistent "last visited" timestamp — it is NOT reset on
+    // logout or idle, so this always reflects the user's real last action.
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const batch = db.batch();
     let count = 0;
 
     Object.keys(statuses).forEach((uid) => {
       const u = statuses[uid];
-      if (u && (u.state === 'online' || (u.last_seen && u.last_seen > cutoff))) {
+      // Prefer last_activity; fall back to last_seen for backwards compatibility
+      // with records written before this field was introduced.
+      const lastActivityMs = u?.last_activity ?? u?.last_seen;
+      if (u && typeof lastActivityMs === 'number' && lastActivityMs > cutoff) {
         const userRef = db.collection("users").doc(uid);
         batch.set(userRef, {
-          last_seen: admin.firestore.Timestamp.fromMillis(u.last_seen || Date.now())
+          last_seen: admin.firestore.Timestamp.fromMillis(lastActivityMs)
         }, { merge: true });
         count++;
       }
@@ -1361,83 +1409,83 @@ exports.syncPresenceToFirestore = onSchedule("every 15 minutes", async () => {
  * Updates forum_stats/global and notifies admins via RTDB & Firestore.
  */
 exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const newUser = snap.data();
-    const db = admin.firestore();
+  const snap = event.data;
+  if (!snap) return;
+  const newUser = snap.data();
+  const db = admin.firestore();
 
-    try {
-        // Update global forum statistics
-        const globalStatsRef = db.collection("forum_stats").doc("global");
-        await globalStatsRef.set({
-            total_users: admin.firestore.FieldValue.increment(1),
-            newest_user: {
-                id: event.params.uid,
-                nickname: newUser.nickname || "User",
-                avatar_url: newUser.avatar_url || "",
-                role_id: newUser.role_id || "player",
-                created_at: admin.firestore.FieldValue.serverTimestamp()
-            }
-        }, { merge: true });
+  try {
+    // Update global forum statistics
+    const globalStatsRef = db.collection("forum_stats").doc("global");
+    await globalStatsRef.set({
+      total_users: admin.firestore.FieldValue.increment(1),
+      newest_user: {
+        id: event.params.uid,
+        nickname: newUser.nickname || "User",
+        avatar_url: newUser.avatar_url || "",
+        role_id: newUser.role_id || "player",
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      }
+    }, { merge: true });
 
-        // 1. Find roles with user-management permissions
-        const rolesSnap = await db.collection("roles").get();
-        const eligibleRoleIds = [];
-        const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
+    // 1. Find roles with user-management permissions
+    const rolesSnap = await db.collection("roles").get();
+    const eligibleRoleIds = [];
+    const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
 
-        rolesSnap.forEach(doc => {
-            const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
-            if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
-                eligibleRoleIds.push(doc.id);
-            }
-        });
+    rolesSnap.forEach(doc => {
+      const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
+      if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
+        eligibleRoleIds.push(doc.id);
+      }
+    });
 
-        // 2. Collect recipients
-        const recipients = new Set();
-        for (let i = 0; i < eligibleRoleIds.length; i += 30) {
-            const usersSnap = await db.collection("users")
-                .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
-                .get();
-            usersSnap.forEach(u => recipients.add(u.id));
-        }
-
-        // Always notify role_id === 'root'
-        const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
-        rootSnap.forEach(u => recipients.add(u.id));
-
-        if (recipients.size === 0) return;
-
-        const notifPayload = {
-            uid: event.params.uid,
-            nickname: newUser.nickname,
-            email: newUser.email,
-            admin_message: newUser.admin_message || null
-        };
-
-        // Send real-time RTDB admin notification
-        await sendRtdbAdminNotification({
-            type: "new_registration",
-            payload: notifPayload
-        });
-
-        // 3. Create notifications in Firestore backup
-        const batch = db.batch();
-        recipients.forEach(uid => {
-            const notifRef = db.collection("notifications").doc();
-            batch.set(notifRef, {
-                recipient_uid: uid,
-                type: "new_registration",
-                read: false,
-                archived: false,
-                payload: notifPayload,
-                created_at: admin.firestore.FieldValue.serverTimestamp()
-            });
-        });
-
-        await batch.commit();
-    } catch (error) {
-        logger.error(`onUserCreated error (${event.params.uid}):`, error);
+    // 2. Collect recipients
+    const recipients = new Set();
+    for (let i = 0; i < eligibleRoleIds.length; i += 30) {
+      const usersSnap = await db.collection("users")
+        .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
+        .get();
+      usersSnap.forEach(u => recipients.add(u.id));
     }
+
+    // Always notify role_id === 'root'
+    const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
+    rootSnap.forEach(u => recipients.add(u.id));
+
+    if (recipients.size === 0) return;
+
+    const notifPayload = {
+      uid: event.params.uid,
+      nickname: newUser.nickname,
+      email: newUser.email,
+      admin_message: newUser.admin_message || null
+    };
+
+    // Send real-time RTDB admin notification
+    await sendRtdbAdminNotification({
+      type: "new_registration",
+      payload: notifPayload
+    });
+
+    // 3. Create notifications in Firestore backup
+    const batch = db.batch();
+    recipients.forEach(uid => {
+      const notifRef = db.collection("notifications").doc();
+      batch.set(notifRef, {
+        recipient_uid: uid,
+        type: "new_registration",
+        read: false,
+        archived: false,
+        payload: notifPayload,
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    logger.error(`onUserCreated error (${event.params.uid}):`, error);
+  }
 });
 
 /**
@@ -1445,83 +1493,71 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
  * Decrements posts_count and updates forum_stats/global.
  */
 exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const post = snap.data();
-    const { topic_id, author_id } = post;
+  const snap = event.data;
+  if (!snap) return;
+  const post = snap.data();
+  const { topic_id, author_id } = post;
 
-    try {
-        const db = admin.firestore();
-        const batch = db.batch();
+  // 1. Очистка поста из кэша темы в RTDB
+  if (topic_id) {
+    await removePostFromRtdbCache(topic_id, event.params.postId);
+  }
 
-        // 1. Counters Fallback
-        const topicRef = db.collection("topics").doc(topic_id);
-        const topicSnap = await topicRef.get();
-        if (topicSnap.exists) {
-            const { category_id } = topicSnap.data();
-            batch.update(topicRef, { posts_count: admin.firestore.FieldValue.increment(-1) });
-            batch.update(db.collection("categories").doc(category_id), { posts_count: admin.firestore.FieldValue.increment(-1) });
-        }
+  try {
+    const db = admin.firestore();
+    const batch = db.batch();
 
-        if (author_id) {
-            batch.update(db.collection("users").doc(author_id), { post_count: admin.firestore.FieldValue.increment(-1) });
-        }
+    // 2. Получаем тему и категорию
+    const topicRef = db.collection("topics").doc(topic_id);
+    const topicSnap = await topicRef.get();
 
-        // Global pre-aggregated statistics
-        const globalStatsRef = db.collection("forum_stats").doc("global");
-        batch.set(globalStatsRef, { total_posts: admin.firestore.FieldValue.increment(-1) }, { merge: true });
-
-        // 2. Revert Reputation Logs
-        //    Do NOT revert reputation here — onReputationLogDeleted owns that.
-        //    Doing both decremented the author twice whenever the batch did not
-        //    fail outright on the already-deleted post document.
-        const logsSnap = await db.collection("reputation_logs").where("post_id", "==", event.params.postId).get();
-        logsSnap.forEach(l => batch.delete(l.ref));
-
-        await batch.commit();
-
-        // 3. Notification Cleanup
-        const notifSnap = await db.collection("notifications")
-            .where("payload.topic_id", "==", topic_id)
-            .where("read", "==", false)
-            .get();
-        
-        if (!notifSnap.empty) {
-            const batchNotif = db.batch();
-            notifSnap.forEach(d => {
-                const data = d.data();
-                if (data.type === 'topic_reply') {
-                    const count = (data.payload?.post_count || 1) - 1;
-                    if (count <= 0) {
-                        batchNotif.delete(d.ref);
-                    } else {
-                        batchNotif.update(d.ref, { "payload.post_count": count });
-                    }
-                }
-            });
-            await batchNotif.commit();
-        }
-
-        // Cleanup direct post references (quotes, etc)
-        const postNotifsSnap = await db.collection("notifications")
-            .where("payload.post_id", "==", event.params.postId)
-            .get();
-        if (!postNotifsSnap.empty) {
-            const batchPost = db.batch();
-            postNotifsSnap.forEach(d => batchPost.delete(d.ref));
-            await batchPost.commit();
-        }
-
-        // 4. Metadata Sync (Fallback) — pointless when the whole topic is going away.
-        if (topicSnap.exists) {
-            await syncTopicMetadata(db, topic_id);
-        }
-
-        
-        logger.info(`onPostDeleted cleanup for ${event.params.postId} successful.`);
-    } catch (error) {
-        logger.error(`onPostDeleted error (${event.params.postId}):`, error);
+    if (topicSnap.exists) {
+      const { category_id } = topicSnap.data();
+      batch.update(topicRef, { posts_count: admin.firestore.FieldValue.increment(-1) });
+      batch.update(db.collection("categories").doc(category_id), { posts_count: admin.firestore.FieldValue.increment(-1) });
     }
+
+    if (author_id) {
+      batch.update(db.collection("users").doc(author_id), { post_count: admin.firestore.FieldValue.increment(-1) });
+    }
+
+    // Общая статистика
+    const globalStatsRef = db.collection("forum_stats").doc("global");
+    batch.set(globalStatsRef, { total_posts: admin.firestore.FieldValue.increment(-1) }, { merge: true });
+
+    await batch.commit();
+
+    // 3. Обновляем RTDB кэш статистики Главной страницы
+    admin.database().ref('main_page_cache/stats').update({
+      total_posts: admin.database.ServerValue.increment(-1)
+    }).catch(() => { });
+
+    // 4. Пересчитываем метаданные темы и категории в Firestore
+    if (topicSnap.exists) {
+      await syncTopicMetadata(db, topic_id);
+
+      // 5. Синхронизируем свежие метаданные категории в RTDB main_page_cache
+      const categoryId = topicSnap.data()?.category_id;
+      if (categoryId) {
+        const updatedCatSnap = await db.collection("categories").doc(categoryId).get();
+        if (updatedCatSnap.exists) {
+          const cData = updatedCatSnap.data();
+          await updateRtdbMainPageCategory(categoryId, {
+            posts_count: cData.posts_count || 0,
+            last_post_at: cData.last_post_at ? (cData.last_post_at.toDate ? cData.last_post_at.toDate().toISOString() : cData.last_post_at) : null,
+            last_post_author: cData.last_post_author || null,
+            last_post_author_id: cData.last_post_author_id || null,
+            last_post_topic_id: cData.last_post_topic_id || null,
+            last_post_topic_title: cData.last_post_topic_title || null
+          });
+        }
+      }
+    }
+
+    logger.info(`onPostDeleted cleanup for ${event.params.postId} successful.`);
+  } catch (error) {
+    logger.error(`onPostDeleted error (${event.params.postId}):`, error);
+  }
 });
 
 /**
@@ -1530,10 +1566,10 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
  * counter updates were silently lost when an author or post had been deleted.
  */
 async function queueIncrement(batch, ref, field, delta) {
-    const snap = await ref.get();
-    if (!snap.exists) return false;
-    batch.update(ref, { [field]: admin.firestore.FieldValue.increment(delta) });
-    return true;
+  const snap = await ref.get();
+  if (!snap.exists) return false;
+  batch.update(ref, { [field]: admin.firestore.FieldValue.increment(delta) });
+  return true;
 }
 
 /**
@@ -1542,36 +1578,36 @@ async function queueIncrement(batch, ref, field, delta) {
  * Then triggers category sync.
  */
 async function syncTopicMetadata(db, topicId) {
-    const topicRef = db.collection("topics").doc(topicId);
-    const postSnap = await db.collection("posts")
-        .where("topic_id", "==", topicId)
-        .orderBy("created_at", "desc")
-        .limit(1)
-        .get();
+  const topicRef = db.collection("topics").doc(topicId);
+  const postSnap = await db.collection("posts")
+    .where("topic_id", "==", topicId)
+    .orderBy("created_at", "desc")
+    .limit(1)
+    .get();
 
-    let categoryId = null;
+  let categoryId = null;
 
-    if (!postSnap.empty) {
-        const lp = postSnap.docs[0].data();
-        await topicRef.update({
-            last_post_at: lp.created_at,
-            last_post_author: lp.author_name,
-            last_post_author_id: lp.author_id || null,
-            last_post_author_avatar: lp.author_avatar || null,
-            last_post_is_character: !!lp.is_character,
-            last_post_author_character_id: lp.author_character_id || null
-        });
-        const topicSnap = await topicRef.get();
-        categoryId = topicSnap.data()?.category_id;
-    } else {
-        // No posts left — topic will likely be deleted by another process or trigger
-        // but we'll neutralise it just in case
-        await topicRef.update({ last_post_at: null, last_post_author: null });
-    }
+  if (!postSnap.empty) {
+    const lp = postSnap.docs[0].data();
+    await topicRef.update({
+      last_post_at: lp.created_at,
+      last_post_author: lp.author_name,
+      last_post_author_id: lp.author_id || null,
+      last_post_author_avatar: lp.author_avatar || null,
+      last_post_is_character: !!lp.is_character,
+      last_post_author_character_id: lp.author_character_id || null
+    });
+    const topicSnap = await topicRef.get();
+    categoryId = topicSnap.data()?.category_id;
+  } else {
+    // No posts left — topic will likely be deleted by another process or trigger
+    // but we'll neutralise it just in case
+    await topicRef.update({ last_post_at: null, last_post_author: null });
+  }
 
-    if (categoryId) {
-        await syncCategoryMetadata(db, categoryId);
-    }
+  if (categoryId) {
+    await syncCategoryMetadata(db, categoryId);
+  }
 }
 
 /**
@@ -1579,51 +1615,76 @@ async function syncTopicMetadata(db, topicId) {
  * Finds the latest active topic in a category and syncs its metadata.
  */
 async function syncCategoryMetadata(db, categoryId) {
-    const topicSnap = await db.collection("topics")
-        .where("category_id", "==", categoryId)
-        .orderBy("last_post_at", "desc")
-        .limit(1)
-        .get();
+  const topicSnap = await db.collection("topics")
+    .where("category_id", "==", categoryId)
+    .orderBy("last_post_at", "desc")
+    .limit(1)
+    .get();
 
-    const catRef = db.collection("categories").doc(categoryId);
+  const catRef = db.collection("categories").doc(categoryId);
 
-    if (!topicSnap.empty) {
-        const lt = topicSnap.docs[0].data();
-        const ltId = topicSnap.docs[0].id;
-        await catRef.update({
-            last_post_at: lt.last_post_at || null,
-            last_post_author: lt.last_post_author || null,
-            last_post_author_id: lt.last_post_author_id || null,
-            last_post_author_avatar: lt.last_post_author_avatar || null,
-            last_post_topic_id: ltId,
-            last_post_topic_title: lt.title,
-            last_post_topic_posts_count: lt.posts_count || null,
-            last_post_is_character: lt.last_post_is_character || false,
-            last_post_author_character_id: lt.last_post_author_character_id || null
-        });
-    } else {
-        await catRef.update({
-            last_post_at: null,
-            last_post_author: null,
-            last_post_author_id: null,
-            last_post_topic_id: null,
-            last_post_topic_title: null
-        });
-    }
+  if (!topicSnap.empty) {
+    const lt = topicSnap.docs[0].data();
+    const ltId = topicSnap.docs[0].id;
+    const timestampIso = lt.last_post_at ? (lt.last_post_at.toDate ? lt.last_post_at.toDate().toISOString() : lt.last_post_at) : null;
+    await catRef.update({
+      last_post_at: lt.last_post_at || null,
+      last_post_author: lt.last_post_author || null,
+      last_post_author_id: lt.last_post_author_id || null,
+      last_post_author_avatar: lt.last_post_author_avatar || null,
+      last_post_topic_id: ltId,
+      last_post_topic_title: lt.title,
+      last_post_topic_posts_count: lt.posts_count || null,
+      last_post_is_character: lt.last_post_is_character || false,
+      last_post_author_character_id: lt.last_post_author_character_id || null
+    });
+    updateRtdbMainPageCategory(categoryId, {
+      last_post_at: timestampIso,
+      last_post_author: lt.last_post_author || null,
+      last_post_author_id: lt.last_post_author_id || null,
+      last_post_author_avatar: lt.last_post_author_avatar || null,
+      last_post_topic_id: ltId,
+      last_post_topic_title: lt.title,
+      last_post_topic_posts_count: lt.posts_count || null,
+      last_post_is_character: lt.last_post_is_character || false,
+      last_post_author_character_id: lt.last_post_author_character_id || null
+    });
+  } else {
+    await catRef.update({
+      last_post_at: null,
+      last_post_author: null,
+      last_post_author_id: null,
+      last_post_author_avatar: null,
+      last_post_topic_id: null,
+      last_post_topic_title: null,
+      last_post_is_character: null,
+      last_post_author_character_id: null
+    });
+    updateRtdbMainPageCategory(categoryId, {
+      last_post_at: null,
+      last_post_author: null,
+      last_post_author_id: null,
+      last_post_author_avatar: null,
+      last_post_topic_id: null,
+      last_post_topic_title: null,
+      last_post_is_character: null,
+      last_post_author_character_id: null
+    });
+  }
 }
 
 exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
-    const deletedUid = event.params.userId;
-    try {
-        await admin.auth().deleteUser(deletedUid);
-        const db = admin.firestore();
-        await db.collection("forum_stats").doc("global").set({
-            total_users: admin.firestore.FieldValue.increment(-1)
-        }, { merge: true });
-        logger.info(`Successfully deleted auth user: ${deletedUid}`);
-    } catch (error) {
-        logger.error(`Error deleting auth user ${deletedUid}:`, error);
-    }
+  const deletedUid = event.params.userId;
+  try {
+    await admin.auth().deleteUser(deletedUid);
+    const db = admin.firestore();
+    await db.collection("forum_stats").doc("global").set({
+      total_users: admin.firestore.FieldValue.increment(-1)
+    }, { merge: true });
+    logger.info(`Successfully deleted auth user: ${deletedUid}`);
+  } catch (error) {
+    logger.error(`Error deleting auth user ${deletedUid}:`, error);
+  }
 });
 
 /**
@@ -1657,75 +1718,75 @@ exports.cleanupExpiredPresence = onSchedule("every 15 minutes", async () => {
  * Updates forum_stats/global and notifies admins.
  */
 exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-    const newUser = snap.data();
-    const db = admin.firestore();
+  const snap = event.data;
+  if (!snap) return;
+  const newUser = snap.data();
+  const db = admin.firestore();
 
-    try {
-        // Update global forum statistics
-        const globalStatsRef = db.collection("forum_stats").doc("global");
-        await globalStatsRef.set({
-            total_users: admin.firestore.FieldValue.increment(1),
-            newest_user: {
-                id: event.params.uid,
-                nickname: newUser.nickname || "User",
-                avatar_url: newUser.avatar_url || "",
-                role_id: newUser.role_id || "player",
-                created_at: admin.firestore.FieldValue.serverTimestamp()
-            }
-        }, { merge: true });
+  try {
+    // Update global forum statistics
+    const globalStatsRef = db.collection("forum_stats").doc("global");
+    await globalStatsRef.set({
+      total_users: admin.firestore.FieldValue.increment(1),
+      newest_user: {
+        id: event.params.uid,
+        nickname: newUser.nickname || "User",
+        avatar_url: newUser.avatar_url || "",
+        role_id: newUser.role_id || "player",
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      }
+    }, { merge: true });
 
-        // 1. Find roles with user-management permissions
-        const rolesSnap = await db.collection("roles").get();
-        const eligibleRoleIds = [];
-        const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
+    // 1. Find roles with user-management permissions
+    const rolesSnap = await db.collection("roles").get();
+    const eligibleRoleIds = [];
+    const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
 
-        rolesSnap.forEach(doc => {
-            const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
-            if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
-                eligibleRoleIds.push(doc.id);
-            }
-        });
+    rolesSnap.forEach(doc => {
+      const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
+      if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
+        eligibleRoleIds.push(doc.id);
+      }
+    });
 
-        // 2. Collect recipients
-        const recipients = new Set();
-        for (let i = 0; i < eligibleRoleIds.length; i += 30) {
-            const usersSnap = await db.collection("users")
-                .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
-                .get();
-            usersSnap.forEach(u => recipients.add(u.id));
-        }
-
-        // Always notify role_id === 'root'
-        const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
-        rootSnap.forEach(u => recipients.add(u.id));
-
-        if (recipients.size === 0) return;
-
-        // 3. Create notifications
-        const batch = db.batch();
-        recipients.forEach(uid => {
-            const notifRef = db.collection("notifications").doc();
-            batch.set(notifRef, {
-                recipient_uid: uid,
-                type: "new_registration",
-                read: false,
-                archived: false,
-                payload: {
-                    uid: event.params.uid,
-                    nickname: newUser.nickname,
-                    email: newUser.email,
-                    admin_message: newUser.admin_message || null
-                },
-                created_at: admin.firestore.FieldValue.serverTimestamp()
-            });
-        });
-
-        await batch.commit();
-    } catch (error) {
-        logger.error(`onUserCreated error (${event.params.uid}):`, error);
+    // 2. Collect recipients
+    const recipients = new Set();
+    for (let i = 0; i < eligibleRoleIds.length; i += 30) {
+      const usersSnap = await db.collection("users")
+        .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
+        .get();
+      usersSnap.forEach(u => recipients.add(u.id));
     }
+
+    // Always notify role_id === 'root'
+    const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
+    rootSnap.forEach(u => recipients.add(u.id));
+
+    if (recipients.size === 0) return;
+
+    // 3. Create notifications
+    const batch = db.batch();
+    recipients.forEach(uid => {
+      const notifRef = db.collection("notifications").doc();
+      batch.set(notifRef, {
+        recipient_uid: uid,
+        type: "new_registration",
+        read: false,
+        archived: false,
+        payload: {
+          uid: event.params.uid,
+          nickname: newUser.nickname,
+          email: newUser.email,
+          admin_message: newUser.admin_message || null
+        },
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    logger.error(`onUserCreated error (${event.params.uid}):`, error);
+  }
 });
 
 /**
@@ -1749,9 +1810,9 @@ exports.getReputationLogs = onCall(
     if (requesterUid) {
       promises.push(db.collection('users').doc(requesterUid).get());
     }
-    
+
     const [targetUserDoc, userDoc] = await Promise.all(promises);
-    
+
     const isRequesterAdmin = userDoc && userDoc.exists && ['root', 'admin'].includes(userDoc.data().role_id);
     const isRequesterModerator = userDoc && userDoc.exists && userDoc.data().role_id === 'moderator';
 
@@ -1817,15 +1878,15 @@ exports.getReputationLogs = onCall(
     const shouldHideComments =
       isGuest ||
       (repShowComments === false &&
-      !isTargetUser &&
-      !isRequesterAdmin &&
-      !isRequesterModerator);
+        !isTargetUser &&
+        !isRequesterAdmin &&
+        !isRequesterModerator);
 
     logsSnapshot.forEach((logDoc) => {
       const logData = { id: logDoc.id, ...logDoc.data() };
-      
+
       if (logData.created_at) {
-         logData.created_at = logData.created_at.toDate().toISOString();
+        logData.created_at = logData.created_at.toDate().toISOString();
       }
 
       if (shouldHideComments && logData.comment && logData.voter_id !== requesterUid) {
@@ -1878,7 +1939,7 @@ exports.getReputationLogs = onCall(
     // 2. Fetch Topics to check categories
     const topicIds = [...new Set(logs.map(l => l.topic_id).filter(Boolean))];
     const topicsMap = {};
-    
+
     for (let i = 0; i < topicIds.length; i += 30) {
       const chunk = topicIds.slice(i, i + 30);
       const tSnap = await db.collection('topics')
@@ -1893,7 +1954,7 @@ exports.getReputationLogs = onCall(
         log.isAllowed = true;
         return log;
       }
-      
+
       const topic = topicsMap[log.topic_id];
       if (!topic) {
         // Topic was deleted
@@ -1902,7 +1963,7 @@ exports.getReputationLogs = onCall(
         log.post_id = null;
         return log;
       }
-      
+
       const allowed = hasViewPermission(topic.category_id);
       if (!allowed) {
         log.isAllowed = false;
@@ -1914,8 +1975,8 @@ exports.getReputationLogs = onCall(
       return log;
     });
 
-    return { 
-      hidden: false, 
+    return {
+      hidden: false,
       logs: processedLogs,
       totalCount,
       page: resolvedPage,
@@ -2043,20 +2104,35 @@ exports.getSecuredPosts = onCall(
     }
 
     let resolvedPage = 1;
+    // realTotalPosts: authoritative post count from Firestore, used for page math when
+    // goLast mode is active. Avoids stale posts_count causing an off-by-one empty page.
+    let realTotalPosts = totalPosts;
+
     if (page === 'last' || page === 'latest' || page === 'unread') {
       if (lastVisit) {
         const lastVisitDate = new Date(lastVisit);
         if (!isNaN(lastVisitDate.getTime())) {
+          // Count posts before AND at lastVisit (already-read posts)
           const countBeforeSnap = await db.collection('posts')
             .where('topic_id', '==', topicId)
             .where('created_at', '<=', lastVisitDate)
             .count()
             .get();
           const countBefore = countBeforeSnap.data().count;
-          if (countBefore < totalPosts) {
+
+          // Also get the real total so page math is never based on stale posts_count
+          const totalCountSnap = await db.collection('posts')
+            .where('topic_id', '==', topicId)
+            .count()
+            .get();
+          realTotalPosts = totalCountSnap.data().count || totalPosts;
+
+          if (countBefore < realTotalPosts) {
+            // Jump to the page containing the first unread post
             resolvedPage = Math.max(1, Math.ceil((countBefore + 1) / pageSize));
           } else {
-            resolvedPage = Math.max(1, Math.ceil(totalPosts / pageSize));
+            // All posts already read — go to last page
+            resolvedPage = Math.max(1, Math.ceil(realTotalPosts / pageSize));
           }
         } else {
           resolvedPage = Math.max(1, Math.ceil(totalPosts / pageSize));
@@ -2069,7 +2145,7 @@ exports.getSecuredPosts = onCall(
     }
 
     const startIndex = (resolvedPage - 1) * pageSize;
-    const totalPages = Math.max(1, Math.ceil(totalPosts / pageSize));
+    const totalPages = Math.max(1, Math.ceil(realTotalPosts / pageSize));
     const isTailPage = resolvedPage >= Math.max(1, totalPages - 2);
 
     let rawPosts = [];
@@ -2177,7 +2253,7 @@ exports.getSecuredPosts = onCall(
         Object.keys(p.rolls).forEach(rId => {
           const roll = p.rolls[rId];
           if (roll.type === 'master' && !canViewMasterDice && p.author_id !== uid) {
-            roll.value = null; 
+            roll.value = null;
           }
         });
       }
@@ -2187,7 +2263,7 @@ exports.getSecuredPosts = onCall(
         if (!canBypassHideTags && !isAuthor) {
           p.content = p.content.replace(/\[hide(?:=([^\]]+))?\]([\s\S]*?)\[\/hide\]/gi, (match, param) => {
             const fullParam = param ? param.trim() : 'hidden';
-            const baseVal = fullParam.split(/\s+/)[0]; 
+            const baseVal = fullParam.split(/\s+/)[0];
             let isVisible = false;
 
             if (baseVal === 'hidden') {
@@ -2200,14 +2276,14 @@ exports.getSecuredPosts = onCall(
               if (!isNaN(threshold)) {
                 if (userPostCount >= threshold) isVisible = true;
               } else {
-                isVisible = true; 
+                isVisible = true;
               }
             }
 
             if (isVisible) {
-              return match; 
+              return match;
             } else {
-              const safeBase = baseVal.replace(/\]/g, ''); 
+              const safeBase = baseVal.replace(/\]/g, '');
               let nickParam = '';
               if (safeBase.startsWith('@')) {
                 const targetUid = safeBase.substring(1);
@@ -2294,7 +2370,7 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
 
     const rtdb = admin.database();
     const unreadRef = rtdb.ref(`dm_unread/${recipientUid}/conversations/${convId}`);
-    
+
     await unreadRef.transaction((current) => {
       const prevCount = (current && current.unread_count) || 0;
       return {
@@ -2381,7 +2457,7 @@ exports.getUserPosts = onCall(
   { memory: '256MB', timeoutSeconds: 60 },
   async (request) => {
     const { targetUid, page = 1, pageSize = 20, postFilter = 'all' } = request.data;
-    
+
     if (!targetUid || typeof targetUid !== 'string') {
       throw new HttpsError('invalid-argument', 'targetUid must be a non-empty string');
     }
@@ -2426,7 +2502,7 @@ exports.getUserPosts = onCall(
     // 4. Helper to check VIEW_FORUM permission
     const hasViewPermission = (categoryId) => {
       if (effectiveRole === 'root' || effectiveRole === 'admin') return true;
-      
+
       const category = categoriesMap[categoryId];
       if (!category) return false;
 
@@ -2483,7 +2559,7 @@ exports.getUserPosts = onCall(
     // 6. Get unique topics to find their categories
     const topicIds = [...new Set(postsSnap.docs.map(d => d.data().topic_id))];
     const topicsMap = {};
-    
+
     // Fetch topics in chunks of 30 (Firestore IN limit)
     for (let i = 0; i < topicIds.length; i += 30) {
       const chunk = topicIds.slice(i, i + 30);
@@ -2499,8 +2575,8 @@ exports.getUserPosts = onCall(
       const data = doc.data();
       const topic = topicsMap[data.topic_id];
       if (topic && hasViewPermission(topic.category_id)) {
-        const cleanPost = { 
-          id: doc.id, 
+        const cleanPost = {
+          id: doc.id,
           ...data,
           topic_title: topic.title,
           category_id: topic.category_id
@@ -2519,5 +2595,27 @@ exports.getUserPosts = onCall(
       totalCount,
       hasMore: totalCount > startIndex + pageSize
     };
+  }
+);
+
+
+/**
+ * deleteGhostPost (Callable)
+ * Очищает кэш RTDB для поста-призрака, который уже был удален из Firestore.
+ */
+exports.deleteGhostPost = onCall(
+  { enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const { topicId, postId } = request.data;
+    if (!topicId || !postId) return { success: false };
+
+    try {
+      await removePostFromRtdbCache(topicId, postId);
+      logger.info(`[deleteGhostPost] Successfully purged ghost post ${postId} from topic ${topicId}`);
+      return { success: true };
+    } catch (err) {
+      logger.error(`[deleteGhostPost] Error purging ${postId}:`, err);
+      return { success: false };
+    }
   }
 );

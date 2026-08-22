@@ -7,7 +7,7 @@ import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
   updateUser, updateTopic,
   deleteTopics, moveTopics, movePosts, createDraftPost, updateDraftPost, publishDraft,
-  subscribeToTopicDraft, deleteDraftPost, locatePost, locateUnreadPost
+  subscribeToTopicDraft, deleteDraftPost, locatePost, locateUnreadPost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
 
 import { doc, getDoc } from 'firebase/firestore';
@@ -114,10 +114,15 @@ const TopicPage = () => {
   const ITEMS_PER_PAGE = settings?.postsPerPage ?? 20;
   const MAX_CHARS = settings?.maxCharsPerPost ?? 15000;
   const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
+  const latestPostTimestampRef = useRef(Date.now());
 
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
+
+
+  const userRef = useRef(user);
+  userRef.current = user;
 
   const profileRef = useRef(profile);
   profileRef.current = profile;
@@ -128,7 +133,95 @@ const TopicPage = () => {
   const topicRef = useRef(topic);
   topicRef.current = topic;
 
+  const postsRef = useRef(posts);
+  postsRef.current = posts;
+
+  const pageLoadTimeRef = useRef(Date.now());
+  useEffect(() => {
+    pageLoadTimeRef.current = Date.now();
+  }, [id]);
+
+  // Слушатель новых сообщений и удалений из RTDB в реальном времени
+  useEffect(() => {
+    if (!id) return;
+
+    const sinceTimestamp = pageLoadTimeRef.current || Date.now();
+
+    const unsubNew = subscribeToNewPostsRtdb(id, sinceTimestamp, (newPost) => {
+      const curTopic = topicRef.current;
+      const curPosts = postsRef.current;
+      const effectivePostsCount = Math.max(curTopic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + curPosts.length);
+      const totalPagesCount = Math.max(1, Math.ceil(effectivePostsCount / ITEMS_PER_PAGE));
+
+      if (currentPage < totalPagesCount) return;
+
+      setPosts(prev => {
+        if (prev.some(p => p.id === newPost.id)) return prev;
+        return [...prev, newPost];
+      });
+
+      // ── Автоматически обогащаем и обновляем метаданные автора ──────────────────
+      if (newPost.author_id) {
+        const curUser = userRef.current;
+        const curProfile = profileRef.current;
+        setAuthorStats(prev => {
+          // 1. Если автор — это текущий юзер (своё сообщение уже обработано в handleReply)
+          if (newPost.author_id === curUser?.uid && curProfile) {
+            return {
+              ...prev,
+              [curUser.uid]: {
+                ...(prev[curUser.uid] || {}),
+                post_count: Math.max((prev[curUser.uid]?.post_count || 0), (curProfile.post_count || 0)),
+                reputation: curProfile.reputation || 0,
+                role_id: curProfile.role_id,
+                status_line: curProfile.status_line || '',
+                settings: curProfile.settings
+              }
+            };
+          }
+
+          // 2. Если автор — ЧУЖОЙ пользователь:
+          const existingAuthorStats = prev[newPost.author_id];
+          const currentPostCount = existingAuthorStats?.post_count ?? newPost.author_posts_count ?? 0;
+          const updatedPostCount = currentPostCount + 1;
+
+          return {
+            ...prev,
+            [newPost.author_id]: {
+              ...existingAuthorStats,
+              post_count: updatedPostCount,
+              reputation: existingAuthorStats?.reputation ?? newPost.author_reputation ?? 0,
+              role_id: existingAuthorStats?.role_id || newPost.author_role_id || 'player',
+              status_line: existingAuthorStats?.status_line ?? newPost.author_status_line ?? '',
+              settings: existingAuthorStats?.settings || { signature: newPost.author_signature || '' }
+            }
+          };
+        });
+      }
+
+      // Подсветка нового поста БЕЗ принудительного скролла страницы
+      setTimeout(() => {
+        const el = document.getElementById(`post-${newPost.id}`);
+        if (el) {
+          el.classList.add('highlight-new-post');
+          setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
+        }
+      }, 200);
+    });
+
+    const unsubRemoved = subscribeToPostRemovalsRtdb(id, (deletedPostId) => {
+      setPosts(prev => prev.filter(p => p.id !== deletedPostId));
+    });
+
+    return () => {
+      unsubNew();
+      unsubRemoved();
+    };
+  }, [id, currentPage, ITEMS_PER_PAGE]);
+
   const isFetchingPostsRef = useRef(false);
+  const activeFetchIdRef = useRef(0);
+  const locatingPostIdRef = useRef(null);
   const prevTopicStatsRef = useRef(null);
 
   const [accessError, setAccessError] = React.useState(null);
@@ -150,12 +243,17 @@ const TopicPage = () => {
       lastVisitMs = Math.max(rawMs, regMs) || null;
     }
 
-    if (isFetchingPostsRef.current === pageToFetch) {
-      return [];
-    }
+    // Идентификатор текущего запроса для предотвращения гонки состояний
+    const currentFetchId = ++activeFetchIdRef.current;
     isFetchingPostsRef.current = pageToFetch;
+
     try {
       const { posts: data, pinnedPost, page: resolvedPage, lastPost } = await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE, lastVisitMs);
+
+      // Если стартовал более свежий запрос, отбрасываем старый ответ!
+      if (currentFetchId !== activeFetchIdRef.current) {
+        return [];
+      }
 
       if (lastPost && topicRef.current) {
         updateLocalTopicLastPost(id, topicRef.current.category_id, topicRef.current.title, lastPost, topicRef.current.posts_count);
@@ -172,7 +270,8 @@ const TopicPage = () => {
         }, { replace: true, preventScrollReset: true });
       }
 
-      const activePage = resolvedPage || pageToFetch;
+      const activePage = resolvedPage || (typeof pageToFetch === 'number' ? pageToFetch : 1);
+
       if (currentPageRef.current === activePage || pageToFetch === 'last') {
         const curTopic = topicRef.current;
         if (data.length === 0 && activePage > 1 && curTopic) {
@@ -185,6 +284,11 @@ const TopicPage = () => {
           }
         }
         setPosts(data);
+        if (data.length > 0) {
+          latestPostTimestampRef.current = Math.max(...data.map(p => p.created_at?.toMillis?.() || 0));
+        } else {
+          latestPostTimestampRef.current = Date.now();
+        }
         setPinnedFirstPost(pinnedPost || null);
         setAuthorStats(prev => {
           const next = { ...prev };
@@ -192,8 +296,6 @@ const TopicPage = () => {
             if (p.author_id) {
               const serverPostCount = p.author_posts_count ?? 0;
               const cachedPostCount = next[p.author_id]?.post_count ?? 0;
-              // For the current user: server may return stale post_count because
-              // onPostCreated trigger hasn't run yet — keep the higher (optimistic) value.
               const postCount = p.author_id === user?.uid
                 ? Math.max(serverPostCount, cachedPostCount)
                 : serverPostCount || cachedPostCount;
@@ -206,34 +308,28 @@ const TopicPage = () => {
           });
           return next;
         });
+        setIsPageLoading(false);
       }
       return data;
     } catch (err) {
+      if (currentFetchId !== activeFetchIdRef.current) return [];
       console.error(err);
       if (err?.message?.includes('permission') || err?.message?.includes('403') || err?.code === 'permission-denied') {
         setAccessError(err.message || 'Access denied');
-        setIsPageLoading(false);
       }
+      setIsPageLoading(false);
       return [];
     } finally {
       if (isFetchingPostsRef.current === pageToFetch) {
         isFetchingPostsRef.current = false;
       }
+      setIsPageLoading(false);
     }
-  }, [id, ITEMS_PER_PAGE]);
+  }, [id, ITEMS_PER_PAGE, user?.uid, setSearchParams, updateLocalTopicLastPost]);
 
   useEffect(() => {
-    if (topic && prevTopicStatsRef.current) {
-      const prev = prevTopicStatsRef.current;
-      if (prev.id === topic.id) {
-        if (prev.posts_count !== topic.posts_count || prev.last_post_at !== topic.last_post_at) {
-          const maxPage = Math.max(1, Math.ceil((topic.posts_count || 1) / ITEMS_PER_PAGE));
-          if (currentPageRef.current === maxPage) {
-            loadPosts();
-          }
-        }
-      }
-    }
+    // Нам больше не нужно вызывать loadPosts() при изменении счетчика сообщений,
+    // так как новые посты автоматически добавляются на экран через слушатель RTDB!
     if (topic) {
       prevTopicStatsRef.current = {
         id: topic.id,
@@ -242,7 +338,7 @@ const TopicPage = () => {
       };
       setPageTitle(topic.title);
     }
-  }, [topic?.id, topic?.posts_count, topic?.last_post_at, loadPosts, setPageTitle, ITEMS_PER_PAGE]);
+  }, [topic?.id, topic?.posts_count, topic?.last_post_at, setPageTitle]);
 
   const currentTopicIdRef = useRef(id);
   const jumpTargetPageRef = useRef(null);
@@ -280,30 +376,50 @@ const TopicPage = () => {
   // Load posts whenever topic id or page changes
   useEffect(() => {
     setIsPageLoading(true);
+
+    // Проверяем, есть ли прямой запрос на прыжок к конкретному посту
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasPostJump = !!urlParams.get('post');
+    const hasHashJump = window.location.hash.startsWith('#post-');
+    const hasExplicitPage = urlParams.has('page');
+
+    // Если запрошен прыжок к конкретному посту (?post=ID или #post-ID), но номера страницы еще нет:
+    if ((hasPostJump || hasHashJump) && !hasExplicitPage) {
+      setPosts([]);
+      return;
+    }
+
     setPosts([]);
     loadPosts();
   }, [id, currentPage, loadPosts]);
 
+  const lastMarkedOffsetRef = useRef(-1);
+  useEffect(() => {
+    lastMarkedOffsetRef.current = -1;
+  }, [id, currentPage]);
+
   // Mark the topic as read with granular offset
   useEffect(() => {
-    if (user && id && posts.length > 0 && profile?.role_id !== 'spectator') {
+    if (user?.uid && id && posts.length > 0 && profile?.role_id !== 'spectator') {
       // Calculate the global index of the last message currently visible on this page
-      // Mark everything on the current page as read
       const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + posts.length - 1;
-      markTopicRead(id, lastMessageIndex);
+      if (lastMarkedOffsetRef.current !== lastMessageIndex) {
+        lastMarkedOffsetRef.current = lastMessageIndex;
+        markTopicRead(id, lastMessageIndex);
+      }
     }
-  }, [posts.length, id, user, markTopicRead, currentPage, profile?.role_id, ITEMS_PER_PAGE]);
+  }, [posts.length, id, user?.uid, markTopicRead, currentPage, profile?.role_id, ITEMS_PER_PAGE]);
 
   // Subscribe to draft
   useEffect(() => {
-    if (!user || !id) return;
+    if (!user?.uid || !id) return;
     const unsub = subscribeToTopicDraft(id, user.uid, setMyDraft);
     return () => unsub();
-  }, [user, id]);
+  }, [user?.uid, id]);
 
   // Track unread quote and mention notifications and clear them via IntersectionObserver
   useEffect(() => {
-    if (!user || !id) return;
+    if (!user?.uid || !id) return;
     const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
       const activeQuotes = notifs.filter(n =>
         !n.read &&
@@ -313,7 +429,7 @@ const TopicPage = () => {
       setUnreadQuotes(activeQuotes);
     });
     return () => unsub();
-  }, [user, id]);
+  }, [user?.uid, id]);
 
   useEffect(() => {
     if (unreadQuotes.length === 0 || posts.length === 0) return;
@@ -325,7 +441,8 @@ const TopicPage = () => {
           const matchingNotifs = unreadQuotes.filter(n => n.payload?.post_id === postId);
 
           if (matchingNotifs.length > 0) {
-            matchingNotifs.forEach(n => markNotificationRead(n.id));
+            // Передаем ID уведомления 1-м параметром, user.uid — 2-м параметром
+            matchingNotifs.forEach(n => markNotificationRead(n.id, user?.uid));
             setUnreadQuotes(prev => prev.filter(p => !matchingNotifs.some(m => m.id === p.id)));
           }
         }
@@ -340,24 +457,24 @@ const TopicPage = () => {
     });
 
     return () => observer.disconnect();
-  }, [unreadQuotes, posts]);
+  }, [unreadQuotes, posts, user?.uid]);
 
   // Subscribe to characters separately so we can unsubscribe properly
   useEffect(() => {
-    if (!user) return;
+    if (!user?.uid) return;
     const unsub = subscribeToCharacters(user.uid, setCharacters);
 
     // Fetch my votes in this topic
     getVotesInTopic(user.uid, id).then(setMyVotes).catch(console.error);
 
     return () => unsub();
-  }, [user, id]);
+  }, [user?.uid, id]);
 
   useEffect(() => {
-    if (!user || !id || profile?.role_id === 'pending') return;
+    if (!user?.uid || !id || profile?.role_id === 'pending') return;
     const unsub = subscribeToTopicStatus(id, user.uid, setIsSubscribed);
     return () => unsub();
-  }, [user, id, profile?.role_id]);
+  }, [user?.uid, id, profile?.role_id]);
 
   // Set initial selectedCharacterId from profile
   useEffect(() => {
@@ -434,17 +551,18 @@ const TopicPage = () => {
     alreadyJumpedRef.current = false;
   }, [id, locationKey]);
 
-  // Reset jumpTargetPageRef ONLY when the topic changes, so we don't clear it during our own redirects
+  // Reset jumpTargetPageRef and locatingPostIdRef ONLY when the topic changes
   useEffect(() => {
     jumpTargetPageRef.current = null;
+    locatingPostIdRef.current = null; // <-- Сбрасываем замок при смене топика
   }, [id]);
 
   // Capture initial visit state once per topic change
   useEffect(() => {
-    if (user && id && readMap[id] !== undefined && initialVisitRef.current[id] === undefined) {
+    if (user?.uid && id && readMap[id] !== undefined && initialVisitRef.current[id] === undefined) {
       initialVisitRef.current[id] = readMap[id];
     }
-  }, [user, id, readMap]);
+  }, [user?.uid, id, readMap]);
 
   useEffect(() => {
     // 1. Topics not yet loaded
@@ -462,7 +580,7 @@ const TopicPage = () => {
     let targetPage = currentPage;
     let scrollBlock = 'start';
 
-    // Priority 1: ?post=ID (Clicking from a quote)
+    // Priority 1: ?post=ID (Clicking from a quote or external link)
     const queryPostId = searchParams.get('post');
     if (queryPostId) {
       const postIndex = posts.findIndex(p => p.id === queryPostId);
@@ -470,8 +588,17 @@ const TopicPage = () => {
         targetPage = currentPage;
         targetId = `post-${queryPostId}`;
         scrollBlock = 'center';
+        locatingPostIdRef.current = null; // Сбрасываем замок, так как пост уже на экране
       } else if (jumpTargetPageRef.current !== currentPage) {
-        // Post not found on the current page - try to locate it across the database
+
+        // ВАЖНО: Если этот postId УЖЕ находится в процессе поиска, предотвращаем повторный вызов!
+        if (locatingPostIdRef.current === queryPostId) {
+          return;
+        }
+
+        // Ставим замок
+        locatingPostIdRef.current = queryPostId;
+
         locatePost(queryPostId, ITEMS_PER_PAGE).then(result => {
           if (result.found) {
             if (result.topicId === id) {
@@ -481,12 +608,14 @@ const TopicPage = () => {
                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
               } else {
                 jumpTargetPageRef.current = currentPage;
-                loadPosts();
+                loadPosts(currentPage);
               }
             } else {
+              locatingPostIdRef.current = null;
               navigate(`/topic/${result.topicId}?post=${queryPostId}`);
             }
           } else {
+            locatingPostIdRef.current = null;
             if (user?.uid) {
               clearOrphanedPostNotifications(user.uid, queryPostId).catch(err => console.error('[Cleanup Orphaned Notification error]', err));
             }
@@ -504,15 +633,16 @@ const TopicPage = () => {
             }, 500);
           }
         }).catch(err => {
+          locatingPostIdRef.current = null;
           console.error('[TopicPage navigation locator error]', err);
           setIsPageLoading(false);
           alreadyJumpedRef.current = true;
         });
         return;
       } else if (posts.length > 0) {
-         // Post was not found even after ensuring current page loaded. Probably deleted.
-         alreadyJumpedRef.current = true;
-         setIsPageLoading(false);
+        locatingPostIdRef.current = null;
+        alreadyJumpedRef.current = true;
+        setIsPageLoading(false);
       }
     }
     // Priority 2: #post-ID (Legacy anchors)
@@ -524,23 +654,23 @@ const TopicPage = () => {
         targetId = hash.substring(1);
       } else if (jumpTargetPageRef.current !== currentPage) {
         locatePost(postId, ITEMS_PER_PAGE).then(result => {
-           if (result.found && result.topicId === id) {
-              if (result.page !== currentPage) {
-                 jumpTargetPageRef.current = result.page;
-                 alreadyJumpedRef.current = false;
-                 setSearchParams({ page: result.page }, { preventScrollReset: true });
-                 // hash stays in window.location.hash natively
-              } else {
-                 jumpTargetPageRef.current = currentPage;
-                 loadPosts();
-              }
-           } else {
-              setIsPageLoading(false);
-              alreadyJumpedRef.current = true;
-           }
+          if (result.found && result.topicId === id) {
+            if (result.page !== currentPage) {
+              jumpTargetPageRef.current = result.page;
+              alreadyJumpedRef.current = false;
+              setSearchParams({ page: result.page }, { preventScrollReset: true });
+              // hash stays in window.location.hash natively
+            } else {
+              jumpTargetPageRef.current = currentPage;
+              loadPosts();
+            }
+          } else {
+            setIsPageLoading(false);
+            alreadyJumpedRef.current = true;
+          }
         }).catch(() => {
-           setIsPageLoading(false);
-           alreadyJumpedRef.current = true;
+          setIsPageLoading(false);
+          alreadyJumpedRef.current = true;
         });
         return;
       } else if (posts.length > 0) {
@@ -765,11 +895,11 @@ const TopicPage = () => {
         repTargetPostNumber,
         profile?.nickname || 'User'
       );
-      
+
       // Optimistic update for posts
-      setPosts(prev => prev.map(p => 
-        p.id === repTargetPost.id 
-          ? { ...p, reputation: (p.reputation || 0) + repValue } 
+      setPosts(prev => prev.map(p =>
+        p.id === repTargetPost.id
+          ? { ...p, reputation: (p.reputation || 0) + repValue }
           : p
       ));
 
@@ -947,13 +1077,42 @@ const TopicPage = () => {
         prevTopicStatsRef.current.last_post_at = new Date().toISOString();
       }
 
+      const curCategoryId = topicRef.current?.category_id || topic?.category_id;
+      const curTitle = topicRef.current?.title || topic?.title;
+      if (curCategoryId) {
+        updateLocalTopicLastPost(id, curCategoryId, curTitle, {
+          id: newPostId,
+          author_id: user?.uid || null,
+          author_name: postData.author_name || profile?.nickname || guestNickname || 'User',
+          author_avatar: postData.author_avatar || profile?.avatar_url || '',
+          author_role_id: profile?.role_id || 'player',
+          is_character: !!postData.is_character,
+          author_character_id: postData.author_character_id || null,
+          created_at: new Date().toISOString()
+        }, newTotalPosts);
+      }
+
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
         jumpTargetPageRef.current = targetPage;
         setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
       } else {
-        // Already on the correct page — reload posts and scroll
-        await loadPosts(currentPage);
+        // ОПТИМИСТИЧНЫЙ UI: мгновенно отображаем свой пост, не дожидаясь ни Cloud Functions, ни RTDB
+        const optimisticPost = {
+          ...postData,
+          id: newPostId,
+          created_at: {
+            toDate: () => new Date(),
+            toMillis: () => Date.now(),
+            seconds: Math.floor(Date.now() / 1000)
+          }
+        };
+
+        setPosts(prev => {
+          if (prev.some(p => p.id === newPostId)) return prev;
+          return [...prev, optimisticPost];
+        });
+
         setTimeout(() => {
           const element = document.getElementById(`post-${newPostId}`);
           if (element) {
@@ -961,7 +1120,7 @@ const TopicPage = () => {
             element.classList.add('highlight-new-post');
             setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
           }
-        }, 300);
+        }, 100);
       }
 
     } catch (err) {
@@ -1048,12 +1207,25 @@ const TopicPage = () => {
     setDraftSaving(true);
     recordActivity();
     try {
-      await publishDraft(user.uid, id);
+      const publishedDraft = myDraft;
+      const newPostId = await publishDraft(user.uid, id);
+      setMyDraft(null);
       markTopicRead(id);
       showToast(t('forum.draft_published'));
 
-      const postsBeforeNew = (currentPage - 1) * ITEMS_PER_PAGE + posts.length;
-      const newTotalPosts = postsBeforeNew + 1;
+      if (user?.uid) {
+        setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
+        setAuthorStats(prev => ({
+          ...prev,
+          [user.uid]: {
+            ...(prev[user.uid] || {}),
+            post_count: ((prev[user.uid]?.post_count) || 0) + 1
+          }
+        }));
+      }
+
+      const currentTotal = Math.max(topic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
+      const newTotalPosts = currentTotal + 1;
       const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
 
       setTopic(prev => prev ? {
@@ -1067,11 +1239,56 @@ const TopicPage = () => {
         prevTopicStatsRef.current.last_post_at = new Date().toISOString();
       }
 
+      const curCategoryId = topicRef.current?.category_id || topic?.category_id;
+      const curTitle = topicRef.current?.title || topic?.title;
+      if (curCategoryId) {
+        updateLocalTopicLastPost(id, curCategoryId, curTitle, {
+          id: newPostId,
+          author_id: user?.uid || null,
+          author_name: publishedDraft?.author_name || profile?.nickname || 'User',
+          author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
+          author_role_id: profile?.role_id || 'player',
+          is_character: !!publishedDraft?.is_character,
+          author_character_id: publishedDraft?.author_character_id || null,
+          created_at: new Date().toISOString()
+        }, newTotalPosts);
+      }
+
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
-        setSearchParams({ page: targetPage, goLast: '1' }, { preventScrollReset: true });
+        jumpTargetPageRef.current = targetPage;
+        setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
       } else {
-        await loadPosts(currentPage);
+        const optimisticPost = {
+          topic_id: id,
+          author_id: user.uid,
+          author_name: publishedDraft?.author_name || profile?.nickname || user.displayName || 'User',
+          author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
+          is_character: !!publishedDraft?.is_character,
+          author_character_id: publishedDraft?.author_character_id || null,
+          content: publishedDraft?.content || '',
+          reputation: 0,
+          id: newPostId,
+          created_at: {
+            toDate: () => new Date(),
+            toMillis: () => Date.now(),
+            seconds: Math.floor(Date.now() / 1000)
+          }
+        };
+
+        setPosts(prev => {
+          if (prev.some(p => p.id === newPostId)) return prev;
+          return [...prev, optimisticPost];
+        });
+
+        setTimeout(() => {
+          const element = document.getElementById(`post-${newPostId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('highlight-new-post');
+            setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
+          }
+        }, 100);
       }
     } catch (err) {
       console.error(err);
@@ -1103,9 +1320,10 @@ const TopicPage = () => {
       const originalPost = posts.find(p => p.id === postId);
 
       let metadata = {};
-      // If the character ID has changed, we must update the "frozen" display fields
+      const selectedChar = characters.find(c => c.id === editCharacterId);
+
+      // Если изменился персонаж/маска или это автор
       if (editCharacterId !== (originalPost?.author_character_id || '')) {
-        const selectedChar = characters.find(c => c.id === editCharacterId);
         metadata = {
           author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
           author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
@@ -1116,24 +1334,55 @@ const TopicPage = () => {
         };
       }
 
+      // ОПТИМИСТИЧНЫЙ UI: мгновенно обновляем текст и данные поста на экране React
+      setPosts(prev => prev.map(p => {
+        if (p.id === postId) {
+          return {
+            ...p,
+            content: editContent.trim(),
+            ...metadata,
+            edited_at: {
+              toDate: () => new Date(),
+              toMillis: () => Date.now()
+            }
+          };
+        }
+        return p;
+      }));
+
+      // Сбрасываем форму редактирования
+      setEditingPostId(null);
+      setEditContent('');
+      setEditCharacterId('');
+
+      // Отправляем изменения в Firestore
       await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id);
+
       if (editingFirstPost && topic) {
         await updateTopic(topic.id, {
           title: editTopicTitle.trim() || topic.title,
           description: editTopicDescription.trim(),
           first_post_pinned: editPinFirstPost
         }, user.uid, topic.author_id);
+
+        // Обновляем заголовок темы локально
+        setTopic(prev => prev ? {
+          ...prev,
+          title: editTopicTitle.trim() || prev.title,
+          description: editTopicDescription.trim()
+        } : prev);
       }
-      await loadPosts();
-      setEditingPostId(null);
-      setEditContent('');
-      setEditCharacterId('');
+
       setEditingFirstPost(false);
       setEditTopicTitle('');
       setEditTopicDescription('');
+      showToast(lang === 'ru' ? 'Сообщение обновлено' : 'Post updated', 'success');
+
     } catch (err) {
       console.error(err);
       alert('Error editing post');
+      // В случае ошибки возвращаем актуальные данные с сервера
+      await loadPosts();
     }
   };
 
@@ -1158,7 +1407,14 @@ const TopicPage = () => {
           }
         } else {
           const delAuthorId = deletingPost.author_id;
-          await deletePost(deletingPost, user.uid);
+          const targetPostId = deletingPost.id;
+
+          // ОПТИМИСТИЧНЫЙ UI: мгновенно убираем пост с экрана React
+          setPosts(prev => prev.filter(p => p.id !== targetPostId));
+
+          // Вызываем удаление
+          const result = await deletePost(deletingPost, user.uid);
+
           if (delAuthorId) {
             if (delAuthorId === user?.uid) {
               setProfile(prev => prev ? { ...prev, post_count: Math.max(0, (prev.post_count || 0) - 1) } : prev);
@@ -1171,13 +1427,19 @@ const TopicPage = () => {
               }
             } : prev);
           }
-          await loadPosts();
+
+          if (result?.isGhost) {
+            showToast(lang === 'ru' ? 'Устаревшее сообщение удалено из кэша' : 'Ghost post cleared', 'info');
+          } else {
+            showToast(lang === 'ru' ? 'Сообщение удалено' : 'Post deleted', 'success');
+          }
         }
       }
       setDeletingPost(null);
     } catch (err) {
       console.error(err);
-      alert('Error deleting post');
+      showToast(lang === 'ru' ? 'Не удалось удалить сообщение' : 'Error deleting post', 'danger');
+      await loadPosts();
     }
   };
 

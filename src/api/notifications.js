@@ -153,10 +153,12 @@ export const subscribeToUserNotifications = (uid, callback) => {
 // ── Mark read & Delete ────────────────────────────────────────────────────────
 
 export const markNotificationRead = async (id, uid = null, isAdmin = false) => {
+  if (!id) return;
+  // Передаем (uid, id, isAdmin), так как rtdb-notifications.js ожидает uid первым аргументом!
   await markNotificationReadRtdb(uid, id, isAdmin);
   try {
-    await updateDoc(doc(db, 'notifications', id), { read: true }).catch(() => {});
-  } catch (e) {}
+    await updateDoc(doc(db, 'notifications', id), { read: true }).catch(() => { });
+  } catch (e) { }
 };
 
 export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {
@@ -169,11 +171,13 @@ export const clearOrphanedPostNotifications = async (uid, postId) => {
 };
 
 export const deleteNotification = async (id, uid = null, isAdmin = false) => {
+  if (!id) return;
+  // Передаем (uid, id, isAdmin) в правильном порядке!
   await deleteNotificationRtdb(uid, id, isAdmin);
   try {
     const { deleteDoc } = await import('firebase/firestore');
-    await deleteDoc(doc(db, 'notifications', id)).catch(() => {});
-  } catch (e) {}
+    await deleteDoc(doc(db, 'notifications', id)).catch(() => { });
+  } catch (e) { }
 };
 
 // Backwards compatibility alias
@@ -287,7 +291,7 @@ export const handlePostDeletionNotifications = async (topicId) => {
   );
   const snap = await getDocs(q);
   if (snap.empty) return;
-  
+
   const batch = writeBatch(db);
   snap.docs.forEach(d => {
     const data = d.data();

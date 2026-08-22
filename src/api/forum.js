@@ -21,6 +21,16 @@ import {
   getCountFromServer,
   Timestamp
 } from 'firebase/firestore';
+import {
+  getDatabase,
+  ref as rtdbRef,
+  remove as rtdbRemove,
+  onChildAdded,
+  onChildRemoved,
+  query as rtdbQuery,
+  orderByChild,
+  startAfter
+} from 'firebase/database';
 
 import { processDiceRolls } from '../utils/dice';
 
@@ -54,29 +64,19 @@ export const subscribeToTopics = (categoryId, callback) => {
 };
 
 // Single topic by ID with quiet polling (no persistent WebSocket)
-export const subscribeToTopic = (topicId, callback, pollIntervalMs = 30000) => {
-  let isSubscribed = true;
-
-  const fetchTopicData = async () => {
-    try {
-      const snap = await getDoc(doc(db, 'topics', topicId));
-      if (!isSubscribed) return;
+// Single topic by ID with real-time listener (much cheaper than setInterval polling)
+export const subscribeToTopic = (topicId, callback) => {
+  const unsub = onSnapshot(doc(db, 'topics', topicId),
+    (snap) => {
       callback(snap.exists() ? { id: snap.id, ...snap.data() } : null, null);
-    } catch (err) {
+    },
+    (err) => {
       console.error('[subscribeToTopic]', err);
-      if (!isSubscribed) return;
       callback(null, err);
     }
-  };
+  );
 
-  fetchTopicData();
-
-  const intervalId = setInterval(fetchTopicData, pollIntervalMs);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(intervalId);
-  };
+  return unsub; // Возвращаем функцию отписки напрямую
 };
 
 export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) => {
@@ -115,7 +115,7 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
 // Create new topic + first post atomically
 export const createTopic = async (topicData, firstPostData) => {
   const topicRef = doc(collection(db, 'topics'));
-  
+
   await runTransaction(db, async (transaction) => {
     const postRef = doc(collection(db, 'posts'));
 
@@ -167,12 +167,74 @@ export const subscribeToPosts = (topicId, callback) => {
   );
 };
 
+export const subscribeToNewPostsRtdb = (topicId, sinceTimestamp, callback) => {
+  if (!topicId) return () => {};
+  const rtdb = getDatabase();
+  const postsRef = rtdbRef(rtdb, `topic_posts_cache/${topicId}/posts`);
+  const effectiveSince = typeof sinceTimestamp === 'number' ? sinceTimestamp : Date.now();
+  const q = rtdbQuery(postsRef, orderByChild('created_at'), startAfter(effectiveSince));
+
+  const unsubscribe = onChildAdded(q, (snapshot) => {
+    const post = snapshot.val();
+    if (!post) return;
+
+    post.id = snapshot.key;
+
+    // Parse created_at timestamp
+    let postMs = typeof post.created_at === 'number'
+      ? post.created_at
+      : (post.created_at?.toMillis ? post.created_at.toMillis() : Date.now());
+
+    const validDate = new Date(postMs);
+    post.created_at = {
+      toDate: () => validDate,
+      toMillis: () => validDate.getTime(),
+      seconds: Math.floor(validDate.getTime() / 1000)
+    };
+
+    if (post.edited_at) {
+      const editMs = typeof post.edited_at === 'number'
+        ? post.edited_at
+        : new Date(post.edited_at).getTime();
+      const editDate = !isNaN(editMs) ? new Date(editMs) : new Date();
+      post.edited_at = {
+        toDate: () => editDate,
+        toMillis: () => editDate.getTime()
+      };
+    }
+
+    callback(post);
+  }, (err) => {
+    console.error('[subscribeToNewPostsRtdb error]', err);
+  });
+
+  return () => unsubscribe();
+};
+
+export const subscribeToPostRemovalsRtdb = (topicId, callback) => {
+  const rtdb = getDatabase();
+  const postsRef = rtdbRef(rtdb, `topic_posts_cache/${topicId}/posts`);
+
+  const unsubscribe = onChildRemoved(postsRef, (snapshot) => {
+    const removedPostId = snapshot.key;
+    if (removedPostId) {
+      callback(removedPostId);
+    }
+  }, (err) => {
+    console.error('[subscribeToPostRemovalsRtdb error]', err);
+  });
+
+  return () => unsubscribe();
+};
+
 export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null) => {
   try {
     const functions = getFunctions();
     const getSecured = httpsCallable(functions, 'getSecuredPosts');
     const result = await getSecured({ topicId, page, pageSize, lastVisit });
+
     const normalizePost = (p) => {
+      if (!p) return null;
       const dateVal = p.created_at ? new Date(p.created_at) : null;
       return {
         ...p,
@@ -182,15 +244,22 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVi
           seconds: Math.floor(dateVal.getTime() / 1000)
         } : null,
         updated_at: p.updated_at ? {
-           toDate: () => new Date(p.updated_at),
-           toMillis: () => new Date(p.updated_at).getTime()
+          toDate: () => new Date(p.updated_at),
+          toMillis: () => new Date(p.updated_at).getTime()
         } : null
       };
     };
+
     const posts = (result.data.posts || []).map(normalizePost);
     const pinnedPost = result.data.pinnedPost ? normalizePost(result.data.pinnedPost) : null;
     const lastPost = result.data.lastPost ? normalizePost(result.data.lastPost) : null;
-    return { posts, pinnedPost, page: result.data.page || page, lastPost };
+
+    return {
+      posts,
+      pinnedPost,
+      page: result.data.page || (typeof page === 'number' ? page : 1),
+      lastPost
+    };
   } catch (err) {
     console.error('[fetchSecuredPosts]', err);
     throw err;
@@ -205,13 +274,13 @@ export const fetchUserPosts = async (targetUid, page = 1, pageSize = 20, postFil
     const functions = getFunctions();
     const getUserPosts = httpsCallable(functions, 'getUserPosts');
     const result = await getUserPosts({ targetUid, page, pageSize, postFilter });
-    
+
     const posts = result.data.posts || [];
     const mappedPosts = posts.map(p => {
       // Map ISO strings back to Firestore-like Timestamp objects for component compatibility
       const dateVal = p.created_at ? new Date(p.created_at) : null;
       const updateVal = p.updated_at ? new Date(p.updated_at) : null;
-      
+
       return {
         ...p,
         created_at: dateVal ? {
@@ -263,7 +332,7 @@ export const subscribeToUserPosts = (uid, limitCount, callback) => {
 // Reply to a topic
 export const createPost = async (postData) => {
   const postRef = doc(collection(db, 'posts'));
-  
+
   await runTransaction(db, async (transaction) => {
     const { content: processedContent, rolls } = processDiceRolls(postData.content);
 
@@ -300,7 +369,7 @@ export const createDraftPost = async (postData) => {
 
 
 export const subscribeToTopicDraft = (topicId, uid, callback) => {
-  if (!uid) return () => {};
+  if (!uid) return () => { };
   const draftRef = doc(db, 'users', uid, 'drafts', topicId);
   return onSnapshot(draftRef, (snapshot) => {
     callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
@@ -450,16 +519,43 @@ export const deletePost = async (post, performerId) => {
   const postRef = doc(db, 'posts', post.id);
 
   if (performerId && performerId !== post.author_id) {
-    await logAdminAction('post_deleted_by_admin', performerId, { targetId: post.id, topicId: post.topic_id, authorId: post.author_id });
+    await logAdminAction('post_deleted_by_admin', performerId, { targetId: post.id, topicId: post.topic_id, author_id: post.author_id });
   }
 
-  // Simply delete the post. Cloud Functions handle:
-  // - Decrementing posts_count for topic, category, user
-  // - Reverting reputation and deleting reputation_logs
-  // - Synchronizing last_post metadata for topic and category
-  // - Cleaning up notifications
-  await deleteDoc(postRef);
+  try {
+    // 1. Пробуем удалить пост из Firestore
+    await deleteDoc(postRef);
+  } catch (err) {
+    // Если Firestore выдаёт "Missing or insufficient permissions" или "not-found",
+    // значит поста в Firestore УЖЕ НЕТ (он остался только в кэше RTDB).
+    const isPermissionOrNotFound =
+      err?.code === 'permission-denied' ||
+      err?.message?.includes('permissions') ||
+      err?.code === 'not-found';
+
+    if (isPermissionOrNotFound) {
+      console.warn(`[deletePost] Post ${post.id} missing in Firestore. Requesting server to purge RTDB cache...`);
+
+      // 2. Взываем серверную функцию, чтобы она от имени Admin SDK зачистила RTDB!
+      try {
+        const functions = getFunctions();
+        const purgeGhost = httpsCallable(functions, 'deleteGhostPost');
+        await purgeGhost({ topicId: post.topic_id, postId: post.id });
+      } catch (purgeErr) {
+        console.error('[deletePost] Failed to call deleteGhostPost:', purgeErr);
+      }
+
+      return { isGhost: true };
+    }
+
+    // Любую другую настоящую ошибку пробрасываем дальше
+    throw err;
+  }
+
+  return { success: true };
 };
+
+
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 export const updateUser = async (uid, userData, performerId) => {
@@ -499,7 +595,7 @@ export const checkNicknameExists = async (nickname, excludeUid = null) => {
   // We need to do a case-insensitive check, but Firestore doesn't support that directly easily
   // For exact match:
   const q = query(
-    collection(db, 'users'), 
+    collection(db, 'users'),
     where('nickname', '==', nickname),
     limit(1)
   );
@@ -531,7 +627,7 @@ export const deleteTopics = async (topicIds, performerId) => {
 
     // 2. Delete topic
     batch.delete(topicRef);
-    
+
     // Log
     if (performerId) {
       await logAdminAction('topic_deleted', performerId, { targetId: topicId, title: topicData.title });
@@ -542,7 +638,7 @@ export const deleteTopics = async (topicIds, performerId) => {
 
     // Commit the batch
     await batch.commit();
-    
+
     // Recalculate Category last_post if needed
     if (categoryId) {
       const catTopicsQ = query(
@@ -553,7 +649,7 @@ export const deleteTopics = async (topicIds, performerId) => {
       );
       const catTopicsSnap = await getDocs(catTopicsQ);
       const catRef = doc(db, 'categories', categoryId);
-      
+
       if (!catTopicsSnap.empty) {
         const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
         await updateDoc(catRef, {
@@ -601,7 +697,7 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
 
     await runTransaction(db, async (transaction) => {
       // 1. Update Topic's category_id
-      transaction.update(topicRef, { 
+      transaction.update(topicRef, {
         category_id: targetCategoryId,
         updated_at: serverTimestamp()
       });
@@ -620,7 +716,7 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
         posts_count: increment(postsCount)
       });
     });
-    
+
     if (performerId) {
       await logAdminAction('topic_moved', performerId, { targetId: topicId, title: topicData.title, sourceCategoryId, targetCategoryId });
     }
@@ -636,6 +732,7 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
           last_post_at: top.last_post_at || null,
           last_post_author: top.last_post_author || null,
           last_post_author_id: top.last_post_author_id || null,
+          last_post_author_avatar: top.last_post_author_avatar || null,
           last_post_topic_id: snap.docs[0].id || null,
           last_post_topic_title: top.title || null,
           last_post_topic_posts_count: top.posts_count || null,
@@ -643,11 +740,12 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
           last_post_author_character_id: top.last_post_author_character_id || null
         });
       } else {
-        await updateDoc(ref, { 
-          last_post_at: null, 
-          last_post_author: null, 
+        await updateDoc(ref, {
+          last_post_at: null,
+          last_post_author: null,
           last_post_author_id: null,
-          last_post_topic_id: null, 
+          last_post_author_avatar: null,
+          last_post_topic_id: null,
           last_post_topic_title: null,
           last_post_is_character: null,
           last_post_author_character_id: null
@@ -924,12 +1022,12 @@ export const batchUpdateTopics = async (topicIds, data, performerId) => {
     if (!snap.exists()) return;
     const topicData = snap.data();
     const title = topicData.title;
-    
+
     await updateDoc(topicRef, {
       ...data,
       updated_at: serverTimestamp()
     });
-    
+
     if (performerId) {
       if (data.is_pinned !== undefined) {
         await logAdminAction(data.is_pinned ? 'topic_pinned' : 'topic_unpinned', performerId, { targetId: id, title });

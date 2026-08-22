@@ -779,7 +779,11 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       }
       case 'html': {
         const rawHtml = (node.children || []).map(getRawContent).join('');
-        return safeHtmlToReact(rawHtml, index);
+        return (
+          <div key={index} className="custom-html-content">
+            {safeHtmlToReact(rawHtml, index)}
+          </div>
+        );
       }
       default: return <span key={index}>{content}</span>;
     }

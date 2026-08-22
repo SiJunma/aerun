@@ -39,7 +39,7 @@ const ROLE_LEVELS = {
 
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
-  const { user, hasPermission, roles, isRootAdmin } = useAuth();
+  const { user, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -354,6 +354,7 @@ const AdminPage = () => {
       } else {
         await addCategory(catForm, user.uid);
       }
+      await refreshForumState?.(true);
       showToast(t('admin.categories.toast_saved'), 'success');
       setShowCatModal(false);
     } catch (err) {
@@ -372,6 +373,7 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteCategory(id, user.uid);
+          await refreshForumState?.(true);
           showToast(t('admin.categories.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -404,6 +406,7 @@ const AdminPage = () => {
       } else {
         await addCategoryGroup(groupForm, user.uid);
       }
+      await refreshForumState?.(true);
       showToast(t('admin.categories.toast_saved'), 'success');
       setShowGroupModal(false);
     } catch (err) {
@@ -422,6 +425,7 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteCategoryGroup(id, user.uid);
+          await refreshForumState?.(true);
           showToast(t('admin.categories.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);

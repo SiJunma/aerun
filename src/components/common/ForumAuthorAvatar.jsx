@@ -22,12 +22,15 @@ const ForumAuthorAvatar = ({
 }) => {
   const { lang } = useI18n();
 
-  const cacheKey = isCharacter && characterId ? `char_${characterId}` : `user_${userId}`;
+  const validCharId = isCharacter && characterId && typeof characterId === 'string' && characterId.trim() !== '' ? characterId.trim() : null;
+  const validUserId = userId && typeof userId === 'string' && userId.trim() !== '' ? userId.trim() : null;
+  const cacheKey = validCharId ? `char_${validCharId}` : (validUserId ? `user_${validUserId}` : null);
+
   if (initialAvatar && cacheKey) {
     avatarCache.set(cacheKey, initialAvatar);
   }
 
-  const cachedAvatar = avatarCache.get(cacheKey);
+  const cachedAvatar = cacheKey ? avatarCache.get(cacheKey) : null;
   const placeholder = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName || 'Guest')}&size=${size}`;
   const finalAvatar = initialAvatar || cachedAvatar || placeholder;
 

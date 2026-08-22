@@ -137,9 +137,11 @@ export const AuthProvider = ({ children }) => {
     lastActivityRef.current = now;
 
     if (user?.uid && profile) {
-      // If user was offline due to inactivity/idle, bring them back online in RTDB
-      if (!isRtdbOnlineRef.current) {
+      // If user was offline due to inactivity/idle, or every 2 minutes of active interaction, push fresh timestamp to RTDB
+      const PUSH_INTERVAL_MS = 2 * 60 * 1000;
+      if (!isRtdbOnlineRef.current || (now - lastPushTimeRef.current >= PUSH_INTERVAL_MS)) {
         isRtdbOnlineRef.current = true;
+        lastPushTimeRef.current = now;
         setRtdbOnline(user.uid, profile).catch(err => console.warn('[setRtdbOnline resume err]', err));
       }
 
@@ -162,7 +164,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user, profile, getOrCreateGuestId]);
 
-  // Inactivity detection: auto-switch to 'offline' after 15 minutes of no clicks/keydown
+  // Inactivity detection: auto-switch to 'offline' after exactly 15 minutes of no clicks/keydowns
   useEffect(() => {
     if (!user?.uid || !profile) return;
 
@@ -173,7 +175,7 @@ export const AuthProvider = ({ children }) => {
         isRtdbOnlineRef.current = false;
         setRtdbOffline(user.uid, false).catch(err => console.warn('[setRtdbOffline idle err]', err));
       }
-    }, 5 * 60 * 1000);
+    }, 60 * 1000); // Check every minute
 
     let throttleTimer = null;
     const onUserInteraction = () => {
@@ -504,6 +506,7 @@ export const AuthProvider = ({ children }) => {
           }
 
           readMapUnsubRef.current = subscribeToReadMap(firebaseUser.uid, setReadMap);
+          latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 50);
 
           profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
             if (docSnap.exists()) {
@@ -514,7 +517,7 @@ export const AuthProvider = ({ children }) => {
                 await setDoc(userDocRef, { role_id: CHIEF_ADMIN_ID, last_seen: serverTimestamp() }, { merge: true });
               } else {
                 setProfile({ id: docSnap.id, ...data });
-                if (isAdmin && data.nickname && firebaseUser && data.nickname !== settings?.adminNickname) {
+                if (isAdmin && data.nickname && firebaseUser && settings?.adminNickname && data.nickname !== settings.adminNickname) {
                   setDoc(doc(db, 'settings', 'global'), { adminNickname: data.nickname }, { merge: true })
                     .catch(err => console.warn('[adminNickname sync]', err));
                 }
@@ -721,7 +724,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const data = await fetchSecuredMainPageData();
       if (data.categories) setCategories(data.categories);
-      if (data.latestTopics) setLatestTopics(data.latestTopics);
+      if (data.latestTopics && data.latestTopics.length > 0) setLatestTopics(data.latestTopics);
       if (data.stats) setForumStats(data.stats);
       if (data.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
     } catch (err) {
@@ -735,45 +738,51 @@ export const AuthProvider = ({ children }) => {
   }, [loading, user?.uid, refreshForumState]);
 
   useEffect(() => {
-    if (!user || latestTopics.length === 0) {
+    if (!user?.uid || latestTopics.length === 0) {
       setUnreadTopicsCount(0);
       return;
     }
 
-    const registrationMs = profile?.created_at?.toMillis?.() || 0;
+    const registrationMs = profile?.created_at?.toMillis?.()
+      || (profile?.created_at ? new Date(profile.created_at).getTime() : 0);
 
     const count = latestTopics.filter(topic => {
       const category = categories.find(c => c.id === topic.category_id);
-      if (!category || !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) return false;
+      if (category && !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) return false;
 
       if (topic.last_post_author_id === user.uid) return false;
 
       const entry = readMap[topic.id];
       const lastVisitValue = entry?.timestamp || entry;
-      const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
+      const lastVisitMs = lastVisitValue?.toMillis
+        ? lastVisitValue.toMillis()
+        : (typeof lastVisitValue === 'number' ? lastVisitValue : (lastVisitValue ? new Date(lastVisitValue).getTime() : 0));
       const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
       const lastPostMs = topic.last_post_at?.toMillis?.() ??
-        (typeof topic.last_post_at === 'string' ? new Date(topic.last_post_at).getTime() : 0);
+        (typeof topic.last_post_at === 'string' ? new Date(topic.last_post_at).getTime() : (typeof topic.last_post_at === 'number' ? topic.last_post_at : 0));
 
       return lastPostMs > effectiveLastVisitMs;
     }).length;
 
     setUnreadTopicsCount(count);
-  }, [user, profile, latestTopics, readMap, categories, hasPermission]);
+  }, [user?.uid, profile?.created_at, latestTopics, readMap, categories, hasPermission]);
+
+  const readMapRef = useRef(readMap);
+  readMapRef.current = readMap;
+
+  const latestTopicsRef = useRef(latestTopics);
+  latestTopicsRef.current = latestTopics;
 
   const markTopicRead = useCallback(async (topicId, offset = null) => {
-    if (!user || !topicId) return;
+    if (!user?.uid || !topicId) return;
     const now = Date.now();
     
-    // Calculate the final offset using the current readMap state to avoid async closure issues
-    const currentReadMap = readMap[topicId];
+    // Calculate the final offset using the current readMap state from ref
+    const currentReadMap = readMapRef.current?.[topicId];
     const prevOffset = currentReadMap?.offset ?? -1;
     
-    // Do not allow offset to decrease or re-trigger if already at or past this offset
-    if (offset !== null && offset <= prevOffset) return;
-    
-    // If no new offset is provided, but we had one, preserve it
-    const finalOffset = offset !== null ? offset : (prevOffset !== -1 ? prevOffset : null);
+    // Preserve or advance offset (never regress)
+    const finalOffset = offset !== null ? Math.max(offset, prevOffset) : (prevOffset !== -1 ? prevOffset : null);
     
     const value = finalOffset !== null ? { timestamp: now, offset: finalOffset } : now;
     
@@ -787,16 +796,16 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error('[markTopicRead]', err);
     }
-  }, [user, profile?.role_id, readMap]);
+  }, [user?.uid, profile?.role_id]);
 
   const markAllRead = useCallback(async () => {
-    if (!user || latestTopics.length === 0 || isMarkingAllRead) return;
+    if (!user?.uid || latestTopicsRef.current.length === 0 || isMarkingAllRead) return;
 
     setIsMarkingAllRead(true);
     try {
       const now = Date.now();
-      const newReadMap = { ...readMap };
-      const topicIds = latestTopics.map(t => {
+      const newReadMap = { ...(readMapRef.current || {}) };
+      const topicIds = latestTopicsRef.current.map(t => {
         newReadMap[t.id] = now;
         return t.id;
       });
@@ -808,7 +817,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setIsMarkingAllRead(false);
     }
-  }, [user, latestTopics, readMap, isMarkingAllRead]);
+  }, [user?.uid, isMarkingAllRead]);
 
   React.useEffect(() => {
     if (user && !loading) {
@@ -858,7 +867,7 @@ export const AuthProvider = ({ children }) => {
 
   const isRootAdmin = isChiefAdmin(user?.email, profile?.role_id);
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     profile,
     setProfile,
@@ -896,7 +905,15 @@ export const AuthProvider = ({ children }) => {
     isUserOnline,
     PERMISSIONS,
     DEFAULT_ROLES
-  };
+  }), [
+    user, profile, authError, isRootAdmin, settings, loading, readMap, categories,
+    unreadTopicsCount, dmUnread, isMarkingAllRead, markTopicRead, markAllRead,
+    loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
+    resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
+    updateSettings, updateProfile, recordActivity, refreshForumState, forumStats,
+    dailyActiveUsers, updateLocalTopicLastPost, hasPermission, roles, activeUsers,
+    activeUserIds, isUserOnline
+  ]);
 
   return (
     <AuthContext.Provider value={value}>

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { useAuth } from './AuthProvider';
-import { subscribeToDesigns } from '../api/designs';
+import { getDesigns } from '../api/designs';
 
 const DesignContext = createContext();
 
@@ -17,7 +17,11 @@ export const DesignProvider = ({ children }) => {
   const previewId = urlParams.get('preview_design');
 
   useEffect(() => {
-    return subscribeToDesigns(setDesigns);
+    let isSubscribed = true;
+    getDesigns().then(d => {
+      if (isSubscribed) setDesigns(d);
+    }).catch(err => console.error('[DesignProvider]', err));
+    return () => { isSubscribed = false; };
   }, []);
 
   const activeDesign = useMemo(() => {

@@ -825,8 +825,8 @@ label.fw-bold {
   font-weight: normal !important;
 }
 
-/* Markdown Styling in Posts */
-.post-content img {
+/* Markdown & BBCode Styling in Posts (excluding custom HTML blocks) */
+.post-content img:not(.custom-html-content img):not(.bbcode-smile) {
   max-width: 100%;
   height: auto;
   border-radius: 0.75rem;
@@ -835,7 +835,7 @@ label.fw-bold {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.post-content blockquote {
+.post-content blockquote:not(.custom-html-content blockquote) {
   border: 1px dashed var(--border-color);
   padding: 0.8rem 1rem;
   margin: 0.75rem 0;
@@ -845,22 +845,22 @@ label.fw-bold {
   font-style: normal;
 }
 
-[data-theme='dark'] .post-content blockquote {
+[data-theme='dark'] .post-content blockquote:not(.custom-html-content blockquote) {
   background: #1a2333;
   /* Darker than card-bg for depth */
   border-color: var(--border-color) !important;
 }
 
-[data-theme='neutral'] .post-content blockquote {
+[data-theme='neutral'] .post-content blockquote:not(.custom-html-content blockquote) {
   background: #ede9df;
   /* Same as sidebar for consistency */
 }
 
-.post-content blockquote p {
+.post-content blockquote:not(.custom-html-content blockquote) p {
   margin-bottom: 0.5rem;
 }
 
-.post-content blockquote p:last-child {
+.post-content blockquote:not(.custom-html-content blockquote) p:last-child {
   margin-bottom: 0;
 }
 
@@ -934,28 +934,27 @@ label.fw-bold {
   border-bottom-color: rgba(100, 80, 50, 0.12);
 }
 
-
-.post-content ul,
-.post-content ol {
+.post-content ul:not(.custom-html-content ul),
+.post-content ol:not(.custom-html-content ol) {
   margin-top: 0;
   margin-bottom: 1.25rem;
   padding-left: 2rem;
   line-height: 1.6;
 }
 
-.post-content li {
+.post-content li:not(.custom-html-content li) {
   margin-bottom: 0.15rem;
 }
 
-.post-content ul {
+.post-content ul:not(.custom-html-content ul) {
   list-style-type: none;
 }
 
-.post-content ul li {
+.post-content ul:not(.custom-html-content ul) li:not(.custom-html-content li) {
   position: relative;
 }
 
-.post-content ul li::before {
+.post-content ul:not(.custom-html-content ul) li:not(.custom-html-content li)::before {
   content: "•";
   color: var(--primary-color);
   font-weight: bold;
@@ -963,6 +962,59 @@ label.fw-bold {
   width: 1rem;
   margin-left: -1rem;
   position: absolute;
+}
+
+/* ── Custom HTML Container Isolation ───────────────────────────────── */
+.custom-html-content {
+  display: block;
+  width: 100%;
+  /* Reset inherited properties from .bbcode-content inline style */
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+  /* Reset any other inherited forum text styles */
+  /* font-size: revert;
+  line-height: revert;
+  color: revert;
+  background: revert;
+  font-family: revert;
+  text-align: revert; */
+}
+
+.custom-html-content img {
+  border-radius: 0;
+  border: none;
+  margin: 0;
+  box-shadow: none;
+  max-width: none;
+}
+
+.custom-html-content blockquote {
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border-radius: 0;
+  font-style: normal;
+}
+
+.custom-html-content ul,
+.custom-html-content ol {
+  margin: initial;
+  padding-left: 1.5rem;
+  list-style: initial;
+}
+
+.custom-html-content ul li,
+.custom-html-content ol li {
+  margin: initial;
+  position: static;
+}
+
+.custom-html-content ul li::before,
+.custom-html-content ol li::before {
+  content: none !important;
+  display: none !important;
 }
 
 .editor-toolbar {
@@ -1610,12 +1662,15 @@ a.badge.bg-danger:hover {
 .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::before {
   border-top-color: var(--border-color) !important;
 }
+
 .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::after {
   border-top-color: var(--card-bg) !important;
 }
+
 .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::before {
   border-bottom-color: var(--border-color) !important;
 }
+
 .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::after {
   border-bottom-color: var(--card-bg) !important;
 }
@@ -1624,12 +1679,15 @@ a.badge.bg-danger:hover {
 [data-theme='dark'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::before {
   border-top-color: rgba(255, 255, 255, 0.1) !important;
 }
+
 [data-theme='dark'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::after {
   border-top-color: var(--card-bg) !important;
 }
+
 [data-theme='dark'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::before {
   border-bottom-color: rgba(255, 255, 255, 0.1) !important;
 }
+
 [data-theme='dark'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::after {
   border-bottom-color: var(--card-bg) !important;
 }
@@ -1638,12 +1696,15 @@ a.badge.bg-danger:hover {
 [data-theme='neutral'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::before {
   border-top-color: rgba(140, 113, 82, 0.2) !important;
 }
+
 [data-theme='neutral'] .rep-preview-popover[data-popper-placement^="top"] .popover-arrow::after {
   border-top-color: #fffcf5 !important;
 }
+
 [data-theme='neutral'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::before {
   border-bottom-color: rgba(140, 113, 82, 0.2) !important;
 }
+
 [data-theme='neutral'] .rep-preview-popover[data-popper-placement^="bottom"] .popover-arrow::after {
   border-bottom-color: #fffcf5 !important;
 }
@@ -1741,9 +1802,11 @@ a.rep-preview-name:hover {
   0% {
     background-color: rgba(230, 162, 60, 0.25) !important;
   }
+
   70% {
     background-color: rgba(230, 162, 60, 0.15) !important;
   }
+
   100% {
     background-color: transparent;
   }

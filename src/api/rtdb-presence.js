@@ -12,9 +12,21 @@ let activePresenceUnsub = null;
 let activeDisconnectCancel = null; // stores cancel fn for current onDisconnect
 
 /**
+ * RTDB status/{uid} field semantics:
+ *
+ * last_seen     — online presence timestamp. Updated on every activity push and on
+ *                 connect/disconnect. Used ONLY for the "Online now" (15-min) list.
+ *                 On logout: state='logged_out' is set so the user leaves the online
+ *                 list instantly, but last_seen is left at the real logout time.
+ *
+ * last_activity — real, persistent "last visited" timestamp. Updated on every
+ *                 meaningful activity (recordActivity). NOT touched on logout/disconnect.
+ *                 Used for:  "Visited today" list  +  synced to Firestore users.last_seen.
+ */
+
+/**
  * Initializes real-time presence tracking for an authenticated user.
  * Automatically sets status to 'online' on connect, and 'offline' on disconnect.
- * Enriches status with post_count, status_line, signature, and active_character.
  */
 export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
   if (activePresenceUnsub) {
@@ -32,8 +44,7 @@ export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
 
     const unsubConnected = onValue(connectedRef, (snap) => {
       if (snap.val() === true) {
-        // Prepare server-side onDisconnect hook (fires even on tab crash/network loss)
-        // Use update() so only state/last_seen are overwritten — nickname etc. are preserved.
+        // Server-side onDisconnect: only update state + last_seen (NOT last_activity)
         disconnectHandler = onDisconnect(userStatusRef);
         disconnectHandler
           .update({
@@ -45,7 +56,8 @@ export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
           })
           .catch((err) => console.warn('[RTDB onDisconnect err]', err));
 
-        // Set online status with enriched fields
+        // Set online status. last_activity is set here on fresh login (first connect),
+        // and will be updated again on every recordActivity call.
         set(userStatusRef, {
           state: 'online',
           uid,
@@ -60,12 +72,12 @@ export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
             name: activeCharacter.name || '',
             avatar_url: activeCharacter.avatar_url || ''
           } : null,
-          last_seen: serverTimestamp()
+          last_seen: serverTimestamp(),
+          last_activity: serverTimestamp()  // initialize on login
         }).catch((err) => console.warn('[RTDB set online err]', err));
       }
     });
 
-    // Cleanup: ONLY unsubscribe the listener.
     activePresenceUnsub = () => {
       unsubConnected();
     };
@@ -98,6 +110,7 @@ export const updateRtdbActiveCharacter = async (uid, characterData) => {
 
 /**
  * Sets user status to online in RTDB when user resumes activity.
+ * Updates BOTH last_seen (online presence) and last_activity (persistent visit timestamp).
  */
 export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
   if (!uid || !rtdb) return;
@@ -106,6 +119,7 @@ export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
     await update(userStatusRef, {
       state: 'online',
       last_seen: serverTimestamp(),
+      last_activity: serverTimestamp(),  // persistent — used for "visited today" + Firestore sync
       ...(profile?.nickname ? { nickname: profile.nickname } : {}),
       ...(profile?.avatar_url !== undefined ? { avatar_url: profile.avatar_url } : {}),
       ...(profile?.role_id ? { role_id: profile.role_id } : {}),
@@ -120,21 +134,24 @@ export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
 
 /**
  * Sets user status to offline manually (called on idle timeout or logout).
+ * On logout: sets state='logged_out' and updates last_seen, but does NOT touch
+ * last_activity so "visited today" and Firestore last_seen remain accurate.
+ * On idle:   sets state='offline' and updates last_seen only.
+ *
  * @param {string} uid
- * @param {boolean} isLogout - If true, cancels the server-side onDisconnect hook before sign out.
+ * @param {boolean} isLogout - If true, cancels the server-side onDisconnect hook.
  */
 export const setRtdbOffline = async (uid, isLogout = false) => {
   if (!uid || !rtdb) return;
   try {
     const userStatusRef = ref(rtdb, `status/${uid}`);
-    // Cancel any pending server-side onDisconnect if explicit logout (avoid double-write)
     if (isLogout && activeDisconnectCancel) {
       activeDisconnectCancel();
       activeDisconnectCancel = null;
     }
-    // Use update() — only changes state/last_seen, preserves nickname/role_id/avatar_url
+    // last_activity is intentionally NOT updated here so it reflects the last real action.
     await update(userStatusRef, {
-      state: 'offline',
+      state: isLogout ? 'logged_out' : 'offline',
       last_seen: serverTimestamp()
     });
   } catch (e) {
@@ -144,6 +161,7 @@ export const setRtdbOffline = async (uid, isLogout = false) => {
 
 /**
  * Subscribes to the list of currently online users from RTDB (0 Firestore reads).
+ * Uses last_seen for the 15-minute window. Excludes 'logged_out' users.
  */
 export const subscribeToOnlineUsers = (callback) => {
   if (!rtdb) {
@@ -160,10 +178,21 @@ export const subscribeToOnlineUsers = (callback) => {
         return;
       }
 
+      const ONLINE_WINDOW_MS = 15 * 60 * 1000;
+      const now = Date.now();
       const onlineList = [];
+
       Object.keys(data).forEach((uid) => {
         const u = data[uid];
-        if (u && u.state === 'online' && u.role_id !== 'banned') {
+        if (!u || u.role_id === 'banned') return;
+        // 'logged_out' = explicit logout — immediately hidden from online list
+        if (u.state === 'logged_out') return;
+
+        const lastSeenMs = typeof u.last_seen === 'number' ? u.last_seen : 0;
+        const isWithin15Min = lastSeenMs > 0 && (now - lastSeenMs < ONLINE_WINDOW_MS);
+        const isOnline = lastSeenMs > 0 && (u.state === 'online' || isWithin15Min);
+
+        if (isOnline) {
           onlineList.push({
             id: uid,
             nickname: u.nickname || 'User',
@@ -193,6 +222,7 @@ export const subscribeToOnlineUsers = (callback) => {
 
 /**
  * Real-time listener for a single user's online state from RTDB.
+ * Uses last_seen for the 15-minute window. Excludes 'logged_out' users.
  */
 export const subscribeToUserOnlineStatus = (uid, callback) => {
   if (!uid || !rtdb) {
@@ -204,7 +234,14 @@ export const subscribeToUserOnlineStatus = (uid, callback) => {
     const userStatusRef = ref(rtdb, `status/${uid}`);
     return onValue(userStatusRef, (snapshot) => {
       const val = snapshot.val();
-      callback(val?.state === 'online');
+      if (!val || val.role_id === 'banned' || val.state === 'logged_out') {
+        callback(false);
+        return;
+      }
+      const ONLINE_WINDOW_MS = 15 * 60 * 1000;
+      const lastSeenMs = typeof val.last_seen === 'number' ? val.last_seen : 0;
+      const isWithin15Min = lastSeenMs > 0 && (Date.now() - lastSeenMs < ONLINE_WINDOW_MS);
+      callback(lastSeenMs > 0 && (val.state === 'online' || isWithin15Min));
     }, (err) => {
       console.warn('[subscribeToUserOnlineStatus error]', err);
       callback(false);
@@ -217,7 +254,7 @@ export const subscribeToUserOnlineStatus = (uid, callback) => {
 
 /**
  * Subscribes to the list of users active in the last 24 hours from RTDB.
- * Uses status/{uid}.last_seen — no Firestore reads needed.
+ * Uses last_activity (NOT last_seen) so logout/disconnect never removes users.
  */
 export const subscribeToDailyActiveUsers = (callback) => {
   if (!rtdb) {
@@ -239,9 +276,9 @@ export const subscribeToDailyActiveUsers = (callback) => {
       Object.keys(data).forEach((uid) => {
         const u = data[uid];
         if (!u || u.role_id === 'banned') return;
-        // RTDB serverTimestamp() stores as number (epoch ms) on clients
-        const lastSeenMs = typeof u.last_seen === 'number' ? u.last_seen : 0;
-        if (lastSeenMs >= cutoff) {
+        // Use last_activity for persistent daily tracking (unaffected by logout)
+        const lastActivityMs = typeof u.last_activity === 'number' ? u.last_activity : 0;
+        if (lastActivityMs >= cutoff) {
           dailyList.push({
             id: uid,
             nickname: u.nickname || 'User',
@@ -251,7 +288,7 @@ export const subscribeToDailyActiveUsers = (callback) => {
             status_line: u.status_line || '',
             signature: u.signature || '',
             active_character: u.active_character || null,
-            last_seen: u.last_seen
+            last_seen: lastActivityMs  // expose as last_seen for downstream compatibility
           });
         }
       });
