@@ -864,6 +864,45 @@ exports.getSecuredMainPageData = onCall(
 );
 
 /**
+ * onCategoryUpdated
+ * Fires when a category document changes.
+ * If permissions changed — invalidates all RTDB session_perms so the next
+ * page load recalculates who can see what.
+ * Also resets the server-side permissions context cache to force immediate reload.
+ */
+exports.onCategoryUpdated = onDocumentUpdated("categories/{categoryId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const categoryId = event.params.categoryId;
+
+  // Compare serialised permissions to detect changes
+  const permsBefore = JSON.stringify(before?.permissions || {});
+  const permsAfter = JSON.stringify(after?.permissions || {});
+  const permsChanged = permsBefore !== permsAfter;
+
+  if (permsChanged) {
+    try {
+      const rtdb = admin.database();
+      // Invalidate all cached session_perms by setting expires_at to 0.
+      // On the next getSecuredMainPageData / getSecuredCategories call,
+      // each user's perms will be recalculated from fresh Firestore data.
+      const permsSnap = await rtdb.ref('session_perms').once('value');
+      const allPerms = permsSnap.val();
+      if (allPerms) {
+        const updates = {};
+        Object.keys(allPerms).forEach(key => {
+          updates[`${key}/expires_at`] = 0; // force expiry on next call
+        });
+        await rtdb.ref('session_perms').update(updates);
+        logger.info(`[onCategoryUpdated] Invalidated ${Object.keys(allPerms).length} session_perms entries (permissions changed on category ${categoryId})`);
+      }
+    } catch (err) {
+      logger.warn('[onCategoryUpdated] session_perms invalidation failed', err);
+    }
+  }
+});
+
+/**
  * onTopicCreated
  * Increments topics_count for category, author, updates forum_stats/global and RTDB main_page_cache.
  */
