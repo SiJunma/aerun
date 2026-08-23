@@ -1,4 +1,4 @@
-import { db } from '../../firebase';
+import { db, rtdb } from '../../firebase';
 import { logAdminAction } from './audit';
 import {
   collection,
@@ -13,6 +13,7 @@ import {
   deleteDoc,
   getDoc
 } from 'firebase/firestore';
+import { ref, update, remove } from 'firebase/database';
 
 // ── Category Groups ──────────────────────────────────────────────────────────
 
@@ -168,6 +169,27 @@ export const updateCategory = async (id, catData, performerId) => {
     updated_at: serverTimestamp()
   });
   await logAdminAction('category_updated', performerId, { targetId: id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
+
+  // Immediately patch RTDB main_page_cache so the main page reflects the change
+  // without waiting for a full cache rebuild. Only update metadata fields — leave
+  // counters (topics_count, posts_count, last_post_*) untouched.
+  if (rtdb) {
+    try {
+      const rtdbPatch = {
+        id,
+        permissions,
+        group_id: catData.group_id || null,
+        order: catData.order ?? null,
+        updated_at: new Date().toISOString()
+      };
+      // Multilingual fields — write as-is (objects with {en, ru})
+      if (catData.title !== undefined) rtdbPatch.title = catData.title;
+      if (catData.description !== undefined) rtdbPatch.description = catData.description;
+      await update(ref(rtdb, `main_page_cache/categories/${id}`), rtdbPatch);
+    } catch (e) {
+      console.warn('[updateCategory RTDB patch err]', e);
+    }
+  }
 };
 
 export const deleteCategory = async (id, performerId) => {
@@ -180,4 +202,9 @@ export const deleteCategory = async (id, performerId) => {
   }
   await deleteDoc(catRef);
   await logAdminAction('category_deleted', performerId, { targetId: id, title });
+
+  // Remove from RTDB main_page_cache immediately
+  if (rtdb) {
+    remove(ref(rtdb, `main_page_cache/categories/${id}`)).catch(() => {});
+  }
 };

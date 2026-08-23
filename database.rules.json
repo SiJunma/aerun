@@ -24,7 +24,12 @@
     },
     "main_page_cache": {
       ".read": true,
-      ".write": false
+      "categories": {
+        ".write": "auth != null"
+      },
+      "stats": {
+        ".write": false
+      }
     },
     "topic_posts_cache": {
       "$topic_id": {
