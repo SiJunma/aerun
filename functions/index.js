@@ -948,6 +948,34 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
 });
 
 /**
+ * onTopicUpdated
+ * Handles category moves, title changes, or metadata changes on a topic.
+ * Syncs category metadata and RTDB main_page_cache.
+ */
+exports.onTopicUpdated = onDocumentUpdated("topics/{topicId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const topicId = event.params.topicId;
+  const db = admin.firestore();
+
+  try {
+    // 1. If topic was moved to a different category
+    if (before?.category_id && after?.category_id && before.category_id !== after.category_id) {
+      await syncCategoryMetadata(db, before.category_id);
+      await syncCategoryMetadata(db, after.category_id);
+      logger.info(`onTopicUpdated: moved topic ${topicId} from category ${before.category_id} to ${after.category_id}`);
+    } else if (before?.title !== after?.title || before?.last_post_at !== after?.last_post_at) {
+      // 2. If title or last_post_at changed, update category's last_post if this was the last topic
+      if (after?.category_id) {
+        await syncCategoryMetadata(db, after.category_id);
+      }
+    }
+  } catch (err) {
+    logger.error(`onTopicUpdated error (${topicId}):`, err);
+  }
+});
+
+/**
  * onTopicDeleted
  * Decrements topics_count. Rollback category posts_count, updates forum_stats/global,
  * cleans up RTDB topic_posts_cache and updates main_page_cache.
@@ -1233,6 +1261,23 @@ exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
     if (!latestPostSnap.empty && latestPostSnap.docs[0].id === event.params.postId) {
       await syncTopicMetadata(db, topicId);
       logger.info(`onPostUpdated: synced metadata for topic ${topicId} due to post ${event.params.postId} update`);
+    }
+
+    // Check if this post is the FIRST post (topic starter) in the topic
+    const firstPostSnap = await db.collection("posts")
+      .where("topic_id", "==", topicId)
+      .orderBy("created_at", "asc")
+      .limit(1)
+      .get();
+
+    if (!firstPostSnap.empty && firstPostSnap.docs[0].id === event.params.postId) {
+      await db.collection("topics").doc(topicId).update({
+        author_name: after.author_name || 'User',
+        author_avatar: after.author_avatar || '',
+        is_character: !!after.is_character,
+        author_character_id: after.author_character_id || null
+      });
+      logger.info(`onPostUpdated: synced creator metadata for topic ${topicId} due to first post author update`);
     }
   } catch (error) {
     logger.error(`onPostUpdated error (${event.params.postId}):`, error);

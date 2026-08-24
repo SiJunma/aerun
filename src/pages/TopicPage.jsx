@@ -1359,17 +1359,35 @@ const TopicPage = () => {
       await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id);
 
       if (editingFirstPost && topic) {
-        await updateTopic(topic.id, {
+        const topicUpdates = {
           title: editTopicTitle.trim() || topic.title,
           description: editTopicDescription.trim(),
           first_post_pinned: editPinFirstPost
-        }, user.uid, topic.author_id);
+        };
 
-        // Обновляем заголовок темы локально
+        if (metadata && Object.keys(metadata).length > 0) {
+          if (metadata.author_name !== undefined) topicUpdates.author_name = metadata.author_name;
+          if (metadata.author_avatar !== undefined) topicUpdates.author_avatar = metadata.author_avatar;
+          if (metadata.author_status_line !== undefined) topicUpdates.author_status_line = metadata.author_status_line;
+          if (metadata.author_signature !== undefined) topicUpdates.author_signature = metadata.author_signature;
+          if (metadata.is_character !== undefined) topicUpdates.is_character = metadata.is_character;
+          if (metadata.author_character_id !== undefined) topicUpdates.author_character_id = metadata.author_character_id;
+
+          // If topic has only 1 post, this post is also the last_post
+          if (posts.length <= 1 || topic.posts_count <= 1) {
+            topicUpdates.last_post_author = metadata.author_name;
+            topicUpdates.last_post_author_avatar = metadata.author_avatar;
+            topicUpdates.last_post_is_character = metadata.is_character;
+            topicUpdates.last_post_author_character_id = metadata.author_character_id;
+          }
+        }
+
+        await updateTopic(topic.id, topicUpdates, user.uid, topic.author_id);
+
+        // Обновляем состояние темы локально
         setTopic(prev => prev ? {
           ...prev,
-          title: editTopicTitle.trim() || prev.title,
-          description: editTopicDescription.trim()
+          ...topicUpdates
         } : prev);
       }
 

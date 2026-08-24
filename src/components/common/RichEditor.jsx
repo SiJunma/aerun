@@ -338,7 +338,7 @@ const RichEditor = forwardRef(({
         case 'KeyR': e.preventDefault(); insertText('[right]', '[/right]'); break;
         case 'KeyE': e.preventDefault(); insertText('[center]', '[/center]'); break;
         case 'KeyJ': e.preventDefault(); insertText('[justify]', '[/justify]'); break;
-        case 'KeyK': e.preventDefault(); setShowLinkModal(true); break;
+        case 'KeyK': e.preventDefault(); openLinkModal(); break;
         case 'KeyG': e.preventDefault(); insertText('', '', 'spoiler'); break;
         case 'KeyH': e.preventDefault(); openHideModal(); break;
         case 'KeyQ': e.preventDefault(); insertText('', '', 'quote'); break;
@@ -381,24 +381,38 @@ const RichEditor = forwardRef(({
     addToHistory(newValue, false);
   };
 
+  const [savedLinkSelection, setSavedLinkSelection] = useState({ start: 0, end: 0, text: '' });
+
+  const openLinkModal = () => {
+    const textarea = textareaRef.current;
+    const start = textarea ? textarea.selectionStart : 0;
+    const end = textarea ? textarea.selectionEnd : 0;
+    const selected = textarea ? textarea.value.substring(start, end) : '';
+    setSavedLinkSelection({ start, end, text: selected });
+    setLinkData({ text: selected, url: 'https://' });
+    setShowLinkModal(true);
+  };
+
   const handleLinkSubmit = (e) => {
     e.preventDefault();
     const capturedLinkData = { ...linkData };
+    const { start, end, text: selected } = savedLinkSelection;
     setShowLinkModal(false);
     setLinkData({ text: '', url: 'https://' });
     setTimeout(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
       const text = latestValueRef.current;
       const currentScrollTop = textarea.scrollTop;
-      const selected = text.substring(start, end);
-      const { url, text: linkText } = capturedLinkData;
-      if (!url) return;
+      let { url, text: linkText } = capturedLinkData;
+      if (!url || !url.trim()) return;
+      url = url.trim();
       
-      const replacement = `[url=${url}]${linkText || selected || 'link'}[/url]`;
-      const newValue = text.substring(0, start) + replacement + text.substring(end);
+      const displayContent = linkText?.trim() || selected || url;
+      const replacement = `[url=${url}]${displayContent}[/url]`;
+      const safeStart = Math.min(start, text.length);
+      const safeEnd = Math.min(end, text.length);
+      const newValue = text.substring(0, safeStart) + replacement + text.substring(safeEnd);
 
       let newHistory = history.slice(0, historyIndex + 1);
       if (newHistory[newHistory.length - 1] !== text) newHistory.push(text);
@@ -413,7 +427,7 @@ const RichEditor = forwardRef(({
       onChange({ target: { value: newValue } });
 
       textarea.focus();
-      const newCursorPos = start + replacement.length;
+      const newCursorPos = safeStart + replacement.length;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
       textarea.scrollTop = currentScrollTop;
     }, 0);
@@ -765,11 +779,11 @@ const RichEditor = forwardRef(({
         );
       case 'links':
         return isOverflow ? (
-          <Dropdown.Item onClick={() => setShowLinkModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
+          <Dropdown.Item onClick={openLinkModal} className="d-flex align-items-center gap-2 py-2 px-3">
             <LinkIcon size={16} /> {lang === 'ru' ? 'Ссылка' : 'Link'}
           </Dropdown.Item>
         ) : (
-          <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowLinkModal(true)} title="Link (Ctrl+K)"><LinkIcon size={16} /></Button>
+          <Button variant="light" size="sm" className="p-1 px-2" onClick={openLinkModal} title="Link (Ctrl+K)"><LinkIcon size={16} /></Button>
         );
       case 'typography':
         return isOverflow ? (

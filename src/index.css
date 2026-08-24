@@ -9,6 +9,8 @@
   --nav-bg: #212529;
   --link-color: #475569;
   /* Slate 600 */
+  --content-link-color: #0284c7;
+  /* Light theme post links */
   --primary-color: #1e293b;
   /* Slate 800 */
   --primary-rgb: 30, 41, 59;
@@ -47,6 +49,8 @@
   --nav-bg: #080d1e;
   --link-color: #94a3b8;
   /* Slate link */
+  --content-link-color: #38bdf8;
+  /* Dark theme post links */
   --primary-color: #f1f5f9;
   --primary-rgb: 241, 245, 249;
   /* Slate 100 for a "Cold White" accent */
@@ -86,6 +90,8 @@
   --nav-bg: #2c241a;
   --link-color: #8c7152;
   /* Darkened for visibility */
+  --content-link-color: #b45309;
+  /* Neutral theme post links */
   --primary-color: #a68a64;
   --primary-rgb: 166, 138, 100;
   --secondary-color: #5c4b3a;
@@ -185,6 +191,78 @@ a {
 a:hover {
   color: var(--primary-color);
   text-decoration: none;
+}
+
+/* Links inside posts, user text and direct messages */
+.bbcode-content a,
+.post-content a {
+  color: var(--content-link-color, var(--link-color));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.bbcode-content a:hover,
+.post-content a:hover {
+  text-decoration: underline;
+  opacity: 0.8;
+}
+
+/* ── Direct Messages Links & Contrast ──────────────────────────────── */
+.dm-chat-bubble .bbcode-content a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  font-weight: 500;
+}
+
+/* Outgoing message (isMe) link contrast across all 3 themes */
+[data-theme='light'] .dm-bubble-me a,
+body:not([data-theme]) .dm-bubble-me a {
+  color: #38bdf8 !important; /* Sky 400 - bright glowing contrast on dark slate bubble */
+}
+[data-theme='light'] .dm-bubble-me a:hover,
+body:not([data-theme]) .dm-bubble-me a:hover {
+  color: #7dd3fc !important;
+}
+
+[data-theme='dark'] .dm-bubble-me a {
+  color: #1d4ed8 !important; /* Blue 700 - deep contrast on white bubble */
+}
+[data-theme='dark'] .dm-bubble-me a:hover {
+  color: #1e40af !important;
+}
+
+[data-theme='neutral'] .dm-bubble-me a {
+  color: #ffffff !important; /* Pure white on tan/gold bubble */
+}
+[data-theme='neutral'] .dm-bubble-me a:hover {
+  color: #fef08a !important; /* Warm gold on hover */
+}
+
+/* Incoming message (peer) link contrast across all 3 themes */
+[data-theme='light'] .dm-bubble-peer a,
+body:not([data-theme]) .dm-bubble-peer a {
+  color: #0284c7 !important; /* Deep blue - contrast on light/gray background */
+}
+[data-theme='light'] .dm-bubble-peer a:hover,
+body:not([data-theme]) .dm-bubble-peer a:hover {
+  color: #0369a1 !important;
+}
+
+[data-theme='dark'] .dm-bubble-peer a {
+  color: #38bdf8 !important; /* Sky 400 - contrast on dark background */
+}
+[data-theme='dark'] .dm-bubble-peer a:hover {
+  color: #7dd3fc !important;
+}
+
+[data-theme='neutral'] .dm-bubble-peer a {
+  color: #b45309 !important; /* Amber 700 - contrast on sepia card background */
+}
+[data-theme='neutral'] .dm-bubble-peer a:hover {
+  color: #d97706 !important;
 }
 
 .btn-link {

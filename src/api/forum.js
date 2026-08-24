@@ -1,4 +1,4 @@
-import { db } from '../../firebase';
+import { db, rtdb } from '../../firebase';
 import { logAdminAction } from './audit';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
@@ -25,6 +25,7 @@ import {
   getDatabase,
   ref as rtdbRef,
   remove as rtdbRemove,
+  update as rtdbUpdate,
   onChildAdded,
   onChildRemoved,
   query as rtdbQuery,
@@ -721,35 +722,53 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
       await logAdminAction('topic_moved', performerId, { targetId: topicId, title: topicData.title, sourceCategoryId, targetCategoryId });
     }
 
-    // Recalculate last_post for both categories (simplified: just trigger update logic)
+    // Recalculate last_post and counters for both categories and sync to RTDB
     const updateCatLastPost = async (catId) => {
       const q = query(collection(db, 'topics'), where('category_id', '==', catId), orderBy('last_post_at', 'desc'), limit(1));
       const snap = await getDocs(q);
-      const ref = doc(db, 'categories', catId);
+      const catDocRef = doc(db, 'categories', catId);
+      const lastPostFields = {};
       if (!snap.empty) {
         const top = snap.docs[0].data();
-        await updateDoc(ref, {
-          last_post_at: top.last_post_at || null,
-          last_post_author: top.last_post_author || null,
-          last_post_author_id: top.last_post_author_id || null,
-          last_post_author_avatar: top.last_post_author_avatar || null,
-          last_post_topic_id: snap.docs[0].id || null,
-          last_post_topic_title: top.title || null,
-          last_post_topic_posts_count: top.posts_count || null,
-          last_post_is_character: top.last_post_is_character || false,
-          last_post_author_character_id: top.last_post_author_character_id || null
-        });
+        lastPostFields.last_post_at = top.last_post_at || null;
+        lastPostFields.last_post_author = top.last_post_author || null;
+        lastPostFields.last_post_author_id = top.last_post_author_id || null;
+        lastPostFields.last_post_author_avatar = top.last_post_author_avatar || null;
+        lastPostFields.last_post_topic_id = snap.docs[0].id || null;
+        lastPostFields.last_post_topic_title = top.title || null;
+        lastPostFields.last_post_topic_posts_count = top.posts_count || null;
+        lastPostFields.last_post_is_character = top.last_post_is_character || false;
+        lastPostFields.last_post_author_character_id = top.last_post_author_character_id || null;
       } else {
-        await updateDoc(ref, {
-          last_post_at: null,
-          last_post_author: null,
-          last_post_author_id: null,
-          last_post_author_avatar: null,
-          last_post_topic_id: null,
-          last_post_topic_title: null,
-          last_post_is_character: null,
-          last_post_author_character_id: null
-        });
+        lastPostFields.last_post_at = null;
+        lastPostFields.last_post_author = null;
+        lastPostFields.last_post_author_id = null;
+        lastPostFields.last_post_author_avatar = null;
+        lastPostFields.last_post_topic_id = null;
+        lastPostFields.last_post_topic_title = null;
+        lastPostFields.last_post_is_character = null;
+        lastPostFields.last_post_author_character_id = null;
+      }
+      await updateDoc(catDocRef, lastPostFields);
+
+      // Immediately patch RTDB main_page_cache
+      if (rtdb) {
+        try {
+          const freshSnap = await getDoc(catDocRef);
+          if (freshSnap.exists()) {
+            const data = freshSnap.data();
+            const rtdbPayload = {
+              id: catId,
+              ...data,
+              created_at: data.created_at?.toDate ? data.created_at.toDate().toISOString() : data.created_at || null,
+              updated_at: data.updated_at?.toDate ? data.updated_at.toDate().toISOString() : data.updated_at || null,
+              last_post_at: data.last_post_at?.toDate ? data.last_post_at.toDate().toISOString() : data.last_post_at || null,
+            };
+            await rtdbUpdate(rtdbRef(rtdb, `main_page_cache/categories/${catId}`), rtdbPayload);
+          }
+        } catch (rtdbErr) {
+          console.warn('[moveTopics RTDB sync err]', rtdbErr);
+        }
       }
     };
 
@@ -904,32 +923,53 @@ export const movePosts = async (postIds, targetTopicId, performerId) => {
     await recalcTopicLastPost(sourceTopicId);
     await recalcTopicLastPost(targetTopicId);
 
-    // Recalculate last_post for affected categories
+    // Recalculate last_post for affected categories and sync to RTDB
     const updateCatLastPost = async (catId) => {
       const q = query(collection(db, 'topics'), where('category_id', '==', catId), orderBy('last_post_at', 'desc'), limit(1));
       const snap = await getDocs(q);
-      const ref = doc(db, 'categories', catId);
+      const catDocRef = doc(db, 'categories', catId);
+      const lastPostFields = {};
       if (!snap.empty) {
         const top = snap.docs[0].data();
-        await updateDoc(ref, {
-          last_post_at: top.last_post_at || null,
-          last_post_author: top.last_post_author || null,
-          last_post_author_id: top.last_post_author_id || null,
-          last_post_topic_id: snap.docs[0].id || null,
-          last_post_topic_title: top.title || null,
-          last_post_is_character: top.last_post_is_character || false,
-          last_post_author_character_id: top.last_post_author_character_id || null,
-        });
+        lastPostFields.last_post_at = top.last_post_at || null;
+        lastPostFields.last_post_author = top.last_post_author || null;
+        lastPostFields.last_post_author_id = top.last_post_author_id || null;
+        lastPostFields.last_post_author_avatar = top.last_post_author_avatar || null;
+        lastPostFields.last_post_topic_id = snap.docs[0].id || null;
+        lastPostFields.last_post_topic_title = top.title || null;
+        lastPostFields.last_post_topic_posts_count = top.posts_count || null;
+        lastPostFields.last_post_is_character = top.last_post_is_character || false;
+        lastPostFields.last_post_author_character_id = top.last_post_author_character_id || null;
       } else {
-        await updateDoc(ref, {
-          last_post_at: null,
-          last_post_author: null,
-          last_post_author_id: null,
-          last_post_topic_id: null,
-          last_post_topic_title: null,
-          last_post_is_character: null,
-          last_post_author_character_id: null,
-        });
+        lastPostFields.last_post_at = null;
+        lastPostFields.last_post_author = null;
+        lastPostFields.last_post_author_id = null;
+        lastPostFields.last_post_author_avatar = null;
+        lastPostFields.last_post_topic_id = null;
+        lastPostFields.last_post_topic_title = null;
+        lastPostFields.last_post_is_character = null;
+        lastPostFields.last_post_author_character_id = null;
+      }
+      await updateDoc(catDocRef, lastPostFields);
+
+      // Immediately patch RTDB main_page_cache
+      if (rtdb) {
+        try {
+          const freshSnap = await getDoc(catDocRef);
+          if (freshSnap.exists()) {
+            const data = freshSnap.data();
+            const rtdbPayload = {
+              id: catId,
+              ...data,
+              created_at: data.created_at?.toDate ? data.created_at.toDate().toISOString() : data.created_at || null,
+              updated_at: data.updated_at?.toDate ? data.updated_at.toDate().toISOString() : data.updated_at || null,
+              last_post_at: data.last_post_at?.toDate ? data.last_post_at.toDate().toISOString() : data.last_post_at || null,
+            };
+            await rtdbUpdate(rtdbRef(rtdb, `main_page_cache/categories/${catId}`), rtdbPayload);
+          }
+        } catch (rtdbErr) {
+          console.warn('[movePosts RTDB sync err]', rtdbErr);
+        }
       }
     };
 

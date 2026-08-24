@@ -420,7 +420,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                         />
                       )}
                       <div
-                        className="px-3 py-2 rounded-3 dm-chat-bubble"
+                        className={`px-3 py-2 rounded-3 dm-chat-bubble ${isMe ? 'dm-bubble-me' : 'dm-bubble-peer'}`}
                         style={{
                           maxWidth: '85%',
                           background: isMe ? 'var(--primary-color)' : 'var(--block-bg)',

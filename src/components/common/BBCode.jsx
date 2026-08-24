@@ -476,8 +476,15 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       }
       case '*': return <li key={index}>{content}</li>;
       case 'url': {
-        const url = (params.default || getTextContent(node)).trim();
-        return <a key={index} href={url} target="_blank" rel="noopener noreferrer">{content}</a>;
+        const rawUrl = (params.default || getTextContent(node)).trim();
+        if (/^(?:javascript|data|vbscript):/i.test(rawUrl)) {
+          return <span key={index}>{content}</span>;
+        }
+        let href = rawUrl;
+        if (href && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) && !href.startsWith('/') && !href.startsWith('#') && !href.startsWith('mailto:')) {
+          href = `https://${href}`;
+        }
+        return <a key={index} href={href} target="_blank" rel="noopener noreferrer">{content}</a>;
       }
       case 'img': {
         const imgUrl = getTextContent(node).trim();
