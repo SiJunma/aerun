@@ -149,11 +149,16 @@ export const setRtdbOffline = async (uid, isLogout = false) => {
       activeDisconnectCancel();
       activeDisconnectCancel = null;
     }
-    // last_activity is intentionally NOT updated here so it reflects the last real action.
-    await update(userStatusRef, {
-      state: isLogout ? 'logged_out' : 'offline',
-      last_seen: serverTimestamp()
-    });
+    // On logout: set state='logged_out' and record last_seen as the logout time.
+    // On idle:   set state='offline' without refreshing last_seen, so last_seen remains
+    //            the timestamp of the user's last actual interaction.
+    const updates = {
+      state: isLogout ? 'logged_out' : 'offline'
+    };
+    if (isLogout) {
+      updates.last_seen = serverTimestamp();
+    }
+    await update(userStatusRef, updates);
   } catch (e) {
     console.warn('[setRtdbOffline err]', e);
   }
@@ -161,7 +166,7 @@ export const setRtdbOffline = async (uid, isLogout = false) => {
 
 /**
  * Subscribes to the list of currently online users from RTDB (0 Firestore reads).
- * Uses last_seen for the 15-minute window. Excludes 'logged_out' users.
+ * A user is considered online ONLY if state === 'online' AND last_seen is within 15 minutes.
  */
 export const subscribeToOnlineUsers = (callback) => {
   if (!rtdb) {
@@ -185,14 +190,13 @@ export const subscribeToOnlineUsers = (callback) => {
       Object.keys(data).forEach((uid) => {
         const u = data[uid];
         if (!u || u.role_id === 'banned') return;
-        // 'logged_out' = explicit logout — immediately hidden from online list
-        if (u.state === 'logged_out') return;
+        // User must be explicitly in 'online' state (not idle/offline and not logged_out)
+        if (u.state !== 'online') return;
 
         const lastSeenMs = typeof u.last_seen === 'number' ? u.last_seen : 0;
         const isWithin15Min = lastSeenMs > 0 && (now - lastSeenMs < ONLINE_WINDOW_MS);
-        const isOnline = lastSeenMs > 0 && (u.state === 'online' || isWithin15Min);
 
-        if (isOnline) {
+        if (isWithin15Min) {
           onlineList.push({
             id: uid,
             nickname: u.nickname || 'User',
@@ -222,7 +226,7 @@ export const subscribeToOnlineUsers = (callback) => {
 
 /**
  * Real-time listener for a single user's online state from RTDB.
- * Uses last_seen for the 15-minute window. Excludes 'logged_out' users.
+ * A user is online ONLY if state === 'online' AND last_seen is within 15 minutes.
  */
 export const subscribeToUserOnlineStatus = (uid, callback) => {
   if (!uid || !rtdb) {
@@ -234,14 +238,14 @@ export const subscribeToUserOnlineStatus = (uid, callback) => {
     const userStatusRef = ref(rtdb, `status/${uid}`);
     return onValue(userStatusRef, (snapshot) => {
       const val = snapshot.val();
-      if (!val || val.role_id === 'banned' || val.state === 'logged_out') {
+      if (!val || val.role_id === 'banned' || val.state !== 'online') {
         callback(false);
         return;
       }
       const ONLINE_WINDOW_MS = 15 * 60 * 1000;
       const lastSeenMs = typeof val.last_seen === 'number' ? val.last_seen : 0;
       const isWithin15Min = lastSeenMs > 0 && (Date.now() - lastSeenMs < ONLINE_WINDOW_MS);
-      callback(lastSeenMs > 0 && (val.state === 'online' || isWithin15Min));
+      callback(isWithin15Min);
     }, (err) => {
       console.warn('[subscribeToUserOnlineStatus error]', err);
       callback(false);

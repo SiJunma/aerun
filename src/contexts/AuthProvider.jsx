@@ -97,13 +97,13 @@ export const AuthProvider = ({ children }) => {
   const rolesUnsubRef = useRef(null);
   const catsUnsubRef = useRef(null);
 
-  // RTDB Presence initialization
+  // RTDB Presence initialization (runs on connect / login)
   useEffect(() => {
     if (user?.uid && profile) {
       isRtdbOnlineRef.current = true;
       return initRtdbPresence(user.uid, profile);
     }
-  }, [user?.uid, profile?.nickname, profile?.avatar_url, profile?.role_id, profile?.status_line, profile?.signature, profile?.post_count]);
+  }, [user?.uid]);
 
   // Real-time Online Users subscription from RTDB (0 Firestore reads)
   useEffect(() => {
@@ -175,7 +175,7 @@ export const AuthProvider = ({ children }) => {
         isRtdbOnlineRef.current = false;
         setRtdbOffline(user.uid, false).catch(err => console.warn('[setRtdbOffline idle err]', err));
       }
-    }, 60 * 1000); // Check every minute
+    }, 15 * 1000); // Check every 15 seconds for timely transition to offline
 
     let throttleTimer = null;
     const onUserInteraction = () => {
