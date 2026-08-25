@@ -358,13 +358,7 @@ const TopicPage = () => {
         return;
       }
       if (data) {
-        setTopic(prev => {
-          if (!prev) return data;
-          return {
-            ...data,
-            posts_count: Math.max(prev.posts_count || 0, data.posts_count || 0)
-          };
-        });
+        setTopic(data);
       }
     });
 
@@ -1007,6 +1001,7 @@ const TopicPage = () => {
     try {
       const isFirstPostMoved = posts.length > 0 && postIds.includes(posts[0].id);
       const categoryId = topic?.category_id;
+      const movedCount = postIds.length;
 
       await movePosts(postIds, targetTopicId, user.uid);
       showToast(t('forum.move_posts_success'));
@@ -1018,7 +1013,18 @@ const TopicPage = () => {
           navigate('/');
         }
       } else {
-        await loadPosts();
+        const currentCount = topic?.posts_count || posts.length;
+        const newCount = Math.max(1, currentCount - movedCount);
+        const newTotalPages = Math.max(1, Math.ceil(newCount / ITEMS_PER_PAGE));
+
+        setTopic(prev => prev ? { ...prev, posts_count: newCount } : prev);
+
+        if (currentPage > newTotalPages) {
+          setSearchParams({ page: newTotalPages.toString() });
+        } else {
+          await loadPosts(currentPage);
+        }
+        if (refreshForumState) refreshForumState(true);
       }
     } catch (err) {
       showToast(err.message, 'danger');
@@ -2879,6 +2885,7 @@ const TopicPage = () => {
           show={showMovePostsModal}
           onHide={() => setShowMovePostsModal(false)}
           posts={posts}
+          startIndex={indexOfFirstItem + 1}
           firstPostId={posts[0]?.id}
           currentTopicId={id}
           onConfirm={handleMovePosts}

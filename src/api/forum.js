@@ -777,6 +777,25 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
   }
 };
 
+/**
+ * Safely converts any Firestore timestamp representation to milliseconds.
+ */
+const getTimestampMs = (ts) => {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+  if (typeof ts === 'number') return ts;
+  if (typeof ts === 'string') {
+    const parsed = Date.parse(ts);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof ts.seconds === 'number') {
+    return ts.seconds * 1000 + Math.floor((ts.nanoseconds || 0) / 1000000);
+  }
+  if (ts instanceof Date) return ts.getTime();
+  return 0;
+};
+
 // Batch update topic fields (is_pinned, is_locked)
 /**
  * Move a set of posts from their current topics to a target topic.
@@ -796,21 +815,23 @@ export const movePosts = async (postIds, targetTopicId, performerId) => {
   const targetTopicData = targetTopicSnap.data();
   const targetCategoryId = targetTopicData.category_id;
 
-  // Get the target topic's first post (oldest post) to prevent moved posts from replacing it
+  // Get the target topic's posts to prevent moved posts from preceding its first post
   const targetPostsQuery = query(
     collection(db, 'posts'),
     where('topic_id', '==', targetTopicId)
   );
   const targetPostsSnap = await getDocs(targetPostsQuery);
   let targetFirstPost = null;
+  let targetLatestPost = null;
   if (!targetPostsSnap.empty) {
     const targetPostsList = targetPostsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     targetPostsList.sort((a, b) => {
-      const aTime = a.created_at?.toMillis?.() ?? 0;
-      const bTime = b.created_at?.toMillis?.() ?? 0;
+      const aTime = getTimestampMs(a.created_at);
+      const bTime = getTimestampMs(b.created_at);
       return aTime - bTime; // oldest first
     });
     targetFirstPost = targetPostsList[0];
+    targetLatestPost = targetPostsList[targetPostsList.length - 1];
   }
 
   // Group posts by their source topic so we can update each source once
@@ -838,30 +859,40 @@ export const movePosts = async (postIds, targetTopicId, performerId) => {
     const batch = writeBatch(db);
 
     const sortedSourcePosts = [...sourcePosts].sort((a, b) => {
-      const aMs = a.created_at?.toMillis?.() ?? 0;
-      const bMs = b.created_at?.toMillis?.() ?? 0;
+      const aMs = getTimestampMs(a.created_at);
+      const bMs = getTimestampMs(b.created_at);
       return aMs - bMs; // oldest first
     });
 
-    const targetFirstPostMs = targetFirstPost?.created_at?.toMillis?.() ?? 0;
-    let nextAllowedMs = targetFirstPostMs + 1000; // 1 second after first post
+    const targetFirstPostMs = getTimestampMs(targetFirstPost?.created_at) || getTimestampMs(targetTopicData.created_at);
+    const targetLatestPostMs = getTimestampMs(targetLatestPost?.created_at) || targetFirstPostMs;
+    const baseTimestampMs = Math.max(targetFirstPostMs, targetLatestPostMs);
 
-    for (const p of sortedSourcePosts) {
-      const postMs = p.created_at?.toMillis?.() ?? 0;
+    // If target topic has posts, moved posts that were created prior to the target's posts
+    // are shifted to start 1 minute (60,000 ms) after baseTimestampMs, spaced by at least 1 min.
+    let nextAllowedMs = baseTimestampMs + 60 * 1000;
+
+    for (let i = 0; i < sortedSourcePosts.length; i++) {
+      const p = sortedSourcePosts[i];
+      const postMs = getTimestampMs(p.created_at);
       const updates = { topic_id: targetTopicId };
 
-      if (postMs <= targetFirstPostMs) {
-        // Adjust timestamp so it is chronologically after target's first post
+      if (baseTimestampMs > 0 && (postMs <= baseTimestampMs || postMs < nextAllowedMs)) {
+        // Assign adjusted timestamp
         updates.created_at = Timestamp.fromMillis(nextAllowedMs);
-        nextAllowedMs += 1000; // Increment for subsequent posts to maintain order
-      } else {
-        // Ensure chronological order is maintained and no overlap with shifted ones
-        if (postMs < nextAllowedMs) {
-          updates.created_at = Timestamp.fromMillis(nextAllowedMs);
-          nextAllowedMs += 1000;
+
+        // Next post will be at least 1 minute later, or preserve the original relative delta
+        const nextP = sortedSourcePosts[i + 1];
+        if (nextP) {
+          const nextPMs = getTimestampMs(nextP.created_at);
+          const originalDelta = (nextPMs > postMs && postMs > 0) ? (nextPMs - postMs) : 60 * 1000;
+          nextAllowedMs += Math.max(60 * 1000, originalDelta);
         } else {
-          nextAllowedMs = postMs + 1000;
+          nextAllowedMs += 60 * 1000;
         }
+      } else {
+        // Timestamp is already properly in the future
+        nextAllowedMs = postMs + 60 * 1000;
       }
 
       batch.update(doc(db, 'posts', p.id), updates);
@@ -1006,8 +1037,8 @@ export const createTopicFromPosts = async (postIds, topicData, performerId) => {
     .filter(s => s.exists())
     .map(s => ({ id: s.id, ...s.data() }))
     .sort((a, b) => {
-      const aMs = a.created_at?.toMillis?.() ?? 0;
-      const bMs = b.created_at?.toMillis?.() ?? 0;
+      const aMs = getTimestampMs(a.created_at);
+      const bMs = getTimestampMs(b.created_at);
       return aMs - bMs;
     });
 

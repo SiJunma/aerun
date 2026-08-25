@@ -7,8 +7,6 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 import { resolveField } from '../../utils/text';
 
-const POSTS_PER_PAGE = 10;
-
 /** Strip BBCode tags and collapse whitespace for a plain-text preview. */
 const stripBBCode = (text = '') =>
   text
@@ -24,7 +22,8 @@ const stripBBCode = (text = '') =>
  * Props:
  *   show            {boolean}
  *   onHide          {() => void}
- *   posts           {Array}   – All posts in the current topic, sorted chronologically
+ *   posts           {Array}   – Posts on the current page, sorted chronologically
+ *   startIndex      {number}  – Starting post number for the current page (e.g. 1, 21, 41)
  *   firstPostId     {string}  – ID of the first post (cannot be moved)
  *   currentTopicId  {string}  – ID of the current topic (excluded from target list)
  *   onConfirm       {async (postIds: string[], targetTopicId: string) => void}
@@ -33,6 +32,7 @@ const MovePostsModal = ({
   show,
   onHide,
   posts = [],
+  startIndex = 1,
   firstPostId,
   currentTopicId,
   onConfirm,
@@ -42,7 +42,6 @@ const MovePostsModal = ({
 
   // ── Post selection ──────────────────────────────────────────────────────────
   const [selectedPostIds, setSelectedPostIds] = useState(new Set());
-  const [postPage, setPostPage] = useState(1);
 
   // ── Category / Topic target ─────────────────────────────────────────────────
   const [categories, setCategories] = useState([]);
@@ -58,7 +57,6 @@ const MovePostsModal = ({
   useEffect(() => {
     if (show) {
       setSelectedPostIds(new Set());
-      setPostPage(1);
       setTargetCategoryId('');
       setTargetTopicId('');
       setTopics([]);
@@ -109,15 +107,7 @@ const MovePostsModal = ({
     return () => { isActive = false; };
   }, [targetCategoryId, currentTopicId]);
 
-  // ── Post pagination ─────────────────────────────────────────────────────────
-  const totalPostPages = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
-  const safePostPage   = Math.min(postPage, totalPostPages);
-  const pageStart      = (safePostPage - 1) * POSTS_PER_PAGE;
-  const pagePosts      = posts.slice(pageStart, pageStart + POSTS_PER_PAGE);
-
-  // Movable posts on the current page (all posts are now selectable)
-  const pageMovable = pagePosts;
-  const allPageSelected = pageMovable.length > 0 && pageMovable.every(p => selectedPostIds.has(p.id));
+  const allPageSelected = posts.length > 0 && posts.every(p => selectedPostIds.has(p.id));
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const togglePost = (postId) => {
@@ -133,9 +123,9 @@ const MovePostsModal = ({
     setSelectedPostIds(prev => {
       const next = new Set(prev);
       if (allPageSelected) {
-        pageMovable.forEach(p => next.delete(p.id));
+        posts.forEach(p => next.delete(p.id));
       } else {
-        pageMovable.forEach(p => next.add(p.id));
+        posts.forEach(p => next.add(p.id));
       }
       return next;
     });
@@ -256,7 +246,7 @@ const MovePostsModal = ({
               </Badge>
             )}
           </div>
-          {pageMovable.length > 0 && (
+          {posts.length > 0 && (
             <Button
               variant="link"
               size="sm"
@@ -274,15 +264,15 @@ const MovePostsModal = ({
 
         <div
           className="border rounded move-posts-list"
-          style={{ maxHeight: '300px', overflowY: 'auto' }}
+          style={{ maxHeight: '350px', overflowY: 'auto' }}
         >
           {posts.length === 0 ? (
             <div className="p-3 text-muted text-center small">
               {t('forum.move_posts_no_posts')}
             </div>
           ) : (
-            pagePosts.map((post, i) => {
-              const globalIndex = pageStart + i + 1;
+            posts.map((post, i) => {
+              const globalIndex = startIndex + i;
               const isFirst    = post.id === firstPostId;
               const isSelected = selectedPostIds.has(post.id);
               const preview    = stripBBCode(post.content);
@@ -343,8 +333,6 @@ const MovePostsModal = ({
             })
           )}
         </div>
-
-        {renderPageButtons()}
       </div>
 
       {/* ── Target selection section ───────────────────────────────────────── */}
