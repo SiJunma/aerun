@@ -573,7 +573,8 @@ export const translations = {
           user_registered: "New Registration",
           banned_user_login_attempt: "Banned Login Attempt",
           reputation_deleted: "Reputation Entry Deleted",
-          nickname_changed: "Nickname Changed"
+          nickname_changed: "Nickname Changed",
+          posts_moved: "Posts Moved"
         },
         fields: {
           targetId: "Target",
@@ -1205,7 +1206,8 @@ export const translations = {
           user_registered: "Новая регистрация",
           banned_user_login_attempt: "Попытка входа забаненного",
           reputation_deleted: "Запись репутации удалена",
-          nickname_changed: "Никнейм изменён"
+          nickname_changed: "Никнейм изменён",
+          posts_moved: "Сообщения перенесены"
         },
         fields: {
           targetId: "Цель",

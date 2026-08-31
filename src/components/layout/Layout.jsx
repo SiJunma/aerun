@@ -14,19 +14,6 @@ const Layout = ({ children }) => {
   const { activeDesign } = useDesign();
   const location = useLocation();
 
-  // Update document title dynamically
-  React.useEffect(() => {
-    let forumName = 'Aerun Forum';
-    if (activeDesign?.forumTitle) {
-      forumName = activeDesign.forumTitle;
-    } else {
-      forumName = (typeof settings?.forumName === 'object' && settings.forumName !== null)
-        ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-        : (settings?.forumName || 'Aerun Forum');
-    }
-    document.title = forumName;
-  }, [settings, lang, activeDesign]);
-
   const sanitizedBanner = useMemo(() => {
     let rawHtml = '';
 
