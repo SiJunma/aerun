@@ -362,7 +362,7 @@ service cloud.firestore {
         allow create: if isActive()
           && request.resource.data.sender_uid == request.auth.uid
           && request.auth.uid in get(/databases/$(database)/documents/dms/$(convId)).data.participants
-          && (!('text' in request.resource.data) || request.resource.data.text.size() <= 5000);
+          && (!('text' in request.resource.data) || request.resource.data.text.size() <= 100000);
         // update/delete intentionally denied: messages are immutable.
       }
     }
