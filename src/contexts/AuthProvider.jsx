@@ -734,7 +734,12 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (loading) return;
-    refreshForumState(true);
+    // Debounce: loading→false and uid→value can fire as two separate renders.
+    // Wait 100ms so both settle before making the network call.
+    const timer = setTimeout(() => {
+      refreshForumState(true);
+    }, 100);
+    return () => clearTimeout(timer);
   }, [loading, user?.uid, refreshForumState]);
 
   useEffect(() => {

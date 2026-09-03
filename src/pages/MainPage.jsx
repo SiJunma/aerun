@@ -14,7 +14,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, profile, readMap, hasPermission, PERMISSIONS, categories, refreshForumState } = useAuth();
+  const { user, profile, readMap, hasPermission, PERMISSIONS, categories } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [timeoutExpired, setTimeoutExpired] = useState(false);
@@ -22,7 +22,6 @@ const MainPage = () => {
 
   useEffect(() => {
     setPageTitle('');
-    refreshForumState?.();
     const unsubGroups = subscribeToCategoryGroups((data) => {
       setGroups(data);
       setLoading(false);
@@ -31,7 +30,7 @@ const MainPage = () => {
     return () => {
       unsubGroups();
     };
-  }, [refreshForumState]);
+  }, []);
 
 
   // While a logged-in user's profile is still loading from Firestore, treat as loading
