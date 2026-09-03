@@ -575,6 +575,8 @@ async function hydrateAuthorProfiles(db, items) {
           const c = charProfiles[key];
           if (c.name) item.author_name = c.name;
           if (c.avatar_url) item.author_avatar = c.avatar_url;
+          if (c.status_line !== undefined) item.author_status_line = c.status_line;
+          if (c.signature !== undefined) item.author_signature = c.signature;
         }
       }
 
@@ -1499,6 +1501,15 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
   const db = admin.firestore();
 
   try {
+    // Set custom user claims for instantaneous Firestore Security Rules checks (0 reads)
+    try {
+      await admin.auth().setCustomUserClaims(event.params.uid, {
+        role_id: newUser.role_id || "player"
+      });
+    } catch (claimErr) {
+      logger.warn(`[onUserCreated] Failed to set custom claims for ${event.params.uid}:`, claimErr);
+    }
+
     // Update global forum statistics
     const globalStatsRef = db.collection("forum_stats").doc("global");
     await globalStatsRef.set({
@@ -1797,79 +1808,24 @@ exports.cleanupExpiredPresence = onSchedule("every 15 minutes", async () => {
 });
 
 /**
- * onUserCreated
- * Triggers when a new user document is created.
- * Updates forum_stats/global and notifies admins.
+ * onUserUpdated
+ * Triggers when a user document is updated in Firestore.
+ * Synchronizes role_id changes to Firebase Custom Claims for zero-read rules.
  */
-exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
-  const snap = event.data;
-  if (!snap) return;
-  const newUser = snap.data();
-  const db = admin.firestore();
+exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  if (!after) return;
 
-  try {
-    // Update global forum statistics
-    const globalStatsRef = db.collection("forum_stats").doc("global");
-    await globalStatsRef.set({
-      total_users: admin.firestore.FieldValue.increment(1),
-      newest_user: {
-        id: event.params.uid,
-        nickname: newUser.nickname || "User",
-        avatar_url: newUser.avatar_url || "",
-        role_id: newUser.role_id || "player",
-        created_at: admin.firestore.FieldValue.serverTimestamp()
-      }
-    }, { merge: true });
-
-    // 1. Find roles with user-management permissions
-    const rolesSnap = await db.collection("roles").get();
-    const eligibleRoleIds = [];
-    const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
-
-    rolesSnap.forEach(doc => {
-      const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
-      if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
-        eligibleRoleIds.push(doc.id);
-      }
-    });
-
-    // 2. Collect recipients
-    const recipients = new Set();
-    for (let i = 0; i < eligibleRoleIds.length; i += 30) {
-      const usersSnap = await db.collection("users")
-        .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
-        .get();
-      usersSnap.forEach(u => recipients.add(u.id));
-    }
-
-    // Always notify role_id === 'root'
-    const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
-    rootSnap.forEach(u => recipients.add(u.id));
-
-    if (recipients.size === 0) return;
-
-    // 3. Create notifications
-    const batch = db.batch();
-    recipients.forEach(uid => {
-      const notifRef = db.collection("notifications").doc();
-      batch.set(notifRef, {
-        recipient_uid: uid,
-        type: "new_registration",
-        read: false,
-        archived: false,
-        payload: {
-          uid: event.params.uid,
-          nickname: newUser.nickname,
-          email: newUser.email,
-          admin_message: newUser.admin_message || null
-        },
-        created_at: admin.firestore.FieldValue.serverTimestamp()
+  if (before?.role_id !== after.role_id) {
+    try {
+      await admin.auth().setCustomUserClaims(event.params.uid, {
+        role_id: after.role_id || "player"
       });
-    });
-
-    await batch.commit();
-  } catch (error) {
-    logger.error(`onUserCreated error (${event.params.uid}):`, error);
+      logger.info(`[onUserUpdated] Synced custom claims for ${event.params.uid} to role: ${after.role_id}`);
+    } catch (err) {
+      logger.error(`[onUserUpdated] Failed to update custom claims for ${event.params.uid}:`, err);
+    }
   }
 });
 

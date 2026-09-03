@@ -15,21 +15,22 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    function getRole() {
+      return !isSignedIn() ? 'guest' : 
+        ('role_id' in request.auth.token ? request.auth.token.role_id : 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? getUser().data.get('role_id', 'player') : 'player'));
+    }
+
     function isAdmin() {
-      return isSignedIn() 
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && (getUser().data.get('role_id', 'player') == 'admin' || getUser().data.get('role_id', 'player') == 'root');
+      return isSignedIn() && (getRole() == 'admin' || getRole() == 'root');
     }
 
     function isActive() {
-      return isSignedIn() 
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && getUser().data.get('role_id', 'player') != 'pending' 
-        && getUser().data.get('role_id', 'player') != 'banned';
+      return isSignedIn() && getRole() != 'pending' && getRole() != 'banned';
     }
 
     function hasPermission(permission) {
-      let roleId = getUser().data.get('role_id', 'player');
+      let roleId = getRole();
       return roleId == 'root' || 
         (exists(/databases/$(database)/documents/roles/$(roleId)) && 
          permission in get(/databases/$(database)/documents/roles/$(roleId)).data.permissions);
@@ -48,10 +49,6 @@ service cloud.firestore {
     function isTopicOpen(topicId) {
       let tData = getTopicData(topicId);
       return !('is_locked' in tData) || tData.is_locked == false;
-    }
-
-    function getRole() {
-      return !isSignedIn() ? 'guest' : getUser().data.get('role_id', 'player');
     }
 
 

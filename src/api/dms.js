@@ -55,7 +55,7 @@ export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirP
  * Subscribe to all conversations for a given user, sorted by lastTimestamp desc.
  * Only conversations with at least one message appear (lastTimestamp set by sendDmMessage).
  */
-export const subscribeToDmList = (uid, callback) => {
+export const subscribeToDmList = (uid, callback, errorCallback) => {
   const q = query(
     collection(db, 'dms'),
     where('participants', 'array-contains', uid),
@@ -64,7 +64,10 @@ export const subscribeToDmList = (uid, callback) => {
   );
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  }, (err) => console.error('[subscribeToDmList]', err));
+  }, (err) => {
+    console.error('[subscribeToDmList]', err);
+    if (errorCallback) errorCallback(err);
+  });
 };
 
 /**
@@ -89,7 +92,7 @@ export const subscribeToDmUnread = (uid, callback) => {
         conversations: data.conversations || {}
       });
     }, (err) => {
-      console.warn('[subscribeToDmUnread err]', err);
+      console.warn('[subscribeToDmUnread onValue err]', err);
       callback({ total: 0, conversations: {} });
     });
   } catch (err) {
@@ -124,7 +127,7 @@ export const fetchOlderDmMessages = async (conversationId, oldestTimestamp, batc
 /**
  * Subscribe to messages in a conversation (legacy/active listener with limit).
  */
-export const subscribeToDmMessages = (conversationId, limitCount, callback) => {
+export const subscribeToDmMessages = (conversationId, limitCount, callback, errorCallback) => {
   const q = query(
     collection(db, 'dms', conversationId, 'messages'),
     orderBy('timestamp', 'desc'),
@@ -132,7 +135,10 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback) => {
   );
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map(d => ({ id: d.id, ...d.data() })).reverse());
-  }, (err) => console.error('[subscribeToDmMessages]', err));
+  }, (err) => {
+    console.error('[subscribeToDmMessages]', err);
+    if (errorCallback) errorCallback(err);
+  });
 };
 
 /**

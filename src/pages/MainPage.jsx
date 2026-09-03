@@ -8,6 +8,7 @@ import { subscribeToCategoryGroups } from '../api/categories';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
+import ErrorCard from '../components/common/ErrorCard';
 import { resolveField } from '../utils/text';
 import { usePageTitle } from '../contexts/TitleProvider';
 
@@ -16,11 +17,12 @@ const MainPage = () => {
   const { user, profile, readMap, hasPermission, PERMISSIONS, categories, refreshForumState } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [timeoutExpired, setTimeoutExpired] = useState(false);
   const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
     setPageTitle('');
-    refreshForumState?.(true);
+    refreshForumState?.();
     const unsubGroups = subscribeToCategoryGroups((data) => {
       setGroups(data);
       setLoading(false);
@@ -39,10 +41,32 @@ const MainPage = () => {
   // Categories now come from AuthProvider context — treat as loading until they arrive
   const catsLoading = categories.length === 0;
 
+  useEffect(() => {
+    if (loading || profileLoading || catsLoading) {
+      const timer = setTimeout(() => {
+        setTimeoutExpired(true);
+      }, 7000);
+      return () => clearTimeout(timer);
+    } else {
+      setTimeoutExpired(false);
+    }
+  }, [loading, profileLoading, catsLoading]);
+
   return (
     <div className="pt-5 pb-4">
 
-      {loading || profileLoading || catsLoading ? (
+      {(loading || profileLoading || catsLoading) ? (
+        timeoutExpired ? (
+          <ErrorCard
+            isNetworkError={true}
+            title={lang === 'ru' ? 'Не удалось загрузить разделы форума' : 'Failed to load forum categories'}
+            message={lang === 'ru'
+              ? 'Сервер не ответил вовремя. Пожалуйста, проверьте подключение к интернету или попробуйте обновить страницу.'
+              : 'The server did not respond in time. Please check your internet connection or try refreshing the page.'
+            }
+            onRetry={() => window.location.reload()}
+          />
+        ) : (
         <Card className="shadow-sm border-0">
           <div className="p-0">
             <Table responsive className="mb-0 align-middle">
@@ -82,6 +106,7 @@ const MainPage = () => {
             </Table>
           </div>
         </Card>
+        )
       ) : (() => {
         const visibleCats = categories.filter(cat => hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat }));
         const groupsWithCats = groups.filter(g => visibleCats.some(c => c.group_id === g.id));

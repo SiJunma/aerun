@@ -20,6 +20,7 @@ import { getCachedDmMessages, setCachedDmMessages } from '../../api/dm-cache';
 import { subscribeToUser } from '../../api/auth-resources';
 import { playNotificationSound } from '../../utils/notificationSound';
 import Timestamp from '../common/Timestamp';
+import ErrorCard from '../common/ErrorCard';
 import { PERMISSIONS } from '../../constants/permissions';
 
 /**
@@ -43,6 +44,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // ── Inbox state ──────────────────────────────────────────────────────────
   const [conversations, setConversations] = useState([]);
   const [loadingConvs, setLoadingConvs] = useState(true);
+  const [inboxError, setInboxError] = useState(null);
 
   // ── Chat state ───────────────────────────────────────────────────────────
   const [activeChatId, setActiveChatId] = useState(null); // conversationId
@@ -51,6 +53,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
+  const [chatError, setChatError] = useState(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [targetProfile, setTargetProfile] = useState(initialTargetProfile || null);
@@ -86,10 +89,18 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   useEffect(() => {
     if (!myUid) return;
     setLoadingConvs(true);
-    const unsub = subscribeToDmList(myUid, (convs) => {
-      setConversations(convs);
-      setLoadingConvs(false);
-    });
+    setInboxError(null);
+    const unsub = subscribeToDmList(
+      myUid,
+      (convs) => {
+        setConversations(convs);
+        setLoadingConvs(false);
+      },
+      (err) => {
+        setInboxError(err);
+        setLoadingConvs(false);
+      }
+    );
     return () => unsub();
   }, [myUid]);
 
@@ -110,6 +121,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       setActiveChatId(null);
       setActivePeer(null);
       setMessages([]);
+      setChatError(null);
     }
   }, [mode]);
 
@@ -117,6 +129,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   useEffect(() => {
     if (!activeChatId || !myUid) return;
     
+    setChatError(null);
     // 1. Immediately hydrate from local cache
     const cached = getCachedDmMessages(myUid, activeChatId);
     if (cached.length > 0) {
@@ -130,32 +143,40 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     setMessageLimit(15);
 
     // 2. Subscribe to Firestore for real-time updates and merge with cache
-    const unsub = subscribeToDmMessages(activeChatId, messageLimit, (msgs) => {
-      setMessages(prev => {
-        // Detect new incoming message from the other participant
-        if (prev.length > 0 && msgs.length > 0) {
-          const latestNew = msgs[msgs.length - 1];
-          const isFromPeer = latestNew && latestNew.sender_uid && latestNew.sender_uid !== myUid;
-          const isNew = !prev.some(m => m.id === latestNew.id);
-          if (isFromPeer && isNew && profile?.settings?.sound?.enabled !== false) {
-            playNotificationSound(profile?.settings?.sound?.volume ?? 40);
+    const unsub = subscribeToDmMessages(
+      activeChatId,
+      messageLimit,
+      (msgs) => {
+        setMessages(prev => {
+          // Detect new incoming message from the other participant
+          if (prev.length > 0 && msgs.length > 0) {
+            const latestNew = msgs[msgs.length - 1];
+            const isFromPeer = latestNew && latestNew.sender_uid && latestNew.sender_uid !== myUid;
+            const isNew = !prev.some(m => m.id === latestNew.id);
+            if (isFromPeer && isNew && profile?.settings?.sound?.enabled !== false) {
+              playNotificationSound(profile?.settings?.sound?.volume ?? 40);
+            }
           }
-        }
 
-        const map = new Map();
-        prev.forEach(m => m.id && map.set(m.id, m));
-        msgs.forEach(m => m.id && map.set(m.id, m));
-        const merged = Array.from(map.values()).sort((a, b) => {
-          const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-          const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-          return aTime - bTime;
+          const map = new Map();
+          prev.forEach(m => m.id && map.set(m.id, m));
+          msgs.forEach(m => m.id && map.set(m.id, m));
+          const merged = Array.from(map.values()).sort((a, b) => {
+            const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+            const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+            return aTime - bTime;
+          });
+          setCachedDmMessages(myUid, activeChatId, merged);
+          return merged;
         });
-        setCachedDmMessages(myUid, activeChatId, merged);
-        return merged;
-      });
-      setLoadingChat(false);
-      markDmRead(activeChatId, myUid).catch(() => {});
-    });
+        setLoadingChat(false);
+        markDmRead(activeChatId, myUid).catch(() => {});
+      },
+      (err) => {
+        setChatError(err);
+        setLoadingChat(false);
+      }
+    );
 
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,7 +392,17 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
           {/* Left: scrollable message feed */}
           <div className="dm-messages-col">
             <PrivacyNotice />
-            {loadingChat ? (
+            {chatError ? (
+              <ErrorCard
+                isNetworkError={true}
+                title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load messages'}
+                error={chatError}
+                onRetry={() => {
+                  setChatError(null);
+                  setLoadingChat(true);
+                }}
+              />
+            ) : loadingChat ? (
               <div className="text-center py-5 text-muted">
                 <Spinner animation="border" size="sm" />
               </div>
@@ -506,7 +537,17 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       <Card.Body className="p-3">
         <PrivacyNotice />
 
-        {loadingConvs ? (
+        {inboxError ? (
+          <ErrorCard
+            isNetworkError={true}
+            title={lang === 'ru' ? 'Не удалось загрузить диалоги' : 'Failed to load conversations'}
+            error={inboxError}
+            onRetry={() => {
+              setInboxError(null);
+              setLoadingConvs(true);
+            }}
+          />
+        ) : loadingConvs ? (
           <div className="text-center py-5">
             <Spinner animation="border" size="sm" />
           </div>

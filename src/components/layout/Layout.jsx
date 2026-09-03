@@ -6,6 +6,7 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { useDesign } from '../../contexts/DesignProvider';
 import ForumBackground from './ForumBackground';
 import { useLocation, Link } from 'react-router-dom';
+import ConnectionStatusBanner from '../common/ConnectionStatusBanner';
 import ScrollButtons from '../common/ScrollButtons';
 
 const Layout = ({ children }) => {
@@ -55,6 +56,7 @@ const Layout = ({ children }) => {
       <ForumBackground />
 
       <div className="app-wrapper">
+        <ConnectionStatusBanner />
         <Navigation />
 
         {settings?.maintenanceMode && location.pathname !== '/maintenance' && (

@@ -17,6 +17,7 @@ import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
+import ErrorCard from '../components/common/ErrorCard';
 import { resolveField } from '../utils/text';
 import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -32,6 +33,7 @@ const CategoryPage = () => {
   const [pinnedTopics, setPinnedTopics] = useState([]);
   const [regularTopics, setRegularTopics] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   // Management State
   const [isManaging, setIsManaging] = useState(false);
@@ -48,10 +50,17 @@ const CategoryPage = () => {
 
   const loadTopics = async (showLoading = true) => {
     if (showLoading) setLoading(true);
-    const result = await fetchSecuredTopics(id, currentPage, ITEMS_PER_PAGE);
-    setPinnedTopics(result.pinned || []);
-    setRegularTopics(result.topics || []);
-    if (showLoading) setLoading(false);
+    setLoadError(null);
+    try {
+      const result = await fetchSecuredTopics(id, currentPage, ITEMS_PER_PAGE);
+      setPinnedTopics(result.pinned || []);
+      setRegularTopics(result.topics || []);
+    } catch (err) {
+      console.error('[CategoryPage loadTopics err]', err);
+      setLoadError(err);
+    } finally {
+      if (showLoading) setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -240,6 +249,15 @@ const CategoryPage = () => {
                 ))}
               </tbody>
             </Table>
+          </div>
+        ) : loadError ? (
+          <div className="p-3">
+            <ErrorCard
+              isNetworkError={true}
+              title={lang === 'ru' ? 'Не удалось загрузить темы' : 'Failed to load topics'}
+              error={loadError}
+              onRetry={() => loadTopics(true)}
+            />
           </div>
         ) : currentTopics.length === 0 ? (
           <div className="p-5 text-center">
