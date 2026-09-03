@@ -64,12 +64,12 @@ const MessagesPage = () => {
   }
 
   return (
-    <Container className="p-0 p-lg-4">
+    <div className="messages-page-wrapper">
       <DirectMessages
         mode={targetUid ? 'chat' : 'inbox'}
         targetUid={targetUid || null}
       />
-    </Container>
+    </div>
   );
 };
 

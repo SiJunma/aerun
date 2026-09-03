@@ -14,7 +14,8 @@ import {
   limit,
   getDocs,
   endBefore,
-  startAfter
+  startAfter,
+  Timestamp
 } from 'firebase/firestore';
 import { ref, onValue, remove, set } from 'firebase/database';
 import { processDiceRolls } from '../utils/dice';
@@ -108,11 +109,26 @@ export const subscribeToDmUnread = (uid, callback) => {
 export const fetchOlderDmMessages = async (conversationId, oldestTimestamp, batchSize = 15) => {
   if (!conversationId || !oldestTimestamp) return [];
   try {
+    let cursor = oldestTimestamp;
+    if (!(cursor instanceof Timestamp)) {
+      if (cursor && typeof cursor.seconds === 'number') {
+        cursor = new Timestamp(cursor.seconds, cursor.nanoseconds || 0);
+      } else if (cursor && typeof cursor._seconds === 'number') {
+        cursor = new Timestamp(cursor._seconds, cursor._nanoseconds || 0);
+      } else if (typeof cursor === 'number') {
+        cursor = Timestamp.fromMillis(cursor);
+      } else if (typeof cursor === 'string') {
+        cursor = Timestamp.fromDate(new Date(cursor));
+      } else if (typeof cursor?.toDate === 'function') {
+        cursor = Timestamp.fromDate(cursor.toDate());
+      }
+    }
+
     const messagesRef = collection(db, 'dms', conversationId, 'messages');
     let q = query(
       messagesRef,
       orderBy('timestamp', 'desc'),
-      startAfter(oldestTimestamp),
+      startAfter(cursor),
       limit(batchSize)
     );
 

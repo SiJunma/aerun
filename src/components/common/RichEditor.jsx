@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Button, Form, Dropdown, Table } from 'react-bootstrap';
 import ForumModal from './ForumModal';
 import {
@@ -13,10 +13,10 @@ import { db } from '../../../firebase';
 import { collection, query, orderBy, startAt, endAt, limit, getDocs } from 'firebase/firestore';
 
 const RichEditor = forwardRef(({
-  value, onChange, placeholder, rows = 6, minHeight, id = 'rich-editor',
+  value, onChange, placeholder, rows = 6, minHeight, maxHeight, id = 'rich-editor',
   maxLength, autoFocus, showDice = false, isEdit = false, hideDiceType = false,
   showHide = true, smilesDropDirection = "up", smilesFullWidth = true, onSubmit,
-  hideHotkeysButton = false
+  hideHotkeysButton = false, hideFooter = false, autoResize = false
 }, ref) => {
   const { lang, t } = useI18n();
 
@@ -46,10 +46,42 @@ const RichEditor = forwardRef(({
   const [showSmilesModal, setShowSmilesModal] = useState(false);
   const [showAbbrModal, setShowAbbrModal] = useState(false);
   const [abbrData, setAbbrData] = useState({ text: '', title: '' });
+  const [showMoreToolsModal, setShowMoreToolsModal] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 992);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 992);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useImperativeHandle(ref, () => ({
-    openHotkeysModal: () => setShowHotkeysModal(true)
+    openHotkeysModal: () => setShowHotkeysModal(true),
+    focus: () => textareaRef.current?.focus()
   }));
+
+  const adjustTextareaHeight = useCallback(() => {
+    if (!autoResize || !textareaRef.current) return;
+    const el = textareaRef.current;
+    el.style.height = 'auto';
+    const maxHeightPx = typeof maxHeight === 'number'
+      ? maxHeight
+      : (typeof maxHeight === 'string' && maxHeight.endsWith('px')
+          ? parseInt(maxHeight, 10)
+          : window.innerHeight * 0.3);
+    const scrollH = el.scrollHeight;
+    if (scrollH > maxHeightPx) {
+      el.style.height = `${maxHeightPx}px`;
+      el.style.overflowY = 'auto';
+    } else {
+      el.style.height = `${Math.max(scrollH, 38)}px`;
+      el.style.overflowY = 'hidden';
+    }
+  }, [autoResize, maxHeight]);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [value, adjustTextareaHeight]);
 
   // Undo/Redo history
   const [history, setHistory] = useState([value || '']);
@@ -322,7 +354,7 @@ const RichEditor = forwardRef(({
       onSubmit();
       return;
     }
-    if (isCtrl && e.code === 'Slash') {
+    if (isCtrl && (e.code === 'Slash' || e.key === '/' || e.key === '?')) {
       e.preventDefault();
       setShowHotkeysModal(true);
       return;
@@ -944,18 +976,38 @@ const RichEditor = forwardRef(({
         {overflowGroupIds.length > 0 && (
           <>
             {visibleGroupIds.length > 0 && <div className="vr mx-1 opacity-25"></div>}
-            <Dropdown className="d-inline-block">
-              <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={lang === 'ru' ? 'Дополнительно' : 'More'}>
+            {isMobile ? (
+              <Button
+                variant="light"
+                size="sm"
+                className="p-1 px-2 editor-more-tools-btn"
+                onClick={() => setShowMoreToolsModal(true)}
+                title={lang === 'ru' ? 'Дополнительные коды' : 'More tools'}
+              >
                 <MoreHorizontal size={18} />
-              </Dropdown.Toggle>
-              <Dropdown.Menu className="shadow-sm border-0 dropdown-menu-end" style={{ borderRadius: '12px', minWidth: '220px' }}>
-                {overflowGroupIds.map(groupId => (
-                  <React.Fragment key={groupId}>
-                    {renderGroup(groupId, true)}
-                  </React.Fragment>
-                ))}
-              </Dropdown.Menu>
-            </Dropdown>
+              </Button>
+            ) : (
+              <Dropdown className="d-inline-block">
+                <Dropdown.Toggle variant="light" size="sm" className="p-1 px-2 no-caret editor-dropdown-toggle" title={lang === 'ru' ? 'Дополнительно' : 'More'}>
+                  <MoreHorizontal size={18} />
+                </Dropdown.Toggle>
+                <Dropdown.Menu
+                  className="shadow-sm border-0 dropdown-menu-end editor-overflow-dropdown-menu"
+                  style={{
+                    borderRadius: '12px',
+                    minWidth: '220px',
+                    maxHeight: '260px',
+                    overflowY: 'auto'
+                  }}
+                >
+                  {overflowGroupIds.map(groupId => (
+                    <React.Fragment key={groupId}>
+                      {renderGroup(groupId, true)}
+                    </React.Fragment>
+                  ))}
+                </Dropdown.Menu>
+              </Dropdown>
+            )}
           </>
         )}
 
@@ -978,23 +1030,26 @@ const RichEditor = forwardRef(({
         value={value}
         onChange={handleTextChange}
         onKeyDown={handleKeyDown}
+        onInput={adjustTextareaHeight}
         maxLength={maxLength}
         autoFocus={autoFocus}
         className="form-control"
         style={minHeight ? { minHeight } : {}}
       />
 
-      <div className="d-flex justify-content-between mt-2 px-1">
-        <Form.Text className="text-muted small">
-          {lang === 'ru' ? 'Поддерживается BBCode' : 'BBCode is supported'}.
-        </Form.Text>
-        <Form.Text className={`${maxLength && value?.length >= maxLength ? 'text-danger' : 'text-muted'} fw-bold small`}>
-          {maxLength > 0
-            ? `${value?.length || 0} / ${maxLength}`
-            : `${lang === 'ru' ? 'Символов: ' : 'Chars: '}${value?.length || 0}`
-          }
-        </Form.Text>
-      </div>
+      {!hideFooter && (
+        <div className="d-flex justify-content-between mt-2 px-1">
+          <Form.Text className="text-muted small">
+            {lang === 'ru' ? 'Поддерживается BBCode' : 'BBCode is supported'}.
+          </Form.Text>
+          <Form.Text className={`${maxLength && value?.length >= maxLength ? 'text-danger' : 'text-muted'} fw-bold small`}>
+            {maxLength > 0
+              ? `${value?.length || 0} / ${maxLength}`
+              : `${lang === 'ru' ? 'Символов: ' : 'Chars: '}${value?.length || 0}`
+            }
+          </Form.Text>
+        </div>
+      )}
 
       <ForumModal
         show={showLinkModal}
@@ -1382,6 +1437,29 @@ const RichEditor = forwardRef(({
             insertText(code, '');
             setShowSmilesModal(false);
           }} />
+        </div>
+      </ForumModal>
+
+      {/* More Tools Modal (Mobile) */}
+      <ForumModal
+        show={showMoreToolsModal}
+        onHide={() => closeModalWithFocus(setShowMoreToolsModal)}
+        title={lang === 'ru' ? 'Дополнительные коды' : 'Additional Formatting'}
+        size="md"
+      >
+        <div 
+          className="editor-overflow-modal-items py-1"
+          onClick={(e) => {
+            if (e.target.closest('.dropdown-item, button')) {
+              setShowMoreToolsModal(false);
+            }
+          }}
+        >
+          {overflowGroupIds.map(groupId => (
+            <React.Fragment key={groupId}>
+              {renderGroup(groupId, true)}
+            </React.Fragment>
+          ))}
         </div>
       </ForumModal>
     </div>
