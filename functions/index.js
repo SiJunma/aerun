@@ -9,7 +9,7 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 // Ensure only a reasonable amount of instances run at once to manage billing safely
-setGlobalOptions({ maxInstances: 10, enforceAppCheck: true, memory: "512MiB" });
+setGlobalOptions({ maxInstances: 10, cors: true, enforceAppCheck: false, memory: "512MiB" });
 
 async function sendRtdbNotification(recipientUid, notifData) {
   if (!recipientUid) return;
@@ -318,7 +318,7 @@ exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", as
  * Resolves the page number of a given post inside a topic.
  */
 exports.locatePost = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const { postId, itemsPerPage = 20 } = request.data;
     if (!postId) return { found: false, reason: 'missing_post_id' };
@@ -360,7 +360,7 @@ exports.locatePost = onCall(
  * Resolves the page number of the first unread post in a topic based on lastVisitMs.
  */
 exports.locateUnreadPost = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const { topicId, lastVisitMs, itemsPerPage = 20 } = request.data;
     if (!topicId || !lastVisitMs) return { found: false, reason: 'missing_args' };
@@ -389,7 +389,7 @@ exports.locateUnreadPost = onCall(
  * Retrieves categories the user has permission to view.
  */
 exports.getSecuredCategories = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const db = admin.firestore();
     const uid = request.auth ? request.auth.uid : null;
@@ -607,7 +607,7 @@ async function hydrateAuthorProfiles(db, items) {
  * Retrieves topics for a category the user has permission to view.
  */
 exports.getSecuredTopics = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const { categoryId, page = 1, pageSize = 20 } = request.data;
     if (!categoryId) throw new HttpsError('invalid-argument', 'Missing categoryId');
@@ -715,7 +715,7 @@ exports.getSecuredTopics = onCall(
  * Used for "New Replies" and "Active Topics" pages.
  */
 exports.getSecuredGlobalTopics = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const { orderByField = 'last_post_at', limitCount = 50 } = request.data;
     const db = admin.firestore();
@@ -765,7 +765,7 @@ exports.getSecuredGlobalTopics = onCall(
  * filters via session_perms, and falls back to Firestore on first run.
  */
 exports.getSecuredMainPageData = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const db = admin.firestore();
     const uid = request.auth ? request.auth.uid : null;
@@ -1796,82 +1796,7 @@ exports.cleanupExpiredPresence = onSchedule("every 15 minutes", async () => {
   }
 });
 
-/**
- * onUserCreated
- * Triggers when a new user document is created.
- * Updates forum_stats/global and notifies admins.
- */
-exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
-  const snap = event.data;
-  if (!snap) return;
-  const newUser = snap.data();
-  const db = admin.firestore();
 
-  try {
-    // Update global forum statistics
-    const globalStatsRef = db.collection("forum_stats").doc("global");
-    await globalStatsRef.set({
-      total_users: admin.firestore.FieldValue.increment(1),
-      newest_user: {
-        id: event.params.uid,
-        nickname: newUser.nickname || "User",
-        avatar_url: newUser.avatar_url || "",
-        role_id: newUser.role_id || "player",
-        created_at: admin.firestore.FieldValue.serverTimestamp()
-      }
-    }, { merge: true });
-
-    // 1. Find roles with user-management permissions
-    const rolesSnap = await db.collection("roles").get();
-    const eligibleRoleIds = [];
-    const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
-
-    rolesSnap.forEach(doc => {
-      const perms = (doc.data().permissions || []).map(p => String(p).toLowerCase());
-      if (USER_MGMT_PERMS.some(p => perms.includes(p))) {
-        eligibleRoleIds.push(doc.id);
-      }
-    });
-
-    // 2. Collect recipients
-    const recipients = new Set();
-    for (let i = 0; i < eligibleRoleIds.length; i += 30) {
-      const usersSnap = await db.collection("users")
-        .where("role_id", "in", eligibleRoleIds.slice(i, i + 30))
-        .get();
-      usersSnap.forEach(u => recipients.add(u.id));
-    }
-
-    // Always notify role_id === 'root'
-    const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
-    rootSnap.forEach(u => recipients.add(u.id));
-
-    if (recipients.size === 0) return;
-
-    // 3. Create notifications
-    const batch = db.batch();
-    recipients.forEach(uid => {
-      const notifRef = db.collection("notifications").doc();
-      batch.set(notifRef, {
-        recipient_uid: uid,
-        type: "new_registration",
-        read: false,
-        archived: false,
-        payload: {
-          uid: event.params.uid,
-          nickname: newUser.nickname,
-          email: newUser.email,
-          admin_message: newUser.admin_message || null
-        },
-        created_at: admin.firestore.FieldValue.serverTimestamp()
-      });
-    });
-
-    await batch.commit();
-  } catch (error) {
-    logger.error(`onUserCreated error (${event.params.uid}):`, error);
-  }
-});
 
 /**
  * getReputationLogs (Callable)
@@ -1879,7 +1804,7 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
  * based on target user settings if the requester doesn't have permissions.
  */
 exports.getReputationLogs = onCall(
-  { memory: '256MB', timeoutSeconds: 60 },
+  { cors: true, enforceAppCheck: false, memory: '256MB', timeoutSeconds: 60 },
   async (request) => {
     const { targetUid, page = 1, pageSize = 20, seekLogId } = request.data;
     if (!targetUid || typeof targetUid !== 'string') {
@@ -2075,7 +2000,7 @@ exports.getReputationLogs = onCall(
  * Anyone can call this; private users are shown as "Anonymous".
  */
 exports.getPostVoters = onCall(
-  { memory: '256MB', timeoutSeconds: 30 },
+  { cors: true, enforceAppCheck: false, memory: '256MB', timeoutSeconds: 30 },
   async (request) => {
     const { postId, limit: reqLimit = 10 } = request.data;
     if (!postId || typeof postId !== 'string') {
@@ -2147,7 +2072,7 @@ exports.getPostVoters = onCall(
  * Checks RTDB topic_posts_cache for the last 3 pages of active topics to save Firestore reads.
  */
 exports.getSecuredPosts = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const { topicId, page = 1, pageSize = 20, lastVisit } = request.data;
     if (!topicId) {
@@ -2538,7 +2463,7 @@ exports.cleanupStaleTopicPostsCache = onSchedule("every 1 hours", async () => {
  * Filters results on the server based on the requester's permissions for each category.
  */
 exports.getUserPosts = onCall(
-  { memory: '256MB', timeoutSeconds: 60 },
+  { cors: true, enforceAppCheck: false, memory: '256MB', timeoutSeconds: 60 },
   async (request) => {
     const { targetUid, page = 1, pageSize = 20, postFilter = 'all' } = request.data;
 
@@ -2688,7 +2613,7 @@ exports.getUserPosts = onCall(
  * Очищает кэш RTDB для поста-призрака, который уже был удален из Firestore.
  */
 exports.deleteGhostPost = onCall(
-  { enforceAppCheck: false, minInstances: 0 },
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
   async (request) => {
     const { topicId, postId } = request.data;
     if (!topicId || !postId) return { success: false };
