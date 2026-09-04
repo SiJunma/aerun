@@ -20,12 +20,14 @@ This file serves as the master context for AI interaction, combining the current
             "role_id": "string (references roles.id, e.g., 'root', 'admin', 'player')",
             "previous_role_id": "string (stores role before ban)",
             "post_count": "number",
+            "topics_count": "number",
             "reputation": "number",
             "admin_message": "string (optional)",
             "settings": {
               "theme": "string",
               "language": "string",
-              "member_view_style": "string"
+              "member_view_style": "string",
+              "postsPerPage": "number (optional)"
             },
             "created_at": "serverTimestamp",
             "last_seen": "serverTimestamp",
@@ -435,38 +437,25 @@ service cloud.firestore {
         && (getUser().data.role_id == 'admin' || getUser().data.role_id == 'root');
     }
 
-    // Active = authenticated + profile exists + role is not pending/banned
+    function getRole() {
+      return !isSignedIn() ? 'guest' : 
+        ('role_id' in request.auth.token ? request.auth.token.role_id : 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? getUser().data.get('role_id', 'player') : 'player'));
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (getRole() == 'admin' || getRole() == 'root');
+    }
+
     function isActive() {
-      return isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && getUser().data.role_id != 'pending' 
-        && getUser().data.role_id != 'banned';
+      return isSignedIn() && getRole() != 'pending' && getRole() != 'banned';
     }
 
     function hasPermission(permission) {
-      let roleId = getUser().data.role_id;
+      let roleId = getRole();
       return roleId == 'root' || 
         (exists(/databases/$(database)/documents/roles/$(roleId)) && 
          permission in get(/databases/$(database)/documents/roles/$(roleId)).data.permissions);
-    }
-
-    function canModerateContent() {
-      return isSignedIn() && hasPermission('moderate_content');
-    }
-
-    function getTopicData(topicId) {
-      return exists(/databases/$(database)/documents/topics/$(topicId)) ? 
-        get(/databases/$(database)/documents/topics/$(topicId)).data : 
-        getAfter(/databases/$(database)/documents/topics/$(topicId)).data;
-    }
-
-    function isTopicOpen(topicId) {
-      let tData = getTopicData(topicId);
-      return !('is_locked' in tData) || tData.is_locked == false;
-    }
-
-    function getRole() {
-      return !isSignedIn() ? 'guest' : getUser().data.role_id;
     }
 
     function isBanned() {

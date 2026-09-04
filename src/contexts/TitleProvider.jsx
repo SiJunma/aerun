@@ -12,45 +12,71 @@ export const usePageTitle = () => useContext(TitleContext);
 export const TitleProvider = ({ children }) => {
   const [pageTitle, setPageTitle] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
-  const { user, profile, settings, hasPermission, PERMISSIONS } = useAuth();
+  const { user, profile, settings, hasPermission, PERMISSIONS, activeDmConvId } = useAuth();
   const { lang } = useI18n();
   const { activeDesign } = useDesign();
 
   const isAdmin = hasPermission ? hasPermission(PERMISSIONS?.ADMIN_ACCESS) : false;
 
   // Real-time unread notifications and DMs subscription for browser tab title badge
+  const dmUnreadDataRef = React.useRef({ total: 0, conversations: {} });
+  const [dmCount, setDmCount] = React.useState(0);
+  const [userCount, setUserCount] = React.useState(0);
+  const [adminCount, setAdminCount] = React.useState(0);
+
+  // Combine counts into unreadCount
+  useEffect(() => {
+    setUnreadCount(userCount + adminCount + dmCount);
+  }, [userCount, adminCount, dmCount]);
+
+  // Recalculate dmCount whenever activeDmConvId changes (e.g. user opens/closes a chat)
+  useEffect(() => {
+    // Sync activeDmConvId into the ref so RTDB callback can read it
+    dmUnreadDataRef._activeDmConvId = activeDmConvId;
+    const { total = 0, conversations = {} } = dmUnreadDataRef.current;
+    if (activeDmConvId && conversations[activeDmConvId]) {
+      const openConvCount = conversations[activeDmConvId]?.unread_count || 0;
+      setDmCount(Math.max(0, total - openConvCount));
+    } else {
+      setDmCount(total);
+    }
+  }, [activeDmConvId]);
+
   useEffect(() => {
     if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') {
-      setUnreadCount(0);
+      setUserCount(0);
+      setAdminCount(0);
+      setDmCount(0);
       return;
     }
 
-    let userCount = 0;
-    let adminCount = 0;
-    let dmCount = 0;
-
-    const updateTotal = () => {
-      setUnreadCount(userCount + adminCount + dmCount);
-    };
-
     const unsubUser = subscribeToUserNotifications(user.uid, (notifs) => {
-      userCount = notifs.filter(n => !n.read).length;
-      updateTotal();
+      setUserCount(notifs.filter(n => !n.read).length);
     });
 
     let unsubAdmin = () => {};
     if (isAdmin) {
       unsubAdmin = subscribeToAdminNotifications((notifs) => {
-        adminCount = notifs.filter(n => !n.read).length;
-        updateTotal();
+        setAdminCount(notifs.filter(n => !n.read).length);
       });
+    } else {
+      setAdminCount(0);
     }
 
     let unsubDm = () => {};
     if (hasPermission && hasPermission(PERMISSIONS?.USE_DIRECT_MESSAGES)) {
       unsubDm = subscribeToDmUnread(user.uid, (data) => {
-        dmCount = data?.total || 0;
-        updateTotal();
+        const raw = data || { total: 0, conversations: {} };
+        dmUnreadDataRef.current = raw;
+        const total = raw.total || 0;
+        const conversations = raw.conversations || {};
+        const openConvId = dmUnreadDataRef._activeDmConvId; // will be set via ref sync
+        if (openConvId && conversations[openConvId]) {
+          const openConvCount = conversations[openConvId]?.unread_count || 0;
+          setDmCount(Math.max(0, total - openConvCount));
+        } else {
+          setDmCount(total);
+        }
       });
     }
 

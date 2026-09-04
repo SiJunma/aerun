@@ -14,7 +14,8 @@ import {
   limit,
   getDocs,
   endBefore,
-  startAfter
+  startAfter,
+  Timestamp
 } from 'firebase/firestore';
 import { ref, onValue, remove, set } from 'firebase/database';
 import { processDiceRolls } from '../utils/dice';
@@ -55,7 +56,7 @@ export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirP
  * Subscribe to all conversations for a given user, sorted by lastTimestamp desc.
  * Only conversations with at least one message appear (lastTimestamp set by sendDmMessage).
  */
-export const subscribeToDmList = (uid, callback) => {
+export const subscribeToDmList = (uid, callback, errorCallback) => {
   const q = query(
     collection(db, 'dms'),
     where('participants', 'array-contains', uid),
@@ -64,7 +65,10 @@ export const subscribeToDmList = (uid, callback) => {
   );
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  }, (err) => console.error('[subscribeToDmList]', err));
+  }, (err) => {
+    console.error('[subscribeToDmList]', err);
+    if (errorCallback) errorCallback(err);
+  });
 };
 
 /**
@@ -89,7 +93,7 @@ export const subscribeToDmUnread = (uid, callback) => {
         conversations: data.conversations || {}
       });
     }, (err) => {
-      console.warn('[subscribeToDmUnread err]', err);
+      console.warn('[subscribeToDmUnread onValue err]', err);
       callback({ total: 0, conversations: {} });
     });
   } catch (err) {
@@ -105,11 +109,26 @@ export const subscribeToDmUnread = (uid, callback) => {
 export const fetchOlderDmMessages = async (conversationId, oldestTimestamp, batchSize = 15) => {
   if (!conversationId || !oldestTimestamp) return [];
   try {
+    let cursor = oldestTimestamp;
+    if (!(cursor instanceof Timestamp)) {
+      if (cursor && typeof cursor.seconds === 'number') {
+        cursor = new Timestamp(cursor.seconds, cursor.nanoseconds || 0);
+      } else if (cursor && typeof cursor._seconds === 'number') {
+        cursor = new Timestamp(cursor._seconds, cursor._nanoseconds || 0);
+      } else if (typeof cursor === 'number') {
+        cursor = Timestamp.fromMillis(cursor);
+      } else if (typeof cursor === 'string') {
+        cursor = Timestamp.fromDate(new Date(cursor));
+      } else if (typeof cursor?.toDate === 'function') {
+        cursor = Timestamp.fromDate(cursor.toDate());
+      }
+    }
+
     const messagesRef = collection(db, 'dms', conversationId, 'messages');
     let q = query(
       messagesRef,
       orderBy('timestamp', 'desc'),
-      startAfter(oldestTimestamp),
+      startAfter(cursor),
       limit(batchSize)
     );
 
@@ -124,7 +143,7 @@ export const fetchOlderDmMessages = async (conversationId, oldestTimestamp, batc
 /**
  * Subscribe to messages in a conversation (legacy/active listener with limit).
  */
-export const subscribeToDmMessages = (conversationId, limitCount, callback) => {
+export const subscribeToDmMessages = (conversationId, limitCount, callback, errorCallback) => {
   const q = query(
     collection(db, 'dms', conversationId, 'messages'),
     orderBy('timestamp', 'desc'),
@@ -132,7 +151,10 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback) => {
   );
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map(d => ({ id: d.id, ...d.data() })).reverse());
-  }, (err) => console.error('[subscribeToDmMessages]', err));
+  }, (err) => {
+    console.error('[subscribeToDmMessages]', err);
+    if (errorCallback) errorCallback(err);
+  });
 };
 
 /**

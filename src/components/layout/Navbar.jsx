@@ -13,7 +13,7 @@ import AuthModal from '../modals/AuthModal';
 import { usePageTitle } from '../../contexts/TitleProvider';
 
 const Navigation = () => {
-  const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS } = useAuth();
+  const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, activeDmConvId } = useAuth();
   const { t, lang } = useI18n();
   const { theme, changeGuestTheme } = useTheme();
   const { activeDesign } = useDesign();
@@ -54,16 +54,29 @@ const Navigation = () => {
   }, [isAdmin, user?.uid, profile?.role_id]);
 
   // Subscribe to DM unread count via RTDB (0 Firestore reads)
+  const [dmUnreadData, setDmUnreadData] = React.useState({ total: 0, conversations: {} });
   React.useEffect(() => {
     if (!user?.uid || !hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) || profile?.role_id === 'pending') {
       setDmUnread(0);
+      setDmUnreadData({ total: 0, conversations: {} });
       return;
     }
     const unsub = subscribeToDmUnread(user.uid, (data) => {
-      setDmUnread(data?.total || 0);
+      setDmUnreadData(data || { total: 0, conversations: {} });
     });
     return () => unsub();
   }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES, profile?.role_id]);
+
+  // Exclude the currently open DM conversation from the badge
+  React.useEffect(() => {
+    const { total = 0, conversations = {} } = dmUnreadData;
+    if (activeDmConvId && conversations[activeDmConvId]) {
+      const openConvCount = conversations[activeDmConvId]?.unread_count || 0;
+      setDmUnread(Math.max(0, total - openConvCount));
+    } else {
+      setDmUnread(total);
+    }
+  }, [dmUnreadData, activeDmConvId]);
 
   const totalUnread = adminUnread + userUnread;
   const totalBadge = totalUnread + dmUnread;

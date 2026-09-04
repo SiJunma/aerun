@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Card, Button, Image, Badge, Spinner } from 'react-bootstrap';
-import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2 } from 'lucide-react';
+import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2, ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -20,6 +20,8 @@ import { getCachedDmMessages, setCachedDmMessages } from '../../api/dm-cache';
 import { subscribeToUser } from '../../api/auth-resources';
 import { playNotificationSound } from '../../utils/notificationSound';
 import Timestamp from '../common/Timestamp';
+import ErrorCard from '../common/ErrorCard';
+import ConfirmModal from '../common/ConfirmModal';
 import { PERMISSIONS } from '../../constants/permissions';
 
 /**
@@ -32,7 +34,7 @@ import { PERMISSIONS } from '../../constants/permissions';
  */
 const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTargetProfile }) => {
   const { t, lang } = useI18n();
-  const { profile, settings, hasPermission } = useAuth();
+  const { profile, settings, hasPermission, setActiveDmConvId } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const myUid = profile?.uid;
@@ -43,6 +45,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // ── Inbox state ──────────────────────────────────────────────────────────
   const [conversations, setConversations] = useState([]);
   const [loadingConvs, setLoadingConvs] = useState(true);
+  const [inboxError, setInboxError] = useState(null);
 
   // ── Chat state ───────────────────────────────────────────────────────────
   const [activeChatId, setActiveChatId] = useState(null); // conversationId
@@ -51,14 +54,69 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
+  const [chatError, setChatError] = useState(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [targetProfile, setTargetProfile] = useState(initialTargetProfile || null);
   const [messageLimit, setMessageLimit] = useState(15);
   const [peerStatus, setPeerStatus] = useState('active'); // 'active', 'deleted', 'banned'
 
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
+  const [deleteConfirmConvId, setDeleteConfirmConvId] = useState(null);
+
   const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
+  const editorRef = useRef(null);
+  const scrollContainerRef = useRef(null);
+  const isLoadingOlderRef = useRef(false);
+  const scrollPosBeforeRef = useRef({ scrollHeight: 0, scrollTop: 0 });
+  const initialScrollDoneRef = useRef(false);
+  const prevMessagesCountRef = useRef(0);
+  const firstUnreadIdRef = useRef(null);
+  const sentByMeRef = useRef(false); // flag to force scroll-to-bottom after sending own message
+
+  const getScrollContainer = () => {
+    return scrollContainerRef.current;
+  };
+
+  const checkIfAtBottom = (threshold = 90) => {
+    const container = getScrollContainer();
+    if (!container) return true;
+    const dist = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return dist <= threshold;
+  };
+
+  const handleScroll = (e) => {
+    const target = e?.currentTarget || getScrollContainer();
+    if (!target) return;
+    const dist = target.scrollHeight - target.scrollTop - target.clientHeight;
+    const atBottom = dist <= 90;
+    setShowScrollBottom(!atBottom);
+    if (atBottom) {
+      setUnreadBelowCount(0);
+      firstUnreadIdRef.current = null;
+    }
+  };
+
+  const scrollToUnreadOrBottom = () => {
+    const container = getScrollContainer();
+    if (!container) return;
+
+    if (firstUnreadIdRef.current) {
+      const el = document.getElementById(`dm-msg-${firstUnreadIdRef.current}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        firstUnreadIdRef.current = null;
+        setUnreadBelowCount(0);
+        return;
+      }
+    }
+
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    setShowScrollBottom(false);
+    setUnreadBelowCount(0);
+    firstUnreadIdRef.current = null;
+  };
 
   // ── Track peer status ───────────────────────────────────────────────────
   useEffect(() => {
@@ -86,10 +144,18 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   useEffect(() => {
     if (!myUid) return;
     setLoadingConvs(true);
-    const unsub = subscribeToDmList(myUid, (convs) => {
-      setConversations(convs);
-      setLoadingConvs(false);
-    });
+    setInboxError(null);
+    const unsub = subscribeToDmList(
+      myUid,
+      (convs) => {
+        setConversations(convs);
+        setLoadingConvs(false);
+      },
+      (err) => {
+        setInboxError(err);
+        setLoadingConvs(false);
+      }
+    );
     return () => unsub();
   }, [myUid]);
 
@@ -110,13 +176,26 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       setActiveChatId(null);
       setActivePeer(null);
       setMessages([]);
+      setChatError(null);
     }
   }, [mode]);
+
+  // ── Register active chat in AuthProvider so Navbar can exclude it from unread badge ──
+  useEffect(() => {
+    setActiveDmConvId(activeChatId);
+    return () => setActiveDmConvId(null);
+  }, [activeChatId, setActiveDmConvId]);
 
   // ── Subscribe to messages when a chat is open (with local cache) ─────────
   useEffect(() => {
     if (!activeChatId || !myUid) return;
     
+    setChatError(null);
+    initialScrollDoneRef.current = false;
+    prevMessagesCountRef.current = 0;
+    setShowScrollBottom(false);
+    setUnreadBelowCount(0);
+    firstUnreadIdRef.current = null;
     // 1. Immediately hydrate from local cache
     const cached = getCachedDmMessages(myUid, activeChatId);
     if (cached.length > 0) {
@@ -130,32 +209,40 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     setMessageLimit(15);
 
     // 2. Subscribe to Firestore for real-time updates and merge with cache
-    const unsub = subscribeToDmMessages(activeChatId, messageLimit, (msgs) => {
-      setMessages(prev => {
-        // Detect new incoming message from the other participant
-        if (prev.length > 0 && msgs.length > 0) {
-          const latestNew = msgs[msgs.length - 1];
-          const isFromPeer = latestNew && latestNew.sender_uid && latestNew.sender_uid !== myUid;
-          const isNew = !prev.some(m => m.id === latestNew.id);
-          if (isFromPeer && isNew && profile?.settings?.sound?.enabled !== false) {
-            playNotificationSound(profile?.settings?.sound?.volume ?? 40);
+    const unsub = subscribeToDmMessages(
+      activeChatId,
+      messageLimit,
+      (msgs) => {
+        setMessages(prev => {
+          // Detect new incoming message from the other participant
+          if (prev.length > 0 && msgs.length > 0) {
+            const latestNew = msgs[msgs.length - 1];
+            const isFromPeer = latestNew && latestNew.sender_uid && latestNew.sender_uid !== myUid;
+            const isNew = !prev.some(m => m.id === latestNew.id);
+            if (isFromPeer && isNew && profile?.settings?.sound?.enabled !== false) {
+              playNotificationSound(profile?.settings?.sound?.volume ?? 40);
+            }
           }
-        }
 
-        const map = new Map();
-        prev.forEach(m => m.id && map.set(m.id, m));
-        msgs.forEach(m => m.id && map.set(m.id, m));
-        const merged = Array.from(map.values()).sort((a, b) => {
-          const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-          const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-          return aTime - bTime;
+          const map = new Map();
+          prev.forEach(m => m.id && map.set(m.id, m));
+          msgs.forEach(m => m.id && map.set(m.id, m));
+          const merged = Array.from(map.values()).sort((a, b) => {
+            const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+            const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+            return aTime - bTime;
+          });
+          setCachedDmMessages(myUid, activeChatId, merged);
+          return merged;
         });
-        setCachedDmMessages(myUid, activeChatId, merged);
-        return merged;
-      });
-      setLoadingChat(false);
-      markDmRead(activeChatId, myUid).catch(() => {});
-    });
+        setLoadingChat(false);
+        markDmRead(activeChatId, myUid).catch(() => {});
+      },
+      (err) => {
+        setChatError(err);
+        setLoadingChat(false);
+      }
+    );
 
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,12 +250,22 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
   const handleLoadOlder = async () => {
     if (!activeChatId || loadingOlder || messages.length === 0) return;
+
+    // Capture scroll container state before prepending older messages
+    const container = getScrollContainer();
+    scrollPosBeforeRef.current = {
+      scrollHeight: container ? container.scrollHeight : 0,
+      scrollTop: container ? container.scrollTop : 0
+    };
+    isLoadingOlderRef.current = true;
+
     setLoadingOlder(true);
     try {
       const oldestMsg = messages[0];
       const olderMsgs = await fetchOlderDmMessages(activeChatId, oldestMsg.timestamp, 15);
       if (olderMsgs.length === 0) {
         setHasMoreOlder(false);
+        isLoadingOlderRef.current = false;
       } else {
         setMessages(prev => {
           const map = new Map();
@@ -188,15 +285,65 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       }
     } catch (err) {
       console.error('[handleLoadOlder err]', err);
+      isLoadingOlderRef.current = false;
     } finally {
       setLoadingOlder(false);
     }
   };
 
-  // ── Auto-scroll to bottom ────────────────────────────────────────────────
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  // ── Auto-scroll: messenger-style (initial load, on sending, or if already at bottom) ──
+  useLayoutEffect(() => {
+    const container = getScrollContainer();
+    if (!container) return;
+
+    if (isLoadingOlderRef.current) {
+      // 1. Loading older messages: preserve scroll position
+      const deltaHeight = container.scrollHeight - scrollPosBeforeRef.current.scrollHeight;
+      container.scrollTop = scrollPosBeforeRef.current.scrollTop + deltaHeight;
+      isLoadingOlderRef.current = false;
+      const dist = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setShowScrollBottom(dist > 90);
+    } else if (!initialScrollDoneRef.current) {
+      // 2. Initial load: immediately snap to bottom
+      if (messages.length > 0) {
+        container.scrollTop = container.scrollHeight;
+        initialScrollDoneRef.current = true;
+        setShowScrollBottom(false);
+        setUnreadBelowCount(0);
+        firstUnreadIdRef.current = null;
+      }
+    } else {
+      // 3. New message added
+      const prevCount = prevMessagesCountRef.current;
+      const newCount = messages.length;
+      const addedCount = newCount - prevCount;
+
+      if (addedCount > 0) {
+        const lastMsg = messages[messages.length - 1];
+        const isFromMe = lastMsg?.sender_uid === myUid;
+        const forcedByMe = sentByMeRef.current;
+        const atBottom = checkIfAtBottom(150); // wider threshold for autoResize textarea
+
+        if (isFromMe || forcedByMe || atBottom) {
+          // Sent by me, forced, or user was at bottom: auto-scroll to bottom
+          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+          setShowScrollBottom(false);
+          setUnreadBelowCount(0);
+          firstUnreadIdRef.current = null;
+          sentByMeRef.current = false;
+        } else {
+          // Scrolled up reading history and peer sent a message:
+          // Keep user position, show floating button with new messages badge
+          setShowScrollBottom(true);
+          setUnreadBelowCount(prev => prev + addedCount);
+          if (!firstUnreadIdRef.current) {
+            firstUnreadIdRef.current = messages[prevCount]?.id || lastMsg?.id;
+          }
+        }
+      }
+    }
+    prevMessagesCountRef.current = messages.length;
+  }, [messages, myUid]);
 
   // ── Open a chat ──────────────────────────────────────────────────────────
   const openChat = async (peerUid, peerInfo) => {
@@ -232,10 +379,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     }
 
     setSending(true);
+    sentByMeRef.current = true; // flag to force scroll when Firestore message arrives
     try {
       await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid);
       setMessageText('');
-      inputRef.current?.focus();
+      editorRef.current?.focus();
+      const container = getScrollContainer();
+      if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      }
     } catch (err) {
       console.error('[handleSend]', err);
       showToast(lang === 'ru' ? 'Ошибка отправки сообщения' : 'Failed to send message', 'danger');
@@ -256,15 +408,18 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   };
 
   // ── Deletion handler ─────────────────────────────────────────────────────
-  const handleDeleteConversation = async (convId, e) => {
+  const promptDeleteConversation = (convId, e) => {
     if (e) {
       e.stopPropagation();
       e.preventDefault();
     }
-    const confirmMsg = lang === 'ru' 
-      ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?' 
-      : 'Are you sure you want to permanently delete this conversation for yourself?';
-    if (!window.confirm(confirmMsg)) return;
+    setDeleteConfirmConvId(convId);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmConvId) return;
+    const convId = deleteConfirmConvId;
+    setDeleteConfirmConvId(null);
 
     try {
       await deleteConversation(convId, myUid);
@@ -273,6 +428,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
         setActiveChatId(null);
         setActivePeer(null);
         setMessages([]);
+        navigate('/messages');
       }
     } catch (err) {
       console.error('[handleDeleteConversation]', err);
@@ -311,15 +467,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     </div>
   );
 
-  // ── Chat View ─────────────────────────────────────────────────────────────
   if (activeChatId && activePeer) {
     return (
-      <Card
-        className="shadow-sm border-0 bg-card dm-fullscreen-card"
-        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', minHeight: '500px' }}
-      >
+      <>
+        <Card
+          className="shadow-sm border-0 bg-card dm-fullscreen-card"
+          style={{ display: 'flex', flexDirection: 'column' }}
+        >
         {/* Header */}
-        <Card.Header className="py-2 d-flex align-items-center gap-3" style={{ flexShrink: 0, background: 'var(--nav-bg)' }}>
+        <Card.Header className="py-1 px-3 d-flex align-items-center gap-2" style={{ flexShrink: 0, background: 'var(--nav-bg)', minHeight: '44px' }}>
           <Button
             as={mode === 'chat' ? Link : 'button'}
             to={mode === 'chat' ? '/messages' : undefined}
@@ -329,49 +485,60 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             style={{ color: '#ffffff', border: 'none', boxShadow: 'none' }}
             onClick={mode === 'inbox' ? () => { setActiveChatId(null); setActivePeer(null); setMessages([]); } : undefined}
           >
-            <ArrowLeft size={20} color="#ffffff" />
+            <ArrowLeft size={18} color="#ffffff" />
           </Button>
           <Image
             src={activePeer.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(activePeer.name)}&background=random`}
             roundedCircle
-            style={{ width: '40px', height: '40px', objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.2)' }}
+            style={{ width: '32px', height: '32px', objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.2)' }}
             onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(activePeer.name)}&background=666&color=fff`; }}
           />
-          <div>
+          <div className="d-flex align-items-center gap-2 min-w-0">
             <Link
               to={`/profile/${activePeer.uid}`}
-              className="fw-bold text-decoration-none"
-              style={{ color: '#ffffff', fontSize: '1.05rem', display: 'block', lineHeight: '1.2' }}
+              className="fw-bold text-decoration-none text-truncate"
+              style={{ color: '#ffffff', fontSize: '0.95rem' }}
             >
               {activePeer.name}
             </Link>
-              <div
-              className="d-flex align-items-center gap-1"
-              style={{ fontSize: '0.875rem', opacity: 0.8, color: '#ffffff' }}
+            <span
+              className="d-inline-flex align-items-center gap-1 text-nowrap"
+              style={{ fontSize: '0.75rem', opacity: 0.75, color: '#ffffff' }}
             >
-              <Lock size={12} color="#ffffff" />
+              <Lock size={11} color="#ffffff" />
               <span>{t('dm.encryption_badge')}</span>
-            </div>
+            </span>
           </div>
           <Button
             variant="link"
             size="sm"
-            className="ms-auto text-decoration-none p-1"
-            style={{ color: '#ffffff', opacity: 0.8 }}
-            onClick={(e) => handleDeleteConversation(activeChatId, e)}
+            className="ms-auto text-decoration-none p-1 d-flex align-items-center"
+            style={{ color: '#ffffff', opacity: 0.75 }}
+            onClick={(e) => promptDeleteConversation(activeChatId, e)}
             title={lang === 'ru' ? 'Удалить переписку' : 'Delete conversation'}
           >
-            <Trash2 size={20} />
+            <Trash2 size={17} />
           </Button>
         </Card.Header>
 
         {/* Two-column body: messages left, editor right — stacks vertically on mobile (see index.css) */}
         <div className="dm-chat-body">
 
-          {/* Left: scrollable message feed */}
-          <div className="dm-messages-col">
+          {/* Left: scrollable message feed with floating scroll-to-bottom button */}
+          <div className="dm-messages-wrapper">
+            <div className="dm-messages-col" ref={scrollContainerRef} onScroll={handleScroll}>
             <PrivacyNotice />
-            {loadingChat ? (
+            {chatError ? (
+              <ErrorCard
+                isNetworkError={true}
+                title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load messages'}
+                error={chatError}
+                onRetry={() => {
+                  setChatError(null);
+                  setLoadingChat(true);
+                }}
+              />
+            ) : loadingChat ? (
               <div className="text-center py-5 text-muted">
                 <Spinner animation="border" size="sm" />
               </div>
@@ -409,6 +576,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   return (
                     <div
                       key={msg.id || index}
+                      id={msg.id ? `dm-msg-${msg.id}` : undefined}
                       className={`d-flex mb-2 ${isMe ? 'justify-content-end' : 'justify-content-start'}`}
                     >
                       {!isMe && (
@@ -416,7 +584,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           src={activePeer?.avatar || '/default-avatar.png'}
                           roundedCircle
                           className="me-2"
-                          style={{ width: '30px', height: '30px', objectFit: 'cover' }}
+                          style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', flexShrink: 0, objectFit: 'cover' }}
                         />
                       )}
                       <div
@@ -445,6 +613,54 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 <div ref={messagesEndRef} />
               </div>
             )}
+            </div>
+
+            {/* Floating scroll-to-bottom / unread button */}
+            {showScrollBottom && (
+              <button
+                type="button"
+                onClick={scrollToUnreadOrBottom}
+                className="dm-scroll-bottom-btn"
+                style={{
+                  position: 'absolute',
+                  bottom: '18px',
+                  right: '24px',
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '50%',
+                  background: 'var(--primary-color)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 30,
+                  cursor: 'pointer',
+                }}
+                title={unreadBelowCount > 0
+                  ? (lang === 'ru' ? `Непрочитанных сообщений: ${unreadBelowCount}` : `${unreadBelowCount} unread messages`)
+                  : (lang === 'ru' ? 'Вниз' : 'Scroll to bottom')}
+              >
+                <ChevronDown size={22} />
+                {unreadBelowCount > 0 && (
+                  <span
+                    className="badge bg-danger rounded-pill position-absolute"
+                    style={{
+                      top: '-6px',
+                      right: '-6px',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      padding: '0.3em 0.55em',
+                      border: '2px solid var(--card-bg)',
+                      boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+                    }}
+                  >
+                    {unreadBelowCount > 99 ? '99+' : unreadBelowCount}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
 
           {/* Right: editor column */}
@@ -463,11 +679,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             <div className="dm-editor-col">
               <div className="flex-grow-1">
                 <RichEditor
+                  ref={editorRef}
                   id="dm-reply-editor"
                   value={messageText}
                   onChange={(e) => setMessageText(e.target.value)}
                   placeholder={t('dm.placeholder')}
-                  minHeight="120px"
+                  minHeight="38px"
+                  rows={1}
+                  autoResize={true}
+                  hideFooter={true}
                   maxLength={computedMaxChars}
                   showDice={hasPermission && hasPermission(PERMISSIONS.USE_DICE)}
                   hideDiceType={true}
@@ -475,38 +695,71 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   showHide={false}
                   smilesDropDirection="start"
                   smilesFullWidth={false}
+                  onSubmit={handleSend}
                 />
               </div>
-              <div className="d-flex justify-content-end">
+              <div className="d-flex align-items-center justify-content-between mt-1 px-1">
                 <Button
                   variant="primary"
+                  size="sm"
                   onClick={handleSend}
                   disabled={sending || !messageText.trim()}
-                  className="d-flex align-items-center gap-2"
+                  className="d-flex align-items-center gap-2 px-3 py-1"
                 >
-                  {sending ? <Spinner size="sm" animation="border" /> : <Send size={15} />}
-                  {t('dm.send_button')}
+                  {sending ? <Spinner size="sm" animation="border" /> : <Send size={14} />}
+                  <span>{t('dm.send_button')}</span>
                 </Button>
+                <div className={`${computedMaxChars && messageText.length >= computedMaxChars ? 'text-danger' : 'text-muted'} fw-semibold small`}>
+                  {computedMaxChars > 0
+                    ? `${messageText.length} / ${computedMaxChars}`
+                    : `${lang === 'ru' ? 'Символов: ' : 'Chars: '}${messageText.length}`
+                  }
+                </div>
               </div>
             </div>
           )}
 
         </div>
       </Card>
-    );
-  }
+
+      <ConfirmModal
+        show={!!deleteConfirmConvId}
+        onHide={() => setDeleteConfirmConvId(null)}
+        onConfirm={handleConfirmDelete}
+        title={lang === 'ru' ? 'Удалить переписку?' : 'Delete conversation?'}
+        message={lang === 'ru'
+          ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?'
+          : 'Are you sure you want to permanently delete this conversation for yourself?'}
+        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+        cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+        variant="danger"
+      />
+    </>
+  );
+}
 
   // ── Inbox View ────────────────────────────────────────────────────────────
   return (
-    <Card className="shadow-sm border-0 bg-card dm-fullscreen-card" style={{ minHeight: 'calc(100vh - 140px)' }}>
-      <Card.Header className="py-3 d-flex align-items-center gap-2">
-        <MessageCircle size={18} />
-        <h5 className="mb-0">{t('dm.inbox')}</h5>
+    <>
+      <Card className="shadow-sm border-0 bg-card dm-fullscreen-card">
+      <Card.Header className="py-2 px-3 d-flex align-items-center gap-2" style={{ flexShrink: 0, background: 'var(--nav-bg)', color: '#ffffff', minHeight: '44px' }}>
+        <MessageCircle size={18} color="#ffffff" />
+        <h5 className="mb-0 text-white" style={{ fontSize: '1rem' }}>{t('dm.inbox')}</h5>
       </Card.Header>
-      <Card.Body className="p-3">
+      <Card.Body className="p-3 d-flex flex-column" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto' }}>
         <PrivacyNotice />
 
-        {loadingConvs ? (
+        {inboxError ? (
+          <ErrorCard
+            isNetworkError={true}
+            title={lang === 'ru' ? 'Не удалось загрузить диалоги' : 'Failed to load conversations'}
+            error={inboxError}
+            onRetry={() => {
+              setInboxError(null);
+              setLoadingConvs(true);
+            }}
+          />
+        ) : loadingConvs ? (
           <div className="text-center py-5">
             <Spinner animation="border" size="sm" />
           </div>
@@ -567,7 +820,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     variant="link"
                     className="text-muted p-2 mx-1 shadow-none dm-trash-btn"
                     style={{ opacity: 0.6 }}
-                    onClick={(e) => handleDeleteConversation(conv.id, e)}
+                    onClick={(e) => promptDeleteConversation(conv.id, e)}
                     title={lang === 'ru' ? 'Удалить переписку' : 'Delete conversation'}
                   >
                     <Trash2 size={16} />
@@ -579,7 +832,21 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
         )}
       </Card.Body>
     </Card>
-  );
+
+    <ConfirmModal
+      show={!!deleteConfirmConvId}
+      onHide={() => setDeleteConfirmConvId(null)}
+      onConfirm={handleConfirmDelete}
+      title={lang === 'ru' ? 'Удалить переписку?' : 'Delete conversation?'}
+      message={lang === 'ru'
+        ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?'
+        : 'Are you sure you want to permanently delete this conversation for yourself?'}
+      confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+      cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
+      variant="danger"
+    />
+  </>
+);
 };
 
 export default DirectMessages;

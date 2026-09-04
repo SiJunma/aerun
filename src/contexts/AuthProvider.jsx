@@ -73,6 +73,7 @@ export const AuthProvider = ({ children }) => {
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
   const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {} });
+  const [activeDmConvId, setActiveDmConvId] = useState(null); // Currently open DM conversation
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState([]);
   const [authError, setAuthError] = useState(null);
@@ -734,7 +735,12 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (loading) return;
-    refreshForumState(true);
+    // Debounce: loading→false and uid→value can fire as two separate renders.
+    // Wait 100ms so both settle before making the network call.
+    const timer = setTimeout(() => {
+      refreshForumState(true);
+    }, 100);
+    return () => clearTimeout(timer);
   }, [loading, user?.uid, refreshForumState]);
 
   useEffect(() => {
@@ -879,6 +885,8 @@ export const AuthProvider = ({ children }) => {
     categories,
     unreadTopicsCount,
     dmUnread,
+    activeDmConvId,
+    setActiveDmConvId,
     isMarkingAllRead,
     markTopicRead,
     markAllRead,
@@ -907,7 +915,7 @@ export const AuthProvider = ({ children }) => {
     DEFAULT_ROLES
   }), [
     user, profile, authError, isRootAdmin, settings, loading, readMap, categories,
-    unreadTopicsCount, dmUnread, isMarkingAllRead, markTopicRead, markAllRead,
+    unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
     updateSettings, updateProfile, recordActivity, refreshForumState, forumStats,

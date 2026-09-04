@@ -575,6 +575,8 @@ async function hydrateAuthorProfiles(db, items) {
           const c = charProfiles[key];
           if (c.name) item.author_name = c.name;
           if (c.avatar_url) item.author_avatar = c.avatar_url;
+          if (c.status_line !== undefined) item.author_status_line = c.status_line;
+          if (c.signature !== undefined) item.author_signature = c.signature;
         }
       }
 
@@ -1499,6 +1501,15 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
   const db = admin.firestore();
 
   try {
+    // Set custom user claims for instantaneous Firestore Security Rules checks (0 reads)
+    try {
+      await admin.auth().setCustomUserClaims(event.params.uid, {
+        role_id: newUser.role_id || "player"
+      });
+    } catch (claimErr) {
+      logger.warn(`[onUserCreated] Failed to set custom claims for ${event.params.uid}:`, claimErr);
+    }
+
     // Update global forum statistics
     const globalStatsRef = db.collection("forum_stats").doc("global");
     await globalStatsRef.set({
@@ -1796,7 +1807,27 @@ exports.cleanupExpiredPresence = onSchedule("every 15 minutes", async () => {
   }
 });
 
+/**
+ * onUserUpdated
+ * Triggers when a user document is updated in Firestore.
+ * Synchronizes role_id changes to Firebase Custom Claims for zero-read rules.
+ */
+exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  if (!after) return;
 
+  if (before?.role_id !== after.role_id) {
+    try {
+      await admin.auth().setCustomUserClaims(event.params.uid, {
+        role_id: after.role_id || "player"
+      });
+      logger.info(`[onUserUpdated] Synced custom claims for ${event.params.uid} to role: ${after.role_id}`);
+    } catch (err) {
+      logger.error(`[onUserUpdated] Failed to update custom claims for ${event.params.uid}:`, err);
+    }
+  }
+});
 
 /**
  * getReputationLogs (Callable)

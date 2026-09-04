@@ -15,8 +15,21 @@ const Timestamp = ({ date, className = '' }) => {
   let formattedText = '—';
 
   try {
-    // Handle Firebase Timestamp (has toDate method) or regular Date/string/number
-    const d = date.toDate ? date.toDate() : new Date(date);
+    // Handle Firebase Timestamp (has toDate/toMillis method), serialized {seconds, nanoseconds} from cache, or regular Date/string/number
+    let d;
+    if (typeof date?.toDate === 'function') {
+      d = date.toDate();
+    } else if (typeof date?.toMillis === 'function') {
+      d = new Date(date.toMillis());
+    } else if (typeof date?.seconds === 'number') {
+      d = new Date(date.seconds * 1000 + Math.floor((date.nanoseconds || 0) / 1000000));
+    } else if (typeof date?._seconds === 'number') {
+      d = new Date(date._seconds * 1000 + Math.floor((date._nanoseconds || 0) / 1000000));
+    } else if (date instanceof Date) {
+      d = date;
+    } else {
+      d = new Date(date);
+    }
     
     // Fallback if parsing results in Invalid Date
     if (!isNaN(d.getTime())) {

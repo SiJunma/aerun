@@ -39,6 +39,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import ForumCharacterBadge from '../components/common/ForumCharacterBadge';
 import Skeleton from '../components/common/Skeleton';
+import ErrorCard from '../components/common/ErrorCard';
 import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 
@@ -225,11 +226,12 @@ const TopicPage = () => {
   const prevTopicStatsRef = useRef(null);
 
   const [accessError, setAccessError] = React.useState(null);
+  const [postsLoadError, setPostsLoadError] = React.useState(null);
 
   const loadPosts = React.useCallback(async (overridePage) => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const hasPageParam = urlParams.has('page');
-    const isGoLast = urlParams.get('goLast') === '1';
+    setPostsLoadError(null);
+    const hasPageParam = searchParams.has('page');
+    const isGoLast = searchParams.get('goLast') === '1';
 
     let pageToFetch = overridePage !== undefined ? overridePage : currentPageRef.current;
     let lastVisitMs = null;
@@ -277,9 +279,11 @@ const TopicPage = () => {
         if (data.length === 0 && activePage > 1 && curTopic) {
           const validMaxPage = Math.max(1, Math.ceil((curTopic.posts_count || 1) / ITEMS_PER_PAGE));
           if (activePage > validMaxPage) {
-            const p = new URLSearchParams(window.location.search);
-            p.set('page', validMaxPage.toString());
-            window.history.replaceState(null, '', `${window.location.pathname}?${p.toString()}`);
+            setSearchParams(prev => {
+              const next = new URLSearchParams(prev);
+              next.set('page', validMaxPage.toString());
+              return next;
+            }, { replace: true });
             return [];
           }
         }
@@ -302,7 +306,10 @@ const TopicPage = () => {
               next[p.author_id] = {
                 ...(next[p.author_id] || {}),
                 post_count: postCount,
-                reputation: p.author_reputation ?? next[p.author_id]?.reputation ?? 0
+                reputation: p.author_reputation ?? next[p.author_id]?.reputation ?? 0,
+                status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author_id]?.status_line ?? ''),
+                role_id: p.author_role_id || next[p.author_id]?.role_id || 'player',
+                settings: next[p.author_id]?.settings || { signature: p.author_signature || '' }
               };
             }
           });
@@ -316,6 +323,8 @@ const TopicPage = () => {
       console.error(err);
       if (err?.message?.includes('permission') || err?.message?.includes('403') || err?.code === 'permission-denied') {
         setAccessError(err.message || 'Access denied');
+      } else {
+        setPostsLoadError(err);
       }
       setIsPageLoading(false);
       return [];
@@ -325,7 +334,7 @@ const TopicPage = () => {
       }
       setIsPageLoading(false);
     }
-  }, [id, ITEMS_PER_PAGE, user?.uid, setSearchParams, updateLocalTopicLastPost]);
+  }, [id, ITEMS_PER_PAGE, user?.uid, setSearchParams, updateLocalTopicLastPost, searchParams]);
 
   useEffect(() => {
     // Нам больше не нужно вызывать loadPosts() при изменении счетчика сообщений,
@@ -369,13 +378,20 @@ const TopicPage = () => {
 
   // Load posts whenever topic id or page changes
   useEffect(() => {
+    // Если эта страница только что была загружена в рамках запроса 'last', предотвращаем повторный запрос
+    if (jumpTargetPageRef.current === currentPage) {
+      jumpTargetPageRef.current = null;
+      setIsPageLoading(false);
+      return;
+    }
+    jumpTargetPageRef.current = null;
+
     setIsPageLoading(true);
 
     // Проверяем, есть ли прямой запрос на прыжок к конкретному посту
-    const urlParams = new URLSearchParams(window.location.search);
-    const hasPostJump = !!urlParams.get('post');
+    const hasPostJump = !!searchParams.get('post');
     const hasHashJump = window.location.hash.startsWith('#post-');
-    const hasExplicitPage = urlParams.has('page');
+    const hasExplicitPage = searchParams.has('page');
 
     // Если запрошен прыжок к конкретному посту (?post=ID или #post-ID), но номера страницы еще нет:
     if ((hasPostJump || hasHashJump) && !hasExplicitPage) {
@@ -385,7 +401,7 @@ const TopicPage = () => {
 
     setPosts([]);
     loadPosts();
-  }, [id, currentPage, loadPosts]);
+  }, [id, currentPage, loadPosts, searchParams]);
 
   const lastMarkedOffsetRef = useRef(-1);
   useEffect(() => {
@@ -802,6 +818,8 @@ const TopicPage = () => {
 
 
   const getLiveAuthorStatus = (post) => {
+    if (!post) return '';
+
     if (post.author_id === user?.uid) {
       if (post.is_character) {
         const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
@@ -812,29 +830,29 @@ const TopicPage = () => {
 
     if (post.is_character) {
       if (post.author_character_id) {
-        if (!(post.author_character_id in maskStats)) return 'LOADING';
         const stats = maskStats[post.author_character_id];
+        if (stats && stats.status_line !== undefined) return stats.status_line || '';
         if (stats === null) return post.author_status_line || '';
-        return stats.status_line || '';
+        if (!(post.author_character_id in maskStats)) {
+          return post.author_status_line || '';
+        }
       }
       return post.author_status_line || '';
     }
 
     // Check if we have entries in authorStats for this UID
-    if (!post.author_id) return '';
-    if (!(post.author_id in authorStats)) {
-      // Not yet loaded or even started fetching? (Should be handled by useEffect but safety first)
-      return 'LOADING';
-    }
+    if (!post.author_id) return post.author_status_line || '';
 
     const stats = authorStats[post.author_id];
-    if (stats === null) {
-      // Fetch finished but returned nothing (User deleted)
+    if (stats) {
+      if (stats.status_line !== undefined && stats.status_line !== '') {
+        return stats.status_line;
+      }
+      // If stats was initialized without a custom status_line, fallback to the post's status_line
       return post.author_status_line || '';
     }
 
-    // Live data found
-    return stats.status_line || '';
+    return post.author_status_line || '';
   };
 
   const getLiveAuthorSignature = (post) => {
@@ -1552,8 +1570,27 @@ const TopicPage = () => {
     </Container>
   );
 
-  // Show access denied page if either subscribeToTopic or loadPosts failed with permissions
+  // Show access denied page or network error page if subscribeToTopic or loadPosts failed
   if (accessError) {
+    const isPerm = typeof accessError === 'string' && (
+      accessError.toLowerCase().includes('permission') ||
+      accessError.toLowerCase().includes('403') ||
+      accessError.toLowerCase().includes('access denied')
+    );
+
+    if (!isPerm) {
+      return (
+        <Container className="py-5">
+          <ErrorCard
+            isNetworkError={true}
+            title={lang === 'ru' ? 'Не удалось загрузить тему' : 'Failed to load topic'}
+            error={accessError}
+            onRetry={() => window.location.reload()}
+          />
+        </Container>
+      );
+    }
+
     return (
       <Container className="py-5 text-center">
         <h3 className="text-muted">{lang === 'ru' ? 'Доступ запрещён' : 'Access Denied'}</h3>
@@ -1910,7 +1947,14 @@ const TopicPage = () => {
 
         {/* Posts */}
         <div className="posts-container">
-          {currentPosts.length === 0 && isPageLoading ? (
+          {postsLoadError && currentPosts.length === 0 ? (
+            <ErrorCard
+              isNetworkError={true}
+              title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load posts'}
+              error={postsLoadError}
+              onRetry={() => loadPosts(currentPage)}
+            />
+          ) : currentPosts.length === 0 && isPageLoading ? (
             /* Inline skeleton while page posts are loading (pagination) */
             [...Array(3)].map((_, i) => (
               <Card key={`skel-${i}`} className="mb-4 post-card shadow-sm border-0 overflow-hidden skeleton-fade-in">
