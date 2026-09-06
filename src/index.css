@@ -947,6 +947,29 @@ label.fw-bold {
   text-decoration-thickness: 1px;
 }
 
+/* Strikethrough Text Hover Effect */
+del,
+s,
+strike,
+.bbcode-strike,
+.text-decoration-line-through,
+[style*="line-through"] {
+  transition: text-decoration-color 0.15s ease-in-out, opacity 0.15s ease-in-out;
+}
+
+del:hover,
+s:hover,
+strike:hover,
+.bbcode-strike:hover,
+.text-decoration-line-through:hover,
+[style*="line-through"]:hover,
+[data-theme] del:hover,
+[data-theme] s:hover,
+[data-theme] strike:hover,
+[data-theme] .bbcode-strike:hover {
+  text-decoration: none !important;
+}
+
 .bbcode-quote {
   border-left: 4px solid var(--primary-color);
   padding: 0.2rem 0.75rem;

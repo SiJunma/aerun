@@ -233,7 +233,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hide_secured', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'left', 'center', 'right', 'justify'];
+  const supportedTags = ['b', 'i', 'u', 's', 'strike', 'del', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hide_secured', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'left', 'center', 'right', 'justify'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -402,7 +402,10 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       case 'b': return <strong key={index}>{content}</strong>;
       case 'i': return <em key={index}>{content}</em>;
       case 'u': return <u key={index}>{content}</u>;
-      case 's': return <del key={index}>{content}</del>;
+      case 's':
+      case 'strike':
+      case 'del':
+        return <del key={index} className="bbcode-strike">{content}</del>;
       case 'sup': return <sup key={index}>{content}</sup>;
       case 'sub': return <sub key={index}>{content}</sub>;
       case 'abbr': return <abbr key={index} title={params.default || ''}>{content}</abbr>;
