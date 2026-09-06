@@ -262,7 +262,7 @@ const TopicPage = () => {
       }
 
       if (resolvedPage && pageToFetch === 'last') {
-        jumpTargetPageRef.current = resolvedPage;
+        skipNextLoadForPageRef.current = resolvedPage;
         setSearchParams(prev => {
           const next = new URLSearchParams(prev);
           if (next.get('page') !== resolvedPage.toString()) {
@@ -350,7 +350,7 @@ const TopicPage = () => {
   }, [topic?.id, topic?.posts_count, topic?.last_post_at, setPageTitle]);
 
   const currentTopicIdRef = useRef(id);
-  const jumpTargetPageRef = useRef(null);
+  const skipNextLoadForPageRef = useRef(null);
 
   // Subscribe to topic document (only on topic id change)
   useEffect(() => {
@@ -379,12 +379,12 @@ const TopicPage = () => {
   // Load posts whenever topic id or page changes
   useEffect(() => {
     // Если эта страница только что была загружена в рамках запроса 'last', предотвращаем повторный запрос
-    if (jumpTargetPageRef.current === currentPage) {
-      jumpTargetPageRef.current = null;
+    if (skipNextLoadForPageRef.current === currentPage) {
+      skipNextLoadForPageRef.current = null;
       setIsPageLoading(false);
       return;
     }
-    jumpTargetPageRef.current = null;
+    skipNextLoadForPageRef.current = null;
 
     setIsPageLoading(true);
 
@@ -561,10 +561,9 @@ const TopicPage = () => {
     alreadyJumpedRef.current = false;
   }, [id, locationKey]);
 
-  // Reset jumpTargetPageRef and locatingPostIdRef ONLY when the topic changes
+  // Reset locatingPostIdRef ONLY when the topic changes
   useEffect(() => {
-    jumpTargetPageRef.current = null;
-    locatingPostIdRef.current = null; // <-- Сбрасываем замок при смене топика
+    locatingPostIdRef.current = null;
   }, [id]);
 
   // Capture initial visit state once per topic change
@@ -599,8 +598,7 @@ const TopicPage = () => {
         targetId = `post-${queryPostId}`;
         scrollBlock = 'center';
         locatingPostIdRef.current = null; // Сбрасываем замок, так как пост уже на экране
-      } else if (jumpTargetPageRef.current !== currentPage) {
-
+      } else {
         // ВАЖНО: Если этот postId УЖЕ находится в процессе поиска, предотвращаем повторный вызов!
         if (locatingPostIdRef.current === queryPostId) {
           return;
@@ -613,11 +611,12 @@ const TopicPage = () => {
           if (result.found) {
             if (result.topicId === id) {
               if (result.page !== currentPage) {
-                jumpTargetPageRef.current = result.page;
                 alreadyJumpedRef.current = false;
                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
               } else {
-                jumpTargetPageRef.current = currentPage;
+                if (!searchParams.has('page')) {
+                  setSearchParams({ page: currentPage, post: queryPostId }, { replace: true, preventScrollReset: true });
+                }
                 loadPosts(currentPage);
               }
             } else {
@@ -649,10 +648,6 @@ const TopicPage = () => {
           alreadyJumpedRef.current = true;
         });
         return;
-      } else if (posts.length > 0) {
-        locatingPostIdRef.current = null;
-        alreadyJumpedRef.current = true;
-        setIsPageLoading(false);
       }
     }
     // Priority 2: #post-ID (Legacy anchors)
@@ -662,30 +657,31 @@ const TopicPage = () => {
       if (postIndex !== -1) {
         targetPage = currentPage;
         targetId = hash.substring(1);
-      } else if (jumpTargetPageRef.current !== currentPage) {
+      } else {
+        if (locatingPostIdRef.current === postId) {
+          return;
+        }
+        locatingPostIdRef.current = postId;
         locatePost(postId, ITEMS_PER_PAGE).then(result => {
           if (result.found && result.topicId === id) {
             if (result.page !== currentPage) {
-              jumpTargetPageRef.current = result.page;
               alreadyJumpedRef.current = false;
               setSearchParams({ page: result.page }, { preventScrollReset: true });
               // hash stays in window.location.hash natively
             } else {
-              jumpTargetPageRef.current = currentPage;
-              loadPosts();
+              loadPosts(currentPage);
             }
           } else {
+            locatingPostIdRef.current = null;
             setIsPageLoading(false);
             alreadyJumpedRef.current = true;
           }
         }).catch(() => {
+          locatingPostIdRef.current = null;
           setIsPageLoading(false);
           alreadyJumpedRef.current = true;
         });
         return;
-      } else if (posts.length > 0) {
-        alreadyJumpedRef.current = true;
-        setIsPageLoading(false);
       }
     }
     // Priority 3: goLast (New unread or bottom)
@@ -712,7 +708,6 @@ const TopicPage = () => {
         if (!hasExplicitPage && topic?.posts_count) {
           const finalTargetPage = Math.ceil(topic.posts_count / ITEMS_PER_PAGE) || 1;
           if (currentPage !== finalTargetPage) {
-            jumpTargetPageRef.current = finalTargetPage;
             setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
             return;
           }
@@ -1118,7 +1113,6 @@ const TopicPage = () => {
 
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
-        jumpTargetPageRef.current = targetPage;
         setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
       } else {
         // ОПТИМИСТИЧНЫЙ UI: мгновенно отображаем свой пост, не дожидаясь ни Cloud Functions, ни RTDB
@@ -1280,7 +1274,6 @@ const TopicPage = () => {
 
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
-        jumpTargetPageRef.current = targetPage;
         setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
       } else {
         const optimisticPost = {
