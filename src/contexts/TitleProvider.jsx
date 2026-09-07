@@ -12,7 +12,7 @@ export const usePageTitle = () => useContext(TitleContext);
 export const TitleProvider = ({ children }) => {
   const [pageTitle, setPageTitle] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
-  const { user, profile, settings, hasPermission, PERMISSIONS, activeDmConvId } = useAuth();
+  const { user, profile, settings, hasPermission, PERMISSIONS, activeDmConvId, unreadTopicsCount } = useAuth();
   const { lang } = useI18n();
   const { activeDesign } = useDesign();
 
@@ -24,10 +24,10 @@ export const TitleProvider = ({ children }) => {
   const [userCount, setUserCount] = React.useState(0);
   const [adminCount, setAdminCount] = React.useState(0);
 
-  // Combine counts into unreadCount
+  // Combine counts into unreadCount (notifications + admin + DMs + new topics/posts)
   useEffect(() => {
-    setUnreadCount(userCount + adminCount + dmCount);
-  }, [userCount, adminCount, dmCount]);
+    setUnreadCount(userCount + adminCount + dmCount + (unreadTopicsCount || 0));
+  }, [userCount, adminCount, dmCount, unreadTopicsCount]);
 
   // Recalculate dmCount whenever activeDmConvId changes (e.g. user opens/closes a chat)
   useEffect(() => {

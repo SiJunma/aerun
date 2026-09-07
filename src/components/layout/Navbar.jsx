@@ -10,7 +10,6 @@ import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../
 import { subscribeToDmUnread } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
-import { usePageTitle } from '../../contexts/TitleProvider';
 
 const Navigation = () => {
   const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, activeDmConvId } = useAuth();
@@ -24,7 +23,6 @@ const Navigation = () => {
   const [expanded, setExpanded] = React.useState(false);
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [authModalMode, setAuthModalMode] = React.useState('login');
-  const { setUnreadCount } = usePageTitle();
 
   const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
@@ -97,11 +95,6 @@ const Navigation = () => {
     prevTotalBadgeRef.current = totalBadge;
   }, [totalBadge, profile?.settings?.sound?.enabled, profile?.settings?.sound?.volume]);
 
-  // Update unread count in TitleProvider
-  React.useEffect(() => {
-    setUnreadCount(totalBadge);
-  }, [totalBadge, setUnreadCount]);
-
   const handleLogout = async () => {
     await logout();
     if (settings?.whitelistMode) {
@@ -129,7 +122,7 @@ const Navigation = () => {
               className="me-2 border-0 p-1"
               onClick={() => setExpanded(!expanded)}
             />
-            {unreadTopicsCount > 0 && (
+            {(unreadTopicsCount > 0 || totalBadge > 0) && (
               <span 
                 className="position-absolute rounded-circle bg-warning shadow-sm" 
                 style={{ 

@@ -26,6 +26,7 @@ import {
   ref as rtdbRef,
   remove as rtdbRemove,
   update as rtdbUpdate,
+  increment as rtdbIncrement,
   onChildAdded,
   onChildRemoved,
   query as rtdbQuery,
@@ -142,6 +143,59 @@ export const createTopic = async (topicData, firstPostData) => {
 
     // post_count increment is handled server-side via Cloud Functions
   });
+
+  // Optimistic RTDB cache updates (main_page_cache categories & latest_topics)
+  if (rtdb) {
+    try {
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const authorName = firstPostData.author_name || 'User';
+      const authorAvatar = firstPostData.author_avatar || '';
+      const authorId = firstPostData.author_id || null;
+
+      // 1. Patch category in main_page_cache
+      rtdbUpdate(rtdbRef(rtdb, `main_page_cache/categories/${topicData.category_id}`), {
+        topics_count: rtdbIncrement(1),
+        posts_count: rtdbIncrement(1),
+        last_post_at: nowIso,
+        last_post_author: authorName,
+        last_post_author_id: authorId,
+        last_post_author_avatar: authorAvatar,
+        last_post_topic_id: topicRef.id,
+        last_post_topic_title: topicData.title,
+        last_post_topic_posts_count: 1,
+        last_post_is_character: !!firstPostData.is_character,
+        last_post_author_character_id: firstPostData.author_character_id || null
+      }).catch(() => {});
+
+      // 2. Patch latest_topics in main_page_cache
+      rtdbUpdate(rtdbRef(rtdb, `main_page_cache/latest_topics/${topicRef.id}`), {
+        id: topicRef.id,
+        category_id: topicData.category_id,
+        title: topicData.title,
+        author_id: authorId,
+        author_name: authorName,
+        author_avatar: authorAvatar,
+        author_role_id: firstPostData.author_role_id || 'player',
+        posts_count: 1,
+        views: 0,
+        reputation: 0,
+        is_pinned: !!topicData.is_pinned,
+        is_locked: !!topicData.is_locked,
+        created_at: nowMs,
+        last_post_id: null,
+        last_post_at: nowMs,
+        last_post_author: authorName,
+        last_post_author_id: authorId,
+        last_post_author_avatar: authorAvatar,
+        last_post_author_role_id: firstPostData.author_role_id || 'player',
+        last_post_is_character: !!firstPostData.is_character,
+        last_post_author_character_id: firstPostData.author_character_id || null
+      }).catch(() => {});
+    } catch (err) {
+      console.warn('[createTopic RTDB sync err]', err);
+    }
+  }
 
   return topicRef.id;
 };
@@ -347,6 +401,47 @@ export const createPost = async (postData) => {
     // post_count increment is handled server-side via Cloud Functions
   });
 
+  // Optimistic RTDB cache updates (main_page_cache categories & latest_topics)
+  if (rtdb && postData.topic_id) {
+    try {
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const authorName = postData.author_name || 'User';
+      const authorAvatar = postData.author_avatar || '';
+      const authorId = postData.author_id || null;
+
+      // 1. Patch category in main_page_cache if category_id is known
+      if (postData.category_id) {
+        rtdbUpdate(rtdbRef(rtdb, `main_page_cache/categories/${postData.category_id}`), {
+          posts_count: rtdbIncrement(1),
+          last_post_at: nowIso,
+          last_post_author: authorName,
+          last_post_author_id: authorId,
+          last_post_author_avatar: authorAvatar,
+          last_post_topic_id: postData.topic_id,
+          last_post_topic_title: postData.topic_title || '',
+          last_post_is_character: !!postData.is_character,
+          last_post_author_character_id: postData.author_character_id || null
+        }).catch(() => {});
+      }
+
+      // 2. Patch latest_topics in main_page_cache
+      rtdbUpdate(rtdbRef(rtdb, `main_page_cache/latest_topics/${postData.topic_id}`), {
+        last_post_id: postRef.id,
+        last_post_at: nowMs,
+        last_post_author: authorName,
+        last_post_author_id: authorId,
+        last_post_author_avatar: authorAvatar,
+        last_post_author_role_id: postData.author_role_id || 'player',
+        last_post_is_character: !!postData.is_character,
+        last_post_author_character_id: postData.author_character_id || null,
+        posts_count: rtdbIncrement(1)
+      }).catch(() => {});
+    } catch (err) {
+      console.warn('[createPost RTDB sync err]', err);
+    }
+  }
+
   // Notifications are handled server-side by the onPostCreated Cloud Function
   // (handlePostNotifications). Do NOT duplicate that logic here.
 
@@ -472,6 +567,19 @@ export const updatePost = async (postId, content, metadata = {}, performerId, au
   if (performerId && authorId && performerId !== authorId) {
     await logAdminAction('post_edited_by_admin', performerId, { targetId: postId, authorId });
   }
+
+  if (rtdb && metadata.topic_id) {
+    const rtdbPatch = {
+      content,
+      edited_at: Date.now()
+    };
+    if (metadata.author_name !== undefined) rtdbPatch.author_name = metadata.author_name;
+    if (metadata.author_avatar !== undefined) rtdbPatch.author_avatar = metadata.author_avatar;
+    if (metadata.is_character !== undefined) rtdbPatch.is_character = metadata.is_character;
+    if (metadata.author_character_id !== undefined) rtdbPatch.author_character_id = metadata.author_character_id;
+    if (metadata.rolls !== undefined) rtdbPatch.rolls = metadata.rolls;
+    rtdbUpdate(rtdbRef(rtdb, `topic_posts_cache/${metadata.topic_id}/posts/${postId}`), rtdbPatch).catch(() => {});
+  }
 };
 
 export const updateTopic = async (topicId, data, performerId, authorId) => {
@@ -507,11 +615,27 @@ export const updateTopic = async (topicId, data, performerId, authorId) => {
             await updateDoc(categoryRef, {
               last_post_topic_title: data.title
             });
+            if (rtdb) {
+              rtdbUpdate(rtdbRef(rtdb, `main_page_cache/categories/${categoryId}`), {
+                last_post_topic_title: data.title
+              }).catch(() => {});
+            }
           }
         }
       }
     } catch (err) {
       console.error('[updateTopic sync]', err);
+    }
+  }
+
+  // Optimistic RTDB update for latest_topics
+  if (rtdb) {
+    const topicPatch = {};
+    if (data.title !== undefined) topicPatch.title = data.title;
+    if (data.is_pinned !== undefined) topicPatch.is_pinned = data.is_pinned;
+    if (data.is_locked !== undefined) topicPatch.is_locked = data.is_locked;
+    if (Object.keys(topicPatch).length > 0) {
+      rtdbUpdate(rtdbRef(rtdb, `main_page_cache/latest_topics/${topicId}`), topicPatch).catch(() => {});
     }
   }
 };
@@ -677,6 +801,9 @@ export const deleteTopics = async (topicIds, performerId) => {
       }
     }
 
+    if (rtdb) {
+      rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${topicId}`)).catch(() => {});
+    }
   }
 };
 
@@ -695,6 +822,12 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
     const postsCount = topicData.posts_count || 0;
 
     if (sourceCategoryId === targetCategoryId) continue;
+
+    if (rtdb) {
+      rtdbUpdate(rtdbRef(rtdb, `main_page_cache/latest_topics/${topicId}`), {
+        category_id: targetCategoryId
+      }).catch(() => {});
+    }
 
     await runTransaction(db, async (transaction) => {
       // 1. Update Topic's category_id
@@ -939,6 +1072,18 @@ export const movePosts = async (postIds, targetTopicId, performerId) => {
           last_post_is_character: latest.is_character || false,
           last_post_author_character_id: latest.author_character_id || null,
         });
+        if (rtdb) {
+          const lpMs = latest.created_at?.toMillis?.() ?? (typeof latest.created_at === 'number' ? latest.created_at : (latest.created_at ? new Date(latest.created_at).getTime() : Date.now()));
+          rtdbUpdate(rtdbRef(rtdb, `main_page_cache/latest_topics/${topicId}`), {
+            posts_count: postsList.length,
+            last_post_at: lpMs,
+            last_post_author: latest.author_name || null,
+            last_post_author_id: latest.author_id || null,
+            last_post_author_avatar: latest.author_avatar || null,
+            last_post_is_character: !!latest.is_character,
+            last_post_author_character_id: latest.author_character_id || null
+          }).catch(() => {});
+        }
       } else {
         await updateDoc(tRef, {
           last_post_at: null,
@@ -948,6 +1093,9 @@ export const movePosts = async (postIds, targetTopicId, performerId) => {
           last_post_is_character: null,
           last_post_author_character_id: null,
         });
+        if (rtdb) {
+          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${topicId}`)).catch(() => {});
+        }
       }
     };
 

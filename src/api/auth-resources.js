@@ -68,12 +68,29 @@ export const fetchLatestTopics = async (limitCount = 50) => {
   }
 };
 
+import { subscribeToLatestTopicsRtdb } from './categories';
+
 export const subscribeToLatestTopics = (callback, limitCount = 50) => {
-  let isSubscribed = true;
+  let hasReceivedRtdb = false;
+  
+  // 1. Subscribe to RTDB real-time stream
+  const unsubRtdb = subscribeToLatestTopicsRtdb((topics) => {
+    if (topics && topics.length > 0) {
+      hasReceivedRtdb = true;
+      callback(topics.slice(0, limitCount));
+    }
+  }, limitCount);
+
+  // 2. Initial fallback fetch via Callable function if RTDB is still empty
   fetchLatestTopics(limitCount).then(topics => {
-    if (isSubscribed) callback(topics);
+    if (!hasReceivedRtdb && topics && topics.length > 0) {
+      callback(topics);
+    }
   });
-  return () => { isSubscribed = false; };
+
+  return () => {
+    if (typeof unsubRtdb === 'function') unsubRtdb();
+  };
 };
 
 // ── Guest Activity ──────────────────────────────────────────────────────────

@@ -28,7 +28,13 @@
         ".write": "auth != null"
       },
       "stats": {
-        ".write": false
+        ".write": "auth != null"
+      },
+      "latest_topics": {
+        ".write": "auth != null",
+        ".indexOn": [
+          "last_post_at"
+        ]
       }
     },
     "topic_posts_cache": {

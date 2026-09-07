@@ -313,10 +313,11 @@ This file serves as the master context for AI interaction, combining the current
           }
         },
         "main_page_cache": {
-          "description": "Cached categories and global stats for the home page (0 Firestore reads, updated by Cloud Functions).",
+          "description": "Cached categories, global stats, and latest topics for real-time live synchronization (0 Firestore reads, updated by Cloud Functions and client optimistic writes).",
           "fields": {
             "categories": "object (maps catId to full category metadata and last_post_* info)",
-            "stats": "object (total_topics, total_posts, total_users, newest_user_*, updated_at)"
+            "stats": "object (total_topics, total_posts, total_users, newest_user_*, updated_at)",
+            "latest_topics": "object (maps topicId to latest topic metadata for live unread updates and new-replies feed)"
           }
         },
         "topic_posts_cache": {

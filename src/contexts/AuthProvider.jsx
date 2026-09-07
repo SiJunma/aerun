@@ -44,7 +44,7 @@ import {
 } from '../api/rtdb-presence';
 import { subscribeToDmUnread } from '../api/dms';
 import { clearAllDmCache } from '../api/dm-cache';
-import { fetchSecuredMainPageData } from '../api/categories';
+import { fetchSecuredMainPageData, subscribeToMainPageCategoriesRtdb, subscribeToMainPageStatsRtdb } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -109,6 +109,24 @@ export const AuthProvider = ({ children }) => {
   // Real-time Online Users subscription from RTDB (0 Firestore reads)
   useEffect(() => {
     return subscribeToOnlineUsers(setActiveUsers);
+  }, []);
+
+  // Real-time Categories & Stats subscriptions from RTDB (0 Firestore reads)
+  useEffect(() => {
+    const unsubCats = subscribeToMainPageCategoriesRtdb((cats) => {
+      if (cats && cats.length > 0) {
+        setCategories(cats);
+      }
+    });
+    const unsubStats = subscribeToMainPageStatsRtdb((stats) => {
+      if (stats) {
+        setForumStats(stats);
+      }
+    });
+    return () => {
+      if (unsubCats) unsubCats();
+      if (unsubStats) unsubStats();
+    };
   }, []);
 
   // Real-time DM Unread subscription from RTDB (0 Firestore reads)

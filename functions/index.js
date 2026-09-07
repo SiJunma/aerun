@@ -65,6 +65,26 @@ async function removeRtdbMainPageCategory(catId) {
   }
 }
 
+async function updateRtdbLatestTopic(topicId, updates) {
+  if (!topicId) return;
+  try {
+    const rtdb = admin.database();
+    await rtdb.ref(`main_page_cache/latest_topics/${topicId}`).update(updates);
+  } catch (err) {
+    logger.warn(`[updateRtdbLatestTopic] ${topicId} err:`, err);
+  }
+}
+
+async function removeRtdbLatestTopic(topicId) {
+  if (!topicId) return;
+  try {
+    const rtdb = admin.database();
+    await rtdb.ref(`main_page_cache/latest_topics/${topicId}`).remove();
+  } catch (err) {
+    logger.warn(`[removeRtdbLatestTopic] ${topicId} err:`, err);
+  }
+}
+
 async function mirrorPostToRtdbCache(topicId, postId, postData, postsPerPage = 20) {
   if (!topicId || !postId) return;
   try {
@@ -777,14 +797,17 @@ exports.getSecuredMainPageData = onCall(
     // 1. Check RTDB main_page_cache
     let rtdbCategories = null;
     let rtdbStats = null;
+    let rtdbLatestTopics = null;
 
     try {
-      const [catSnap, statsSnap] = await Promise.all([
+      const [catSnap, statsSnap, latestTopicsSnap] = await Promise.all([
         rtdb.ref('main_page_cache/categories').once('value'),
-        rtdb.ref('main_page_cache/stats').once('value')
+        rtdb.ref('main_page_cache/stats').once('value'),
+        rtdb.ref('main_page_cache/latest_topics').once('value')
       ]);
       rtdbCategories = catSnap.val();
       rtdbStats = statsSnap.val();
+      rtdbLatestTopics = latestTopicsSnap.val();
     } catch (err) {
       logger.warn('[getSecuredMainPageData RTDB read err]', err);
     }
@@ -843,12 +866,67 @@ exports.getSecuredMainPageData = onCall(
       }
     }
 
+    // Fallback if RTDB latest_topics cache is empty: populate from Firestore!
+    if (!rtdbLatestTopics || Object.keys(rtdbLatestTopics).length === 0) {
+      try {
+        const topicsSnap = await db.collection("topics").orderBy("last_post_at", "desc").limit(50).get();
+        rtdbLatestTopics = {};
+        const topicBatch = {};
+
+        topicsSnap.forEach(doc => {
+          const t = doc.data();
+          const lpMs = t.last_post_at?.toMillis ? t.last_post_at.toMillis() : (typeof t.last_post_at === 'number' ? t.last_post_at : (t.last_post_at ? new Date(t.last_post_at).getTime() : Date.now()));
+          const crMs = t.created_at?.toMillis ? t.created_at.toMillis() : (typeof t.created_at === 'number' ? t.created_at : (t.created_at ? new Date(t.created_at).getTime() : Date.now()));
+          const topicObj = {
+            id: doc.id,
+            category_id: t.category_id || '',
+            title: t.title || '',
+            author_id: t.author_id || null,
+            author_name: t.author_name || 'User',
+            author_avatar: t.author_avatar || '',
+            author_role_id: t.author_role_id || 'player',
+            posts_count: t.posts_count || 1,
+            views: t.views || 0,
+            reputation: t.reputation || 0,
+            is_pinned: !!t.is_pinned,
+            is_locked: !!t.is_locked,
+            created_at: crMs,
+            last_post_id: t.last_post_id || null,
+            last_post_at: lpMs,
+            last_post_author: t.last_post_author || t.author_name || 'User',
+            last_post_author_id: t.last_post_author_id || t.author_id || null,
+            last_post_author_avatar: t.last_post_author_avatar || t.author_avatar || '',
+            last_post_author_role_id: t.last_post_author_role_id || 'player',
+            last_post_is_character: !!t.last_post_is_character,
+            last_post_author_character_id: t.last_post_author_character_id || null
+          };
+          rtdbLatestTopics[doc.id] = topicObj;
+          topicBatch[doc.id] = topicObj;
+        });
+
+        if (Object.keys(topicBatch).length > 0) {
+          rtdb.ref('main_page_cache/latest_topics').set(topicBatch).catch(() => { });
+        }
+      } catch (err) {
+        logger.warn('[getSecuredMainPageData latest_topics fallback err]', err);
+      }
+    }
+
     // 2. Filter allowed categories using session_perms
     const allowedCatIds = await getSessionPerms(db, uid, requester.role);
 
     const categories = Object.values(rtdbCategories)
       .filter(cat => allowedCatIds.has(cat.id))
       .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    const latestTopics = Object.values(rtdbLatestTopics || {})
+      .filter(t => allowedCatIds.has(t.category_id))
+      .sort((a, b) => {
+        const aMs = typeof a.last_post_at === 'number' ? a.last_post_at : (a.last_post_at ? new Date(a.last_post_at).getTime() : 0);
+        const bMs = typeof b.last_post_at === 'number' ? b.last_post_at : (b.last_post_at ? new Date(b.last_post_at).getTime() : 0);
+        return bMs - aMs;
+      })
+      .slice(0, 50);
 
     const stats = {
       totalTopics: rtdbStats?.total_topics ?? 0,
@@ -861,7 +939,7 @@ exports.getSecuredMainPageData = onCall(
       } : null
     };
 
-    return { categories, latestTopics: [], stats, dailyActiveUsers: [] };
+    return { categories, latestTopics, stats, dailyActiveUsers: [] };
   }
 );
 
@@ -944,6 +1022,31 @@ exports.onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => 
     admin.database().ref('main_page_cache/stats').update({
       total_topics: admin.database.ServerValue.increment(1)
     }).catch(() => { });
+
+    const nowMs = Date.now();
+    updateRtdbLatestTopic(event.params.topicId, {
+      id: event.params.topicId,
+      category_id,
+      title: topic.title || '',
+      author_id: author_id || null,
+      author_name: topic.author_name || 'User',
+      author_avatar: topic.author_avatar || '',
+      author_role_id: topic.author_role_id || 'player',
+      posts_count: 1,
+      views: 0,
+      reputation: 0,
+      is_pinned: !!topic.is_pinned,
+      is_locked: !!topic.is_locked,
+      created_at: nowMs,
+      last_post_id: null,
+      last_post_at: nowMs,
+      last_post_author: topic.author_name || 'User',
+      last_post_author_id: author_id || null,
+      last_post_author_avatar: topic.author_avatar || '',
+      last_post_author_role_id: topic.author_role_id || 'player',
+      last_post_is_character: !!topic.is_character,
+      last_post_author_character_id: topic.author_character_id || null
+    });
   } catch (error) {
     logger.error(`onTopicCreated error (${event.params.topicId}):`, error);
   }
@@ -961,6 +1064,21 @@ exports.onTopicUpdated = onDocumentUpdated("topics/{topicId}", async (event) => 
   const db = admin.firestore();
 
   try {
+    if (after) {
+      const topicUpdates = {
+        title: after.title || '',
+        category_id: after.category_id || '',
+        is_pinned: !!after.is_pinned,
+        is_locked: !!after.is_locked
+      };
+      if (after.last_post_at) {
+        topicUpdates.last_post_at = after.last_post_at.toMillis
+          ? after.last_post_at.toMillis()
+          : (typeof after.last_post_at === 'number' ? after.last_post_at : new Date(after.last_post_at).getTime());
+      }
+      updateRtdbLatestTopic(topicId, topicUpdates);
+    }
+
     // 1. If topic was moved to a different category
     if (before?.category_id && after?.category_id && before.category_id !== after.category_id) {
       await syncCategoryMetadata(db, before.category_id);
@@ -1056,6 +1174,7 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
         posts_count: admin.database.ServerValue.increment(-posts_count)
       });
     }
+    removeRtdbLatestTopic(event.params.topicId);
     admin.database().ref(`topic_posts_cache/${event.params.topicId}`).remove().catch(() => { });
     admin.database().ref('main_page_cache/stats').update({
       total_topics: admin.database.ServerValue.increment(-1),
@@ -1174,6 +1293,21 @@ exports.onPostCreated = onDocumentCreated("posts/{postId}", async (event) => {
 
     const nowMs = Date.now();
 
+    updateRtdbLatestTopic(topic_id, {
+      id: topic_id,
+      category_id,
+      title: topic_title || '',
+      last_post_id: event.params.postId,
+      last_post_at: nowMs,
+      last_post_author: author_name,
+      last_post_author_id: author_id || null,
+      last_post_author_avatar: author_avatar || null,
+      last_post_author_role_id: post.author_role_id || 'player',
+      last_post_is_character: !!is_character,
+      last_post_author_character_id: author_character_id || null,
+      posts_count: newPostCount
+    });
+
     // Mirror post to topic_posts_cache (last 3 pages)
     mirrorPostToRtdbCache(
       topic_id,
@@ -1273,12 +1407,14 @@ exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
       .get();
 
     if (!firstPostSnap.empty && firstPostSnap.docs[0].id === event.params.postId) {
-      await db.collection("topics").doc(topicId).update({
+      const creatorUpdates = {
         author_name: after.author_name || 'User',
         author_avatar: after.author_avatar || '',
         is_character: !!after.is_character,
         author_character_id: after.author_character_id || null
-      });
+      };
+      await db.collection("topics").doc(topicId).update(creatorUpdates);
+      updateRtdbLatestTopic(topicId, creatorUpdates);
       logger.info(`onPostUpdated: synced creator metadata for topic ${topicId} due to first post author update`);
     }
   } catch (error) {
@@ -1684,6 +1820,7 @@ async function syncTopicMetadata(db, topicId) {
 
   if (!postSnap.empty) {
     const lp = postSnap.docs[0].data();
+    const lpMs = lp.created_at?.toMillis ? lp.created_at.toMillis() : (typeof lp.created_at === 'number' ? lp.created_at : (lp.created_at ? new Date(lp.created_at).getTime() : Date.now()));
     await topicRef.update({
       last_post_at: lp.created_at,
       last_post_author: lp.author_name,
@@ -1693,11 +1830,26 @@ async function syncTopicMetadata(db, topicId) {
       last_post_author_character_id: lp.author_character_id || null
     });
     const topicSnap = await topicRef.get();
-    categoryId = topicSnap.data()?.category_id;
+    const tData = topicSnap.exists ? topicSnap.data() : {};
+    categoryId = tData.category_id;
+    updateRtdbLatestTopic(topicId, {
+      id: topicId,
+      category_id: categoryId || '',
+      title: tData.title || '',
+      posts_count: tData.posts_count || 1,
+      last_post_id: postSnap.docs[0].id,
+      last_post_at: lpMs,
+      last_post_author: lp.author_name || null,
+      last_post_author_id: lp.author_id || null,
+      last_post_author_avatar: lp.author_avatar || null,
+      last_post_is_character: !!lp.is_character,
+      last_post_author_character_id: lp.author_character_id || null
+    });
   } else {
     // No posts left — topic will likely be deleted by another process or trigger
     // but we'll neutralise it just in case
     await topicRef.update({ last_post_at: null, last_post_author: null });
+    removeRtdbLatestTopic(topicId);
   }
 
   if (categoryId) {
