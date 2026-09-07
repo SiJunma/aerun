@@ -98,13 +98,14 @@ export const AuthProvider = ({ children }) => {
   const rolesUnsubRef = useRef(null);
   const catsUnsubRef = useRef(null);
 
-  // RTDB Presence initialization (runs on connect / login)
+  // RTDB Presence initialization (runs on connect / login / profile load)
   useEffect(() => {
-    if (user?.uid && profile) {
+    if (user?.uid && profile && profile.id === user.uid) {
       isRtdbOnlineRef.current = true;
+      lastPushTimeRef.current = Date.now();
       return initRtdbPresence(user.uid, profile);
     }
-  }, [user?.uid]);
+  }, [user?.uid, profile?.id, profile?.nickname, profile?.avatar_url, profile?.role_id]);
 
   // Real-time Online Users subscription from RTDB (0 Firestore reads)
   useEffect(() => {
@@ -403,6 +404,7 @@ export const AuthProvider = ({ children }) => {
       if (latestTopicsUnsubRef.current) { latestTopicsUnsubRef.current(); latestTopicsUnsubRef.current = null; }
 
       if (firebaseUser) {
+        setProfile(prev => (prev?.id === firebaseUser.uid ? prev : null));
         setUser(firebaseUser);
 
         const usesPassword = firebaseUser.providerData.some(p => p.providerId === 'password');

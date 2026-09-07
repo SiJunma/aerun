@@ -193,7 +193,9 @@ export const subscribeToOnlineUsers = (callback) => {
         // User must be explicitly in 'online' state (not idle/offline and not logged_out)
         if (u.state !== 'online') return;
 
-        const lastSeenMs = typeof u.last_seen === 'number' ? u.last_seen : 0;
+        const lastSeenMs = typeof u.last_seen === 'number'
+          ? u.last_seen
+          : (u.last_seen ? new Date(u.last_seen).getTime() : 0);
         const isWithin15Min = lastSeenMs > 0 && (now - lastSeenMs < ONLINE_WINDOW_MS);
 
         if (isWithin15Min) {
@@ -206,7 +208,7 @@ export const subscribeToOnlineUsers = (callback) => {
             status_line: u.status_line || '',
             signature: u.signature || '',
             active_character: u.active_character || null,
-            last_seen: u.last_seen
+            last_seen: lastSeenMs
           });
         }
       });
@@ -243,7 +245,9 @@ export const subscribeToUserOnlineStatus = (uid, callback) => {
         return;
       }
       const ONLINE_WINDOW_MS = 15 * 60 * 1000;
-      const lastSeenMs = typeof val.last_seen === 'number' ? val.last_seen : 0;
+      const lastSeenMs = typeof val.last_seen === 'number'
+        ? val.last_seen
+        : (val.last_seen ? new Date(val.last_seen).getTime() : 0);
       const isWithin15Min = lastSeenMs > 0 && (Date.now() - lastSeenMs < ONLINE_WINDOW_MS);
       callback(isWithin15Min);
     }, (err) => {
@@ -280,8 +284,13 @@ export const subscribeToDailyActiveUsers = (callback) => {
       Object.keys(data).forEach((uid) => {
         const u = data[uid];
         if (!u || u.role_id === 'banned') return;
-        // Use last_activity for persistent daily tracking (unaffected by logout)
-        const lastActivityMs = typeof u.last_activity === 'number' ? u.last_activity : 0;
+        // Use last_activity for persistent daily tracking (unaffected by logout), with fallback to last_seen
+        const lastActivityMs = typeof u.last_activity === 'number'
+          ? u.last_activity
+          : (typeof u.last_seen === 'number'
+              ? u.last_seen
+              : (u.last_activity ? new Date(u.last_activity).getTime() : (u.last_seen ? new Date(u.last_seen).getTime() : 0))
+            );
         if (lastActivityMs >= cutoff) {
           dailyList.push({
             id: uid,

@@ -11,7 +11,8 @@ import {
 } from '../api/forum';
 
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { ref as rtdbRef, remove as rtdbRemove } from 'firebase/database';
+import { db, rtdb } from '../../firebase';
 import { subscribeToCharacters } from '../api/character';
 import { fetchUnreadTopicNotifications } from '../api/notifications';
 
@@ -226,6 +227,7 @@ const TopicPage = () => {
   const prevTopicStatsRef = useRef(null);
 
   const [accessError, setAccessError] = React.useState(null);
+  const [topicNotFound, setTopicNotFound] = React.useState(false);
   const [postsLoadError, setPostsLoadError] = React.useState(null);
 
   const loadPosts = React.useCallback(async (overridePage) => {
@@ -320,8 +322,14 @@ const TopicPage = () => {
       return data;
     } catch (err) {
       if (currentFetchId !== activeFetchIdRef.current) return [];
-      console.error(err);
-      if (err?.message?.includes('permission') || err?.message?.includes('403') || err?.code === 'permission-denied') {
+      console.error('[loadPosts error]', err);
+      const errMsg = (err?.message || '').toLowerCase();
+      if (errMsg.includes('topic not found') || err?.code === 'not-found') {
+        setTopicNotFound(true);
+        if (rtdb && id) {
+          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => {});
+        }
+      } else if (errMsg.includes('permission') || errMsg.includes('403') || err?.code === 'permission-denied') {
         setAccessError(err.message || 'Access denied');
       } else {
         setPostsLoadError(err);
@@ -357,6 +365,7 @@ const TopicPage = () => {
     // Only clear topic if navigating to a DIFFERENT topic
     if (currentTopicIdRef.current !== id) {
       setTopic(null);
+      setTopicNotFound(false);
       currentTopicIdRef.current = id;
     }
 
@@ -368,6 +377,16 @@ const TopicPage = () => {
       }
       if (data) {
         setTopic(data);
+        setTopicNotFound(false);
+      } else {
+        // Topic does not exist in Firestore (was deleted)
+        setTopic(null);
+        setTopicNotFound(true);
+        setIsPageLoading(false);
+        // Clean up stale RTDB cache entry immediately
+        if (rtdb && id) {
+          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => {});
+        }
       }
     });
 
@@ -1432,6 +1451,16 @@ const TopicPage = () => {
         const categoryId = topic?.category_id;
 
         if (isFirstPost) {
+          if ((posts.length > 1 || (topic?.posts_count || 0) > 1) && !hasPermission('moderate_content')) {
+            showToast(
+              lang === 'ru'
+                ? 'Нельзя удалить тему, в которой уже есть ответы других участников. Обратитесь к модератору.'
+                : 'Cannot delete a topic that already has replies from other users. Please contact a moderator.',
+              'warning'
+            );
+            setDeletingPost(null);
+            return;
+          }
           await deleteTopics([id], user.uid);
           if (categoryId) {
             navigate(`/category/${categoryId}`);
@@ -1563,6 +1592,37 @@ const TopicPage = () => {
     </Container>
   );
 
+  // Show Topic Not Found card
+  if (topicNotFound) {
+    return (
+      <Container className="py-5">
+        <Card className="p-4 border-0 shadow-sm mx-auto text-center forum-card" style={{ maxWidth: 520, borderRadius: '1rem' }}>
+          <div className="mb-3 d-flex justify-content-center">
+            <div className="rounded-circle p-3 d-inline-flex align-items-center justify-content-center" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+              <MessageSquareOff size={36} />
+            </div>
+          </div>
+          <h4 className="fw-bold mb-2">
+            {lang === 'ru' ? 'Тема не найдена' : 'Topic Not Found'}
+          </h4>
+          <p className="text-muted mb-4 small">
+            {lang === 'ru'
+              ? 'Запрошенная тема была удалена, перемещена или никогда не существовала.'
+              : 'The requested topic has been deleted, moved, or never existed.'}
+          </p>
+          <div className="d-flex justify-content-center gap-2">
+            <Button as={Link} to="/" variant="primary" className="rounded-pill px-4 btn-sm">
+              {lang === 'ru' ? 'На главную' : 'Go Home'}
+            </Button>
+            <Button as={Link} to="/new-replies" variant="outline-secondary" className="rounded-pill px-3 btn-sm">
+              {lang === 'ru' ? 'Новые ответы' : 'New Replies'}
+            </Button>
+          </div>
+        </Card>
+      </Container>
+    );
+  }
+
   // Show access denied page or network error page if subscribeToTopic or loadPosts failed
   if (accessError) {
     const isPerm = typeof accessError === 'string' && (
@@ -1595,7 +1655,7 @@ const TopicPage = () => {
     );
   }
 
-  // Full-page skeleton only when topic data hasn't loaded at all (first visit)
+  // Full-page skeleton only when topic data is actively loading
   if (!topic) {
     return <TopicPageSkeleton />;
   }
@@ -2386,14 +2446,16 @@ const TopicPage = () => {
                           <div className="d-flex gap-2 gap-md-3">
                             {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
                               <>
-                                <Button
-                                  variant="link"
-                                  size="sm"
-                                  className="footer-link p-0 text-danger"
-                                  onClick={() => setDeletingPost(post)}
-                                >
-                                  {lang === 'ru' ? 'Удалить' : 'Delete'}
-                                </Button>
+                                {(!((index + indexOfFirstItem) === 0) || (posts.length <= 1 && (topic?.posts_count || 0) <= 1) || hasPermission('moderate_content')) && (
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="footer-link p-0 text-danger"
+                                    onClick={() => setDeletingPost(post)}
+                                  >
+                                    {lang === 'ru' ? 'Удалить' : 'Delete'}
+                                  </Button>
+                                )}
                                 <Button
                                   variant="link"
                                   size="sm"
@@ -2897,7 +2959,7 @@ const TopicPage = () => {
           onHide={() => setShowDeleteTopicModal(false)}
           onConfirm={async () => {
             const catId = topic.category_id;
-            await deleteTopics([id]);
+            await deleteTopics([id], user?.uid);
             navigate(catId ? `/category/${catId}` : '/');
           }}
           title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}

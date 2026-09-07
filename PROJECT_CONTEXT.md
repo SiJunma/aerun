@@ -524,32 +524,38 @@ service cloud.firestore {
 
     // --- Categories ---
     match /categories/{catId} {
-      allow read: if true;
+      allow get: if isAdmin() || resource == null || hasCategoryDataPermission(resource.data, 'view_forum');
+      allow list: if isAdmin();
       allow create, delete: if isAdmin();
-      // Counter updates and last_post metadata are now server-side only (Cloud Functions)
-      allow update: if isAdmin()
-        || ((isActive() || !isSignedIn()) && !request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['topics_count', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_topic_id', 'last_post_topic_title', 'last_post_is_character', 'last_post_author_character_id']));
+      // All category counters and metadata are now written by Cloud Functions (Admin SDK).
+      // No client path needs to update a category document.
+      allow update: if isAdmin();
     }
 
     // --- Topics ---
     match /topics/{topicId} {
-      allow read: if true;
-      // Active users can create topics (UI handles category-specific permissions)
-      allow create: if isActive();
-      // Author or admin can edit; view/counter bumps allowed for all active users
-      allow update: if isAdmin()
-        || (isActive() && (
-          resource.data.author_id == request.auth.uid
-          || request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['views', 'posts_count', 'last_post_at', 'last_post_author', 'last_post_author_id', 'last_post_author_avatar', 'last_post_is_character', 'last_post_author_character_id'])
-        ));
+      allow get: if isAdmin() || resource == null || hasCategoryPermission(resource.data.category_id, 'view_forum');
+      allow list: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
+
+      allow create: if (isAdmin() || canCreateTopic(request.resource.data.category_id))
+        && (!isSignedIn() || request.resource.data.author_id == request.auth.uid)
+        && request.resource.data.created_at == request.time;
+
+      // Author may only edit content — not moderation flags, counters or ownership.
+      allow update: if isAdmin() || canModerateContent()
+        || (isActive() && resource.data.author_id == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['title', 'content', 'updated_at', 'edited_at', 'edited_by', 'tags']))
+        || ((isActive() || !isSignedIn())
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])
+            && request.resource.data.views == resource.data.views + 1);
+
       allow delete: if canModerateContent() || (isActive() && resource.data.author_id == request.auth.uid && isTopicOpen(topicId));
     }
 
     // --- Posts ---
-    match /posts/{postId} {
-      allow read: if true;
+     match /posts/{postId} {
+      allow read: if isAdmin() || resource == null || hasCategoryPermission(resource.data.category_id, 'view_forum');
       // Active users can create posts; limit to 1000 posts per topic
       allow create: if isActive() && (
         !exists(/databases/$(database)/documents/topics/$(request.resource.data.topic_id)) ||

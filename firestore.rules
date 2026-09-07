@@ -144,7 +144,7 @@ service cloud.firestore {
 
     // --- Categories ---
     match /categories/{catId} {
-      allow get: if isAdmin() || hasCategoryDataPermission(resource.data, 'view_forum');
+      allow get: if isAdmin() || resource == null || hasCategoryDataPermission(resource.data, 'view_forum');
       allow list: if isAdmin();
       allow create, delete: if isAdmin();
       // All category counters and metadata are now written by Cloud Functions (Admin SDK).
@@ -154,7 +154,7 @@ service cloud.firestore {
 
     // --- Topics ---
     match /topics/{topicId} {
-      allow get: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
+      allow get: if isAdmin() || resource == null || hasCategoryPermission(resource.data.category_id, 'view_forum');
       allow list: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
 
       allow create: if (isAdmin() || canCreateTopic(request.resource.data.category_id))
@@ -175,7 +175,7 @@ service cloud.firestore {
 
     // --- Posts ---
      match /posts/{postId} {
-      allow read: if isAdmin() || hasCategoryPermission(resource.data.category_id, 'view_forum');
+      allow read: if isAdmin() || resource == null || hasCategoryPermission(resource.data.category_id, 'view_forum');
 
       allow create: if (isAdmin() || canPostToTopic(request.resource.data.topic_id))
         && (!isSignedIn() || request.resource.data.author_id == request.auth.uid)

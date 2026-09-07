@@ -73,6 +73,11 @@ export const subscribeToTopic = (topicId, callback) => {
       callback(snap.exists() ? { id: snap.id, ...snap.data() } : null, null);
     },
     (err) => {
+      if (err?.code === 'permission-denied') {
+        // Document was deleted or access revoked gracefully
+        callback(null, null);
+        return;
+      }
       console.error('[subscribeToTopic]', err);
       callback(null, err);
     }
@@ -741,68 +746,138 @@ export const deleteTopics = async (topicIds, performerId) => {
     const topicData = topicSnap.data();
     const categoryId = topicData.category_id;
 
-    // Fetch posts outside of atomic block to avoid running queries inside a transaction callback
-    const postsQ = query(collection(db, 'posts'), where('topic_id', '==', topicId));
-    const postsSnap = await getDocs(postsQ);
+    // Fetch posts count for RTDB update (use topic's stored posts_count)
+    let postsCount = topicData.posts_count || 0;
 
-    const batch = writeBatch(db);
+    // Determine if this is an admin/moderator action (performer !== author)
+    const isAdminAction = performerId && performerId !== topicData.author_id;
 
-    // 1. Delete all posts in topic
-    postsSnap.forEach(pDoc => batch.delete(pDoc.ref));
+    if (isAdminAction) {
+      // Admin/Moderator: delete posts client-side before topic deletion.
+      // moderators have canModerateContent() permission which bypasses isTopicOpen() check.
+      // IMPORTANT: Delete posts FIRST (separate batch), THEN delete topic.
+      const postsSnap = await getDocs(query(collection(db, 'posts'), where('topic_id', '==', topicId)));
+      postsCount = postsSnap.size;
+      if (postsSnap.size > 0) {
+        const postsBatch = writeBatch(db);
+        postsSnap.forEach(pDoc => postsBatch.delete(pDoc.ref));
+        await postsBatch.commit();
+      }
+    } else {
+      // Regular player deleting their own topic:
+      // Do NOT attempt to delete posts client-side — regular players only have
+      // permission to delete their OWN posts, and the security rule requires
+      // isTopicOpen() which can produce unexpected results in batch context.
+      // The Cloud Function onTopicDeleted already cascade-deletes all posts via
+      // Admin SDK, so this is fully handled server-side automatically.
+      console.log(`[deleteTopics] Relying on Cloud Function cascade for posts of topic ${topicId}`);
+    }
 
-    // 2. Delete topic
-    batch.delete(topicRef);
+    // Delete the topic document
+    // Security rule: allow delete if (isActive() && author_id == uid && isTopicOpen(topicId))
+    await deleteDoc(topicRef);
 
-    // Log
-    if (performerId) {
+    // Log admin action only when performer is different from the topic author
+    if (isAdminAction) {
       await logAdminAction('topic_deleted', performerId, { targetId: topicId, title: topicData.title });
     }
 
-    // NOTE: topics_count / posts_count decrements are handled server-side
-    // by the onTopicDeleted / onPostDeleted Cloud Function triggers.
+    // NOTE: topics_count / posts_count decrements and notification cleanup are
+    // handled server-side by the onTopicDeleted Cloud Function trigger.
 
-    // Commit the batch
-    await batch.commit();
-
-    // Recalculate Category last_post if needed
+    // Recalculate Category last_post in Firestore if possible (Admin SDK trigger onTopicDeleted
+    // guarantees server-side recalculation via syncCategoryMetadata; ignore client permission errors for non-admins)
     if (categoryId) {
-      const catTopicsQ = query(
-        collection(db, 'topics'),
-        where('category_id', '==', categoryId),
-        orderBy('last_post_at', 'desc'),
-        limit(1)
-      );
-      const catTopicsSnap = await getDocs(catTopicsQ);
-      const catRef = doc(db, 'categories', categoryId);
+      try {
+        const catTopicsQ = query(
+          collection(db, 'topics'),
+          where('category_id', '==', categoryId),
+          orderBy('last_post_at', 'desc'),
+          limit(1)
+        );
+        const catTopicsSnap = await getDocs(catTopicsQ);
+        const catRef = doc(db, 'categories', categoryId);
 
-      if (!catTopicsSnap.empty) {
-        const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
-        await updateDoc(catRef, {
-          last_post_at: latestTopic.last_post_at || null,
-          last_post_author: latestTopic.last_post_author || null,
-          last_post_author_id: latestTopic.last_post_author_id || null,
-          last_post_author_avatar: latestTopic.last_post_author_avatar || null,
-          last_post_topic_id: latestTopic.id || null,
-          last_post_topic_title: latestTopic.title || null,
-          last_post_topic_posts_count: latestTopic.posts_count || null,
-          last_post_is_character: latestTopic.last_post_is_character || false,
-          last_post_author_character_id: latestTopic.last_post_author_character_id || null
-        });
-      } else {
-        await updateDoc(catRef, {
-          last_post_at: null,
-          last_post_author: null,
-          last_post_author_id: null,
-          last_post_topic_id: null,
-          last_post_topic_title: null,
-          last_post_is_character: null,
-          last_post_author_character_id: null
-        });
+        if (!catTopicsSnap.empty) {
+          const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
+          await updateDoc(catRef, {
+            last_post_at: latestTopic.last_post_at || null,
+            last_post_author: latestTopic.last_post_author || null,
+            last_post_author_id: latestTopic.last_post_author_id || null,
+            last_post_author_avatar: latestTopic.last_post_author_avatar || null,
+            last_post_topic_id: latestTopic.id || null,
+            last_post_topic_title: latestTopic.title || null,
+            last_post_topic_posts_count: latestTopic.posts_count || null,
+            last_post_is_character: latestTopic.last_post_is_character || false,
+            last_post_author_character_id: latestTopic.last_post_author_character_id || null
+          });
+        } else {
+          await updateDoc(catRef, {
+            last_post_at: null,
+            last_post_author: null,
+            last_post_author_id: null,
+            last_post_topic_id: null,
+            last_post_topic_title: null,
+            last_post_is_character: null,
+            last_post_author_character_id: null
+          });
+        }
+      } catch (catErr) {
+        // Firestore category documents are updated server-side by onTopicDeleted.
+        // Non-admin clients do not have update permissions on /categories, which is expected.
       }
     }
 
+    // Optimistic RTDB updates for main_page_cache
     if (rtdb) {
       rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${topicId}`)).catch(() => {});
+      if (categoryId) {
+        try {
+          const catTopicsQ = query(
+            collection(db, 'topics'),
+            where('category_id', '==', categoryId),
+            orderBy('last_post_at', 'desc'),
+            limit(1)
+          );
+          const catTopicsSnap = await getDocs(catTopicsQ);
+          if (!catTopicsSnap.empty) {
+            const latestTopic = { id: catTopicsSnap.docs[0].id, ...catTopicsSnap.docs[0].data() };
+            const timestampIso = latestTopic.last_post_at ? (latestTopic.last_post_at.toDate ? latestTopic.last_post_at.toDate().toISOString() : latestTopic.last_post_at) : null;
+            rtdbUpdate(rtdbRef(rtdb, `main_page_cache/categories/${categoryId}`), {
+              topics_count: rtdbIncrement(-1),
+              posts_count: rtdbIncrement(-postsCount),
+              last_post_at: timestampIso,
+              last_post_author: latestTopic.last_post_author || null,
+              last_post_author_id: latestTopic.last_post_author_id || null,
+              last_post_author_avatar: latestTopic.last_post_author_avatar || null,
+              last_post_topic_id: latestTopic.id || null,
+              last_post_topic_title: latestTopic.title || null,
+              last_post_topic_posts_count: latestTopic.posts_count || null,
+              last_post_is_character: latestTopic.last_post_is_character || false,
+              last_post_author_character_id: latestTopic.last_post_author_character_id || null
+            }).catch(() => {});
+          } else {
+            rtdbUpdate(rtdbRef(rtdb, `main_page_cache/categories/${categoryId}`), {
+              topics_count: 0,
+              posts_count: 0,
+              last_post_at: null,
+              last_post_author: null,
+              last_post_author_id: null,
+              last_post_author_avatar: null,
+              last_post_topic_id: null,
+              last_post_topic_title: null,
+              last_post_is_character: null,
+              last_post_author_character_id: null
+            }).catch(() => {});
+          }
+        } catch (rtdbErr) {
+          console.warn('[deleteTopics RTDB sync]', rtdbErr);
+        }
+      }
+      rtdbUpdate(rtdbRef(rtdb, 'main_page_cache/stats'), {
+        total_topics: rtdbIncrement(-1),
+        total_posts: rtdbIncrement(-postsCount)
+      }).catch(() => {});
     }
   }
 };
