@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/auth-resources';
+import { subscribeToRtdbStatuses } from '../api/rtdb-presence';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import Timestamp from '../components/common/Timestamp';
@@ -25,6 +26,7 @@ const MembersPage = () => {
   const { profile, updateSettings, settings } = useAuth();
   const { setPageTitle } = usePageTitle();
   const [users, setUsers] = useState([]);
+  const [rtdbStatuses, setRtdbStatuses] = useState({});
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('nickname');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'desc'
@@ -53,8 +55,10 @@ const MembersPage = () => {
 
   useEffect(() => {
     const unsubUsers = subscribeToAllUsers(setUsers);
+    const unsubStatuses = subscribeToRtdbStatuses(setRtdbStatuses);
     return () => {
       unsubUsers();
+      unsubStatuses();
     };
   }, []);
 
@@ -66,6 +70,20 @@ const MembersPage = () => {
     } catch {
       return '...';
     }
+  };
+
+  const getUserLastSeen = (u) => {
+    const rtdb = rtdbStatuses[u.id] || rtdbStatuses[u.uid];
+    if (rtdb) {
+      const lastActive = typeof rtdb.last_activity === 'number'
+        ? rtdb.last_activity
+        : (typeof rtdb.last_seen === 'number'
+            ? rtdb.last_seen
+            : (rtdb.last_activity ? new Date(rtdb.last_activity).getTime() : (rtdb.last_seen ? new Date(rtdb.last_seen).getTime() : 0))
+          );
+      if (lastActive > 0) return lastActive;
+    }
+    return u.last_seen || u.updated_at || u.created_at;
   };
 
   const formatLastSeen = (timestamp) => {
@@ -89,7 +107,12 @@ const MembersPage = () => {
       if (sortField === 'role_id') {
         aVal = ROLE_PRIORITY[a.role_id] || 60;
         bVal = ROLE_PRIORITY[b.role_id] || 60;
-      } else if (sortField === 'created_at' || sortField === 'last_seen' || sortField === 'updated_at') {
+      } else if (sortField === 'last_seen') {
+        const aSeen = getUserLastSeen(a);
+        const bSeen = getUserLastSeen(b);
+        aVal = typeof aSeen === 'number' ? aSeen : (aSeen?.toMillis?.() || (aSeen ? new Date(aSeen).getTime() : 0));
+        bVal = typeof bSeen === 'number' ? bSeen : (bSeen?.toMillis?.() || (bSeen ? new Date(bSeen).getTime() : 0));
+      } else if (sortField === 'created_at' || sortField === 'updated_at') {
         aVal = a[sortField]?.toMillis?.() || 0;
         bVal = b[sortField]?.toMillis?.() || 0;
       } else {
@@ -110,7 +133,7 @@ const MembersPage = () => {
     });
 
     return result;
-  }, [users, search, sortField, sortOrder]);
+  }, [users, rtdbStatuses, search, sortField, sortOrder]);
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -291,7 +314,7 @@ const MembersPage = () => {
                   <td className="small text-muted border-0" data-label={lang === 'ru' ? 'Активность' : 'Last Seen'}>
                     <div className="d-flex align-items-center gap-1">
                       <Clock size={14} className="flex-shrink-0" />
-                      {formatLastSeen(u.last_seen || u.updated_at || u.created_at)}
+                      {formatLastSeen(getUserLastSeen(u))}
                     </div>
                   </td>
                   <td className="text-center fw-semibold text-primary border-0" data-label={lang === 'ru' ? 'Посты' : 'Posts'}>{u.post_count || 0}</td>

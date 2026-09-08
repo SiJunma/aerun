@@ -254,10 +254,10 @@ This file serves as the master context for AI interaction, combining the current
     "rtdb": {
       "nodes": {
         "status": {
-          "description": "Live presence tracking node.",
+          "description": "Live presence tracking node. Presence in 'Online now' is based on a 15-minute sliding window from last activity (unless explicitly in 'logged_out' state).",
           "fields": {
             "$uid": {
-              "state": "string ('online' | 'offline')",
+              "state": "string ('online' | 'offline' | 'logged_out')",
               "uid": "string",
               "nickname": "string",
               "avatar_url": "string",
@@ -266,7 +266,8 @@ This file serves as the master context for AI interaction, combining the current
               "status_line": "string",
               "signature": "string",
               "active_character": "object (null or { id, name, avatar_url })",
-              "last_seen": "number (serverTimestamp ms)"
+              "last_seen": "number (serverTimestamp ms)",
+              "last_activity": "number (serverTimestamp ms, persistent visit timestamp)"
             }
           }
         },

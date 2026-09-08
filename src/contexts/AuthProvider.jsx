@@ -90,6 +90,7 @@ export const AuthProvider = ({ children }) => {
   const isRtdbOnlineRef = useRef(true);
   // Ref holding the timestamp of the last database push (last_seen)
   const lastPushTimeRef = useRef(0);
+  const lastFirestorePushTimeRef = useRef(0);
 
   // Listener Refs (persisted across renders for cleanup)
   const profileUnsubRef = useRef(null);
@@ -163,6 +164,14 @@ export const AuthProvider = ({ children }) => {
         isRtdbOnlineRef.current = true;
         lastPushTimeRef.current = now;
         setRtdbOnline(user.uid, profile).catch(err => console.warn('[setRtdbOnline resume err]', err));
+      }
+
+      // Periodic sync to Firestore users document (throttled to every 5 minutes to minimize writes)
+      const FIRESTORE_PUSH_INTERVAL_MS = 5 * 60 * 1000;
+      if (now - lastFirestorePushTimeRef.current >= FIRESTORE_PUSH_INTERVAL_MS) {
+        lastFirestorePushTimeRef.current = now;
+        setDoc(doc(db, 'users', user.uid), { last_seen: serverTimestamp() }, { merge: true })
+          .catch(err => console.warn('[sync last_seen to firestore err]', err));
       }
 
       // 1. Если пользователь авторизован, но остался старый guest_id — удаляем его запись из guest_activity
@@ -873,10 +882,11 @@ export const AuthProvider = ({ children }) => {
   }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout, authError]);
 
   useEffect(() => {
-    // При возвращении на вкладку обновляем статичные данные форума (с соблюдением 5-минутного cooldown)
+    // При возвращении на вкладку обновляем активность и статичные данные форума (с соблюдением cooldown)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         refreshForumState(false);
+        recordActivity();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -884,7 +894,7 @@ export const AuthProvider = ({ children }) => {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [refreshForumState]);
+  }, [refreshForumState, recordActivity]);
 
   const isUserOnline = useCallback((uid) => {
     if (!uid) return false;
