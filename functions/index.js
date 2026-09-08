@@ -293,6 +293,33 @@ exports.onReputationLogCreated = onDocumentCreated("reputation_logs/{logId}", as
       payload: notifPayload
     });
 
+    // 6. Sync voter to RTDB post_voters cache for instant modal loading
+    if (post_id) {
+      try {
+        let voterAvatar = null;
+        let voterNickname = log.voter_nickname || "User";
+        if (log.voter_id) {
+          const voterSnap = await db.collection("users").doc(log.voter_id).get();
+          if (voterSnap.exists) {
+            const vData = voterSnap.data();
+            voterAvatar = vData.avatar_url || null;
+            if (vData.nickname) voterNickname = vData.nickname;
+          }
+        }
+        await admin.database().ref(`post_voters/${post_id}/${snap.id}`).set({
+          log_id: snap.id,
+          voter_id: log.voter_id || null,
+          voter_nickname: voterNickname,
+          avatar_url: voterAvatar,
+          value: value,
+          comment: log.comment || "",
+          created_at: Date.now()
+        });
+      } catch (rtdbErr) {
+        logger.warn(`[onReputationLogCreated] RTDB post_voters sync failed:`, rtdbErr);
+      }
+    }
+
     logger.info(`Reputation applied for log ${snap.id}: target=${target_id}, value=${value}`);
   } catch (error) {
     logger.error(`Error processing reputation log ${snap.id}:`, error);
@@ -322,6 +349,11 @@ exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", as
     const userQueued = await queueIncrement(batch, db.collection("users").doc(target_id), "reputation", -value);
     if (post_id) {
       await queueIncrement(batch, db.collection("posts").doc(post_id), "reputation", -value);
+      try {
+        await admin.database().ref(`post_voters/${post_id}/${snap.id}`).remove();
+      } catch (rtdbErr) {
+        logger.warn(`[onReputationLogDeleted] RTDB post_voters removal failed:`, rtdbErr);
+      }
     }
 
     await batch.commit();
@@ -330,6 +362,25 @@ exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", as
     // Background triggers must never throw HttpsError — it means nothing outside
     // a callable and just produces an unhandled rejection.
     logger.error(`Error reverting reputation log ${snap.id}:`, error);
+  }
+});
+
+/**
+ * Reputation Handler (Update)
+ * Fired when a reputation comment is edited.
+ */
+exports.onReputationLogUpdated = onDocumentUpdated("reputation_logs/{logId}", async (event) => {
+  const afterSnap = event.data.after;
+  if (!afterSnap) return;
+  const log = afterSnap.data();
+  const { post_id, comment } = log;
+
+  if (post_id) {
+    try {
+      await admin.database().ref(`post_voters/${post_id}/${afterSnap.id}/comment`).set(comment || "");
+    } catch (err) {
+      logger.warn(`[onReputationLogUpdated] RTDB comment update failed:`, err);
+    }
   }
 });
 
@@ -1767,7 +1818,7 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
     if (topicSnap.exists) {
       await syncTopicMetadata(db, topic_id);
 
-      // 5. Синхронизируем свежие метаданные категории в RTDB main_page_cache
+    // 5. Синхронизируем свежие метаданные категории в RTDB main_page_cache
       const categoryId = topicSnap.data()?.category_id;
       if (categoryId) {
         const updatedCatSnap = await db.collection("categories").doc(categoryId).get();
@@ -1784,6 +1835,9 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
         }
       }
     }
+
+    // 6. Очищаем RTDB кэш оценок для удаленного поста
+    admin.database().ref(`post_voters/${event.params.postId}`).remove().catch(() => { });
 
     logger.info(`onPostDeleted cleanup for ${event.params.postId} successful.`);
   } catch (error) {
@@ -2228,6 +2282,7 @@ exports.getPostVoters = onCall(
     }
 
     const voters = [];
+    const rtdbUpdates = {};
     sortedDocs.forEach(logDoc => {
       const log = logDoc.data();
       const voterData = voterProfiles[log.voter_id];
@@ -2237,13 +2292,36 @@ exports.getPostVoters = onCall(
         && !isRequesterAdmin
         && !isRequesterModerator;
 
-      voters.push({
+      const voterObj = {
+        log_id: logDoc.id,
         voter_id: isPrivate ? null : log.voter_id,
         voter_nickname: isPrivate ? null : (log.voter_nickname || voterData?.nickname || 'User'),
+        avatar_url: isPrivate ? null : (voterData?.avatar_url || null),
         value: log.value,
-        created_at: log.created_at ? log.created_at.toDate().toISOString() : null,
-      });
+        comment: log.comment || '',
+        created_at: log.created_at ? (typeof log.created_at.toDate === 'function' ? log.created_at.toDate().toISOString() : log.created_at) : null,
+      };
+
+      voters.push(voterObj);
+
+      // Prepare backfill for RTDB
+      rtdbUpdates[logDoc.id] = {
+        log_id: logDoc.id,
+        voter_id: isPrivate ? null : log.voter_id,
+        voter_nickname: isPrivate ? null : (log.voter_nickname || voterData?.nickname || 'User'),
+        avatar_url: isPrivate ? null : (voterData?.avatar_url || null),
+        value: log.value,
+        comment: log.comment || '',
+        created_at: log.created_at ? (typeof log.created_at.toMillis === 'function' ? log.created_at.toMillis() : (typeof log.created_at.toDate === 'function' ? log.created_at.toDate().getTime() : Date.now())) : Date.now()
+      };
     });
+
+    // Asynchronously backfill RTDB cache (non-blocking)
+    if (Object.keys(rtdbUpdates).length > 0) {
+      admin.database().ref(`post_voters/${postId}`).update(rtdbUpdates).catch(err => {
+        logger.warn(`[getPostVoters] RTDB backfill failed for ${postId}:`, err);
+      });
+    }
 
     return { voters, total };
 
@@ -2634,6 +2712,27 @@ exports.cleanupStaleTopicPostsCache = onSchedule("every 1 hours", async () => {
     if (removals.length > 0) {
       await Promise.all(removals);
       logger.info(`[cleanupStaleTopicPostsCache] Cleaned up ${removals.length} stale topic post caches`);
+    }
+
+    // 2. Cleanup stale post_voters cache (entries with no activity >48h)
+    const votersSnap = await rtdb.ref("post_voters").once("value");
+    if (votersSnap.exists()) {
+      const votersCutoff = Date.now() - 48 * 60 * 60 * 1000;
+      const voterRemovals = [];
+      votersSnap.forEach(postChild => {
+        let maxTime = 0;
+        postChild.forEach(logChild => {
+          const t = logChild.child("created_at").val();
+          if (typeof t === 'number' && t > maxTime) maxTime = t;
+        });
+        if (!maxTime || maxTime < votersCutoff) {
+          voterRemovals.push(postChild.ref.remove());
+        }
+      });
+      if (voterRemovals.length > 0) {
+        await Promise.all(voterRemovals);
+        logger.info(`[cleanupStaleTopicPostsCache] Cleaned up ${voterRemovals.length} stale post_voters caches`);
+      }
     }
   } catch (err) {
     logger.warn("[cleanupStaleTopicPostsCache err]", err);

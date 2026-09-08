@@ -377,7 +377,7 @@ This file serves as the master context for AI interaction, combining the current
     "GUEST_TICK_MS": "10 * 60 * 1000 (Guest pulse for online visibility limit)",
     "Pagination Limits": {
       "dms": "Limit 50 conversations, messages fetched using dynamic limitCount.",
-      "reputation_logs": "Server-side pagination via Cloud Function getReputationLogs. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=20. Logs for inaccessible/deleted topics are included but have isAllowed=false (topic_title and post_id stripped).",
+      "reputation_logs": "Server-side pagination via Cloud Function getReputationLogs. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=20. Logs for inaccessible/deleted topics are included but have isAllowed=false (topic_title and post_id stripped). Post voters are cached in RTDB under post_voters/{postId} with fallback to getPostVoters Cloud Function.",
       "getUserPosts": "Server-side pagination via Cloud Function getUserPosts. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=10. Posts in inaccessible categories are excluded.",
       "audit_logs": "Default 50 entries fetched per batch."
     },

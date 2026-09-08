@@ -10,7 +10,8 @@ import {
   where
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../../firebase';
+import { ref as rtdbRef, get as rtdbGet, update as rtdbUpdate } from 'firebase/database';
+import { db, rtdb, functions } from '../../firebase';
 import { logAdminAction } from './audit';
 
 /**
@@ -102,11 +103,21 @@ export const getProfileVote = async (voterUid, targetUid) => {
  * updateReputationComment
  * Allows a user to edit or remove their reputation comment.
  */
-export const updateReputationComment = async (logId, newComment) => {
+export const updateReputationComment = async (logId, newComment, postId = null) => {
   const logRef = doc(db, 'reputation_logs', logId);
   await updateDoc(logRef, {
     comment: newComment || ''
   });
+
+  if (rtdb && postId) {
+    try {
+      await rtdbUpdate(rtdbRef(rtdb, `post_voters/${postId}/${logId}`), {
+        comment: newComment || ''
+      });
+    } catch (err) {
+      console.warn('[updateReputationComment] RTDB sync error:', err);
+    }
+  }
 };
 
 /**
@@ -121,13 +132,47 @@ export const fetchReputationLogs = async (uid, page = 1, pageSize = 20, seekLogI
 
 /**
  * fetchPostVoters
- * Fetches the list of users who voted on a specific post (via Cloud Function).
- * Returns { voters: [{ voter_id, voter_nickname, value, created_at }], total }.
+ * Fetches the list of users who voted on a specific post.
+ * Checks RTDB post_voters cache first for instant (<50ms) load,
+ * falling back to Cloud Function getPostVoters if not cached yet.
+ * Returns { voters: [{ log_id, voter_id, voter_nickname, avatar_url, value, comment, created_at }], total }.
  */
-export const fetchPostVoters = async (postId, limit = 10) => {
+export const fetchPostVoters = async (postId, limit = 50) => {
+  if (!postId) return { voters: [], total: 0 };
+
+  // 1. RTDB-first fetch (0 Firestore reads, instant socket cache)
+  if (rtdb) {
+    try {
+      const snap = await rtdbGet(rtdbRef(rtdb, `post_voters/${postId}`));
+      if (snap.exists()) {
+        const val = snap.val();
+        if (val && typeof val === 'object') {
+          const votersList = Object.keys(val).map(key => ({
+            id: key,
+            ...val[key]
+          })).sort((a, b) => {
+            const timeA = typeof a.created_at === 'number' ? a.created_at : new Date(a.created_at || 0).getTime();
+            const timeB = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at || 0).getTime();
+            return timeB - timeA;
+          });
+
+          if (votersList.length > 0) {
+            return {
+              voters: votersList.slice(0, limit),
+              total: votersList.length
+            };
+          }
+        }
+      }
+    } catch (rtdbErr) {
+      console.warn('[fetchPostVoters] RTDB read failed, falling back to Cloud Function:', rtdbErr);
+    }
+  }
+
+  // 2. Fallback to Cloud Function getPostVoters
   const getVoters = httpsCallable(functions, 'getPostVoters');
   const result = await getVoters({ postId, limit });
-  return result.data;
+  return result.data || { voters: [], total: 0 };
 };
 
 

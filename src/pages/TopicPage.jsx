@@ -26,11 +26,11 @@ import Timestamp from '../components/common/Timestamp';
 import {
   Award, Pin, Lock, Settings, Trash2, ArrowRightLeft, Bell, BellOff, MessageSquare, Send,
   Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
-  Dices, User, FilePen, MessageSquareOff, Keyboard
+  Dices, User, FilePen, MessageSquareOff, Keyboard, Eye
 } from 'lucide-react';
 import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNotifications } from '../api/notifications';
 import { voteOnPost, getVotesInTopic, updateReputationComment } from '../api/reputation';
-import ReputationHoverPreview from '../components/common/ReputationHoverPreview';
+import PostVotersModal from '../components/common/PostVotersModal';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
 import { resolveField } from '../utils/text';
@@ -95,6 +95,8 @@ const TopicPage = () => {
   const [isEditingRepComment, setIsEditingRepComment] = useState(false);
   const [editingRepComment, setEditingRepComment] = useState('');
   const [savingRepComment, setSavingRepComment] = useState(false);
+  const [showPostVotersModal, setShowPostVotersModal] = useState(false);
+  const [selectedPostForVoters, setSelectedPostForVoters] = useState(null);
 
   // Subscription state
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -985,7 +987,7 @@ const TopicPage = () => {
     if (!selectedVote || !user) return;
     setSavingRepComment(true);
     try {
-      await updateReputationComment(selectedVote.id, editingRepComment);
+      await updateReputationComment(selectedVote.id, editingRepComment, selectedVote.post_id);
 
       const updatedVote = { ...selectedVote, comment: editingRepComment };
       setSelectedVote(updatedVote);
@@ -2328,90 +2330,117 @@ const TopicPage = () => {
                       </div>
 
                       {/* Reputation / Voting Buttons */}
-                      {settings?.enableReputation && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (
-                        <div className="mt-3 d-flex justify-content-end align-items-center gap-3 reputation-section">
-                          <ReputationHoverPreview
-                            postId={post.id}
-                            targetUid={post.author_id}
-                            lang={lang}
-                            disabled={!post.reputation}
-                          >
-                            <div
-                              className={`text-muted small d-flex align-items-center gap-1 ${post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'pending' ? 'rep-trigger' : ''}`}
-                              title={post.author_id && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.status !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'banned' && (post.author_id === user?.uid ? profile : authorStats[post.author_id])?.role_id !== 'pending'
-                                ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы проголосовать или посмотреть детали)' : 'Post Reputation (Click to vote or view details)')
-                                : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
-                              onClick={() => {
-                                const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                                if (post.author_id === profile?.uid || authorData?.status === 'banned' || authorData?.role_id === 'banned' || authorData?.role_id === 'pending') return;
+                      {settings?.enableReputation && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (() => {
+                        const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                        const isOwnPost = post.author_id === user?.uid;
+                        const hasVoted = !!myVotes[post.id];
+                        const hasReputation = (post.reputation || 0) !== 0;
+                        const postNum = index + indexOfFirstItem + 1;
+                        const canVote = !isOwnPost && !hasVoted && hasPermission(PERMISSIONS.USE_REPUTATION) && authorData?.status !== 'banned' && authorData?.role_id !== 'banned' && authorData?.role_id !== 'pending';
 
-                                // If user has permission to use (vote), show modal or toggle controls
-                                // If they DON'T have permission, they can still view details if they clicked an existing vote?
-                                // Actually, let's stick to the rule: if no role perm, can only read (see counter).
-                                if (!hasPermission(PERMISSIONS.USE_REPUTATION)) {
-                                  // Maybe allow viewing info if there are votes?
-                                  if (myVotes[post.id]) {
-                                    setSelectedVote(myVotes[post.id]);
-                                    setShowVoteInfoModal(true);
-                                  }
-                                  return;
-                                }
+                        return (
+                          <div className="mt-3 d-flex justify-content-end align-items-center gap-2 reputation-section">
+                            {/* Eye button: View who evaluated */}
+                            {hasReputation && (
+                              <button
+                                type="button"
+                                className="rep-eye-btn"
+                                title={lang === 'ru' ? 'Посмотреть кто оценил' : 'View who evaluated'}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedPostForVoters({
+                                    id: post.id,
+                                    postNumber: postNum
+                                  });
+                                  setShowPostVotersModal(true);
+                                }}
+                              >
+                                <Eye size={15} />
+                              </button>
+                            )}
 
-                                if (myVotes[post.id]) {
+                            {/* Own Post Karma Badge */}
+                            {isOwnPost ? (
+                              <div
+                                className="text-muted small d-flex align-items-center gap-1 rep-badge-own"
+                                title={lang === 'ru' ? 'Репутация сообщения (Вы не можете голосовать за свой пост)' : 'Post reputation (You cannot vote for your own post)'}
+                              >
+                                <Award size={14} className="text-muted" style={{ opacity: 0.65 }} />
+                                <strong>{post.reputation || 0}</strong>
+                              </div>
+                            ) : hasVoted ? (
+                              /* Already Voted Post Karma Badge (Green) */
+                              <div
+                                className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
+                                title={lang === 'ru' ? 'Вы уже оценили этот пост (Нажмите чтобы посмотреть ваш голос)' : 'You evaluated this post (Click to view your vote)'}
+                                onClick={() => {
                                   setSelectedVote(myVotes[post.id]);
                                   setShowVoteInfoModal(true);
-                                } else if (settings?.reputationStyle === 'positive_only') {
-                                  handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
-                                } else {
-                                  setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
-                                }
-                              }}
-                            >
-                              <Award size={14} className="text-accent" />
-                              <strong>{post.reputation || 0}</strong>
-                              {myVotes[post.id] && (
-                                <span className="ms-1" style={{ fontWeight: 400, opacity: 0.8 }}>
+                                }}
+                              >
+                                <Award size={14} className="text-success" />
+                                <strong>{post.reputation || 0}</strong>
+                                <span className="ms-1" style={{ fontWeight: 500, opacity: 0.9 }}>
                                   ({myVotes[post.id].value > 0 ? '+1' : '-1'})
                                 </span>
-                              )}
-                            </div>
-                          </ReputationHoverPreview>
+                              </div>
+                            ) : (
+                              /* Not yet voted Post Karma Badge */
+                              <div
+                                className={`text-muted small d-flex align-items-center gap-1 ${canVote ? 'rep-trigger' : ''}`}
+                                title={canVote
+                                  ? (lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы оценить)' : 'Post Reputation (Click to evaluate)')
+                                  : (lang === 'ru' ? 'Репутация сообщения' : 'Post Reputation')}
+                                onClick={() => {
+                                  if (!canVote) return;
+                                  if (settings?.reputationStyle === 'positive_only') {
+                                    handleOpenVoteModal(post, 1, postNum);
+                                  } else {
+                                    setActiveRepPostId(activeRepPostId === post.id ? null : post.id);
+                                  }
+                                }}
+                              >
+                                <Award size={14} className="text-accent" />
+                                <strong>{post.reputation || 0}</strong>
+                              </div>
+                            )}
 
-
-                          {activeRepPostId === post.id && !myVotes[post.id] && post.author_id !== profile?.uid && hasPermission(PERMISSIONS.USE_REPUTATION) && (
-                            <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
-                              <div className="d-flex gap-1">
-                                {settings?.reputationStyle !== 'positive_only' && (
+                            {/* + / - Controls for unvoted post */}
+                            {activeRepPostId === post.id && canVote && (
+                              <div className="reputation-controls d-flex align-items-center rounded px-2 py-1 gap-2 animate-fade-in shadow-sm">
+                                <div className="d-flex gap-1">
+                                  {settings?.reputationStyle !== 'positive_only' && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline-danger"
+                                      className="py-0 px-2 voting-btn"
+                                      disabled={votingPostId === post.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenVoteModal(post, -1, postNum);
+                                      }}
+                                    >
+                                      −
+                                    </Button>
+                                  )}
                                   <Button
                                     size="sm"
-                                    variant="outline-danger"
+                                    variant="outline-success"
                                     className="py-0 px-2 voting-btn"
                                     disabled={votingPostId === post.id}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleOpenVoteModal(post, -1, index + indexOfFirstItem + 1);
+                                      handleOpenVoteModal(post, 1, postNum);
                                     }}
                                   >
-                                    −
+                                    +
                                   </Button>
-                                )}
-                                <Button
-                                  size="sm"
-                                  variant="outline-success"
-                                  className="py-0 px-2 voting-btn"
-                                  disabled={votingPostId === post.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenVoteModal(post, 1, index + indexOfFirstItem + 1);
-                                  }}
-                                >
-                                  +
-                                </Button>
+                                </div>
                               </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Post Management Links — only render if at least one button is visible */}
@@ -3116,6 +3145,18 @@ const TopicPage = () => {
             </div>
           )}
         </ForumModal>
+
+        {/* Post Voters Modal */}
+        <PostVotersModal
+          show={showPostVotersModal}
+          onHide={() => {
+            setShowPostVotersModal(false);
+            setSelectedPostForVoters(null);
+          }}
+          postId={selectedPostForVoters?.id}
+          postNumber={selectedPostForVoters?.postNumber}
+          lang={lang}
+        />
       </div>
 
     </Container>

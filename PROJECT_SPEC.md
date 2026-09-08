@@ -136,18 +136,35 @@
 }
 ```
 
-### 2.7 Коллекция `reputation_logs`
+### 2.7 Коллекция `reputation_logs` & RTDB `post_voters`
 ```
+Firestore `reputation_logs/{logId}`:
 {
-  target_user_id: string,
-  sender_user_id: string,
-  post_id:        string,     // пост, за который дана репутация
-  topic_id:       string,     // тема этого поста
+  target_id:      string,     // получатель репутации
+  voter_id:       string,     // отдавший голос
+  voter_nickname: string,     // никнейм проголосовавшего
+  post_id:        string,     // пост (null для профиля)
+  topic_id:       string,     // тема (null для профиля)
+  topic_title:    string,
+  post_number:    number,
   value:          +1 | -1,
   comment:        string,
-  timestamp:      Timestamp
+  created_at:     Timestamp
 }
-// Security Rules: allow create только; update и delete запрещены даже для admin
+
+RTDB `post_voters/{post_id}/{log_id}` (кеш для быстрого открытия модального окна оценок):
+{
+  log_id:         string,
+  voter_id:       string,
+  voter_nickname: string,
+  avatar_url:     string | null,
+  value:          number (+1 / -1),
+  comment:        string,
+  created_at:     number (timestamp ms)
+}
+// Политика кэша: до 50 записей на пост. Удаляется при onPostDeleted/onTopicDeleted, 
+// а также периодическим scheduled таском (очистка записей старше 48ч без активности). 
+// Полная история всегда хранится в Firestore `reputation_logs`.
 ```
 
 ### 2.8 Коллекция `direct_messages` (ЛС)
