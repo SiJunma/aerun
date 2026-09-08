@@ -110,6 +110,11 @@ async function mirrorPostToRtdbCache(topicId, postId, postData, postsPerPage = 2
       author_id: postData.author_id || null,
       author_name: postData.author_name || 'User',
       author_avatar: postData.author_avatar || '',
+      author_status_line: postData.author_status_line || '',
+      author_signature: postData.author_signature || '',
+      author_role_id: postData.author_role_id || 'player',
+      author_posts_count: postData.author_posts_count || 0,
+      author_reputation: postData.author_reputation || 0,
       is_character: !!postData.is_character,
       author_character_id: postData.author_character_id || null,
       content: postData.content || '',
@@ -630,7 +635,7 @@ async function hydrateAuthorProfiles(db, items) {
         const u = userProfiles[item.author_id];
         item.author_role_id = u.role_id || item.author_role_id;
         item.author_status_line = u.status_line !== undefined ? u.status_line : (item.author_status_line || '');
-        item.author_signature = u.signature !== undefined ? u.signature : (item.author_signature || '');
+        item.author_signature = (u.settings?.signature !== undefined ? u.settings.signature : (u.signature !== undefined ? u.signature : (item.author_signature || '')));
         item.author_posts_count = u.post_count !== undefined ? u.post_count : (item.author_posts_count || 0);
         item.author_reputation = u.reputation !== undefined ? u.reputation : (item.author_reputation || 0);
 

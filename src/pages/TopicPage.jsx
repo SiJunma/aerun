@@ -313,7 +313,9 @@ const TopicPage = () => {
                 reputation: p.author_reputation ?? next[p.author_id]?.reputation ?? 0,
                 status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author_id]?.status_line ?? ''),
                 role_id: p.author_role_id || next[p.author_id]?.role_id || 'player',
-                settings: next[p.author_id]?.settings || { signature: p.author_signature || '' }
+                settings: p.author_signature !== undefined
+                  ? { signature: p.author_signature }
+                  : (next[p.author_id]?.settings || { signature: '' })
               };
             }
           });
@@ -879,9 +881,17 @@ const TopicPage = () => {
       }
       return profile?.settings?.signature || post.author_signature || '';
     }
-    if (post.is_character) return post.author_signature || '';
+    if (post.is_character) {
+      if (post.author_character_id && maskStats[post.author_character_id]?.signature !== undefined) {
+        return maskStats[post.author_character_id].signature || '';
+      }
+      return post.author_signature || '';
+    }
     const stats = authorStats[post.author_id];
-    return (stats && stats.nickname) ? (stats.settings?.signature || '') : (post.author_signature || '');
+    if (stats?.settings?.signature !== undefined && stats.settings.signature !== '') {
+      return stats.settings.signature;
+    }
+    return post.author_signature || '';
   };
 
   const isAuthorOnline = (post) => {

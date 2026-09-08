@@ -580,6 +580,8 @@ export const updatePost = async (postId, content, metadata = {}, performerId, au
     };
     if (metadata.author_name !== undefined) rtdbPatch.author_name = metadata.author_name;
     if (metadata.author_avatar !== undefined) rtdbPatch.author_avatar = metadata.author_avatar;
+    if (metadata.author_status_line !== undefined) rtdbPatch.author_status_line = metadata.author_status_line;
+    if (metadata.author_signature !== undefined) rtdbPatch.author_signature = metadata.author_signature;
     if (metadata.is_character !== undefined) rtdbPatch.is_character = metadata.is_character;
     if (metadata.author_character_id !== undefined) rtdbPatch.author_character_id = metadata.author_character_id;
     if (metadata.rolls !== undefined) rtdbPatch.rolls = metadata.rolls;
