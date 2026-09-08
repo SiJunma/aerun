@@ -65,7 +65,7 @@ export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
           role_id: profile?.role_id || 'player',
           post_count: profile?.post_count || 0,
           status_line: profile?.status_line || '',
-          signature: profile?.signature || '',
+          signature: profile?.settings?.signature || profile?.signature || '',
           active_character: activeCharacter ? {
             id: activeCharacter.id || activeCharacter._id,
             name: activeCharacter.name || '',
@@ -115,6 +115,7 @@ export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
   if (!uid || !rtdb) return;
   try {
     const userStatusRef = ref(rtdb, `status/${uid}`);
+    const sig = profile?.settings?.signature ?? profile?.signature;
     await update(userStatusRef, {
       state: 'online',
       last_seen: serverTimestamp(),
@@ -124,7 +125,7 @@ export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
       ...(profile?.role_id ? { role_id: profile.role_id } : {}),
       ...(profile?.post_count !== undefined ? { post_count: profile.post_count } : {}),
       ...(profile?.status_line !== undefined ? { status_line: profile.status_line } : {}),
-      ...(profile?.signature !== undefined ? { signature: profile.signature } : {})
+      ...(sig !== undefined ? { signature: sig } : {})
     });
   } catch (err) {
     console.warn('[setRtdbOnline err]', err);

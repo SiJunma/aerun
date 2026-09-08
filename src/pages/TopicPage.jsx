@@ -188,6 +188,7 @@ const TopicPage = () => {
           const existingAuthorStats = prev[newPost.author_id];
           const currentPostCount = existingAuthorStats?.post_count ?? newPost.author_posts_count ?? 0;
           const updatedPostCount = currentPostCount + 1;
+          const postSig = newPost.author_signature || newPost.signature || newPost.settings?.signature || '';
 
           return {
             ...prev,
@@ -197,7 +198,9 @@ const TopicPage = () => {
               reputation: existingAuthorStats?.reputation ?? newPost.author_reputation ?? 0,
               role_id: existingAuthorStats?.role_id || newPost.author_role_id || 'player',
               status_line: existingAuthorStats?.status_line ?? newPost.author_status_line ?? '',
-              settings: existingAuthorStats?.settings || { signature: newPost.author_signature || '' }
+              settings: postSig
+                ? { ...(existingAuthorStats?.settings || {}), signature: postSig }
+                : (existingAuthorStats?.settings || { signature: '' })
             }
           };
         });
@@ -307,14 +310,15 @@ const TopicPage = () => {
               const postCount = p.author_id === user?.uid
                 ? Math.max(serverPostCount, cachedPostCount)
                 : serverPostCount || cachedPostCount;
+              const sig = p.author_signature || p.signature || p.settings?.signature || '';
               next[p.author_id] = {
                 ...(next[p.author_id] || {}),
                 post_count: postCount,
                 reputation: p.author_reputation ?? next[p.author_id]?.reputation ?? 0,
                 status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author_id]?.status_line ?? ''),
                 role_id: p.author_role_id || next[p.author_id]?.role_id || 'player',
-                settings: p.author_signature !== undefined
-                  ? { signature: p.author_signature }
+                settings: sig
+                  ? { ...(next[p.author_id]?.settings || {}), signature: sig }
                   : (next[p.author_id]?.settings || { signature: '' })
               };
             }
@@ -570,6 +574,57 @@ const TopicPage = () => {
       }
     });
   }, [posts, maskStats]);
+
+  // Fallback hydration for missing author signatures or status lines
+  const hydratedAuthorsRef = useRef(new Set());
+  useEffect(() => {
+    if (posts.length === 0) return;
+    const missingUids = new Set();
+
+    posts.forEach(p => {
+      if (p.author_id && p.author_id !== user?.uid && !hydratedAuthorsRef.current.has(p.author_id)) {
+        const stats = authorStats[p.author_id];
+        const hasSig = (stats?.settings?.signature !== undefined && stats.settings.signature !== '') ||
+                       (stats?.signature !== undefined && stats.signature !== '') ||
+                       (p.author_signature && p.author_signature !== '') ||
+                       (p.signature && p.signature !== '');
+        if (!hasSig) {
+          missingUids.add(p.author_id);
+        }
+      }
+    });
+
+    if (missingUids.size === 0) return;
+
+    missingUids.forEach(async (uid) => {
+      hydratedAuthorsRef.current.add(uid);
+      try {
+        const uSnap = await getDoc(doc(db, 'users', uid));
+        if (uSnap.exists()) {
+          const uData = uSnap.data();
+          const sig = uData.settings?.signature || uData.signature || '';
+          if (sig || uData.status_line) {
+            setAuthorStats(prev => ({
+              ...prev,
+              [uid]: {
+                ...(prev[uid] || {}),
+                post_count: uData.post_count ?? prev[uid]?.post_count ?? 0,
+                reputation: uData.reputation ?? prev[uid]?.reputation ?? 0,
+                role_id: uData.role_id || prev[uid]?.role_id || 'player',
+                status_line: uData.status_line !== undefined ? uData.status_line : (prev[uid]?.status_line ?? ''),
+                settings: {
+                  ...(prev[uid]?.settings || {}),
+                  signature: sig
+                }
+              }
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('[fetchAuthorProfile fallback error]', err);
+      }
+    });
+  }, [posts, authorStats, user?.uid]);
 
 
 
