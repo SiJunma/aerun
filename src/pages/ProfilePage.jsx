@@ -692,38 +692,42 @@ const ProfilePage = () => {
                     <Row className="g-3 p-3">
                       {characters.map(char => (
                         <Col key={char.id} xs={12} md={6}>
-                          <Card className="h-100 border shadow-sm modal-inner-card">
-                            <Card.Body className="d-flex align-items-center gap-3 p-3">
-                              <Image
-                                src={char.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(char.name)}&background=random`}
-                                roundedCircle
-                                style={{ width: '64px', height: '64px', objectFit: 'cover' }}
-                                className="border border-2 border-accent shadow-sm flex-shrink-0"
-                                onError={(e) => {
-                                  e.target.onerror = null;
-                                  e.target.src = 'https://ui-avatars.com/api/?name=?&background=666&color=fff';
-                                }}
-                              />
-                              <div className="flex-grow-1 me-3">
-                                <h6 className="mb-1 fw-bold">{char.name}</h6>
-                                {char.status_line ? (
-                                  <p className="text-muted small mb-0" style={{ fontStyle: 'italic', opacity: 0.8, wordBreak: 'break-word' }}>
-                                    {char.status_line}
-                                  </p>
-                                ) : (
-                                  <p className="text-muted small mb-0 opacity-50">
-                                    {lang === 'ru' ? 'Нет статуса' : 'No status'}
-                                  </p>
-                                )}
+                          <Card className="h-100 border shadow-sm modal-inner-card char-card">
+                            <Card.Body className="d-flex flex-column px-3 py-2 gap-2">
+                              {/* Top row: avatar + name/status */}
+                              <div className="d-flex align-items-center gap-3">
+                                <Image
+                                  src={char.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(char.name)}&background=random`}
+                                  roundedCircle
+                                  style={{ width: '64px', height: '64px', objectFit: 'cover' }}
+                                  className="border border-2 border-accent shadow-sm flex-shrink-0"
+                                  onError={(e) => {
+                                    e.target.onerror = null;
+                                    e.target.src = 'https://ui-avatars.com/api/?name=?&background=666&color=fff';
+                                  }}
+                                />
+                                <div className="flex-grow-1 min-w-0">
+                                  <h6 className="mb-1 fw-bold text-truncate">{char.name}</h6>
+                                  {char.status_line ? (
+                                    <p className="text-muted small mb-0" style={{ fontStyle: 'italic', opacity: 0.8, wordBreak: 'break-word' }}>
+                                      {char.status_line}
+                                    </p>
+                                  ) : (
+                                    <p className="text-muted small mb-0 opacity-50">
+                                      {lang === 'ru' ? 'Нет статуса' : 'No status'}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
-                                {(() => {
-                                  const canEdit = (isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || hasPermission(PERMISSIONS.EDIT_OTHERS_MASK);
-                                  const canDelete = (isOwn && hasPermission(PERMISSIONS.DELETE_SELF_MASK)) || hasPermission(PERMISSIONS.DELETE_OTHERS_MASK);
-                                  
-                                  if (!canEdit && !canDelete) return null;
 
-                                  return (
-                                    <div className="d-flex flex-column gap-1 align-items-end flex-shrink-0">
+                              {/* Bottom row: edit / delete buttons on opposite sides */}
+                              {(() => {
+                                const canEdit = (isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || hasPermission(PERMISSIONS.EDIT_OTHERS_MASK);
+                                const canDelete = (isOwn && hasPermission(PERMISSIONS.DELETE_SELF_MASK)) || hasPermission(PERMISSIONS.DELETE_OTHERS_MASK);
+                                if (!canEdit && !canDelete) return null;
+                                return (
+                                  <div className="d-flex justify-content-between align-items-center char-card-actions">
+                                    <span>
                                       {canEdit && (
                                         <Button
                                           variant="link"
@@ -734,6 +738,8 @@ const ProfilePage = () => {
                                           {t('profile.edit_character')}
                                         </Button>
                                       )}
+                                    </span>
+                                    <span>
                                       {canDelete && (
                                         <Button
                                           variant="link"
@@ -744,9 +750,10 @@ const ProfilePage = () => {
                                           {t('profile.delete_character')}
                                         </Button>
                                       )}
-                                    </div>
-                                  );
-                                })()}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                             </Card.Body>
                           </Card>
                         </Col>

@@ -1392,6 +1392,23 @@ strike:hover,
   /* Lighter sepia for "raised" effect */
 }
 
+/* Character card bottom action bar */
+.char-card-actions {
+  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+  padding-top: 6px;
+}
+
+.char-card-actions .btn-link {
+  opacity: 0.8;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.char-card-actions .btn-link:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
 .confirm-modal-backdrop {
   background-color: rgba(0, 0, 0, 0.7) !important;
   -webkit-backdrop-filter: blur(8px);
