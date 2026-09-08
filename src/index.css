@@ -1393,6 +1393,47 @@ strike:hover,
 }
 
 /* Character card bottom action bar */
+/* ── Profile Sidebar – responsive card ──────────────────────────────────── */
+/* Mobile / Tablet (default): horizontal row (avatar left, info right, 72px avatar) */
+.profile-sidebar-avatar img {
+  width: 72px;
+  height: 72px;
+}
+
+/* Very small screens (<= 380px): switch to vertical centered column */
+@media (max-width: 380px) {
+  .profile-sidebar-wrapper {
+    flex-direction: column !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+  .profile-sidebar-wrapper .profile-sidebar-info,
+  .profile-sidebar-wrapper .profile-sidebar-role,
+  .profile-sidebar-wrapper .profile-stat-item {
+    text-align: center !important;
+  }
+  .profile-sidebar-wrapper .profile-sidebar-stats {
+    justify-content: center !important;
+  }
+  .profile-sidebar-wrapper .profile-rep-row {
+    justify-content: center !important;
+  }
+}
+
+/* Desktop lg+: switch to vertical, centre layout, bigger avatar */
+@media (min-width: 992px) {
+  .profile-sidebar-avatar {
+    margin-bottom: 0.75rem;
+  }
+
+  .profile-sidebar-avatar img {
+    width: 110px;
+    height: 110px;
+    display: block;
+    margin: 0 auto;
+  }
+}
+
 .char-card-actions {
   border-top: 1px solid var(--border-color);
   margin-top: 4px;

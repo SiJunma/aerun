@@ -472,106 +472,124 @@ const ProfilePage = () => {
       </Row>
 
       <Row className={!hasTabs ? "justify-content-center" : ""}>
-        <Col lg={hasTabs ? 4 : 5} className="mb-4">
+        <Col lg={hasTabs ? 3 : 4} className="mb-4">
           <Card className="shadow-sm border-0 bg-card">
             <Card.Header className="py-3">
               <h5 className="mb-0">{t('profile.info')}</h5>
             </Card.Header>
-            <Card.Body className="p-4 text-center">
-              <div className="mb-4">
-                {!viewedProfile ? (
-                  <div className="mb-3">
-                    <Skeleton variant="avatar" width={120} height={120} className="rounded-circle d-block mx-auto shadow-sm" style={{ border: '3px solid var(--border-color)' }} />
-                    <Skeleton width="180px" height="1.8rem" className="d-block mx-auto mt-3" />
-                    <Skeleton width="120px" height="0.9rem" className="d-block mx-auto mt-2" />
-                  </div>
-                ) : (
-                  <>
+            <Card.Body className="p-3">
+              {/* ── Responsive profile layout: column on <=380px & >=992px, row on 381px..991px ── */}
+              <div className="profile-sidebar-wrapper d-flex flex-row align-items-start gap-3 d-lg-block text-lg-center">
+
+                {/* Avatar */}
+                <div className="flex-shrink-0 text-center profile-sidebar-avatar">
+                  {!viewedProfile ? (
+                    <Skeleton variant="avatar" width={72} height={72} className="rounded-circle d-block mx-auto shadow-sm" style={{ border: '3px solid var(--border-color)' }} />
+                  ) : (
                     <Image
                       src={viewedProfile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
                       roundedCircle
-                      className="mb-3 border border-3 border-light shadow-sm"
-                      style={{ width: '120px', height: '120px', objectFit: 'cover' }}
+                      className="border border-3 border-light shadow-sm"
+                      style={{ width: '72px', height: '72px', objectFit: 'cover' }}
                       referrerPolicy="no-referrer"
                       onError={(e) => {
                         e.target.onerror = null;
                         e.target.src = 'https://ui-avatars.com/api/?name=User&background=666&color=fff';
                       }}
                     />
-                    <h4 className="mb-1">{viewedProfile?.nickname || 'No Nickname'}</h4>
-                    <p className="text-muted small mb-0 mx-auto" style={{ maxWidth: '250px', wordBreak: 'break-word' }}>
-                      {viewedProfile?.status_line || 'No status set'}
-                    </p>
-                  </>
-                )}
+                  )}
+                </div>
 
-                {/* Send Message Button */}
-                {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.role_id !== 'banned' && uid !== profile?.uid && (
-                  <div className="mt-3">
-                    <Button
-                      as={Link}
-                      to={`/messages/${uid}`}
-                      variant="primary"
-                      className="d-inline-flex align-items-center justify-content-center gap-2"
-                      style={{ borderRadius: '20px', padding: '0.4rem 1.2rem', fontSize: '0.9rem' }}
-                    >
-                      <MessageCircle size={16} />
-                      {lang === 'ru' ? 'Написать сообщение' : 'Send Message'}
-                    </Button>
+                {/* Info block */}
+                <div className="flex-grow-1 min-w-0 w-100 profile-sidebar-info">
+                  {/* Name & status */}
+                  <div className="mb-2 mb-lg-3 text-lg-center">
+                    {!viewedProfile ? (
+                      <>
+                        <Skeleton width="140px" height="1.5rem" className="d-block mb-1 mx-lg-auto" />
+                        <Skeleton width="100px" height="0.85rem" className="d-block mx-lg-auto" />
+                      </>
+                    ) : (
+                      <>
+                        <h5 className="mb-1 text-truncate">{viewedProfile?.nickname || 'No Nickname'}</h5>
+                        <p className="text-muted small mb-0" style={{ wordBreak: 'break-word' }}>
+                          {viewedProfile?.status_line || ''}
+                        </p>
+                      </>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {!isLimitedProfile && (
-                <div className="mb-3 text-start border-top pt-3 d-flex justify-content-between align-items-center">
-                  <div>
-                    <span className="text-muted d-block small mb-1">{t('profile.posts_count')}</span>
-                    <div className="fw-bold fs-5">
-                      {!viewedProfile ? <Skeleton width="30px" height="1.5rem" /> : (viewedProfile?.post_count || 0)}
+                  {/* Send Message button */}
+                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.role_id !== 'banned' && uid !== profile?.uid && (
+                    <div className="mb-2 text-lg-center">
+                      <Button
+                        as={Link}
+                        to={`/messages/${uid}`}
+                        variant="primary"
+                        size="sm"
+                        className="d-inline-flex align-items-center gap-2"
+                        style={{ borderRadius: '20px', padding: '0.3rem 1rem', fontSize: '0.85rem' }}
+                      >
+                        <MessageCircle size={14} />
+                        {lang === 'ru' ? 'Написать' : 'Message'}
+                      </Button>
                     </div>
-                  </div>
-                  <div className="text-end">
-                    <span className="text-muted d-block small mb-1">{t('profile.reputation')}</span>
-                      <div className="d-flex align-items-center justify-content-end gap-2">
-                      <div className="fw-bold fs-5 text-accent">
-                        {!viewedProfile ? <Skeleton width="30px" height="1.5rem" /> : (viewedProfile?.reputation || 0)}
+                  )}
+
+                  {/* Stats */}
+                  {!isLimitedProfile && (
+                    <div className="profile-sidebar-stats d-flex justify-content-start justify-content-lg-between gap-4 gap-lg-0 align-items-center border-top pt-2 mt-1">
+                      <div className="profile-stat-item text-start">
+                        <span className="text-muted d-block small mb-0" style={{ fontSize: '0.72rem' }}>{t('profile.posts_count')}</span>
+                        <div className="fw-bold">
+                          {!viewedProfile ? <Skeleton width="30px" height="1.2rem" /> : (viewedProfile?.post_count || 0)}
+                        </div>
                       </div>
-                      {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && viewedProfile?.role_id !== 'pending' && (
-                        <div className="d-flex gap-1 align-items-center">
-                          {!myVote ? (
-                            <>
-                              {settings?.reputationStyle !== 'positive_only' && (
-                                <Button size="sm" variant="outline-danger" className="py-0 px-2" onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
+                      <div className="profile-stat-item text-start text-lg-end">
+                        <span className="text-muted d-block small mb-0" style={{ fontSize: '0.72rem' }}>{t('profile.reputation')}</span>
+                        <div className="profile-rep-row d-flex align-items-center justify-content-start justify-content-lg-end gap-1">
+                          <div className="fw-bold text-accent">
+                            {!viewedProfile ? <Skeleton width="30px" height="1.2rem" /> : (viewedProfile?.reputation || 0)}
+                          </div>
+                          {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && viewedProfile?.role_id !== 'pending' && (
+                            <div className="d-flex gap-1 align-items-center">
+                              {!myVote ? (
+                                <>
+                                  {settings?.reputationStyle !== 'positive_only' && (
+                                    <Button size="sm" variant="outline-danger" className="py-0 px-1" style={{ fontSize: '0.8rem' }} onClick={() => { setRepValue(-1); setShowRepModal(true); }}>−</Button>
+                                  )}
+                                  <Button size="sm" variant="outline-success" className="py-0 px-1" style={{ fontSize: '0.8rem' }} onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
+                                </>
+                              ) : (
+                                <Badge bg={myVote.value > 0 ? 'success' : 'danger'} style={{ opacity: 0.8 }}>
+                                  {myVote.value > 0 ? `+${myVote.value}` : myVote.value}
+                                </Badge>
                               )}
-                              <Button size="sm" variant="outline-success" className="py-0 px-2" onClick={() => { setRepValue(1); setShowRepModal(true); }}>+</Button>
-                            </>
-                          ) : (
-                            <Badge bg={myVote.value > 0 ? 'success' : 'danger'} className="ms-1" style={{ opacity: 0.8 }}>
-                              {myVote.value > 0 ? `+${myVote.value}` : myVote.value}
-                            </Badge>
+                            </div>
                           )}
                         </div>
-                      )}
+                      </div>
                     </div>
+                  )}
+
+                  {/* Role */}
+                  <div className="mt-2 text-start text-lg-center profile-sidebar-role">
+                    <span className="text-muted d-block mb-1 fw-bold text-uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.1em' }}>
+                      {t('profile.account_role')}
+                    </span>
+                    {!viewedProfile ? (
+                      <Skeleton width="80px" height="1.4rem" className="mx-lg-auto" />
+                    ) : (
+                      <ForumRoleBadge
+                        roleId={viewedProfile?.role_id}
+                        status={viewedProfile?.status}
+                        userEmail={viewedProfile?.email}
+                        isDeleted={viewedProfile === null}
+                        className="px-3 py-1 font-uppercase"
+                      />
+                    )}
                   </div>
                 </div>
-              )}
-
-              <div className="mb-0 text-start">
-                <span className="text-muted d-block small mb-1 fw-bold text-uppercase" style={{ fontSize: '0.65rem', letterSpacing: '0.1em' }}>
-                  {t('profile.account_role')}
-                </span>
-                {!viewedProfile ? (
-                  <Skeleton width="100px" height="1.5rem" className="mt-1" />
-                ) : (
-                  <ForumRoleBadge
-                    roleId={viewedProfile?.role_id}
-                    status={viewedProfile?.status}
-                    userEmail={viewedProfile?.email}
-                    isDeleted={viewedProfile === null}
-                    className="px-3 py-1 mt-1 font-uppercase"
-                  />
-                )}
               </div>
 
             </Card.Body>
@@ -579,7 +597,7 @@ const ProfilePage = () => {
         </Col>
 
         {hasTabs && (
-          <Col lg={8}>
+          <Col lg={9}>
               <Tabs
                 activeKey={activeTab}
                 onSelect={(k) => setActiveTab(k)}
