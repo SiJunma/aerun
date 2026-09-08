@@ -2572,45 +2572,98 @@ const TopicPage = () => {
             <Card.Body className="p-0">
               <div className="d-flex flex-column flex-md-row flex-md-nowrap">
                 {/* Author sidebar */}
-                <div className="author-sidebar border-end px-2 pt-2 pb-0 text-center d-flex flex-column align-items-center">
-                  <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
-                    <ForumAuthorName
-                      userId={myDraft.author_id}
-                      characterId={myDraft.author_character_id}
-                      isCharacter={!!myDraft.is_character}
-                      fallbackName={myDraft.author_name}
-                      onClick={handleQuoteAuthor}
-                    />
-                  </div>
-                  {getLiveAuthorStatus(myDraft) && (
-                    <div className="text-primary mb-2 w-100 px-2" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
-                      {getLiveAuthorStatus(myDraft)}
+                <div className="author-sidebar border-end p-2 px-md-2 pt-md-2 pb-md-0 text-center d-flex flex-column align-items-center">
+                  {/* --- DESKTOP VERSION (Full Sidebar) --- */}
+                  <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
+                    <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
+                      <ForumAuthorName
+                        userId={myDraft.author_id}
+                        characterId={myDraft.author_character_id}
+                        isCharacter={!!myDraft.is_character}
+                        fallbackName={myDraft.author_name}
+                        onClick={handleQuoteAuthor}
+                      />
                     </div>
-                  )}
-                  <div className="mb-2 hide-on-extra-small-mobile">
-                    <ForumAuthorAvatar
-                      userId={myDraft.author_id}
-                      characterId={myDraft.author_character_id}
-                      isCharacter={!!myDraft.is_character}
-                      fallbackName={myDraft.author_name}
-                      initialAvatar={myDraft.author_avatar}
-                      size={150}
-                      className="rounded shadow-sm"
-                      isOnline={!!user}
-                    />
+                    {getLiveAuthorStatus(myDraft) && (
+                      <div className="text-primary mb-2 w-100 px-2 text-center" style={{ fontStyle: 'italic', lineHeight: '1.2', fontSize: '0.875rem' }}>
+                        {getLiveAuthorStatus(myDraft)}
+                      </div>
+                    )}
+                    <div className="mb-2">
+                      <ForumAuthorAvatar
+                        userId={myDraft.author_id}
+                        characterId={myDraft.author_character_id}
+                        isCharacter={!!myDraft.is_character}
+                        fallbackName={myDraft.author_name}
+                        initialAvatar={myDraft.author_avatar}
+                        size={150}
+                        className="rounded shadow-sm"
+                        isOnline={!!user}
+                      />
+                    </div>
+                    <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
+                      {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count ?? profile?.post_count ?? 0}</strong>
+                    </div>
+                    <div className="text-muted" style={{ fontSize: '0.775rem' }}>
+                      {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation ?? profile?.reputation ?? 0}</strong>
+                    </div>
+                    <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(myDraft)}</div>
+                    {/* Draft Status Links */}
+                    <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
+                      <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
+                        {t('profile.view_profile')}
+                      </Link>
+                    </div>
                   </div>
-                  <div className="text-muted mt-1" style={{ fontSize: '0.8rem' }}>
-                    {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count || 0}</strong>
-                  </div>
-                  <div className="text-muted" style={{ fontSize: '0.875rem' }}>
-                    {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation || 0}</strong>
-                  </div>
-                  <div className="mt-2 mb-3 text-center w-100">{getRoleBadge(myDraft)}</div>
-                  {/* Draft Status Links */}
-                  <div className="mt-auto py-2 border-top w-100 d-flex gap-3 justify-content-center border-top-dashed">
-                    <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
-                      {t('profile.view_profile')}
-                    </Link>
+
+                  {/* --- MOBILE VERSION (Compact & Horizontal) --- */}
+                  <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
+                    {/* Avatar */}
+                    <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
+                      <ForumAuthorAvatar
+                        userId={myDraft.author_id}
+                        characterId={myDraft.author_character_id}
+                        isCharacter={!!myDraft.is_character}
+                        fallbackName={myDraft.author_name}
+                        initialAvatar={myDraft.author_avatar}
+                        size={60}
+                        className="rounded shadow-sm"
+                        isOnline={!!user}
+                      />
+                    </div>
+
+                    {/* Info Group */}
+                    <div className="flex-grow-1 text-start overflow-hidden">
+                      <div className="fw-bold text-truncate author-res-nickname">
+                        <ForumAuthorName
+                          userId={myDraft.author_id}
+                          characterId={myDraft.author_character_id}
+                          isCharacter={!!myDraft.is_character}
+                          fallbackName={myDraft.author_name}
+                          onClick={handleQuoteAuthor}
+                        />
+                      </div>
+                      {getLiveAuthorStatus(myDraft) && (
+                        <div className="text-primary author-res-status" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
+                          {getLiveAuthorStatus(myDraft)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Stats & Role Group */}
+                    <div className="text-end author-stats-group ms-auto">
+                      <div className="d-flex flex-column align-items-end gap-1">
+                        <div className="text-muted author-res-stat">
+                          {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{authorStats[myDraft.author_id]?.post_count ?? profile?.post_count ?? 0}</strong>
+                        </div>
+                        <div className="text-muted author-res-stat">
+                          {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{authorStats[myDraft.author_id]?.reputation ?? profile?.reputation ?? 0}</strong>
+                        </div>
+                        <div className="author-res-info-lite text-end">
+                          {getRoleBadge(myDraft, 'mb-0')}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -2721,33 +2774,46 @@ const TopicPage = () => {
 
                   {/* Draft Management Links (Aligned with post footer) */}
                   {!editingPostId && (
-                    <div className="px-2 px-md-4 py-2 mt-auto d-flex justify-content-end gap-3 border-top border-top-dashed post-footer-links">
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="footer-link p-0"
-                        onClick={() => setDeletingPost(myDraft)}
-                      >
-                        {t('common.delete')}
-                      </Button>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="footer-link p-0"
-                        onClick={() => handleStartEdit(myDraft, false)}
-                      >
-                        {t('common.edit')}
-                      </Button>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="footer-link p-0 text-success fw-semibold"
-                        onClick={() => handlePublishDraft(myDraft.id)}
-                        disabled={draftSaving}
-                      >
-                        <Send size={12} className="me-1" />
-                        {draftSaving ? t('forum.draft_publishing') : t('forum.draft_publish')}
-                      </Button>
+                    <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed post-footer-links" style={{ height: '34px' }}>
+                      {/* Left side: Profile Links (Mobile Only) */}
+                      <div className="d-flex d-md-none gap-3">
+                        <Link to={`/profile/${myDraft.author_id}`} className="author-res-footer-link">
+                          {t('profile.view_profile')}
+                        </Link>
+                      </div>
+
+                      {/* Placeholder for desktop formatting */}
+                      <div className="d-none d-md-block"></div>
+
+                      {/* Right side: Actions */}
+                      <div className="d-flex gap-2 gap-md-3 ms-auto">
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="footer-link p-0"
+                          onClick={() => setDeletingPost(myDraft)}
+                        >
+                          {t('common.delete')}
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="footer-link p-0"
+                          onClick={() => handleStartEdit(myDraft, false)}
+                        >
+                          {t('common.edit')}
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="footer-link p-0 text-success fw-semibold"
+                          onClick={() => handlePublishDraft(myDraft.id)}
+                          disabled={draftSaving}
+                        >
+                          <Send size={12} className="me-1" />
+                          {draftSaving ? t('forum.draft_publishing') : t('forum.draft_publish')}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
