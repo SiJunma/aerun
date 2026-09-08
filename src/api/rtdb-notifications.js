@@ -156,3 +156,27 @@ export const deleteNotification = async (uid, notifId, isAdmin = false) => {
     console.warn('[deleteNotification err]', err);
   }
 };
+
+/**
+ * Deletes ALL notifications for a user from RTDB.
+ */
+export const deleteAllUserNotifications = async (uid) => {
+  if (!uid || !rtdb) return;
+  try {
+    await remove(ref(rtdb, `notifications/${uid}`));
+  } catch (err) {
+    console.warn('[deleteAllUserNotifications err]', err);
+  }
+};
+
+/**
+ * Deletes ALL admin notifications from RTDB.
+ */
+export const deleteAllAdminNotifications = async () => {
+  if (!rtdb) return;
+  try {
+    await remove(ref(rtdb, 'admin_notifications'));
+  } catch (err) {
+    console.warn('[deleteAllAdminNotifications err]', err);
+  }
+};

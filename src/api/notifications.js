@@ -131,7 +131,9 @@ import {
   markNotificationRead as markNotificationReadRtdb,
   markTopicNotificationsRead as markTopicNotificationsReadRtdb,
   markAllNotificationsRead as markAllNotificationsReadRtdb,
-  deleteNotification as deleteNotificationRtdb
+  deleteNotification as deleteNotificationRtdb,
+  deleteAllUserNotifications as deleteAllUserNotificationsRtdb,
+  deleteAllAdminNotifications as deleteAllAdminNotificationsRtdb
 } from './rtdb-notifications';
 
 // ── Subscribe (Delegated to RTDB for 0 Firestore read costs) ─────────────────
@@ -200,30 +202,47 @@ export const markAllAdminNotificationsRead = async () => {
 };
 
 export const deleteAllAdminNotifications = async () => {
-  const q = query(
-    collection(db, 'notifications'),
-    where('recipient_uid', '==', null)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return;
-  const batch = writeBatch(db);
-  snap.docs.forEach(d => batch.delete(d.ref));
-  await batch.commit();
+  // Delete from RTDB first (live source)
+  await deleteAllAdminNotificationsRtdb();
+  // Best-effort cleanup in Firestore
+  try {
+    const q = query(
+      collection(db, 'notifications'),
+      where('recipient_uid', '==', null)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+  } catch (e) {
+    console.warn('[deleteAllAdminNotifications Firestore]', e);
+  }
 };
 
 // Backwards compatibility alias
 export const archiveAllAdminNotifications = deleteAllAdminNotifications;
 
 export const deleteAllUserNotifications = async (uid) => {
-  const q = query(
-    collection(db, 'notifications'),
-    where('recipient_uid', '==', uid)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return;
-  const batch = writeBatch(db);
-  snap.docs.forEach(d => batch.delete(d.ref));
-  await batch.commit();
+  if (!uid) return;
+  // Delete from RTDB first (live source)
+  await deleteAllUserNotificationsRtdb(uid);
+  // Best-effort cleanup in Firestore
+  try {
+    const q = query(
+      collection(db, 'notifications'),
+      where('recipient_uid', '==', uid)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+  } catch (e) {
+    console.warn('[deleteAllUserNotifications Firestore]', e);
+  }
 };
 
 // Backwards compatibility alias
