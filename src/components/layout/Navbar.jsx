@@ -309,7 +309,7 @@ const Navigation = () => {
             {user && (
               <>
                 <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
-                  {t('nav.new_replies')}
+                  {t('nav.active_topics')}
                   {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
                 </Nav.Link>
                 <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)}>

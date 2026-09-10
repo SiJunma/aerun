@@ -38,6 +38,9 @@
   /* Block Backgrounds */
   --block-bg: rgba(30, 41, 59, 0.03);
   /* Light Slate wash */
+  /* Accent badge (unread counter etc.) */
+  --badge-bg: #0284c7;
+  --badge-text: #ffffff;
 }
 
 [data-theme='dark'] {
@@ -77,6 +80,9 @@
   /* Slate 50 */
   /* Block Backgrounds */
   --block-bg: rgba(255, 255, 255, 0.04);
+  /* Accent badge (unread counter etc.) */
+  --badge-bg: #38bdf8;
+  --badge-text: #0f172a;
 }
 
 [data-theme='neutral'] {
@@ -116,6 +122,15 @@
   /* Pitch black */
   /* Block Backgrounds */
   --block-bg: rgba(67, 52, 34, 0.03);
+  /* Accent badge (unread counter etc.) */
+  --badge-bg: #b45309;
+  --badge-text: #ffffff;
+}
+
+/* Theme-aware accent badge — use instead of Bootstrap bg-primary */
+.badge-theme {
+  background-color: var(--badge-bg) !important;
+  color: var(--badge-text) !important;
 }
 
 body {

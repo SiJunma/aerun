@@ -1,50 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { subscribeToLatestTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
-
 import { usePageTitle } from '../contexts/TitleProvider';
+
+const TABS = { ALL: 'all', NEW: 'new_replies' };
+const ITEMS_PER_PAGE = 20;
 
 const NewRepliesPage = () => {
   const { t, lang } = useI18n();
-  const { user, markAllRead, isMarkingAllRead, unreadTopicsCount, hasPermission, PERMISSIONS, categories } = useAuth();
+  const {
+    user, profile,
+    latestTopics,
+    markAllRead, isMarkingAllRead, unreadTopicsCount,
+    hasPermission, PERMISSIONS, categories, readMap,
+  } = useAuth();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [topics, setTopics] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setPageTitle(t('nav.new_replies', 'Новые ответы'));
-  }, [setPageTitle, t, lang]);
-
-  const ITEMS_PER_PAGE = 20;
+  const activeTab = searchParams.get('tab') === TABS.NEW ? TABS.NEW : TABS.ALL;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   useEffect(() => {
-    if (categories.length === 0) return;
-    
-    const allowedCategories = categories.filter(c => hasPermission(PERMISSIONS.VIEW_FORUM, { category: c })).map(c => c.id);
-    
-    if (allowedCategories.length === 0) {
-      setTopics([]);
-      setLoading(false);
-      return;
-    }
-
-    const unsubTopics = subscribeToLatestTopics((data) => {
-      setTopics(data);
-      setLoading(false);
-    }, 200);
-
-    return () => {
-      unsubTopics();
-    };
-  }, [categories, hasPermission]);
+    setPageTitle(t('stats.latest_replies', 'Активные темы'));
+  }, [setPageTitle, t, lang]);
 
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);
@@ -52,40 +35,71 @@ const NewRepliesPage = () => {
     return typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title;
   };
 
-  // Pagination logic
-  const filteredTopics = topics.filter(topic => {
+  // All topics accessible to user — client-side filter from shared latestTopics
+  const filteredTopics = useMemo(() => latestTopics.filter(topic => {
     const cat = categories.find(c => c.id === topic.category_id);
     return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
-  });
+  }), [latestTopics, categories, hasPermission]);
 
-  const totalPages = Math.ceil(filteredTopics.length / ITEMS_PER_PAGE);
+  // Unread topics — same algorithm as AuthProvider unreadTopicsCount
+  const unreadTopics = useMemo(() => {
+    if (!user) return [];
+
+    const registrationMs = profile?.created_at?.toMillis?.()
+      || (profile?.created_at ? new Date(profile.created_at).getTime() : 0);
+
+    return filteredTopics.filter(topic => {
+      if (topic.last_post_author_id === user.uid) return false;
+
+      const entry = readMap[topic.id];
+      const lastVisitValue = entry?.timestamp || entry;
+      const lastVisitMs = lastVisitValue?.toMillis
+        ? lastVisitValue.toMillis()
+        : (typeof lastVisitValue === 'number' ? lastVisitValue : (lastVisitValue ? new Date(lastVisitValue).getTime() : 0));
+
+      const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
+
+      const lastPostMs = topic.last_post_at?.toMillis?.()
+        ?? (typeof topic.last_post_at === 'string'
+          ? new Date(topic.last_post_at).getTime()
+          : (typeof topic.last_post_at === 'number' ? topic.last_post_at : 0));
+
+      return lastPostMs > effectiveLastVisitMs;
+    });
+  }, [filteredTopics, readMap, user, profile?.created_at]);
+
+  const displayTopics = activeTab === TABS.NEW ? unreadTopics : filteredTopics;
+  const totalPages = Math.ceil(displayTopics.length / ITEMS_PER_PAGE);
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
-  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentTopics = filteredTopics.slice(indexOfFirstItem, indexOfLastItem);
+  const currentTopics = displayTopics.slice(indexOfLastItem - ITEMS_PER_PAGE, indexOfLastItem);
 
-  const handlePageChange = (page) => {
-    setSearchParams({ page });
+  const switchTab = (tab) => {
+    setSearchParams({ tab });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handlePageChange = (page) => {
+    setSearchParams({ tab: activeTab, page });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const loading = latestTopics.length === 0 && categories.length === 0;
+
   return (
     <Container className="py-4">
-      <ForumBreadcrumbs 
-        items={[{ label: t('stats.latest_replies'), active: true }]} 
+      <ForumBreadcrumbs
+        items={[{ label: t('stats.latest_replies', 'Активные темы'), active: true }]}
       />
 
-      <div className="mb-4 d-flex justify-content-between align-items-end">
+      <div className="mb-3 d-flex justify-content-between align-items-end">
         <div>
-          <h2>{t('stats.latest_replies')}</h2>
-          <p className="text-muted small mb-0">
-            {t('stats.latest_replies_desc')}
-          </p>
+          <h2 className="mb-0">{t('stats.latest_replies', 'Активные темы')}</h2>
         </div>
-        <div>
-          <button 
+        {activeTab === TABS.NEW && user && (
+          <button
             className="btn btn-outline-primary btn-sm rounded-pill px-3 d-flex align-items-center gap-2"
             onClick={() => markAllRead()}
-            disabled={filteredTopics.length === 0 || unreadTopicsCount === 0 || isMarkingAllRead}
+            disabled={unreadTopics.length === 0 || unreadTopicsCount === 0 || isMarkingAllRead}
           >
             {isMarkingAllRead && (
               <div className="spinner-border spinner-border-sm" role="status">
@@ -94,7 +108,38 @@ const NewRepliesPage = () => {
             )}
             {t('forum.mark_all_read')}
           </button>
-        </div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="mb-3">
+        <ul className="nav nav-tabs forum-tabs">
+          <li className="nav-item">
+            <button
+              className={`nav-link${activeTab === TABS.ALL ? ' active' : ''}`}
+              onClick={() => switchTab(TABS.ALL)}
+              id="tab-all-active"
+            >
+              {t('stats.active_topics_tab', 'Все активные')}
+            </button>
+          </li>
+          {user && (
+            <li className="nav-item">
+              <button
+                className={`nav-link d-flex align-items-center gap-2${activeTab === TABS.NEW ? ' active' : ''}`}
+                onClick={() => switchTab(TABS.NEW)}
+                id="tab-new-replies"
+              >
+                {t('stats.new_replies_tab', 'Новые ответы')}
+                {unreadTopicsCount > 0 && (
+                <span className="badge rounded-pill badge-theme" style={{ fontSize: '0.7em' }}>
+                    {unreadTopicsCount}
+                  </span>
+                )}
+              </button>
+            </li>
+          )}
+        </ul>
       </div>
 
       <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
@@ -103,9 +148,11 @@ const NewRepliesPage = () => {
             <div className="spinner-border spinner-border-sm me-2" role="status" />
             {t('common.loading')}
           </div>
-        ) : filteredTopics.length === 0 ? (
+        ) : displayTopics.length === 0 ? (
           <div className="p-5 text-center text-muted">
-            {t('stats.no_topics')}
+            {activeTab === TABS.NEW
+              ? t('stats.new_replies_tab_desc', 'Нет непрочитанных тем.')
+              : t('stats.no_topics')}
           </div>
         ) : (
           <>
@@ -120,7 +167,7 @@ const NewRepliesPage = () => {
               </thead>
               <tbody>
                 {currentTopics.map(topic => (
-                  <TopicRow 
+                  <TopicRow
                     key={topic.id}
                     topic={topic}
                     user={user}
@@ -132,10 +179,10 @@ const NewRepliesPage = () => {
                 ))}
               </tbody>
             </Table>
-            
+
             {totalPages > 1 && (
               <div className="p-3 border-top d-flex justify-content-center">
-                <ForumPagination 
+                <ForumPagination
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={handlePageChange}

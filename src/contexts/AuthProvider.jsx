@@ -951,6 +951,7 @@ export const AuthProvider = ({ children }) => {
     settings,
     loading,
     readMap,
+    latestTopics,
     categories,
     unreadTopicsCount,
     dmUnread,
@@ -989,7 +990,7 @@ export const AuthProvider = ({ children }) => {
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
     updateSettings, updateProfile, recordActivity, refreshForumState, forumStats,
     dailyActiveUsers, updateLocalTopicLastPost, hasPermission, roles, activeUsers,
-    activeUserIds, isUserOnline
+    activeUserIds, isUserOnline, latestTopics
   ]);
 
   return (
