@@ -5,6 +5,7 @@ const { setGlobalOptions } = require("firebase-functions/v2");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
+const { sendBrevoEmail, renderDmNotificationEmail, renderTopicReplyEmail } = require("./email");
 
 admin.initializeApp();
 
@@ -1534,6 +1535,42 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
                 created_at: admin.firestore.FieldValue.serverTimestamp()
               });
             }
+
+            // Optional transactional email for topic reply
+            try {
+              const userSnap = await db.collection("users").doc(recipientUid).get();
+              if (userSnap.exists) {
+                const uData = userSnap.data();
+                const emailEnabled = uData.settings?.email_notifications?.topic_replies !== false;
+                if (uData.email && emailEnabled) {
+                  // Check if user is offline in RTDB before sending email
+                  const rtdb = admin.database();
+                  const presenceSnap = await rtdb.ref(`status/${recipientUid}`).once('value');
+                  const pVal = presenceSnap.val();
+                  const lastSeen = pVal?.last_seen || pVal?.last_activity || 0;
+                  const isOffline = !pVal || pVal.state === 'logged_out' || (Date.now() - lastSeen > 15 * 60 * 1000);
+
+                  if (isOffline) {
+                    const postSnippet = (content || "").replace(/\[.*?\]/g, "").substring(0, 200);
+                    const html = renderTopicReplyEmail({
+                      recipientName: uData.nickname || "Traveler",
+                      authorName: "Someone",
+                      topicTitle: topicTitle || "Discussion",
+                      postSnippet,
+                      topicUrl: `https://aerun-forum.web.app/topic/${topicId}?postId=${postId}`
+                    });
+                    sendBrevoEmail({
+                      toEmail: uData.email,
+                      toName: uData.nickname || "Traveler",
+                      subject: `New reply in: ${topicTitle || "Subscribed topic"}`,
+                      htmlContent: html
+                    }).catch(err => logger.warn("[Brevo topic reply email err]", err));
+                  }
+                }
+              }
+            } catch (emailErr) {
+              logger.warn(`[topic reply email dispatch error] ${recipientUid}:`, emailErr);
+            }
           } catch (subErr) {
             logger.error(`Failed to send topic notification to ${recipientUid}:`, subErr);
           }
@@ -1691,9 +1728,10 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
   if (!snap) return;
   const newUser = snap.data();
   const db = admin.firestore();
+  const rtdb = admin.database();
 
   try {
-    // Set custom user claims for instantaneous Firestore Security Rules checks (0 reads)
+    // 1. Устанавливаем Custom Claims для мгновенных проверок Security Rules
     try {
       await admin.auth().setCustomUserClaims(event.params.uid, {
         role_id: newUser.role_id || "player"
@@ -1702,20 +1740,39 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
       logger.warn(`[onUserCreated] Failed to set custom claims for ${event.params.uid}:`, claimErr);
     }
 
-    // Update global forum statistics
+    const newestUserObj = {
+      id: event.params.uid,
+      nickname: newUser.nickname || "User",
+      avatar_url: newUser.avatar_url || "",
+      role_id: newUser.role_id || "player",
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    // 2. Обновляем глобальную статистику форума в Firestore (forum_stats/global)
     const globalStatsRef = db.collection("forum_stats").doc("global");
     await globalStatsRef.set({
       total_users: admin.firestore.FieldValue.increment(1),
-      newest_user: {
-        id: event.params.uid,
-        nickname: newUser.nickname || "User",
-        avatar_url: newUser.avatar_url || "",
-        role_id: newUser.role_id || "player",
-        created_at: admin.firestore.FieldValue.serverTimestamp()
-      }
+      newest_user: newestUserObj
     }, { merge: true });
 
-    // 1. Find roles with user-management permissions
+    // 3. Зеркалируем обновленную статистику в кэш Realtime Database для клиентов
+    try {
+      const globalSnap = await globalStatsRef.get();
+      if (globalSnap.exists) {
+        const gs = globalSnap.data();
+        await rtdb.ref('main_page_cache/stats').update({
+          total_users: gs.total_users ?? 0,
+          newest_user_id: event.params.uid,
+          newest_user_nickname: newUser.nickname || "User",
+          newest_user_role_id: newUser.role_id || "player",
+          updated_at: Date.now()
+        });
+      }
+    } catch (rtdbStatsErr) {
+      logger.warn(`[onUserCreated] Failed to update RTDB stats cache:`, rtdbStatsErr);
+    }
+
+    // 4. Поиск ролей с правами управления пользователями
     const rolesSnap = await db.collection("roles").get();
     const eligibleRoleIds = [];
     const USER_MGMT_PERMS = ["approve_users", "ban_users", "delete_users"];
@@ -1727,7 +1784,7 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
       }
     });
 
-    // 2. Collect recipients
+    // 5. Сбор получателей уведомлений
     const recipients = new Set();
     for (let i = 0; i < eligibleRoleIds.length; i += 30) {
       const usersSnap = await db.collection("users")
@@ -1736,7 +1793,7 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
       usersSnap.forEach(u => recipients.add(u.id));
     }
 
-    // Always notify role_id === 'root'
+    // Всегда уведомляем root
     const rootSnap = await db.collection("users").where("role_id", "==", "root").get();
     rootSnap.forEach(u => recipients.add(u.id));
 
@@ -1749,13 +1806,13 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
       admin_message: newUser.admin_message || null
     };
 
-    // Send real-time RTDB admin notification
+    // Отправляем RTDB-уведомление админам
     await sendRtdbAdminNotification({
       type: "new_registration",
       payload: notifPayload
     });
 
-    // 3. Create notifications in Firestore backup
+    // 6. Создаем резервные уведомления в Firestore
     const batch = db.batch();
     recipients.forEach(uid => {
       const notifRef = db.collection("notifications").doc();
@@ -1823,7 +1880,7 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
     if (topicSnap.exists) {
       await syncTopicMetadata(db, topic_id);
 
-    // 5. Синхронизируем свежие метаданные категории в RTDB main_page_cache
+      // 5. Синхронизируем свежие метаданные категории в RTDB main_page_cache
       const categoryId = topicSnap.data()?.category_id;
       if (categoryId) {
         const updatedCatSnap = await db.collection("categories").doc(categoryId).get();
@@ -1854,11 +1911,18 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
  * Queues an increment onto a batch only if the target document still exists.
  * batch.update() on a missing document fails the entire commit, which is how
  * counter updates were silently lost when an author or post had been deleted.
+ * Includes floor protection: decrements will never lower counter below 0.
  */
 async function queueIncrement(batch, ref, field, delta) {
   const snap = await ref.get();
   if (!snap.exists) return false;
-  batch.update(ref, { [field]: admin.firestore.FieldValue.increment(delta) });
+  if (delta < 0) {
+    const currentVal = snap.data()[field] || 0;
+    const newVal = Math.max(0, currentVal + delta);
+    batch.update(ref, { [field]: newVal });
+  } else {
+    batch.update(ref, { [field]: admin.firestore.FieldValue.increment(delta) });
+  }
   return true;
 }
 
@@ -1982,14 +2046,76 @@ async function syncCategoryMetadata(db, categoryId) {
 exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
   const deletedUid = event.params.userId;
   try {
-    await admin.auth().deleteUser(deletedUid);
     const db = admin.firestore();
-    await db.collection("forum_stats").doc("global").set({
-      total_users: admin.firestore.FieldValue.increment(-1)
-    }, { merge: true });
-    logger.info(`Successfully deleted auth user: ${deletedUid}`);
+    const rtdb = admin.database();
+
+    // 1. Delete from Firebase Auth
+    await admin.auth().deleteUser(deletedUid).catch(err => {
+      logger.warn(`Auth deletion warning for ${deletedUid}:`, err.message);
+    });
+
+    // 2. Clean up RTDB & Firestore presence/status immediately
+    await Promise.allSettled([
+      rtdb.ref(`status/${deletedUid}`).remove(),
+      rtdb.ref(`user_presence/${deletedUid}`).remove(),
+      rtdb.ref(`notifications/${deletedUid}`).remove(),
+      rtdb.ref(`dm_unread/${deletedUid}`).remove(),
+      db.collection("user_presence").doc(deletedUid).delete()
+    ]);
+
+    // 3. Decrement total_users with floor protection (>= 0)
+    const globalStatsRef = db.collection("forum_stats").doc("global");
+    let updatedTotalUsers = 0;
+    let newestUserToSet = null;
+
+    await db.runTransaction(async (t) => {
+      const gSnap = await t.get(globalStatsRef);
+      const gData = gSnap.exists ? gSnap.data() : {};
+      const currentTotal = gData.total_users || 0;
+      updatedTotalUsers = Math.max(0, currentTotal - 1);
+      
+      const updates = { total_users: updatedTotalUsers };
+
+      // If the deleted user was the newest_user, find the new newest user
+      if (gData.newest_user?.id === deletedUid) {
+        const latestUserSnap = await db.collection("users")
+          .orderBy("created_at", "desc")
+          .limit(1)
+          .get();
+
+        if (!latestUserSnap.empty) {
+          const lu = latestUserSnap.docs[0].data();
+          newestUserToSet = {
+            id: latestUserSnap.docs[0].id,
+            nickname: lu.nickname || "User",
+            avatar_url: lu.avatar_url || "",
+            role_id: lu.role_id || "player",
+            created_at: lu.created_at || admin.firestore.FieldValue.serverTimestamp()
+          };
+          updates.newest_user = newestUserToSet;
+        } else {
+          updates.newest_user = null;
+        }
+      }
+
+      t.set(globalStatsRef, updates, { merge: true });
+    });
+
+    // 4. Mirror updated stats to RTDB
+    const rtdbStatsUpdate = {
+      total_users: updatedTotalUsers,
+      updated_at: Date.now()
+    };
+    if (newestUserToSet) {
+      rtdbStatsUpdate.newest_user_id = newestUserToSet.id;
+      rtdbStatsUpdate.newest_user_nickname = newestUserToSet.nickname;
+      rtdbStatsUpdate.newest_user_role_id = newestUserToSet.role_id;
+    }
+    await rtdb.ref('main_page_cache/stats').update(rtdbStatsUpdate).catch(() => {});
+
+    logger.info(`Successfully deleted user ${deletedUid} and cleaned up presence/stats.`);
   } catch (error) {
-    logger.error(`Error deleting auth user ${deletedUid}:`, error);
+    logger.error(`Error in onUserDeleted for ${deletedUid}:`, error);
   }
 });
 
@@ -2021,21 +2147,72 @@ exports.cleanupExpiredPresence = onSchedule("every 15 minutes", async () => {
 /**
  * onUserUpdated
  * Triggers when a user document is updated in Firestore.
- * Synchronizes role_id changes to Firebase Custom Claims for zero-read rules.
+ * Synchronizes role_id changes to Firebase Custom Claims for zero-read rules,
+ * updates RTDB status/{uid}, and syncs newest_user nickname in forum stats.
  */
 exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
   const before = event.data?.before?.data();
   const after = event.data?.after?.data();
   if (!after) return;
+  const uid = event.params.uid;
+  const db = admin.firestore();
+  const rtdb = admin.database();
 
+  // 1. Sync custom claims if role changed
   if (before?.role_id !== after.role_id) {
     try {
-      await admin.auth().setCustomUserClaims(event.params.uid, {
+      await admin.auth().setCustomUserClaims(uid, {
         role_id: after.role_id || "player"
       });
-      logger.info(`[onUserUpdated] Synced custom claims for ${event.params.uid} to role: ${after.role_id}`);
+      logger.info(`[onUserUpdated] Synced custom claims for ${uid} to role: ${after.role_id}`);
     } catch (err) {
-      logger.error(`[onUserUpdated] Failed to update custom claims for ${event.params.uid}:`, err);
+      logger.error(`[onUserUpdated] Failed to update custom claims for ${uid}:`, err);
+    }
+  }
+
+  // 2. Sync profile updates (nickname, avatar, role, status_line, signature) to RTDB status/{uid}
+  try {
+    const statusUpdates = {};
+    if (before?.nickname !== after.nickname && after.nickname) statusUpdates.nickname = after.nickname;
+    if (before?.avatar_url !== after.avatar_url && after.avatar_url !== undefined) statusUpdates.avatar_url = after.avatar_url;
+    if (before?.role_id !== after.role_id && after.role_id) statusUpdates.role_id = after.role_id;
+    if (before?.status_line !== after.status_line && after.status_line !== undefined) statusUpdates.status_line = after.status_line;
+    const afterSig = after.settings?.signature ?? after.signature;
+    const beforeSig = before?.settings?.signature ?? before?.signature;
+    if (beforeSig !== afterSig && afterSig !== undefined) statusUpdates.signature = afterSig;
+
+    if (Object.keys(statusUpdates).length > 0) {
+      await rtdb.ref(`status/${uid}`).update(statusUpdates);
+    }
+  } catch (presenceErr) {
+    logger.warn(`[onUserUpdated] Failed to update RTDB status for ${uid}:`, presenceErr);
+  }
+
+  // 3. Sync newest_user in global stats if this user's nickname or role was updated
+  if (before?.nickname !== after.nickname || before?.role_id !== after.role_id) {
+    try {
+      const globalStatsRef = db.collection("forum_stats").doc("global");
+      const gSnap = await globalStatsRef.get();
+      if (gSnap.exists) {
+        const gData = gSnap.data();
+        if (gData.newest_user?.id === uid) {
+          await globalStatsRef.set({
+            newest_user: {
+              ...gData.newest_user,
+              nickname: after.nickname || gData.newest_user.nickname,
+              role_id: after.role_id || gData.newest_user.role_id
+            }
+          }, { merge: true });
+
+          await rtdb.ref('main_page_cache/stats').update({
+            newest_user_nickname: after.nickname || "User",
+            newest_user_role_id: after.role_id || "player",
+            updated_at: Date.now()
+          }).catch(() => {});
+        }
+      }
+    } catch (statErr) {
+      logger.warn(`[onUserUpdated] Failed to sync newest_user stats for ${uid}:`, statErr);
     }
   }
 });
@@ -2624,7 +2801,8 @@ exports.getSecuredPosts = onCall(
 
 /**
  * onDmMessageCreated
- * Triggers when a new DM message is created. Updates unread counter in RTDB (dm_unread/{recipientUid}).
+ * Triggers when a new DM message is created. Updates unread counter in RTDB (dm_unread/{recipientUid})
+ * and sends a Brevo email notification if the recipient is currently offline.
  */
 exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", async (event) => {
   const snap = event.data;
@@ -2662,6 +2840,47 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
       total += (child.val()?.unread_count || 0);
     });
     await rtdb.ref(`dm_unread/${recipientUid}/total`).set(total);
+
+    // Check if recipient is offline and send email notification
+    try {
+      const [presenceSnap, recipientDoc, senderDoc] = await Promise.all([
+        rtdb.ref(`status/${recipientUid}`).once('value'),
+        db.collection("users").doc(recipientUid).get(),
+        db.collection("users").doc(sender_uid).get()
+      ]);
+
+      if (recipientDoc.exists) {
+        const rData = recipientDoc.data();
+        const emailNotificationsEnabled = rData.settings?.email_notifications?.dms !== false;
+
+        if (rData.email && emailNotificationsEnabled) {
+          const pVal = presenceSnap.val();
+          const lastSeen = pVal?.last_seen || pVal?.last_activity || 0;
+          const ONLINE_WINDOW_MS = 15 * 60 * 1000;
+          const isOffline = !pVal || pVal.state === 'logged_out' || (Date.now() - lastSeen > ONLINE_WINDOW_MS);
+
+          if (isOffline) {
+            const senderNick = (senderDoc.exists ? senderDoc.data().nickname : null) || "A forum member";
+            const messageSnippet = (text || "").substring(0, 150);
+            const html = renderDmNotificationEmail({
+              recipientName: rData.nickname || "Traveler",
+              senderName: senderNick,
+              messageSnippet,
+              forumUrl: "https://aerun-forum.web.app"
+            });
+
+            await sendBrevoEmail({
+              toEmail: rData.email,
+              toName: rData.nickname || "Traveler",
+              subject: `New direct message from ${senderNick}`,
+              htmlContent: html
+            });
+          }
+        }
+      }
+    } catch (emailErr) {
+      logger.warn(`[onDmMessageCreated email notification err] ${recipientUid}:`, emailErr);
+    }
 
   } catch (err) {
     logger.error(`[onDmMessageCreated] conv=${convId} err:`, err);

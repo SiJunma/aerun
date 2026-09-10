@@ -40,7 +40,9 @@ import {
   initRtdbPresence,
   setRtdbOnline,
   setRtdbOffline,
-  subscribeToOnlineUsers
+  subscribeToOnlineUsers,
+  initRtdbGuestPresence,
+  removeRtdbGuestPresence
 } from '../api/rtdb-presence';
 import { subscribeToDmUnread } from '../api/dms';
 import { clearAllDmCache } from '../api/dm-cache';
@@ -174,24 +176,15 @@ export const AuthProvider = ({ children }) => {
           .catch(err => console.warn('[sync last_seen to firestore err]', err));
       }
 
-      // 1. Если пользователь авторизован, но остался старый guest_id — удаляем его запись из guest_activity
+      // 1. Если пользователь авторизован, но остался старый guest_id — удаляем его запись из guest_presence
       const gid = localStorage.getItem('guest_id');
       if (gid) {
-        apiDeleteGuestActivity(gid).catch(err => console.warn('[deleteGuestActivity error]', err));
+        removeRtdbGuestPresence(gid);
+        apiDeleteGuestActivity(gid).catch(() => {});
         localStorage.removeItem('guest_id');
-        localStorage.removeItem('last_guest_push');
-      }
-    } else {
-      // Для гостей: пинг раз в 10 минут
-      const GUEST_TICK_MS = 10 * 60 * 1000;
-      const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0', 10);
-      if (now - lastGuestPush >= GUEST_TICK_MS) {
-        const gid = getOrCreateGuestId();
-        apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity]', err));
-        localStorage.setItem('last_guest_push', now.toString());
       }
     }
-  }, [user, profile, getOrCreateGuestId]);
+  }, [user, profile]);
 
   // Inactivity detection: auto-switch to 'offline' after exactly 15 minutes of no clicks/keydowns
   useEffect(() => {
@@ -295,7 +288,7 @@ export const AuthProvider = ({ children }) => {
       if (uid && !skipPresenceCleanup) {
         try {
           await setRtdbOffline(uid, true); // isLogout=true cancels the onDisconnect hook
-          await deleteDoc(doc(db, 'user_presence', uid)).catch(() => {});
+          await deleteDoc(doc(db, 'user_presence', uid)).catch(() => { });
           setActiveUsers(prev => prev.filter(u => u.id !== uid));
         } catch (e) {
           console.warn('[logout presence cleanup error]', e);
@@ -348,6 +341,22 @@ export const AuthProvider = ({ children }) => {
 
     if (!isSelf) {
       await logAdminAction('user_profile_edited_by_admin', user.uid, { targetId: finalUid });
+    }
+
+    if (updatedData.nickname && (finalUid === forumStats?.newestUser?.id || finalUid === forumStats?.newest_user_id)) {
+      setForumStats(prev => prev ? {
+        ...prev,
+        newestUser: {
+          ...prev.newestUser,
+          nickname: updatedData.nickname
+        }
+      } : prev);
+      setDoc(doc(db, 'forum_stats', 'global'), {
+        newest_user: {
+          id: finalUid,
+          nickname: updatedData.nickname
+        }
+      }, { merge: true }).catch(() => {});
     }
 
     if (isSelf) {
@@ -424,9 +433,9 @@ export const AuthProvider = ({ children }) => {
         // 1. Очищаем гостевую сессию
         const gid = localStorage.getItem('guest_id');
         if (gid) {
-          apiDeleteGuestActivity(gid).catch(err => console.warn('[deleteGuestActivity error]', err));
+          removeRtdbGuestPresence(gid);
+          apiDeleteGuestActivity(gid).catch(() => {});
           localStorage.removeItem('guest_id');
-          localStorage.removeItem('last_guest_push');
         }
 
         try {
@@ -436,20 +445,23 @@ export const AuthProvider = ({ children }) => {
           if (!userDoc.exists()) {
             const isRegistering = sessionStorage.getItem('is_registering') === 'true';
 
-            // ЖЕСТКИЙ ЗАПРЕТ: Если нет флага регистрации — НИКОГДА НЕ ВЫЗЫВАЕМ setDoc
-            if (!isRegistering) {
-              console.warn('[AuthProvider] Документ профиля временно не найден в кэше Firestore. Запись заблокирована.');
+            // Разрешаем воссоздание профиля, если пользователь регистрируется 
+            // ИЛИ если у него уже подтверждена почта/он вошел через пароль/провайдер
+            const isExistingAuthUser = !!firebaseUser.uid;
+
+            if (!isRegistering && !isExistingAuthUser) {
+              console.warn('[AuthProvider] Документ профиля не найден. Запись заблокирована.');
               finishLoading();
               return;
             }
 
-            // Логика создания НОВОГО пользователя при явной регистрации:
+            // Получаем настройки
             const globalSettingsSnap = await getDoc(doc(db, 'settings', 'global'));
             const globalSettings = globalSettingsSnap.exists() ? globalSettingsSnap.data() : null;
 
             const registrationEnabled = globalSettings?.registrationEnabled !== false;
 
-            if (!registrationEnabled && !isAdmin) {
+            if (!registrationEnabled && !isAdmin && isRegistering) {
               console.warn('[Registration] Blocked: registration is disabled.');
               sessionStorage.setItem('auth_error', 'registration_disabled');
               await signOut(auth);
@@ -457,13 +469,28 @@ export const AuthProvider = ({ children }) => {
               return;
             }
 
+            // Восстанавливаем никнейм из сессии или генерируем из почты/рандома
             const pendingNickname = sessionStorage.getItem('pending_nickname');
             const pendingMessage = sessionStorage.getItem('pending_message');
 
-            let chosenNickname = (pendingNickname && typeof pendingNickname === 'string') ? pendingNickname.trim() : null;
-            let finalNickname = chosenNickname || `${generateRandomNickname()}-${Math.random().toString(36).substring(2, 6)}`;
+            let finalNickname = (pendingNickname && typeof pendingNickname === 'string')
+              ? pendingNickname.trim()
+              : (firebaseUser.displayName || firebaseUser.email?.split('@')[0] || `${generateRandomNickname()}-${Math.random().toString(36).substring(2, 6)}`);
 
-            const defaultAvatar = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(finalNickname)}`;
+            const defaultAvatar = firebaseUser.photoURL || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(finalNickname)}`;
+
+            // Если у пользователя подтверждена почта или отключена пре-модерация — даем роль player
+            const isEmailVerified = firebaseUser.emailVerified;
+            const requireApproval = globalSettings?.requireApproval !== false;
+
+            const initialRole = isAdmin
+              ? CHIEF_ADMIN_ID
+              : ((!requireApproval || isEmailVerified) ? 'player' : 'pending');
+
+            const initialLanguage = localStorage.getItem('preferred_language')
+              || localStorage.getItem('i18nextLng')
+              || (navigator.language?.startsWith('ru') ? 'ru' : 'en')
+              || 'ru';
 
             const newUser = {
               uid: firebaseUser.uid,
@@ -471,18 +498,42 @@ export const AuthProvider = ({ children }) => {
               nickname: finalNickname,
               avatar_url: defaultAvatar,
               status_line: 'Hello, I am new here!',
-              role_id: isAdmin ? CHIEF_ADMIN_ID : (globalSettings?.requireApproval === false ? 'player' : 'pending'),
+              role_id: initialRole,
+              status: initialRole === 'banned' ? 'banned' : (initialRole === 'pending' ? 'pending' : 'active'),
+              post_count: 0,
+              reputation: 0,
               created_at: serverTimestamp(),
               last_seen: serverTimestamp(),
               ...(pendingMessage ? { admin_message: pendingMessage } : {}),
               settings: {
                 theme: localStorage.getItem('guest_theme') || 'dark',
-                language: 'ru',
-                member_view_style: 'table'
+                language: initialLanguage,
+                member_view_style: 'table',
+                email_notifications: {
+                  dms: true,
+                  topic_replies: true
+                }
               }
             };
 
+            // Создаем отсутствующий профиль в Firestore
             await setDoc(userDocRef, newUser, { merge: true });
+
+            // Обновляем статистику
+            setForumStats(prev => ({
+              ...prev,
+              totalUsers: (prev?.totalUsers || 0) + 1,
+              newestUser: {
+                id: firebaseUser.uid,
+                nickname: finalNickname,
+                role_id: newUser.role_id
+              }
+            }));
+
+            // 3. Фоново запрашиваем обновленное состояние с сервера
+            setTimeout(() => {
+              refreshForumState(true);
+            }, 500);
 
             sessionStorage.removeItem('pending_nickname');
             sessionStorage.removeItem('pending_message');
@@ -501,7 +552,7 @@ export const AuthProvider = ({ children }) => {
                 const globalSnap = await getDoc(doc(db, 'settings', 'global'));
                 const reqAppr = globalSnap.exists() ? globalSnap.data().requireApproval : false;
                 if (!reqAppr) {
-                  await updateDoc(userDocRef, { role_id: 'player' });
+                  await setDoc(userDocRef, { role_id: 'player' }, { merge: true });
                   data.role_id = 'player';
                 }
               } catch (e) {
@@ -535,12 +586,18 @@ export const AuthProvider = ({ children }) => {
             }
           }
 
+          // ВАЖНО: Подписки на карту прочитанного и темы активируем ТОЛЬКО ПОСЛЕ того, 
+          // как профиль пользователя гарантированно существует в Firestore!
           readMapUnsubRef.current = subscribeToReadMap(firebaseUser.uid, setReadMap);
           latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 50);
 
           profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
             if (docSnap.exists()) {
-              const data = docSnap.data();
+              const rawData = docSnap.data();
+              const data = {
+                ...rawData,
+                status: rawData.status || (rawData.role_id === 'banned' ? 'banned' : (rawData.role_id === 'pending' ? 'pending' : 'active'))
+              };
               setAuthError(null);
 
               if (isAdmin && data.role_id !== CHIEF_ADMIN_ID) {
@@ -560,16 +617,6 @@ export const AuthProvider = ({ children }) => {
             profileUnsubRef._hasLoadedOnce = true;
             finishLoading();
           }, (error) => {
-            const isTransient = !error?.code ||
-              error.code === 'unavailable' ||
-              error.code === 'unknown' ||
-              error.message === undefined;
-
-            if (isTransient) {
-              finishLoading();
-              return;
-            }
-
             console.error('Firestore profile listener error:', error);
             if (!profile) {
               setAuthError(error || new Error('Unknown Firestore Error'));
@@ -611,19 +658,11 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (user) return;
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const GUEST_TICK_MS = 10 * 60 * 1000;
-      const lastGuestPush = parseInt(localStorage.getItem('last_guest_push') || '0', 10);
-      if (now - lastGuestPush >= GUEST_TICK_MS) {
-        const gid = getOrCreateGuestId();
-        apiRecordGuestActivity(gid).catch(err => console.warn('[guest_activity heartbeat]', err));
-        localStorage.setItem('last_guest_push', now.toString());
-      }
-    }, 60000);
+    const gid = getOrCreateGuestId();
+    const unsubGuest = initRtdbGuestPresence(gid);
 
     return () => {
-      clearInterval(interval);
+      if (typeof unsubGuest === 'function') unsubGuest();
     };
   }, [user, getOrCreateGuestId]);
 
@@ -811,16 +850,16 @@ export const AuthProvider = ({ children }) => {
   const markTopicRead = useCallback(async (topicId, offset = null) => {
     if (!user?.uid || !topicId) return;
     const now = Date.now();
-    
+
     // Calculate the final offset using the current readMap state from ref
     const currentReadMap = readMapRef.current?.[topicId];
     const prevOffset = currentReadMap?.offset ?? -1;
-    
+
     // Preserve or advance offset (never regress)
     const finalOffset = offset !== null ? Math.max(offset, prevOffset) : (prevOffset !== -1 ? prevOffset : null);
-    
+
     const value = finalOffset !== null ? { timestamp: now, offset: finalOffset } : now;
-    
+
     setReadMap(prev => ({ ...prev, [topicId]: value }));
 
     try {

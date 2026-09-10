@@ -442,6 +442,7 @@ const AdminPage = () => {
       message: t('admin.users.confirm_reject_message'),
       onConfirm: async () => {
         try {
+          setUsers(prev => prev.filter(u => u.id !== uid));
           await rejectUser(uid, user.uid);
           showToast(t('admin.users.toast_rejected'), 'success');
         } catch (err) {
@@ -454,6 +455,7 @@ const AdminPage = () => {
 
   const handleApproveUser = async (uid) => {
     try {
+      setUsers(prev => prev.map(u => u.id === uid ? { ...u, role_id: 'player', status: 'active' } : u));
       await approveUser(uid, user.uid);
       showToast(t('admin.users.toast_approved'), 'success');
     } catch (err) {
@@ -469,6 +471,7 @@ const AdminPage = () => {
       message: t('admin.users.confirm_ban_message'),
       onConfirm: async () => {
         try {
+          setUsers(prev => prev.map(u => u.id === uid ? { ...u, role_id: 'banned', status: 'banned' } : u));
           await banUser(uid, user.uid);
           showToast(t('admin.users.toast_banned'), 'success');
         } catch (err) {
@@ -481,6 +484,7 @@ const AdminPage = () => {
 
   const handleUnbanUser = async (uid) => {
     try {
+      setUsers(prev => prev.map(u => u.id === uid ? { ...u, role_id: u.previous_role_id || 'player', status: 'active' } : u));
       await unbanUser(uid, user.uid);
       showToast(t('admin.users.toast_unbanned'), 'success');
     } catch (err) {
@@ -496,6 +500,7 @@ const AdminPage = () => {
       message: t('admin.users.confirm_delete_message'),
       onConfirm: async () => {
         try {
+          setUsers(prev => prev.filter(u => u.id !== uid));
           await deleteUser(uid, user.uid);
           showToast(t('admin.users.toast_deleted'), 'success');
         } catch (err) {
@@ -516,6 +521,7 @@ const AdminPage = () => {
     if (!editingUser) return;
     setSaving(true);
     try {
+      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role_id: userForm.role_id } : u));
       await updateUserRole(editingUser.id, userForm.role_id, user.uid);
       showToast(t('admin.users.toast_role_updated'), 'success');
       setShowUserModal(false);

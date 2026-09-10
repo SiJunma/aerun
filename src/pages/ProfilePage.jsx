@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
-import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2, Bell, Volume2 } from 'lucide-react';
+import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2, Bell, Volume2, Mail } from 'lucide-react';
 import { playNotificationSound } from '../utils/notificationSound';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
@@ -75,6 +75,8 @@ const ProfilePage = () => {
     notif_post_quoted: true,
     notif_reputation: true,
     notif_new_registration: true,
+    email_notif_dms: true,
+    email_notif_topic_replies: true,
     soundEnabled: false,
     soundVolume: 40
   });
@@ -269,6 +271,8 @@ const ProfilePage = () => {
         notif_post_quoted: source.settings?.notifications?.post_quoted?.in_app !== false,
         notif_reputation:  source.settings?.notifications?.reputation_change?.in_app !== false,
         notif_new_registration: source.settings?.notifications?.new_registration?.in_app !== false,
+        email_notif_dms: source.settings?.email_notifications?.dms !== false,
+        email_notif_topic_replies: source.settings?.email_notifications?.topic_replies !== false,
         soundEnabled: source.settings?.sound?.enabled ?? false,
         soundVolume:  source.settings?.sound?.volume  ?? 40
       });
@@ -359,6 +363,10 @@ const ProfilePage = () => {
             post_quoted:       { in_app: accountFormData.notif_post_quoted },
             reputation_change: { in_app: accountFormData.notif_reputation },
             new_registration:  { in_app: accountFormData.notif_new_registration }
+          },
+          email_notifications: {
+            dms: accountFormData.email_notif_dms,
+            topic_replies: accountFormData.email_notif_topic_replies
           },
           sound: {
             enabled: accountFormData.soundEnabled,
@@ -1571,6 +1579,33 @@ const ProfilePage = () => {
                           onChange={(e) => setAccountFormData({ ...accountFormData, notif_new_registration: e.target.checked })}
                         />
                       )}
+
+                      {/* ── Email Notifications (Brevo) ────────────────── */}
+                      <hr className="my-4" />
+                      <h6 className="mb-1 text-primary small fw-bold d-flex align-items-center gap-2">
+                        <Mail size={15} /> {lang === 'ru' ? 'Email-уведомления (когда вы не на форуме)' : 'Email Notifications (when offline)'}
+                      </h6>
+                      <p className="small text-muted mb-3" style={{ maxWidth: '520px' }}>
+                        {lang === 'ru'
+                          ? 'Уведомления на ваш email отправляются только если вы не проявляли активности последние 15 минут.'
+                          : 'Transactional emails are only sent if you have been offline for at least 15 minutes.'}
+                      </p>
+                      <Form.Check
+                        type="switch"
+                        id="email-notif-dms-switch"
+                        label={lang === 'ru' ? 'Личные сообщения (ЛС)' : 'Direct Messages'}
+                        className="mb-2"
+                        checked={accountFormData.email_notif_dms}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, email_notif_dms: e.target.checked })}
+                      />
+                      <Form.Check
+                        type="switch"
+                        id="email-notif-replies-switch"
+                        label={lang === 'ru' ? 'Новые ответы в отслеживаемых темах' : 'New replies in subscribed topics'}
+                        className="mb-2"
+                        checked={accountFormData.email_notif_topic_replies}
+                        onChange={(e) => setAccountFormData({ ...accountFormData, email_notif_topic_replies: e.target.checked })}
+                      />
 
                       {/* ── Sound Settings ──────────────────────────────── */}
                       <hr className="my-4" />

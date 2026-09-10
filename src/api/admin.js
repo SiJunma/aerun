@@ -1,4 +1,5 @@
-import { db } from '../../firebase';
+import { db, rtdb } from '../../firebase';
+import { ref, remove, update } from 'firebase/database';
 import { doc, setDoc, getDoc, onSnapshot, deleteDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, writeBatch, orderBy } from 'firebase/firestore';
 import { logAdminAction } from './audit';
 
@@ -74,11 +75,17 @@ export const approveUser = async (uid, performerId) => {
 
 export const deleteUser = async (uid, performerId) => {
   await deleteDoc(doc(db, 'users', uid));
+  if (rtdb) {
+    remove(ref(rtdb, `status/${uid}`)).catch(() => {});
+  }
   await logAdminAction('user_deleted', performerId, { targetId: uid });
 };
 
 export const rejectUser = async (uid, performerId) => {
   await deleteDoc(doc(db, 'users', uid));
+  if (rtdb) {
+    remove(ref(rtdb, `status/${uid}`)).catch(() => {});
+  }
   await logAdminAction('user_rejected', performerId, { targetId: uid });
 };
 
@@ -89,9 +96,13 @@ export const banUser = async (uid, performerId) => {
 
   await updateDoc(doc(db, 'users', uid), {
     role_id: 'banned',
+    status: 'banned',
     previous_role_id: currentRole,
     updated_at: serverTimestamp()
   });
+  if (rtdb) {
+    update(ref(rtdb, `status/${uid}`), { role_id: 'banned', state: 'logged_out' }).catch(() => {});
+  }
   await logAdminAction('user_banned', performerId, { targetId: uid });
 };
 
@@ -102,16 +113,24 @@ export const unbanUser = async (uid, performerId) => {
 
   await updateDoc(doc(db, 'users', uid), {
     role_id: previousRole,
+    status: 'active',
     updated_at: serverTimestamp()
   });
+  if (rtdb) {
+    update(ref(rtdb, `status/${uid}`), { role_id: previousRole, state: 'offline' }).catch(() => {});
+  }
   await logAdminAction('user_unbanned', performerId, { targetId: uid });
 };
 
 export const updateUserRole = async (uid, roleId, performerId) => {
   await updateDoc(doc(db, 'users', uid), {
     role_id: roleId,
+    status: roleId === 'banned' ? 'banned' : (roleId === 'pending' ? 'pending' : 'active'),
     updated_at: serverTimestamp()
   });
+  if (rtdb) {
+    update(ref(rtdb, `status/${uid}`), { role_id: roleId }).catch(() => {});
+  }
   await logAdminAction('user_role_updated', performerId, { targetId: uid, roleId });
 };
 

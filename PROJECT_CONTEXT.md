@@ -19,6 +19,7 @@ This file serves as the master context for AI interaction, combining the current
             "status_line": "string",
             "role_id": "string (references roles.id, e.g., 'root', 'admin', 'player')",
             "previous_role_id": "string (stores role before ban)",
+            "status": "'pending' | 'active' | 'banned'",
             "post_count": "number",
             "topics_count": "number",
             "reputation": "number",
@@ -27,7 +28,11 @@ This file serves as the master context for AI interaction, combining the current
               "theme": "string",
               "language": "string",
               "member_view_style": "string",
-              "postsPerPage": "number (optional)"
+              "postsPerPage": "number (optional)",
+              "email_notifications": {
+                "dms": "boolean (default true)",
+                "topic_replies": "boolean (default true)"
+              }
             },
             "created_at": "serverTimestamp",
             "last_seen": "serverTimestamp",
@@ -243,7 +248,7 @@ This file serves as the master context for AI interaction, combining the current
           }
         },
         "guest_activity": {
-          "description": "Tracks active anonymous users.",
+          "description": "DEPRECATED: Firestore guest tracking. Replaced by RTDB guest_presence to eliminate document write costs.",
           "fields": {
             "guest_id": "string",
             "last_seen": "serverTimestamp"
@@ -253,6 +258,15 @@ This file serves as the master context for AI interaction, combining the current
     },
     "rtdb": {
       "nodes": {
+        "guest_presence": {
+          "description": "Real-time presence tracking for anonymous/guest sessions with onDisconnect removal (0 Firestore reads/writes).",
+          "fields": {
+            "$guestId": {
+              "id": "string",
+              "last_seen": "number (serverTimestamp ms)"
+            }
+          }
+        },
         "status": {
           "description": "Live presence tracking node. Presence in 'Online now' is based on a 15-minute sliding window from last activity (unless explicitly in 'logged_out' state).",
           "fields": {

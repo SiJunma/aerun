@@ -1,5 +1,11 @@
 {
   "rules": {
+    "guest_presence": {
+      ".read": true,
+      "$guest_id": {
+        ".write": true
+      }
+    },
     "status": {
       ".read": true,
       "$uid": {

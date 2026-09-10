@@ -4,8 +4,7 @@ import { Card } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
-import { subscribeToActiveGuests } from '../../api/auth-resources';
-import { subscribeToDailyActiveUsers } from '../../api/rtdb-presence';
+import { subscribeToDailyActiveUsers, subscribeToActiveGuestsRtdb } from '../../api/rtdb-presence';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
@@ -17,7 +16,7 @@ const ForumStats = () => {
   const [dailyFromRtdb, setDailyFromRtdb] = useState([]);
   
   useEffect(() => {
-    const unsubGuests = subscribeToActiveGuests(setActiveGuestsRaw);
+    const unsubGuests = subscribeToActiveGuestsRtdb(setActiveGuestsRaw);
     const unsubDaily = subscribeToDailyActiveUsers(setDailyFromRtdb);
 
     // Таймер для скользящего окна отсечения гостей (раз в 30 секунд)
@@ -40,7 +39,9 @@ const ForumStats = () => {
     const currentGuestId = localStorage.getItem('guest_id');
     
     const filteredGuests = activeGuestsRaw.filter(g => {
-      const lastSeenMs = g.last_seen?.toMillis?.() || (typeof g.last_seen === 'string' ? new Date(g.last_seen).getTime() : 0);
+      const lastSeenMs = typeof g.last_seen === 'number'
+        ? g.last_seen
+        : (g.last_seen?.toMillis ? g.last_seen.toMillis() : (typeof g.last_seen === 'string' ? new Date(g.last_seen).getTime() : 0));
       if (user && g.id === currentGuestId) return false;
       return lastSeenMs >= threshold;
     });

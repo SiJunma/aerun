@@ -125,6 +125,27 @@ export const markAllNotificationsRead = async (uid, notifs = []) => {
 };
 
 /**
+ * Marks all admin notifications as read in RTDB.
+ */
+export const markAllAdminNotificationsRead = async (adminNotifs = []) => {
+  if (!rtdb) return;
+  try {
+    const updates = {};
+    adminNotifs.forEach((n) => {
+      if (!n.read) {
+        updates[`admin_notifications/${n.id}/read`] = true;
+      }
+    });
+    if (Object.keys(updates).length > 0) {
+      await update(ref(rtdb), updates);
+    }
+  } catch (err) {
+    console.warn('[markAllAdminNotificationsRead err]', err);
+  }
+};
+
+
+/**
  * Marks topic notifications as read for a topic in RTDB.
  */
 export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {

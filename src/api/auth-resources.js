@@ -269,20 +269,12 @@ export const subscribeToActiveGuests = (callback) => {
   return () => { isSubscribed = false; };
 };
 
-// Все пользователи (Разовый запрос)
+// Все пользователи (Real-time подписка для AdminPage и MembersPage)
 export const subscribeToAllUsers = (callback) => {
-  let isSubscribed = true;
-  const fetchAll = async () => {
-    try {
-      const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
-      const snapshot = await getDocs(q);
-      if (!isSubscribed) return;
-      callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (err) {
-      console.error('[subscribeToAllUsers]', err);
-    }
-  };
-
-  fetchAll();
-  return () => { isSubscribed = false; };
+  const q = query(collection(db, 'users'), orderBy('nickname', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+  }, (err) => {
+    console.error('[subscribeToAllUsers]', err);
+  });
 };

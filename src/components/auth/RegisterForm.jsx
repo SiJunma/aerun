@@ -57,6 +57,10 @@ const RegisterForm = ({ onSuccess }) => {
     }
 
     sessionStorage.setItem('is_registering', 'true');
+    if (lang) {
+      sessionStorage.setItem('preferred_language', lang);
+      localStorage.setItem('preferred_language', lang);
+    }
     
     if (adminMessage.trim()) {
       sessionStorage.setItem('pending_message', adminMessage.trim());

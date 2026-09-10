@@ -3146,6 +3146,204 @@ a.rep-preview-name:hover {
   /* Amber 400 - more vibrant in dark */
 }
 
+/* ── Email Verification Banner Theme Adaptations ────────────────────────── */
+.email-verification-banner {
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.9) 0%, rgba(253, 230, 138, 0.65) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-left: 4px solid #d97706;
+  box-shadow: 0 4px 15px -1px rgba(217, 119, 6, 0.1);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.email-verification-icon-box {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background-color: rgba(245, 158, 11, 0.2);
+  color: #b45309;
+  border: 1px solid rgba(217, 119, 6, 0.25);
+  transition: all 0.25s ease;
+}
+
+.email-verification-title {
+  font-weight: 700;
+  color: #92400e;
+  letter-spacing: -0.01em;
+}
+
+.email-verification-desc {
+  font-size: 0.875rem;
+  color: #4b5563;
+  line-height: 1.45;
+}
+
+.email-verification-desc strong {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.email-verification-success {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #15803d;
+}
+
+.email-verification-btn-primary {
+  background-color: #f59e0b !important;
+  border: 1px solid #d97706 !important;
+  color: #1e293b !important;
+  font-weight: 600;
+  transition: all 0.15s ease-in-out;
+}
+
+.email-verification-btn-primary:hover:not(:disabled) {
+  background-color: #d97706 !important;
+  border-color: #b45309 !important;
+  color: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+.email-verification-btn-primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.email-verification-btn-secondary {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
+  font-weight: 500;
+  transition: all 0.15s ease-in-out;
+}
+
+.email-verification-btn-secondary:hover:not(:disabled) {
+  background-color: #ffffff !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+  transform: translateY(-1px);
+}
+
+.email-verification-btn-secondary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Dark Theme */
+[data-theme='dark'] .email-verification-banner {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(30, 41, 59, 0.88) 100%) !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  border-left: 4px solid #f59e0b !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 0 15px -3px rgba(245, 158, 11, 0.15) !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+[data-theme='dark'] .email-verification-icon-box {
+  background-color: rgba(245, 158, 11, 0.18) !important;
+  color: #fbbf24 !important;
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+}
+
+[data-theme='dark'] .email-verification-title {
+  color: #fde68a !important;
+}
+
+[data-theme='dark'] .email-verification-desc {
+  color: #cbd5e1 !important;
+}
+
+[data-theme='dark'] .email-verification-desc strong {
+  color: #f8fafc !important;
+}
+
+[data-theme='dark'] .email-verification-success {
+  color: #4ade80 !important;
+}
+
+[data-theme='dark'] .email-verification-btn-primary {
+  background-color: #f59e0b !important;
+  border-color: #f59e0b !important;
+  color: #0f172a !important;
+  font-weight: 600;
+}
+
+[data-theme='dark'] .email-verification-btn-primary:hover:not(:disabled) {
+  background-color: #fbbf24 !important;
+  border-color: #fcd34d !important;
+  color: #0f172a !important;
+}
+
+[data-theme='dark'] .email-verification-btn-secondary {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme='dark'] .email-verification-btn-secondary:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  color: #ffffff !important;
+}
+
+/* Neutral Theme */
+[data-theme='neutral'] .email-verification-banner {
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.6) 0%, rgba(244, 241, 234, 0.95) 100%) !important;
+  border: 1px solid rgba(180, 83, 9, 0.25) !important;
+  border-left: 4px solid #b45309 !important;
+  box-shadow: 0 4px 16px -2px rgba(56, 45, 29, 0.08) !important;
+}
+
+[data-theme='neutral'] .email-verification-icon-box {
+  background-color: rgba(180, 83, 9, 0.15) !important;
+  color: #92400e !important;
+  border: 1px solid rgba(180, 83, 9, 0.25) !important;
+}
+
+[data-theme='neutral'] .email-verification-title {
+  color: #78350f !important;
+}
+
+[data-theme='neutral'] .email-verification-desc {
+  color: #451a03 !important;
+}
+
+[data-theme='neutral'] .email-verification-desc strong {
+  color: #1f1105 !important;
+}
+
+[data-theme='neutral'] .email-verification-success {
+  color: #166534 !important;
+}
+
+[data-theme='neutral'] .email-verification-btn-primary {
+  background-color: #d97706 !important;
+  border-color: #b45309 !important;
+  color: #ffffff !important;
+}
+
+[data-theme='neutral'] .email-verification-btn-primary:hover:not(:disabled) {
+  background-color: #b45309 !important;
+  border-color: #92400e !important;
+  color: #ffffff !important;
+}
+
+[data-theme='neutral'] .email-verification-btn-secondary {
+  background-color: rgba(255, 252, 245, 0.9) !important;
+  border: 1px solid #d2ccba !important;
+  color: #382d1d !important;
+}
+
+[data-theme='neutral'] .email-verification-btn-secondary:hover:not(:disabled) {
+  background-color: #fffcf5 !important;
+  border-color: #8c7152 !important;
+  color: #1f160e !important;
+}
+
 /* ── DM Chat Two-Column Layout ─────────────────────────────────────────── */
 .dm-chat-body {
   flex: 1 1 0;

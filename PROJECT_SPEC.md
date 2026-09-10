@@ -602,11 +602,11 @@ HTML-шаблоны (Handlebars) с логотипом форума, текст�
 - [ ] Страница `/members` с пагинацией и поиском
 
 ### Уведомления
-- [ ] `<NotificationBell />` с real-time бейджем
-- [ ] In-app уведомления (коллекция `notifications`)
-- [ ] Email уведомления (Trigger Email + Cloud Functions)
+- [x] `<NotificationBell />` с real-time бейджем
+- [x] In-app уведомления (RTDB `notifications/${uid}` + Firestore backup)
+- [x] Email уведомления (Brevo API v3 транзакционные email для ЛС в оффлайне и ответов в отслеживаемых темах)
 - [ ] Push (FCM)
-- [ ] Настройки уведомлений в профиле (per-event, per-channel)
+- [x] Настройки уведомлений в профиле (in-app switches, email switches, sound effects)
 
 ### Темизация и i18n
 - [ ] CSS Variables (dark / light / neutral)

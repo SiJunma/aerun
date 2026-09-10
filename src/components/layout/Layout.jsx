@@ -7,6 +7,7 @@ import { useDesign } from '../../contexts/DesignProvider';
 import ForumBackground from './ForumBackground';
 import { useLocation, Link } from 'react-router-dom';
 import ConnectionStatusBanner from '../common/ConnectionStatusBanner';
+import EmailVerificationBanner from '../common/EmailVerificationBanner';
 import ScrollButtons from '../common/ScrollButtons';
 
 const Layout = ({ children }) => {
@@ -67,23 +68,7 @@ const Layout = ({ children }) => {
           </Alert>
         )}
 
-        {profile?.role_id === 'pending' && location.pathname !== '/pending' && (
-          <Alert variant="warning" className="m-0 text-center rounded-0 border-0 shadow-sm sticky-top pending-status-banner" style={{ zIndex: 900, top: '56px' }}>
-            <span className="small fw-medium">
-              {emailUnverified ? t('gatekeeper.pending_banner_email') : t('gatekeeper.pending_banner')}
-            </span>
-            {emailUnverified && (
-              <>
-                <Button variant="link" size="sm" className="p-0 ms-2 fw-bold text-decoration-underline" onClick={resendVerificationEmail}>
-                  {t('auth.resend_verification')}
-                </Button>
-                <Button variant="link" size="sm" className="p-0 ms-3 fw-bold text-decoration-underline text-success" onClick={checkVerificationStatus}>
-                  {t('common.check_status')}
-                </Button>
-              </>
-            )}
-          </Alert>
-        )}
+        <EmailVerificationBanner />
         
         {sanitizedBanner && location.pathname === '/' && (
           <div dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />

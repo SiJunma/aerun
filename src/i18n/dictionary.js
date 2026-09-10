@@ -66,7 +66,13 @@ export const translations = {
       invalid_email: "Invalid email address.",
       user_not_found: "User not found.",
       wrong_password: "Wrong password.",
-      email_already_in_use: "This email is already registered."
+      email_already_in_use: "This email is already registered.",
+      email_verification_required: "Email Verification Required",
+      email_verification_desc: "Please verify your email address ({email}) to unlock full forum permissions.",
+      resend_in: "Resend in",
+      resend_verification_email: "Resend Email",
+      check_status: "Check Status",
+      verification_email_sent: "A new verification link has been sent to your email."
     },
     gatekeeper: {
       pending_title: "Access Restricted",
@@ -291,6 +297,7 @@ export const translations = {
       we_will_notify: "We'll notify you when something important happens.",
       archive_all: "Archive All",
       delete_all: "Clear All",
+      mark_all_read: "Mark all as read",
       mark_as_read: "Mark as Read",
       archive: "Archive",
       delete: "Delete",
@@ -298,8 +305,11 @@ export const translations = {
       deleted_toast: "Notification deleted",
       archived_all_toast: "All notifications archived",
       deleted_all_toast: "All notifications deleted",
+      all_read_toast: "All notifications marked as read",
+      all_deleted_toast: "All notifications cleared",
       marked_read_toast: "Marked as read",
       manage_users: "Manage Users →",
+      go_to_message: "Go to message →",
       new_badge: "New",
       types: {
         new_registration: "New Registration",
@@ -630,7 +640,7 @@ export const translations = {
           maxPostsPerTopic: "Max Posts per Topic"
         }
       }
-    }
+    },
   },
   ru: {
     common: {
@@ -699,7 +709,13 @@ export const translations = {
       invalid_email: "Неверный формат email.",
       user_not_found: "Пользователь не найден.",
       wrong_password: "Неверный пароль.",
-      email_already_in_use: "Этот email уже зарегистрирован."
+      email_already_in_use: "Этот email уже зарегистрирован.",
+      email_verification_required: "Требуется подтверждение почты",
+      email_verification_desc: "Пожалуйста, подтвердите ваш email ({email}), чтобы разблокировать все возможности форума.",
+      resend_in: "Повторно через",
+      resend_verification_email: "Отправить письмо снова",
+      check_status: "Проверить статус",
+      verification_email_sent: "Новая ссылка для подтверждения отправлена на вашу почту."
     },
     gatekeeper: {
       pending_title: "Доступ ограничен",
@@ -924,15 +940,19 @@ export const translations = {
       we_will_notify: "Мы сообщим вам, когда произойдет что-то важное.",
       archive_all: "Архивировать все",
       delete_all: "Очистить все",
-      mark_as_read: "Прочитать",
+      mark_all_read: "Прочитать все",
+      mark_as_read: "Отметить как прочитанное",
       archive: "В архив",
       delete: "Удалить",
       archived_toast: "Отправлено в архив",
       deleted_toast: "Уведомление удалено",
       archived_all_toast: "Все уведомления архивированы",
       deleted_all_toast: "Все уведомления удалены",
+      all_read_toast: "Все уведомления прочитаны",
+      all_deleted_toast: "Все уведомления очищены",
       marked_read_toast: "Отмечено как прочитанное",
       manage_users: "К управлению пользователями →",
+      go_to_message: "Перейти к сообщению →",
       new_badge: "Новое",
       types: {
         new_registration: "Новая регистрация",
@@ -950,6 +970,7 @@ export const translations = {
       followed_toast: "Вы подписались на тему",
       unfollowed_toast: "Вы отписались от темы"
     },
+
     stats: {
       title: "Статистика форума",
       topics: "Темы",

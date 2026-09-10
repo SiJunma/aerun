@@ -131,6 +131,7 @@ import {
   markNotificationRead as markNotificationReadRtdb,
   markTopicNotificationsRead as markTopicNotificationsReadRtdb,
   markAllNotificationsRead as markAllNotificationsReadRtdb,
+  markAllAdminNotificationsRead as markAllAdminNotificationsReadRtdb,
   deleteNotification as deleteNotificationRtdb,
   deleteAllUserNotifications as deleteAllUserNotificationsRtdb,
   deleteAllAdminNotifications as deleteAllAdminNotificationsRtdb
@@ -154,13 +155,22 @@ export const subscribeToUserNotifications = (uid, callback) => {
 
 // ── Mark read & Delete ────────────────────────────────────────────────────────
 
-export const markNotificationRead = async (id, uid = null, isAdmin = false) => {
-  if (!id) return;
-  // Передаем (uid, id, isAdmin), так как rtdb-notifications.js ожидает uid первым аргументом!
-  await markNotificationReadRtdb(uid, id, isAdmin);
-  try {
-    await updateDoc(doc(db, 'notifications', id), { read: true }).catch(() => { });
-  } catch (e) { }
+/**
+ * Marks a notification as read.
+ * Signature: markNotificationRead(notifId, uid, isAdmin)
+ * - notifId: the RTDB/Firestore notification key
+ * - uid: the user's uid (only needed for user-owned notifications, null for admin)
+ * - isAdmin: true if the notification is in admin_notifications
+ */
+export const markNotificationRead = async (notifId, uid = null, isAdmin = false) => {
+  if (!notifId) return;
+  await markNotificationReadRtdb(uid, notifId, isAdmin);
+  // Best-effort Firestore sync (personal notifications only, since admin ones are RTDB-only now)
+  if (!isAdmin) {
+    try {
+      await updateDoc(doc(db, 'notifications', notifId), { read: true }).catch(() => { });
+    } catch (e) { }
+  }
 };
 
 export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {
@@ -172,33 +182,70 @@ export const clearOrphanedPostNotifications = async (uid, postId) => {
   if (!uid || !postId) return;
 };
 
-export const deleteNotification = async (id, uid = null, isAdmin = false) => {
-  if (!id) return;
-  // Передаем (uid, id, isAdmin) в правильном порядке!
-  await deleteNotificationRtdb(uid, id, isAdmin);
-  try {
-    const { deleteDoc } = await import('firebase/firestore');
-    await deleteDoc(doc(db, 'notifications', id)).catch(() => { });
-  } catch (e) { }
+/**
+ * Deletes a notification.
+ * Signature: deleteNotification(notifId, uid, isAdmin)
+ * - notifId: the RTDB/Firestore notification key
+ * - uid: the user's uid (only needed for user-owned notifications, null for admin)
+ * - isAdmin: true if the notification is in admin_notifications
+ */
+export const deleteNotification = async (notifId, uid = null, isAdmin = false) => {
+  if (!notifId) return;
+  await deleteNotificationRtdb(uid, notifId, isAdmin);
+  if (!isAdmin) {
+    try {
+      const { deleteDoc } = await import('firebase/firestore');
+      await deleteDoc(doc(db, 'notifications', notifId)).catch(() => { });
+    } catch (e) { }
+  }
 };
 
 // Backwards compatibility alias
 export const archiveNotification = deleteNotification;
 
 /**
+ * Mark all user notifications as read.
+ */
+export const markAllNotificationsRead = async (uid, notifs = []) => {
+  if (!uid) return;
+  await markAllNotificationsReadRtdb(uid, notifs);
+  try {
+    const q = query(
+      collection(db, 'notifications'),
+      where('recipient_uid', '==', uid),
+      where('read', '==', false)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.update(d.ref, { read: true }));
+      await batch.commit();
+    }
+  } catch (e) {
+    console.warn('[markAllNotificationsRead Firestore]', e);
+  }
+};
+
+/**
  * Mark all unread admin-broadcast notifications as read.
  */
-export const markAllAdminNotificationsRead = async () => {
-  const q = query(
-    collection(db, 'notifications'),
-    where('recipient_uid', '==', null),
-    where('read', '==', false)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return;
-  const batch = writeBatch(db);
-  snap.docs.forEach(d => batch.update(d.ref, { read: true }));
-  await batch.commit();
+export const markAllAdminNotificationsRead = async (adminNotifs = []) => {
+  await markAllAdminNotificationsReadRtdb(adminNotifs);
+  try {
+    const q = query(
+      collection(db, 'notifications'),
+      where('recipient_uid', '==', null),
+      where('read', '==', false)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.update(d.ref, { read: true }));
+      await batch.commit();
+    }
+  } catch (e) {
+    console.warn('[markAllAdminNotificationsRead Firestore]', e);
+  }
 };
 
 export const deleteAllAdminNotifications = async () => {

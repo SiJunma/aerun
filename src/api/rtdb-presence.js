@@ -4,6 +4,7 @@ import {
   onValue,
   set,
   update,
+  remove,
   onDisconnect,
   serverTimestamp
 } from 'firebase/database';
@@ -350,3 +351,94 @@ export const subscribeToDailyActiveUsers = (callback) => {
     return () => {};
   }
 };
+
+/**
+ * Initializes RTDB presence for an anonymous/guest session with 0 Firestore reads/writes.
+ * Automatically removes the guest key on disconnect or tab close.
+ */
+export const initRtdbGuestPresence = (guestId) => {
+  if (!guestId || !rtdb) return () => {};
+
+  try {
+    const connectedRef = ref(rtdb, '.info/connected');
+    const guestRef = ref(rtdb, `guest_presence/${guestId}`);
+
+    const unsub = onValue(connectedRef, (snap) => {
+      if (snap.val() === true) {
+        onDisconnect(guestRef).remove().catch(() => {});
+        set(guestRef, {
+          id: guestId,
+          last_seen: serverTimestamp()
+        }).catch((err) => console.warn('[initRtdbGuestPresence set err]', err));
+      }
+    });
+
+    return () => {
+      unsub();
+      remove(guestRef).catch(() => {});
+    };
+  } catch (err) {
+    console.warn('[initRtdbGuestPresence err]', err);
+    return () => {};
+  }
+};
+
+/**
+ * Removes guest presence when user logs in or leaves.
+ */
+export const removeRtdbGuestPresence = async (guestId) => {
+  if (!guestId || !rtdb) return;
+  try {
+    await remove(ref(rtdb, `guest_presence/${guestId}`));
+  } catch (err) {
+    console.warn('[removeRtdbGuestPresence err]', err);
+  }
+};
+
+/**
+ * Subscribes to active guests from RTDB (0 Firestore reads).
+ * Filters out sessions older than 15 minutes.
+ */
+export const subscribeToActiveGuestsRtdb = (callback) => {
+  if (!rtdb) {
+    callback([]);
+    return () => {};
+  }
+
+  try {
+    const guestPresenceRef = ref(rtdb, 'guest_presence');
+    return onValue(guestPresenceRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        callback([]);
+        return;
+      }
+
+      const ONLINE_WINDOW_MS = 15 * 60 * 1000;
+      const now = Date.now();
+      const guestList = [];
+
+      Object.keys(data).forEach((gid) => {
+        const g = data[gid];
+        if (!g) return;
+        const lastSeenMs = typeof g.last_seen === 'number'
+          ? g.last_seen
+          : (g.last_seen ? new Date(g.last_seen).getTime() : 0);
+
+        if (lastSeenMs > 0 && (now - lastSeenMs < ONLINE_WINDOW_MS)) {
+          guestList.push({ id: gid, last_seen: lastSeenMs });
+        }
+      });
+
+      callback(guestList);
+    }, (err) => {
+      console.warn('[subscribeToActiveGuestsRtdb err]', err);
+      callback([]);
+    });
+  } catch (err) {
+    console.warn('[subscribeToActiveGuestsRtdb caught]', err);
+    callback([]);
+    return () => {};
+  }
+};
+

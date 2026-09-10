@@ -9,6 +9,8 @@ import {
   subscribeToAdminNotifications,
   subscribeToUserNotifications,
   markNotificationRead,
+  markAllNotificationsRead,
+  markAllAdminNotificationsRead,
   deleteNotification,
   deleteAllAdminNotifications,
   deleteAllUserNotifications
@@ -125,7 +127,8 @@ const NotificationsPage = () => {
   const handleMarkRead = (e, id) => {
     if (e) e.stopPropagation();
     recordActivity();
-    markNotificationRead(id, profile?.uid)
+    const isAdminNotif = adminActive.some(n => n.id === id);
+    markNotificationRead(id, profile?.uid, isAdminNotif)
       .catch(err => {
         console.error('[markNotificationRead]', err);
         showToast(err.message, 'danger');
@@ -138,10 +141,11 @@ const NotificationsPage = () => {
     
     // Trigger animation first
     setDeletingId(id);
+    const isAdminNotif = adminActive.some(n => n.id === id);
     
     // Wait for animation to finish before calling API
     setTimeout(() => {
-      deleteNotification(id, profile?.uid)
+      deleteNotification(id, profile?.uid, isAdminNotif)
         .then(() => {
           showToast(t('notifications.deleted_toast', 'Уведомление удалено'));
           setDeletingId(null);
@@ -154,6 +158,22 @@ const NotificationsPage = () => {
     }, 300);
   };
 
+  const handleMarkAllRead = async () => {
+    recordActivity();
+    try {
+      if (profile?.uid && userActive.length > 0) {
+        await markAllNotificationsRead(profile.uid, userActive);
+      }
+      if (canManageUsers && adminActive.length > 0) {
+        await markAllAdminNotificationsRead(adminActive);
+      }
+      showToast(t('notifications.all_read_toast', 'Все уведомления прочитаны'));
+    } catch (err) {
+      console.error('[handleMarkAllRead]', err);
+      showToast(err.message, 'danger');
+    }
+  };
+
   const handleDeleteAll = async () => {
     recordActivity();
     try {
@@ -163,7 +183,7 @@ const NotificationsPage = () => {
       if (profile?.uid) {
         await deleteAllUserNotifications(profile.uid);
       }
-      showToast(t('notifications.deleted_all_toast', 'Все уведомления удалены'));
+      showToast(t('notifications.all_deleted_toast', 'Все уведомления очищены'));
     } catch (err) {
       console.error('[deleteAllNotifications]', err);
       showToast(err.message, 'danger');
@@ -593,6 +613,17 @@ const NotificationsPage = () => {
           </div>
         </div>
         <div className="d-flex gap-2 ms-auto">
+          {unreadCount > 0 && (
+            <Button 
+              variant="outline-primary" 
+              size="sm" 
+              onClick={handleMarkAllRead} 
+              className="d-flex align-items-center gap-2 px-3 rounded-pill"
+            >
+              <CheckCheck size={14} />
+              {t('notifications.mark_all_read', 'Прочитать все')}
+            </Button>
+          )}
           {activeNotifs.length > 0 && (
             <Button 
               variant="outline-danger" 
