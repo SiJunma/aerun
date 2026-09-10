@@ -610,11 +610,11 @@ export const AuthProvider = ({ children }) => {
                 }
               }
             } else {
-              if (!profileUnsubRef._hasLoadedOnce) {
-                setProfile(null);
-              }
+              // Profile document was deleted (e.g. by admin). Force sign-out to clear the
+              // client session — onAuthStateChanged will then handle full cleanup.
+              console.warn('[AuthProvider] Profile document missing — forcing sign-out.');
+              signOut(auth).catch(err => console.warn('[AuthProvider] Force sign-out error:', err));
             }
-            profileUnsubRef._hasLoadedOnce = true;
             finishLoading();
           }, (error) => {
             console.error('Firestore profile listener error:', error);
