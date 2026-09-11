@@ -1483,9 +1483,9 @@ exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
  * handlePostNotifications
  * Dispatches notifications across both Firestore and Realtime Database (RTDB).
  */
-async function handlePostNotifications(db, { postId, topicId, authorId, topicTitle, content }) {
+async function handlePostNotifications(db, { postId, topicId, authorId, authorName, topicTitle, content }) {
   try {
-    // 1. Topic Reply Notifications
+    // 1. Topic Reply Notifications (only users explicitly subscribed to the topic)
     const subSnap = await db.collection("topic_subscriptions").where("topic_id", "==", topicId).get();
     const subscribers = subSnap.docs.map(d => d.data().user_id).filter(uid => uid !== authorId);
 
@@ -1536,37 +1536,42 @@ async function handlePostNotifications(db, { postId, topicId, authorId, topicTit
               });
             }
 
-            // Optional transactional email for topic reply
+            // Transactional email for topic reply to subscribed users
             try {
               const userSnap = await db.collection("users").doc(recipientUid).get();
-              if (userSnap.exists) {
-                const uData = userSnap.data();
-                const emailEnabled = uData.settings?.email_notifications?.topic_replies !== false;
-                if (uData.email && emailEnabled) {
-                  // Check if user is offline in RTDB before sending email
-                  const rtdb = admin.database();
-                  const presenceSnap = await rtdb.ref(`status/${recipientUid}`).once('value');
-                  const pVal = presenceSnap.val();
-                  const lastSeen = pVal?.last_seen || pVal?.last_activity || 0;
-                  const isOffline = !pVal || pVal.state === 'logged_out' || (Date.now() - lastSeen > 15 * 60 * 1000);
+              const uData = userSnap.exists ? userSnap.data() : {};
+              const emailEnabled = uData.settings?.email_notifications?.topic_replies !== false;
+              let recipientEmail = uData.email;
 
-                  if (isOffline) {
-                    const postSnippet = (content || "").replace(/\[.*?\]/g, "").substring(0, 200);
-                    const html = renderTopicReplyEmail({
-                      recipientName: uData.nickname || "Traveler",
-                      authorName: "Someone",
-                      topicTitle: topicTitle || "Discussion",
-                      postSnippet,
-                      topicUrl: `https://aerun-forum.web.app/topic/${topicId}?postId=${postId}`
-                    });
-                    sendBrevoEmail({
-                      toEmail: uData.email,
-                      toName: uData.nickname || "Traveler",
-                      subject: `New reply in: ${topicTitle || "Subscribed topic"}`,
-                      htmlContent: html
-                    }).catch(err => logger.warn("[Brevo topic reply email err]", err));
-                  }
+              if (!recipientEmail) {
+                try {
+                  const authUser = await admin.auth().getUser(recipientUid);
+                  recipientEmail = authUser?.email || null;
+                } catch (aErr) {
+                  // user might not exist in Auth
                 }
+              }
+
+              if (recipientEmail && emailEnabled) {
+                const postSnippet = (content || "").replace(/\[.*?\]/g, "").substring(0, 200);
+                const html = renderTopicReplyEmail({
+                  recipientName: uData.nickname || "Traveler",
+                  authorName: authorName || "Someone",
+                  topicTitle: topicTitle || "Discussion",
+                  postSnippet,
+                  topicUrl: `https://aerun-forum.web.app/topic/${topicId}?postId=${postId}`
+                });
+
+                logger.info(`[Brevo Topic Reply] Sending email to ${recipientEmail} for topic "${topicTitle}" (recipientUid=${recipientUid})`);
+                const sendResult = await sendBrevoEmail({
+                  toEmail: recipientEmail,
+                  toName: uData.nickname || "Traveler",
+                  subject: `New reply in: ${topicTitle || "Subscribed topic"}`,
+                  htmlContent: html
+                });
+                logger.info(`[Brevo Topic Reply Result] recipient=${recipientEmail} success=${sendResult?.success} result=${JSON.stringify(sendResult)}`);
+              } else {
+                logger.info(`[Brevo Topic Reply Skipped] recipientUid=${recipientUid} email=${recipientEmail} emailEnabled=${emailEnabled}`);
               }
             } catch (emailErr) {
               logger.warn(`[topic reply email dispatch error] ${recipientUid}:`, emailErr);
@@ -2841,7 +2846,7 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
     });
     await rtdb.ref(`dm_unread/${recipientUid}/total`).set(total);
 
-    // Check if recipient is offline and send email notification
+    // Check if recipient should receive email notification
     try {
       const [presenceSnap, recipientDoc, senderDoc] = await Promise.all([
         rtdb.ref(`status/${recipientUid}`).once('value'),
@@ -2849,34 +2854,48 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
         db.collection("users").doc(sender_uid).get()
       ]);
 
-      if (recipientDoc.exists) {
-        const rData = recipientDoc.data();
-        const emailNotificationsEnabled = rData.settings?.email_notifications?.dms !== false;
+      const rData = recipientDoc.exists ? recipientDoc.data() : {};
+      const emailNotificationsEnabled = rData.settings?.email_notifications?.dms !== false;
+      let recipientEmail = rData.email;
 
-        if (rData.email && emailNotificationsEnabled) {
-          const pVal = presenceSnap.val();
-          const lastSeen = pVal?.last_seen || pVal?.last_activity || 0;
-          const ONLINE_WINDOW_MS = 15 * 60 * 1000;
-          const isOffline = !pVal || pVal.state === 'logged_out' || (Date.now() - lastSeen > ONLINE_WINDOW_MS);
-
-          if (isOffline) {
-            const senderNick = (senderDoc.exists ? senderDoc.data().nickname : null) || "A forum member";
-            const messageSnippet = (text || "").substring(0, 150);
-            const html = renderDmNotificationEmail({
-              recipientName: rData.nickname || "Traveler",
-              senderName: senderNick,
-              messageSnippet,
-              forumUrl: "https://aerun-forum.web.app"
-            });
-
-            await sendBrevoEmail({
-              toEmail: rData.email,
-              toName: rData.nickname || "Traveler",
-              subject: `New direct message from ${senderNick}`,
-              htmlContent: html
-            });
-          }
+      if (!recipientEmail) {
+        try {
+          const authUser = await admin.auth().getUser(recipientUid);
+          recipientEmail = authUser?.email || null;
+        } catch (aErr) {
+          // user not in Auth
         }
+      }
+
+      if (recipientEmail && emailNotificationsEnabled) {
+        const pVal = presenceSnap.val();
+        const lastSeen = pVal?.last_seen || pVal?.last_activity || 0;
+        const ONLINE_WINDOW_MS = 15 * 60 * 1000;
+        const isOffline = !pVal || pVal.state !== 'online' || (Date.now() - lastSeen > ONLINE_WINDOW_MS);
+
+        if (isOffline) {
+          const senderNick = (senderDoc.exists ? senderDoc.data().nickname : null) || "A forum member";
+          const messageSnippet = (text || "").substring(0, 150);
+          const html = renderDmNotificationEmail({
+            recipientName: rData.nickname || "Traveler",
+            senderName: senderNick,
+            messageSnippet,
+            forumUrl: "https://aerun-forum.web.app"
+          });
+
+          logger.info(`[Brevo DM Email] Dispatching email to ${recipientEmail} from ${senderNick} (conv=${convId})`);
+          const sendResult = await sendBrevoEmail({
+            toEmail: recipientEmail,
+            toName: rData.nickname || "Traveler",
+            subject: `New direct message from ${senderNick}`,
+            htmlContent: html
+          });
+          logger.info(`[Brevo DM Email Result] recipient=${recipientEmail} success=${sendResult?.success} result=${JSON.stringify(sendResult)}`);
+        } else {
+          logger.info(`[Brevo DM Email Skipped] recipient=${recipientEmail} is currently active/online in forum (state=${pVal?.state})`);
+        }
+      } else {
+        logger.info(`[Brevo DM Email Skipped] recipientUid=${recipientUid} email=${recipientEmail} emailEnabled=${emailNotificationsEnabled}`);
       }
     } catch (emailErr) {
       logger.warn(`[onDmMessageCreated email notification err] ${recipientUid}:`, emailErr);

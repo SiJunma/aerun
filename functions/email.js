@@ -16,6 +16,10 @@ async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textConte
   if (!toEmail) return { success: false, reason: "No recipient email provided" };
 
   try {
+    const plainText = (textContent && textContent.trim())
+      ? textContent.trim()
+      : (subject || "Notification from Aerun Forum");
+
     const payload = {
       sender: {
         name: SENDER_NAME,
@@ -29,7 +33,7 @@ async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textConte
       ],
       subject: subject,
       htmlContent: htmlContent,
-      textContent: textContent || ""
+      textContent: plainText
     };
 
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -58,7 +62,7 @@ async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textConte
 }
 
 /**
- * Base email layout wrapper with modern Aerun dark styling
+ * Base email layout wrapper with modern clean light styling
  */
 function wrapEmailTemplate({ title, content, ctaText, ctaUrl, forumName = "Aerun Forum" }) {
   return `<!DOCTYPE html>
@@ -71,81 +75,94 @@ function wrapEmailTemplate({ title, content, ctaText, ctaUrl, forumName = "Aerun
     body {
       margin: 0;
       padding: 0;
-      background-color: #0f172a;
+      background-color: #f1f5f9;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      color: #e2e8f0;
+      color: #334155;
+      -webkit-font-smoothing: antialiased;
     }
     .wrapper {
       width: 100%;
-      background-color: #0f172a;
-      padding: 40px 0;
+      background-color: #f1f5f9;
+      padding: 40px 15px;
+      box-sizing: border-box;
     }
     .container {
-      max-width: 580px;
+      max-width: 560px;
       margin: 0 auto;
-      background: #1e293b;
-      border: 1px solid #334155;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
       border-radius: 12px;
       overflow: hidden;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05);
+    }
+    .top-accent {
+      height: 4px;
+      background: linear-gradient(90deg, #4f46e5 0%, #38bdf8 100%);
     }
     .header {
-      padding: 28px 32px;
-      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
-      border-bottom: 1px solid #4338ca;
+      padding: 24px 32px 20px;
+      background-color: #ffffff;
+      border-bottom: 1px solid #f1f5f9;
       text-align: center;
     }
     .brand-title {
-      color: #ffffff;
-      font-size: 22px;
+      color: #0f172a;
+      font-size: 20px;
       font-weight: 700;
-      letter-spacing: 0.5px;
+      letter-spacing: -0.2px;
       margin: 0;
     }
     .body-content {
-      padding: 32px;
+      padding: 28px 32px;
       line-height: 1.6;
-      font-size: 15px;
-      color: #cbd5e1;
+      font-size: 14px;
+      color: #334155;
+    }
+    .body-content p {
+      margin: 0 0 14px;
     }
     .highlight-box {
-      background: #0f172a;
-      border-left: 4px solid #6366f1;
-      padding: 16px;
+      background-color: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #4f46e5;
+      padding: 14px 18px;
       border-radius: 6px;
-      margin: 20px 0;
-      color: #94a3b8;
+      margin: 18px 0;
+      color: #475569;
       font-size: 14px;
       font-style: italic;
+      line-height: 1.5;
     }
     .btn-container {
       text-align: center;
-      margin: 30px 0 10px;
+      margin: 28px 0 8px;
     }
     .btn {
       display: inline-block;
-      background: #4f46e5;
+      background-color: #4f46e5;
       color: #ffffff !important;
       font-weight: 600;
-      font-size: 15px;
-      padding: 12px 28px;
+      font-size: 14px;
+      padding: 11px 28px;
       text-decoration: none;
       border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+      box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
     }
     .footer {
       padding: 20px 32px;
-      background-color: #111827;
+      background-color: #f8fafc;
       text-align: center;
       font-size: 12px;
-      color: #64748b;
-      border-top: 1px solid #1e293b;
+      color: #94a3b8;
+      border-top: 1px solid #f1f5f9;
+      line-height: 1.5;
     }
   </style>
 </head>
 <body>
   <div class="wrapper">
     <div class="container">
+      <div class="top-accent"></div>
       <div class="header">
         <h1 class="brand-title">${forumName}</h1>
       </div>
@@ -158,8 +175,8 @@ function wrapEmailTemplate({ title, content, ctaText, ctaUrl, forumName = "Aerun
         ` : ""}
       </div>
       <div class="footer">
-        <p style="margin: 0 0 6px;">You received this automated notification from ${forumName}.</p>
-        <p style="margin: 0;">You can adjust your notification settings in your forum profile preferences.</p>
+        <p style="margin: 0 0 4px;">You received this automated notification from ${forumName}.</p>
+        <p style="margin: 0;">You can adjust your notification preferences in your forum profile.</p>
       </div>
     </div>
   </div>
@@ -169,13 +186,13 @@ function wrapEmailTemplate({ title, content, ctaText, ctaUrl, forumName = "Aerun
 
 function renderDmNotificationEmail({ recipientName, senderName, messageSnippet, forumUrl = "https://aerun-forum.web.app", forumName = "Aerun Forum" }) {
   const content = `
-    <h2 style="color: #f8fafc; margin-top: 0; font-size: 18px;">New Personal Message</h2>
+    <h2 style="color: #0f172a; margin: 0 0 16px; font-size: 17px; font-weight: 600;">New Personal Message</h2>
     <p>Hello <strong>${recipientName || "Traveler"}</strong>,</p>
-    <p><strong>${senderName || "Someone"}</strong> has sent you a new direct message on ${forumName}:</p>
+    <p><strong>${senderName || "Someone"}</strong> has sent you a direct message on ${forumName}:</p>
     <div class="highlight-box">
       "${messageSnippet || "..."}"
     </div>
-    <p>Since you are currently offline, we wanted to ensure you do not miss this conversation.</p>
+    <p style="color: #64748b; font-size: 13px;">Since you are currently offline, we wanted to ensure you do not miss this conversation.</p>
   `;
   return wrapEmailTemplate({
     title: `New Direct Message from ${senderName}`,
@@ -188,13 +205,13 @@ function renderDmNotificationEmail({ recipientName, senderName, messageSnippet, 
 
 function renderTopicReplyEmail({ recipientName, authorName, topicTitle, postSnippet, topicUrl, forumName = "Aerun Forum" }) {
   const content = `
-    <h2 style="color: #f8fafc; margin-top: 0; font-size: 18px;">New Reply in Subscribed Topic</h2>
+    <h2 style="color: #0f172a; margin: 0 0 16px; font-size: 17px; font-weight: 600;">New Reply in Subscribed Topic</h2>
     <p>Hello <strong>${recipientName || "Traveler"}</strong>,</p>
     <p><strong>${authorName || "Someone"}</strong> has posted a new reply in <strong>"${topicTitle}"</strong>:</p>
     <div class="highlight-box">
       ${postSnippet ? `"${postSnippet}"` : "New post submitted."}
     </div>
-    <p>Click below to jump directly to the discussion.</p>
+    <p style="color: #64748b; font-size: 13px;">Click below to open the topic and view the latest replies.</p>
   `;
   return wrapEmailTemplate({
     title: `New reply in ${topicTitle}`,

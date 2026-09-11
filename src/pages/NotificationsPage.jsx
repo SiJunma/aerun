@@ -280,8 +280,8 @@ const NotificationsPage = () => {
                             {typeLabel} {lang === 'ru' ? 'в теме ' : 'in topic '}
                             <Link 
                               to={`/topic/${payload.topic_id}?post=${payload.post_id || ''}`}
-                              className="text-primary text-decoration-none hover-underline"
-                              style={{ textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
+                              className="text-decoration-none hover-underline"
+                              style={{ color: 'var(--content-link-color)', textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
                               onClick={() => !n.read && handleMarkRead(null, n.id)}
                             >
                               {payload.topic_title}
@@ -524,9 +524,9 @@ const NotificationsPage = () => {
           }
           .badge-new {
             font-size: 0.6rem;
-            background-color: var(--primary-color) !important;
-            color: var(--bg-color) !important;
-            border: 1px solid var(--primary-color) !important;
+            background-color: var(--badge-bg, var(--primary-color)) !important;
+            color: var(--badge-text, #ffffff) !important;
+            border: 1px solid var(--badge-bg, var(--primary-color)) !important;
             opacity: 1;
           }
 
