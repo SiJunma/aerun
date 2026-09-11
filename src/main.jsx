@@ -12,6 +12,16 @@ import { ToastProvider } from './contexts/ToastProvider'
 import { DesignProvider } from './contexts/DesignProvider'
 import { TitleProvider } from './contexts/TitleProvider'
 
+// Handle chunk load errors after new deploys (stale assets on open tabs)
+window.addEventListener('vite:preloadError', (event) => {
+  console.warn('New version detected or asset failed to load. Reloading page...', event);
+  window.location.reload();
+});
+
+if (typeof __APP_BUILD_TIME__ !== 'undefined') {
+  console.info(`[Aerun] Build time: ${__APP_BUILD_TIME__}`);
+}
+
 // Prevent harmless but noisy Firebase WebChannel internal errors from spamming the console
 const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
