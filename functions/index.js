@@ -1480,13 +1480,32 @@ exports.onPostUpdated = onDocumentUpdated("posts/{postId}", async (event) => {
 });
 
 /**
+ * Extracts the forum name from global settings based on user language.
+ */
+function getForumNameFromSettings(settingsData, lang = 'ru') {
+  if (!settingsData) return "Aerun Forum";
+  const fn = settingsData.forumName;
+  if (typeof fn === 'object' && fn !== null) {
+    return fn[lang] || fn.ru || fn.en || "Aerun Forum";
+  }
+  if (typeof fn === 'string' && fn.trim()) {
+    return fn.trim();
+  }
+  return "Aerun Forum";
+}
+
+/**
  * handlePostNotifications
  * Dispatches notifications across both Firestore and Realtime Database (RTDB).
  */
 async function handlePostNotifications(db, { postId, topicId, authorId, authorName, topicTitle, content }) {
   try {
     // 1. Topic Reply Notifications (only users explicitly subscribed to the topic)
-    const subSnap = await db.collection("topic_subscriptions").where("topic_id", "==", topicId).get();
+    const [subSnap, settingsSnap] = await Promise.all([
+      db.collection("topic_subscriptions").where("topic_id", "==", topicId).get(),
+      db.collection("settings").doc("global").get()
+    ]);
+    const settingsData = settingsSnap.exists ? settingsSnap.data() : {};
     const subscribers = subSnap.docs.map(d => d.data().user_id).filter(uid => uid !== authorId);
 
     if (subscribers.length > 0) {
@@ -1518,6 +1537,8 @@ async function handlePostNotifications(db, { postId, topicId, authorId, authorNa
 
             const existingSnap = await q.get();
 
+            const isFirstUnreadReply = existingSnap.empty;
+
             if (!existingSnap.empty) {
               const existingDoc = existingSnap.docs[0];
               await existingDoc.ref.update({
@@ -1536,45 +1557,53 @@ async function handlePostNotifications(db, { postId, topicId, authorId, authorNa
               });
             }
 
-            // Transactional email for topic reply to subscribed users
-            try {
-              const userSnap = await db.collection("users").doc(recipientUid).get();
-              const uData = userSnap.exists ? userSnap.data() : {};
-              const emailEnabled = uData.settings?.email_notifications?.topic_replies !== false;
-              let recipientEmail = uData.email;
+            // Transactional email for topic reply: ONLY send for the FIRST unread reply in the topic
+            if (!isFirstUnreadReply) {
+              logger.info(`[Brevo Topic Reply Skipped] recipientUid=${recipientUid} already has unread notification in topic ${topicId}`);
+            } else {
+              try {
+                const userSnap = await db.collection("users").doc(recipientUid).get();
+                const uData = userSnap.exists ? userSnap.data() : {};
+                const emailEnabled = uData.settings?.email_notifications?.topic_replies !== false;
+                let recipientEmail = uData.email;
 
-              if (!recipientEmail) {
-                try {
-                  const authUser = await admin.auth().getUser(recipientUid);
-                  recipientEmail = authUser?.email || null;
-                } catch (aErr) {
-                  // user might not exist in Auth
+                if (!recipientEmail) {
+                  try {
+                    const authUser = await admin.auth().getUser(recipientUid);
+                    recipientEmail = authUser?.email || null;
+                  } catch (aErr) {
+                    // user might not exist in Auth
+                  }
                 }
-              }
 
-              if (recipientEmail && emailEnabled) {
-                const postSnippet = (content || "").replace(/\[.*?\]/g, "").substring(0, 200);
-                const html = renderTopicReplyEmail({
-                  recipientName: uData.nickname || "Traveler",
-                  authorName: authorName || "Someone",
-                  topicTitle: topicTitle || "Discussion",
-                  postSnippet,
-                  topicUrl: `https://aerun-forum.web.app/topic/${topicId}?postId=${postId}`
-                });
+                if (recipientEmail && emailEnabled) {
+                  const userLang = uData.settings?.language || 'ru';
+                  const dynamicForumName = getForumNameFromSettings(settingsData, userLang);
+                  const postSnippet = (content || "").replace(/\[.*?\]/g, "").substring(0, 200);
+                  const html = renderTopicReplyEmail({
+                    recipientName: uData.nickname || "Traveler",
+                    authorName: authorName || "Someone",
+                    topicTitle: topicTitle || "Discussion",
+                    postSnippet,
+                    topicUrl: `https://aerun-forum.web.app/topic/${topicId}?postId=${postId}`,
+                    forumName: dynamicForumName
+                  });
 
-                logger.info(`[Brevo Topic Reply] Sending email to ${recipientEmail} for topic "${topicTitle}" (recipientUid=${recipientUid})`);
-                const sendResult = await sendBrevoEmail({
-                  toEmail: recipientEmail,
-                  toName: uData.nickname || "Traveler",
-                  subject: `New reply in: ${topicTitle || "Subscribed topic"}`,
-                  htmlContent: html
-                });
-                logger.info(`[Brevo Topic Reply Result] recipient=${recipientEmail} success=${sendResult?.success} result=${JSON.stringify(sendResult)}`);
-              } else {
-                logger.info(`[Brevo Topic Reply Skipped] recipientUid=${recipientUid} email=${recipientEmail} emailEnabled=${emailEnabled}`);
+                  logger.info(`[Brevo Topic Reply] Sending email to ${recipientEmail} for topic "${topicTitle}" (forumName="${dynamicForumName}")`);
+                  const sendResult = await sendBrevoEmail({
+                    toEmail: recipientEmail,
+                    toName: uData.nickname || "Traveler",
+                    subject: `New reply in: ${topicTitle || "Subscribed topic"}`,
+                    htmlContent: html,
+                    senderName: dynamicForumName
+                  });
+                  logger.info(`[Brevo Topic Reply Result] recipient=${recipientEmail} success=${sendResult?.success} result=${JSON.stringify(sendResult)}`);
+                } else {
+                  logger.info(`[Brevo Topic Reply Skipped] recipientUid=${recipientUid} email=${recipientEmail} emailEnabled=${emailEnabled}`);
+                }
+              } catch (emailErr) {
+                logger.warn(`[topic reply email dispatch error] ${recipientUid}:`, emailErr);
               }
-            } catch (emailErr) {
-              logger.warn(`[topic reply email dispatch error] ${recipientUid}:`, emailErr);
             }
           } catch (subErr) {
             logger.error(`Failed to send topic notification to ${recipientUid}:`, subErr);
@@ -2829,10 +2858,11 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
     const rtdb = admin.database();
     const unreadRef = rtdb.ref(`dm_unread/${recipientUid}/conversations/${convId}`);
 
+    let prevUnreadCount = 0;
     await unreadRef.transaction((current) => {
-      const prevCount = (current && current.unread_count) || 0;
+      prevUnreadCount = (current && current.unread_count) || 0;
       return {
-        unread_count: prevCount + 1,
+        unread_count: prevUnreadCount + 1,
         last_message: (text || '').substring(0, 100),
         sender_uid: sender_uid,
         timestamp: timestamp?.toMillis ? timestamp.toMillis() : Date.now()
@@ -2846,15 +2876,23 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
     });
     await rtdb.ref(`dm_unread/${recipientUid}/total`).set(total);
 
+    // Only send DM email notification for the FIRST unread message in this conversation!
+    if (prevUnreadCount > 0) {
+      logger.info(`[Brevo DM Email Skipped] recipientUid=${recipientUid} already has ${prevUnreadCount} unread DM(s) in conversation ${convId}`);
+      return;
+    }
+
     // Check if recipient should receive email notification
     try {
-      const [presenceSnap, recipientDoc, senderDoc] = await Promise.all([
+      const [presenceSnap, recipientDoc, senderDoc, settingsDoc] = await Promise.all([
         rtdb.ref(`status/${recipientUid}`).once('value'),
         db.collection("users").doc(recipientUid).get(),
-        db.collection("users").doc(sender_uid).get()
+        db.collection("users").doc(sender_uid).get(),
+        db.collection("settings").doc("global").get()
       ]);
 
       const rData = recipientDoc.exists ? recipientDoc.data() : {};
+      const settingsData = settingsDoc.exists ? settingsDoc.data() : {};
       const emailNotificationsEnabled = rData.settings?.email_notifications?.dms !== false;
       let recipientEmail = rData.email;
 
@@ -2874,21 +2912,25 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
         const isOffline = !pVal || pVal.state !== 'online' || (Date.now() - lastSeen > ONLINE_WINDOW_MS);
 
         if (isOffline) {
+          const userLang = rData.settings?.language || 'ru';
+          const dynamicForumName = getForumNameFromSettings(settingsData, userLang);
           const senderNick = (senderDoc.exists ? senderDoc.data().nickname : null) || "A forum member";
           const messageSnippet = (text || "").substring(0, 150);
           const html = renderDmNotificationEmail({
             recipientName: rData.nickname || "Traveler",
             senderName: senderNick,
             messageSnippet,
-            forumUrl: "https://aerun-forum.web.app"
+            forumUrl: "https://aerun-forum.web.app",
+            forumName: dynamicForumName
           });
 
-          logger.info(`[Brevo DM Email] Dispatching email to ${recipientEmail} from ${senderNick} (conv=${convId})`);
+          logger.info(`[Brevo DM Email] Dispatching email to ${recipientEmail} from ${senderNick} (conv=${convId}, forumName="${dynamicForumName}")`);
           const sendResult = await sendBrevoEmail({
             toEmail: recipientEmail,
             toName: rData.nickname || "Traveler",
             subject: `New direct message from ${senderNick}`,
-            htmlContent: html
+            htmlContent: html,
+            senderName: dynamicForumName
           });
           logger.info(`[Brevo DM Email Result] recipient=${recipientEmail} success=${sendResult?.success} result=${JSON.stringify(sendResult)}`);
         } else {

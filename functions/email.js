@@ -12,7 +12,7 @@ const SENDER_NAME = process.env.FORUM_NAME || "Aerun Forum";
 /**
  * Sends a transactional email using Brevo v3 API
  */
-async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textContent }) {
+async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textContent, senderName }) {
   if (!toEmail) return { success: false, reason: "No recipient email provided" };
 
   try {
@@ -20,9 +20,11 @@ async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textConte
       ? textContent.trim()
       : (subject || "Notification from Aerun Forum");
 
+    const fromName = (senderName && senderName.trim()) ? senderName.trim() : SENDER_NAME;
+
     const payload = {
       sender: {
-        name: SENDER_NAME,
+        name: fromName,
         email: SENDER_EMAIL
       },
       to: [
@@ -192,7 +194,9 @@ function renderDmNotificationEmail({ recipientName, senderName, messageSnippet, 
     <div class="highlight-box">
       "${messageSnippet || "..."}"
     </div>
-    <p style="color: #64748b; font-size: 13px;">Since you are currently offline, we wanted to ensure you do not miss this conversation.</p>
+    <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin-top: 18px;">
+      There may be additional unread messages in this conversation, but you will not receive further email notifications until you open your messages.
+    </p>
   `;
   return wrapEmailTemplate({
     title: `New Direct Message from ${senderName}`,
@@ -211,7 +215,9 @@ function renderTopicReplyEmail({ recipientName, authorName, topicTitle, postSnip
     <div class="highlight-box">
       ${postSnippet ? `"${postSnippet}"` : "New post submitted."}
     </div>
-    <p style="color: #64748b; font-size: 13px;">Click below to open the topic and view the latest replies.</p>
+    <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin-top: 18px;">
+      There may be other new replies in this topic, but you will not receive further email notifications until you visit the topic.
+    </p>
   `;
   return wrapEmailTemplate({
     title: `New reply in ${topicTitle}`,

@@ -604,7 +604,7 @@ HTML-шаблоны (Handlebars) с логотипом форума, текст�
 ### Уведомления
 - [x] `<NotificationBell />` с real-time бейджем
 - [x] In-app уведомления (RTDB `notifications/${uid}` + Firestore backup)
-- [x] Email уведомления (Brevo API v3 транзакционные email для ЛС в оффлайне и ответов в отслеживаемых темах)
+- [x] Email уведомления (Brevo API v3 транзакционные email: отправка только первого уведомления для непрочитанных ЛС в оффлайне и ответов в отслеживаемых темах до момента их прочтения)
 - [ ] Push (FCM)
 - [x] Настройки уведомлений в профиле (in-app switches, email switches, sound effects)
 
