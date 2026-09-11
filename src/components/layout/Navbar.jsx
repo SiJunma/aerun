@@ -81,9 +81,21 @@ const Navigation = () => {
 
   // ── Play sound when new notification or DM arrives ───────────────
   const prevTotalBadgeRef = useRef(null);
+  const isHydratedRef = useRef(false);
+
+  // Reset hydration grace window on initial load or user change
   React.useEffect(() => {
-    // Skip sound on initial page load / initial state hydration
-    if (prevTotalBadgeRef.current === null) {
+    isHydratedRef.current = false;
+    prevTotalBadgeRef.current = null;
+    const timer = setTimeout(() => {
+      isHydratedRef.current = true;
+    }, 2000); // 2s grace window to absorb initial snapshot loads
+    return () => clearTimeout(timer);
+  }, [user?.uid]);
+
+  React.useEffect(() => {
+    // Skip sound on initial page load / initial state hydration grace period
+    if (!isHydratedRef.current || prevTotalBadgeRef.current === null) {
       prevTotalBadgeRef.current = totalBadge;
       return;
     }
