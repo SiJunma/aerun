@@ -1,4 +1,4 @@
-import { db, rtdb } from '../../firebase';
+import { db } from '../../firebase';
 import { logAdminAction } from './audit';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
@@ -18,23 +18,20 @@ import {
   limit,
   getDoc,
   writeBatch,
-  getCountFromServer,
   Timestamp
 } from 'firebase/firestore';
 import {
-  getDatabase,
   ref as rtdbRef,
   remove as rtdbRemove,
   update as rtdbUpdate,
   increment as rtdbIncrement,
-  onChildAdded,
-  onChildRemoved,
-  query as rtdbQuery,
-  orderByChild,
-  startAfter
 } from 'firebase/database';
 
 import { processDiceRolls } from '../utils/dice';
+
+// RTDB forum caches are server-only because they contain records from every
+// category. Cloud Functions keep them current after Firestore writes.
+const rtdb = null;
 
 
 // ── Topics ───────────────────────────────────────────────────────────────────
@@ -87,15 +84,10 @@ export const subscribeToTopic = (topicId, callback) => {
 };
 
 export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) => {
-  try {
-    const functions = getFunctions();
-    const getSecured = httpsCallable(functions, 'getSecuredTopics');
-    const result = await getSecured({ categoryId, page, pageSize });
-    return result.data; // { pinned: [], topics: [] }
-  } catch (err) {
-    console.error('[fetchSecuredTopics]', err);
-    return { pinned: [], topics: [] };
-  }
+  const functions = getFunctions();
+  const getSecured = httpsCallable(functions, 'getSecuredTopics');
+  const result = await getSecured({ categoryId, page, pageSize });
+  return result.data; // { pinned: [], topics: [] }
 };
 
 // Most recent topic in a category — client-side sort to avoid needing a composite index
@@ -228,63 +220,18 @@ export const subscribeToPosts = (topicId, callback) => {
 };
 
 export const subscribeToNewPostsRtdb = (topicId, sinceTimestamp, callback) => {
-  if (!topicId) return () => {};
-  const rtdb = getDatabase();
-  const postsRef = rtdbRef(rtdb, `topic_posts_cache/${topicId}/posts`);
-  const effectiveSince = typeof sinceTimestamp === 'number' ? sinceTimestamp : Date.now();
-  const q = rtdbQuery(postsRef, orderByChild('created_at'), startAfter(effectiveSince));
-
-  const unsubscribe = onChildAdded(q, (snapshot) => {
-    const post = snapshot.val();
-    if (!post) return;
-
-    post.id = snapshot.key;
-
-    // Parse created_at timestamp
-    let postMs = typeof post.created_at === 'number'
-      ? post.created_at
-      : (post.created_at?.toMillis ? post.created_at.toMillis() : Date.now());
-
-    const validDate = new Date(postMs);
-    post.created_at = {
-      toDate: () => validDate,
-      toMillis: () => validDate.getTime(),
-      seconds: Math.floor(validDate.getTime() / 1000)
-    };
-
-    if (post.edited_at) {
-      const editMs = typeof post.edited_at === 'number'
-        ? post.edited_at
-        : new Date(post.edited_at).getTime();
-      const editDate = !isNaN(editMs) ? new Date(editMs) : new Date();
-      post.edited_at = {
-        toDate: () => editDate,
-        toMillis: () => editDate.getTime()
-      };
-    }
-
-    callback(post);
-  }, (err) => {
-    console.error('[subscribeToNewPostsRtdb error]', err);
-  });
-
-  return () => unsubscribe();
+  // Deliberately disabled: the cache is private to Cloud Functions. The page
+  // refreshes through fetchSecuredPosts, which performs the permission check.
+  void topicId;
+  void sinceTimestamp;
+  void callback;
+  return () => {};
 };
 
 export const subscribeToPostRemovalsRtdb = (topicId, callback) => {
-  const rtdb = getDatabase();
-  const postsRef = rtdbRef(rtdb, `topic_posts_cache/${topicId}/posts`);
-
-  const unsubscribe = onChildRemoved(postsRef, (snapshot) => {
-    const removedPostId = snapshot.key;
-    if (removedPostId) {
-      callback(removedPostId);
-    }
-  }, (err) => {
-    console.error('[subscribeToPostRemovalsRtdb error]', err);
-  });
-
-  return () => unsubscribe();
+  void topicId;
+  void callback;
+  return () => {};
 };
 
 export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null) => {
@@ -824,7 +771,7 @@ export const deleteTopics = async (topicIds, performerId) => {
             last_post_author_character_id: null
           });
         }
-      } catch (catErr) {
+      } catch {
         // Firestore category documents are updated server-side by onTopicDeleted.
         // Non-admin clients do not have update permissions on /categories, which is expected.
       }

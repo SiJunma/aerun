@@ -46,8 +46,6 @@ const CategoryPage = () => {
 
   const isStaff = hasPermission(PERMISSIONS.MODERATE_CONTENT);
 
-  const prevCatStatsRef = React.useRef(null);
-
   const loadTopics = async (showLoading = true) => {
     if (showLoading) setLoading(true);
     setLoadError(null);
@@ -65,9 +63,7 @@ const CategoryPage = () => {
 
   useEffect(() => {
     const found = categories.find(c => c.id === id);
-    if (found) {
-      setCategory(found);
-    }
+    setCategory(found || null);
   }, [id, categories]);
 
   useEffect(() => {

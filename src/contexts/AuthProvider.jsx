@@ -16,13 +16,7 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp,
-  collection,
-  query,
-  where,
-  getDocs,
-  deleteDoc,
-  limit,
-  orderBy
+  deleteDoc
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../../firebase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
@@ -33,8 +27,7 @@ import {
   deleteGuestActivity as apiDeleteGuestActivity,
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
-  subscribeToLatestTopics,
-  fetchLatestTopics
+  subscribeToLatestTopics
 } from '../api/auth-resources';
 import {
   initRtdbPresence,
@@ -46,7 +39,7 @@ import {
 } from '../api/rtdb-presence';
 import { subscribeToDmUnread } from '../api/dms';
 import { clearAllDmCache } from '../api/dm-cache';
-import { fetchSecuredMainPageData, subscribeToMainPageCategoriesRtdb, subscribeToMainPageStatsRtdb } from '../api/categories';
+import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, seedSystemRoles } from '../api/admin';
 import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -71,6 +64,10 @@ export const AuthProvider = ({ children }) => {
   const [readMap, setReadMap] = useState({});
   const [latestTopics, setLatestTopics] = useState([]);
   const [categories, setCategories] = useState([]);
+  // Categories and latest topics are an access-controlled server response.  Never
+  // initialise these from the shared RTDB cache: it contains data for every role.
+  const [forumStateLoading, setForumStateLoading] = useState(true);
+  const [forumStateError, setForumStateError] = useState(null);
   const [forumStats, setForumStats] = useState(null);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
@@ -99,7 +96,7 @@ export const AuthProvider = ({ children }) => {
   const readMapUnsubRef = useRef(null);
   const latestTopicsUnsubRef = useRef(null);
   const rolesUnsubRef = useRef(null);
-  const catsUnsubRef = useRef(null);
+  const forumStateRequestRef = useRef(0);
 
   // RTDB Presence initialization (runs on connect / login / profile load)
   useEffect(() => {
@@ -113,24 +110,6 @@ export const AuthProvider = ({ children }) => {
   // Real-time Online Users subscription from RTDB (0 Firestore reads)
   useEffect(() => {
     return subscribeToOnlineUsers(setActiveUsers);
-  }, []);
-
-  // Real-time Categories & Stats subscriptions from RTDB (0 Firestore reads)
-  useEffect(() => {
-    const unsubCats = subscribeToMainPageCategoriesRtdb((cats) => {
-      if (cats && cats.length > 0) {
-        setCategories(cats);
-      }
-    });
-    const unsubStats = subscribeToMainPageStatsRtdb((stats) => {
-      if (stats) {
-        setForumStats(stats);
-      }
-    });
-    return () => {
-      if (unsubCats) unsubCats();
-      if (unsubStats) unsubStats();
-    };
   }, []);
 
   // Real-time DM Unread subscription from RTDB (0 Firestore reads)
@@ -699,11 +678,19 @@ export const AuthProvider = ({ children }) => {
     if (context?.category) {
       const catPerms = context.category.permissions;
       if (catPerms && catPerms[perm] !== undefined && catPerms[perm] !== null) {
-        const allowedRoles = catPerms[perm];
-        if (allowedRoles.includes(effectiveRoleId)) return true;
+        const rawAllowed = catPerms[perm];
+        const allowedRoles = Array.isArray(rawAllowed)
+          ? rawAllowed
+          : (rawAllowed && typeof rawAllowed === 'object'
+              ? Object.values(rawAllowed).filter(r => typeof r === 'string')
+              : []);
+
+        const cleanAllowedRoles = allowedRoles.filter(r => r && r !== '__none__');
+
+        if (cleanAllowedRoles.includes(effectiveRoleId)) return true;
 
         const userRole = roles.find(r => r.id === effectiveRoleId);
-        if (userRole?.base_role_id && allowedRoles.includes(userRole.base_role_id)) return true;
+        if (userRole?.base_role_id && cleanAllowedRoles.includes(userRole.base_role_id)) return true;
 
         return false;
       }
@@ -711,6 +698,9 @@ export const AuthProvider = ({ children }) => {
 
     if (isRestricted && !isWhitelistOff) return false;
 
+    // Do not grant default permissions while the authoritative role list is
+    // still loading. This makes every client-side UI check fail closed.
+    if (roles.length === 0) return false;
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
@@ -784,29 +774,50 @@ export const AuthProvider = ({ children }) => {
   const lastForumRefreshTimeRef = useRef(0);
   const FORUM_REFRESH_COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown
 
-  const refreshForumState = useCallback(async (force = false) => {
+  const refreshForumState = useCallback(async (force = false, showLoading = false) => {
     const now = Date.now();
     if (!force && (now - lastForumRefreshTimeRef.current < FORUM_REFRESH_COOLDOWN_MS)) {
       return;
     }
     lastForumRefreshTimeRef.current = now;
+    const requestId = ++forumStateRequestRef.current;
+    if (showLoading) setForumStateLoading(true);
+    setForumStateError(null);
     try {
       const data = await fetchSecuredMainPageData();
-      if (data.categories) setCategories(data.categories);
-      if (data.latestTopics && data.latestTopics.length > 0) setLatestTopics(data.latestTopics);
+      // A response made for the previous auth state (e.g. guest → signed in)
+      // must never replace the current user's permitted data.
+      if (requestId !== forumStateRequestRef.current) return;
+      setCategories(Array.isArray(data.categories) ? data.categories : []);
+      setLatestTopics(Array.isArray(data.latestTopics) ? data.latestTopics : []);
       if (data.stats) setForumStats(data.stats);
       if (data.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
     } catch (err) {
       console.error('[refreshForumState]', err);
+      if (requestId === forumStateRequestRef.current) {
+        setForumStateError(err);
+      }
+    } finally {
+      if (requestId === forumStateRequestRef.current) {
+        setForumStateLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
+    // Invalidate any in-flight server response as soon as the authenticated
+    // identity changes.  This keeps guest and prior-user category lists out of
+    // the next render.
+    forumStateRequestRef.current += 1;
+    setForumStateLoading(true);
+    setForumStateError(null);
+    setCategories([]);
+    setLatestTopics([]);
     if (loading) return;
     // Debounce: loading→false and uid→value can fire as two separate renders.
     // Wait 100ms so both settle before making the network call.
     const timer = setTimeout(() => {
-      refreshForumState(true);
+      refreshForumState(true, true);
     }, 100);
     return () => clearTimeout(timer);
   }, [loading, user?.uid, refreshForumState]);
@@ -953,6 +964,8 @@ export const AuthProvider = ({ children }) => {
     readMap,
     latestTopics,
     categories,
+    forumStateLoading,
+    forumStateError,
     unreadTopicsCount,
     dmUnread,
     activeDmConvId,
@@ -984,7 +997,7 @@ export const AuthProvider = ({ children }) => {
     PERMISSIONS,
     DEFAULT_ROLES
   }), [
-    user, profile, authError, isRootAdmin, settings, loading, readMap, categories,
+    user, profile, authError, isRootAdmin, settings, loading, readMap, categories, forumStateLoading, forumStateError,
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,

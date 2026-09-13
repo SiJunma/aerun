@@ -7,14 +7,17 @@ import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
   updateUser, updateTopic,
   deleteTopics, moveTopics, movePosts, createDraftPost, updateDraftPost, publishDraft,
-  subscribeToTopicDraft, deleteDraftPost, locatePost, locateUnreadPost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
+  subscribeToTopicDraft, deleteDraftPost, locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
 
 import { doc, getDoc } from 'firebase/firestore';
 import { ref as rtdbRef, remove as rtdbRemove } from 'firebase/database';
-import { db, rtdb } from '../../firebase';
+import { db } from '../../firebase';
+
+// Forum cache access is server-only; the page receives posts through secured
+// callable functions and Firestore rules.
+const rtdb = null;
 import { subscribeToCharacters } from '../api/character';
-import { fetchUnreadTopicNotifications } from '../api/notifications';
 
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';

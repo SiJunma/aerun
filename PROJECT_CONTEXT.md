@@ -328,7 +328,7 @@ This file serves as the master context for AI interaction, combining the current
           }
         },
         "main_page_cache": {
-          "description": "Cached categories, global stats, and latest topics for real-time live synchronization (0 Firestore reads, updated by Cloud Functions and client optimistic writes).",
+          "description": "Server-only cache of category metadata, global statistics, and latest topics. Browser clients have no direct read or write access; getSecuredMainPageData filters category/topic data against current Firestore permissions before returning it.",
           "fields": {
             "categories": "object (maps catId to full category metadata and last_post_* info)",
             "stats": "object (total_topics, total_posts, total_users, newest_user_*, updated_at)",
@@ -336,7 +336,7 @@ This file serves as the master context for AI interaction, combining the current
           }
         },
         "topic_posts_cache": {
-          "description": "Cached last 3 pages of posts for active topics (<24h activity).",
+          "description": "Server-only cache of the last 3 pages of active topics (<24h activity), read only by getSecuredPosts after its permission check.",
           "fields": {
             "$topicId": {
               "meta": "object (category_id, cache_size, last_post_at, posts_count)",
@@ -345,7 +345,7 @@ This file serves as the master context for AI interaction, combining the current
           }
         },
         "session_perms": {
-          "description": "Cached permission checks per user/guest for fast server-side filtering.",
+          "description": "Legacy RTDB permission-cache records. Security-critical filtering now reads roles, categories, and settings freshly from Firestore in each callable invocation.",
           "fields": {
             "$uid": "object (allowed_category_ids: array, role_id: string, expires_at: number)"
           }
@@ -358,7 +358,7 @@ This file serves as the master context for AI interaction, combining the current
       "path": "src/contexts/AuthProvider.jsx",
       "description": "Maintains user state, global settings, unread counts, and permission checks.",
       "state_keys": [
-        "user", "profile", "settings", "loading", "readMap (polymorphic — see readmap schema)", "unreadTopicsCount", "isMarkingAllRead", "roles", "PERMISSIONS"
+        "user", "profile", "settings", "loading", "forumStateLoading", "forumStateError", "readMap (polymorphic — see readmap schema)", "unreadTopicsCount", "isMarkingAllRead", "roles", "PERMISSIONS"
       ]
     },
     "ToastContext": {

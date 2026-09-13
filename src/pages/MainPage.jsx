@@ -14,7 +14,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, profile, readMap, hasPermission, PERMISSIONS, categories } = useAuth();
+  const { user, profile, readMap, categories, forumStateLoading, forumStateError, refreshForumState } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [timeoutExpired, setTimeoutExpired] = useState(false);
@@ -37,8 +37,9 @@ const MainPage = () => {
   // to prevent a flash of content with wrong permissions (profile=null → role='player', then
   // flips to 'pending' once profile arrives and categories may disappear).
   const profileLoading = !!user && profile === null;
-  // Categories now come from AuthProvider context — treat as loading until they arrive
-  const catsLoading = categories.length === 0;
+  // Categories are supplied only by getSecuredMainPageData. An empty list is a
+  // valid server result, so use its explicit loading state rather than length.
+  const catsLoading = forumStateLoading;
 
   useEffect(() => {
     if (loading || profileLoading || catsLoading) {
@@ -46,8 +47,6 @@ const MainPage = () => {
         setTimeoutExpired(true);
       }, 7000);
       return () => clearTimeout(timer);
-    } else {
-      setTimeoutExpired(false);
     }
   }, [loading, profileLoading, catsLoading]);
 
@@ -63,7 +62,8 @@ const MainPage = () => {
               ? 'Сервер не ответил вовремя. Пожалуйста, проверьте подключение к интернету или попробуйте обновить страницу.'
               : 'The server did not respond in time. Please check your internet connection or try refreshing the page.'
             }
-            onRetry={() => window.location.reload()}
+            error={forumStateError}
+            onRetry={() => refreshForumState(true, true)}
           />
         ) : (
         <Card className="shadow-sm border-0">
@@ -107,7 +107,9 @@ const MainPage = () => {
         </Card>
         )
       ) : (() => {
-        const visibleCats = categories.filter(cat => hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat }));
+        // The list has already been filtered by getSecuredMainPageData. Do not
+        // re-evaluate it on the client: local role state may still be stale.
+        const visibleCats = categories;
         const groupsWithCats = groups.filter(g => visibleCats.some(c => c.group_id === g.id));
 
         if (visibleCats.length === 0) {

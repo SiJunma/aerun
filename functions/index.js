@@ -1,4 +1,4 @@
-const { loadContext, hasViewForum, getRequester } = require("./permissions");
+const { loadContext, invalidateContext, hasViewForum, getRequester } = require("./permissions");
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
@@ -63,6 +63,34 @@ async function removeRtdbMainPageCategory(catId) {
     await rtdb.ref(`main_page_cache/categories/${catId}`).remove();
   } catch (err) {
     logger.warn(`[removeRtdbMainPageCategory] ${catId} err:`, err);
+  }
+}
+
+function serialiseCategoryForRtdb(catId, category) {
+  const serialiseDate = (value) => value?.toDate ? value.toDate().toISOString() : (value || null);
+  return {
+    ...category,
+    id: catId,
+    created_at: serialiseDate(category.created_at),
+    updated_at: serialiseDate(category.updated_at),
+    last_post_at: serialiseDate(category.last_post_at)
+  };
+}
+
+async function invalidateAllSessionPerms(reason) {
+  try {
+    const rtdb = admin.database();
+    const permsSnap = await rtdb.ref('session_perms').once('value');
+    const allPerms = permsSnap.val();
+    if (!allPerms) return;
+    const updates = {};
+    Object.keys(allPerms).forEach(key => {
+      updates[`${key}/expires_at`] = 0;
+    });
+    await rtdb.ref('session_perms').update(updates);
+    logger.info(`[permissions] Invalidated ${Object.keys(allPerms).length} session entries: ${reason}`);
+  } catch (err) {
+    logger.warn(`[permissions] session_perms invalidation failed: ${reason}`, err);
   }
 }
 
@@ -177,41 +205,6 @@ async function updatePostInRtdbCache(topicId, postId, updates) {
   } catch (err) {
     logger.warn(`[updatePostInRtdbCache] topic=${topicId} post=${postId} err:`, err);
   }
-}
-
-async function getSessionPerms(db, uid, userRole) {
-  const rtdb = admin.database();
-  const key = uid || 'guest';
-  const permsRef = rtdb.ref(`session_perms/${key}`);
-
-  try {
-    const snap = await permsRef.once('value');
-    const cached = snap.val();
-    const now = Date.now();
-    if (cached && cached.expires_at > now && cached.role_id === userRole) {
-      return new Set(cached.allowed_category_ids || []);
-    }
-  } catch (err) {
-    logger.warn('[getSessionPerms read err]', err);
-  }
-
-  // Calculate permissions
-  const ctx = await loadContext(db);
-  const allowed = [];
-  Object.keys(ctx.categories).forEach(catId => {
-    if (hasViewForum(userRole, catId, ctx)) {
-      allowed.push(catId);
-    }
-  });
-
-  const expiresAt = Date.now() + (uid ? 30 * 60 * 1000 : 60 * 60 * 1000);
-  permsRef.set({
-    allowed_category_ids: allowed,
-    role_id: userRole,
-    expires_at: expiresAt
-  }).catch(() => { });
-
-  return new Set(allowed);
 }
 
 /**
@@ -969,12 +962,15 @@ exports.getSecuredMainPageData = onCall(
       }
     }
 
-    // 2. Filter allowed categories using session_perms
-    const allowedCatIds = await getSessionPerms(db, uid, requester.role);
-
-    const categories = Object.values(rtdbCategories)
-      .filter(cat => allowedCatIds.has(cat.id))
+    // 2. Categories and access checks must come from Firestore, not from the
+    // RTDB cache. The cache is only a private performance layer for mutable
+    // counters and latest-topic metadata.
+    const permissionContext = await loadContext(db);
+    const categories = Object.entries(permissionContext.categories)
+      .filter(([categoryId]) => hasViewForum(requester.role, categoryId, permissionContext))
+      .map(([categoryId, category]) => serialiseCategoryForRtdb(categoryId, category))
       .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const allowedCatIds = new Set(categories.map(category => category.id));
 
     const latestTopics = Object.values(rtdbLatestTopics || {})
       .filter(t => allowedCatIds.has(t.category_id))
@@ -1017,26 +1013,44 @@ exports.onCategoryUpdated = onDocumentUpdated("categories/{categoryId}", async (
   const permsAfter = JSON.stringify(after?.permissions || {});
   const permsChanged = permsBefore !== permsAfter;
 
-  if (permsChanged) {
-    try {
-      const rtdb = admin.database();
-      // Invalidate all cached session_perms by setting expires_at to 0.
-      // On the next getSecuredMainPageData / getSecuredCategories call,
-      // each user's perms will be recalculated from fresh Firestore data.
-      const permsSnap = await rtdb.ref('session_perms').once('value');
-      const allPerms = permsSnap.val();
-      if (allPerms) {
-        const updates = {};
-        Object.keys(allPerms).forEach(key => {
-          updates[`${key}/expires_at`] = 0; // force expiry on next call
-        });
-        await rtdb.ref('session_perms').update(updates);
-        logger.info(`[onCategoryUpdated] Invalidated ${Object.keys(allPerms).length} session_perms entries (permissions changed on category ${categoryId})`);
-      }
-    } catch (err) {
-      logger.warn('[onCategoryUpdated] session_perms invalidation failed', err);
-    }
-  }
+  // RTDB is a server-only cache. Mirror the complete authoritative document so
+  // cache data cannot keep an old permission or metadata value.
+  await admin.database().ref(`main_page_cache/categories/${categoryId}`)
+    .set(serialiseCategoryForRtdb(categoryId, after));
+
+  if (permsChanged) await invalidateAllSessionPerms(`category ${categoryId} permissions changed`);
+  invalidateContext();
+});
+
+exports.onCategoryCreated = onDocumentCreated("categories/{categoryId}", async (event) => {
+  if (!event.data) return;
+  const categoryId = event.params.categoryId;
+  await admin.database().ref(`main_page_cache/categories/${categoryId}`)
+    .set(serialiseCategoryForRtdb(categoryId, event.data.data()));
+  invalidateContext();
+  await invalidateAllSessionPerms(`category ${categoryId} created`);
+});
+
+exports.onCategoryDeleted = onDocumentDeleted("categories/{categoryId}", async (event) => {
+  const categoryId = event.params.categoryId;
+  await removeRtdbMainPageCategory(categoryId);
+  invalidateContext();
+  await invalidateAllSessionPerms(`category ${categoryId} deleted`);
+});
+
+exports.onRoleChanged = onDocumentUpdated("roles/{roleId}", async (event) => {
+  invalidateContext();
+  await invalidateAllSessionPerms(`role ${event.params.roleId} changed`);
+});
+
+exports.onRoleCreated = onDocumentCreated("roles/{roleId}", async (event) => {
+  invalidateContext();
+  await invalidateAllSessionPerms(`role ${event.params.roleId} created`);
+});
+
+exports.onRoleDeleted = onDocumentDeleted("roles/{roleId}", async (event) => {
+  invalidateContext();
+  await invalidateAllSessionPerms(`role ${event.params.roleId} deleted`);
 });
 
 /**
@@ -1571,7 +1585,7 @@ async function handlePostNotifications(db, { postId, topicId, authorId, authorNa
                   try {
                     const authUser = await admin.auth().getUser(recipientUid);
                     recipientEmail = authUser?.email || null;
-                  } catch (aErr) {
+                  } catch {
                     // user might not exist in Auth
                   }
                 }
@@ -1652,7 +1666,7 @@ async function handlePostNotifications(db, { postId, topicId, authorId, authorNa
 
     // 3. Mention Notifications
     if (content) {
-      const mentionRegex = /\[b\]([^\[]+)\[\/b\],/gi;
+      const mentionRegex = /\[b\]([^[]+)\[\/b\],/gi;
       const mentionedNames = new Set();
       let mMatch;
       while ((mMatch = mentionRegex.exec(content)) !== null) {
@@ -2900,7 +2914,7 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
         try {
           const authUser = await admin.auth().getUser(recipientUid);
           recipientEmail = authUser?.email || null;
-        } catch (aErr) {
+        } catch {
           // user not in Auth
         }
       }

@@ -1,4 +1,4 @@
-import { db, rtdb } from '../../firebase';
+import { db } from '../../firebase';
 import { logAdminAction } from './audit';
 import {
   collection,
@@ -13,58 +13,6 @@ import {
   deleteDoc,
   getDoc
 } from 'firebase/firestore';
-import { ref, update, remove, onValue } from 'firebase/database';
-
-export const subscribeToMainPageCategoriesRtdb = (callback) => {
-  if (!rtdb) return () => {};
-  const catRef = ref(rtdb, 'main_page_cache/categories');
-  const unsubscribe = onValue(catRef, (snapshot) => {
-    const data = snapshot.val();
-    if (!data) return;
-    const cats = Object.values(data).sort((a, b) => (a.order || 0) - (b.order || 0));
-    callback(cats);
-  }, (err) => console.error('[subscribeToMainPageCategoriesRtdb err]', err));
-  return () => unsubscribe();
-};
-
-export const subscribeToMainPageStatsRtdb = (callback) => {
-  if (!rtdb) return () => {};
-  const statsRef = ref(rtdb, 'main_page_cache/stats');
-  const unsubscribe = onValue(statsRef, (snapshot) => {
-    const data = snapshot.val();
-    if (!data) return;
-    callback({
-      totalTopics: data.total_topics ?? 0,
-      totalPosts: data.total_posts ?? 0,
-      totalUsers: data.total_users ?? 0,
-      newestUser: data.newest_user_nickname ? {
-        id: data.newest_user_id,
-        nickname: data.newest_user_nickname,
-        role_id: data.newest_user_role_id
-      } : null
-    });
-  }, (err) => console.error('[subscribeToMainPageStatsRtdb err]', err));
-  return () => unsubscribe();
-};
-
-export const subscribeToLatestTopicsRtdb = (callback, limitCount = 50) => {
-  if (!rtdb) return () => {};
-  const topicsRef = ref(rtdb, 'main_page_cache/latest_topics');
-  const unsubscribe = onValue(topicsRef, (snapshot) => {
-    const data = snapshot.val();
-    if (!data) {
-      callback([]);
-      return;
-    }
-    const topics = Object.values(data).sort((a, b) => {
-      const aMs = typeof a.last_post_at === 'number' ? a.last_post_at : (a.last_post_at ? new Date(a.last_post_at).getTime() : 0);
-      const bMs = typeof b.last_post_at === 'number' ? b.last_post_at : (b.last_post_at ? new Date(b.last_post_at).getTime() : 0);
-      return bMs - aMs;
-    });
-    callback(topics.slice(0, limitCount));
-  }, (err) => console.error('[subscribeToLatestTopicsRtdb err]', err));
-  return () => unsubscribe();
-};
 
 // ── Category Groups ──────────────────────────────────────────────────────────
 
@@ -155,15 +103,10 @@ export const fetchSecuredCategories = async () => {
 };
 
 export const fetchSecuredMainPageData = async () => {
-  try {
-    const functions = getFunctions();
-    const getMainPage = httpsCallable(functions, 'getSecuredMainPageData');
-    const result = await getMainPage();
-    return result.data;
-  } catch (err) {
-    console.error('[fetchSecuredMainPageData]', err);
-    return { categories: [], latestTopics: [], stats: null, dailyActiveUsers: [] };
-  }
+  const functions = getFunctions();
+  const getMainPage = httpsCallable(functions, 'getSecuredMainPageData');
+  const result = await getMainPage();
+  return result.data;
 };
 
 export const subscribeToCategories = (callback) => {
@@ -221,26 +164,6 @@ export const updateCategory = async (id, catData, performerId) => {
   });
   await logAdminAction('category_updated', performerId, { targetId: id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
 
-  // Immediately patch RTDB main_page_cache so the main page reflects the change
-  // without waiting for a full cache rebuild. Only update metadata fields — leave
-  // counters (topics_count, posts_count, last_post_*) untouched.
-  if (rtdb) {
-    try {
-      const rtdbPatch = {
-        id,
-        permissions,
-        group_id: catData.group_id || null,
-        order: catData.order ?? null,
-        updated_at: new Date().toISOString()
-      };
-      // Multilingual fields — write as-is (objects with {en, ru})
-      if (catData.title !== undefined) rtdbPatch.title = catData.title;
-      if (catData.description !== undefined) rtdbPatch.description = catData.description;
-      await update(ref(rtdb, `main_page_cache/categories/${id}`), rtdbPatch);
-    } catch (e) {
-      console.warn('[updateCategory RTDB patch err]', e);
-    }
-  }
 };
 
 export const deleteCategory = async (id, performerId) => {
@@ -254,8 +177,4 @@ export const deleteCategory = async (id, performerId) => {
   await deleteDoc(catRef);
   await logAdminAction('category_deleted', performerId, { targetId: id, title });
 
-  // Remove from RTDB main_page_cache immediately
-  if (rtdb) {
-    remove(ref(rtdb, `main_page_cache/categories/${id}`)).catch(() => {});
-  }
 };

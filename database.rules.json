@@ -29,15 +29,9 @@
       }
     },
     "main_page_cache": {
-      ".read": true,
-      "categories": {
-        ".write": "auth != null"
-      },
-      "stats": {
-        ".write": "auth != null"
-      },
+      ".read": false,
+      ".write": false,
       "latest_topics": {
-        ".write": "auth != null",
         ".indexOn": [
           "last_post_at"
         ]
@@ -45,7 +39,7 @@
     },
     "topic_posts_cache": {
       "$topic_id": {
-        ".read": true,
+        ".read": false,
         ".write": false,
         "posts": {
           ".indexOn": [

@@ -1,7 +1,11 @@
-const admin = require("firebase-admin");
-
-const TTL_MS = 60 * 1000;
+// Permission data is security-sensitive. It is read fresh for every callable
+// invocation so a revoked category or role is effective on the next request.
+const TTL_MS = 0;
 let cache = { at: 0, roles: null, categories: null, settings: null };
+
+function invalidateContext() {
+  cache = { at: 0, roles: null, categories: null, settings: null };
+}
 
 /**
  * roles/categories/settings are tiny and change rarely, but every callable was
@@ -63,4 +67,4 @@ async function getRequester(db, uid) {
   return { uid, role: data.role_id || "player", data };
 }
 
-module.exports = { loadContext, effectiveRole, hasViewForum, getRequester };
+module.exports = { loadContext, invalidateContext, effectiveRole, hasViewForum, getRequester };
