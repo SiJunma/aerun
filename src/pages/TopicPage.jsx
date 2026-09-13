@@ -52,7 +52,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, refreshForumState, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, refreshForumState, scheduleForumStateRefresh, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1091,6 +1091,7 @@ const TopicPage = () => {
   const handleMoveTopic = async (targetCategoryId) => {
     try {
       await moveTopics([id], targetCategoryId, user.uid);
+      scheduleForumStateRefresh();
       showToast(lang === 'ru' ? 'Тема перенесена!' : 'Topic moved!');
       setShowMoveModal(false);
       navigate(`/category/${targetCategoryId}`);
@@ -1106,6 +1107,7 @@ const TopicPage = () => {
       const movedCount = postIds.length;
 
       await movePosts(postIds, targetTopicId, user.uid);
+      scheduleForumStateRefresh();
       showToast(t('forum.move_posts_success'));
 
       if (isFirstPostMoved) {
@@ -1197,8 +1199,9 @@ const TopicPage = () => {
           is_character: !!postData.is_character,
           author_character_id: postData.author_character_id || null,
           created_at: new Date().toISOString()
-        }, newTotalPosts);
+        }, newTotalPosts, 1);
       }
+      scheduleForumStateRefresh();
 
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
@@ -1358,8 +1361,9 @@ const TopicPage = () => {
           is_character: !!publishedDraft?.is_character,
           author_character_id: publishedDraft?.author_character_id || null,
           created_at: new Date().toISOString()
-        }, newTotalPosts);
+        }, newTotalPosts, 1);
       }
+      scheduleForumStateRefresh();
 
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
@@ -1497,6 +1501,8 @@ const TopicPage = () => {
         } : prev);
       }
 
+      scheduleForumStateRefresh();
+
       setEditingFirstPost(false);
       setEditTopicTitle('');
       setEditTopicDescription('');
@@ -1532,6 +1538,7 @@ const TopicPage = () => {
             return;
           }
           await deleteTopics([id], user.uid);
+          scheduleForumStateRefresh();
           if (categoryId) {
             navigate(`/category/${categoryId}`);
             return;
@@ -1548,6 +1555,7 @@ const TopicPage = () => {
 
           // Вызываем удаление
           const result = await deletePost(deletingPost, user.uid);
+          scheduleForumStateRefresh();
 
           if (delAuthorId) {
             if (delAuthorId === user?.uid) {
@@ -3123,6 +3131,7 @@ const TopicPage = () => {
           onConfirm={async () => {
             const catId = topic.category_id;
             await deleteTopics([id], user?.uid);
+            scheduleForumStateRefresh();
             navigate(catId ? `/category/${catId}` : '/');
           }}
           title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}

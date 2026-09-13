@@ -17,7 +17,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, hasPermission, PERMISSIONS, settings, categories } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, hasPermission, PERMISSIONS, settings, categories } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
 
@@ -138,6 +138,7 @@ const TopicFormPage = () => {
       };
 
       const newTopicId = await createTopic(topicData, firstPostData);
+      scheduleForumStateRefresh();
       localStorage.removeItem(DRAFT_KEY);
       // Mark as read immediately (server-side, all roles)
       await markTopicRead(newTopicId);

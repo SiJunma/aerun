@@ -46,6 +46,7 @@ import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChi
 import { generateRandomNickname } from '../utils/nickname';
 
 const AuthContext = createContext();
+const FORUM_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
 
 export const useAuth = () => useContext(AuthContext);
 
@@ -97,6 +98,7 @@ export const AuthProvider = ({ children }) => {
   const latestTopicsUnsubRef = useRef(null);
   const rolesUnsubRef = useRef(null);
   const forumStateRequestRef = useRef(0);
+  const forumRefreshTimersRef = useRef(new Set());
 
   // RTDB Presence initialization (runs on connect / login / profile load)
   useEffect(() => {
@@ -705,7 +707,7 @@ export const AuthProvider = ({ children }) => {
     return !!normalizePermissions(userRole?.permissions).includes(perm);
   }, [user, profile, roles, settings]);
 
-  const updateLocalTopicLastPost = useCallback((topicId, categoryId, topicTitle, lastPost, postsCount) => {
+  const updateLocalTopicLastPost = useCallback((topicId, categoryId, topicTitle, lastPost, postsCount, categoryPostsDelta = 0) => {
     if (!topicId || !lastPost) return;
 
     const lastPostDateIso = lastPost.created_at?.toMillis ? new Date(lastPost.created_at.toMillis()).toISOString() : (typeof lastPost.created_at === 'string' ? lastPost.created_at : new Date().toISOString());
@@ -761,7 +763,8 @@ export const AuthProvider = ({ children }) => {
                 last_post_author_role_id: lastPost.author_role_id || 'player',
                 last_post_is_character: !!lastPost.is_character,
                 last_post_author_character_id: lastPost.author_character_id || null,
-                last_post_topic_posts_count: postsCount
+                last_post_topic_posts_count: postsCount,
+                posts_count: Math.max(0, (cat.posts_count || 0) + categoryPostsDelta)
               };
             }
           }
@@ -772,7 +775,6 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const lastForumRefreshTimeRef = useRef(0);
-  const FORUM_REFRESH_COOLDOWN_MS = 5 * 60 * 1000; // 5 min cooldown
 
   const refreshForumState = useCallback(async (force = false, showLoading = false) => {
     const now = Date.now();
@@ -802,6 +804,26 @@ export const AuthProvider = ({ children }) => {
         setForumStateLoading(false);
       }
     }
+  }, []);
+
+  /**
+   * Cloud Firestore writes are acknowledged before their Cloud Function
+   * denormalisation triggers finish. Refresh immediately and then retry a few
+   * times so the main-page projection converges without a browser reload.
+   */
+  const scheduleForumStateRefresh = useCallback((delays = [0, 700, 2200]) => {
+    delays.forEach(delay => {
+      const timer = window.setTimeout(() => {
+        forumRefreshTimersRef.current.delete(timer);
+        refreshForumState(true);
+      }, delay);
+      forumRefreshTimersRef.current.add(timer);
+    });
+  }, [refreshForumState]);
+
+  useEffect(() => () => {
+    forumRefreshTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    forumRefreshTimersRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -986,6 +1008,7 @@ export const AuthProvider = ({ children }) => {
     updateProfile,
     recordActivity,
     refreshForumState,
+    scheduleForumStateRefresh,
     forumStats,
     dailyActiveUsers,
     updateLocalTopicLastPost,
@@ -1001,7 +1024,7 @@ export const AuthProvider = ({ children }) => {
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
-    updateSettings, updateProfile, recordActivity, refreshForumState, forumStats,
+    updateSettings, updateProfile, recordActivity, refreshForumState, scheduleForumStateRefresh, forumStats,
     dailyActiveUsers, updateLocalTopicLastPost, hasPermission, roles, activeUsers,
     activeUserIds, isUserOnline, latestTopics
   ]);

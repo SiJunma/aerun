@@ -31,7 +31,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 const ProfilePage = () => {
   const { uid } = useParams();
   const { t, lang, setLang } = useI18n();
-  const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity, categories } = useAuth();
+  const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity, categories, scheduleForumStateRefresh } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
 
@@ -92,7 +92,6 @@ const ProfilePage = () => {
     return subscribeToDesigns(setDesigns);
   }, []);
 
-  const profileRef = useRef(null);
   const [submittingRep, setSubmittingRep] = useState(false);
   const [repLogs, setRepLogs] = useState([]);
   const [totalRepLogs, setTotalRepLogs] = useState(0);
@@ -312,6 +311,7 @@ const ProfilePage = () => {
       } else {
         await addCharacter(uid, formData);
       }
+      scheduleForumStateRefresh();
     } catch (err) {
       console.error(err);
       showToast(lang === 'ru' ? 'Не удалось сохранить персонажа' : 'Failed to save character', 'danger');
@@ -375,6 +375,7 @@ const ProfilePage = () => {
         }
       };
       await updateProfile(updates, uid);
+      scheduleForumStateRefresh();
       if (uid === profile?.uid && accountFormData.language !== lang) {
         setLang(accountFormData.language);
       }
@@ -458,6 +459,7 @@ const ProfilePage = () => {
       onConfirm: async () => {
         try {
           await deleteCharacter(uid, id);
+          scheduleForumStateRefresh();
         } catch (err) {
           console.error(err);
         }

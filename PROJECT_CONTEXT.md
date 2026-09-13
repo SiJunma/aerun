@@ -356,7 +356,7 @@ This file serves as the master context for AI interaction, combining the current
   "react_contexts": {
     "AuthContext": {
       "path": "src/contexts/AuthProvider.jsx",
-      "description": "Maintains user state, global settings, unread counts, and permission checks.",
+      "description": "Maintains user state, global settings, unread counts, and permission checks. After forum mutations it refreshes the server-filtered main-page projection immediately and with short retries, because Firestore triggers complete asynchronously.",
       "state_keys": [
         "user", "profile", "settings", "loading", "forumStateLoading", "forumStateError", "readMap (polymorphic — see readmap schema)", "unreadTopicsCount", "isMarkingAllRead", "roles", "PERMISSIONS"
       ]
@@ -417,7 +417,8 @@ This file serves as the master context for AI interaction, combining the current
     "posts": {
       "onPostCreated": "Updates topic/category post counts and last_post metadata.",
       "onPostDeleted": "Decrements topic/category post counts and recalculates last_post metadata.",
-      "onPostUpdated": "Detects author metadata changes (nickname, avatar, mask). If the updated post is the latest in its topic, triggers metadata sync for topic and category to ensure 'Last Message' info remains accurate."
+      "onPostUpdated": "Detects author metadata changes (nickname, avatar, mask). If the updated post is the latest in its topic, triggers metadata sync for topic and category to ensure 'Last Message' info remains accurate.",
+      "onUserUpdated/onCharacterUpdated": "When nickname, mask name, or avatar changes, refreshes the denormalized last-post identity in matching topics and categories. Topic deletion is fully server-owned: it performs the aggregate decrement and cascade deletion, while cascade post deletions do not decrement a second time."
     }
   },
   "ux_patterns": {

@@ -698,29 +698,10 @@ export const deleteTopics = async (topicIds, performerId) => {
     // Fetch posts count for RTDB update (use topic's stored posts_count)
     let postsCount = topicData.posts_count || 0;
 
-    // Determine if this is an admin/moderator action (performer !== author)
+    // Do not delete posts in the browser, even for moderators. onTopicDeleted
+    // is the sole owner of the aggregate decrement and cascade delete; splitting
+    // it between the client and asynchronous triggers caused double decrements.
     const isAdminAction = performerId && performerId !== topicData.author_id;
-
-    if (isAdminAction) {
-      // Admin/Moderator: delete posts client-side before topic deletion.
-      // moderators have canModerateContent() permission which bypasses isTopicOpen() check.
-      // IMPORTANT: Delete posts FIRST (separate batch), THEN delete topic.
-      const postsSnap = await getDocs(query(collection(db, 'posts'), where('topic_id', '==', topicId)));
-      postsCount = postsSnap.size;
-      if (postsSnap.size > 0) {
-        const postsBatch = writeBatch(db);
-        postsSnap.forEach(pDoc => postsBatch.delete(pDoc.ref));
-        await postsBatch.commit();
-      }
-    } else {
-      // Regular player deleting their own topic:
-      // Do NOT attempt to delete posts client-side — regular players only have
-      // permission to delete their OWN posts, and the security rule requires
-      // isTopicOpen() which can produce unexpected results in batch context.
-      // The Cloud Function onTopicDeleted already cascade-deletes all posts via
-      // Admin SDK, so this is fully handled server-side automatically.
-      console.log(`[deleteTopics] Relying on Cloud Function cascade for posts of topic ${topicId}`);
-    }
 
     // Delete the topic document
     // Security rule: allow delete if (isActive() && author_id == uid && isTopicOpen(topicId))
@@ -731,8 +712,8 @@ export const deleteTopics = async (topicIds, performerId) => {
       await logAdminAction('topic_deleted', performerId, { targetId: topicId, title: topicData.title });
     }
 
-    // NOTE: topics_count / posts_count decrements and notification cleanup are
-    // handled server-side by the onTopicDeleted Cloud Function trigger.
+    // Counters, last-post metadata, notifications, and post cascade deletion
+    // are all handled by the onTopicDeleted Cloud Function trigger.
 
     // Recalculate Category last_post in Firestore if possible (Admin SDK trigger onTopicDeleted
     // guarantees server-side recalculation via syncCategoryMetadata; ignore client permission errors for non-admins)
@@ -1032,7 +1013,10 @@ export const movePosts = async (postIds, targetTopicId, performerId) => {
     for (let i = 0; i < sortedSourcePosts.length; i++) {
       const p = sortedSourcePosts[i];
       const postMs = getTimestampMs(p.created_at);
-      const updates = { topic_id: targetTopicId };
+      const updates = {
+        topic_id: targetTopicId,
+        category_id: targetCategoryId
+      };
 
       if (baseTimestampMs > 0 && (postMs <= baseTimestampMs || postMs < nextAllowedMs)) {
         // Assign adjusted timestamp

@@ -1152,6 +1152,18 @@ exports.onTopicUpdated = onDocumentUpdated("topics/{topicId}", async (event) => 
 
     // 1. If topic was moved to a different category
     if (before?.category_id && after?.category_id && before.category_id !== after.category_id) {
+      // Posts carry category_id for security rules and server-side filtering.
+      // Keep it aligned with the topic whenever moderators move a topic.
+      const postsSnap = await db.collection("posts")
+        .where("topic_id", "==", topicId)
+        .get();
+      for (let i = 0; i < postsSnap.docs.length; i += 400) {
+        const batch = db.batch();
+        postsSnap.docs.slice(i, i + 400).forEach(postDoc => {
+          batch.update(postDoc.ref, { category_id: after.category_id });
+        });
+        await batch.commit();
+      }
       await syncCategoryMetadata(db, before.category_id);
       await syncCategoryMetadata(db, after.category_id);
       logger.info(`onTopicUpdated: moved topic ${topicId} from category ${before.category_id} to ${after.category_id}`);
@@ -1175,19 +1187,27 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
   const snap = event.data;
   if (!snap) return;
   const topic = snap.data();
-  const { category_id, author_id, posts_count = 0 } = topic;
+  const { category_id, author_id } = topic;
 
   try {
     const db = admin.firestore();
+    // The denormalised posts_count can lag behind a just-created/deleted post.
+    // Count the authoritative documents once and use that same snapshot for
+    // both the aggregate decrement and the cascade deletion.
+    const postsSnap = await db.collection("posts")
+      .where("topic_id", "==", event.params.topicId)
+      .get();
+    const deletedPostsCount = postsSnap.size;
     const batch = db.batch();
 
     // Guard: category may have already been deleted.
     if (category_id) {
       const catRef = db.collection("categories").doc(category_id);
-      const catExists = await queueIncrement(batch, catRef, "topics_count", -1);
-      if (catExists) {
+      const catSnap = await catRef.get();
+      if (catSnap.exists) {
         batch.update(catRef, {
-          posts_count: admin.firestore.FieldValue.increment(-posts_count)
+          topics_count: admin.firestore.FieldValue.increment(-1),
+          posts_count: admin.firestore.FieldValue.increment(-deletedPostsCount)
         });
       }
     }
@@ -1201,15 +1221,12 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
     const globalStatsRef = db.collection("forum_stats").doc("global");
     batch.set(globalStatsRef, {
       total_topics: admin.firestore.FieldValue.increment(-1),
-      total_posts: admin.firestore.FieldValue.increment(-posts_count)
+      total_posts: admin.firestore.FieldValue.increment(-deletedPostsCount)
     }, { merge: true });
 
     await batch.commit();
 
     // 2b. Cascade-delete posts in Firestore
-    const postsSnap = await db.collection("posts")
-      .where("topic_id", "==", event.params.topicId)
-      .get();
     for (let i = 0; i < postsSnap.docs.length; i += 400) {
       const chunk = db.batch();
       postsSnap.docs.slice(i, i + 400).forEach(d => chunk.delete(d.ref));
@@ -1242,14 +1259,14 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
     if (category_id) {
       updateRtdbMainPageCategory(category_id, {
         topics_count: admin.database.ServerValue.increment(-1),
-        posts_count: admin.database.ServerValue.increment(-posts_count)
+        posts_count: admin.database.ServerValue.increment(-deletedPostsCount)
       });
     }
     removeRtdbLatestTopic(event.params.topicId);
     admin.database().ref(`topic_posts_cache/${event.params.topicId}`).remove().catch(() => { });
     admin.database().ref('main_page_cache/stats').update({
       total_topics: admin.database.ServerValue.increment(-1),
-      total_posts: admin.database.ServerValue.increment(-posts_count)
+      total_posts: admin.database.ServerValue.increment(-deletedPostsCount)
     }).catch(() => { });
 
     logger.info(`onTopicDeleted cleanup for ${event.params.topicId} successful.`);
@@ -1903,14 +1920,22 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
     const topicRef = db.collection("topics").doc(topic_id);
     const topicSnap = await topicRef.get();
 
-    if (topicSnap.exists) {
-      const { category_id } = topicSnap.data();
-      batch.update(topicRef, { posts_count: admin.firestore.FieldValue.increment(-1) });
-      batch.update(db.collection("categories").doc(category_id), { posts_count: admin.firestore.FieldValue.increment(-1) });
+    // onTopicDeleted already removes this topic's counters before its cascade
+    // deletes posts. Do not decrement them a second time for cascade events.
+    if (!topicSnap.exists) {
+      await admin.database().ref(`post_voters/${event.params.postId}`).remove().catch(() => {});
+      logger.info(`onPostDeleted skipped counters for cascade/orphan post ${event.params.postId}`);
+      return;
+    }
+
+    const { category_id } = topicSnap.data();
+    await queueIncrement(batch, topicRef, "posts_count", -1);
+    if (category_id) {
+      await queueIncrement(batch, db.collection("categories").doc(category_id), "posts_count", -1);
     }
 
     if (author_id) {
-      batch.update(db.collection("users").doc(author_id), { post_count: admin.firestore.FieldValue.increment(-1) });
+      await queueIncrement(batch, db.collection("users").doc(author_id), "post_count", -1);
     }
 
     // Общая статистика
@@ -1925,7 +1950,7 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
     }).catch(() => { });
 
     // 4. Пересчитываем метаданные темы и категории в Firestore
-    if (topicSnap.exists) {
+    {
       await syncTopicMetadata(db, topic_id);
 
       // 5. Синхронизируем свежие метаданные категории в RTDB main_page_cache
@@ -2091,6 +2116,66 @@ async function syncCategoryMetadata(db, categoryId) {
   }
 }
 
+/**
+ * The main page stores a denormalised copy of the last author's identity.
+ * Update only records that currently point at the changed account/character;
+ * historical posts themselves deliberately remain immutable.
+ */
+async function syncLastPostIdentity(db, userId, characterId, identity) {
+  const isCharacter = !!characterId;
+  const [topicsSnap, categoriesSnap] = await Promise.all([
+    db.collection("topics").where("last_post_author_id", "==", userId).get(),
+    db.collection("categories").where("last_post_author_id", "==", userId).get()
+  ]);
+
+  const matchesIdentity = (data) =>
+    !!data.last_post_is_character === isCharacter &&
+    (!isCharacter || data.last_post_author_character_id === characterId);
+
+  const topicDocs = topicsSnap.docs.filter(docSnap => matchesIdentity(docSnap.data()));
+  const categoryDocs = categoriesSnap.docs.filter(docSnap => matchesIdentity(docSnap.data()));
+  const updates = {
+    last_post_author: identity.name,
+    last_post_author_avatar: identity.avatar_url || null
+  };
+
+  for (let i = 0; i < topicDocs.length; i += 400) {
+    const batch = db.batch();
+    topicDocs.slice(i, i + 400).forEach(docSnap => batch.update(docSnap.ref, updates));
+    await batch.commit();
+  }
+  for (let i = 0; i < categoryDocs.length; i += 400) {
+    const batch = db.batch();
+    categoryDocs.slice(i, i + 400).forEach(docSnap => batch.update(docSnap.ref, updates));
+    await batch.commit();
+  }
+
+  await Promise.all([
+    ...topicDocs.map(docSnap => updateRtdbLatestTopic(docSnap.id, updates)),
+    ...categoryDocs.map(docSnap => updateRtdbMainPageCategory(docSnap.id, updates))
+  ]);
+}
+
+exports.onCharacterUpdated = onDocumentUpdated("users/{userId}/characters/{characterId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const nameChanged = before.name !== after.name;
+  const avatarChanged = before.avatar_url !== after.avatar_url;
+  if (!nameChanged && !avatarChanged) return;
+
+  const { userId, characterId } = event.params;
+  serverCharCache.delete(`${userId}_${characterId}`);
+  try {
+    await syncLastPostIdentity(admin.firestore(), userId, characterId, {
+      name: after.name || "Character",
+      avatar_url: after.avatar_url || ""
+    });
+    logger.info(`onCharacterUpdated: refreshed last-post identity for ${userId}/${characterId}`);
+  } catch (err) {
+    logger.error(`onCharacterUpdated identity sync error for ${userId}/${characterId}:`, err);
+  }
+});
+
 exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
   const deletedUid = event.params.userId;
   try {
@@ -2205,6 +2290,23 @@ exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
   const uid = event.params.uid;
   const db = admin.firestore();
   const rtdb = admin.database();
+  const nameChanged = before?.nickname !== after.nickname;
+  const avatarChanged = before?.avatar_url !== after.avatar_url;
+
+  // The category/topic projections store the latest author's display identity.
+  // Keep them current when that account changes its nickname or avatar.
+  if (nameChanged || avatarChanged) {
+    serverUserCache.delete(uid);
+    try {
+      await syncLastPostIdentity(db, uid, null, {
+        name: after.nickname || "User",
+        avatar_url: after.avatar_url || ""
+      });
+      logger.info(`[onUserUpdated] Refreshed last-post identity for ${uid}`);
+    } catch (identityErr) {
+      logger.error(`[onUserUpdated] Last-post identity sync failed for ${uid}:`, identityErr);
+    }
+  }
 
   // 1. Sync custom claims if role changed
   if (before?.role_id !== after.role_id) {
@@ -2221,8 +2323,8 @@ exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
   // 2. Sync profile updates (nickname, avatar, role, status_line, signature) to RTDB status/{uid}
   try {
     const statusUpdates = {};
-    if (before?.nickname !== after.nickname && after.nickname) statusUpdates.nickname = after.nickname;
-    if (before?.avatar_url !== after.avatar_url && after.avatar_url !== undefined) statusUpdates.avatar_url = after.avatar_url;
+    if (nameChanged && after.nickname) statusUpdates.nickname = after.nickname;
+    if (avatarChanged && after.avatar_url !== undefined) statusUpdates.avatar_url = after.avatar_url;
     if (before?.role_id !== after.role_id && after.role_id) statusUpdates.role_id = after.role_id;
     if (before?.status_line !== after.status_line && after.status_line !== undefined) statusUpdates.status_line = after.status_line;
     const afterSig = after.settings?.signature ?? after.signature;
@@ -2237,7 +2339,7 @@ exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
   }
 
   // 3. Sync newest_user in global stats if this user's nickname or role was updated
-  if (before?.nickname !== after.nickname || before?.role_id !== after.role_id) {
+  if (nameChanged || before?.role_id !== after.role_id) {
     try {
       const globalStatsRef = db.collection("forum_stats").doc("global");
       const gSnap = await globalStatsRef.get();
