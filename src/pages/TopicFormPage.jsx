@@ -17,7 +17,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, hasPermission, PERMISSIONS, settings, categories } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, applyForumState, hasPermission, PERMISSIONS, settings, categories } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
 
@@ -137,8 +137,15 @@ const TopicFormPage = () => {
         author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || '')
       };
 
-      const newTopicId = await createTopic(topicData, firstPostData);
-      scheduleForumStateRefresh();
+      const newTopic = await createTopic(topicData, firstPostData);
+      const newTopicId = newTopic?.topicId;
+      // The createTopic callable returned the converged main-page projection -
+      // apply it directly instead of firing background refresh calls.
+      if (newTopic?.forum) {
+        applyForumState(newTopic.forum);
+      } else {
+        scheduleForumStateRefresh();
+      }
       localStorage.removeItem(DRAFT_KEY);
       // Mark as read immediately (server-side, all roles)
       await markTopicRead(newTopicId);

@@ -67,4 +67,39 @@ async function getRequester(db, uid) {
   return { uid, role: data.role_id || "player", data };
 }
 
-module.exports = { loadContext, invalidateContext, effectiveRole, hasViewForum, getRequester };
+/**
+ * Mirrors the Firestore rules isAdmin(): admin/root bypass every permission
+ * check, exactly like request.auth.token.role_id in firestore.rules.
+ */
+function isRuleAdmin(rawRole) {
+  return rawRole === "admin" || rawRole === "root";
+}
+
+/**
+ * Mirrors the Firestore rules hasPermission(): checks the role's GLOBAL
+ * permissions list (root bypasses). Write callables replicate the rules, so no
+ * base_role_id inheritance here — the rules do not apply any.
+ */
+function hasRulePermission(ctx, rawRole, permission) {
+  if (rawRole === "root") return true;
+  const role = effectiveRole(rawRole, ctx.settings);
+  const roleData = ctx.roles[role] || {};
+  return Array.isArray(roleData.permissions) && roleData.permissions.includes(permission);
+}
+
+/**
+ * Mirrors the Firestore rules hasCategoryDataPermission(): a category-level
+ * permission list (when present) overrides the role's global list; only
+ * explicit role ids count in that list, exactly as the rules evaluate it.
+ */
+function hasRuleCategoryPermission(ctx, rawRole, categoryId, permission) {
+  if (rawRole === "root") return true;
+  const category = ctx.categories[categoryId];
+  if (!category) return false;
+  const catPerms = category.permissions || {};
+  const role = effectiveRole(rawRole, ctx.settings);
+  if (!(permission in catPerms)) return hasRulePermission(ctx, rawRole, permission);
+  return Array.isArray(catPerms[permission]) && catPerms[permission].includes(role);
+}
+
+module.exports = { loadContext, invalidateContext, effectiveRole, hasViewForum, getRequester, isRuleAdmin, hasRulePermission, hasRuleCategoryPermission };

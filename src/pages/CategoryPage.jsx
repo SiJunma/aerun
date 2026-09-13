@@ -25,7 +25,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user, hasPermission, PERMISSIONS, categories, scheduleForumStateRefresh } = useAuth();
+  const { user, hasPermission, PERMISSIONS, categories, scheduleForumStateRefresh, applyForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -132,8 +132,12 @@ const CategoryPage = () => {
   const handleBatchDelete = async () => {
     if (selectedTopicIds.length === 0) return;
     try {
-      await deleteTopics(selectedTopicIds, user.uid);
-      scheduleForumStateRefresh();
+      const deleteResult = await deleteTopics(selectedTopicIds, user.uid);
+      if (deleteResult?.forum) {
+        applyForumState(deleteResult.forum);
+      } else {
+        scheduleForumStateRefresh();
+      }
       showToast(lang === 'ru' ? 'Темы удалены' : 'Topics deleted', 'success');
       setSelectedTopicIds([]);
       loadTopics();
@@ -145,8 +149,12 @@ const CategoryPage = () => {
   const handleConfirmMove = async (targetCatId) => {
     if (selectedTopicIds.length === 0) return;
     try {
-      await moveTopics(selectedTopicIds, targetCatId, user.uid);
-      scheduleForumStateRefresh();
+      const moveResult = await moveTopics(selectedTopicIds, targetCatId, user.uid);
+      if (moveResult?.forum) {
+        applyForumState(moveResult.forum);
+      } else {
+        scheduleForumStateRefresh();
+      }
       showToast(lang === 'ru' ? 'Темы перенесены' : 'Topics moved', 'success');
       setSelectedTopicIds([]);
       setIsManaging(false);

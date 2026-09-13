@@ -52,8 +52,18 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, refreshForumState, scheduleForumStateRefresh, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, scheduleForumStateRefresh, applyForumState, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
   const { showToast } = useToast();
+
+  // A mutation callable returns a converged main-page projection. Apply it
+  // directly — only fall back to a background refresh when convergence timed out.
+  const applyMutationResult = (result) => {
+    if (result?.forum) {
+      applyForumState(result.forum);
+    } else {
+      scheduleForumStateRefresh();
+    }
+  };
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
@@ -1108,8 +1118,8 @@ const TopicPage = () => {
 
   const handleMoveTopic = async (targetCategoryId) => {
     try {
-      await moveTopics([id], targetCategoryId, user.uid);
-      scheduleForumStateRefresh();
+      const moveResult = await moveTopics([id], targetCategoryId, user.uid);
+      applyMutationResult(moveResult);
       showToast(lang === 'ru' ? 'Тема перенесена!' : 'Topic moved!');
       setShowMoveModal(false);
       navigate(`/category/${targetCategoryId}`);
@@ -1124,8 +1134,8 @@ const TopicPage = () => {
       const categoryId = topic?.category_id;
       const movedCount = postIds.length;
 
-      await movePosts(postIds, targetTopicId, user.uid);
-      scheduleForumStateRefresh();
+      const movePostsResult = await movePosts(postIds, targetTopicId, user.uid);
+      applyMutationResult(movePostsResult);
       showToast(t('forum.move_posts_success'));
 
       if (isFirstPostMoved) {
@@ -1146,7 +1156,6 @@ const TopicPage = () => {
         } else {
           await loadPosts(currentPage);
         }
-        if (refreshForumState) refreshForumState(true);
       }
     } catch (err) {
       showToast(err.message, 'danger');
@@ -1172,7 +1181,8 @@ const TopicPage = () => {
     setSubmitting(true);
     try {
       const postData = buildPostData();
-      const newPostId = await createPost(postData);
+      const replyResult = await createPost(postData);
+      const newPostId = replyResult?.postId;
       // Client-side post count updates
       if (user?.uid) {
         setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
@@ -1219,7 +1229,7 @@ const TopicPage = () => {
           created_at: new Date().toISOString()
         }, newTotalPosts, 1);
       }
-      scheduleForumStateRefresh();
+      applyMutationResult(replyResult);
 
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
@@ -1336,7 +1346,8 @@ const TopicPage = () => {
     recordActivity();
     try {
       const publishedDraft = myDraft;
-      const newPostId = await publishDraft(user.uid, id);
+      const pubResult = await publishDraft(user.uid, id);
+      const newPostId = pubResult?.postId;
       setMyDraft(null);
       markTopicRead(id);
       showToast(t('forum.draft_published'));
@@ -1381,7 +1392,7 @@ const TopicPage = () => {
           created_at: new Date().toISOString()
         }, newTotalPosts, 1);
       }
-      scheduleForumStateRefresh();
+      applyMutationResult(pubResult);
 
       if (targetPage !== currentPage) {
         alreadyJumpedRef.current = false;
@@ -1483,25 +1494,11 @@ const TopicPage = () => {
       setEditContent('');
       setEditCharacterId('');
 
-      // Отправляем изменения в Firestore
-      await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id);
-
-      // Keep the main page correct even if the user navigates away before the
-      // asynchronous onPostUpdated trigger recalculates the category metadata.
-      // Only the topic's authoritative last_post_id qualifies: posts holds the
-      // current page, so the newest loaded post is not necessarily the last one.
-      if (topic && topic.last_post_id === postId && originalPost && Object.keys(metadata).length > 0) {
-        updateLocalTopicLastPost(
-          id,
-          topic.category_id,
-          editingFirstPost ? (editTopicTitle.trim() || topic.title) : topic.title,
-          { ...originalPost, ...metadata },
-          topic.posts_count || posts.length
-        );
-      }
-
+      // First-post edits also update the topic (title/description/author identity).
+      // The server applies the same per-role key whitelist the rules do.
+      let topicUpdates = null;
       if (editingFirstPost && topic) {
-        const topicUpdates = {
+        topicUpdates = {
           title: editTopicTitle.trim() || topic.title,
           description: editTopicDescription.trim(),
           first_post_pinned: editPinFirstPost
@@ -1523,17 +1520,29 @@ const TopicPage = () => {
             topicUpdates.last_post_author_character_id = metadata.author_character_id;
           }
         }
-
-        await updateTopic(topic.id, topicUpdates, user.uid, topic.author_id);
-
-        // Обновляем состояние темы локально
-        setTopic(prev => prev ? {
-          ...prev,
-          ...topicUpdates
-        } : prev);
       }
 
-      scheduleForumStateRefresh();
+      const editResult = await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id, topicUpdates);
+
+      // Keep the main page correct even if the user navigates away before the
+      // asynchronous onPostUpdated trigger recalculates the category metadata.
+      if (topic && topic.last_post_id === postId && originalPost && Object.keys(metadata).length > 0) {
+        updateLocalTopicLastPost(
+          id,
+          topic.category_id,
+          editingFirstPost ? (editTopicTitle.trim() || topic.title) : topic.title,
+          { ...originalPost, ...metadata },
+          topic.posts_count || posts.length
+        );
+      }
+
+      // The callable returned the converged main-page projection — apply it
+      // directly (no background polling).
+      applyMutationResult(editResult);
+
+      if (editingFirstPost && topicUpdates) {
+        setTopic(prev => prev ? { ...prev, ...topicUpdates } : prev);
+      }
 
       setEditingFirstPost(false);
       setEditTopicTitle('');
@@ -1569,8 +1578,8 @@ const TopicPage = () => {
             setDeletingPost(null);
             return;
           }
-          await deleteTopics([id], user.uid);
-          scheduleForumStateRefresh();
+          const delTopicResult = await deleteTopics([id], user.uid);
+          applyMutationResult(delTopicResult);
           if (categoryId) {
             navigate(`/category/${categoryId}`);
             return;
@@ -1605,7 +1614,7 @@ const TopicPage = () => {
           } else {
             updateLocalTopicPostsCount(id, categoryId, -1);
           }
-          scheduleForumStateRefresh();
+          applyMutationResult(result);
 
           if (delAuthorId) {
             if (delAuthorId === user?.uid) {
@@ -3180,8 +3189,8 @@ const TopicPage = () => {
           onHide={() => setShowDeleteTopicModal(false)}
           onConfirm={async () => {
             const catId = topic.category_id;
-            await deleteTopics([id], user?.uid);
-            scheduleForumStateRefresh();
+            const delModalResult = await deleteTopics([id], user?.uid);
+            applyMutationResult(delModalResult);
             navigate(catId ? `/category/${catId}` : '/');
           }}
           title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}

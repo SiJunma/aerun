@@ -792,6 +792,18 @@ export const AuthProvider = ({ children }) => {
 
   const lastForumRefreshTimeRef = useRef(0);
 
+  /**
+   * Applies a server-authoritative main-page projection ({ categories,
+   * latestTopics, stats, dailyActiveUsers }) returned by the mutation callables.
+   */
+  const applyForumState = useCallback((data) => {
+    if (!data) return;
+    setCategories(Array.isArray(data.categories) ? data.categories : []);
+    setLatestTopics(Array.isArray(data.latestTopics) ? data.latestTopics : []);
+    if (data.stats) setForumStats(data.stats);
+    if (data.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
+  }, []);
+
   const refreshForumState = useCallback(async (force = false, showLoading = false) => {
     const now = Date.now();
     if (!force && (now - lastForumRefreshTimeRef.current < FORUM_REFRESH_COOLDOWN_MS)) {
@@ -801,19 +813,17 @@ export const AuthProvider = ({ children }) => {
     const requestId = ++forumStateRequestRef.current;
     if (showLoading) setForumStateLoading(true);
     setForumStateError(null);
+    // A projection computed before the last optimistic update would revert it
+    // (triggers lag behind the write). Skip the request entirely — calling the
+    // server here would be a wasted invocation. The initial load (showLoading)
+    // must never be blocked by this guard.
+    if (!showLoading && now - lastOptimisticForumUpdateRef.current < 3000) return;
     try {
       const data = await fetchSecuredMainPageData();
       // A response made for the previous auth state (e.g. guest → signed in)
       // must never replace the current user's permitted data.
       if (requestId !== forumStateRequestRef.current) return;
-      // A projection computed before the last optimistic update would revert it
-      // (triggers lag behind the write). Skip and let a later retry converge.
-      // The initial load (showLoading) must never be blocked by this guard.
-      if (!showLoading && Date.now() - lastOptimisticForumUpdateRef.current < 3000) return;
-      setCategories(Array.isArray(data.categories) ? data.categories : []);
-      setLatestTopics(Array.isArray(data.latestTopics) ? data.latestTopics : []);
-      if (data.stats) setForumStats(data.stats);
-      if (data.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
+      applyForumState(data);
     } catch (err) {
       console.error('[refreshForumState]', err);
       if (requestId === forumStateRequestRef.current) {
@@ -824,7 +834,7 @@ export const AuthProvider = ({ children }) => {
         setForumStateLoading(false);
       }
     }
-  }, []);
+  }, [applyForumState]);
 
   const updateLocalTopicPostsCount = useCallback((topicId, categoryId, delta) => {
     if (!topicId || !delta) return;
@@ -853,11 +863,16 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Cloud Firestore writes are acknowledged before their Cloud Function
-   * denormalisation triggers finish. Start after a short delay: an immediate
-   * response can still contain old data and overwrite the optimistic update.
-   * Subsequent retries make the main-page projection converge without reload.
+   * denormalisation triggers finish, but refreshForumState discards responses
+   * that arrive less than 3000ms after the last optimistic update. A single
+   * fetch scheduled past that window (plus one backstop retry) converges the
+   * main-page projection without burning repeated wasted invocations.
+   * Pending timers are cleared first so rapid successive actions can never
+   * stack multiple overlapping refresh schedules.
    */
-  const scheduleForumStateRefresh = useCallback((delays = [500, 1500, 4000]) => {
+  const scheduleForumStateRefresh = useCallback((delays = [3200, 7000]) => {
+    forumRefreshTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    forumRefreshTimersRef.current.clear();
     delays.forEach(delay => {
       const timer = window.setTimeout(() => {
         forumRefreshTimersRef.current.delete(timer);
@@ -1056,6 +1071,7 @@ export const AuthProvider = ({ children }) => {
     recordActivity,
     refreshForumState,
     scheduleForumStateRefresh,
+    applyForumState,
     forumStats,
     dailyActiveUsers,
     updateLocalTopicLastPost,
@@ -1072,7 +1088,7 @@ export const AuthProvider = ({ children }) => {
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
-    updateSettings, updateProfile, recordActivity, refreshForumState, scheduleForumStateRefresh, forumStats,
+    updateSettings, updateProfile, recordActivity, refreshForumState, scheduleForumStateRefresh, applyForumState, forumStats,
     dailyActiveUsers, updateLocalTopicLastPost, updateLocalTopicPostsCount, hasPermission, roles, activeUsers,
     activeUserIds, isUserOnline, latestTopics
   ]);

@@ -1,4 +1,4 @@
-const { loadContext, invalidateContext, hasViewForum, getRequester } = require("./permissions");
+const { loadContext, invalidateContext, hasViewForum, getRequester, isRuleAdmin, hasRulePermission, hasRuleCategoryPermission } = require("./permissions");
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
@@ -112,6 +112,65 @@ async function removeRtdbLatestTopic(topicId) {
   } catch (err) {
     logger.warn(`[removeRtdbLatestTopic] ${topicId} err:`, err);
   }
+}
+
+/**
+ * Resolves once the RTDB main_page_cache satisfies the predicate.
+ *
+ * Mutation callables perform the write the client used to do and then WAIT for
+ * the async Firestore triggers to denormalise the projection — so the callable
+ * returns genuinely converged data instead of making the client poll again.
+ * Resolves with the converged value, or null when the timeout elapses.
+ */
+function waitForRtdbConvergence(path, predicate, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const ref = admin.database().ref(path);
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ref.off("value", onChange);
+      resolve(val);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    const onChange = (snap) => {
+      const val = snap.val();
+      if (predicate(val)) finish(val);
+    };
+    ref.on("value", onChange);
+  });
+}
+
+/**
+ * Firestore variant of waitForRtdbConvergence: polls the document the
+ * projection actually reads. The RTDB mirrors can satisfy their predicates
+ * through secondary writers — e.g. syncTopicMetadata's topicRef.update fires
+ * onTopicUpdated, which mirrors the topic into latest_topics BEFORE
+ * syncCategoryMetadata lands — so a satisfied RTDB predicate does not strictly
+ * imply the Firestore denormalisation is committed. Polling the source
+ * document is immune to trigger ordering.
+ */
+function waitForFirestoreConvergence(docRef, predicate, timeoutMs = 8000, intervalMs = 250) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      clearTimeout(timeout);
+      resolve(val);
+    };
+    const timer = setInterval(async () => {
+      try {
+        const snap = await docRef.get();
+        if (predicate(snap.exists ? snap.data() : null)) finish(true);
+      } catch (err) {
+        logger.warn("[waitForFirestoreConvergence] poll error:", err);
+      }
+    }, intervalMs);
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+  });
 }
 
 async function mirrorPostToRtdbCache(topicId, postId, postData, postsPerPage = 20) {
@@ -831,18 +890,18 @@ exports.getSecuredGlobalTopics = onCall(
 );
 
 /**
- * getSecuredMainPageData (Callable)
- * Combines categories and forum statistics into a single unified payload.
- * Reads primarily from RTDB main_page_cache with zero Firestore reads,
- * filters via session_perms, and falls back to Firestore on first run.
+ * buildMainPageProjection
+ * Builds the secured main-page projection (categories / latestTopics / stats)
+ * for a given uid. Reads primarily from RTDB main_page_cache, filters via
+ * session_perms, and falls back to Firestore on first run. Shared by
+ * getSecuredMainPageData and every mutation callable so a write returns the
+ * exact payload a fresh getSecuredMainPageData call would produce — the client
+ * then has no reason to poll.
  */
-exports.getSecuredMainPageData = onCall(
-  { cors: true, enforceAppCheck: false, minInstances: 0 },
-  async (request) => {
-    const db = admin.firestore();
-    const uid = request.auth ? request.auth.uid : null;
-    const requester = await getRequester(db, uid);
-    const rtdb = admin.database();
+async function buildMainPageProjection(uid) {
+  const db = admin.firestore();
+  const rtdb = admin.database();
+  const requester = await getRequester(db, uid);
 
     // 1. Check RTDB main_page_cache
     let rtdbCategories = null;
@@ -993,6 +1052,640 @@ exports.getSecuredMainPageData = onCall(
     };
 
     return { categories, latestTopics, stats, dailyActiveUsers: [] };
+}
+
+/**
+ * getSecuredMainPageData (Callable)
+ * Combines categories and forum statistics into a single unified payload.
+ */
+exports.getSecuredMainPageData = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const uid = request.auth ? request.auth.uid : null;
+    return buildMainPageProjection(uid);
+  }
+);
+
+// ── Honest mutation callables ─────────────────────────────────────────────────
+// Every write the client used to perform directly now goes through these
+// callables. They validate server-side (mirroring firestore.rules), perform the
+// same write, WAIT for the async denormalisation triggers to converge the RTDB
+// main_page_cache, and return the converged projection. The client applies it
+// directly — no blind background polling any more. On a convergence timeout the
+// callable answers with converged:false and the client keeps its optimistic
+// state, scheduling a single fallback refresh.
+
+/** Shorthand for a permission-denied HttpsError. */
+function deny(msg = "permission-denied") {
+  return new HttpsError("permission-denied", msg);
+}
+
+/**
+ * createPost (Callable)
+ * Replaces the client-side transaction. Mirrors the rules' canPostToTopic.
+ */
+exports.createPost = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in to post.");
+
+    const postData = request.data || {};
+    const topicId = postData.topic_id;
+    const content = typeof postData.content === "string" ? postData.content.trim() : "";
+    if (!topicId) throw new HttpsError("invalid-argument", "topic_id is required.");
+    if (!content) throw new HttpsError("invalid-argument", "Post content is empty.");
+
+    const topicSnap = await db.collection("topics").doc(topicId).get();
+    if (!topicSnap.exists) throw new HttpsError("not-found", "Topic not found.");
+    const topic = topicSnap.data();
+
+    const requester = await getRequester(db, uid);
+    if (requester.data.role_id === "pending" || requester.data.role_id === "banned") {
+      throw deny("Account cannot post yet.");
+    }
+    const ctx = await loadContext(db);
+    const isMod = isRuleAdmin(requester.role) || hasRulePermission(ctx, requester.role, "moderate_content");
+    // Mods may reply in locked topics (matches the UI gate and updatePost/deletePost).
+    if (!isMod && topic.is_locked) throw new HttpsError("failed-precondition", "Topic is locked.");
+    if (!isMod && !hasRuleCategoryPermission(ctx, requester.role, topic.category_id, "post_reply")) {
+      throw deny("No permission to reply in this category.");
+    }
+    if (postData.author_id && postData.author_id !== uid) throw deny("author_id mismatch.");
+
+    const postRef = db.collection("posts").doc();
+    const createdPost = {
+      ...postData,
+      author_id: uid,
+      category_id: topic.category_id,
+      topic_id: topicId,
+      content,
+      rolls: postData.rolls || null,
+      reputation: 0,
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    };
+    await postRef.set(createdPost);
+
+    const expectedCount = (topic.posts_count || 0) + 1;
+    // The category row (posts_count / last_post_topic_*) is denormalised by the
+    // onPostCreated trigger and read from Firestore by the projection below, so
+    // wait for it to converge as well.
+    const catSnap = topic.category_id ? await db.collection("categories").doc(topic.category_id).get() : null;
+    const catExpectedPosts = catSnap && catSnap.exists ? ((catSnap.data().posts_count || 0) + 1) : null;
+    const [topicConverged, catConverged] = await Promise.all([
+      waitForRtdbConvergence(
+        `main_page_cache/latest_topics/${topicId}`,
+        (t) => !!t && t.last_post_id === postRef.id && t.posts_count === expectedCount
+      ),
+      catExpectedPosts === null ? Promise.resolve(true) : waitForRtdbConvergence(
+        `main_page_cache/categories/${topic.category_id}`,
+        (c) => !!c && (c.posts_count || 0) === catExpectedPosts
+          && c.last_post_topic_id === topicId
+          && c.last_post_topic_posts_count === expectedCount
+      )
+    ]);
+    if (!topicConverged || !catConverged) return { success: true, postId: postRef.id, converged: false };
+
+    return { success: true, postId: postRef.id, converged: true, forum: await buildMainPageProjection(uid) };
+  }
+);
+
+/**
+ * updatePost (Callable)
+ * Replaces the client updateDoc. Also supports the first-post / topic edit via
+ * optional topicUpdates, applying the same key whitelist per role as the rules.
+ */
+exports.updatePost = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in to edit.");
+
+    const { postId, content, metadata = {}, topicUpdates = null } = request.data || {};
+    if (!postId) throw new HttpsError("invalid-argument", "postId is required.");
+    if (typeof content !== "string" || !content.trim()) {
+      throw new HttpsError("invalid-argument", "Post content is empty.");
+    }
+
+    const postRef = db.collection("posts").doc(postId);
+    const postSnap = await postRef.get();
+    if (!postSnap.exists) throw new HttpsError("not-found", "Post not found.");
+    const post = postSnap.data();
+
+    const requester = await getRequester(db, uid);
+    const ctx = await loadContext(db);
+    const isMod = isRuleAdmin(requester.role) || hasRulePermission(ctx, requester.role, "moderate_content");
+    const isAuthor = post.author_id === uid;
+    if (!isMod && !isAuthor) throw deny("You can only edit your own posts.");
+
+    // Author key whitelist — firestore.rules /posts allow update.
+    const AUTHOR_POST_KEYS = ["content", "edited_at", "author_name", "author_avatar", "is_character", "author_character_id"];
+    const affectedKeys = [...new Set(["content", "edited_at", ...Object.keys(metadata)])];
+    if (!isMod && !affectedKeys.every((k) => AUTHOR_POST_KEYS.includes(k))) {
+      throw deny("You may only edit the post content and your author identity.");
+    }
+
+    const update = { content: content.trim(), edited_at: admin.firestore.FieldValue.serverTimestamp() };
+    for (const [k, v] of Object.entries(metadata)) update[k] = v;
+    await postRef.update(update);
+
+    const topicRef = db.collection("topics").doc(post.topic_id);
+    const topicSnap = await topicRef.get();
+    if (!topicSnap.exists) throw new HttpsError("not-found", "Topic not found.");
+    const topic = topicSnap.data();
+
+    // If the edited post is the topic's last post and its author identity changed,
+    // the async onPostUpdated trigger must recompute the denormalised
+    // last_post_author* fields in main_page_cache before the returned projection
+    // is built — otherwise the client applies stale identity data.
+    let converged = true;
+    // Re-read the post after the write and diff its identity against the
+    // pre-write snapshot. Authoritative regardless of which metadata keys the
+    // client sent — the previous per-key checks built from `metadata` could
+    // miss a changed field and skip the wait entirely, returning a projection
+    // built before the trigger chain had propagated the new identity.
+    let postAfter = post;
+    let identityChanged = false;
+    const identityChecks = [];
+    if (topic.last_post_id === postId) {
+      postAfter = (await postRef.get()).data();
+      identityChanged = (postAfter.author_name || '') !== (post.author_name || '')
+        || (postAfter.author_avatar || '') !== (post.author_avatar || '')
+        || !!postAfter.is_character !== !!post.is_character
+        || (postAfter.author_character_id || null) !== (post.author_character_id || null);
+    }
+    if (identityChanged) {
+      identityChecks.push(
+        (t) => (t.last_post_author || '') === (postAfter.author_name || ''),
+        (t) => (t.last_post_author_avatar || '') === (postAfter.author_avatar || ''),
+        (t) => !!t.last_post_is_character === !!postAfter.is_character,
+        (t) => (t.last_post_author_character_id || null) === (postAfter.author_character_id || null)
+      );
+      // The topic document is the trigger chain's source of truth: wait for it,
+      // then for the latest_topics mirror the projection reads.
+      converged = await waitForFirestoreConvergence(
+        topicRef,
+        (t) => !!t && identityChecks.every((check) => check(t))
+      );
+      const mirrorConverged = await waitForRtdbConvergence(
+        `main_page_cache/latest_topics/${post.topic_id}`,
+        (t) => !!t && t.last_post_id === postId && identityChecks.every((check) => check(t))
+      );
+      converged = converged && !!mirrorConverged;
+    }
+
+    // First-post / topic edit — mirrors the /topics update whitelist.
+    const titleChanged = topicUpdates && typeof topicUpdates.title === "string" && topicUpdates.title !== topic.title;
+    if (topicUpdates && Object.keys(topicUpdates).length > 0) {
+      const isTopicAuthor = topic.author_id === uid;
+      if (!isMod && !isTopicAuthor) throw deny("You can only edit your own topic.");
+      if (!isMod) {
+        const AUTHOR_TOPIC_KEYS = ["title", "content", "updated_at", "edited_at", "edited_by", "tags"];
+        if (!Object.keys(topicUpdates).every((k) => AUTHOR_TOPIC_KEYS.includes(k))) {
+          throw deny("You may only edit the topic title.");
+        }
+      }
+      await topicRef.update({ ...topicUpdates, updated_at: admin.firestore.FieldValue.serverTimestamp() });
+
+      // Wait for the title to converge into the main page cache if it changed.
+      if (titleChanged) {
+        converged = converged && (await waitForRtdbConvergence(
+          `main_page_cache/latest_topics/${post.topic_id}`,
+          (t) => !!t && t.title === topicUpdates.title
+        ));
+      }
+    }
+
+    // The category row mirrors this topic's last_post identity/title while the
+    // topic is the category's newest. The trigger chain rewrites the category
+    // document (Firestore, read by the projection below) after the topic mirror,
+    // so wait for it too — otherwise the returned projection carries a stale
+    // category row on the main page.
+    const catRef = post.category_id ? db.collection("categories").doc(post.category_id) : null;
+    const catSnap = catRef ? await catRef.get() : null;
+    const catIsLast = !!(catSnap && catSnap.exists && catSnap.data().last_post_topic_id === post.topic_id);
+    if (catIsLast && (identityChecks.length > 0 || titleChanged)) {
+      // buildMainPageProjection reads the category row from the Firestore
+      // document, and the RTDB mirrors can satisfy their predicates before
+      // syncCategoryMetadata lands (onTopicUpdated fires from the topic write
+      // inside syncTopicMetadata). Poll the source document instead.
+      const catConverged = await waitForFirestoreConvergence(
+        catRef,
+        (c) => !!c && (c.last_post_topic_id !== post.topic_id
+          || (identityChecks.every((check) => check(c))
+            && (!titleChanged || c.last_post_topic_title === topicUpdates.title)))
+      );
+      converged = converged && catConverged;
+    }
+
+    if (!converged) return { success: true, converged: false };
+    return { success: true, converged: true, forum: await buildMainPageProjection(uid) };
+  }
+);
+
+/**
+ * deletePost (Callable)
+ * Replaces the client deleteDoc. Returns the same result shape the client used
+ * to compute (incl. ghost purging), plus a converged projection.
+ */
+exports.deletePost = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in.");
+
+    const { postId, topicId } = request.data || {};
+    if (!postId) throw new HttpsError("invalid-argument", "postId is required.");
+
+    const postRef = db.collection("posts").doc(postId);
+    const postSnap = await postRef.get();
+
+    // Ghost post: only an RTDB cache entry remains — purge it server-side.
+    if (!postSnap.exists) {
+      await removePostFromRtdbCache(topicId, postId);
+      await admin.database().ref(`post_voters/${postId}`).remove().catch(() => { });
+      return { success: true, isGhost: true, converged: true, forum: await buildMainPageProjection(uid) };
+    }
+    const post = postSnap.data();
+
+    const requester = await getRequester(db, uid);
+    const ctx = await loadContext(db);
+    const isMod = isRuleAdmin(requester.role) || hasRulePermission(ctx, requester.role, "moderate_content");
+    const isAuthor = post.author_id === uid;
+    if (!isMod && !isAuthor) throw deny("You can only delete your own posts.");
+
+    const topicRef = db.collection("topics").doc(post.topic_id);
+    const topicSnap = await topicRef.get();
+    if (!isMod && (!topicSnap.exists || topicSnap.data().is_locked)) {
+      throw new HttpsError("failed-precondition", "Topic is locked.");
+    }
+    const topic = topicSnap.exists ? topicSnap.data() : {};
+    const wasLast = !!topic.last_post_id && topic.last_post_id === postId;
+    const expectedCount = Math.max(0, (topic.posts_count || 0) - 1);
+
+    // Category state read before the delete so the convergence predicates can
+    // assert exact post-write values.
+    const catSnap = topic.category_id ? await db.collection("categories").doc(topic.category_id).get() : null;
+    const catData = catSnap && catSnap.exists ? catSnap.data() : null;
+    const wasCatLast = !!catData && catData.last_post_topic_id === post.topic_id;
+    const catExpectedPosts = catData ? Math.max(0, (catData.posts_count || 0) - 1) : null;
+
+    await postRef.delete();
+
+    const [topicConverged, catConverged] = await Promise.all([
+      waitForRtdbConvergence(
+        `main_page_cache/latest_topics/${post.topic_id}`,
+        (t) => {
+          if (t === null || t === undefined) return expectedCount === 0;
+          return t.posts_count === expectedCount && (!wasLast || t.last_post_id !== postId);
+        }
+      ),
+      catExpectedPosts === null ? Promise.resolve(true) : waitForFirestoreConvergence(
+        db.collection("categories").doc(topic.category_id),
+        // The projection reads the category row from Firestore; its counters
+        // land via the trigger's batch and its last_post_* row via the
+        // subsequent syncCategoryMetadata — poll the source document.
+        (c) => !!c && (c.posts_count || 0) === catExpectedPosts
+          && (!wasCatLast
+            || c.last_post_topic_id !== post.topic_id
+            || (expectedCount > 0 && c.last_post_topic_posts_count === expectedCount))
+      )
+    ]);
+    const converged = topicConverged && catConverged;
+    if (!converged) return { success: true, isGhost: false, converged: false };
+    return { success: true, isGhost: false, converged: true, forum: await buildMainPageProjection(uid) };
+  }
+);
+
+/**
+ * createTopic (Callable)
+ * Replaces the client createTopic transaction. Mirrors the rules' canCreateTopic.
+ */
+exports.createTopic = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in to create a topic.");
+
+    const { topicData = {}, firstPostData = {} } = request.data || {};
+    const categoryId = topicData.category_id;
+    const title = typeof topicData.title === "string" ? topicData.title.trim() : "";
+    const content = typeof firstPostData.content === "string" ? firstPostData.content.trim() : "";
+    if (!categoryId || !title || !content) {
+      throw new HttpsError("invalid-argument", "category_id, title and first-post content are required.");
+    }
+
+    const requester = await getRequester(db, uid);
+    if (requester.data.role_id === "pending" || requester.data.role_id === "banned") throw deny("Account cannot create topics yet.");
+    const ctx = await loadContext(db);
+    if (!isRuleAdmin(requester.role) && !hasRuleCategoryPermission(ctx, requester.role, categoryId, "create_topic")) {
+      throw deny("No permission to create topics here.");
+    }
+
+    const topicRef = db.collection("topics").doc();
+    const postRef = db.collection("posts").doc();
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+
+    const topicDoc = {
+      ...topicData,
+      author_id: uid,
+      views: 0,
+      reputation: 0,
+      created_at: timestamp,
+      posts_count: 0
+    };
+    const firstPostDoc = {
+      ...firstPostData,
+      topic_id: topicRef.id,
+      category_id: categoryId,
+      author_id: uid,
+      content,
+      rolls: firstPostData.rolls || null,
+      reputation: 0,
+      created_at: timestamp
+    };
+
+    // Base category counters, read before the write so the convergence predicate
+    // below can assert exact post-write values (onTopicCreated and onPostCreated
+    // both denormalise this category document).
+    const catRef = db.collection("categories").doc(categoryId);
+    const catSnap = await catRef.get();
+    const catExists = catSnap.exists;
+    const expectedTopics = catExists ? ((catSnap.data().topics_count || 0) + 1) : null;
+    const expectedPosts = catExists ? ((catSnap.data().posts_count || 0) + 1) : null;
+
+    await db.runTransaction(async (tx) => {
+      tx.set(topicRef, topicDoc);
+      tx.set(postRef, firstPostDoc);
+    });
+
+    const [topicConverged, catConverged] = await Promise.all([
+      waitForRtdbConvergence(
+        `main_page_cache/latest_topics/${topicRef.id}`,
+        (t) => !!t && t.last_post_id === postRef.id && t.posts_count === 1
+      ),
+      catExists ? waitForRtdbConvergence(
+        `main_page_cache/categories/${categoryId}`,
+        (c) => !!c && (c.topics_count || 0) === expectedTopics
+          && (c.posts_count || 0) === expectedPosts
+          && c.last_post_topic_id === topicRef.id
+          && c.last_post_topic_posts_count === 1
+      ) : Promise.resolve(true)
+    ]);
+    if (!topicConverged || !catConverged) return { success: true, topicId: topicRef.id, postId: postRef.id, converged: false };
+    return { success: true, topicId: topicRef.id, postId: postRef.id, converged: true, forum: await buildMainPageProjection(uid) };
+  }
+);
+
+/**
+ * deleteTopics (Callable)
+ * Replaces the client deleteDoc loop. onTopicDeleted owns the counter/cascade
+ * cleanup; this callable only performs the deletes and waits for the RTDB cache
+ * to converge.
+ */
+exports.deleteTopics = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in.");
+
+    const { topicIds = [] } = request.data || {};
+    if (!Array.isArray(topicIds) || topicIds.length === 0) throw new HttpsError("invalid-argument", "topicIds is required.");
+
+    const requester = await getRequester(db, uid);
+    const ctx = await loadContext(db);
+    const isMod = isRuleAdmin(requester.role) || hasRulePermission(ctx, requester.role, "moderate_content");
+
+    // Validate every topic BEFORE deleting anything so a permission error cannot
+    // leave the operation half-applied.
+    const validated = [];
+    for (const topicId of topicIds) {
+      const topicSnap = await db.collection("topics").doc(topicId).get();
+      if (!topicSnap.exists) continue;
+      const topic = topicSnap.data();
+      const isOwner = topic.author_id === uid && !topic.is_locked;
+      if (!isMod && !isOwner) throw deny("You can only delete your own open topics.");
+      validated.push({ id: topicId, title: topic.title, category_id: topic.category_id });
+    }
+
+    for (const { id } of validated) {
+      await db.collection("topics").doc(id).delete();
+    }
+
+    await Promise.all(validated.map(({ id }) => waitForRtdbConvergence(
+      `main_page_cache/latest_topics/${id}`,
+      (t) => t === null || t === undefined
+    )));
+
+    return { success: true, deleted: validated, converged: true, forum: await buildMainPageProjection(uid) };
+  }
+);
+
+/**
+ * moveTopics (Callable)
+ * Replaces the client moveTopics loop. onTopicUpdated recomputes category
+ * metadata and moves the posts' category_id; this callable waits for the RTDB
+ * cache to converge before returning the projection.
+ */
+exports.moveTopics = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in.");
+
+    const { topicIds = [], targetCategoryId } = request.data || {};
+    if (!Array.isArray(topicIds) || topicIds.length === 0 || !targetCategoryId) {
+      throw new HttpsError("invalid-argument", "topicIds and targetCategoryId are required.");
+    }
+
+    const requester = await getRequester(db, uid);
+    const ctx = await loadContext(db);
+    if (!isRuleAdmin(requester.role) && !hasRulePermission(ctx, requester.role, "moderate_content")) {
+      throw deny("Only moderators can move topics.");
+    }
+
+    const targetCatRef = db.collection("categories").doc(targetCategoryId);
+    const targetCatSnap = await targetCatRef.get();
+    if (!targetCatSnap.exists) throw new HttpsError("not-found", "Target category not found.");
+
+    const moved = [];
+    const waits = [];
+    for (const topicId of topicIds) {
+      const topicRef = db.collection("topics").doc(topicId);
+      const topicSnap = await topicRef.get();
+      if (!topicSnap.exists) continue;
+      const topicData = topicSnap.data();
+      const sourceCategoryId = topicData.category_id;
+      if (sourceCategoryId === targetCategoryId) continue;
+      const postsCount = topicData.posts_count || 0;
+
+      await db.runTransaction(async (tx) => {
+        tx.update(topicRef, { category_id: targetCategoryId, updated_at: admin.firestore.FieldValue.serverTimestamp() });
+        if (sourceCategoryId) {
+          tx.update(db.collection("categories").doc(sourceCategoryId), {
+            topics_count: admin.firestore.FieldValue.increment(-1),
+            posts_count: admin.firestore.FieldValue.increment(-postsCount)
+          });
+        }
+        tx.update(targetCatRef, {
+          topics_count: admin.firestore.FieldValue.increment(1),
+          posts_count: admin.firestore.FieldValue.increment(postsCount)
+        });
+      });
+
+      moved.push({ id: topicId, title: topicData.title, sourceCategoryId });
+      waits.push(waitForRtdbConvergence(
+        `main_page_cache/latest_topics/${topicId}`,
+        (t) => !!t && t.category_id === targetCategoryId
+      ));
+    }
+
+    await Promise.all(waits);
+    return { success: true, moved, converged: true, forum: await buildMainPageProjection(uid) };
+  }
+);
+
+/**
+ * movePosts (Callable)
+ * Replaces the client movePosts batch. onPostUpdated recomputes topic + category
+ * metadata for both ends; this callable waits for the RTDB cache to converge.
+ */
+exports.movePosts = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const db = admin.firestore();
+    const uid = request.auth ? request.auth.uid : null;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in.");
+
+    const { postIds = [], targetTopicId } = request.data || {};
+    if (!Array.isArray(postIds) || postIds.length === 0 || !targetTopicId) {
+      throw new HttpsError("invalid-argument", "postIds and targetTopicId are required.");
+    }
+
+    const requester = await getRequester(db, uid);
+    const ctx = await loadContext(db);
+    if (!isRuleAdmin(requester.role) && !hasRulePermission(ctx, requester.role, "moderate_content")) {
+      throw deny("Only moderators can move posts.");
+    }
+
+    const getTimestampMs = (ts) => {
+      if (!ts) return 0;
+      if (typeof ts.toMillis === "function") return ts.toMillis();
+      if (typeof ts.toDate === "function") return ts.toDate().getTime();
+      if (typeof ts === "number") return ts;
+      if (typeof ts === "string") { const p = Date.parse(ts); return isNaN(p) ? 0 : p; }
+      if (typeof ts.seconds === "number") return ts.seconds * 1000 + Math.floor((ts.nanoseconds || 0) / 1e6);
+      return 0;
+    };
+
+    const targetTopicRef = db.collection("topics").doc(targetTopicId);
+    const targetTopicSnap = await targetTopicRef.get();
+    if (!targetTopicSnap.exists) throw new HttpsError("not-found", "Target topic not found.");
+    const targetTopicData = targetTopicSnap.data();
+    const targetCategoryId = targetTopicData.category_id;
+
+    const targetPostsQuery = await db.collection("posts").where("topic_id", "==", targetTopicId).get();
+    let targetFirstPost = null;
+    let targetLatestPost = null;
+    if (!targetPostsQuery.empty) {
+      const list = targetPostsQuery.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => getTimestampMs(a.created_at) - getTimestampMs(b.created_at));
+      targetFirstPost = list[0];
+      targetLatestPost = list[list.length - 1];
+    }
+
+    const sourceMap = {};
+    const movedGroups = [];
+    for (const postId of postIds) {
+      const postSnap = await db.collection("posts").doc(postId).get();
+      if (!postSnap.exists) continue;
+      const data = postSnap.data();
+      if (!sourceMap[data.topic_id]) sourceMap[data.topic_id] = [];
+      sourceMap[data.topic_id].push({ id: postId, ...data });
+    }
+
+    const waits = [];
+    for (const [sourceTopicId, sourcePosts] of Object.entries(sourceMap)) {
+      if (sourceTopicId === targetTopicId) continue;
+
+      const count = sourcePosts.length;
+      const sourceTopicRef = db.collection("topics").doc(sourceTopicId);
+      const sourceTopicSnap = await sourceTopicRef.get();
+      const sourceCategoryId = sourceTopicSnap.exists ? sourceTopicSnap.data().category_id : null;
+
+      const batch = db.batch();
+      const sortedSourcePosts = [...sourcePosts].sort((a, b) => getTimestampMs(a.created_at) - getTimestampMs(b.created_at));
+      const targetFirstPostMs = getTimestampMs(targetFirstPost?.created_at) || getTimestampMs(targetTopicData.created_at);
+      const targetLatestPostMs = getTimestampMs(targetLatestPost?.created_at) || targetFirstPostMs;
+      const baseTimestampMs = Math.max(targetFirstPostMs, targetLatestPostMs);
+      let nextAllowedMs = baseTimestampMs + 60 * 1000;
+
+      for (let i = 0; i < sortedSourcePosts.length; i++) {
+        const p = sortedSourcePosts[i];
+        const postMs = getTimestampMs(p.created_at);
+        const updates = { topic_id: targetTopicId, category_id: targetCategoryId };
+        if (baseTimestampMs > 0 && (postMs <= baseTimestampMs || postMs < nextAllowedMs)) {
+          updates.created_at = admin.firestore.Timestamp.fromMillis(nextAllowedMs);
+          const nextP = sortedSourcePosts[i + 1];
+          if (nextP) {
+            const nextPMs = getTimestampMs(nextP.created_at);
+            const originalDelta = (nextPMs > postMs && postMs > 0) ? (nextPMs - postMs) : 60 * 1000;
+            nextAllowedMs += Math.max(60 * 1000, originalDelta);
+          } else {
+            nextAllowedMs += 60 * 1000;
+          }
+        } else {
+          nextAllowedMs = postMs + 60 * 1000;
+        }
+        batch.update(db.collection("posts").doc(p.id), updates);
+      }
+
+      batch.update(sourceTopicRef, {
+        posts_count: admin.firestore.FieldValue.increment(-count),
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      batch.update(targetTopicRef, {
+        posts_count: admin.firestore.FieldValue.increment(count),
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      if (sourceCategoryId && targetCategoryId && sourceCategoryId !== targetCategoryId) {
+        batch.update(db.collection("categories").doc(sourceCategoryId), { posts_count: admin.firestore.FieldValue.increment(-count) });
+        batch.update(db.collection("categories").doc(targetCategoryId), { posts_count: admin.firestore.FieldValue.increment(count) });
+      }
+      await batch.commit();
+      movedGroups.push({
+        sourceTopicId,
+        postIds: sortedSourcePosts.map((p) => p.id),
+        count,
+      });
+
+      const srcAfter = Math.max(0, (sourceTopicSnap.exists ? (sourceTopicSnap.data().posts_count || 0) : 0) - count);
+      const targetAfter = (targetTopicData.posts_count || 0) + count;
+
+      waits.push(
+        waitForRtdbConvergence(
+          `main_page_cache/latest_topics/${sourceTopicId}`,
+          (t) => (t === null || t === undefined) ? srcAfter === 0 : t.posts_count === srcAfter
+        ),
+        waitForRtdbConvergence(
+          `main_page_cache/latest_topics/${targetTopicId}`,
+          (t) => !!t && t.posts_count === targetAfter
+        )
+      );
+    }
+
+    await Promise.all(waits.flat());
+    // `moved` mirrors the audit shape the client logged before the callable
+    // existed: one entry per source topic, consumed by the client-side
+    // `posts_moved` audit log.
+    return { success: true, converged: true, moved: movedGroups, forum: await buildMainPageProjection(uid) };
   }
 );
 
@@ -1135,29 +1828,9 @@ exports.onTopicUpdated = onDocumentUpdated("topics/{topicId}", async (event) => 
   const db = admin.firestore();
 
   try {
-    if (after) {
-      const topicUpdates = {
-        title: after.title || '',
-        category_id: after.category_id || '',
-        is_pinned: !!after.is_pinned,
-        is_locked: !!after.is_locked
-      };
-      // Manual or profile-driven edits of the denormalised author identity
-      // must reach the main page cache as well.
-      if (before?.author_name !== after.author_name) topicUpdates.author_name = after.author_name || 'User';
-      if (before?.author_avatar !== after.author_avatar) topicUpdates.author_avatar = after.author_avatar || '';
-      if (before?.author_role_id !== after.author_role_id) topicUpdates.author_role_id = after.author_role_id || 'player';
-      if (before?.last_post_author !== after.last_post_author) topicUpdates.last_post_author = after.last_post_author || 'User';
-      if (before?.last_post_author_avatar !== after.last_post_author_avatar) topicUpdates.last_post_author_avatar = after.last_post_author_avatar || '';
-      if (before?.last_post_author_role_id !== after.last_post_author_role_id) topicUpdates.last_post_author_role_id = after.last_post_author_role_id || 'player';
-      if (after.last_post_at) {
-        topicUpdates.last_post_at = after.last_post_at.toMillis
-          ? after.last_post_at.toMillis()
-          : (typeof after.last_post_at === 'number' ? after.last_post_at : new Date(after.last_post_at).getTime());
-      }
-      updateRtdbLatestTopic(topicId, topicUpdates);
-    }
-
+    // Category-side denormalisation runs FIRST: the latest_topics mirror at the
+    // bottom is the convergence signal mutation callables wait on, so it must
+    // imply that the main-page category row (Firestore doc) is already fresh.
     // 1. If topic was moved to a different category
     if (before?.category_id && after?.category_id && before.category_id !== after.category_id) {
       // Posts carry category_id for security rules and server-side filtering.
@@ -1180,6 +1853,29 @@ exports.onTopicUpdated = onDocumentUpdated("topics/{topicId}", async (event) => 
       if (after?.category_id) {
         await syncCategoryMetadata(db, after.category_id);
       }
+    }
+
+    if (after) {
+      const topicUpdates = {
+        title: after.title || '',
+        category_id: after.category_id || '',
+        is_pinned: !!after.is_pinned,
+        is_locked: !!after.is_locked
+      };
+      // Manual or profile-driven edits of the denormalised author identity
+      // must reach the main page cache as well.
+      if (before?.author_name !== after.author_name) topicUpdates.author_name = after.author_name || 'User';
+      if (before?.author_avatar !== after.author_avatar) topicUpdates.author_avatar = after.author_avatar || '';
+      if (before?.author_role_id !== after.author_role_id) topicUpdates.author_role_id = after.author_role_id || 'player';
+      if (before?.last_post_author !== after.last_post_author) topicUpdates.last_post_author = after.last_post_author || 'User';
+      if (before?.last_post_author_avatar !== after.last_post_author_avatar) topicUpdates.last_post_author_avatar = after.last_post_author_avatar || '';
+      if (before?.last_post_author_role_id !== after.last_post_author_role_id) topicUpdates.last_post_author_role_id = after.last_post_author_role_id || 'player';
+      if (after.last_post_at) {
+        topicUpdates.last_post_at = after.last_post_at.toMillis
+          ? after.last_post_at.toMillis()
+          : (typeof after.last_post_at === 'number' ? after.last_post_at : new Date(after.last_post_at).getTime());
+      }
+      updateRtdbLatestTopic(topicId, topicUpdates);
     }
   } catch (err) {
     logger.error(`onTopicUpdated error (${topicId}):`, err);
@@ -2021,10 +2717,13 @@ async function syncTopicMetadata(db, topicId) {
     .get();
 
   let categoryId = null;
+  let tData = {};
+  let lp = null;
+  let lpMs = null;
 
   if (!postSnap.empty) {
-    const lp = postSnap.docs[0].data();
-    const lpMs = lp.created_at?.toMillis ? lp.created_at.toMillis() : (typeof lp.created_at === 'number' ? lp.created_at : (lp.created_at ? new Date(lp.created_at).getTime() : Date.now()));
+    lp = postSnap.docs[0].data();
+    lpMs = lp.created_at?.toMillis ? lp.created_at.toMillis() : (typeof lp.created_at === 'number' ? lp.created_at : (lp.created_at ? new Date(lp.created_at).getTime() : Date.now()));
     await topicRef.update({
       last_post_at: lp.created_at,
       last_post_author: lp.author_name,
@@ -2034,8 +2733,27 @@ async function syncTopicMetadata(db, topicId) {
       last_post_author_character_id: lp.author_character_id || null
     });
     const topicSnap = await topicRef.get();
-    const tData = topicSnap.exists ? topicSnap.data() : {};
+    tData = topicSnap.exists ? topicSnap.data() : {};
     categoryId = tData.category_id;
+  } else {
+    // No posts left — topic will likely be deleted by another process or trigger
+    // but we'll neutralise it just in case
+    await topicRef.update({ last_post_at: null, last_post_author: null });
+    const topicSnap = await topicRef.get();
+    tData = topicSnap.exists ? topicSnap.data() : {};
+    categoryId = tData.category_id;
+  }
+
+  // The CATEGORY document must be denormalised BEFORE the topic is mirrored into
+  // main_page_cache/latest_topics: mutation callables use that mirror as their
+  // convergence signal, so it has to imply a fresh main-page category row too.
+  // (Previously the category sync ran after the mirror, and projections built
+  // right after the signal carried stale category fields.)
+  if (categoryId) {
+    await syncCategoryMetadata(db, categoryId);
+  }
+
+  if (lp) {
     updateRtdbLatestTopic(topicId, {
       id: topicId,
       category_id: categoryId || '',
@@ -2050,14 +2768,7 @@ async function syncTopicMetadata(db, topicId) {
       last_post_author_character_id: lp.author_character_id || null
     });
   } else {
-    // No posts left — topic will likely be deleted by another process or trigger
-    // but we'll neutralise it just in case
-    await topicRef.update({ last_post_at: null, last_post_author: null });
     removeRtdbLatestTopic(topicId);
-  }
-
-  if (categoryId) {
-    await syncCategoryMetadata(db, categoryId);
   }
 }
 
