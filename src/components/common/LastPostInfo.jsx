@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import AuthorMeta from './AuthorMeta';
-import { useAuth } from '../../contexts/AuthProvider';
 
 const LastPostInfo = ({
   topicId,
@@ -12,35 +11,18 @@ const LastPostInfo = ({
   authorName,
   authorAvatar,
   hasUnread,
-  lastReadOffset = null,
-  postsCount = 1,
   lang,
   className = ""
 }) => {
-  const { settings } = useAuth();
   if (!lastPostAt) return <span className="text-muted small">—</span>;
 
-  const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
-  // Всего страниц в теме
-  const totalTopicPages = Math.max(1, Math.ceil((postsCount || 1) / ITEMS_PER_PAGE));
-
-  let targetUrl = `/topic/${topicId}?goLast=1`;
-
-  if (hasUnread) {
-    if (lastReadOffset !== null) {
-      // Номер первого непрочитанного сообщения (1-based)
-      const firstUnreadMsgNum = lastReadOffset + 2;
-      // Рассчитываем страницу, но НЕ даем ей превысить существующее кол-во страниц
-      const targetPage = Math.min(
-        totalTopicPages,
-        Math.max(1, Math.ceil(firstUnreadMsgNum / ITEMS_PER_PAGE))
-      );
-      targetUrl = `/topic/${topicId}?page=${targetPage}&goLast=1`;
-    }
-  } else {
-    // Если все прочитано — ведет на последнюю существующую страницу
-    targetUrl = `/topic/${topicId}?page=${totalTopicPages}&goLast=1`;
-  }
+  // The page is resolved SERVER-side (?goLast=1): getSecuredPosts counts posts
+  // up to the stored visit timestamp, so deleted posts, inflated read offsets
+  // or stale posts_count cannot shift the target. Client-side offset math
+  // clamped to the last page whenever the offset had drifted (e.g. after
+  // deletions), dropping the user pages past the actual first unread post.
+  // When everything is read, the server falls through to the last page.
+  const targetUrl = `/topic/${topicId}?goLast=1`;
 
   return (
     <Link

@@ -63,6 +63,10 @@ export const AuthProvider = ({ children }) => {
   const [emailUnverified, setEmailUnverified] = useState(false);
   // readMap: { [topicId]: Firestore Timestamp | number } — synced from server
   const [readMap, setReadMap] = useState({});
+  // True once the read-map snapshot has been delivered at least once. goLast
+  // navigation must wait for it: guessing "last visit" lands on the wrong page
+  // and the read-marking effect would then corrupt the unread pointer.
+  const [readMapReady, setReadMapReady] = useState(false);
   const [latestTopics, setLatestTopics] = useState([]);
   const [categories, setCategories] = useState([]);
   // Categories and latest topics are an access-controlled server response.  Never
@@ -401,6 +405,7 @@ export const AuthProvider = ({ children }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       setAuthError(null);
+      setReadMapReady(false);
 
       if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
       if (readMapUnsubRef.current) { readMapUnsubRef.current(); readMapUnsubRef.current = null; }
@@ -573,7 +578,12 @@ export const AuthProvider = ({ children }) => {
 
           // ВАЖНО: Подписки на карту прочитанного и темы активируем ТОЛЬКО ПОСЛЕ того, 
           // как профиль пользователя гарантированно существует в Firestore!
-          readMapUnsubRef.current = subscribeToReadMap(firebaseUser.uid, setReadMap);
+          readMapUnsubRef.current = subscribeToReadMap(firebaseUser.uid, (data) => {
+            setReadMapReady(true);
+            setReadMap(data);
+          });
+          // Fail-open: a stuck listener must never block goLast navigation.
+          setTimeout(() => setReadMapReady(true), 8000);
           latestTopicsUnsubRef.current = subscribeToLatestTopics(setLatestTopics, 50);
 
           profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
@@ -620,6 +630,7 @@ export const AuthProvider = ({ children }) => {
         setProfile(null);
         setEmailUnverified(false);
         setReadMap({});
+        setReadMapReady(true); // guests have no read map — nothing to wait for
         setLatestTopics([]);
         finishLoading();
 
@@ -1019,6 +1030,7 @@ export const AuthProvider = ({ children }) => {
     settings,
     loading,
     readMap,
+    readMapReady,
     latestTopics,
     categories,
     forumStateLoading,
@@ -1056,7 +1068,7 @@ export const AuthProvider = ({ children }) => {
     PERMISSIONS,
     DEFAULT_ROLES
   }), [
-    user, profile, authError, isRootAdmin, settings, loading, readMap, categories, forumStateLoading, forumStateError,
+    user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, forumStateLoading, forumStateError,
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,

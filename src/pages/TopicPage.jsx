@@ -52,7 +52,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, refreshForumState, scheduleForumStateRefresh, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, refreshForumState, scheduleForumStateRefresh, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -429,9 +429,18 @@ const TopicPage = () => {
       return;
     }
 
+    // goLast без явной страницы требует карты прочитанного: пока она не загружена,
+    // ждём (эффект перезапустится, когда она придёт). Фолбэк «по времени регистрации»
+    // дал бы неверную страницу, а эффект отметки прочитанного записал бы timestamp
+    // «сейчас» и обнулил всё накопленное непрочитанное.
+    if (user?.uid && !hasExplicitPage && !hasPostJump && !hasHashJump && searchParams.get('goLast') === '1' && !readMapReady) {
+      setPosts([]);
+      return;
+    }
+
     setPosts([]);
     loadPosts();
-  }, [id, currentPage, loadPosts, searchParams]);
+  }, [id, currentPage, loadPosts, searchParams, readMapReady, user?.uid]);
 
   const lastMarkedOffsetRef = useRef(-1);
   useEffect(() => {
@@ -776,7 +785,11 @@ const TopicPage = () => {
           registrationMs
         );
 
-        const unreadIndex = posts.findIndex(p => (p.created_at?.toMillis?.() || 0) > lastVisit);
+        // Server posts carry created_at as an ISO string; optimistic/RTDB posts
+        // carry Timestamp-like objects. Support both when locating the first
+        // unread post on the resolved page.
+        const toPostMs = (p) => p.created_at?.toMillis?.() ?? (p.created_at ? new Date(p.created_at).getTime() : 0);
+        const unreadIndex = posts.findIndex(p => toPostMs(p) > lastVisit);
 
         if (unreadIndex !== -1) {
           targetId = `post-${posts[unreadIndex].id}`;
@@ -784,7 +797,11 @@ const TopicPage = () => {
           // All posts read or on last page: target the last post on screen
           targetId = `post-${posts[posts.length - 1].id}`;
         }
-      } else {
+      } else if (!user || readMapReady) {
+        // Guest (no read map) or the read map is confirmed loaded with no entry
+        // for this topic. Only now may the posts_count fallback run: while the
+        // read map is still loading it would race ahead of the server-side
+        // unread resolution and throw the user onto the last page.
         const hasExplicitPage = searchParams.has('page');
         if (!hasExplicitPage && topic?.posts_count) {
           const finalTargetPage = Math.ceil(topic.posts_count / ITEMS_PER_PAGE) || 1;
@@ -795,6 +812,7 @@ const TopicPage = () => {
         }
         targetId = posts.length > 0 ? `post-${posts[posts.length - 1].id}` : null;
       }
+      // else: the read map is still loading — the effect re-runs when it arrives.
     }
 
     // 2. Perform the actual scroll
@@ -837,7 +855,7 @@ const TopicPage = () => {
         setIsPageLoading(false);
       }
     }
-  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE]);
+  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE]);
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
