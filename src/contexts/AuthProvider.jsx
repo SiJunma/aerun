@@ -99,6 +99,10 @@ export const AuthProvider = ({ children }) => {
   const rolesUnsubRef = useRef(null);
   const forumStateRequestRef = useRef(0);
   const forumRefreshTimersRef = useRef(new Set());
+  // Timestamp of the last optimistic latest-topics/categories mutation. Server
+  // refreshes landing inside a short window after it are skipped because the
+  // Cloud Function projection may still be pre-trigger (stale) data.
+  const lastOptimisticForumUpdateRef = useRef(0);
 
   // RTDB Presence initialization (runs on connect / login / profile load)
   useEffect(() => {
@@ -161,7 +165,7 @@ export const AuthProvider = ({ children }) => {
       const gid = localStorage.getItem('guest_id');
       if (gid) {
         removeRtdbGuestPresence(gid);
-        apiDeleteGuestActivity(gid).catch(() => {});
+        apiDeleteGuestActivity(gid).catch(() => { });
         localStorage.removeItem('guest_id');
       }
     }
@@ -337,7 +341,7 @@ export const AuthProvider = ({ children }) => {
           id: finalUid,
           nickname: updatedData.nickname
         }
-      }, { merge: true }).catch(() => {});
+      }, { merge: true }).catch(() => { });
     }
 
     if (isSelf) {
@@ -415,7 +419,7 @@ export const AuthProvider = ({ children }) => {
         const gid = localStorage.getItem('guest_id');
         if (gid) {
           removeRtdbGuestPresence(gid);
-          apiDeleteGuestActivity(gid).catch(() => {});
+          apiDeleteGuestActivity(gid).catch(() => { });
           localStorage.removeItem('guest_id');
         }
 
@@ -684,8 +688,8 @@ export const AuthProvider = ({ children }) => {
         const allowedRoles = Array.isArray(rawAllowed)
           ? rawAllowed
           : (rawAllowed && typeof rawAllowed === 'object'
-              ? Object.values(rawAllowed).filter(r => typeof r === 'string')
-              : []);
+            ? Object.values(rawAllowed).filter(r => typeof r === 'string')
+            : []);
 
         const cleanAllowedRoles = allowedRoles.filter(r => r && r !== '__none__');
 
@@ -709,6 +713,7 @@ export const AuthProvider = ({ children }) => {
 
   const updateLocalTopicLastPost = useCallback((topicId, categoryId, topicTitle, lastPost, postsCount, categoryPostsDelta = 0) => {
     if (!topicId || !lastPost) return;
+    lastOptimisticForumUpdateRef.current = Date.now();
 
     const lastPostDateIso = lastPost.created_at?.toMillis ? new Date(lastPost.created_at.toMillis()).toISOString() : (typeof lastPost.created_at === 'string' ? lastPost.created_at : new Date().toISOString());
 
@@ -790,6 +795,10 @@ export const AuthProvider = ({ children }) => {
       // A response made for the previous auth state (e.g. guest → signed in)
       // must never replace the current user's permitted data.
       if (requestId !== forumStateRequestRef.current) return;
+      // A projection computed before the last optimistic update would revert it
+      // (triggers lag behind the write). Skip and let a later retry converge.
+      // The initial load (showLoading) must never be blocked by this guard.
+      if (!showLoading && Date.now() - lastOptimisticForumUpdateRef.current < 3000) return;
       setCategories(Array.isArray(data.categories) ? data.categories : []);
       setLatestTopics(Array.isArray(data.latestTopics) ? data.latestTopics : []);
       if (data.stats) setForumStats(data.stats);
@@ -806,12 +815,38 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  const updateLocalTopicPostsCount = useCallback((topicId, categoryId, delta) => {
+    if (!topicId || !delta) return;
+    lastOptimisticForumUpdateRef.current = Date.now();
+
+    setLatestTopics(prevTopics => prevTopics.map(topic => (
+      topic.id === topicId
+        ? { ...topic, posts_count: Math.max(0, (topic.posts_count || 0) + delta) }
+        : topic
+    )));
+
+    if (categoryId) {
+      setCategories(prevCats => prevCats.map(category => (
+        category.id === categoryId
+          ? {
+            ...category,
+            posts_count: Math.max(0, (category.posts_count || 0) + delta),
+            last_post_topic_posts_count: category.last_post_topic_id === topicId
+              ? Math.max(0, (category.last_post_topic_posts_count || 0) + delta)
+              : category.last_post_topic_posts_count
+          }
+          : category
+      )));
+    }
+  }, []);
+
   /**
    * Cloud Firestore writes are acknowledged before their Cloud Function
-   * denormalisation triggers finish. Refresh immediately and then retry a few
-   * times so the main-page projection converges without a browser reload.
+   * denormalisation triggers finish. Start after a short delay: an immediate
+   * response can still contain old data and overwrite the optimistic update.
+   * Subsequent retries make the main-page projection converge without reload.
    */
-  const scheduleForumStateRefresh = useCallback((delays = [0, 700, 2200]) => {
+  const scheduleForumStateRefresh = useCallback((delays = [500, 1500, 4000]) => {
     delays.forEach(delay => {
       const timer = window.setTimeout(() => {
         forumRefreshTimersRef.current.delete(timer);
@@ -1012,6 +1047,7 @@ export const AuthProvider = ({ children }) => {
     forumStats,
     dailyActiveUsers,
     updateLocalTopicLastPost,
+    updateLocalTopicPostsCount,
     hasPermission,
     roles,
     activeUsers,
@@ -1025,7 +1061,7 @@ export const AuthProvider = ({ children }) => {
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
     updateSettings, updateProfile, recordActivity, refreshForumState, scheduleForumStateRefresh, forumStats,
-    dailyActiveUsers, updateLocalTopicLastPost, hasPermission, roles, activeUsers,
+    dailyActiveUsers, updateLocalTopicLastPost, updateLocalTopicPostsCount, hasPermission, roles, activeUsers,
     activeUserIds, isUserOnline, latestTopics
   ]);
 

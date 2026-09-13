@@ -635,7 +635,7 @@ async function hydrateAuthorProfiles(db, items) {
 
         if (!item.is_character) {
           if (u.nickname) item.author_name = u.nickname;
-          if (u.avatar_url) item.author_avatar = u.avatar_url;
+          if (u.avatar_url !== undefined) item.author_avatar = u.avatar_url || '';
         }
       }
 
@@ -644,7 +644,7 @@ async function hydrateAuthorProfiles(db, items) {
         if (charProfiles[key]) {
           const c = charProfiles[key];
           if (c.name) item.author_name = c.name;
-          if (c.avatar_url) item.author_avatar = c.avatar_url;
+          if (c.avatar_url !== undefined) item.author_avatar = c.avatar_url || '';
           if (c.status_line !== undefined) item.author_status_line = c.status_line;
           if (c.signature !== undefined) item.author_signature = c.signature;
         }
@@ -654,7 +654,7 @@ async function hydrateAuthorProfiles(db, items) {
         const u = userProfiles[item.last_post_author_id];
         if (!item.last_post_is_character) {
           if (u.nickname) item.last_post_author = u.nickname;
-          if (u.avatar_url) item.last_post_author_avatar = u.avatar_url;
+          if (u.avatar_url !== undefined) item.last_post_author_avatar = u.avatar_url || '';
         }
       }
 
@@ -663,7 +663,7 @@ async function hydrateAuthorProfiles(db, items) {
         if (charProfiles[key]) {
           const c = charProfiles[key];
           if (c.name) item.last_post_author = c.name;
-          if (c.avatar_url) item.last_post_author_avatar = c.avatar_url;
+          if (c.avatar_url !== undefined) item.last_post_author_avatar = c.avatar_url || '';
         }
       }
     });
@@ -1142,6 +1142,14 @@ exports.onTopicUpdated = onDocumentUpdated("topics/{topicId}", async (event) => 
         is_pinned: !!after.is_pinned,
         is_locked: !!after.is_locked
       };
+      // Manual or profile-driven edits of the denormalised author identity
+      // must reach the main page cache as well.
+      if (before?.author_name !== after.author_name) topicUpdates.author_name = after.author_name || 'User';
+      if (before?.author_avatar !== after.author_avatar) topicUpdates.author_avatar = after.author_avatar || '';
+      if (before?.author_role_id !== after.author_role_id) topicUpdates.author_role_id = after.author_role_id || 'player';
+      if (before?.last_post_author !== after.last_post_author) topicUpdates.last_post_author = after.last_post_author || 'User';
+      if (before?.last_post_author_avatar !== after.last_post_author_avatar) topicUpdates.last_post_author_avatar = after.last_post_author_avatar || '';
+      if (before?.last_post_author_role_id !== after.last_post_author_role_id) topicUpdates.last_post_author_role_id = after.last_post_author_role_id || 'player';
       if (after.last_post_at) {
         topicUpdates.last_post_at = after.last_post_at.toMillis
           ? after.last_post_at.toMillis()
@@ -1923,7 +1931,7 @@ exports.onPostDeleted = onDocumentDeleted("posts/{postId}", async (event) => {
     // onTopicDeleted already removes this topic's counters before its cascade
     // deletes posts. Do not decrement them a second time for cascade events.
     if (!topicSnap.exists) {
-      await admin.database().ref(`post_voters/${event.params.postId}`).remove().catch(() => {});
+      await admin.database().ref(`post_voters/${event.params.postId}`).remove().catch(() => { });
       logger.info(`onPostDeleted skipped counters for cascade/orphan post ${event.params.postId}`);
       return;
     }
@@ -2138,6 +2146,7 @@ async function syncLastPostIdentity(db, userId, characterId, identity) {
     last_post_author: identity.name,
     last_post_author_avatar: identity.avatar_url || null
   };
+  if (identity.role_id) updates.last_post_author_role_id = identity.role_id;
 
   for (let i = 0; i < topicDocs.length; i += 400) {
     const batch = db.batch();
@@ -2154,6 +2163,35 @@ async function syncLastPostIdentity(db, userId, characterId, identity) {
     ...topicDocs.map(docSnap => updateRtdbLatestTopic(docSnap.id, updates)),
     ...categoryDocs.map(docSnap => updateRtdbMainPageCategory(docSnap.id, updates))
   ]);
+}
+
+/**
+ * Topic documents keep a denormalised copy of the author's account identity
+ * (nickname, avatar, role). Refresh them when the account changes so older
+ * topics stop showing a stale name/avatar/role on the main page.
+ * Character-masked topics display the mask identity instead and are skipped.
+ */
+async function syncTopicAuthorIdentity(db, userId, identity) {
+  const topicsSnap = await db.collection("topics")
+    .where("author_id", "==", userId)
+    .get();
+
+  const topicDocs = topicsSnap.docs.filter(docSnap => docSnap.data().is_character !== true);
+  if (topicDocs.length === 0) return;
+
+  const updates = {
+    author_name: identity.name,
+    author_avatar: identity.avatar_url || ''
+  };
+  if (identity.role_id) updates.author_role_id = identity.role_id;
+
+  for (let i = 0; i < topicDocs.length; i += 400) {
+    const batch = db.batch();
+    topicDocs.slice(i, i + 400).forEach(docSnap => batch.update(docSnap.ref, updates));
+    await batch.commit();
+  }
+
+  await Promise.all(topicDocs.map(docSnap => updateRtdbLatestTopic(docSnap.id, updates)));
 }
 
 exports.onCharacterUpdated = onDocumentUpdated("users/{userId}/characters/{characterId}", async (event) => {
@@ -2206,7 +2244,7 @@ exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
       const gData = gSnap.exists ? gSnap.data() : {};
       const currentTotal = gData.total_users || 0;
       updatedTotalUsers = Math.max(0, currentTotal - 1);
-      
+
       const updates = { total_users: updatedTotalUsers };
 
       // If the deleted user was the newest_user, find the new newest user
@@ -2244,7 +2282,7 @@ exports.onUserDeleted = onDocumentDeleted("users/{userId}", async (event) => {
       rtdbStatsUpdate.newest_user_nickname = newestUserToSet.nickname;
       rtdbStatsUpdate.newest_user_role_id = newestUserToSet.role_id;
     }
-    await rtdb.ref('main_page_cache/stats').update(rtdbStatsUpdate).catch(() => {});
+    await rtdb.ref('main_page_cache/stats').update(rtdbStatsUpdate).catch(() => { });
 
     logger.info(`Successfully deleted user ${deletedUid} and cleaned up presence/stats.`);
   } catch (error) {
@@ -2293,18 +2331,25 @@ exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
   const nameChanged = before?.nickname !== after.nickname;
   const avatarChanged = before?.avatar_url !== after.avatar_url;
 
-  // The category/topic projections store the latest author's display identity.
-  // Keep them current when that account changes its nickname or avatar.
-  if (nameChanged || avatarChanged) {
+  // The category/topic projections store the latest author's display identity,
+  // and topics keep a copy of the author's name/avatar/role. Keep them current
+  // when that account changes its nickname, avatar or role.
+  const roleChanged = before?.role_id !== after.role_id;
+  if (nameChanged || avatarChanged || roleChanged) {
     serverUserCache.delete(uid);
     try {
-      await syncLastPostIdentity(db, uid, null, {
+      const identity = {
         name: after.nickname || "User",
-        avatar_url: after.avatar_url || ""
-      });
-      logger.info(`[onUserUpdated] Refreshed last-post identity for ${uid}`);
+        avatar_url: after.avatar_url || "",
+        role_id: after.role_id || "player"
+      };
+      await Promise.all([
+        syncLastPostIdentity(db, uid, null, identity),
+        syncTopicAuthorIdentity(db, uid, identity)
+      ]);
+      logger.info(`[onUserUpdated] Refreshed author identity for ${uid}`);
     } catch (identityErr) {
-      logger.error(`[onUserUpdated] Last-post identity sync failed for ${uid}:`, identityErr);
+      logger.error(`[onUserUpdated] Author identity sync failed for ${uid}:`, identityErr);
     }
   }
 
@@ -2358,7 +2403,7 @@ exports.onUserUpdated = onDocumentUpdated("users/{uid}", async (event) => {
             newest_user_nickname: after.nickname || "User",
             newest_user_role_id: after.role_id || "player",
             updated_at: Date.now()
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
     } catch (statErr) {

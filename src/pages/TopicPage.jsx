@@ -52,7 +52,7 @@ const TopicPage = () => {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const { t, lang } = useI18n();
-  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, refreshForumState, scheduleForumStateRefresh, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, refreshForumState, scheduleForumStateRefresh, readMap, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -338,7 +338,7 @@ const TopicPage = () => {
       if (errMsg.includes('topic not found') || err?.code === 'not-found') {
         setTopicNotFound(true);
         if (rtdb && id) {
-          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => {});
+          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => { });
         }
       } else if (errMsg.includes('permission') || errMsg.includes('403') || err?.code === 'permission-denied') {
         setAccessError(err.message || 'Access denied');
@@ -396,7 +396,7 @@ const TopicPage = () => {
         setIsPageLoading(false);
         // Clean up stale RTDB cache entry immediately
         if (rtdb && id) {
-          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => {});
+          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => { });
         }
       }
     });
@@ -588,9 +588,9 @@ const TopicPage = () => {
       if (p.author_id && p.author_id !== user?.uid && !hydratedAuthorsRef.current.has(p.author_id)) {
         const stats = authorStats[p.author_id];
         const hasSig = (stats?.settings?.signature !== undefined && stats.settings.signature !== '') ||
-                       (stats?.signature !== undefined && stats.signature !== '') ||
-                       (p.author_signature && p.author_signature !== '') ||
-                       (p.signature && p.signature !== '');
+          (stats?.signature !== undefined && stats.signature !== '') ||
+          (p.author_signature && p.author_signature !== '') ||
+          (p.signature && p.signature !== '');
         if (!hasSig) {
           missingUids.add(p.author_id);
         }
@@ -1468,6 +1468,20 @@ const TopicPage = () => {
       // Отправляем изменения в Firestore
       await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id);
 
+      // Keep the main page correct even if the user navigates away before the
+      // asynchronous onPostUpdated trigger recalculates the category metadata.
+      // Only the topic's authoritative last_post_id qualifies: posts holds the
+      // current page, so the newest loaded post is not necessarily the last one.
+      if (topic && topic.last_post_id === postId && originalPost && Object.keys(metadata).length > 0) {
+        updateLocalTopicLastPost(
+          id,
+          topic.category_id,
+          editingFirstPost ? (editTopicTitle.trim() || topic.title) : topic.title,
+          { ...originalPost, ...metadata },
+          topic.posts_count || posts.length
+        );
+      }
+
       if (editingFirstPost && topic) {
         const topicUpdates = {
           title: editTopicTitle.trim() || topic.title,
@@ -1555,6 +1569,24 @@ const TopicPage = () => {
 
           // Вызываем удаление
           const result = await deletePost(deletingPost, user.uid);
+
+          const remainingPosts = posts.filter(post => post.id !== targetPostId);
+          const toMs = (value) => value?.toMillis?.() ?? new Date(value || 0).getTime();
+          const topicLastMs = toMs(topic?.last_post_at);
+          const deletedPostMs = toMs(deletingPost.created_at);
+          const nextPostCount = Math.max(0, (topic?.posts_count || posts.length) - 1);
+          const nextLastPost = [...remainingPosts].sort((a, b) => toMs(b.created_at) - toMs(a.created_at))[0];
+          // Prefer the authoritative last_post_id; fall back to timestamps for
+          // legacy topics that may not have the field yet.
+          const isDeletedPostLast = topic?.last_post_id
+            ? topic.last_post_id === targetPostId
+            : deletedPostMs === topicLastMs;
+
+          if (categoryId && nextLastPost && isDeletedPostLast) {
+            updateLocalTopicLastPost(id, categoryId, topic?.title || '', nextLastPost, nextPostCount, -1);
+          } else {
+            updateLocalTopicPostsCount(id, categoryId, -1);
+          }
           scheduleForumStateRefresh();
 
           if (delAuthorId) {
