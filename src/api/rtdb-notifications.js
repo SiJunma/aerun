@@ -2,13 +2,17 @@ import { rtdb } from '../../firebase';
 import {
   ref,
   onValue,
-  set,
   update,
   remove,
   query,
-  limitToLast,
-  orderByChild
+  limitToLast
 } from 'firebase/database';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const manageAdminNotifications = async (action, notificationIds) => {
+  const manage = httpsCallable(getFunctions(), 'manageAdminNotifications');
+  await manage({ action, notificationIds });
+};
 
 /**
  * Subscribes to real-time notifications for a user via Realtime Database (0 Firestore reads/writes).
@@ -85,7 +89,7 @@ export const subscribeToAdminNotifications = (callback) => {
       console.warn('[subscribeToAdminNotifications error]', err);
       callback([]);
     });
-  } catch (err) {
+  } catch {
     callback([]);
     return () => {};
   }
@@ -97,8 +101,11 @@ export const subscribeToAdminNotifications = (callback) => {
 export const markNotificationRead = async (uid, notifId, isAdmin = false) => {
   if (!notifId || !rtdb) return;
   try {
-    const path = isAdmin ? `admin_notifications/${notifId}` : `notifications/${uid}/${notifId}`;
-    await update(ref(rtdb, path), { read: true });
+    if (isAdmin) {
+      await manageAdminNotifications('mark_read', [notifId]);
+    } else {
+      await update(ref(rtdb, `notifications/${uid}/${notifId}`), { read: true });
+    }
   } catch (err) {
     console.warn('[markNotificationRead err]', err);
   }
@@ -130,15 +137,8 @@ export const markAllNotificationsRead = async (uid, notifs = []) => {
 export const markAllAdminNotificationsRead = async (adminNotifs = []) => {
   if (!rtdb) return;
   try {
-    const updates = {};
-    adminNotifs.forEach((n) => {
-      if (!n.read) {
-        updates[`admin_notifications/${n.id}/read`] = true;
-      }
-    });
-    if (Object.keys(updates).length > 0) {
-      await update(ref(rtdb), updates);
-    }
+    const notificationIds = adminNotifs.filter((n) => !n.read).map((n) => n.id);
+    if (notificationIds.length > 0) await manageAdminNotifications('mark_read', notificationIds);
   } catch (err) {
     console.warn('[markAllAdminNotificationsRead err]', err);
   }
@@ -171,8 +171,11 @@ export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {
 export const deleteNotification = async (uid, notifId, isAdmin = false) => {
   if (!notifId || !rtdb) return;
   try {
-    const path = isAdmin ? `admin_notifications/${notifId}` : `notifications/${uid}/${notifId}`;
-    await remove(ref(rtdb, path));
+    if (isAdmin) {
+      await manageAdminNotifications('delete', [notifId]);
+    } else {
+      await remove(ref(rtdb, `notifications/${uid}/${notifId}`));
+    }
   } catch (err) {
     console.warn('[deleteNotification err]', err);
   }
@@ -196,7 +199,12 @@ export const deleteAllUserNotifications = async (uid) => {
 export const deleteAllAdminNotifications = async () => {
   if (!rtdb) return;
   try {
-    await remove(ref(rtdb, 'admin_notifications'));
+    const snapshot = await new Promise((resolve, reject) => {
+      onValue(ref(rtdb, 'admin_notifications'), resolve, { onlyOnce: true }, reject);
+    });
+    const notificationIds = [];
+    snapshot.forEach((child) => notificationIds.push(child.key));
+    if (notificationIds.length > 0) await manageAdminNotifications('delete', notificationIds);
   } catch (err) {
     console.warn('[deleteAllAdminNotifications err]', err);
   }

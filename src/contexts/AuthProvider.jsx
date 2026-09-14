@@ -484,7 +484,6 @@ export const AuthProvider = ({ children }) => {
 
             const newUser = {
               uid: firebaseUser.uid,
-              email: firebaseUser.email,
               nickname: finalNickname,
               avatar_url: defaultAvatar,
               status_line: 'Hello, I am new here!',
@@ -530,7 +529,6 @@ export const AuthProvider = ({ children }) => {
             sessionStorage.removeItem('is_registering');
 
             await logAdminAction('user_registered', firebaseUser.uid, {
-              email: firebaseUser.email,
               nickname: finalNickname,
               role_id: newUser.role_id
             }).catch(err => console.error('[audit log error]', err));

@@ -1081,6 +1081,135 @@ function deny(msg = "permission-denied") {
 }
 
 /**
+ * Server-owned administration of the RTDB alert stream. Clients must never
+ * receive write access to this shared path because that would let every signed
+ * in user forge or erase moderator notifications.
+ */
+exports.manageAdminNotifications = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+
+    const db = admin.firestore();
+    const requester = await getRequester(db, uid);
+    if (!isRuleAdmin(requester.role)) throw deny("Only administrators can manage admin notifications.");
+
+    const { action, notificationIds } = request.data || {};
+    if (!["mark_read", "delete"].includes(action)) {
+      throw new HttpsError("invalid-argument", "Unsupported notification action.");
+    }
+    if (!Array.isArray(notificationIds) || notificationIds.length === 0 || notificationIds.length > 100) {
+      throw new HttpsError("invalid-argument", "Provide from 1 to 100 notification ids.");
+    }
+
+    const updates = {};
+    for (const notificationId of notificationIds) {
+      if (typeof notificationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(notificationId)) {
+        throw new HttpsError("invalid-argument", "Invalid notification id.");
+      }
+      updates[action === "mark_read"
+        ? `admin_notifications/${notificationId}/read`
+        : `admin_notifications/${notificationId}`] = action === "mark_read" ? true : null;
+    }
+
+    await admin.database().ref().update(updates);
+    return { success: true, affected: notificationIds.length };
+  }
+);
+
+/**
+ * Transitional, root-only data hygiene command. Firebase Auth remains the
+ * canonical private source for email addresses; public user profile documents
+ * must not contain a copy because Firestore cannot hide an individual field.
+ */
+exports.stripProfileEmails = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+
+    const db = admin.firestore();
+    const requester = await getRequester(db, uid);
+    if (requester.role !== "root") throw deny("Only the root administrator can run this migration.");
+
+    const { afterUid = null, limit = 200 } = request.data || {};
+    if (!Number.isInteger(limit) || limit < 1 || limit > 400) {
+      throw new HttpsError("invalid-argument", "limit must be an integer from 1 to 400.");
+    }
+    if (afterUid !== null && (typeof afterUid !== "string" || afterUid.length > 128)) {
+      throw new HttpsError("invalid-argument", "Invalid pagination cursor.");
+    }
+
+    let query = db.collection("users")
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(limit);
+    if (afterUid) query = query.startAfter(afterUid);
+
+    const snapshot = await query.get();
+    const batch = db.batch();
+    let stripped = 0;
+    snapshot.docs.forEach((userDoc) => {
+      if (Object.prototype.hasOwnProperty.call(userDoc.data(), "email")) {
+        batch.update(userDoc.ref, { email: admin.firestore.FieldValue.delete() });
+        stripped++;
+      }
+    });
+    if (stripped > 0) await batch.commit();
+
+    const lastDoc = snapshot.docs[snapshot.docs.length - 1];
+    return {
+      processed: snapshot.size,
+      stripped,
+      nextAfterUid: lastDoc ? lastDoc.id : null,
+      done: snapshot.size < limit
+    };
+  }
+);
+
+/**
+ * Browser audit writes are prohibited by Firestore rules. This narrow bridge
+ * keeps audit events available to privileged staff until the command layer is
+ * fully moved server-side; actor identity is always derived from auth.
+ */
+exports.writeAuditLog = onCall(
+  { cors: true, enforceAppCheck: false, minInstances: 0 },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+
+    const db = admin.firestore();
+    const requester = await getRequester(db, uid);
+    const ctx = await loadContext(db);
+    const mayAudit = isRuleAdmin(requester.role)
+      || hasRulePermission(ctx, requester.role, "moderate_content")
+      || hasRulePermission(ctx, requester.role, "manage_roles");
+    if (!mayAudit) throw deny("No permission to write administrative audit records.");
+
+    const { actionType, details = {} } = request.data || {};
+    if (typeof actionType !== "string" || !/^[a-z0-9_]{3,80}$/.test(actionType)) {
+      throw new HttpsError("invalid-argument", "Invalid audit action type.");
+    }
+    if (!details || typeof details !== "object" || Array.isArray(details)) {
+      throw new HttpsError("invalid-argument", "Audit details must be an object.");
+    }
+    const serializedDetails = JSON.stringify(details);
+    if (serializedDetails.length > 5000) {
+      throw new HttpsError("invalid-argument", "Audit details are too large.");
+    }
+
+    await db.collection("audit_logs").add({
+      action_type: actionType,
+      performer_id: uid,
+      actor_uid: uid,
+      details,
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    return { success: true };
+  }
+);
+
+/**
  * createPost (Callable)
  * Replaces the client-side transaction. Mirrors the rules' canPostToTopic.
  */
@@ -2510,6 +2639,19 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
   const rtdb = admin.database();
 
   try {
+    // Registration is a system event, not a browser supplied audit row.
+    // Keep PII out of the audit payload; email remains in Firebase Auth only.
+    await db.collection("audit_logs").add({
+      action_type: "user_registered",
+      performer_id: event.params.uid,
+      actor_uid: event.params.uid,
+      details: {
+        nickname: newUser.nickname || "User",
+        role_id: newUser.role_id || "player"
+      },
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+
     // 1. Устанавливаем Custom Claims для мгновенных проверок Security Rules
     try {
       await admin.auth().setCustomUserClaims(event.params.uid, {
@@ -2578,10 +2720,17 @@ exports.onUserCreated = onDocumentCreated("users/{uid}", async (event) => {
 
     if (recipients.size === 0) return;
 
+    let registrationEmail = null;
+    try {
+      registrationEmail = (await admin.auth().getUser(event.params.uid)).email || null;
+    } catch (authLookupError) {
+      logger.warn(`[onUserCreated] Could not resolve registration email for ${event.params.uid}:`, authLookupError);
+    }
+
     const notifPayload = {
       uid: event.params.uid,
       nickname: newUser.nickname,
-      email: newUser.email,
+      email: registrationEmail,
       admin_message: newUser.admin_message || null
     };
 
@@ -3344,6 +3493,18 @@ exports.getPostVoters = onCall(
 
     const db = admin.firestore();
     const requesterUid = request.auth ? request.auth.uid : null;
+    const postSnap = await db.collection('posts').doc(postId).get();
+    if (!postSnap.exists) throw new HttpsError('not-found', 'Post not found.');
+
+    // post_voters used to be readable directly from RTDB, leaking vote/comment
+    // data from hidden categories to anyone who knew a post id. Enforce the
+    // exact forum visibility gate before even querying the reputation logs.
+    const requester = await getRequester(db, requesterUid);
+    const ctx = await loadContext(db);
+    const postCategoryId = postSnap.data().category_id;
+    if (!hasViewForum(requester.role, postCategoryId, ctx)) {
+      throw deny('You do not have permission to view voters for this post.');
+    }
 
     let isRequesterAdmin = false;
     let isRequesterModerator = false;

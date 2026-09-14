@@ -17,7 +17,8 @@
 ```
 {
   uid:                  string,          // Firebase Auth UID
-  email:                string,          // скрыт от публичного доступа
+  // Email is not stored in the public Firestore profile. Firebase Auth is the
+  // canonical private source until migration to the new backend.
   nickname:             string,          // отображаемое имя, редактируется юзером
   status_line:          string,          // слоган/статус под ником (свободный текст)
   avatar_url:           string,          // ссылка в Firebase Storage
@@ -498,7 +499,7 @@ HTML-шаблоны (Handlebars) с логотипом форума, текст�
 | `audit_log` — только `create` | Нельзя «подчистить хвосты» |
 | `posts.dice_data` — immutable при `update` | Нельзя «перебросить» кубик |
 | `characters` — только owner_id | Нельзя редактировать чужих персонажей |
-| `email` поле в `users` — только admin + owner | Email скрыт от всех остальных |
+| Email | Не хранится в публичном `users`; до миграции берётся сервером из Firebase Auth |
 | `hero_content` — только `role == admin` | Только админ вставляет HTML |
 | Видимость топиков/постов — по `categories.allowed_roles` | RBAC для категорий |
 | RTDB-кэши форума (`main_page_cache`, `topic_posts_cache`) | Доступны только Cloud Functions; браузер получает список разделов и темы исключительно из функций с серверной проверкой `view_forum`. После мутаций клиент повторно запрашивает серверную проекцию, пока асинхронные триггеры пересчитывают счётчики и последнее сообщение. |

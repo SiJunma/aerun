@@ -1,5 +1,7 @@
 import { db } from '../../firebase';
-import { collection, addDoc, serverTimestamp, query, orderBy, limit, onSnapshot, getDocs, startAfter } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, getDocs, startAfter } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../firebase';
 
 /**
  * Logs an administrative or moderative action.
@@ -12,13 +14,8 @@ export const logAdminAction = async (actionType, performerId, details = {}) => {
   try {
     if (!performerId) return; // Silent return if no performer
     
-    await addDoc(collection(db, 'audit_logs'), {
-      action_type: actionType,
-      performer_id: performerId,
-      actor_uid: performerId, // required by Firestore security rule: actor_uid == request.auth.uid
-      details,
-      created_at: serverTimestamp(),
-    });
+    const writeAuditLog = httpsCallable(functions, 'writeAuditLog');
+    await writeAuditLog({ actionType, details });
   } catch (error) {
     console.error('Failed to log admin action:', error);
     // Don't throw so that the main action (which succeeded) doesn't seem like it failed

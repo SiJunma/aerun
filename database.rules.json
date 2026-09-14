@@ -19,8 +19,8 @@
       }
     },
     "admin_notifications": {
-      ".read": "auth != null",
-      ".write": "auth != null"
+      ".read": "auth != null && (auth.token.role_id === 'admin' || auth.token.role_id === 'root')",
+      ".write": false
     },
     "dm_unread": {
       "$uid": {
@@ -55,10 +55,8 @@
       }
     },
     "post_voters": {
-      "$post_id": {
-        ".read": true,
-        ".write": "auth != null"
-      }
+      ".read": false,
+      ".write": false
     }
   }
 }

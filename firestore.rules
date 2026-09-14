@@ -93,6 +93,7 @@ service cloud.firestore {
       allow create: if isSignedIn() 
         && request.auth.uid == userId
         && request.resource.data.role_id in ['pending', 'spectator', 'player']
+        && !('email' in request.resource.data)
         && request.resource.data.get('post_count', 0) == 0
         && request.resource.data.get('reputation', 0) == 0;
 
@@ -100,7 +101,7 @@ service cloud.firestore {
       // reputation and post_count are now server-side only (Cloud Functions)
       allow update: if (isAdmin() && (getUser().data.get('role_id', 'player') == 'root'
         || (resource.data.get('role_id', 'player') != 'root' && request.resource.data.get('role_id', 'player') != 'root')))
-        || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role_id', 'status', 'post_count', 'reputation', 'created_at', 'previous_role_id', 'admin_message']))
+        || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['email', 'role_id', 'status', 'post_count', 'reputation', 'created_at', 'previous_role_id', 'admin_message']))
         || (isSignedIn() && request.auth.uid == userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last_seen', 'last_selected_character_id']));
         
       allow delete: if isAdmin(); // Added to allow rejecting pending users
@@ -257,14 +258,10 @@ service cloud.firestore {
 
     // --- Audit Logs ---
     match /audit_logs/{logId} {
-      // Client-written audit entries are only trustworthy if the actor is pinned
-      // to the caller. Ideally set this to `false` and write logs from Cloud Functions.
-      allow create: if isActive()
-        && request.resource.data.actor_uid == request.auth.uid;
-      allow read: if isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && getUser().data.get('role_id', 'player') in ['admin', 'root', 'moderator'];
-      allow update, delete: if isAdmin();
+      // Audit entries are server-written only. This prevents any client from
+      // forging administrative history or removing traces after an action.
+      allow create, update, delete: if false;
+      allow read: if isAdmin() || canModerateContent();
     }
 
     // --- Guest Activity ---

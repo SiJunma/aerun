@@ -13,7 +13,7 @@ This file serves as the master context for AI interaction, combining the current
           "description": "Registered users.",
           "fields": {
             "uid": "string (document ID)",
-            "email": "string",
+            "email": "not stored in public profile; Firebase Auth is canonical private source",
             "nickname": "string",
             "avatar_url": "string",
             "status_line": "string",
@@ -300,7 +300,7 @@ This file serves as the master context for AI interaction, combining the current
           }
         },
         "admin_notifications": {
-          "description": "Real-time admin alert stream (registrations, reports).",
+          "description": "Real-time admin alert stream (registrations, reports). Readable only by admin/root; browser writes are denied and routed through manageAdminNotifications.",
           "fields": {
             "$notifId": {
               "id": "string",
@@ -392,7 +392,7 @@ This file serves as the master context for AI interaction, combining the current
     "GUEST_TICK_MS": "10 * 60 * 1000 (Guest pulse for online visibility limit)",
     "Pagination Limits": {
       "dms": "Limit 50 conversations, messages fetched using dynamic limitCount.",
-      "reputation_logs": "Server-side pagination via Cloud Function getReputationLogs. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=20. Logs for inaccessible/deleted topics are included but have isAllowed=false (topic_title and post_id stripped). Post voters are cached in RTDB under post_voters/{postId} with fallback to getPostVoters Cloud Function.",
+      "reputation_logs": "Server-side pagination via Cloud Function getReputationLogs. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=20. Logs for inaccessible/deleted topics are included but have isAllowed=false (topic_title and post_id stripped). post_voters is a server-only RTDB cache; getPostVoters enforces category visibility before returning data.",
       "getUserPosts": "Server-side pagination via Cloud Function getUserPosts. Uses Firestore count() for totalCount, offset+limit for paging. Default pageSize=10. Posts in inaccessible categories are excluded.",
       "audit_logs": "Default 50 entries fetched per batch."
     },
