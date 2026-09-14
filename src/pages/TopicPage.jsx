@@ -2116,7 +2116,7 @@ const TopicPage = () => {
                           className="footer-link p-0"
                           onClick={() => {
                             const author = getLiveAuthorName(firstPost) || 'User';
-                            const quote = `[quote="#p${firstPost.id},t${id},${author}"]\n${firstPost.content}\n[/quote]\n\n`;
+                            const quote = `[quote="#p${firstPost.id},t${id},${author}"]\n${firstPost.content}\n[/quote]\n`;
                             setReplyContent(prev => {
                               const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
                               return prev + separator + quote;
@@ -2675,7 +2675,7 @@ const TopicPage = () => {
                                   };
 
                                   const cleanContent = stripQuotes(content);
-                                  const quote = `[quote="#p${post.id},t${id},${author}"]\n${cleanContent}\n[/quote]\n\n`;
+                                  const quote = `[quote="#p${post.id},t${id},${author}"]\n${cleanContent}\n[/quote]\n`;
 
                                   setReplyContent(prev => {
                                     const separator = prev.trim() && !prev.endsWith('\n') ? '\n' : '';
