@@ -1183,14 +1183,28 @@ const TopicPage = () => {
       const postData = buildPostData();
       const replyResult = await createPost(postData);
       const newPostId = replyResult?.postId;
-      // Client-side post count updates
+      // Client-side post count updates.
+      // Base own stats on the live profile snapshot: authorStats are hydrated
+      // only from posts visible on the current page, so in a cold topic (no
+      // cache / own posts on another page) the entry is missing and the old
+      // "0 + 1" logic showed "Сообщений: 1, Репутация: 0" until a refresh.
+      const preProfile = profileRef.current || {};
+      let ownNewStats = null;
       if (user?.uid) {
+        const prevOwnStats = authorStats[user.uid] || {};
+        ownNewStats = {
+          post_count: Math.max(prevOwnStats.post_count || 0, preProfile.post_count || 0) + 1,
+          reputation: prevOwnStats.reputation ?? preProfile.reputation ?? 0
+        };
         setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
         setAuthorStats(prev => ({
           ...prev,
           [user.uid]: {
             ...(prev[user.uid] || {}),
-            post_count: ((prev[user.uid]?.post_count) || 0) + 1
+            ...ownNewStats,
+            role_id: prev[user.uid]?.role_id || preProfile.role_id || 'player',
+            status_line: prev[user.uid]?.status_line ?? preProfile.status_line ?? '',
+            settings: prev[user.uid]?.settings || (preProfile.settings ? { ...preProfile.settings } : { signature: '' })
           }
         }));
       }
@@ -1239,6 +1253,11 @@ const TopicPage = () => {
         const optimisticPost = {
           ...postData,
           id: newPostId,
+          // Keep the sidebar counters correct without a refresh (see ownNewStats above)
+          ...(ownNewStats ? {
+            author_posts_count: ownNewStats.post_count,
+            author_reputation: ownNewStats.reputation
+          } : {}),
           created_at: {
             toDate: () => new Date(),
             toMillis: () => Date.now(),
@@ -1352,13 +1371,25 @@ const TopicPage = () => {
       markTopicRead(id);
       showToast(t('forum.draft_published'));
 
+      // Client-side post count updates (same cold-topic guard as handleReply:
+      // authorStats may not contain this user yet — base on the live profile).
+      const preProfile = profileRef.current || {};
+      let ownNewStats = null;
       if (user?.uid) {
+        const prevOwnStats = authorStats[user.uid] || {};
+        ownNewStats = {
+          post_count: Math.max(prevOwnStats.post_count || 0, preProfile.post_count || 0) + 1,
+          reputation: prevOwnStats.reputation ?? preProfile.reputation ?? 0
+        };
         setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
         setAuthorStats(prev => ({
           ...prev,
           [user.uid]: {
             ...(prev[user.uid] || {}),
-            post_count: ((prev[user.uid]?.post_count) || 0) + 1
+            ...ownNewStats,
+            role_id: prev[user.uid]?.role_id || preProfile.role_id || 'player',
+            status_line: prev[user.uid]?.status_line ?? preProfile.status_line ?? '',
+            settings: prev[user.uid]?.settings || (preProfile.settings ? { ...preProfile.settings } : { signature: '' })
           }
         }));
       }
@@ -1408,6 +1439,11 @@ const TopicPage = () => {
           content: publishedDraft?.content || '',
           reputation: 0,
           id: newPostId,
+          // Keep the sidebar counters correct without a refresh (see ownNewStats above)
+          ...(ownNewStats ? {
+            author_posts_count: ownNewStats.post_count,
+            author_reputation: ownNewStats.reputation
+          } : {}),
           created_at: {
             toDate: () => new Date(),
             toMillis: () => Date.now(),

@@ -1123,6 +1123,12 @@ exports.createPost = onCall(
       content,
       rolls: postData.rolls || null,
       reputation: 0,
+      // Authoritative denormalised stats: the client does not send them, so a
+      // fresh post doc and its RTDB mirror would otherwise show zeroed counters
+      // in the author sidebar until hydrateAuthorProfiles runs on the next load.
+      // post_count + 1 — onPostCreated increments the user's counter right after.
+      author_posts_count: (requester.data.post_count || 0) + 1,
+      author_reputation: requester.data.reputation || 0,
       created_at: admin.firestore.FieldValue.serverTimestamp()
     };
     await postRef.set(createdPost);
@@ -1406,6 +1412,10 @@ exports.createTopic = onCall(
       content,
       rolls: firstPostData.rolls || null,
       reputation: 0,
+      // Same denormalised author stats stamping as createPost — the client does
+      // not send these and onPostCreated increments post_count right after.
+      author_posts_count: (requester.data.post_count || 0) + 1,
+      author_reputation: requester.data.reputation || 0,
       created_at: timestamp
     };
 
