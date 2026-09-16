@@ -13,6 +13,7 @@ import {
 import { doc, getDoc } from 'firebase/firestore';
 import { ref as rtdbRef, remove as rtdbRemove } from 'firebase/database';
 import { db } from '../../firebase';
+import { processDiceRolls } from '../utils/dice';
 
 // Forum cache access is server-only; the page receives posts through secured
 // callable functions and Firestore rules.
@@ -48,6 +49,14 @@ import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const TopicPage = () => {
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const { id } = useParams();
   const navigate = useNavigate();
   const { hash } = useLocation();
@@ -307,7 +316,12 @@ const TopicPage = () => {
             return [];
           }
         }
-        setPosts(data);
+        if (!isMountedRef.current) return data;
+        setPosts(prev => {
+          const optimisticPosts = prev.filter(p => p._isOptimistic && !data.some(d => d.id === p.id));
+          if (optimisticPosts.length === 0) return data;
+          return [...data, ...optimisticPosts];
+        });
         if (data.length > 0) {
           latestPostTimestampRef.current = Math.max(...data.map(p => p.created_at?.toMillis?.() || 0));
         } else {
@@ -346,37 +360,49 @@ const TopicPage = () => {
       console.error('[loadPosts error]', err);
       const errMsg = (err?.message || '').toLowerCase();
       if (errMsg.includes('topic not found') || err?.code === 'not-found') {
-        setTopicNotFound(true);
+        if (isMountedRef.current) setTopicNotFound(true);
         if (rtdb && id) {
           rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => { });
         }
       } else if (errMsg.includes('permission') || errMsg.includes('403') || err?.code === 'permission-denied') {
-        setAccessError(err.message || 'Access denied');
+        if (isMountedRef.current) setAccessError(err.message || 'Access denied');
       } else {
-        setPostsLoadError(err);
+        if (isMountedRef.current) setPostsLoadError(err);
       }
-      setIsPageLoading(false);
+      if (isMountedRef.current) setIsPageLoading(false);
       return [];
     } finally {
       if (isFetchingPostsRef.current === pageToFetch) {
         isFetchingPostsRef.current = false;
       }
-      setIsPageLoading(false);
+      if (isMountedRef.current) setIsPageLoading(false);
     }
   }, [id, ITEMS_PER_PAGE, user?.uid, setSearchParams, updateLocalTopicLastPost, searchParams]);
 
   useEffect(() => {
-    // Нам больше не нужно вызывать loadPosts() при изменении счетчика сообщений,
-    // так как новые посты автоматически добавляются на экран через слушатель RTDB!
-    if (topic) {
-      prevTopicStatsRef.current = {
-        id: topic.id,
-        posts_count: topic.posts_count,
-        last_post_at: topic.last_post_at
-      };
-      setPageTitle(topic.title);
+    if (!topic) return;
+
+    setPageTitle(topic.title);
+
+    // If topic stats changed remotely (e.g. a post was deleted or added by another user):
+    if (prevTopicStatsRef.current && prevTopicStatsRef.current.id === topic.id) {
+      const prevCount = prevTopicStatsRef.current.posts_count ?? 0;
+      const newCount = topic.posts_count ?? 0;
+      const prevLastPostId = prevTopicStatsRef.current.last_post_id;
+      const newLastPostId = topic.last_post_id;
+
+      if (newCount !== prevCount || (newLastPostId && prevLastPostId && newLastPostId !== prevLastPostId)) {
+        loadPosts(currentPage);
+      }
     }
-  }, [topic?.id, topic?.posts_count, topic?.last_post_at, setPageTitle]);
+
+    prevTopicStatsRef.current = {
+      id: topic.id,
+      posts_count: topic.posts_count,
+      last_post_at: topic.last_post_at,
+      last_post_id: topic.last_post_id
+    };
+  }, [topic?.id, topic?.posts_count, topic?.last_post_at, topic?.last_post_id, setPageTitle, loadPosts, currentPage]);
 
   const currentTopicIdRef = useRef(id);
   const skipNextLoadForPageRef = useRef(null);
@@ -1178,60 +1204,120 @@ const TopicPage = () => {
     }
 
     recordActivity(); // posting = user is active
+
+    // 1. Generate unique temporary ID and save rollback snapshot
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const savedReplyContent = replyContent;
+    const savedGuestNickname = guestNickname;
+
+    const postData = buildPostData();
+    const { content: processedContent, rolls } = processDiceRolls(postData.content);
+
+    // 2. Client-side post count updates (optimistic)
+    const preProfile = profileRef.current || {};
+    let ownNewStats = null;
+    if (user?.uid) {
+      const prevOwnStats = authorStats[user.uid] || {};
+      ownNewStats = {
+        post_count: Math.max(prevOwnStats.post_count || 0, preProfile.post_count || 0) + 1,
+        reputation: prevOwnStats.reputation ?? preProfile.reputation ?? 0
+      };
+      setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
+      setAuthorStats(prev => ({
+        ...prev,
+        [user.uid]: {
+          ...(prev[user.uid] || {}),
+          ...ownNewStats,
+          role_id: prev[user.uid]?.role_id || preProfile.role_id || 'player',
+          status_line: prev[user.uid]?.status_line ?? preProfile.status_line ?? '',
+          settings: prev[user.uid]?.settings || (preProfile.settings ? { ...preProfile.settings } : { signature: '' })
+        }
+      }));
+    }
+
+    // Mark as read immediately (server-side)
+    markTopicRead(id);
+
+    // Calculate pagination target
+    const currentTotal = Math.max(topic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
+    const newTotalPosts = currentTotal + 1;
+    const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
+
+    // Immediately update local topic state so posts_count and pagination UI update instantly
+    setTopic(prev => prev ? {
+      ...prev,
+      posts_count: Math.max(newTotalPosts, (prev.posts_count || 0) + 1),
+      last_post_at: new Date().toISOString()
+    } : prev);
+
+    if (prevTopicStatsRef.current) {
+      prevTopicStatsRef.current.posts_count = Math.max(newTotalPosts, (prevTopicStatsRef.current.posts_count || 0) + 1);
+      prevTopicStatsRef.current.last_post_at = new Date().toISOString();
+    }
+
+    const curCategoryId = topicRef.current?.category_id || topic?.category_id;
+    const curTitle = topicRef.current?.title || topic?.title;
+    if (curCategoryId) {
+      updateLocalTopicLastPost(id, curCategoryId, curTitle, {
+        id: tempId,
+        author_id: user?.uid || null,
+        author_name: postData.author_name || profile?.nickname || guestNickname || 'User',
+        author_avatar: postData.author_avatar || profile?.avatar_url || '',
+        author_role_id: profile?.role_id || 'player',
+        is_character: !!postData.is_character,
+        author_character_id: postData.author_character_id || null,
+        created_at: new Date().toISOString()
+      }, newTotalPosts, 1);
+    }
+
+    // 3. Clear editor input immediately for snappy UX
+    setReplyContent('');
+
+    // 4. Construct optimistic post and append to list
+    const optimisticPost = {
+      ...postData,
+      content: processedContent,
+      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : null,
+      id: tempId,
+      _isOptimistic: true,
+      reputation: 0,
+      ...(ownNewStats ? {
+        author_posts_count: ownNewStats.post_count,
+        author_reputation: ownNewStats.reputation
+      } : {}),
+      created_at: {
+        toDate: () => new Date(),
+        toMillis: () => Date.now(),
+        seconds: Math.floor(Date.now() / 1000)
+      }
+    };
+
+    if (targetPage !== currentPage) {
+      alreadyJumpedRef.current = false;
+      setSearchParams({ page: targetPage, post: tempId }, { preventScrollReset: true });
+    } else {
+      setPosts(prev => {
+        if (prev.some(p => p.id === tempId)) return prev;
+        return [...prev, optimisticPost];
+      });
+
+      setTimeout(() => {
+        const element = document.getElementById(`post-${tempId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.classList.add('highlight-new-post');
+          setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
+        }
+      }, 50);
+    }
+
     setSubmitting(true);
+
     try {
-      const postData = buildPostData();
       const replyResult = await createPost(postData);
       const newPostId = replyResult?.postId;
-      // Client-side post count updates.
-      // Base own stats on the live profile snapshot: authorStats are hydrated
-      // only from posts visible on the current page, so in a cold topic (no
-      // cache / own posts on another page) the entry is missing and the old
-      // "0 + 1" logic showed "Сообщений: 1, Репутация: 0" until a refresh.
-      const preProfile = profileRef.current || {};
-      let ownNewStats = null;
-      if (user?.uid) {
-        const prevOwnStats = authorStats[user.uid] || {};
-        ownNewStats = {
-          post_count: Math.max(prevOwnStats.post_count || 0, preProfile.post_count || 0) + 1,
-          reputation: prevOwnStats.reputation ?? preProfile.reputation ?? 0
-        };
-        setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
-        setAuthorStats(prev => ({
-          ...prev,
-          [user.uid]: {
-            ...(prev[user.uid] || {}),
-            ...ownNewStats,
-            role_id: prev[user.uid]?.role_id || preProfile.role_id || 'player',
-            status_line: prev[user.uid]?.status_line ?? preProfile.status_line ?? '',
-            settings: prev[user.uid]?.settings || (preProfile.settings ? { ...preProfile.settings } : { signature: '' })
-          }
-        }));
-      }
-      // Mark as read immediately (server-side)
-      markTopicRead(id);
-      setReplyContent('');
 
-      // Calculate where the new post will land.
-      const currentTotal = Math.max(topic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
-      const newTotalPosts = currentTotal + 1;
-      const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
-
-      // Immediately update local topic state so posts_count and pagination UI update instantly
-      setTopic(prev => prev ? {
-        ...prev,
-        posts_count: Math.max(newTotalPosts, (prev.posts_count || 0) + 1),
-        last_post_at: new Date().toISOString()
-      } : prev);
-
-      if (prevTopicStatsRef.current) {
-        prevTopicStatsRef.current.posts_count = Math.max(newTotalPosts, (prevTopicStatsRef.current.posts_count || 0) + 1);
-        prevTopicStatsRef.current.last_post_at = new Date().toISOString();
-      }
-
-      const curCategoryId = topicRef.current?.category_id || topic?.category_id;
-      const curTitle = topicRef.current?.title || topic?.title;
-      if (curCategoryId) {
+      if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
           id: newPostId,
           author_id: user?.uid || null,
@@ -1243,48 +1329,86 @@ const TopicPage = () => {
           created_at: new Date().toISOString()
         }, newTotalPosts, 1);
       }
+
       applyMutationResult(replyResult);
 
-      if (targetPage !== currentPage) {
-        alreadyJumpedRef.current = false;
-        setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
-      } else {
-        // ОПТИМИСТИЧНЫЙ UI: мгновенно отображаем свой пост, не дожидаясь ни Cloud Functions, ни RTDB
-        const optimisticPost = {
-          ...postData,
-          id: newPostId,
-          // Keep the sidebar counters correct without a refresh (see ownNewStats above)
-          ...(ownNewStats ? {
-            author_posts_count: ownNewStats.post_count,
-            author_reputation: ownNewStats.reputation
-          } : {}),
-          created_at: {
-            toDate: () => new Date(),
-            toMillis: () => Date.now(),
-            seconds: Math.floor(Date.now() / 1000)
-          }
-        };
-
-        setPosts(prev => {
-          if (prev.some(p => p.id === newPostId)) return prev;
-          return [...prev, optimisticPost];
-        });
-
-        setTimeout(() => {
-          const element = document.getElementById(`post-${newPostId}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            element.classList.add('highlight-new-post');
-            setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
-          }
-        }, 100);
+      try {
+        localStorage.removeItem(`reply_draft_${id}`);
+      } catch (e) {
+        // ignore
       }
 
+      // Reconcile optimistic post if component is still mounted
+      if (isMountedRef.current && newPostId) {
+        setPosts(prev => {
+          if (prev.some(p => p.id === newPostId)) {
+            return prev.filter(p => p.id !== tempId);
+          }
+          return prev.map(p => {
+            if (p.id === tempId) {
+              return {
+                ...p,
+                id: newPostId,
+                _isOptimistic: false
+              };
+            }
+            return p;
+          });
+        });
+      }
     } catch (err) {
-      console.error(err);
-      alert('Error posting reply');
+      console.error('[createPost error]', err);
+
+      // Save unsent text back into localStorage so if user is on another page,
+      // it will be restored when they revisit this topic!
+      try {
+        if (savedReplyContent) {
+          localStorage.setItem(`reply_draft_${id}`, savedReplyContent);
+        }
+      } catch (storageErr) {
+        console.warn('[Failed to restore reply draft to localStorage]', storageErr);
+      }
+
+      // Rollback if component is still mounted
+      if (isMountedRef.current) {
+        setPosts(prev => prev.filter(p => p.id !== tempId));
+        setTopic(prev => prev ? {
+          ...prev,
+          posts_count: Math.max(0, (prev.posts_count || 1) - 1)
+        } : prev);
+
+        if (prevTopicStatsRef.current) {
+          prevTopicStatsRef.current.posts_count = Math.max(0, (prevTopicStatsRef.current.posts_count || 1) - 1);
+        }
+
+        // Restore input in UI
+        setReplyContent(savedReplyContent);
+        if (savedGuestNickname !== undefined) setGuestNickname(savedGuestNickname);
+      }
+
+      // Rollback profile stats (global / profile context)
+      if (user?.uid) {
+        setProfile(prev => prev ? { ...prev, post_count: Math.max(0, (prev.post_count || 1) - 1) } : prev);
+        if (isMountedRef.current) {
+          setAuthorStats(prev => {
+            if (!prev[user.uid]) return prev;
+            return {
+              ...prev,
+              [user.uid]: {
+                ...prev[user.uid],
+                post_count: Math.max(0, (prev[user.uid].post_count || 1) - 1)
+              }
+            };
+          });
+        }
+      }
+
+      // Global toast notification is ALWAYS delivered even if user navigated away
+      showToast(err?.message || (lang === 'ru' ? 'Не удалось отправить сообщение' : 'Failed to post reply'), 'danger');
     } finally {
-      setSubmitting(false);
+      if (isMountedRef.current) {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -1312,7 +1436,7 @@ const TopicPage = () => {
     setDraftSaving(true);
     try {
       await createDraftPost(buildPostData());
-      setReplyContent('');
+      if (isMountedRef.current) setReplyContent('');
       showToast(t('forum.draft_saved'));
       // Navigate to last page so draft is visible
       const lastPage = Math.max(1, totalPages);
@@ -1321,7 +1445,7 @@ const TopicPage = () => {
       console.error(err);
       showToast(t('forum.draft_save_error'), 'danger');
     } finally {
-      setDraftSaving(false);
+      if (isMountedRef.current) setDraftSaving(false);
     }
   };
 
@@ -1344,15 +1468,17 @@ const TopicPage = () => {
       };
 
       await updateDraftPost(user.uid, id, editContent.trim(), metadata);
-      setEditingPostId(null);
-      setEditContent('');
-      setEditCharacterId('');
-      showToast(t('forum.draft_updated'));
+      if (isMountedRef.current) {
+        setEditingPostId(null);
+        setEditContent('');
+        setEditCharacterId('');
+        showToast(t('forum.draft_updated'));
+      }
     } catch (err) {
       console.error(err);
       showToast(t('forum.draft_update_error'), 'danger');
     } finally {
-      setDraftSaving(false);
+      if (isMountedRef.current) setDraftSaving(false);
     }
   };
 
@@ -1361,57 +1487,120 @@ const TopicPage = () => {
       showToast(t('forum.draft_locked_error'), 'danger');
       return;
     }
+    const publishedDraft = myDraft;
+    if (!publishedDraft) return;
+
     setDraftSaving(true);
     recordActivity();
+
+    const tempId = `temp_draft_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const { content: processedContent, rolls } = processDiceRolls(publishedDraft.content || '');
+
+    // Optimistically hide draft and mark as read
+    setMyDraft(null);
+    markTopicRead(id);
+
+    // Client-side post count updates
+    const preProfile = profileRef.current || {};
+    let ownNewStats = null;
+    if (user?.uid) {
+      const prevOwnStats = authorStats[user.uid] || {};
+      ownNewStats = {
+        post_count: Math.max(prevOwnStats.post_count || 0, preProfile.post_count || 0) + 1,
+        reputation: prevOwnStats.reputation ?? preProfile.reputation ?? 0
+      };
+      setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
+      setAuthorStats(prev => ({
+        ...prev,
+        [user.uid]: {
+          ...(prev[user.uid] || {}),
+          ...ownNewStats,
+          role_id: prev[user.uid]?.role_id || preProfile.role_id || 'player',
+          status_line: prev[user.uid]?.status_line ?? preProfile.status_line ?? '',
+          settings: prev[user.uid]?.settings || (preProfile.settings ? { ...preProfile.settings } : { signature: '' })
+        }
+      }));
+    }
+
+    const currentTotal = Math.max(topic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
+    const newTotalPosts = currentTotal + 1;
+    const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
+
+    setTopic(prev => prev ? {
+      ...prev,
+      posts_count: Math.max(newTotalPosts, (prev.posts_count || 0) + 1),
+      last_post_at: new Date().toISOString()
+    } : prev);
+
+    if (prevTopicStatsRef.current) {
+      prevTopicStatsRef.current.posts_count = Math.max(newTotalPosts, (prevTopicStatsRef.current.posts_count || 0) + 1);
+      prevTopicStatsRef.current.last_post_at = new Date().toISOString();
+    }
+
+    const curCategoryId = topicRef.current?.category_id || topic?.category_id;
+    const curTitle = topicRef.current?.title || topic?.title;
+    if (curCategoryId) {
+      updateLocalTopicLastPost(id, curCategoryId, curTitle, {
+        id: tempId,
+        author_id: user?.uid || null,
+        author_name: publishedDraft?.author_name || profile?.nickname || 'User',
+        author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
+        author_role_id: profile?.role_id || 'player',
+        is_character: !!publishedDraft?.is_character,
+        author_character_id: publishedDraft?.author_character_id || null,
+        created_at: new Date().toISOString()
+      }, newTotalPosts, 1);
+    }
+
+    const optimisticPost = {
+      topic_id: id,
+      author_id: user.uid,
+      author_name: publishedDraft?.author_name || profile?.nickname || user.displayName || 'User',
+      author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
+      is_character: !!publishedDraft?.is_character,
+      author_character_id: publishedDraft?.author_character_id || null,
+      author_status_line: publishedDraft?.author_status_line || '',
+      author_signature: publishedDraft?.author_signature || '',
+      content: processedContent,
+      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : null,
+      reputation: 0,
+      id: tempId,
+      _isOptimistic: true,
+      ...(ownNewStats ? {
+        author_posts_count: ownNewStats.post_count,
+        author_reputation: ownNewStats.reputation
+      } : {}),
+      created_at: {
+        toDate: () => new Date(),
+        toMillis: () => Date.now(),
+        seconds: Math.floor(Date.now() / 1000)
+      }
+    };
+
+    if (targetPage !== currentPage) {
+      alreadyJumpedRef.current = false;
+      setSearchParams({ page: targetPage, post: tempId }, { preventScrollReset: true });
+    } else {
+      setPosts(prev => {
+        if (prev.some(p => p.id === tempId)) return prev;
+        return [...prev, optimisticPost];
+      });
+
+      setTimeout(() => {
+        const element = document.getElementById(`post-${tempId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.classList.add('highlight-new-post');
+          setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
+        }
+      }, 50);
+    }
+
     try {
-      const publishedDraft = myDraft;
       const pubResult = await publishDraft(user.uid, id);
       const newPostId = pubResult?.postId;
-      setMyDraft(null);
-      markTopicRead(id);
-      showToast(t('forum.draft_published'));
 
-      // Client-side post count updates (same cold-topic guard as handleReply:
-      // authorStats may not contain this user yet — base on the live profile).
-      const preProfile = profileRef.current || {};
-      let ownNewStats = null;
-      if (user?.uid) {
-        const prevOwnStats = authorStats[user.uid] || {};
-        ownNewStats = {
-          post_count: Math.max(prevOwnStats.post_count || 0, preProfile.post_count || 0) + 1,
-          reputation: prevOwnStats.reputation ?? preProfile.reputation ?? 0
-        };
-        setProfile(prev => prev ? { ...prev, post_count: (prev.post_count || 0) + 1 } : prev);
-        setAuthorStats(prev => ({
-          ...prev,
-          [user.uid]: {
-            ...(prev[user.uid] || {}),
-            ...ownNewStats,
-            role_id: prev[user.uid]?.role_id || preProfile.role_id || 'player',
-            status_line: prev[user.uid]?.status_line ?? preProfile.status_line ?? '',
-            settings: prev[user.uid]?.settings || (preProfile.settings ? { ...preProfile.settings } : { signature: '' })
-          }
-        }));
-      }
-
-      const currentTotal = Math.max(topic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
-      const newTotalPosts = currentTotal + 1;
-      const targetPage = Math.ceil(newTotalPosts / ITEMS_PER_PAGE) || 1;
-
-      setTopic(prev => prev ? {
-        ...prev,
-        posts_count: Math.max(newTotalPosts, (prev.posts_count || 0) + 1),
-        last_post_at: new Date().toISOString()
-      } : prev);
-
-      if (prevTopicStatsRef.current) {
-        prevTopicStatsRef.current.posts_count = Math.max(newTotalPosts, (prevTopicStatsRef.current.posts_count || 0) + 1);
-        prevTopicStatsRef.current.last_post_at = new Date().toISOString();
-      }
-
-      const curCategoryId = topicRef.current?.category_id || topic?.category_id;
-      const curTitle = topicRef.current?.title || topic?.title;
-      if (curCategoryId) {
+      if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
           id: newPostId,
           author_id: user?.uid || null,
@@ -1423,53 +1612,66 @@ const TopicPage = () => {
           created_at: new Date().toISOString()
         }, newTotalPosts, 1);
       }
+
       applyMutationResult(pubResult);
 
-      if (targetPage !== currentPage) {
-        alreadyJumpedRef.current = false;
-        setSearchParams({ page: targetPage, post: newPostId }, { preventScrollReset: true });
-      } else {
-        const optimisticPost = {
-          topic_id: id,
-          author_id: user.uid,
-          author_name: publishedDraft?.author_name || profile?.nickname || user.displayName || 'User',
-          author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
-          is_character: !!publishedDraft?.is_character,
-          author_character_id: publishedDraft?.author_character_id || null,
-          content: publishedDraft?.content || '',
-          reputation: 0,
-          id: newPostId,
-          // Keep the sidebar counters correct without a refresh (see ownNewStats above)
-          ...(ownNewStats ? {
-            author_posts_count: ownNewStats.post_count,
-            author_reputation: ownNewStats.reputation
-          } : {}),
-          created_at: {
-            toDate: () => new Date(),
-            toMillis: () => Date.now(),
-            seconds: Math.floor(Date.now() / 1000)
-          }
-        };
-
-        setPosts(prev => {
-          if (prev.some(p => p.id === newPostId)) return prev;
-          return [...prev, optimisticPost];
-        });
-
-        setTimeout(() => {
-          const element = document.getElementById(`post-${newPostId}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            element.classList.add('highlight-new-post');
-            setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
-          }
-        }, 100);
+      if (isMountedRef.current) {
+        showToast(t('forum.draft_published'));
+        if (newPostId) {
+          setPosts(prev => {
+            if (prev.some(p => p.id === newPostId)) {
+              return prev.filter(p => p.id !== tempId);
+            }
+            return prev.map(p => {
+              if (p.id === tempId) {
+                return {
+                  ...p,
+                  id: newPostId,
+                  _isOptimistic: false
+                };
+              }
+              return p;
+            });
+          });
+        }
       }
     } catch (err) {
-      console.error(err);
-      showToast(err.message || t('forum.draft_publish_error'), 'danger');
+      console.error('[publishDraft error]', err);
+
+      if (isMountedRef.current) {
+        setMyDraft(publishedDraft);
+        setPosts(prev => prev.filter(p => p.id !== tempId));
+        setTopic(prev => prev ? {
+          ...prev,
+          posts_count: Math.max(0, (prev.posts_count || 1) - 1)
+        } : prev);
+
+        if (prevTopicStatsRef.current) {
+          prevTopicStatsRef.current.posts_count = Math.max(0, (prevTopicStatsRef.current.posts_count || 1) - 1);
+        }
+      }
+
+      if (user?.uid) {
+        setProfile(prev => prev ? { ...prev, post_count: Math.max(0, (prev.post_count || 1) - 1) } : prev);
+        if (isMountedRef.current) {
+          setAuthorStats(prev => {
+            if (!prev[user.uid]) return prev;
+            return {
+              ...prev,
+              [user.uid]: {
+                ...prev[user.uid],
+                post_count: Math.max(0, (prev[user.uid].post_count || 1) - 1)
+              }
+            };
+          });
+        }
+      }
+
+      showToast(err?.message || t('forum.draft_publish_error'), 'danger');
     } finally {
-      setDraftSaving(false);
+      if (isMountedRef.current) {
+        setDraftSaving(false);
+      }
     }
   };
 
@@ -1645,6 +1847,19 @@ const TopicPage = () => {
             ? topic.last_post_id === targetPostId
             : deletedPostMs === topicLastMs;
 
+          setTopic(prev => prev ? {
+            ...prev,
+            posts_count: nextPostCount,
+            last_post_id: nextLastPost?.id || prev.last_post_id
+          } : prev);
+
+          if (prevTopicStatsRef.current) {
+            prevTopicStatsRef.current.posts_count = nextPostCount;
+            if (nextLastPost) {
+              prevTopicStatsRef.current.last_post_id = nextLastPost.id;
+            }
+          }
+
           if (categoryId && nextLastPost && isDeletedPostLast) {
             updateLocalTopicLastPost(id, categoryId, topic?.title || '', nextLastPost, nextPostCount, -1);
           } else {
@@ -1682,6 +1897,7 @@ const TopicPage = () => {
 
   const canManagePost = (post) => {
     if (!user || profile?.role_id === 'pending') return false;
+    if (post?._isOptimistic || (typeof post?.id === 'string' && post.id.startsWith('temp_'))) return false;
     return post.author_id === user.uid || hasPermission('moderate_content');
   };
 
@@ -2347,19 +2563,26 @@ const TopicPage = () => {
                     {/* Header Strip: Time, # */}
                     <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
                       <small className="text-muted">
-                        <a
-                          href={`/topic/${id}?post=${post.id}`}
-                          className="text-decoration-none text-muted hover-link"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            const url = `${window.location.origin}/topic/${id}?post=${post.id}`;
-                            navigator.clipboard.writeText(url);
-                            showToast(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
-                          }}
-                        >
-                          <Timestamp date={post.created_at} className="text-muted" />
-                        </a>
-                        {post.edited_at && (
+                        {post._isOptimistic ? (
+                          <span className="d-inline-flex align-items-center gap-1 opacity-75">
+                            <span className="spinner-border spinner-border-sm" style={{ width: '0.75rem', height: '0.75rem', borderWidth: '1px' }} role="status" />
+                            <span>{lang === 'ru' ? 'Отправка...' : 'Sending...'}</span>
+                          </span>
+                        ) : (
+                          <a
+                            href={`/topic/${id}?post=${post.id}`}
+                            className="text-decoration-none text-muted hover-link"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              const url = `${window.location.origin}/topic/${id}?post=${post.id}`;
+                              navigator.clipboard.writeText(url);
+                              showToast(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
+                            }}
+                          >
+                            <Timestamp date={post.created_at} className="text-muted" />
+                          </a>
+                        )}
+                        {post.edited_at && !post._isOptimistic && (
                           <span className="d-block d-md-inline-block ms-md-2 opacity-50">
                             ({lang === 'ru' ? 'ред.' : 'edited'} <Timestamp date={post.edited_at} />)
                           </span>
@@ -2501,7 +2724,7 @@ const TopicPage = () => {
                       </div>
 
                       {/* Reputation / Voting Buttons */}
-                      {settings?.enableReputation && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (() => {
+                      {settings?.enableReputation && !post._isOptimistic && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (() => {
                         const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
                         const isOwnPost = post.author_id === user?.uid;
                         const hasVoted = !!myVotes[post.id];

@@ -2884,6 +2884,7 @@ async function syncTopicMetadata(db, topicId) {
     lp = postSnap.docs[0].data();
     lpMs = lp.created_at?.toMillis ? lp.created_at.toMillis() : (typeof lp.created_at === 'number' ? lp.created_at : (lp.created_at ? new Date(lp.created_at).getTime() : Date.now()));
     await topicRef.update({
+      last_post_id: postSnap.docs[0].id,
       last_post_at: lp.created_at,
       last_post_author: lp.author_name,
       last_post_author_id: lp.author_id || null,
@@ -2897,7 +2898,7 @@ async function syncTopicMetadata(db, topicId) {
   } else {
     // No posts left — topic will likely be deleted by another process or trigger
     // but we'll neutralise it just in case
-    await topicRef.update({ last_post_at: null, last_post_author: null });
+    await topicRef.update({ last_post_id: null, last_post_at: null, last_post_author: null });
     const topicSnap = await topicRef.get();
     tData = topicSnap.exists ? topicSnap.data() : {};
     categoryId = tData.category_id;
