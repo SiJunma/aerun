@@ -24,7 +24,7 @@ const Navigation = () => {
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [authModalMode, setAuthModalMode] = React.useState('login');
 
-  const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
+  const isAdmin = (profile?.role_id === 'admin' || profile?.role_id === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
   // Subscribe to notifications via RTDB (0 Firestore reads)
   React.useEffect(() => {

@@ -91,7 +91,7 @@ const NotificationsPage = () => {
     });
 
     // Admin broadcast notifications (backward-compat: legacy recipient_uid=null docs)
-    if (canManageUsers) {
+    if ((profile?.role_id === 'admin' || profile?.role_id === 'root') && canManageUsers) {
       unsubAdminActive = subscribeToAdminNotifications(setAdminActive);
     }
 

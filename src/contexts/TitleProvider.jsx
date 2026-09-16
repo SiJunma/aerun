@@ -16,7 +16,7 @@ export const TitleProvider = ({ children }) => {
   const { lang } = useI18n();
   const { activeDesign } = useDesign();
 
-  const isAdmin = hasPermission ? hasPermission(PERMISSIONS?.ADMIN_ACCESS) : false;
+  const isAdmin = (profile?.role_id === 'admin' || profile?.role_id === 'root') && (hasPermission ? hasPermission(PERMISSIONS?.ADMIN_ACCESS) : false);
 
   // Real-time unread notifications and DMs subscription for browser tab title badge
   const dmUnreadDataRef = React.useRef({ total: 0, conversations: {} });

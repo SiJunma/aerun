@@ -86,7 +86,10 @@ export const subscribeToAdminNotifications = (callback) => {
       list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
       callback(list);
     }, (err) => {
-      console.warn('[subscribeToAdminNotifications error]', err);
+      const errMsg = (err?.message || err?.code || '').toLowerCase();
+      if (!errMsg.includes('permission_denied') && !errMsg.includes('permission-denied') && err?.code !== 'PERMISSION_DENIED') {
+        console.warn('[subscribeToAdminNotifications error]', err);
+      }
       callback([]);
     });
   } catch {
