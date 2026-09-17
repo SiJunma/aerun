@@ -1,0 +1,7 @@
+# Local runtime/data/credentials; paths are relative to backend/.
+.local-run/
+pb_data/
+pb_public/
+.env
+*.exe
+migration-data/

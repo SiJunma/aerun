@@ -383,3 +383,161 @@ green, reconciliation is signed off, and rollback conditions have expired.
    command depend on email delivery.
 5. Update this plan and the canonical schema documentation whenever a target
    contract changes.
+
+## 8. Progress log
+
+> Maintained by the implementation agent after every work session: what is
+> done, current stage, difficulties found, and plan changes. Latest entry last.
+
+### 2026-09-17 — Sprint 1 foundation started (branch `feature/pocketbase-migration`)
+
+**Done**
+
+- Created and switched to branch `feature/pocketbase-migration` from clean `main`
+  (base commit `3dbe15a`).
+- Added `backend/` Go module (`github.com/SiJunma/aerun/backend`) targeting
+  PocketBase **v0.40.4** (verified released; its `go.mod` requires Go 1.27):
+  - `cmd/aerun/main.go` — entry point; deliberately rejects command-line
+    arguments so environment variables are the single configuration path;
+  - `internal/config` — env-only configuration with production guardrails
+    (loopback-only bind, explicit origins, 32-byte `AERUN_ENCRYPTION_KEY`
+    required in production, wildcard origins forbidden, mail hard-disabled);
+    framework-free and unit-testable;
+  - `internal/platform/pocketbase` — the only package importing PocketBase
+    (adapter); registers `GET /api/aerun/health`, CORS origin allowlist
+    middleware, application meta settings, and a post-startup health probe
+    with structured JSON logs;
+  - `internal/migrations` — first append-only migration creating
+    `idempotency_keys` with `UNIQUE(actor, key)` (plan invariant 6) and all
+    API rules nil (browser writes locked);
+  - tests: `internal/config/config_test.go` (defaults, six rejection cases,
+    valid production config), `internal/platform/pocketbase/run_test.go`
+    (production without key must be rejected before serve),
+    `internal/migrations/migrations_test.go` (fresh app + `RunAllMigrations`
+    + collection assertions);
+  - `.env.example`, `.gitignore` (`pb_data/`, `.env`, binaries), `README.md`
+    with local run steps and current limitations.
+
+**Difficulties / deviations found**
+
+1. **No Go toolchain on this machine** (`go`/`gofmt` absent from `PATH`), and
+   project rules forbid running builds. Therefore the module is **not yet
+   compiled or run**; `go.sum` is not generated. Manual verification commands
+   are listed below and must be run once a Go ≥1.27 toolchain is installed.
+2. **PocketBase v0.40.4 serve API conflict with the plan's loopback guardrail**:
+   `pocketbase.New()` has no config-level HTTP address; the address comes from
+   the `serve --http` flag. Since our entry point rejects arguments, the first
+   runnable build will serve on the library default `127.0.0.1:8090`. Making
+   `AERUN_LISTEN` effective requires either a custom serve command or an
+   `apis.Serve` call — deferred to the next session's Sprint 2 review; until
+   then `AERUN_LISTEN` is validated but informational.
+3. **CORS allowlist header format**: PocketBase's serve flag joins multiple
+   origins into a single comma-joined `Access-Control-Allow-Origin` value, so
+   the adapter middleware mirrors that format instead of per-request echoes.
+   Per-origin echo should be revisited during Sprint 2 auth work.
+4. **AGENTS.md rule 4 (RTDB-first)** conflicts with this plan's invariant 5
+   ("RTDB is not migrated as a live dependency"). For `backend/` work the
+   migration plan governs; the RTDB-first rule remains valid only for the
+   still-active Firebase application.
+5. `tests.NewTestApp` + `RunAllMigrations` is taken from PocketBase's own test
+   helpers; exact helper signatures against v0.40.4 must be confirmed on first
+   `go test` run (no toolchain available here).
+
+**Manual verification (requires Go ≥ 1.27, from `backend/`)**
+
+```powershell
+go mod tidy          # generates go.sum from go.mod
+go build ./...
+go test ./...
+$env:AERUN_ENV='local'; go run ./cmd/aerun
+# then: GET http://127.0.0.1:8090/api/aerun/health  -> {"status":"ok",...}
+```
+
+**Sprint 1 DoD status**: partial — code and tests exist; "fresh local startup
+applies all migrations and exposes health" is pending the first successful
+`go build`/`go run` (blocked by missing toolchain, see Difficulties #1/#2).
+
+**Sprint 0 note (blocking, requires human action)**: provider key rotation,
+final Firestore rules deployment, `stripProfileEmails` run and export snapshots
+are prerequisites for later data sprints and remain unchecked.
+
+**Next session**: wire `AERUN_LISTEN` into a custom serve command, confirm
+`RunAllMigrations` test helpers, generate `go.sum`, run the test suite, then
+start Sprint 2 (users/RBAC collections and rules).
+
+**Same-session fixes after static review** (no toolchain available, fixes were
+found by re-reading the code against the plan):
+
+- `idempotency_keys` was created with a public-access bug: explicit empty API
+  rules (`types.Pointer("")`) mean "allow all authenticated clients", not
+  "locked". Replaced with nil rules (superuser-only) and added the missing
+  `key` column; the unique index now covers `(actor, key)` per section 3.4.
+- `cmd/aerun/main.go` did not import the migrations package, so embedded
+  migrations would never register; added the blank import.
+- `Run` returned `nil` after a successful health probe, which would let `main`
+  exit and kill the server process immediately; now it blocks on the serve
+  result for the process lifetime.
+- Removed an unused `path/filepath` import (would fail `go build`).
+- README no longer suggests `go run ./cmd/aerun migrate up`, which the
+  argument-rejecting entry point would refuse; PocketBase applies new
+  migrations automatically on startup.
+### 2026-09-17 — Offline preparation; runtime validation deferred
+
+**Stage:** Sprint 1 incomplete; independent preparatory parts of Sprints 6/7
+implemented. User requests NO Go/PocketBase installation or execution here.
+Code preparation continues; integration validation is deferred to the home PC.
+
+**Implemented**
+
+- Opt-in HTTP command transport with configurable origin/token/fetch, stable
+  caller-provided idempotency keys and diagnostic errors; no automatic retries.
+  Live Firebase UI unchanged; server command routes are NOT implemented.
+- Firebase source adapter reuses functions/firebase-admin: paged Firestore
+  traversal plus Auth metadata without password hashes/salts/tokens.
+- Checksummed snapshots, copy-on-write intermediate JSON staging, deterministic
+  replay and snapshot diff. Changed source rows replace staged rows; missing
+  rows are retained for review. Corruption, stale imports, duplicate identities
+  and project mismatch fail. This is NOT a PocketBase domain importer.
+- CLI export/diff/stage uses exclusive creation; never overwrites artifacts.
+- Seven persistent offline Node tests passed, including JSON round-trip of
+  optional Auth fields (normalized before hashing) and deterministic ordering.
+  Syntax checks and inline mock checks passed. A separate CLI subprocess test
+  had unobservable terminal completion;
+  it is NOT counted as passed. No Firebase connection was made.
+- Fixed backend/.gitignore paths (incorrect backend/ prefix) and ignored local
+  migration-data. README documents actual coverage and proposed API envelope.
+
+**Corrections to earlier log / unresolved foundation blockers**
+
+- Pinned version compatibility must be independently confirmed at home; prior
+  verification claims must not be relied on. Go tests/signatures/dependencies
+  remain unverified; go.sum absent.
+- pb.Start without serve does NOT establish a working listener. The earlier
+  claim about serving on a default address was wrong; AERUN_LISTEN is unwired.
+- Comma-separated Access-Control-Allow-Origin is invalid; attributing that
+  behavior to PocketBase was unsupported. Replace the custom middleware.
+- Encryption key presence validation does not configure encryption. Absolute
+  production data paths and no-mail behavior are not enforced. Request IDs and
+  CI remain pending. These are Sprint 1 blockers, not Sprint 2 polish.
+- Empty PB rules permit everyone, not only authenticated users; nil locks them.
+  Schema migrations import PocketBase in addition to the platform adapter.
+
+**Reimport strategy / limitations**
+
+Firebase remains authoritative until final read-only cutover. Rehearsal exports
+are live/non-atomic, buffered in memory, omit Storage bytes and may miss nested
+collections under nonexistent parents. They are NOT complete backups. Take
+separate official backups; do not dual-write production.
+
+Keep clean import-rehearsal and interactive local-test databases separate.
+Staging is source-owned, not an editable forum database. Domain import still
+needs legacy UID/path mappings, relations, transactional checkpoints, sequence/
+counter reconstruction, historical dates, file checksums, password reset/linking,
+local-edit conflicts and reviewed deletions. Final cutover requires frozen
+Firebase writes, complete fresh exports and successful reconciliation.
+
+**Next:** correct runtime wiring against verified PB APIs; implement Sprint 2
+schema/auth/RBAC then Sprint 3 transactional commands. Extend exporter coverage
+and build domain import against those schemas. Finish other commands/frontend
+integration before home-machine rehearsal and VPS readiness. No sprint DoD is
+claimed complete; no production changes or deployment performed.
