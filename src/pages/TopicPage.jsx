@@ -59,7 +59,11 @@ const TopicPage = () => {
 
   const { id } = useParams();
   const navigate = useNavigate();
-  const { hash } = useLocation();
+  const location = useLocation();
+  const { hash } = location;
+  const locationRef = useRef(location);
+  locationRef.current = location;
+  const pendingCreatedPostIdRef = useRef(null);
   const { t, lang } = useI18n();
   const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, scheduleForumStateRefresh, applyForumState, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
   const { showToast } = useToast();
@@ -252,6 +256,8 @@ const TopicPage = () => {
   const activeFetchIdRef = useRef(0);
   const locatingPostIdRef = useRef(null);
   const prevTopicStatsRef = useRef(null);
+  // Page number whose posts are currently rendered (set by loadPosts on success).
+  const loadedPageRef = useRef(null);
 
   const [accessError, setAccessError] = React.useState(null);
   const [topicNotFound, setTopicNotFound] = React.useState(false);
@@ -352,6 +358,7 @@ const TopicPage = () => {
           });
           return next;
         });
+        loadedPageRef.current = activePage;
         setIsPageLoading(false);
       }
       return data;
@@ -458,6 +465,16 @@ const TopicPage = () => {
     const hasPostJump = !!searchParams.get('post');
     const hasHashJump = window.location.hash.startsWith('#post-');
     const hasExplicitPage = searchParams.has('page');
+
+    // Ссылка на пост открыта, пока тема уже загружена (вставка в адресную строку,
+    // клик по цитате или уведомлению, завершение отправки поста): если цель уже
+    // есть на текущей странице — не очищаем список и не делаем лишний запрос,
+    // прокрутку выполнит эффект навигации по готовому списку (Priority 0/1).
+    const jumpTargetId = searchParams.get('post') || pendingCreatedPostIdRef.current;
+    if (jumpTargetId && loadedPageRef.current === currentPage && postsRef.current.some(p => p.id === jumpTargetId)) {
+      setIsPageLoading(false);
+      return;
+    }
 
     // Если запрошен прыжок к конкретному посту (?post=ID или #post-ID), но номера страницы еще нет:
     if ((hasPostJump || hasHashJump) && !hasExplicitPage) {
@@ -706,7 +723,12 @@ const TopicPage = () => {
     }
 
     // If posts are not loaded, we can only proceed if a jump is requested (to resolve the page)
-    const isJumpRequestedLocal = !!(searchParams.get('post') || goLast || hash.startsWith('#post-'));
+    // A freshly created post awaiting confirmation (Post IDs never go into the
+    // address bar, so ?post= in a search input can only be a real jump link).
+    const pendingPostId = pendingCreatedPostIdRef.current;
+    const isJumpRequestedLocal = !!(
+      (searchParams.get('post') && !pendingPostId) || pendingPostId || goLast || hash.startsWith('#post-')
+    );
     if (posts.length === 0 && !isJumpRequestedLocal) {
       return;
     }
@@ -715,7 +737,23 @@ const TopicPage = () => {
     let targetPage = currentPage;
     let scrollBlock = 'start';
 
-    // Priority 1: ?post=ID (Clicking from a quote or external link)
+    // Priority 0: scroll to a post created by this user without touching the URL
+    if (pendingPostId) {
+      const postIndex = posts.findIndex(p => p.id === pendingPostId);
+      if (postIndex !== -1) {
+        pendingCreatedPostIdRef.current = null;
+        lastTargetRef.current = null;
+        targetId = `post-${pendingPostId}`;
+        scrollBlock = 'center';
+      } else if (isFetchingPostsRef.current) {
+        return;
+      } else {
+        pendingCreatedPostIdRef.current = null;
+      }
+    }
+
+    // Priority 1: ?post=ID (Clicking from a quote or external link).
+    // Если пост уже в загруженном списке — локальная прокрутка, без locatePost.
     const queryPostId = searchParams.get('post');
     if (queryPostId) {
       const postIndex = posts.findIndex(p => p.id === queryPostId);
@@ -1189,6 +1227,16 @@ const TopicPage = () => {
     }
   };
 
+  // Highlight the freshly created post on its page. Post IDs never go into the
+  // address bar: ?post= links stay reserved for quotes/notifications, and the
+  // request must not outlive its pending page navigation or component lifetime.
+  const navigateToCreatedPost = (tempId, postId) => {
+    const currentLocation = locationRef.current;
+    if (!isMountedRef.current || !postId || currentLocation.state?.pendingPostId !== tempId) return;
+    pendingCreatedPostIdRef.current = postId;
+    setSearchParams(currentLocation.search, { replace: true, preventScrollReset: true, state: null });
+  };
+
   const handleReply = async (e) => {
     e?.preventDefault?.();
     if (submitting) return;
@@ -1294,7 +1342,10 @@ const TopicPage = () => {
 
     if (targetPage !== currentPage) {
       alreadyJumpedRef.current = false;
-      setSearchParams({ page: targetPage, post: tempId }, { preventScrollReset: true });
+      setSearchParams({ page: targetPage }, {
+        preventScrollReset: true,
+        state: { pendingPostId: tempId }
+      });
     } else {
       setPosts(prev => {
         if (prev.some(p => p.id === tempId)) return prev;
@@ -1316,6 +1367,7 @@ const TopicPage = () => {
     try {
       const replyResult = await createPost(postData);
       const newPostId = replyResult?.postId;
+      navigateToCreatedPost(tempId, newPostId);
 
       if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
@@ -1579,7 +1631,10 @@ const TopicPage = () => {
 
     if (targetPage !== currentPage) {
       alreadyJumpedRef.current = false;
-      setSearchParams({ page: targetPage, post: tempId }, { preventScrollReset: true });
+      setSearchParams({ page: targetPage }, {
+        preventScrollReset: true,
+        state: { pendingPostId: tempId }
+      });
     } else {
       setPosts(prev => {
         if (prev.some(p => p.id === tempId)) return prev;
@@ -1599,6 +1654,7 @@ const TopicPage = () => {
     try {
       const pubResult = await publishDraft(user.uid, id);
       const newPostId = pubResult?.postId;
+      navigateToCreatedPost(tempId, newPostId);
 
       if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
@@ -2564,10 +2620,7 @@ const TopicPage = () => {
                     <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
                       <small className="text-muted">
                         {post._isOptimistic ? (
-                          <span className="d-inline-flex align-items-center gap-1 opacity-75">
-                            <span className="spinner-border spinner-border-sm" style={{ width: '0.75rem', height: '0.75rem', borderWidth: '1px' }} role="status" />
-                            <span>{lang === 'ru' ? 'Отправка...' : 'Sending...'}</span>
-                          </span>
+                          <Timestamp date={post.created_at} className="text-muted" />
                         ) : (
                           <a
                             href={`/topic/${id}?post=${post.id}`}
