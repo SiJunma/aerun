@@ -647,3 +647,56 @@ exposes the health check, needs no secrets; formal DoD still requires CI.
 `go test`), then Sprint 2 (users auth collection, RBAC, secure reads).
 Mail hard-disable enforcement on PB auth routes remains a Sprint 2 guardrail
  alongside the auth work.
+### 2026-09-18 — Sprint 0 item 5: live read-only snapshots (Firestore, Auth, Storage; RTDB excluded)
+
+**Stage:** Sprint 0 item 5 executed against the live project `aerun-forum` with
+read-only access only; production stayed fully available for users throughout
+(all operations were list/get/download — no writes, no rule or data changes,
+no downtime).
+
+**Decisions**
+
+- RTDB is EXCLUDED from backups per user decision: it is a derived cache
+  rebuilt from the database and all its data is temporary. This amends Sprint 0
+  task 5 ("Firestore, RTDB, Storage and Auth"); `backend/tools/migration/
+  README.md` updated to record it.
+
+**Access setup**
+
+- Reused the existing firebase CLI login (sijunma116@gmail.com). Generated
+  gcloud-style ADC from it via firebase-tools' own defaultCredentials logic
+  (CLI client_id/secret + the already-stored refresh token) written to
+  %APPDATA%\gcloud\application_default_credentials.json. No new Firebase-side
+  credentials were created; no secrets were printed to the terminal. A
+  dedicated read-only service account remains the hardening step before VPS
+  cutover (Sprint 8).
+
+**Artifacts (backend/migration-data/, gitignored; protect with OS ACLs)**
+
+- firestore-auth-rehearsal-2026-09-18.json — rehearsal snapshot via the repo
+  tool (11,855,557 bytes): Firestore documents + nested collections + Auth
+  metadata WITHOUT password hashes/salts/tokens.
+- stage-1.json — staging ledger; report: created 5411, updated 0, missing 0.
+- auth-official-2026-09-18.json — official `firebase auth:export` (14 accounts,
+  7,353 bytes) INCLUDING password hashes — highly sensitive, never commit,
+  needed only for future login-migration planning.
+- storage/ + storage-manifest.json — full bucket download: 176 GCS objects
+  listed, 5 zero-byte folder placeholders skipped, 171 real files downloaded
+  (≈10.5 MB), every file MD5-verified against GCS metadata (0 mismatches).
+  GCS prefix/name collisions (an object named `smiles/tumblr` with children
+  `smiles/tumblr/*`; same for one user's `personal` path) are stored
+  flat-encoded and mapped back via the manifest `storedAs` field.
+- rtdb-*.json attempt was removed: `firebase database:get /` failed with an
+  instance URL resolution error AND is no longer wanted (decision above).
+
+**Caveats (unchanged from the plan)**
+
+- The rehearsal export is live and non-atomic and buffers everything in
+  memory; subcollections under missing ancestors may be missed; it is NOT the
+  final cutover exporter.
+- The official GCS-managed Firestore export (`gcloud firestore export`) was
+  not run: gcloud is not installed on this machine. Optional hardening later;
+  final cutover will still take fresh complete exports after freezing writes.
+
+**Next:** Sprint 1 leftovers (request/correlation IDs, CI pipeline with
+`go test`), then Sprint 2 (users auth collection, RBAC, secure reads).

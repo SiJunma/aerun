@@ -44,7 +44,10 @@ incomplete artifact: remove that artifact manually and retry with a new name.
 Live exports are NON-ATOMIC and fully buffered in memory. Subcollections under
 nonexistent/deleted ancestor documents may be missed. Storage bytes and orphan
 subcollection discovery are not implemented. This tool is not a complete backup
-or final cutover exporter. RTDB is not read. Take official backups separately.
+or final cutover exporter. RTDB is not read and is intentionally not backed up:
+it is a derived cache rebuilt from the database and all its data is temporary
+(decision 2026-09-18). Take official backups separately for Firestore, Storage
+and Auth.
 
 Staging files are source-owned artifacts, not an editable forum database.
 Domain import still needs legacy-to-PocketBase mappings, foreign-key validation,
