@@ -52,6 +52,18 @@ go run ./cmd/aerun
 The process fails startup when command-line flags are used; this keeps one
 configuration path between local and VPS deployments.
 
+## CI
+
+GitHub Actions (`.github/workflows/backend.yml`) runs gofmt, `go build`,
+`go vet` and `go test` on every push touching `backend/**`. Each run also
+publishes a machine-readable result to the `ci-report` branch
+(`report.json`); read it from anywhere with plain git:
+
+```
+git fetch origin ci-report
+git show origin/ci-report:report.json
+```
+
 ## Health check
 
 ```

@@ -11,8 +11,10 @@ on:
       - '.github/workflows/backend.yml'
   workflow_dispatch:
 
+# contents: write is required only to publish the machine-readable CI report
+# branch (the "Publish CI report" step). Nothing else writes to the repo.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: backend-${{ github.ref }}
@@ -43,12 +45,62 @@ jobs:
             echo "$out"
             exit 1
           fi
+          echo "gofmt=ok" >> .ci-status
 
       - name: Build
-        run: go build ./...
+        run: |
+          go build ./...
+          echo "build=ok" >> .ci-status
 
       - name: Vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          echo "vet=ok" >> .ci-status
 
       - name: Test
-        run: go test ./... -count=1
+        run: |
+          go test ./... -count=1
+          echo "test=ok" >> .ci-status
+
+      # Machine-readable result published to the `ci-report` branch of this
+      # repository so local tooling can read it with plain `git fetch` (no
+      # tokens/API needed even for a private repo). Runs always, so failures
+      # are reported too; a failing check simply has no "=ok" marker.
+      - name: Publish CI report
+        if: always()
+        env:
+          REPORT_COMMIT: ${{ github.sha }}
+          REPORT_BRANCH: ${{ github.ref_name }}
+          REPORT_RUN: ${{ github.run_number }}
+          REPORT_RUN_ID: ${{ github.run_id }}
+          REPORT_STATUS: ${{ job.status }}
+          REPORT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          checks=""
+          if [ -f .ci-status ]; then
+            while IFS='=' read -r n v; do
+              [ -n "$n" ] || continue
+              checks="$checks\"$n\":\"$v\","
+            done < .ci-status
+          fi
+          checks="${checks%,}"
+          cd "$GITHUB_WORKSPACE"
+          cat > report.json <<EOF
+          {
+            "schema": "aerun-ci-report/1",
+            "run_number": ${REPORT_RUN},
+            "status": "${REPORT_STATUS}",
+            "branch": "${REPORT_BRANCH}",
+            "commit": "${REPORT_COMMIT}",
+            "checks": {${checks}},
+            "run_url": "${REPORT_URL}",
+            "finished_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          git config user.name "aerun-ci-bot"
+          git config user.email "ci-bot@aerun.invalid"
+          git checkout --orphan ci-report-publish
+          git rm -rf --quiet .
+          git add report.json
+          git commit -q -m "ci report: run ${REPORT_RUN} ${REPORT_STATUS}"
+          git push --force origin "HEAD:refs/heads/ci-report"

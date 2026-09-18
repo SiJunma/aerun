@@ -742,3 +742,27 @@ roles, public profile DTO without email, registration/verification/password
 reset, Google OAuth locally, RBAC middleware with deny-by-default rules — plus
 the mail hard-disable guardrail on PB auth routes (email delivery stays
 disabled).
+### 2026-09-18 — First CI run green; machine-readable report channel added
+
+**Stage:** CI workflow verified in production conditions and extended with an
+automated report channel readable by local tooling.
+
+**Done**
+
+- First CI run (#1, commit d5c6ba2): Success in 1m55s — gofmt/build/vet/test
+  all green on the clean Linux runner; Sprint 1 DoD now verified by CI.
+- The workflow now publishes a machine-readable `report.json` (schema
+  aerun-ci-report/1: run number, status, branch, commit, per-check ok/skipped
+  markers, run URL, UTC timestamp) to the `ci-report` branch of the repo
+  (force-pushed single-commit branch; `permissions.contents: write` added
+  for this step only). Local tooling reads it with plain `git fetch` — no
+  tokens or API access needed even though the repo is private.
+- Fixed pre-push in the publish step: the status file path is `.ci-status`
+  (working directory is `backend/`) and it must be read before `cd` to the
+  repo root.
+
+**Next:** Sprint 2 — Identity, RBAC and secure reads: `users` auth collection,
+roles, public profile DTO without email, registration/verification/password
+reset, Google OAuth locally, RBAC middleware with deny-by-default rules — plus
+the mail hard-disable guardrail on PB auth routes (email delivery stays
+disabled).
