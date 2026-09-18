@@ -55,14 +55,39 @@ configuration path between local and VPS deployments.
 ## CI
 
 GitHub Actions (`.github/workflows/backend.yml`) runs gofmt, `go build`,
-`go vet` and `go test` on every push touching `backend/**`. Each run also
-publishes a machine-readable result to the `ci-report` branch
-(`report.json`); read it from anywhere with plain git:
+`go vet` and `go test` on every push touching `backend/**`, on a clean Linux
+runner with the Go version from `go.mod`. Each run also publishes a
+machine-readable result to the `ci-report` branch (`report.json`); read it from
+anywhere with plain git — no tokens or GitHub API access required, which matters
+because this repository is private:
 
 ```
 git fetch origin ci-report
 git show origin/ci-report:report.json
 ```
+
+Report schema `aerun-ci-report/1`:
+
+```json
+{
+  "schema": "aerun-ci-report/1",
+  "run_number": 2,
+  "status": "success",
+  "branch": "feature/pocketbase-migration",
+  "commit": "<full sha>",
+  "checks": {"gofmt": "ok", "build": "ok", "vet": "ok", "test": "ok"},
+  "run_url": "https://github.com/<owner>/<repo>/actions/runs/<id>",
+  "finished_at": "2026-09-18T20:12:23Z"
+}
+```
+
+How to read it: `checks` holds a key only for a step that ran and passed, so a
+missing `gofmt`/`build`/`vet`/`test` key means that step failed or was skipped;
+`status` is the overall job status. The publish step runs with `if: always()`,
+so failing runs are reported too. The branch is force-pushed to a single commit,
+so only the newest run is available there — use `run_url` (or the Actions tab)
+for history. Treat the report as the authoritative external check: local results
+come from a developer machine, the report comes from a clean checkout.
 
 ## Health check
 

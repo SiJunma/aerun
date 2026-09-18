@@ -363,6 +363,36 @@ green, reconciliation is signed off, and rollback conditions have expired.
 - Browser reconnect/SSE resubscription tests.
 - Backup restore test before each major release.
 
+### Continuous verification channel (CI report)
+
+Every push touching `backend/**` is verified on a clean Linux runner
+(`.github/workflows/backend.yml`: gofmt, `go build`, `go vet`, `go test`) and
+the outcome is published as `report.json` to the `ci-report` branch of this
+same repository. It is a plain-git channel: it needs no tokens and no GitHub
+API access, which matters because the repository is private.
+
+```
+git fetch origin ci-report
+git show origin/ci-report:report.json
+```
+
+Schema `aerun-ci-report/1` fields:
+
+| Field | Meaning |
+| --- | --- |
+| `run_number` | GitHub Actions run number (also the history key via `run_url`) |
+| `status` | overall job status (`success`, `failure`, `cancelled`) |
+| `branch`, `commit` | branch name and full commit SHA that was verified |
+| `checks` | `{gofmt, build, vet, test}` — a key is present with `ok` **only when that step ran and passed**; missing key = failed or skipped |
+| `run_url` | browser link for full logs |
+| `finished_at` | UTC timestamp of report publication |
+
+The publish step runs with `if: always()`, so red runs are reported too. The
+branch is force-pushed to a single commit, therefore it holds only the latest
+run; use `run_url` or the Actions tab for history. Treat a green report as the
+authoritative external check for backend changes — local success is not enough,
+because the runner is clean and Linux-based.
+
 ## 6. Explicitly deferred items
 
 - Scaling beyond one SQLite writer or one VPS. Reassess with measured queue
@@ -383,6 +413,11 @@ green, reconciliation is signed off, and rollback conditions have expired.
    command depend on email delivery.
 5. Update this plan and the canonical schema documentation whenever a target
    contract changes.
+6. After pushing backend changes, read the machine-readable CI report instead of
+   assuming the change is verified: `git fetch origin ci-report` and
+   `git show origin/ci-report:report.json` (see section 5). Fix red checks
+   before starting new work, and remember that only the latest run is stored on
+   that branch.
 
 ## 8. Progress log
 
