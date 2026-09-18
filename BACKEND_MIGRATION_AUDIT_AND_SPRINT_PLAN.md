@@ -700,3 +700,45 @@ no downtime).
 
 **Next:** Sprint 1 leftovers (request/correlation IDs, CI pipeline with
 `go test`), then Sprint 2 (users auth collection, RBAC, secure reads).
+### 2026-09-18 — Sprint 1 leftovers done: request IDs + CI; DoD complete
+
+**Stage:** Sprint 1 formally complete; the CI workflow is committed and will
+execute on the next push touching `backend/**`.
+
+**Done**
+
+- Request correlation IDs wired in the platform adapter
+  (`internal/platform/pocketbase/request_id.go`): every response carries
+  `X-Request-ID` — a caller-provided ID is echoed only when it matches
+  `^[A-Za-z0-9_.:-]{1,64}$` (no whitespace/control chars, so response
+  splitting or log forging via the echo path is impossible), otherwise a
+  crypto-random 16-char ID is generated (`security.RandomString`). The ID is
+  stored in PB's request-scoped event store (`e.Set`/`e.Get`, confirmed in
+  `tools/router/event.go` of v0.40.4) and returned by the health endpoint as
+  `request_id`. Live-verified on 127.0.0.1:8090: generated, echoed and
+  rejected paths all behave as designed.
+- Unit tests for the sanitizer (generation on empty/whitespace/forbidden/
+  oversized/control-char input, echo of valid input, trim of surrounding
+  spaces).
+- CI pipeline: `.github/workflows/backend.yml` — gofmt, `go build`, `go vet`,
+  `go test -count=1` on ubuntu-latest, Go pinned via `backend/go.mod`, paths
+  filter on `backend/**`, manual dispatch, concurrency cancel-in-progress,
+  read-only token.
+- Line endings: `.gitattributes` pins `backend/**/*.go` to `text eol=lf`
+  (gofmt requires LF); working copies normalized with `gofmt -w`. This
+  surfaced REAL formatting defects previously masked by CRLF noise (stray
+  double blank line in config.go, missing final newline in two new files,
+  alignment drift in config_test.go) — the CI gofmt step is load-bearing,
+  not cosmetic. `gofmt -l` is clean locally now.
+- go build / go vet / go test pass; the local server was restarted on the new
+  build and re-verified.
+
+**Sprint 1 DoD status**: complete — reproducible startup from an empty folder
+with applied migrations, health check, structured logs with request IDs, no
+local secrets for tests, CI wired.
+
+**Next:** Sprint 2 — Identity, RBAC and secure reads: `users` auth collection,
+roles, public profile DTO without email, registration/verification/password
+reset, Google OAuth locally, RBAC middleware with deny-by-default rules — plus
+the mail hard-disable guardrail on PB auth routes (email delivery stays
+disabled).

@@ -113,7 +113,6 @@ func value(key, fallback string, get func(string) string) string {
 	return fallback
 }
 
-
 func validOrigin(raw string, httpsOnly bool) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(raw, "*") {

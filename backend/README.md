@@ -7,11 +7,12 @@
 > preflight, no header for disallowed origins), `idempotency_keys` migration
 > applied. First run opens/prints a superuser installer URL
 > (`/_/#/pbinstall/<token>`, valid 30 min) — create your admin there.
-> Remaining gaps: request/correlation IDs, CI, encryption is wired for settings
-> only when `AERUN_ENCRYPTION_KEY` is set (still validated-but-unused otherwise),
-> production absolute data paths and no-mail enforcement pending. Note: CLI
-> arguments are rejected, so `superuser upsert` is unreachable; use the
-> installer URL on a fresh `pb_data` (or delete `pb_data/` to regenerate it).
+> Remaining gaps: production absolute data paths and no-mail-route enforcement
+> (Sprint 2 guardrail), dedicated read-only export identity (Sprint 8), domain
+> APIs (auth/forum/messaging/…, Sprint 2+). CI (gofmt/build/vet/test) is wired
+> in `.github/workflows/backend.yml`. Note: CLI arguments are rejected, so
+> `superuser upsert` is unreachable; use the installer URL on a fresh `pb_data`
+> (or delete `pb_data/` to regenerate it).
 > See `tools/migration/README.md` for the independently tested Node tools.
 > PocketBase imports are allowed in the platform adapter AND schema migrations,
 > not in future domain packages. Domain APIs (auth/forum/messaging/…) remain
@@ -60,6 +61,11 @@ GET http://127.0.0.1:8090/api/aerun/health
 The application also verifies the endpoint itself after startup and logs the
 health result with structured (JSON) fields including a correlation-ready env
 context.
+
+Every response carries an `X-Request-ID` header: a valid incoming ID is echoed
+(max 64 chars, `[A-Za-z0-9_.:-]`), otherwise a fresh random ID is generated.
+The same value is returned in the health body as `request_id` and is available
+to handlers for structured-log correlation.
 
 ## Migrations
 

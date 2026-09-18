@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Go sources must keep LF everywhere (gofmt requirement), including Windows
+# checkouts; otherwise gofmt flags every file as unformatted locally.
+backend/**/*.go text eol=lf

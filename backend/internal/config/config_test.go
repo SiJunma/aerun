@@ -41,12 +41,12 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 
 func TestLoadProductionRequiresExplicitOriginsAndKey(t *testing.T) {
 	env := map[string]string{
-		"AERUN_ENV":              "production",
-		"AERUN_ENCRYPTION_KEY":   "0123456789abcdef0123456789abcdef",
-		"AERUN_DATA_DIR":         "/srv/aerun/pb_data",
-		"AERUN_ALLOWED_ORIGINS":  "https://aerun.example.com",
-		"AERUN_PUBLIC_URL":       "https://aerun.example.com",
-		"AERUN_LISTEN":           "127.0.0.1:8090",
+		"AERUN_ENV":             "production",
+		"AERUN_ENCRYPTION_KEY":  "0123456789abcdef0123456789abcdef",
+		"AERUN_DATA_DIR":        "/srv/aerun/pb_data",
+		"AERUN_ALLOWED_ORIGINS": "https://aerun.example.com",
+		"AERUN_PUBLIC_URL":      "https://aerun.example.com",
+		"AERUN_LISTEN":          "127.0.0.1:8090",
 	}
 	cfg, err := Load(envGetter(env))
 	if err != nil {

@@ -42,6 +42,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 	})
 
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.BindFunc(assignRequestID)
 		registerRoutes(se, cfg)
 		return se.Next()
 	})
@@ -141,6 +142,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 			"status":      "ok",
 			"service":     "aerun-backend",
 			"environment": cfg.Environment,
+			"request_id":  requestIDFrom(e),
 		})
 	})
 }
