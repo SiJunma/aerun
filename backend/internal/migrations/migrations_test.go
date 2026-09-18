@@ -25,7 +25,7 @@ func TestMigrationsProduceHealthyApp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("idempotency_keys collection must exist after migrations: %v", err)
 	}
-	if collection.Fields.Get("actor") == nil {
+	if collection.Fields.GetByName("actor") == nil {
 		t.Fatal("actor field must exist")
 	}
 	var _ core.App = app

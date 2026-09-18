@@ -36,7 +36,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		if allow := strings.Join(cfg.Origins, ","); allow != "" {
-			se.Router.Bind(apis.WrapStdMiddleware(corsAllowList(allow)))
+			se.Router.BindFunc(apis.WrapStdMiddleware(corsAllowList(allow)))
 		}
 		registerRoutes(se, cfg)
 		return se.Next()

@@ -541,3 +541,53 @@ schema/auth/RBAC then Sprint 3 transactional commands. Extend exporter coverage
 and build domain import against those schemas. Finish other commands/frontend
 integration before home-machine rehearsal and VPS readiness. No sprint DoD is
 claimed complete; no production changes or deployment performed.
+### 2026-09-18 — Go + PocketBase installed; first real build, tests and runtime probe
+
+**Stage:** Sprint 1 environment unblocked. Go toolchain installed on the home
+machine per user request; the previously deferred verification commands ran.
+
+**Done**
+
+- Installed Go 1.27.0 (windows/amd64) via winget (`GoLang.Go`), matching the
+  `go 1.27` directive. `go mod tidy` in backend/ downloaded PocketBase v0.40.4
+  with all transitive dependencies and generated `go.sum` (131 lines); go.mod
+  gained the indirect dependency block.
+- Fixed two compile-level API mismatches against v0.40.4, as predicted:
+  1. `internal/platform/pocketbase/run.go`: `se.Router.Bind(apis.
+     WrapStdMiddleware(...))` does not compile — `WrapStdMiddleware` returns
+     `func(*core.RequestEvent) error`, while `Bind` wants
+     `*hook.Handler[*core.RequestEvent]`. Switched to `se.Router.BindFunc(...)`.
+  2. `internal/migrations/migrations_test.go`: `core.FieldsList` has no `Get`;
+     the accessor is `GetByName`. Switched to `Fields.GetByName("actor")`.
+- `go build ./...` exits 0. `go test ./...` exits 0: `internal/config` ok,
+  `internal/migrations` ok (fresh `tests.NewTestApp` + `RunAllMigrations`,
+  idempotency_keys/actor/index assertions), `internal/platform/pocketbase` ok
+  (production without encryption key rejected before serve). Helper signatures
+  (`tests.NewTestApp()`, `app.RunAllMigrations()`) confirmed valid on v0.40.4.
+- Runtime probe (`go run ./cmd/aerun`, local env vars): **refined the two
+  earlier claims with source-verified facts.** `pb.Start()` with no arguments
+  runs Bootstrap (creates `pb_data/{data.db,auxiliary.db,.notify}` with system
+  tables only), then cobra prints the CLI help (`serve`, `superuser`) and the
+  process exits — no listener is started, and **app migrations are NOT
+  applied**: in v0.40.4 `RunAllMigrations()` is invoked only by the `serve`
+  command (`cmd/serve.go:67`) and by `tests.NewTestApp` (`tests/app.go:125`),
+  not by `Bootstrap()`. Consequently the health probe in `Run()` is
+  unreachable in the no-arg path (serveErr resolves immediately with nil).
+  The original "serves on default 127.0.0.1:8090" claim was definitively
+  wrong; the "no listener" correction was confirmed and made precise.
+- The probe-created `pb_data/` (bootstrap-only DB without app migrations) was
+  removed to avoid a stale half-initialized data dir; `pb_data/` stays
+  gitignored.
+
+**Corrections / open Sprint 1 blockers (unchanged scope, now precise)**
+
+- Entry point must invoke the serve path programmatically (run the `serve`
+  subcommand through `RootCmd`, or call Bootstrap + RunAllMigrations +
+  `apis.Serve` directly) — otherwise no listener and no app migrations, ever.
+  This is the AERUN_LISTEN wiring already scheduled for the Sprint 2 review.
+- Comma-joined CORS middleware, unwired encryption, production path/no-mail
+  enforcement, request IDs, CI: still open, unchanged.
+
+**Next:** implement the serve wiring against verified v0.40.4 APIs, re-run the
+health probe end-to-end (`go run ./cmd/aerun` must serve and pass its own
+probe), then Sprint 2 (users/RBAC collections and rules).

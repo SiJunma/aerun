@@ -1,11 +1,15 @@
-> **Current status (2026-09-17): INCOMPLETE, not runnable/production-ready.**
-> Go/PocketBase will not be installed or run on this device by user request.
-> The startup instructions below describe the intended behavior, not a verified
-> working server. `pb.Start()` has no `serve` command, the listener config is not
-> wired, and the custom comma-separated CORS header is invalid. Encryption key
-> presence is checked but encryption is not wired; production absolute data paths
-> are not enforced. Mail mode validation does not disable PB auth email routes.
-> Versions, migrations and Go tests remain unverified; `go.sum` is absent.
+> **Current status (2026-09-18): compiles, Go tests pass, NOT yet a working server.**
+> Go 1.27.0 and PocketBase v0.40.4 are installed and verified on this machine:
+> `go.sum` generated via `go mod tidy`; `go build ./...` and `go test ./...` pass
+> (config, fresh-app migrations, platform adapter). Verified against the v0.40.4
+> source: `pb.Start()` with no arguments bootstraps system tables, prints the CLI
+> help (`serve`/`superuser`) and exits — no listener starts and app migrations do
+> NOT run, because v0.40.4 calls `RunAllMigrations()` only inside the `serve`
+> command. Until the entry point invokes serve programmatically, the run command
+> below just prints help and `AERUN_LISTEN` stays informational. The custom
+> comma-separated CORS header is still invalid; encryption is validated but not
+> wired; production absolute data paths and no-mail behavior are not enforced.
+> Mail mode validation does not disable PB auth email routes.
 > See `tools/migration/README.md` for the independently tested Node tools.
 > PocketBase imports are allowed in the platform adapter AND schema migrations,
 > not in future domain packages. Correlation IDs/CI/domain APIs remain pending.
@@ -38,6 +42,10 @@ $env:AERUN_LISTEN='127.0.0.1:8090'
 go run ./cmd/aerun
 ```
 
+> Note (2026-09-18): with the current entry point this prints the PocketBase CLI
+> help and exits — no listener and no app migrations. Programmatic serve wiring
+> is the pending review item (see `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`).
+
 The process fails startup when command-line flags are used; this keeps one
 configuration path between local and VPS deployments.
 
@@ -64,7 +72,9 @@ environment-validated path.
 
 - Email delivery is deliberately disabled (`AERUN_MAIL_MODE=disabled`).
 - Command-line flags (`--http`, `--origins`, `--dir`) are intentionally
-  rejected; listener/origin management is finalized in the next sprint review
-  after verifying PocketBase serve APIs against v0.40.4.
+  rejected. Verified on v0.40.4 source: `pb.Start()` without arguments does not
+  start a listener and does not apply app migrations (`RunAllMigrations()` runs
+  only inside the `serve` command, `cmd/serve.go`); programmatic serve wiring is
+  finalized in the next sprint review.
 - Production mode requires `AERUN_ENCRYPTION_KEY`, absolute `AERUN_DATA_DIR`
   and explicit `AERUN_ALLOWED_ORIGINS`; missing values abort startup.
