@@ -1,10 +1,13 @@
 package pocketbase
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/pocketbase/pocketbase"
@@ -30,14 +33,15 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 	}
 
 	pb := pocketbase.NewWithConfig(pocketbase.Config{
-		DefaultDataDir:  cfg.DataDir,
-		HideStartBanner: true,
+		DefaultDataDir: cfg.DataDir,
+		// Settings are encrypted only while AERUN_ENCRYPTION_KEY is present
+		// (required by config.Validate in production); with an empty key value
+		// PocketBase stores settings as plaintext, so local runs stay keyless.
+		// Verified against core/settings_model.go in PocketBase v0.40.4.
+		DefaultEncryptionEnv: "AERUN_ENCRYPTION_KEY",
 	})
 
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		if allow := strings.Join(cfg.Origins, ","); allow != "" {
-			se.Router.BindFunc(apis.WrapStdMiddleware(corsAllowList(allow)))
-		}
 		registerRoutes(se, cfg)
 		return se.Next()
 	})
@@ -54,16 +58,51 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		return pb.Save(settings)
 	})
 
+	// apis.Serve requires a bootstrapped app (DB connections, settings, system
+	// tables). pb.Start() used to bootstrap implicitly; the programmatic path
+	// must do it explicitly before serving.
+	if err := pb.Bootstrap(); err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+
+	// Explicit programmatic serve. Verified against v0.40.4: pb.Start() with no
+	// arguments only bootstraps, prints the cobra help and exits — it never
+	// serves and never applies app migrations (RunAllMigrations runs only
+	// inside the serve command). apis.Serve blocks for the process lifetime,
+	// applies every new migration itself, triggers OnServe on its own router
+	// and never parses os.Args, so the env-only configuration (CLI arguments
+	// stay rejected) holds for local and VPS deployments alike. The listener
+	// is the validated loopback AERUN_LISTEN; production terminates TLS in a
+	// reverse proxy in front of this address. CORS is PocketBase's own
+	// apis.CORS middleware fed by the validated origins allowlist (proper
+	// per-origin echo; the invalid comma-joined custom header is gone).
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- pb.Start() }()
+	go func() {
+		serveErr <- apis.Serve(pb, apis.ServeConfig{
+			ShowStartBanner: false,
+			HttpAddr:        cfg.Listen,
+			AllowedOrigins:  cfg.Origins,
+		})
+	}()
+
+	// Relay termination signals into PocketBase's OnTerminate hook, where
+	// apis.Serve binds its graceful HTTP shutdown (mirrors pb.Start()).
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 
 	select {
 	case err := <-serveErr:
 		return err
+	case <-sigCh:
+		termErr := pb.OnTerminate().Trigger(&core.TerminateEvent{App: pb}, func(e *core.TerminateEvent) error {
+			return e.App.ClearBootstrap()
+		})
+		return errors.Join(termErr, <-serveErr)
 	case <-time.After(startupTimeout):
 	}
-	// pocketbase.New() serves on its built-in default 127.0.0.1:8090; explicit
-	// listener/origin binding is finalized in the next sprint review (README).
+
+	// The listener is up or about to fail; self-probe the health endpoint.
 	url := fmt.Sprintf("http://%s", cfg.Listen)
 	client := &http.Client{Timeout: 2 * time.Second}
 	var lastErr error
@@ -86,7 +125,13 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		}
 		time.Sleep(healthCheckInterval)
 	}
-	// The host keeps running for manual inspection; logs carry the failure cause.
+	// Prefer the actual serve failure (e.g. busy port) over the probe timeout.
+	select {
+	case err := <-serveErr:
+		return err
+	default:
+	}
+	// Surface the probe failure; main exits and the process stops.
 	return fmt.Errorf("health check failed after %s at %s: %w", startupTimeout, url, lastErr)
 }
 
@@ -98,19 +143,4 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 			"environment": cfg.Environment,
 		})
 	})
-}
-
-// corsAllowList sets a comma-joined origin allowlist header. A permissive
-// "*" value is filtered out during configuration loading and never reaches
-// the wire.
-func corsAllowList(allow string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if allow != "" {
-				w.Header().Set("Access-Control-Allow-Origin", allow)
-				w.Header().Set("Vary", "Origin")
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
 }

@@ -591,3 +591,59 @@ machine per user request; the previously deferred verification commands ran.
 **Next:** implement the serve wiring against verified v0.40.4 APIs, re-run the
 health probe end-to-end (`go run ./cmd/aerun` must serve and pass its own
 probe), then Sprint 2 (users/RBAC collections and rules).
+### 2026-09-18 — Programmatic serve wired; Sprint 1 DoD met locally
+
+**Stage:** Sprint 1 locally verifiable. The previously deferred "wire AERUN_LISTEN
+into serve" work is done and validated with a live server on this machine.
+
+**Done**
+
+- First phase committed as `8d5ac95` (toolchain verification + two API fixes).
+- `internal/platform/pocketbase/run.go` rewritten from `pb.Start()` to explicit
+  `Bootstrap()` + `apis.Serve(pb, ServeConfig{HttpAddr: cfg.Listen,
+  AllowedOrigins: cfg.Origins})`:
+  - `pb.Start()` without arguments never serves (help + exit); `apis.Serve`
+    blocks for the process lifetime, applies all new migrations itself and
+    triggers OnServe on its own router without touching `os.Args` — the
+    env-only configuration guardrail now holds at runtime, not just on paper.
+  - `Bootstrap()` must be called explicitly (`apis.Serve` requires a
+    bootstrapped app; first attempt panicked in `MigrationsRunner.
+    initMigrationsTable` because `app.DB()` is nil before bootstrap).
+  - Removed the invalid custom comma-joined `Access-Control-Allow-Origin`
+    middleware; CORS is now PocketBase's own `apis.CORS` fed by the validated
+    origins allowlist (per-origin echo confirmed live: allowed origin echoed,
+    disallowed origin gets no header, preflight 204 with correct `Vary`).
+  - Settings encryption wired via `DefaultEncryptionEnv: "AERUN_ENCRYPTION_KEY"`
+    (verified in `core/settings_model.go`: non-empty key encrypts the settings
+    blob, empty key stores plaintext — safe for local keyless runs, and the
+    production validation already demands the key).
+  - Graceful shutdown: termination signals trigger PocketBase's OnTerminate,
+    where `apis.Serve` binds its HTTP shutdown; health self-probe runs after
+    startup and reports structured `backend healthy` (observed in real logs).
+- Live verification on 127.0.0.1:8090 (fresh pb_data): `GET /api/aerun/health`
+  → 200 JSON; `/_/` dashboard → 200; `idempotency_keys` table + columns +
+  `idx_idempotency_actor_key` confirmed in data.db; installer printed a
+  superuser creation URL (`/_/#/pbinstall/<token>`, 30 min TTL).
+- Known trade-off introduced: CLI arguments are rejected, so PocketBase's
+  `superuser upsert` subcommand is unreachable; first superuser comes from the
+  installer URL on a fresh `pb_data/` (documented in backend/README.md).
+- README status banner and limitations rewritten to the verified state.
+- Probe artifacts (`pb_data/`, temp logs) removed after verification; the
+  committed tree contains no runtime databases.
+- gofmt flags every file as unformatted due to CRLF working-copy checkout
+  (content is gofmt-clean; go vet passes). Cosmetic CI concern only, noted
+  for the Sprint 1 CI task.
+
+**Corrections to earlier log**
+
+- "Serves on default 127.0.0.1:8090" was wrong; "no listener" was right but
+  incomplete: app migrations also never run outside the serve path. Both are
+  now moot — the programmatic serve path is wired and verified.
+
+**Sprint 1 DoD status**: met locally — fresh startup applies all migrations,
+exposes the health check, needs no secrets; formal DoD still requires CI.
+
+**Next:** Sprint 1 leftovers (request/correlation IDs, CI pipeline with
+`go test`), then Sprint 2 (users auth collection, RBAC, secure reads).
+Mail hard-disable enforcement on PB auth routes remains a Sprint 2 guardrail
+ alongside the auth work.
