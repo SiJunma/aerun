@@ -47,6 +47,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		return se.Next()
 	})
 
+	// Sprint 2 mail guardrail: intercept every outgoing email at the app
+	// hook level before an SMTP connection or sendmail exec can happen.
+	pb.OnMailerSend().BindFunc(MailHardDisableGuard())
+
 	pb.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
 		if err := e.Next(); err != nil {
 			return err
@@ -56,6 +60,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		settings.Meta.AppURL = cfg.PublicURL
 		settings.Meta.SenderAddress = "no-reply@aerun.invalid"
 		settings.Meta.SenderName = "Aerun"
+		// Defense in depth for the mail hard-disable: even if SMTP settings
+		// were enabled in the dashboard, reset them on every startup. The
+		// OnMailerSend guard above still blocks any send attempt.
+		settings.SMTP.Enabled = false
 		return pb.Save(settings)
 	})
 
@@ -137,7 +145,13 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 }
 
 func registerRoutes(se *core.ServeEvent, cfg config.Config) {
-	se.Router.GET(healthPath, func(e *core.RequestEvent) error {
+	// The AccessResolver middleware runs for every /api/aerun route; custom
+	// command routes bound later in this group can then use RequirePermission.
+	resolver := NewAccessResolver(se.App.Logger())
+	group := se.Router.Group("/api/aerun")
+	group.BindFunc(resolver.Middleware())
+
+	group.GET("/health", func(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, map[string]any{
 			"status":      "ok",
 			"service":     "aerun-backend",
@@ -145,4 +159,6 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 			"request_id":  requestIDFrom(e),
 		})
 	})
+
+	group.GET("/me", meHandler)
 }
