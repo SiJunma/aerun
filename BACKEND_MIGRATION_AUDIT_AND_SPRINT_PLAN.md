@@ -1002,6 +1002,49 @@ deployed state (no writes, no deploy, no data mutation).
    `post_voters` read with a real non-staff member session and record the
    results in this log.
 
+**Why the email copy is removed, and what does NOT depend on it (verified
+2026-09-21 by code inspection + live data)**
+
+The question "is the copy not needed to detect duplicate registrations and to
+send mail without revealing addresses?" was checked against the code, and the
+answer is that the Firebase Auth record is the single working source for both
+jobs:
+
+- Duplicate registrations are detected by Auth, not Firestore:
+  `src/components/auth/RegisterForm.jsx` calls `fetchSignInMethodsForEmail` and
+  handles `auth/email-already-in-use`. Nothing queries
+  `users.where('email', '==', ...)`, so removing the copy changes nothing here.
+- Mail is sent server-side and already falls back to Auth:
+  `functions/index.js` reads `uData.email` and then, when it is empty, resolves
+  `admin.auth().getUser(uid).email` (topic replies ~line 2442, DMs ~line 3941).
+  The copy is therefore optional by construction -- and new registrations
+  already never write it (`firestore.rules` requires `!('email' in ...)` on
+  create), so the Auth path is the normative one.
+- The only functional consumer of the copy that exists anywhere in the client is
+  the chief-admin badge: `resolveUserRoleId`/`isChiefAdmin` in
+  `src/utils/permissions.js` return CHIEF_ADMIN_ID when
+  `userEmail === VITE_ADMIN_EMAIL` **or** `role_id === 'root'`. Live check on
+  the 12 `users` documents: exactly one profile matches `VITE_ADMIN_EMAIL` and
+  it does have `role_id = 'root'`, while no account relies on the email branch
+  alone -- so the badge keeps resolving after the strip. Root's own "who am I"
+  check uses `user.email` from Auth, which is unaffected.
+- The remaining consumers are cosmetic and root-only: the email display and
+  email search in `AdminPage`/`MembersPage`, and `payload.email` on the
+  notifications page. Addresses stay canonical in Firebase Auth (Console ->
+  Authentication) and are served to staff by the new backend's
+  `GET /api/aerun/admin/users`.
+- Keeping the copy is additionally unsafe because it cannot be a trustworthy
+  index: `firestore.rules` forbids the owner from touching `email`, so a
+  Console/Auth-side email change would leave a stale public address that the
+  legacy admin UI would happily display as current.
+
+Target architecture keeps every job the copy appeared to do, without a public
+copy: the PocketBase auth collection `users` owns a private, unique email
+(`emailVisibility` false, never present in public profile responses), duplicate
+registration is rejected by the unique email index (HTTP 409), verification and
+reset mail come from the auth flow, and notification mail is queued in
+`outbox_events` with recipients resolved server-side.
+
 **Plan changes**
 
 - Sprint 0 items 1-2 are marked DONE with the evidence above instead of being
