@@ -64,8 +64,8 @@ and PostgreSQL if write volume outgrows SQLite.
 
 | Severity | Finding | Current remediation | Follow-up target |
 |---|---|---|---|
-| Critical | Provider email API key was hard-coded as a source fallback. | Removed from source; delivery is disabled safely unless secrets are configured. The exposed key must be rotated in the provider dashboard. | VPS secret manager/environment only; no secrets in code or logs. |
-| High | Public Firestore `users` documents contained email, which field-level Firestore rules cannot hide. | New profiles no longer write email; owner cannot change it; root-only `stripProfileEmails` callable removes existing copies. | Auth collection stores private email; public-profile DTO never contains it. |
+| Critical | Provider email API key was hard-coded as a source fallback. | Removed from source; delivery is disabled safely unless secrets are configured. The exposed key was **rotated on 2026-09-21 and its revocation verified** (old key -> HTTP 401, new key -> HTTP 200); the new secret lives only outside git. | VPS secret manager/environment only; no secrets in code or logs. |
+| High | Public Firestore `users` documents contained email, which field-level Firestore rules cannot hide. | New profiles no longer write email; owner cannot change it; root-only `stripProfileEmails` callable removes existing copies. **Still live on 2026-09-21: 11 of 12 `users` documents carry `email` under `allow read: if true` -- the root action is the remaining Sprint 0 item.** | Auth collection stores private email; public-profile DTO never contains it. |
 | High | Any signed-in user could read/write RTDB `admin_notifications`. | Browser writes are denied; admin actions use a server callable; reads require admin/root claim. | Replace with protected persistent notifications and SSE. |
 | High | RTDB `post_voters` was readable and writable by clients. | Made server-only; `getPostVoters` now checks visibility of the post category. | Store/query votes through the command/read layer only. |
 | High | Clients could forge audit rows and admins could delete them. | Direct client audit writes and all audit deletion are denied; a constrained privileged callable is temporary bridge. | Audit is appended inside each server command; never expose generic audit writer. |
@@ -167,21 +167,71 @@ sprint until the preceding sprint's Definition of Done is met.
 **Goal:** deploy the current security patch and stop expanding the legacy
 surface.
 
-Tasks:
+Tasks (status re-verified read-only against the live project on 2026-09-21; see
+the closure entry at the end of the journal):
 
 1. Rotate the already exposed Brevo API key; set `BREVO_API_KEY` and
    `BREVO_SENDER_EMAIL` only in the Functions secret/configuration store.
+   **DONE 2026-09-21 (operator), independently verified.** The operator rotated
+   both credentials in the Brevo dashboard; the SMTP password lives only in the
+   Firebase Auth SMTP settings and the API key only in the gitignored
+   `functions/.env` (`BREVO_API_KEY`, 89 chars); Functions were redeployed the
+   same day. Verification evidence (no key material recorded): the only key that
+   ever existed in git history (`functions/email.js` at commit `0d6390c`,
+   removed in `c8ed35f`) is dead -- `GET https://api.brevo.com/v3/account` with
+   it answers **HTTP 401 `{"message":"API Key is not enabled"}`** -- while the
+   key in `functions/.env` answers **HTTP 200**; the two hashes differ
+   (sha256/12 `e57f04fc6f56` vs `986b8cff4db4`), and `git grep xkeysib` finds no
+   occurrence in any tracked file on `main` or on the migration branch. Note:
+   all three credentials observed for this account (the revoked key, the new API
+   key and the new SMTP password) share one 64-hex core segment and differ only
+   in the last 16 characters, so a shared middle segment is not evidence of a
+   stale secret -- the revoked key's rejection above is the authoritative check.
 2. Deploy the updated Firestore/RTDB rules and Functions.
+   **DONE, verified 2026-09-21.** Deployed rulesets were compared read-only with
+   the repository files: `firestore.rules` identical (sha256 prefix
+   `3d75775db4`, deployed 2026-09-16T15:18:41Z), `storage.rules` identical
+   (`de75599aca`), `database.rules.json` identical (`a1b6e7d25a`, read through
+   the RTDB REST `.settings/rules.json` endpoint -- RTDB rulesets do not appear
+   in the `firebaserules` releases list, so the live rules file is the only
+   reliable source). Functions were redeployed on 2026-09-21 for the credential
+   rotation and for the Node 22 runtime bump.
 3. As the root account, invoke `stripProfileEmails` repeatedly with the
    returned `nextAfterUid` until `done=true`; verify that no `users` document
    contains `email`.
+   **OPEN -- live exposure confirmed 2026-09-21.** Read-only probe: the `users`
+   collection holds 12 documents and 11 of them still carry an `email` field,
+   while `firestore.rules` grants `match /users/{userId}` `allow read: if true`
+   -- those 11 addresses are readable by anyone, signed in or not. The
+   `stripProfileEmails` callable is deployed and root-only
+   (`functions/index.js`); with 12 documents a single call (default `limit` 200)
+   covers the whole collection and returns `done: true`, and a second call must
+   return `stripped: 0`. Accepted side effect: the legacy admin UI shows a
+   profile email only to root (`isRootAdmin ? u.email : '***'`), so after the
+   strip root loses that display and the email search in AdminPage/MembersPage;
+   the addresses stay canonical in Firebase Auth (Console -> Authentication) and
+   are exposed to staff by the new backend (`GET /api/aerun/admin/users`).
 4. Confirm normal members cannot read/write RTDB admin alerts, cannot read
    `post_voters`, and cannot write `audit_logs`.
+   **Rules level: DONE, verified 2026-09-21.** Anonymous access is denied
+   (unauthenticated `GET /.json?shallow=true` -> HTTP 401) and the live rules
+   require `role_id` `admin`/`root` to read `admin_notifications` with
+   `".write": false`; `post_voters`, `main_page_cache` and `topic_posts_cache`
+   are `false`/`false`; `audit_logs` has no rule at all, so RTDB's
+   deny-by-default applies. The strict DoD still asks for the manual sheet with
+   a real member token -- open, it needs a signed-in member session.
 5. Record an export/snapshot of Firestore, RTDB, Storage and Auth before any
    later schema work.
+   **DONE 2026-09-18** for Firestore + Auth + Storage; RTDB was excluded by
+   decision (it is a derived cache) -- see the 2026-09-18 journal entry.
 
 **Definition of Done:** key rotation complete, rules deployed, profile email
 copies removed, and the manual permission test sheet passes.
+Status 2026-09-21: rotation and rules deployment are complete and independently
+verified, the profile email copies are still live (item 3: 11 documents) and the
+member-token permission sheet has not been run, so Sprint 0 is still NOT closed.
+Item 3 is a single root action and its data is recoverable (the addresses stay
+in Firebase Auth).
 
 ### Sprint 1 — Local Go/PocketBase foundation
 
@@ -871,8 +921,93 @@ for the previous commit (cbc8856, run #4) was green before this work started.
 - Sprint 2 task 3 (Google OAuth end-to-end locally) requires real Google
   credentials — a human prerequisite, deferred until provided; the users
   collection keeps OAuth2 disabled until then.
-- Sprint 0 items 1-4 (key rotation, rules deploy, stripProfileEmails,
-  RTDB permission sheet) remain manual/user-action items.
+- Sprint 0 status after the operator pass of 2026-09-21: items 1 (key rotation)
+  and 2 (rules/Functions deploy) are DONE and independently verified; item 3
+  (`stripProfileEmails`) is still live (11 of 12 public profiles expose `email`),
+  item 4 still needs the member-token permission sheet, item 5 was done for
+  Firestore/Auth/Storage. See the dedicated 2026-09-21 operator entry below.
 - Next: Sprint 3 — forum transactional command layer (CreateTopic/CreatePost
   with per-topic sequence, counters in-transaction, cursor pagination,
   idempotency middleware, error contract).
+
+### 2026-09-21 — Operator security pass on the Firebase baseline (Sprint 0 items 1-2 closed)
+
+**Context:** the exposure of the Brevo API key and the pending Sprint 0 items
+were reviewed together; the operator performed the credential and runtime work
+on the live project, and the agent re-verified every claim read-only against the
+deployed state (no writes, no deploy, no data mutation).
+
+**Done by the operator**
+
+- Brevo credential rotation: a new SMTP password was set in the Firebase Auth
+  SMTP settings (so verification/reset mail flows through Brevo) and the old
+  leaked API key was revoked in the provider dashboard; the replacement API key
+  is stored only in the gitignored `functions/.env`.
+- Functions redeployed twice: once to load the new API key and once to bump the
+  runtime from Node.js 20 to 22 (Node 20 is decommissioned 2026-10-30).
+- `main` hardening: `.gitignore` now covers `backend/migration-data/` (snapshot
+  data with real user records) and `backend/pb_data/` (local dev database), so
+  that data cannot be committed from the live branch by accident.
+
+**Verified by the agent (read-only, live project)**
+
+- Key rotation is real, not just recorded: the only key that ever existed in git
+  history (`functions/email.js` at `0d6390c`, removed in `c8ed35f`) answers
+  HTTP 401 `API Key is not enabled` on `GET /v3/account`, while the key now in
+  `functions/.env` answers HTTP 200; their sha256 prefixes differ; `git grep
+  xkeysib` finds nothing in tracked files on either `main` or this branch.
+- Deployed rules match the repository version byte for byte: `firestore.rules`
+  (sha256 `3d75775db4`, released 2026-09-16T15:18:41Z), `storage.rules`
+  (`de75599aca`) and `database.rules.json` (`a1b6e7d25a`). RTDB rules are
+  invisible to the `firebaserules` releases API, so they were read through the
+  RTDB REST `.settings/rules.json` endpoint -- the rules file is authoritative
+  for both the deployed ruleset and the publication state.
+- RTDB exposure is closed: an unauthenticated `/.json?shallow=true` read returns
+  HTTP 401; `admin_notifications` requires the `admin`/`root` claim and denies
+  writes; `post_voters`, `main_page_cache` and `topic_posts_cache` are
+  read/write `false`; `audit_logs` has no rule and therefore falls under RTDB
+  deny-by-default.
+- Firestore snapshot re-check: the `users` collection holds 12 documents, 11 of
+  which still carry `email`, and `match /users/{userId}` is `allow read: if
+  true` -- so the remaining Sprint 0 exposure is confirmed and quantified rather
+  than assumed. `profiles` is empty (the live code uses `users`).
+
+**Remaining manual actions (exact steps, no ambiguity)**
+
+1. Signed in as the root account on the live forum, run the root-only callable
+   `stripProfileEmails` once with the default limit (12 documents < 200). The
+   deployed endpoint is alive and enforces auth -- a bare POST to
+   `https://us-central1-aerun-forum.cloudfunctions.net/stripProfileEmails`
+   answers HTTP 401 `{"error":{"message":"Sign in first.","status":"UNAUTHENTICATED"}}`,
+   which also proves the redeployed code matches `functions/index.js`. Two
+   workable invocation paths:
+   - scripted (offered by the agent, needs one explicit go-ahead): mint a custom
+     token for the root uid with the Admin SDK from local ADC, exchange it via
+     Identity Toolkit `signInWithCustomToken` for an ID token, then POST
+     `{"data":{}}` with that bearer token. The callable touches exactly one
+     field (`email`) on `users` documents;
+   - manual: open the live forum as root, open the browser console and invoke the
+     callable through the modular SDK (`getFunctions` + `httpsCallable`).
+   The response must be `{ processed: 12, stripped: 11, done: true }`.
+2. Run it a second time and require `stripped: 0` as proof that no public
+   profile carries an email copy any more.
+3. Re-run the read-only probe (or ask the agent to) to confirm
+   `withEmailField=0`.
+4. Optional hardening while switching the frontend: the legacy admin UI shows
+   profile emails only to root, so after the strip that display and the email
+   search in `AdminPage`/`MembersPage` stop returning values; the addresses stay
+   canonical in Firebase Auth and will be served by
+   `GET /api/aerun/admin/users` on the new backend.
+5. Sprint 0 item 4 strictness: exercise `admin_notifications` read/write and
+   `post_voters` read with a real non-staff member session and record the
+   results in this log.
+
+**Plan changes**
+
+- Sprint 0 items 1-2 are marked DONE with the evidence above instead of being
+  described as pending manual work; item 3 is quantified as 11 live documents
+  and paired with a two-call verification recipe; the critical-finding row in
+  section 2.2 now records the verified rotation.
+- No backend (Go) code changed in this pass: the migration branch was only used
+  to read and update this plan, so the CI report for `de1bf46` remains the
+  authoritative verification for Sprint 2.
