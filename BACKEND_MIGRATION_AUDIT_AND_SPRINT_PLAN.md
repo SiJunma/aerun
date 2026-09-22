@@ -801,3 +801,78 @@ roles, public profile DTO without email, registration/verification/password
 reset, Google OAuth locally, RBAC middleware with deny-by-default rules — plus
 the mail hard-disable guardrail on PB auth routes (email delivery stays
 disabled).
+### 2026-09-21 — Sprint 2 completed: registration command, owner-only settings, staff admin read model
+
+**Stage:** Sprint 2 task list complete as far as it can go without external
+secrets (Google OAuth credentials are a human prerequisite). The CI report
+for the previous commit (cbc8856, run #4) was green before this work started.
+
+**Done**
+
+- Registration command `POST /api/aerun/auth/register`
+  (`internal/platform/pocketbase/register.go`): guest-only; creates a `player`
+  account in the safe state — `status=pending`, `verified=false`,
+  `emailVisibility=false` — with `nickname_normalized` derived by
+  `auth.NormalizeNickname` (NFKC + lowercase + whitespace collapse). Duplicate
+  email/nickname are pre-checked and answer `409`; the Save path maps UNIQUE
+  index violations to the same `409` messages so a concurrent registration can
+  never create a duplicate. Reserved display names (role names, "aerun",
+  "staff", "support", … — `internal/auth/reserved_nickname.go`) are rejected
+  so staff/brand impersonation via a nickname is impossible. Bodies beyond
+  64 KiB are rejected with `413` before parsing. The response carries only
+  public fields (`id`, `nickname`, `role`, `status`, `verified`,
+  `request_id`) — never email/password/tokenKey/legacy_firebase_uid. Password
+  policy (8..72, bcrypt input bound) is validated up front; email format is
+  pre-checked with a conservative pattern, PocketBase re-validates on save.
+- Owner-only settings command `PUT /api/aerun/me/settings`
+  (`settings_update.go`): replaces `users.settings` wholesale (deterministic
+  replace-not-merge), accepts only a single JSON object ≤256 KiB (mirrors the
+  column MaxSize) with nesting depth ≤8; JSON null normalises to `{}` so the
+  column never stores null. Guests `401`, banned accounts `403`, pending
+  accounts keep the legacy self-service rights.
+- Staff-only admin read model `GET /api/aerun/admin/users`
+  (`admin_users.go`): gated by the `admin_access` permission (root/admin;
+  moderators deliberately do not have it), `page`/`perPage` (max 100) and a
+  validated `status` filter bound as a dbx expression (no string filters).
+  Includes email for staff account management (not a public response — the
+  Sprint 2 DoD concerns public responses); `tokenKey`, `password` and
+  `legacy_firebase_uid` are never part of the payload because the map is
+  assembled field by field. Deterministic `created DESC, id ASC` ordering.
+- Wired the three commands in `registerRoutes`; the admin route uses the
+  existing `RequirePermission(auth.PermAdminAccess)` middleware which runs
+  after the group AccessResolver.
+- Tests (`commands_test.go`, raw HTTP client per plan §5): registration
+  success/pending contract with absence assertions (no email, tokenKey,
+  legacy_firebase_uid, emailVisibility in the response), duplicate email and
+  case/whitespace nickname variants, the full validation table (email,
+  password bounds, nickname presence/length/reservation), authenticated
+  callers rejected, oversized bodies `413`; settings access matrix
+  (guest/pending/banned/player/moderator) with DB persistence checks;
+  settings payload contract (depth boundary at 8, arrays/malformed rejected,
+  null → `{}`, oversized `413`); admin access matrix (guest 401, everyone
+  without admin_access 403, root 200) and payload contract with status
+  filter and private-column absence assertions. Plus a unit test for
+  `auth.IsReservedNickname`.
+- README documents the Sprint 2 command endpoints and the no-email behaviour
+  of the PB auth endpoints.
+
+**Findings / decisions**
+
+- `router.ApiError` messages are sentenized (first letter capitalised,
+  trailing dot) — test assertions must match the normalized form.
+- `tests.ApiScenario` expects an empty body when `ExpectedContent` is absent,
+  so every case asserting a body must provide `ExpectedContent`.
+- Registration idempotency keys are NOT in this change: the plan schedules
+  the idempotency middleware + error contract as Sprint 3 task 5; duplicate
+  registrations are already impossible via the UNIQUE indexes.
+
+**Still open (explicit)**
+
+- Sprint 2 task 3 (Google OAuth end-to-end locally) requires real Google
+  credentials — a human prerequisite, deferred until provided; the users
+  collection keeps OAuth2 disabled until then.
+- Sprint 0 items 1-4 (key rotation, rules deploy, stripProfileEmails,
+  RTDB permission sheet) remain manual/user-action items.
+- Next: Sprint 3 — forum transactional command layer (CreateTopic/CreatePost
+  with per-topic sequence, counters in-transaction, cursor pagination,
+  idempotency middleware, error contract).

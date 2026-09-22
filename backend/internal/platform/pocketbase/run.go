@@ -14,6 +14,7 @@ import (
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 
+	"github.com/SiJunma/aerun/backend/internal/auth"
 	"github.com/SiJunma/aerun/backend/internal/config"
 )
 
@@ -161,4 +162,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	})
 
 	group.GET("/me", meHandler)
+	group.PUT("/me/settings", updateSettingsHandler)
+
+	// Sprint 2 identity commands. The route middleware runs after the group
+	// AccessResolver, so RequirePermission sees the resolved access context.
+	group.POST("/auth/register", registerHandler)
+	group.GET("/admin/users", adminListUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
 }

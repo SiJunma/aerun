@@ -104,6 +104,35 @@ Every response carries an `X-Request-ID` header: a valid incoming ID is echoed
 The same value is returned in the health body as `request_id` and is available
 to handlers for structured-log correlation.
 
+## Aerun command endpoints (Sprint 2)
+
+All business commands live under `/api/aerun/*` and resolve the access context
+(role + status + permissions) from the AccessResolver middleware. Deny-by-
+default: the `users` and `roles` collections have locked mutation rules, so
+these commands are the only supported way to change account state.
+
+- `POST /api/aerun/auth/register` — guest-only email/password registration.
+  Creates a `player` account in the safe pending state (`status=pending`,
+  `verified=false`); the response never contains the email address, password
+  hash or token key. Conflicts: `409` for duplicate email or nickname
+  (case/whitespace variants collide via `nickname_normalized`); reserved
+  nicknames (role names, "aerun", "staff", …) are rejected. Bodies beyond
+  64 KiB get `413`.
+- `GET /api/aerun/me` — public profile DTO of the caller (no email, no
+  `legacy_firebase_uid`); guests receive the guest identity.
+- `PUT /api/aerun/me/settings` — owner-only replacement of the caller's
+  `users.settings` JSON object (≤256 KiB, ≤8 nesting levels). Banned accounts
+  get `403`; pending accounts keep their legacy self-service rights.
+- `GET /api/aerun/admin/users` — staff-only account list
+  (`admin_access` permission: root/admin only; moderators get `403`).
+  Supports `page`, `perPage` (max 100) and `status` filters; includes email
+  for staff account management (not a public response) and never exposes
+  `tokenKey`, `password` or `legacy_firebase_uid`.
+
+Email stays hard-disabled (`AERUN_MAIL_MODE=disabled`): the PB verification
+and password-reset endpoints answer `204` while the mailer guard blocks every
+send, so registration-related flows must not claim that an email was sent.
+
 ## Migrations
 
 Migrations are embedded Go files in `internal/migrations`; PocketBase applies
