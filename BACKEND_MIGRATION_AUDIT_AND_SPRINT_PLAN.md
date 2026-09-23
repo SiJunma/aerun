@@ -199,33 +199,58 @@ the closure entry at the end of the journal):
 3. As the root account, invoke `stripProfileEmails` repeatedly with the
    returned `nextAfterUid` until `done=true`; verify that no `users` document
    contains `email`.
-   **OPEN -- live exposure confirmed 2026-09-21.** Read-only probe: the `users`
-   collection holds 12 documents and 11 of them still carry an `email` field,
-   while `firestore.rules` grants `match /users/{userId}` `allow read: if true`
-   -- those 11 addresses are readable by anyone, signed in or not. The
-   `stripProfileEmails` callable is deployed and root-only
-   (`functions/index.js`); with 12 documents a single call (default `limit` 200)
-   covers the whole collection and returns `done: true`, and a second call must
-   return `stripped: 0`. Accepted side effect: the legacy admin UI shows a
-   profile email only to root (`isRootAdmin ? u.email : '***'`), so after the
-   strip root loses that display and the email search in AdminPage/MembersPage;
-   the addresses stay canonical in Firebase Auth (Console -> Authentication) and
-   are exposed to staff by the new backend (`GET /api/aerun/admin/users`).
+   **DONE 2026-09-21 (executed and independently verified).** Read-only probe
+   before the run: the `users` collection held 12 documents and 11 of them still
+   carried an `email` field, while `firestore.rules` grants
+   `match /users/{userId}` `allow read: if true` -- those 11 addresses were
+   world readable. The root-only `stripProfileEmails` callable
+   (`functions/index.js`) was invoked through
+   `backend/tools/ops/strip-profile-emails.mjs`:
+   `batch 1: processed=12 stripped=11 done=true`, then an automatic second pass
+   `processed=12 stripped=0 done=true` proving idempotence. Independent
+   verification (not the tool's own report): a separate ADC-authenticated
+   read-only scan showed `users` with `withEmailField=0`, and a sweep of all 15
+   root collections (`audit_logs`, `categories`, `category_groups`, `designs`,
+   `dms`, `forum_stats`, `guest_activity`, `notifications`, `posts`,
+   `reputation_logs`, `roles`, `settings`, `topic_subscriptions`, `topics`,
+   `users`) found `withEmailField=0` everywhere -- so no collection anywhere in
+   Firestore exposes an email field through its public read rules. Firebase Auth
+   still holds the canonical data: 14 accounts, all 14 with an email, 0 disabled,
+   providers `google.com` + `password`. Accepted side effect: the legacy admin UI
+   shows a profile email only to root (`isRootAdmin ? u.email : '***'`), so root
+   no longer sees it in AdminPage/MembersPage and the email search there finds
+   nothing; addresses remain in Console -> Authentication and are served to staff
+   by the new backend's `GET /api/aerun/admin/users`. The chief-admin badge is
+   unaffected because `isChiefAdmin` accepts `role_id === 'root'` as well, and the
+   live document still has that role.
 
-   **Ready-to-run tool (2026-09-21).** `backend/tools/ops/strip-profile-emails.mjs`
-   performs the root session, the call, and the idempotence proof in one command
+   **App Check obstacle, resolved (2026-09-21).** The first attempt failed at the
+   custom-token exchange: the project enforces App Check on Identity Toolkit, so
+   the client-SDK form (`accounts:signInWithCustomToken?key=<web api key>`)
+   answers `HTTP 401 UNAUTHENTICATED "Firebase App Check token is invalid"`. A
+   read-only diagnostic showed the same request authenticated with a service
+   account access token is accepted (`HTTP 200`, valid ID token), and that
+   `accounts:lookup` works the same way. The tool therefore authenticates both
+   Identity Toolkit calls with the service account token and needs no web API
+   key at all; no production setting (App Check enforcement, rules, function
+   config) was weakened or changed.
+
+   **Tool (2026-09-21).** `backend/tools/ops/strip-profile-emails.mjs` performs
+   the root session, the call, and the idempotence proof in one command
    (dependencies: Node 18+; procedure and cleanup in
    `backend/tools/ops/README.md`). It supports `AERUN_CHECK_ONLY=1`, which proves
    that the synthesised root session is accepted (the callable answers
    `invalid-argument` for `limit=0`, and the root check runs before payload
-   validation) **without modifying a single document** — run that probe first.
-   The whole tool was syntax-checked with `node --check` and exercised for its
-   failure path; the only missing input is the short-lived service account key,
-   which is stored at the gitignored `.secrets/aerun-service-account.json`.
+   validation) **without modifying a single document**; that probe
+   (`auth probe: HTTP 400 status=INVALID_ARGUMENT message="limit must be an
+   integer from 1 to 400."`) passed before the real run. The run needs a
+   short-lived service account key at the gitignored
+   `.secrets/aerun-service-account.json`; **delete that key and the file after
+   the run.**
 
    No deploy is required for this item: the callable was already deployed on
    2026-09-21 and answers authenticated calls (an unauthenticated probe returns
-   `unauthenticated` / "Sign in first."), so nothing in the repository has to
+   `unauthenticated` / "Sign in first."), so nothing in the repository had to
    change for the strip to run.
 
    Deliberately NOT changed: `firestore.rules` still grants
@@ -251,11 +276,16 @@ the closure entry at the end of the journal):
 
 **Definition of Done:** key rotation complete, rules deployed, profile email
 copies removed, and the manual permission test sheet passes.
-Status 2026-09-21: rotation and rules deployment are complete and independently
-verified, the profile email copies are still live (item 3: 11 documents) and the
-member-token permission sheet has not been run, so Sprint 0 is still NOT closed.
-Item 3 is a single root action and its data is recoverable (the addresses stay
-in Firebase Auth).
+Status 2026-09-21 (after the strip run): rotation, rules deployment and the
+profile email removal are all complete and independently verified, so the only
+Sprint 0 item still open is the manual permission test sheet with a real member
+token (item 4). Item 3 no longer exposes anything: a read-only sweep of all 15
+root collections reports zero email fields, and Firebase Auth (14 accounts, all
+with email) remains the canonical source. The strip removed only the public
+copies, and the addresses are recoverable from Auth at any time.
+Outstanding operator action: delete the short-lived service account key created
+for the strip (Google Cloud -> Keys -> Delete) and the local
+`.secrets/aerun-service-account.json` file.
 
 ### Sprint 1 — Local Go/PocketBase foundation
 

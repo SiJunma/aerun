@@ -8,11 +8,20 @@
 // copy is removed, and what does NOT depend on it".
 //
 // Why the custom-token detour: the callable deliberately requires a real root
-// user session (`request.auth.uid` + Firestore role `root`), so a service
-// account token is not enough. This tool signs a Firebase custom token for the
-// root uid, exchanges it for an ID token, and then calls the deployed callable
-// exactly like the browser would. It needs a service account key with signing
-// rights and NO other project role; delete that key right after the run.
+// user session (`request.auth.uid` + Firestore role `root`), so a plain service
+// account bearer token is not enough. This tool signs a Firebase custom token
+// for the root uid, exchanges it for an ID token, and then calls the deployed
+// callable with that ID token: the callable receives a genuine root session, so
+// no production setting is weakened and no rule is bypassed.
+//
+// App Check note (learned the hard way, 2026-09-21): the project enforces App
+// Check on Identity Toolkit, which rejects the *client SDK* exchange
+// (`accounts:signInWithCustomToken?key=<web api key>`) with
+// "Firebase App Check token is invalid". The same request authenticated with a
+// service account access token is accepted, so this tool uses the service token
+// for both the account lookup and the token exchange and needs no web API key.
+// The service account must be one Identity Toolkit accepts -- the project's
+// firebase-adminsdk account works; a role-less account is likely rejected.
 //
 // Dependency free: node:crypto + global fetch only, so no firebase-admin install
 // and no bundle to keep up to date.
@@ -25,7 +34,9 @@
 //   AERUN_REGION      callable region (default us-central1)
 //   AERUN_ROOT_UID    skip the email lookup and use this uid
 //   AERUN_ROOT_EMAIL  root account email (default: VITE_ADMIN_EMAIL from .env.production)
-//   AERUN_WEB_API_KEY Firebase web API key (default: VITE_FIREBASE_API_KEY from .env.production)
+//
+// The tool needs no Firebase web API key: Identity Toolkit calls are
+// authenticated with the service account access token (see the App Check note).
 //
 // Output never contains an email address: only counts and the pagination cursor.
 
@@ -77,15 +88,15 @@ if (key.project_id && key.project_id !== project) {
 }
 console.log(`project=${project} caller=${key.client_email} region=${region}`);
 
-const webApiKey = process.env.AERUN_WEB_API_KEY ?? readEnvValue(".env.production", "VITE_FIREBASE_API_KEY");
-if (!webApiKey) fail("no web API key: set AERUN_WEB_API_KEY or VITE_FIREBASE_API_KEY in .env.production");
-
 const rootEmail = process.env.AERUN_ROOT_EMAIL ?? readEnvValue(".env.production", "VITE_ADMIN_EMAIL");
 if (!process.env.AERUN_ROOT_UID && !rootEmail) fail("no root identity: set AERUN_ROOT_UID or VITE_ADMIN_EMAIL");
 
-// Access token is used only for the account lookup; the callable itself runs on
-// a synthetic root user session, exactly as the browser would.
+// Access token for the Identity Toolkit calls (account lookup + custom token
+// exchange). The callable itself runs on the resulting root user session, which
+// is exactly what the browser would present.
+let cachedAccessToken = null;
 const serviceAccessToken = async () => {
+  if (cachedAccessToken) return cachedAccessToken;
   const now = Math.floor(Date.now() / 1000);
   const tokenUri = key.token_uri ?? "https://oauth2.googleapis.com/token";
   const assertion = signJwt(
@@ -111,13 +122,14 @@ const serviceAccessToken = async () => {
   if (!response.ok || !body.access_token) {
     fail(`service access token request failed (HTTP ${response.status}): ${body.error_description ?? body.error ?? "unknown"}`);
   }
-  return body.access_token;
+  cachedAccessToken = body.access_token;
+  return cachedAccessToken;
 };
 
 const resolveRootUid = async () => {
   if (process.env.AERUN_ROOT_UID) return process.env.AERUN_ROOT_UID;
   const accessToken = await serviceAccessToken();
-  const response = await fetch(`${IDENTITY_BASE}/projects/${project}/accounts:lookup?key=${webApiKey}`, {
+  const response = await fetch(`${IDENTITY_BASE}/projects/${project}/accounts:lookup`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ email: [rootEmail] }),
@@ -141,9 +153,12 @@ const idTokenForRoot = async (uid) => {
     },
     key.private_key,
   );
-  const response = await fetch(`${IDENTITY_BASE}/accounts:signInWithCustomToken?key=${webApiKey}`, {
+  // Authenticated with the service account, not the web API key: the project
+  // enforces App Check on the keyed (client SDK) form of this endpoint.
+  const accessToken = await serviceAccessToken();
+  const response = await fetch(`${IDENTITY_BASE}/accounts:signInWithCustomToken`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ token: customToken, returnSecureToken: true }),
   });
   const body = await response.json().catch(() => ({}));
