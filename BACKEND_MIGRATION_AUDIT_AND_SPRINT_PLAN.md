@@ -1131,3 +1131,34 @@ Plan changes:
 - The claims observation was recorded as a legacy note (see above) rather than a
   new Sprint 0 task, because the Sprint 1-2 command layer removes the dependency
   on claims for authorization.
+### 2026-09-23 — Sprint 0 item 3 is a runtime action, not a deploy (operator question)
+
+Question asked: "must this also be done against live Firestore, on the main
+development branch, and deployed?" Answer recorded here so the distinction is
+not lost:
+
+- **Run, not deploy.** The deployed code does not change: `stripProfileEmails`
+  is already live on `main`'s Functions deployment and answers authenticated
+  calls (unauthenticated probe -> HTTP 401 `Sign in first.`, i.e. the current
+  revision with its auth gate, not a stale one). Closing item 3 means *invoking*
+  that callable once against the live `users` collection.
+- **The git branch is irrelevant to the call.** A deployed callable serves
+  whatever was last deployed; checking out a branch does not change it. The
+  runner added in `backend/tools/ops/strip-profile-emails.mjs` is versioned on
+  `feature/pocketbase-migration` as repository tooling, and it only needs the
+  project id, a service account key with signing rights and a web API key.
+- **No new branch and no merge are needed.** Nothing in `firestore.rules`,
+  `functions/` or `src/` changes for this task; only the live data does.
+
+Operator-side preparation done in the same pass:
+
+- The runner and an operations README were committed (`371a978`,
+  `backend/tools/ops/`), with CI green (run 6: gofmt/build/vet/test all `ok`).
+- Safety gap closed on the live branch: `.secrets/`, `*serviceAccount*.json` and
+  `firebase-adminsdk*.json` were ignored on `feature/pocketbase-migration` but
+  **not** on `main`, where `.secrets/` (holding the 2.3 KB service account key)
+  was visible to `git add .`. `.gitignore` on `main` now carries the same guard
+  (`5668a5f`, pushed). The key file itself is untouched and still outside git.
+
+Remaining input for item 3: explicit go-ahead to run the callable against
+production, since it is the only state-changing step in Sprint 0.
