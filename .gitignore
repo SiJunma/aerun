@@ -31,6 +31,11 @@ dist/
 
 # Firebase credentials
 firebase-config.local.js
+# One-off operational keys must never be committed. Put downloaded service
+# account keys here and delete them as soon as the operation is finished.
+.secrets/
+*serviceAccount*.json
+firebase-adminsdk*.json
 
 # Logs
 npm-debug.log*

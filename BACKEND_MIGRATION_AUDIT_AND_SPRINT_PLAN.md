@@ -211,6 +211,30 @@ the closure entry at the end of the journal):
    strip root loses that display and the email search in AdminPage/MembersPage;
    the addresses stay canonical in Firebase Auth (Console -> Authentication) and
    are exposed to staff by the new backend (`GET /api/aerun/admin/users`).
+
+   **Ready-to-run tool (2026-09-21).** `backend/tools/ops/strip-profile-emails.mjs`
+   performs the root session, the call, and the idempotence proof in one command
+   (dependencies: Node 18+; procedure and cleanup in
+   `backend/tools/ops/README.md`). It supports `AERUN_CHECK_ONLY=1`, which proves
+   that the synthesised root session is accepted (the callable answers
+   `invalid-argument` for `limit=0`, and the root check runs before payload
+   validation) **without modifying a single document** — run that probe first.
+   The whole tool was syntax-checked with `node --check` and exercised for its
+   failure path; the only missing input is the short-lived service account key,
+   which is stored at the gitignored `.secrets/aerun-service-account.json`.
+
+   No deploy is required for this item: the callable was already deployed on
+   2026-09-21 and answers authenticated calls (an unauthenticated probe returns
+   `unauthenticated` / "Sign in first."), so nothing in the repository has to
+   change for the strip to run.
+
+   Deliberately NOT changed: `firestore.rules` still grants
+   `match /users/{userId}` `allow read: if true`. That read is not an accident —
+   `src/pages/MembersPage.jsx` renders the member list for guests, so tightening
+   the rule would break a visible feature. Closing the exposure is therefore the
+   data's job (this item), not the rule's; the rule also already blocks any
+   *new* profile from carrying an email (`!('email' in request.resource.data)`).
+
 4. Confirm normal members cannot read/write RTDB admin alerts, cannot read
    `post_voters`, and cannot write `audit_logs`.
    **Rules level: DONE, verified 2026-09-21.** Anonymous access is denied
@@ -1054,3 +1078,56 @@ reset mail come from the auth flow, and notification mail is queued in
 - No backend (Go) code changed in this pass: the migration branch was only used
   to read and update this plan, so the CI report for `de1bf46` remains the
   authoritative verification for Sprint 2.
+
+### 2026-09-21 — Sprint 0 closure tooling, the email-copy decision, a claims observation
+
+Repository changes in this pass:
+
+- `backend/tools/ops/strip-profile-emails.mjs` (new, dependency free: Node 18+,
+  `node:crypto` + global `fetch`). It resolves the root uid, mints a root session
+  through a custom token, runs the deployed `stripProfileEmails` callable to
+  completion and then proves idempotence with a second pass. `AERUN_CHECK_ONLY=1`
+  performs an authentication probe that modifies nothing (the callable answers
+  `invalid-argument` for `limit=0` because the root check runs before payload
+  validation). Verified with `node --check` and by exercising the failure path;
+  output carries aggregates only, never an address.
+- `backend/tools/ops/README.md` (new): the operator procedure, permissions,
+  expected outputs and key cleanup.
+- `.gitignore`: `.secrets/` and `*serviceAccount*.json` added, because the tool
+  needs a short-lived service account key that must never be committed.
+- This plan: item 1 and item 2 closed with evidence, item 3 quantified and
+  paired with the tooling, plus the section "Why the email copy is removed, and
+  what does NOT depend on it".
+
+Read-only checks against the live project in this pass (nothing was written):
+
+- 12 `users` documents, 11 of them still carry `email`; `firestore.rules` grants
+  `allow read: if true` on that collection. Deliberately left as is:
+  `src/pages/MembersPage.jsx` renders the member list for guests, so tightening
+  the read would remove a visible feature — the data strip (item 3) is the right
+  fix, and the rule already forbids writing `email` on create.
+- Firebase Auth holds 14 accounts; only **2 carry a `role_id` custom claim**, 12
+  carry none — including the root account, whose Firestore role is `root`. The
+  cause is by design rather than a bug: claims are written only by
+  `onUserCreated` and by the role-change branch of `onUserUpdated`
+  (`functions/index.js`), so any account whose role predates those triggers has
+  no claim.
+- Consequence, and how the migration absorbs it: `firestore.rules` tolerates the
+  missing claim through `getUserRole()`, which falls back to a single
+  `users` document `get()`; RTDB rules have no such fallback
+  (`auth.token.role_id === 'admin' || 'root'`), and the client converts a
+  `permission_denied` there into an empty list
+  (`src/api/rtdb-notifications.js`), so staff can see an empty admin
+  notification list without any error. This is a legacy hardening gap, not a
+  migration blocker: the new backend serves admin notifications as a Go read
+  model and does not consult claims for authorization at all. Tracked here as a
+  known legacy behaviour so nobody mistakes the empty list for a new regression.
+
+Plan changes:
+
+- Item 3 is now executable without further design work; the only missing input
+  is the short-lived service account key. No deploy is needed for it — the
+  callable is live and answers authenticated calls.
+- The claims observation was recorded as a legacy note (see above) rather than a
+  new Sprint 0 task, because the Sprint 1-2 command layer removes the dependency
+  on claims for authorization.
