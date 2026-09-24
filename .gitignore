@@ -63,3 +63,9 @@ ui-debug.log
 
 # OS
 Thumbs.db
+
+# Backend local data (new Go/PocketBase backend lives on feature/pocketbase-migration;
+# these are local-only artifacts that must never be committed — migration snapshots
+# contain personal data)
+backend/migration-data/
+backend/pb_data/
