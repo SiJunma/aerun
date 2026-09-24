@@ -1348,6 +1348,16 @@ path that has no explicit override — a regression against the product contract
 - Unchanged by design: `pending` still narrows to `view_forum` + self-edit
   rights, `banned` still denies everything, and `RequirePermission` still
   answers `401` for guests on write routes (`create_topic`, `post_reply`).
+- Machine-verified by CI run 9 (`.github/workflows/backend.yml`, report on the
+  `ci-report` branch for commit `321c6ac`): `gofmt`/`build`/`vet`/`test` all
+  `ok`.
+- The frontend is deliberately **not** touched: the legacy Firebase app keeps
+  running its own `DEFAULT_ROLES`, where the guest row stays empty by design
+  and category reads fall back to the role document. `src/constants/permissions.js`
+  already lists `view_forum` in `MAX_ROLE_PERMISSIONS.guest`, so the value only
+  has to move into `DEFAULT_ROLES.guest` at cutover, together with the route
+  switch — changing it now would widen access on the live branch without an
+  operator decision.
 
 **Impact:** guests (and any unauthenticated read path) now pass the global
 `view_forum` gate, which is the precondition for the Sprint 4 category read
