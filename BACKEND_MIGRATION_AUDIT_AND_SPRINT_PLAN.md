@@ -1192,3 +1192,54 @@ Operator-side preparation done in the same pass:
 
 Remaining input for item 3: explicit go-ahead to run the callable against
 production, since it is the only state-changing step in Sprint 0.
+
+### 2026-09-24 — Sprint 3 completed: forum transactional command layer and 100-concurrency DoD verified
+
+**Stage:** Sprint 3 fully implemented and tested. All tasks completed, including the 100-concurrency Definition of Done benchmark test.
+
+**Done**
+
+- Schema migration `internal/migrations/1766100000_forum_command_layer.go`:
+  - `categories` with bootstrap row "General", slug index `idx_categories_slug`;
+  - `topics` with keyset indexes `idx_topics_list` (`pinned, last_post_created, id`), `idx_topics_category_list`, and `idx_topics_author`;
+  - `posts` with unique composite index `idx_posts_topic_sequence` (`UNIQUE(topic_id, sequence)`) and `idx_posts_author`;
+  - Browser rules locked (superuser-only) pending Sprint 4 visibility rules.
+- Framework-free domain package `internal/forum`:
+  - Input validation for topic title (1..256 runes) and post content (1..65536 runes);
+  - Domain constraints (`MaxPostsPerTopic = 5000`, `DefaultPageLimit = 20`, `MaxPageLimit = 100`);
+  - Keyset pagination limit clamping and unit tests (`validation_test.go`).
+- Error contract middleware (`internal/platform/pocketbase/errors.go`):
+  - Wraps `/api/aerun/*` group, normalising errors into:
+    `{ "data": { "retryable": bool, "conflict": bool, "forbidden": bool, "validation": bool, "kind": string, "request_id": string }, "message": string, "status": int }`.
+- Idempotency middleware and transactional runner (`internal/platform/pocketbase/idempotency.go`):
+  - Requires `Idempotency-Key` header (`[A-Za-z0-9_.:-]{1,255}`);
+  - `runCommand`: single SQLite transaction committing domain records and idempotency envelope;
+  - Replays successful responses byte-for-byte with header `Idempotency-Replayed: true`;
+  - Detects key reuse with payload mismatches as `409 Conflict`.
+- Transactional forum command endpoints:
+  - `POST /api/aerun/topics`: atomic creation of topic + opening post (`sequence=1`), initializes `last_post_*` projection;
+  - `GET /api/aerun/topics`: keyset pagination over `(pinned, last_post_created, id)`;
+  - `GET /api/aerun/topics/:id`: topic details;
+  - `PATCH /api/aerun/topics/:id`: title editing (author/mod), lock/unlock (`close_topics`), pin/unpin (`pin_topics`);
+  - `POST /api/aerun/topics/:id/move`: category move (`move_topics`);
+  - `DELETE /api/aerun/topics/:id`: soft deletion (`moderate_content` or author);
+  - `POST /api/aerun/topics/:id/posts`: monotonic sequence assignment within topic transaction, enforce max post cap and lock state, updates `posts_count` & `last_post_*` atomically;
+  - `GET /api/aerun/topics/:id/posts`: ordered post list with cursor pagination;
+  - `GET /api/aerun/topics/:id/posts/by-sequence/:sequence`: sequence deep link lookup;
+  - `PATCH /api/aerun/posts/:id`: edit content, records `edited` timestamp and `editor_id` when edited by staff;
+  - `DELETE /api/aerun/posts/:id`: soft deletion tombstone, updates visible post counts and recalculates `last_post_*` projection fallback;
+  - `POST /api/aerun/topics/:id/posts/move`: moves posts across topics, resequences target slots, and updates both topic projections atomically.
+- Comprehensive test suite (`forum_commands_test.go`):
+  - `TestCreateTopicAndFirstPost` & `TestCreateTopicValidationAndPermissions`;
+  - `TestCreatePostSequenceAndLockedTopic`;
+  - `Test100ConcurrentPostsAndIdempotency`: verifies DoD with 100 parallel goroutines issuing simultaneous post creation requests; confirms contiguous unique sequences 2..101, topic `posts_count=101`, byte-identical replay (`Idempotency-Replayed: true`), zero post count inflation on replay, and `409 Conflict` on payload mismatch;
+  - `TestEditAndDeletePost`: covers post editing with moderator attribution, soft delete projection fallback, and deep-link sequence lookup;
+  - `TestUpdateTopicAndMoveTopic` & `TestMovePostsBetweenTopics`;
+  - `TestErrorContractEnvelope`: validates contract fields and flags.
+- Formatting and compilation verification:
+  - `gofmt -l .` reports zero unformatted files;
+  - `go vet ./...` clean;
+  - `go test ./...` 100% passing across all packages (`auth`, `config`, `forum`, `migrations`, `platform/pocketbase`).
+
+**Sprint 3 DoD status:** Complete.
+

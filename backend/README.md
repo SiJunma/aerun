@@ -104,12 +104,14 @@ Every response carries an `X-Request-ID` header: a valid incoming ID is echoed
 The same value is returned in the health body as `request_id` and is available
 to handlers for structured-log correlation.
 
-## Aerun command endpoints (Sprint 2)
+## Aerun command endpoints (Sprint 2 & 3)
 
 All business commands live under `/api/aerun/*` and resolve the access context
 (role + status + permissions) from the AccessResolver middleware. Deny-by-
-default: the `users` and `roles` collections have locked mutation rules, so
-these commands are the only supported way to change account state.
+default: the collections have locked mutation rules, so these commands are the only
+supported way to change state.
+
+### Identity & Settings (Sprint 2)
 
 - `POST /api/aerun/auth/register` — guest-only email/password registration.
   Creates a `player` account in the safe pending state (`status=pending`,
@@ -128,6 +130,28 @@ these commands are the only supported way to change account state.
   Supports `page`, `perPage` (max 100) and `status` filters; includes email
   for staff account management (not a public response) and never exposes
   `tokenKey`, `password` or `legacy_firebase_uid`.
+
+### Forum Command Layer (Sprint 3)
+
+Every mutating forum command requires an `Idempotency-Key` header (`[A-Za-z0-9_.:-]{1,255}`).
+Mutations execute in a single SQLite transaction together with their idempotency envelope.
+Concurrent duplicate requests replay the winner's byte-identical response (`Idempotency-Replayed: true`),
+while payload mismatches with a reused key return `409 Conflict`.
+All errors return the machine-readable error contract:
+`{ "data": { "retryable": bool, "conflict": bool, "forbidden": bool, "validation": bool, "kind": string, "request_id": string }, "message": string, "status": int }`.
+
+- `POST /api/aerun/topics` — create a new topic with its opening post (`sequence=1`) in one transaction. Requires `create_topic` permission.
+- `GET /api/aerun/topics` — list active topics with keyset pagination (`pinned DESC, last_post_created DESC, id DESC`).
+- `GET /api/aerun/topics/:id` — get topic details.
+- `PATCH /api/aerun/topics/:id` — update topic title, lock, or pin state.
+- `POST /api/aerun/topics/:id/move` — move topic to a different category (`move_topics` permission).
+- `DELETE /api/aerun/topics/:id` — soft delete a topic (`moderate_content` or author).
+- `POST /api/aerun/topics/:id/posts` — create a reply. Monotonically assigns sequence inside the topic transaction, verifies max post limit and locked state, and advances topic metadata atomically (`post_reply` permission).
+- `GET /api/aerun/topics/:id/posts` — list posts in a topic ordered by sequence.
+- `GET /api/aerun/topics/:id/posts/by-sequence/:sequence` — deep-link lookup by topic sequence number.
+- `PATCH /api/aerun/posts/:id` — edit post content (`moderate_content` or author).
+- `DELETE /api/aerun/posts/:id` — soft delete post, updates visible post count and topic `last_post_*` fallback.
+- `POST /api/aerun/topics/:id/posts/move` — move posts between topics, resequencing in target topic and updating projections for both topics in one transaction.
 
 Email stays hard-disabled (`AERUN_MAIL_MODE=disabled`): the PB verification
 and password-reset endpoints answer `204` while the mailer guard blocks every

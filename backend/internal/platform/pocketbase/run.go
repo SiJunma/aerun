@@ -150,6 +150,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// command routes bound later in this group can then use RequirePermission.
 	resolver := NewAccessResolver(se.App.Logger())
 	group := se.Router.Group("/api/aerun")
+	group.BindFunc(errorContractMiddleware)
 	group.BindFunc(resolver.Middleware())
 
 	group.GET("/health", func(e *core.RequestEvent) error {
@@ -164,8 +165,22 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/me", meHandler)
 	group.PUT("/me/settings", updateSettingsHandler)
 
-	// Sprint 2 identity commands. The route middleware runs after the group
-	// AccessResolver, so RequirePermission sees the resolved access context.
+	// Sprint 2 identity commands.
 	group.POST("/auth/register", registerHandler)
 	group.GET("/admin/users", adminListUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
+
+	// Sprint 3 forum command layer.
+	group.POST("/topics", createTopicHandler).BindFunc(RequirePermission(auth.PermCreateTopic)).BindFunc(enforceIdempotency)
+	group.GET("/topics", listTopicsHandler)
+	group.GET("/topics/{id}", getTopicHandler)
+	group.PATCH("/topics/{id}", updateTopicHandler).BindFunc(enforceIdempotency)
+	group.POST("/topics/{id}/move", moveTopicHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)
+	group.DELETE("/topics/{id}", deleteTopicHandler).BindFunc(enforceIdempotency)
+
+	group.POST("/topics/{id}/posts", createPostHandler).BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
+	group.GET("/topics/{id}/posts", listPostsHandler)
+	group.GET("/topics/{id}/posts/by-sequence/{sequence}", getPostBySequenceHandler)
+	group.PATCH("/posts/{id}", editPostHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/posts/{id}", deletePostHandler).BindFunc(enforceIdempotency)
+	group.POST("/topics/{id}/posts/move", movePostsHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)
 }

@@ -43,6 +43,7 @@ func newAerunTestApp(t testing.TB) *tests.TestApp {
 	// The scenario cleanup in tests.ApiScenario calls app.Cleanup().
 	app.OnMailerSend().BindFunc(MailHardDisableGuard())
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.BindFunc(assignRequestID)
 		registerRoutes(se, testAerunConfig())
 		return se.Next()
 	})
