@@ -1243,3 +1243,47 @@ production, since it is the only state-changing step in Sprint 0.
 
 **Sprint 3 DoD status:** Complete.
 
+### 2026-09-24 — Live branch (`main`) merged into the migration branch (`7bd8f04`)
+
+**Stage:** housekeeping sync requested by the operator. The six commits that
+existed only on `main` are now part of `feature/pocketbase-migration`. No Go
+code, migration or workflow file changed, so the CI-verified backend tree is
+untouched.
+
+**Done**
+
+- `git merge origin/main` — clean 3-way merge, no conflicts, commit `7bd8f04`.
+  Merged in:
+  - `7e9d6cc` chore: ignore backend local data (migration snapshots, dev databases);
+  - `33a252f` functions: bump runtime from Node.js 20 to 22 (Node 20 decommissioned 2026-10-30);
+  - `5668a5f` chore: ignore one-off operational credentials on the live branch;
+  - `129b0cb` fix(dm): drop local message cache on build change and revive serialized timestamps;
+  - `340eac0` Added themable concept for developing;
+  - `eb2816d` Added sandbox feature developing sprint-plan.
+- The `.gitignore` guard from `5668a5f` (`.secrets/`, `*serviceAccount*.json`,
+  `firebase-adminsdk*.json`) already existed on this branch, so the merge kept a
+  single copy of those lines; the backend-local-data block from `7e9d6cc`
+  (`backend/migration-data/`, `backend/pb_data/`) was added on top.
+- `functions/package.json` is now on Node.js 22 on both branches and
+  `src/api/dm-cache.js` carries the live DM cache fix, so the live-branch fixes
+  are no longer trapped on `main` alone.
+- Local `main` was three commits behind the remote; it was fast-forwarded to
+  `eb2816d`, so the local copy of the live branch is no longer stale.
+
+**Verification**
+
+- `git diff fe86085 7bd8f04 -- backend .github` is empty: the tree CI exercises
+  is byte-identical to the commit of CI run 8, so no new CI run is required.
+  The `backend` workflow is path-filtered on `backend/**`, which this merge does
+  not touch.
+- Re-run locally after the merge: `gofmt -l .` (empty), `go build ./...` (ok),
+  `go vet ./...` (ok), `go test ./... -count=1` (every package `ok`, including
+  the 100-concurrency Sprint 3 DoD test).
+- Nothing from `main` was lost: no file is deleted relative to `origin/main`,
+  and the nine files `main` touched are byte-identical to `origin/main`.
+
+**Impact:** `origin/main` (`eb2816d`) is now an ancestor of
+`feature/pocketbase-migration`, so merging this branch into `main` later is a
+fast-forward. A local rollback ref `backup-feature-before-main-sync` still points
+at `fe86085`; it can be deleted once the sync is accepted.
+
