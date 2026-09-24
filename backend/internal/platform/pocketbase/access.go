@@ -17,9 +17,9 @@ const (
 
 // AccessContext is the resolved permission view of the current request:
 // the forum role, the account status and the effective permission list.
-// Unauthenticated requests resolve to the guest identity, which carries no
-// global permissions (category-level guest access arrives later with the
-// category read models).
+// Unauthenticated requests resolve to the guest identity, which carries the
+// global guest baseline (view_forum); category-level narrowing for guests
+// arrives later with the category read models.
 type AccessContext struct {
 	Role        auth.Role
 	Status      auth.Status
@@ -31,7 +31,7 @@ func guestAccess() AccessContext {
 	return AccessContext{
 		Role:        auth.RoleGuest,
 		Status:      auth.StatusActive,
-		Permissions: []auth.Permission{},
+		Permissions: auth.DefaultPermissions(auth.RoleGuest),
 	}
 }
 
@@ -92,9 +92,14 @@ func (r *AccessResolver) resolve(e *core.RequestEvent) AccessContext {
 // rolePermissions looks the role up in the roles collection. The bool result
 // reports whether a usable row was found.
 func (r *AccessResolver) rolePermissions(app core.App, role auth.Role) ([]auth.Permission, bool) {
-	if role == "" || role == auth.RoleGuest {
-		// Guests never get a roles row: no global permissions by design.
+	if role == "" {
+		// No role on the record: deny-by-default through the compiled matrix.
 		return nil, false
+	}
+	if role == auth.RoleGuest {
+		// Guests are never a stored identity, so they have no row of their
+		// own to read: their set is the compiled guest baseline (view_forum).
+		return auth.DefaultPermissions(auth.RoleGuest), true
 	}
 	collection, err := app.FindCachedCollectionByNameOrId(rolesCollectionName)
 	if err != nil {

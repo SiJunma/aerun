@@ -107,12 +107,12 @@ func TestDefaultPermissionMatrixMirrorsLegacyRoles(t *testing.T) {
 		}
 	}
 
-	// spectator and guest: minimal/no global permissions.
+	// spectator and guest: read-only access to the public forum.
 	if got := DefaultPermissions(RoleSpectator); len(got) != 1 || got[0] != PermViewForum {
 		t.Fatalf("spectator must hold exactly view_forum, got %v", got)
 	}
-	if got := DefaultPermissions(RoleGuest); len(got) != 0 {
-		t.Fatalf("guest must hold no permissions, got %v", got)
+	if got := DefaultPermissions(RoleGuest); len(got) != 1 || got[0] != PermViewForum {
+		t.Fatalf("guest must hold exactly view_forum, got %v", got)
 	}
 
 	// Unknown roles deny everything.
@@ -154,10 +154,14 @@ func TestEffectivePermissionsNarrowedByStatus(t *testing.T) {
 		t.Fatalf("unknown statuses must deny everything, got %v", moderatorWeird)
 	}
 
-	// Guests stay permissionless in every status.
+	// Guests keep their read-only baseline while active, lose it when banned.
 	guestActive, _ := EffectivePermissions(RoleGuest, StatusActive)
-	if len(guestActive) != 0 {
-		t.Fatalf("guests must hold no permissions, got %v", guestActive)
+	if len(guestActive) != 1 || !Has(guestActive, PermViewForum) {
+		t.Fatalf("active guests must hold view_forum, got %v", guestActive)
+	}
+	guestBanned, _ := EffectivePermissions(RoleGuest, StatusBanned)
+	if len(guestBanned) != 0 {
+		t.Fatalf("banned guests must lose view_forum, got %v", guestBanned)
 	}
 }
 

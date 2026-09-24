@@ -175,7 +175,7 @@ func TestMeMatrix(t *testing.T) {
 			expect: []string{
 				`"role":"guest"`,
 				`"status":"active"`,
-				`"permissions":[]`,
+				`"permissions":["view_forum"]`,
 				`"nickname":""`,
 				`"verified":false`,
 				`"request_id":"`,

@@ -111,6 +111,14 @@ All business commands live under `/api/aerun/*` and resolve the access context
 default: the collections have locked mutation rules, so these commands are the only
 supported way to change state.
 
+Role permissions are read from the seeded `roles` collection, with the compiled
+matrix in `internal/auth` as the fallback when a row is missing, so a broken
+lookup degrades to deny-by-default instead of failing open. The guest identity
+(unauthenticated requests) holds the global `view_forum` baseline, so anonymous
+visitors can read the public forum; category-level narrowing arrives with the
+Sprint 4 category read models. `pending` narrows any role to `view_forum` plus
+the self-edit rights, `banned` denies everything.
+
 ### Identity & Settings (Sprint 2)
 
 - `POST /api/aerun/auth/register` — guest-only email/password registration.

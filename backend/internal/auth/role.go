@@ -122,12 +122,16 @@ var roleSpecs = []RoleSpec{
 		Permissions: []Permission{PermViewForum},
 	},
 	{
-		Role:        RoleGuest,
-		Name:        "Guest",
-		Rank:        200,
-		Color:       "light",
-		IsSystem:    true,
-		Permissions: []Permission{},
+		Role:     RoleGuest,
+		Name:     "Guest",
+		Rank:     200,
+		Color:    "light",
+		IsSystem: true,
+		// Guests may read the public forum. The legacy constants list
+		// view_forum in the guest ceiling (MAX_ROLE_PERMISSIONS.guest), so a
+		// permissionless guest would lock anonymous visitors out of every
+		// read path that is not explicitly overridden at category level.
+		Permissions: []Permission{PermViewForum},
 	},
 }
 
