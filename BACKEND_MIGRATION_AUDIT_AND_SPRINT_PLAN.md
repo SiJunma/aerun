@@ -1287,3 +1287,71 @@ untouched.
 fast-forward. A local rollback ref `backup-feature-before-main-sync` still points
 at `fe86085`; it can be deleted once the sync is accepted.
 
+
+### 2026-09-24 — Guest role granted the global `view_forum` baseline (`1b8752b`)
+
+**Stage:** defect fix reported during local acceptance testing of Sprint 3.
+`GET /api/aerun/me` answered an unauthenticated caller with
+`"permissions":[]`, i.e. anonymous visitors could not read the forum.
+
+**Root cause:** `1766000000_identity_rbac.go` seeded the `guest` role from the
+compiled matrix with an empty permission set, on the assumption that guests
+would only reach the forum through category-level `view_forum` overrides. The
+legacy constants never encoded that assumption: `MAX_ROLE_PERMISSIONS.guest` in
+`src/constants/permissions.js` lists `view_forum` (plus `post_reply` and
+`use_dice`) as the guest ceiling, and `DEFAULT_ROLES` only left the *global*
+guest row empty because the legacy rules fell back to reading the role document
+per category (`SESSION_HANDOVER.md`, the 2026-07-25 guest `permission-denied`
+fix). A guest with no global permission is therefore locked out of every read
+path that has no explicit override — a regression against the product contract.
+
+**Done**
+
+- `internal/auth/role.go`: `RoleGuest.Permissions` is now `[view_forum]`; the
+  spec comment records why. The full legacy guest ceiling (`post_reply`,
+  `use_dice`) is deliberately **not** granted: those are writes and the target
+  contract keeps guests read-only until a category-level grant exists.
+- `internal/platform/pocketbase/access.go`:
+  - `guestAccess()` returns the compiled guest baseline instead of a hard-coded
+    empty slice, so `/api/aerun/me`, `AccessFrom` and the route guards agree;
+  - `rolePermissions()` no longer folds guests into the "unknown role" branch:
+    an empty `role` value still denies everything, while `guest` resolves to the
+    compiled baseline (guests are never stored identities, so there is no row);
+  - `AccessContext` doc comment updated (guest baseline now, category-level
+    narrowing with the Sprint 4 read models).
+- New migration `1766200000_guest_view_forum.go`: replaces the permissions of
+  the already-seeded `guest` `roles` row with `[view_forum]`, creating the row
+  from the compiled spec if a database predating the roles seed is migrated.
+  The pre-existing migration was **not** edited (applied migrations are
+  immutable); fresh installs get the new value straight from the seed and this
+  migration is then a no-op. The down path restores the previous empty set.
+- Tests:
+  - `internal/auth/auth_test.go`: guest must hold exactly `view_forum`; an
+    active guest keeps it while a banned guest loses it;
+  - `internal/migrations/guest_view_forum_test.go` (new): seed contract, repair
+    of a pre-fix row (`[]` → `[view_forum]`), recreation of a missing row from
+    the spec, and the down path;
+  - `internal/platform/pocketbase/http_test.go`: `TestMeMatrix` guest case now
+    expects `"permissions":["view_forum"]`.
+- `backend/README.md`: the permission-resolution paragraph documents the guest
+  baseline and the pending/banned narrowing.
+
+**Verification**
+
+- `gofmt -l .` empty; `go build ./...` ok; `go vet ./...` ok;
+  `go test ./... -count=1` — every package `ok` (including the 100-concurrency
+  Sprint 3 DoD test).
+- Live check against the local data directory (`backend/pb_data`, restarted so
+  the new migration ran):
+  - `GET /api/aerun/me` → `{"role":"guest","permissions":["view_forum"],…}`;
+  - `GET /api/aerun/topics` → `200` `{"items":[],…}`.
+- Unchanged by design: `pending` still narrows to `view_forum` + self-edit
+  rights, `banned` still denies everything, and `RequirePermission` still
+  answers `401` for guests on write routes (`create_topic`, `post_reply`).
+
+**Impact:** guests (and any unauthenticated read path) now pass the global
+`view_forum` gate, which is the precondition for the Sprint 4 category read
+models. No frontend or Cloud Functions change: the legacy Firebase app keeps
+its own `DEFAULT_ROLES`, and `src/constants/permissions.js` only needs the same
+value when it is switched onto this backend.
+
