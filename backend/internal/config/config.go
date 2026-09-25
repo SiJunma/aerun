@@ -18,6 +18,8 @@ type Config struct {
 	// EncryptionKeySet reports that a 32-byte AERUN_ENCRYPTION_KEY was provided.
 	// The value itself never leaves config; Validate re-checks via the getter.
 	EncryptionKeySet bool
+	// MailMode defines email delivery mode: "disabled" (explicit no-SMTP) or "smtp".
+	MailMode string
 }
 
 // Validate re-checks a Config (optionally against the raw environment) without
@@ -30,8 +32,9 @@ func Validate(cfg Config, get func(string) string) error {
 	if cfg.Environment != "local" && cfg.Environment != "production" {
 		return fmt.Errorf("AERUN_ENV must be local or production")
 	}
-	if value("AERUN_MAIL_MODE", "disabled", get) != "disabled" {
-		return fmt.Errorf("AERUN_MAIL_MODE must be disabled until email delivery is implemented")
+	mailMode := value("AERUN_MAIL_MODE", "disabled", get)
+	if mailMode != "disabled" && mailMode != "smtp" {
+		return fmt.Errorf("AERUN_MAIL_MODE must be \"disabled\" or \"smtp\"")
 	}
 	host, port, err := net.SplitHostPort(cfg.Listen)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
@@ -85,6 +88,7 @@ func Load(get func(string) string) (Config, error) {
 		Listen:      value("AERUN_LISTEN", "127.0.0.1:8090"),
 		DataDir:     value("AERUN_DATA_DIR", "./pb_data"),
 		PublicURL:   value("AERUN_PUBLIC_URL", "http://127.0.0.1:8090"),
+		MailMode:    value("AERUN_MAIL_MODE", "disabled"),
 	}
 	if key := get("AERUN_ENCRYPTION_KEY"); key != "" {
 		cfg.EncryptionKeySet = true

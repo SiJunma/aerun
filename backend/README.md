@@ -104,7 +104,7 @@ Every response carries an `X-Request-ID` header: a valid incoming ID is echoed
 The same value is returned in the health body as `request_id` and is available
 to handlers for structured-log correlation.
 
-## Aerun command endpoints (Sprint 2, 3 & 4)
+## Aerun command endpoints (Sprint 2, 3, 4 & 5)
 
 All business commands live under `/api/aerun/*` and resolve the access context
 (role + status + permissions) from the AccessResolver middleware. Deny-by-
@@ -176,10 +176,24 @@ All errors return the machine-readable error contract:
 - `GET /api/aerun/me/subscriptions` — list topics the caller is subscribed to with keyset pagination.
 - `GET /api/aerun/admin/audit-logs` — keyset-paginated audit trail for administrative actions (`view_audit_log` permission: root/admin). Supports filtering by `action_type` and `performer_id`.
 
+### Direct Messages, Notifications and Outbox (Sprint 5)
 
-Email stays hard-disabled (`AERUN_MAIL_MODE=disabled`): the PB verification
-and password-reset endpoints answer `204` while the mailer guard blocks every
-send, so registration-related flows must not claim that an email was sent.
+- `POST /api/aerun/dms` — create a new DM conversation with recipient(s) and opening message in one transaction. Requires `use_direct_messages` permission. Creates in-app notifications and queues deduplicated outbox email (`dm:first-unread:{conv}:{recipient}`).
+- `GET /api/aerun/dms` — list conversations for caller with keyset pagination, unread counters, and last message metadata. Cleared conversations without new messages are excluded.
+- `POST /api/aerun/dms/:id/messages` — send a reply message. Sequenced monotonically within the conversation transaction. Updates conversation unread state, notifies other members, and queues deduplicated outbox event.
+- `GET /api/aerun/dms/:id/messages` — list ordered messages in conversation. Filters out messages prior to member's `cleared_at`.
+- `POST /api/aerun/dms/:id/read` — mark conversation as read, advancing member's read sequence to latest message and clearing unread state.
+- `POST /api/aerun/dms/:id/clear` — clear conversation history for caller (`cleared_at`).
+- `GET /api/aerun/me/notifications` — list in-app notifications with keyset pagination and `unread` filter.
+- `PATCH /api/aerun/me/notifications/:id/read` — mark single notification as read.
+- `POST /api/aerun/me/notifications/read-all` — mark all caller's notifications as read.
+- `PATCH /api/aerun/me/notifications/:id/archive` — archive notification.
+- `GET /api/aerun/me/unread-counts` — aggregated unread counters (`unread_notifications`, `unread_conversations`, `total_unread_messages`), replacing RTDB unread badges.
+- `GET /api/aerun/admin/outbox-events` — keyset-paginated outbox events for staff visibility (`view_audit_log` permission: root/admin).
+- `POST /api/aerun/admin/outbox-events/:id/retry` — reset failed outbox event to pending (`view_audit_log` permission).
+
+`AERUN_MAIL_MODE`: supports `disabled` (explicit no-SMTP mode for local development and tests) and `smtp` (production relay). Disabling SMTP permits all forum and DM actions without interruption. Outbox worker processes events with exponential backoff and never re-dispatches already successful events.
+
 
 ## Migrations
 

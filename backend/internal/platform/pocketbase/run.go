@@ -200,4 +200,21 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.DELETE("/reputation/{id}", deleteReputationHandler).BindFunc(RequirePermission(auth.PermDeleteReputation)).BindFunc(enforceIdempotency)
 	group.GET("/posts/{id}/voters", getPostVotersHandler)
 	group.GET("/users/{id}/reputation", getUserReputationLogsHandler)
+
+	// Sprint 5 direct messages, notifications and outbox routes.
+	group.POST("/dms", createDMHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages)).BindFunc(enforceIdempotency)
+	group.GET("/dms", listConversationsHandler)
+	group.POST("/dms/{id}/messages", sendDMMessageHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages)).BindFunc(enforceIdempotency)
+	group.GET("/dms/{id}/messages", listDMMessagesHandler)
+	group.POST("/dms/{id}/read", markConversationReadHandler)
+	group.POST("/dms/{id}/clear", clearConversationHandler)
+
+	group.GET("/me/notifications", listUserNotificationsHandler)
+	group.PATCH("/me/notifications/{id}/read", markNotificationReadHandler)
+	group.POST("/me/notifications/read-all", markAllNotificationsReadHandler)
+	group.PATCH("/me/notifications/{id}/archive", archiveNotificationHandler)
+	group.GET("/me/unread-counts", getUnreadCountsHandler)
+
+	group.GET("/admin/outbox-events", adminListOutboxEventsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
+	group.POST("/admin/outbox-events/{id}/retry", adminRetryOutboxEventHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
 }

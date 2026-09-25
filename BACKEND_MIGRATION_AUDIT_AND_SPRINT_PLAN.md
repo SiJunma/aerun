@@ -1416,3 +1416,54 @@ value when it is switched onto this backend.
 **Sprint 4 DoD status:** Complete.
 
 
+### 2026-09-25 — Sprint 5: Direct messages, notifications and mail outbox completed
+
+**Stage:** Sprint 5 of the backend migration plan.
+
+**Done**
+
+- Schema migration `internal/migrations/1766400000_sprint5_dms_notifications_outbox.go`:
+  - `dm_conversations` table: stores conversation thread metadata (`title`, `last_message`, `last_message_at`, `messages_count`); locked browser rules;
+  - `dm_members` table: stores per-user thread membership, read progress (`last_read_sequence`) and `cleared_at` horizon; unique constraint `UNIQUE(conversation_id, user_id)`; locked browser rules;
+  - `dm_messages` table: stores sequential messages with monotonic per-conversation sequence; unique constraint `UNIQUE(conversation_id, sequence)`; locked browser rules;
+  - `notifications` table: stores persistent in-app notifications (`recipient_id`, `sender_id`, `type`, `title`, `payload`, `read`, `archived`); locked browser rules;
+  - `outbox_events` table: append-only transactional outbox for reliable asynchronous email delivery (`dedupe_key`, `event_type`, `payload`, `status`, `attempts`, `max_attempts`, `last_error`, `next_attempt_at`, `sent_at`); unique constraint `UNIQUE(dedupe_key)`; locked browser rules.
+- Framework-free domain package `internal/messaging`:
+  - Input validation: `ValidateMessageText` (1..65536 runes), `ValidateConversationTitle` (max 256 runes), `ValidateParticipants` (1..50 unique active recipients);
+  - Deterministic dedupe key generation: `MakeDMUnreadDedupeKey(convID, recipientID)` -> `dm:first-unread:{conv}:{recipient}`;
+  - Unit tests in `internal/messaging/validation_test.go`.
+- Configuration and explicit no-SMTP mode (`internal/config`):
+  - Added `MailMode` configuration field, validating `AERUN_MAIL_MODE` to allow `disabled` (local/test default) and `smtp` (production relay);
+  - Unit tests in `internal/config/config_test.go`.
+- Direct messages and membership commands (`internal/platform/pocketbase/dms.go`):
+  - `POST /api/aerun/dms`: atomic creation of conversation, members, opening message (`sequence=1`), recipient in-app notifications, and deduplicated email outbox events;
+  - `POST /api/aerun/dms/:id/messages`: monotonic sequence assignment within the conversation transaction; updates conversation `last_message` and `last_message_at`, advances sender `last_read_sequence`, creates recipient notifications and enqueues deduplicated outbox event;
+  - `GET /api/aerun/dms`: keyset-paginated conversations for caller with unread message counts, excluding cleared conversations without new activity;
+  - `GET /api/aerun/dms/:id/messages`: lists ordered messages, respecting caller's `cleared_at` horizon;
+  - `POST /api/aerun/dms/:id/read`: marks conversation as read, advancing member's read sequence to current maximum and clearing related DM in-app notifications;
+  - `POST /api/aerun/dms/:id/clear`: marks conversation cleared for caller (`cleared_at = now`).
+- In-app notifications and unread counters (`internal/platform/pocketbase/notifications.go`):
+  - `GET /api/aerun/me/notifications`: keyset-paginated notification feed with optional `unread` filter;
+  - `PATCH /api/aerun/me/notifications/:id/read`: mark notification read with ownership validation;
+  - `POST /api/aerun/me/notifications/read-all`: mark all caller's notifications read;
+  - `PATCH /api/aerun/me/notifications/:id/archive`: archive notification;
+  - `GET /api/aerun/me/unread-counts`: aggregated unread counts (`unread_notifications`, `unread_conversations`, `total_unread_messages`), replacing RTDB unread badges.
+- Outbox worker and admin controls (`internal/platform/pocketbase/outbox.go`):
+  - Background worker processing pending events with exponential backoff on delivery failure;
+  - Admin inspection endpoint: `GET /api/aerun/admin/outbox-events` (root/admin only, `view_audit_log`);
+  - Admin retry endpoint: `POST /api/aerun/admin/outbox-events/:id/retry`.
+- Verification and DoD compliance (`internal/platform/pocketbase/sprint5_test.go` and `internal/migrations/sprint5_test.go`):
+  - Schema migration assertions covering all five collections, rules, and unique indexes;
+  - DM conversation creation, monotonic sequencing, read markers, unread counts, and cleared horizon;
+  - Concurrency DoD: 20 simultaneous messages sent to the same conversation produce strictly contiguous unique sequences (2..21) and exact `messages_count=21`;
+  - Worker DoD: restarting the worker never reprocesses or re-sends an already successful (`status='sent'`) event;
+  - Email resilience DoD: when SMTP is disabled or unavailable (`AERUN_MAIL_MODE=disabled`), all forum and DM actions succeed 100% without failure or dependency on email dispatch.
+- Formatting and clean verification:
+  - `gofmt -l .` reports zero unformatted files;
+  - `go vet ./...` clean;
+  - `go test ./...` 100% passing across all packages.
+
+**Sprint 5 DoD status:** Complete.
+
+
+

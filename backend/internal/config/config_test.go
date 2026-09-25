@@ -30,12 +30,30 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"wildcard origin", map[string]string{"AERUN_ALLOWED_ORIGINS": "*"}},
 		{"non-origin value", map[string]string{"AERUN_ALLOWED_ORIGINS": "not-an-origin"}},
 		{"short key", map[string]string{"AERUN_ENCRYPTION_KEY": "short"}},
-		{"mail enabled", map[string]string{"AERUN_MAIL_MODE": "smtp"}},
+		{"invalid mail mode", map[string]string{"AERUN_MAIL_MODE": "unknown_mode"}},
 	}
 	for _, tc := range cases {
 		if _, err := Load(envGetter(tc.env)); err == nil {
 			t.Errorf("%s: expected error, got nil", tc.name)
 		}
+	}
+}
+
+func TestLoadMailModes(t *testing.T) {
+	cfgDisabled, err := Load(envGetter(map[string]string{"AERUN_MAIL_MODE": "disabled"}))
+	if err != nil {
+		t.Fatalf("disabled mail mode must load: %v", err)
+	}
+	if cfgDisabled.MailMode != "disabled" {
+		t.Fatalf("expected disabled mail mode, got %q", cfgDisabled.MailMode)
+	}
+
+	cfgSMTP, err := Load(envGetter(map[string]string{"AERUN_MAIL_MODE": "smtp"}))
+	if err != nil {
+		t.Fatalf("smtp mail mode must load: %v", err)
+	}
+	if cfgSMTP.MailMode != "smtp" {
+		t.Fatalf("expected smtp mail mode, got %q", cfgSMTP.MailMode)
 	}
 }
 
