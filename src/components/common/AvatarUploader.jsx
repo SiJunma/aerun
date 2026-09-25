@@ -1,15 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { Image as BSImage, Button, Form, Spinner, InputGroup } from 'react-bootstrap';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage, isStorageEnabled } from '../../../firebase';
 import { useI18n } from '../../contexts/I18nProvider';
+
+const isStorageEnabled = true;
 
 /**
  * AvatarUploader
  * Props:
  *   value        – current avatar URL (string)
  *   onChange     – called with new URL when upload/URL change is confirmed
- *   storagePath  – Firebase Storage path, e.g. "users/uid/avatar"
+ *   storagePath  – Storage path / identifier
  *   size         – preview circle size in px (default 80)
  *   label        – optional label text
  */
@@ -27,8 +27,6 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
 
   const resizeImage = (file, minSide = 250) => {
     return new Promise((resolve) => {
-      // GIF resizing is complex in JS, usually better to skip or use a lib.
-      // If it's a GIF and allowGifs is true, we'll just upload as is to preserve animation.
       if (file.type === 'image/gif') {
         resolve(file);
         return;
@@ -47,7 +45,6 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
           width *= ratio;
           height *= ratio;
         } else {
-          // If already small enough, just return original file
           resolve(file);
           return;
         }
@@ -56,24 +53,21 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        
-        // Use better image smoothing
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        
         ctx.drawImage(img, 0, 0, width, height);
-        
+
         canvas.toBlob((blob) => {
           if (blob) {
             resolve(blob);
           } else {
-            resolve(file); // Fallback to original
+            resolve(file);
           }
         }, file.type, 0.85);
       };
       img.onerror = () => {
         URL.revokeObjectURL(img.src);
-        resolve(file); // Fallback
+        resolve(file);
       };
     });
   };
@@ -82,7 +76,6 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate — PNG/JPG/WebP/GIF
     const MAX_SIZE_MB = 2;
     const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
     const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -99,30 +92,25 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
 
     setError('');
     setUploading(true);
-    setProgress(0);
+    setProgress(50);
 
     try {
       const uploadData = await resizeImage(file);
-      const storageRef = ref(storage, storagePath);
-      const uploadTask = uploadBytesResumable(storageRef, uploadData);
-
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          setProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
-        },
-        (err) => {
-          console.error('[AvatarUploader]', err);
-          setError(t('profile.error_upload_failed'));
-          setUploading(false);
-        },
-        async () => {
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          onChange(url);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result;
+        if (typeof dataUrl === 'string') {
+          onChange(dataUrl);
+          setProgress(100);
           setUploading(false);
           setMode('preview');
         }
-      );
+      };
+      reader.onerror = () => {
+        setError(t('profile.error_upload_failed'));
+        setUploading(false);
+      };
+      reader.readAsDataURL(uploadData);
     } catch (err) {
       console.error('[AvatarUploader] Resize error:', err);
       setUploading(false);

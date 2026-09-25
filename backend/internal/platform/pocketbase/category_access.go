@@ -2,6 +2,7 @@ package pocketbase
 
 import (
 	"encoding/json"
+	"net/http"
 	"slices"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -97,4 +98,34 @@ func canViewTopic(app core.App, acc AccessContext, topicID string) (bool, *core.
 	}
 
 	return true, topic, nil
+}
+
+// listCategoriesHandler returns all categories that the caller is permitted to view.
+func listCategoriesHandler(e *core.RequestEvent) error {
+	acc := AccessFrom(e)
+	cats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
+	if err != nil {
+		return internalError("failed to query categories", err)
+	}
+
+	var visible []map[string]any
+	for _, c := range cats {
+		allowed, err := canViewCategory(e.App, acc, c.Id)
+		if err == nil && allowed {
+			visible = append(visible, map[string]any{
+				"id":          c.Id,
+				"name":        c.GetString("name"),
+				"slug":        c.GetString("slug"),
+				"description": c.GetString("description"),
+				"sort_order":  c.GetInt("sort_order"),
+				"created":     c.GetDateTime("created").String(),
+				"updated":     c.GetDateTime("updated").String(),
+			})
+		}
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      visible,
+		"request_id": requestIDFrom(e),
+	})
 }

@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Alert, Button, Container } from 'react-bootstrap';
 import { WifiOff, AlertTriangle, RefreshCw, X } from 'lucide-react';
-import { ref, onValue } from 'firebase/database';
-import { rtdb } from '../../../firebase';
 import { useI18n } from '../../contexts/I18nProvider';
+import { sendApi } from '../../api/pocketbase';
 
 /**
- * ConnectionStatusBanner — Global sticky alert when Firebase/network connection is lost.
- * Specifically alerts users about potential VPN/ISP blockades (especially for Russian users connecting to Google/Firebase).
+ * ConnectionStatusBanner — Global sticky alert when network or backend connection is lost.
  */
 const ConnectionStatusBanner = () => {
   const { lang } = useI18n();
@@ -21,44 +19,42 @@ const ConnectionStatusBanner = () => {
       setIsDisconnected(true);
     };
     const handleBrowserOnline = () => {
-      // Don't immediately set disconnected to false until RTDB verifies, but clear offline flag
+      checkHealth();
     };
 
     window.addEventListener('offline', handleBrowserOffline);
     window.addEventListener('online', handleBrowserOnline);
 
-    // 2. Firebase RTDB connection state
-    let unsubConnected = () => {};
-    if (rtdb) {
+    // 2. Periodic backend health check probe
+    let isMounted = true;
+    const checkHealth = async () => {
       try {
-        const connectedRef = ref(rtdb, '.info/connected');
-        unsubConnected = onValue(connectedRef, (snap) => {
-          const connected = snap.val() === true;
-          if (connected) {
-            if (disconnectTimerRef.current) {
-              clearTimeout(disconnectTimerRef.current);
-              disconnectTimerRef.current = null;
-            }
-            setIsDisconnected(false);
-            setDismissed(false); // Reset dismissal on successful reconnect
-          } else {
-            // Grace period: wait 4 seconds of continuous disconnection before alarming the user
-            if (!disconnectTimerRef.current) {
-              disconnectTimerRef.current = setTimeout(() => {
-                setIsDisconnected(true);
-              }, 4000);
-            }
-          }
-        });
-      } catch (e) {
-        console.warn('[ConnectionStatusBanner err]', e);
+        await sendApi('/api/aerun/health');
+        if (!isMounted) return;
+        if (disconnectTimerRef.current) {
+          clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+        setIsDisconnected(false);
+        setDismissed(false);
+      } catch {
+        if (!isMounted) return;
+        if (!disconnectTimerRef.current) {
+          disconnectTimerRef.current = setTimeout(() => {
+            if (isMounted) setIsDisconnected(true);
+          }, 4000);
+        }
       }
-    }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 25000);
 
     return () => {
+      isMounted = false;
       window.removeEventListener('offline', handleBrowserOffline);
       window.removeEventListener('online', handleBrowserOnline);
-      unsubConnected();
+      clearInterval(interval);
       if (disconnectTimerRef.current) {
         clearTimeout(disconnectTimerRef.current);
       }

@@ -1,18 +1,5 @@
-import { db } from '../../firebase';
+import { pb, sendApi } from './pocketbase';
 import { logAdminAction } from './audit';
-import {
-  collection,
-  addDoc,
-  doc,
-  getDocs,
-  onSnapshot,
-  query,
-  orderBy,
-  serverTimestamp,
-  updateDoc,
-  deleteDoc,
-  getDoc
-} from 'firebase/firestore';
 
 // ── Category Groups ──────────────────────────────────────────────────────────
 
@@ -23,7 +10,7 @@ export const subscribeToCategoryGroups = (callback) => {
   let isSubscribed = true;
 
   const fetchGroups = async () => {
-    // 1. Пробуем localStorage
+    // 1. Try localStorage
     try {
       const raw = localStorage.getItem(CAT_GROUPS_CACHE_KEY);
       if (raw) {
@@ -33,18 +20,16 @@ export const subscribeToCategoryGroups = (callback) => {
           return;
         }
       }
-    } catch { /* Кэш повреждён — читаем свежие данные */ }
+    } catch { /* Cache corrupted */ }
 
-    // 2. Идём в Firestore
+    // 2. Fetch from PocketBase or local fallback
     try {
-      const q = query(collection(db, 'category_groups'), orderBy('order', 'asc'));
-      const snapshot = await getDocs(q);
+      const records = await pb.collection('category_groups').getFullList({ sort: 'sort_order' });
       if (!isSubscribed) return;
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      const data = records.map(r => ({ id: r.id, ...r }));
       localStorage.setItem(CAT_GROUPS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
       callback(data);
-    } catch (err) {
-      console.error('[subscribeToCategoryGroups]', err);
+    } catch {
       if (isSubscribed) callback([]);
     }
   };
@@ -54,48 +39,37 @@ export const subscribeToCategoryGroups = (callback) => {
 };
 
 export const addCategoryGroup = async (groupData, performerId) => {
-  const ref = await addDoc(collection(db, 'category_groups'), {
-    ...groupData,
-    created_at: serverTimestamp(),
-    updated_at: serverTimestamp()
-  });
+  const rec = await pb.collection('category_groups').create(groupData);
   await logAdminAction('category_group_created', performerId, {
-    targetId: ref.id,
+    targetId: rec.id,
     title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
   });
-  localStorage.removeItem(CAT_GROUPS_CACHE_KEY); // Сброс кэша
-  return ref.id;
+  localStorage.removeItem(CAT_GROUPS_CACHE_KEY);
+  return rec.id;
 };
 
 export const updateCategoryGroup = async (id, groupData, performerId) => {
-  await updateDoc(doc(db, 'category_groups', id), {
-    ...groupData,
-    updated_at: serverTimestamp()
-  });
+  await pb.collection('category_groups').update(id, groupData);
   await logAdminAction('category_group_updated', performerId, {
     targetId: id,
     title: groupData.title?.en || groupData.title?.ru || 'Unnamed'
   });
-  localStorage.removeItem(CAT_GROUPS_CACHE_KEY); // Сброс кэша
+  localStorage.removeItem(CAT_GROUPS_CACHE_KEY);
 };
 
 export const deleteCategoryGroup = async (id, performerId) => {
-  await deleteDoc(doc(db, 'category_groups', id));
+  await pb.collection('category_groups').delete(id);
   await logAdminAction('category_group_deleted', performerId, { targetId: id });
-  localStorage.removeItem(CAT_GROUPS_CACHE_KEY); // Сброс кэша
+  localStorage.removeItem(CAT_GROUPS_CACHE_KEY);
 };
 
 // ── Categories ──────────────────────────────────────────────────────────────
 
-import { getFunctions, httpsCallable } from 'firebase/functions';
-
 export const fetchSecuredCategories = async () => {
   try {
-    const functions = getFunctions();
-    const getSecured = httpsCallable(functions, 'getSecuredCategories');
-    const result = await getSecured();
-    const cats = result.data.categories || [];
-    return cats.sort((a, b) => (a.order || 0) - (b.order || 0));
+    const data = await sendApi('/api/aerun/categories');
+    const cats = data.items || [];
+    return cats.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   } catch (err) {
     console.error('[fetchSecuredCategories]', err);
     return [];
@@ -103,10 +77,16 @@ export const fetchSecuredCategories = async () => {
 };
 
 export const fetchSecuredMainPageData = async () => {
-  const functions = getFunctions();
-  const getMainPage = httpsCallable(functions, 'getSecuredMainPageData');
-  const result = await getMainPage();
-  return result.data;
+  try {
+    const cats = await fetchSecuredCategories();
+    return {
+      categories: cats,
+      categoryGroups: []
+    };
+  } catch (err) {
+    console.error('[fetchSecuredMainPageData]', err);
+    return { categories: [], categoryGroups: [] };
+  }
 };
 
 export const subscribeToCategories = (callback) => {
@@ -116,65 +96,39 @@ export const subscribeToCategories = (callback) => {
     if (isSubscribed) callback(cats);
   });
 
-  // Возвращаем чистую отписку для React
   return () => {
     isSubscribed = false;
   };
 };
 
 export const subscribeToAllCategories = (callback) => {
-  const q = query(collection(db, 'categories'), orderBy('order', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+  let isSubscribed = true;
+  fetchSecuredCategories().then(cats => {
+    if (isSubscribed) callback(cats);
   });
+  return () => {
+    isSubscribed = false;
+  };
 };
 
 export const addCategory = async (catData, performerId) => {
-  // Normalize: replace null values with undefined so Firestore doesn't store them as null
-  const permissions = {};
-  if (catData.permissions) {
-    for (const [key, val] of Object.entries(catData.permissions)) {
-      if (val !== null) permissions[key] = val;
-    }
-  }
-  const ref = await addDoc(collection(db, 'categories'), {
-    ...catData,
-    permissions,
-    group_id: catData.group_id || null,
-    topics_count: 0,
-    posts_count: 0,
-    created_at: serverTimestamp()
+  const rec = await pb.collection('categories').create(catData);
+  await logAdminAction('category_created', performerId, {
+    targetId: rec.id,
+    title: catData.name || 'Unnamed'
   });
-  await logAdminAction('category_created', performerId, { targetId: ref.id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
+  return rec.id;
 };
 
 export const updateCategory = async (id, catData, performerId) => {
-  const { permissions: rawPerms, ...rest } = catData;
-  const permissions = {};
-  if (rawPerms) {
-    for (const [key, val] of Object.entries(rawPerms)) {
-      if (val !== null) permissions[key] = val;
-    }
-  }
-  await updateDoc(doc(db, 'categories', id), {
-    ...rest,
-    permissions,
-    group_id: catData.group_id || null,
-    updated_at: serverTimestamp()
+  await pb.collection('categories').update(id, catData);
+  await logAdminAction('category_updated', performerId, {
+    targetId: id,
+    title: catData.name || 'Unnamed'
   });
-  await logAdminAction('category_updated', performerId, { targetId: id, title: catData.title?.en || catData.title?.ru || 'Unnamed' });
-
 };
 
 export const deleteCategory = async (id, performerId) => {
-  const catRef = doc(db, 'categories', id);
-  const catDoc = await getDoc(catRef);
-  let title = 'Unnamed';
-  if (catDoc.exists()) {
-    const data = catDoc.data();
-    title = data.title?.en || data.title?.ru || 'Unnamed';
-  }
-  await deleteDoc(catRef);
-  await logAdminAction('category_deleted', performerId, { targetId: id, title });
-
+  await pb.collection('categories').delete(id);
+  await logAdminAction('category_deleted', performerId, { targetId: id });
 };

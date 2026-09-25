@@ -3,9 +3,7 @@ import { Button, Form, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { checkNicknameExists } from '../../api/forum';
-import { doc, getDoc } from 'firebase/firestore';
-import { db, auth } from '../../../firebase';
-import { fetchSignInMethodsForEmail } from 'firebase/auth';
+import { getGlobalSettings } from '../../api/admin';
 
 const RegisterForm = ({ onSuccess }) => {
   const { loginWithGoogle, registerWithEmail, settings } = useAuth();
@@ -32,15 +30,12 @@ const RegisterForm = ({ onSuccess }) => {
   }, [t]);
 
   React.useEffect(() => {
-    getDoc(doc(db, 'settings', 'global'))
-      .then(snap => {
-        if (snap.exists()) {
-          const data = snap.data();
-          if (data.adminNickname) setAdminNickname(data.adminNickname);
-          if (data.registrationEnabled === false) setRegistrationEnabled(false);
-        }
-      })
-      .catch(() => { /* silently fail */ });
+    getGlobalSettings(data => {
+      if (data) {
+        if (data.adminNickname) setAdminNickname(data.adminNickname);
+        if (data.registrationEnabled === false) setRegistrationEnabled(false);
+      }
+    });
   }, []);
 
   const prepareSession = async () => {
@@ -102,35 +97,24 @@ const RegisterForm = ({ onSuccess }) => {
       setAuthError(null);
       setNicknameError('');
 
-      // Pre-check email uniqueness locally if possible
-      try {
-        const methods = await fetchSignInMethodsForEmail(auth, email.trim());
-        if (methods && methods.length > 0) {
-          if (methods.includes('google.com')) {
-            setAuthError(t('auth.link_account_google'));
-          } else {
-            setAuthError(t('auth.email_already_in_use'));
-          }
-          setLoadingEmail(false);
-          return;
-        }
-      } catch { /* ignore and let createUser handle it */ }
-
       const isOk = await prepareSession();
       if (!isOk) {
         setLoadingEmail(false);
         return;
       }
 
-      await registerWithEmail(email.trim(), password);
+      await registerWithEmail(email.trim(), password, nickname.trim(), adminMessage.trim());
       if (onSuccess) onSuccess();
     } catch (error) {
       setLoadingEmail(false);
       console.error(t('auth.login_failed'), error);
-      if (error.code === 'auth/email-already-in-use') {
-         setAuthError(t('auth.email_already_in_use'));
+      const msg = error?.message || '';
+      if (msg.includes('email') || error?.code === 'validation_not_unique') {
+        setAuthError(t('auth.email_already_in_use'));
+      } else if (msg.includes('nickname')) {
+        setNicknameError(msg);
       } else {
-         setAuthError(error.message);
+        setAuthError(msg || 'Registration failed');
       }
     }
   };

@@ -1,42 +1,19 @@
-import {
-  collection,
-  doc,
-  setDoc,
-  query,
-  getDocs,
-  getDoc,
-  updateDoc,
-  runTransaction,
-  serverTimestamp,
-  where
-} from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../../firebase';
-import { logAdminAction } from './audit';
+import { sendApi, pb } from './pocketbase';
 
 /**
  * voteOnPost
  * Allows a user to vote on a specific post.
- * Writes directly to reputation_logs with a deterministic ID (0 client-side reads).
  */
 export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, comment, topicTitle, postNumber, voterNickname = 'User') => {
   if (!targetUid) throw new Error('Cannot vote on guest posts.');
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
-  const voteId = `${voterUid}_post_${postId}`;
-  const logRef = doc(db, 'reputation_logs', voteId);
-
-  await setDoc(logRef, {
-    voter_id: voterUid,
-    voter_nickname: voterNickname || 'User',
-    target_id: targetUid,
-    post_id: postId,
-    topic_id: topicId,
-    topic_title: topicTitle || '',
-    post_number: postNumber || null,
-    value: value,
-    comment: comment || '',
-    created_at: serverTimestamp()
+  return await sendApi(`/api/aerun/posts/${postId}/vote`, {
+    method: 'POST',
+    body: {
+      value: Number(value),
+      comment: comment || ''
+    }
   });
 };
 
@@ -45,44 +22,40 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
  * Fetches all votes cast by a specific user in a specific topic.
  */
 export const getVotesInTopic = async (voterUid, topicId) => {
-  const q = query(
-    collection(db, 'reputation_logs'),
-    where('voter_id', '==', voterUid),
-    where('topic_id', '==', topicId)
-  );
-
-  const snapshot = await getDocs(q);
-  const votes = {};
-  snapshot.forEach(doc => {
-    const data = doc.data();
-    if (data.post_id) {
-      votes[data.post_id] = {
-        id: doc.id,
-        ...data
-      };
-    }
-  });
-  return votes;
+  if (!voterUid || !topicId) return {};
+  try {
+    const records = await pb.collection('reputation_votes').getFullList({
+      filter: `voter_id = "${voterUid}" && topic_id = "${topicId}"`
+    });
+    const votes = {};
+    records.forEach(r => {
+      if (r.post_id) {
+        votes[r.post_id] = {
+          id: r.id,
+          ...r
+        };
+      }
+    });
+    return votes;
+  } catch (err) {
+    console.warn('[getVotesInTopic]', err);
+    return {};
+  }
 };
 
 /**
  * voteOnProfile
  * Allows a user to vote on another's profile with a comment.
- * Uses a deterministic ID to enforce 1-vote limit per profile (0 client-side reads).
  */
 export const voteOnProfile = async (voterUid, targetUid, value, comment, voterNickname = 'User') => {
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
-  const voteId = `${voterUid}_user_${targetUid}`;
-  const logRef = doc(db, 'reputation_logs', voteId);
-
-  await setDoc(logRef, {
-    voter_id: voterUid,
-    voter_nickname: voterNickname || 'User',
-    target_id: targetUid,
-    value: value,
-    comment: comment || '',
-    created_at: serverTimestamp()
+  return await sendApi(`/api/aerun/users/${targetUid}/vote`, {
+    method: 'POST',
+    body: {
+      value: Number(value),
+      comment: comment || ''
+    }
   });
 };
 
@@ -91,94 +64,97 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment, voterNi
  * Checks if a user has already voted for a specific profile.
  */
 export const getProfileVote = async (voterUid, targetUid) => {
-  const voteId = `${voterUid}_user_${targetUid}`;
-  const logDoc = await getDoc(doc(db, 'reputation_logs', voteId));
-  if (logDoc.exists()) {
-    return { id: logDoc.id, ...logDoc.data() };
+  if (!voterUid || !targetUid) return null;
+  try {
+    const record = await pb.collection('reputation_votes').getFirstListItem(
+      `voter_id = "${voterUid}" && target_id = "${targetUid}" && post_id = ""`
+    );
+    return record ? { id: record.id, ...record } : null;
+  } catch {
+    return null;
   }
-  return null;
 };
 
 /**
  * updateReputationComment
- * Allows a user to edit or remove their reputation comment.
+ * Allows a user to edit their reputation comment.
  */
 export const updateReputationComment = async (logId, newComment, postId = null) => {
-  const logRef = doc(db, 'reputation_logs', logId);
-  await updateDoc(logRef, {
-    comment: newComment || ''
-  });
-  // post_voters is server-only. Its mirror is refreshed by the Firestore
-  // trigger, so browsers never need write access to the cache.
-  void postId;
+  if (postId) {
+    return await sendApi(`/api/aerun/posts/${postId}/vote`, {
+      method: 'POST',
+      body: { comment: newComment || '' }
+    });
+  }
+  try {
+    return await pb.collection('reputation_votes').update(logId, {
+      comment: newComment || ''
+    });
+  } catch (err) {
+    console.warn('[updateReputationComment]', err);
+  }
 };
 
 /**
  * fetchReputationLogs
- * Fetches reputation changes for a user securely through Cloud Functions.
+ * Fetches reputation changes for a user securely through backend API.
  */
 export const fetchReputationLogs = async (uid, page = 1, pageSize = 20, seekLogId = null) => {
-  const getLogs = httpsCallable(functions, 'getReputationLogs');
-  const result = await getLogs({ targetUid: uid, page, pageSize, ...(seekLogId ? { seekLogId } : {}) });
-  return result.data;
+  if (!uid) return { logs: [], total: 0, hidden: false };
+  try {
+    const res = await sendApi(`/api/aerun/users/${uid}/reputation?limit=${pageSize}`);
+    return {
+      logs: res?.items || [],
+      total: res?.total || (res?.items || []).length,
+      hidden: !!res?.hidden
+    };
+  } catch (err) {
+    console.warn('[fetchReputationLogs]', err);
+    return { logs: [], total: 0, hidden: false };
+  }
 };
 
 /**
  * fetchPostVoters
  * Fetches the list of users who voted on a specific post.
- * Fetches through the Cloud Function, which verifies visibility of the post's
- * category before returning vote data. RTDB cache is intentionally private.
- * Returns { voters: [{ log_id, voter_id, voter_nickname, avatar_url, value, comment, created_at }], total }.
  */
 export const fetchPostVoters = async (postId, limit = 50) => {
   if (!postId) return { voters: [], total: 0 };
-
-  const getVoters = httpsCallable(functions, 'getPostVoters');
-  const result = await getVoters({ postId, limit });
-  return result.data || { voters: [], total: 0 };
+  try {
+    const res = await sendApi(`/api/aerun/posts/${postId}/voters?limit=${limit}`);
+    return {
+      voters: res?.voters || [],
+      total: res?.total || (res?.voters || []).length
+    };
+  } catch (err) {
+    console.warn('[fetchPostVoters]', err);
+    return { voters: [], total: 0 };
+  }
 };
 
-
 /**
- * hasVotedOnPost
- * Quick check if user already voted on a post using the deterministic ID.
+ * checkPostVote
+ * Quick check if user already voted on a post.
  */
 export const checkPostVote = async (voterUid, postId) => {
-  const voteId = `${voterUid}_post_${postId}`;
-  const logDoc = await getDoc(doc(db, 'reputation_logs', voteId));
-  return logDoc.exists();
+  if (!voterUid || !postId) return false;
+  try {
+    const record = await pb.collection('reputation_votes').getFirstListItem(
+      `voter_id = "${voterUid}" && post_id = "${postId}"`
+    );
+    return !!record;
+  } catch {
+    return false;
+  }
 };
 
 /**
  * deleteReputation
  * Allows an admin/moderator to delete a reputation log entry.
- * Transactionally reverts the reputation on the user profile and post (if any),
- * then deletes the log entry and writes to the forum audit log.
  */
 export const deleteReputation = async (logId, performerId) => {
-  const logRef = doc(db, 'reputation_logs', logId);
-
-  let logData = null;
-
-  await runTransaction(db, async (transaction) => {
-    const logSnap = await transaction.get(logRef);
-    if (!logSnap.exists()) throw new Error('Reputation entry not found.');
-
-    logData = logSnap.data();
-
-    // Delete the log entry
-    // This will trigger onReputationLogDeleted Cloud Function
-    transaction.delete(logRef);
-  });
-
-  // Log to audit after transaction
-  await logAdminAction('reputation_deleted', performerId, {
-    targetId: logData?.target_id,
-    voterId: logData?.voter_id,
-    voterNickname: logData?.voter_nickname,
-    value: logData?.value,
-    post_id: logData?.post_id || null,
-    topic_id: logData?.topic_id || null,
-    logId
+  if (!logId) return;
+  return await sendApi(`/api/aerun/reputation/${logId}`, {
+    method: 'DELETE'
   });
 };

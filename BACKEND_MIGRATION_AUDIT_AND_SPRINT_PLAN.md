@@ -1466,4 +1466,50 @@ value when it is switched onto this backend.
 **Sprint 5 DoD status:** Complete.
 
 
+### 2026-09-25 — Sprint 6: Frontend adapter, PocketBase client and runtime Firebase elimination completed
+
+**Stage:** Sprint 6 of the backend migration plan.
+
+**Done**
+
+- PocketBase Client and Error Abstraction (`src/api/pocketbase.js`):
+  - Initialized official `pocketbase` SDK client (`pb`) using `VITE_POCKETBASE_URL` (defaulting to `http://127.0.0.1:8090`);
+  - Implemented `sendApi(path, options)` wrapper: automatically forwards PocketBase auth token (`pb.authStore.token`), injects `Idempotency-Key` headers on mutating HTTP methods (`POST`, `PUT`, `PATCH`, `DELETE`), handles structured `ApiError` mapping with request IDs and retryability flags;
+  - Added `generateIdempotencyKey()` for request deduplication.
+- Presence System (`backend/internal/platform/pocketbase/presence.go` & `src/api/rtdb-presence.js`):
+  - Backend endpoints: `POST /api/aerun/presence/heartbeat` and `GET /api/aerun/presence/online-users`;
+  - Replaced Firebase RTDB presence listeners (`status/{uid}`, `.info/connected`) with a periodic lightweight heartbeat and online users polling.
+- Domain API Migration across `src/api/*`:
+  - `src/api/categories.js`: replaced Firestore listeners/queries with `GET /api/aerun/categories`;
+  - `src/api/forum.js`: migrated topic creation, post replies, edits, moves, deletions, and keyset-paginated queries to `/api/aerun/topics` and `/api/aerun/topics/:id/posts` domain endpoints;
+  - `src/api/reputation.js`: migrated post votes, profile votes, voter lists, and reputation logs to `/api/aerun/posts/:id/vote`, `/api/aerun/users/:id/vote`, `/voters`, and `/reputation` domain endpoints;
+  - `src/api/subscriptions.js`: replaced Firestore queries with `/api/aerun/topics/:id/subscription`, `/subscribe`, `/unsubscribe`, and `/me/subscriptions`;
+  - `src/api/dms.js`: migrated DM creation, messaging, read tracking, and clear operations to `/api/aerun/dms` domain endpoints;
+  - `src/api/dm-cache.js`: removed Firebase `Timestamp` import, replaced with self-contained timestamp revival;
+  - `src/api/notifications.js` & `src/api/rtdb-notifications.js`: migrated notifications and unread badges to `/api/aerun/me/notifications`, `/read`, `/read-all`, `/archive`, and `/me/unread-counts`;
+  - `src/api/admin.js` & `src/api/audit.js`: migrated user management and audit log inspection to `/api/aerun/admin/users` and `/api/aerun/admin/audit-logs`;
+  - `src/api/auth-resources.js`: migrated read map, latest topics, and user presence helpers;
+  - `src/api/character.js` & `src/api/designs.js`: adapted to PocketBase user settings and local collections.
+- Authentication & Profile Provider (`src/contexts/AuthProvider.jsx`):
+  - Wired into `pb.authStore` reactive listener (`pb.authStore.onChange`);
+  - Replaced Firebase Auth calls (`signInWithEmailAndPassword`, `createUserWithEmailAndPassword`, `signInWithPopup`, `signOut`, `sendPasswordResetEmail`) with PocketBase collection auth and `/api/aerun/auth/register`;
+  - Profile and settings synchronization through `pb.authStore.record`, `/api/aerun/me`, and `/api/aerun/me/settings`.
+- UI Components Cleanup:
+  - `src/components/auth/RegisterForm.jsx`: registration via `useAuth().registerWithEmail` and domain validation;
+  - `src/components/common/ConnectionStatusBanner.jsx`: network detection via browser online/offline and backend `/api/aerun/health` probes;
+  - `src/components/common/AvatarUploader.jsx`: replaced Firebase Storage with in-browser image optimization;
+  - `src/components/common/RichEditor.jsx`: prefix user mentions query via PocketBase users collection;
+  - `src/components/profile/SecurityTab.jsx`: password change and OAuth2 linking via PocketBase;
+  - `src/pages/TopicPage.jsx`: removed unused Firestore/RTDB imports and adapted author/mask hydration;
+  - `firebase.js`: neutered into no-op facade without initializing Firebase runtime SDK.
+- Verification and Definition of Done:
+  - `git grep -i "from 'firebase"` and `from '../../firebase'` return 0 across all `src/` modules;
+  - Backend test suite (`go test -count=1 ./...`) 100% passing;
+  - `gofmt -l .` reports zero unformatted files;
+  - `go vet ./...` clean.
+
+**Sprint 6 DoD status:** Complete.
+
+
+
 

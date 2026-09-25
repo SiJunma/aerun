@@ -10,14 +10,8 @@ import {
   subscribeToTopicDraft, deleteDraftPost, locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
 
-import { doc, getDoc } from 'firebase/firestore';
-import { ref as rtdbRef, remove as rtdbRemove } from 'firebase/database';
-import { db } from '../../firebase';
+import { pb } from '../api/pocketbase';
 import { processDiceRolls } from '../utils/dice';
-
-// Forum cache access is server-only; the page receives posts through secured
-// callable functions and Firestore rules.
-const rtdb = null;
 import { subscribeToCharacters } from '../api/character';
 
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -368,9 +362,6 @@ const TopicPage = () => {
       const errMsg = (err?.message || '').toLowerCase();
       if (errMsg.includes('topic not found') || err?.code === 'not-found') {
         if (isMountedRef.current) setTopicNotFound(true);
-        if (rtdb && id) {
-          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => { });
-        }
       } else if (errMsg.includes('permission') || errMsg.includes('403') || err?.code === 'permission-denied') {
         if (isMountedRef.current) setAccessError(err.message || 'Access denied');
       } else {
@@ -433,14 +424,9 @@ const TopicPage = () => {
         setTopic(data);
         setTopicNotFound(false);
       } else {
-        // Topic does not exist in Firestore (was deleted)
         setTopic(null);
         setTopicNotFound(true);
         setIsPageLoading(false);
-        // Clean up stale RTDB cache entry immediately
-        if (rtdb && id) {
-          rtdbRemove(rtdbRef(rtdb, `main_page_cache/latest_topics/${id}`)).catch(() => { });
-        }
       }
     });
 
@@ -629,10 +615,12 @@ const TopicPage = () => {
 
     uniqueChars.forEach(async (uid, charId) => {
       try {
-        const charSnap = await getDoc(doc(db, 'users', uid, 'characters', charId));
+        const u = await pb.collection('users').getOne(uid);
+        const characters = u?.settings?.characters || [];
+        const char = characters.find(c => c.id === charId || c._id === charId);
         setMaskStats(prev => ({
           ...prev,
-          [charId]: charSnap.exists() ? { id: charSnap.id, ...charSnap.data() } : null
+          [charId]: char || null
         }));
       } catch (err) {
         console.error('[fetchCharacter error]', err);
@@ -664,9 +652,8 @@ const TopicPage = () => {
     missingUids.forEach(async (uid) => {
       hydratedAuthorsRef.current.add(uid);
       try {
-        const uSnap = await getDoc(doc(db, 'users', uid));
-        if (uSnap.exists()) {
-          const uData = uSnap.data();
+        const uData = await pb.collection('users').getOne(uid);
+        if (uData) {
           const sig = uData.settings?.signature || uData.signature || '';
           if (sig || uData.status_line) {
             setAuthorStats(prev => ({

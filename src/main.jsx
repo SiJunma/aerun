@@ -22,15 +22,6 @@ if (typeof __APP_BUILD_TIME__ !== 'undefined') {
   console.info(`[Aerun] Build time: ${__APP_BUILD_TIME__}`);
 }
 
-// Prevent harmless but noisy Firebase WebChannel internal errors from spamming the console
-const originalConsoleError = console.error;
-const originalConsoleWarn = console.warn;
-const filterFirebaseWarnings = (args, originalFn) => {
-  if (typeof args[0] === 'string' && args[0].includes('BloomFilter error')) return;
-  originalFn(...args);
-};
-console.error = (...args) => filterFirebaseWarnings(args, originalConsoleError);
-console.warn = (...args) => filterFirebaseWarnings(args, originalConsoleWarn);
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

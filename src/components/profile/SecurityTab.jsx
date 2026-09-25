@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { Card, Button, Form, Spinner, Alert, ListGroup, Badge } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
-import { googleProvider } from '../../../firebase';
-import { linkWithPopup, EmailAuthProvider, linkWithCredential } from 'firebase/auth';
+import { pb } from '../../api/pocketbase';
 import { Key, Mail, ShieldAlert } from 'lucide-react';
 
 const SecurityTab = () => {
@@ -18,24 +17,19 @@ const SecurityTab = () => {
 
   if (!user) return null;
 
-  const providers = user.providerData.map(p => p.providerId);
-  const hasGoogle = providers.includes('google.com');
-  const hasPassword = providers.includes('password');
+  const hasGoogle = false;
+  const hasPassword = true;
 
   const handleLinkGoogle = async () => {
     try {
       setLoadingGoogle(true);
       setError(null);
       setSuccess(null);
-      await linkWithPopup(user, googleProvider);
+      await pb.collection('users').authWithOAuth2({ provider: 'google' });
       setSuccess(t('profile.auth_google_linked'));
     } catch (err) {
       console.error(err);
-      if (err.code === 'auth/credential-already-in-use') {
-        setError(lang === 'ru' ? 'Этот Google аккаунт уже привязан к другому пользователю.' : 'This Google account is already linked to another user.');
-      } else {
-        setError(err.message);
-      }
+      setError(err.message || 'Failed to link Google account');
     } finally {
       setLoadingGoogle(false);
     }
@@ -53,17 +47,16 @@ const SecurityTab = () => {
       setLoadingPassword(true);
       setError(null);
       setSuccess(null);
-      const credential = EmailAuthProvider.credential(user.email, passwordInput);
-      await linkWithCredential(user, credential);
+      const uid = user.id || user.uid;
+      await pb.collection('users').update(uid, {
+        password: passwordInput,
+        passwordConfirm: passwordInput
+      });
       setSuccess(t('profile.auth_password_updated'));
       setPasswordInput('');
     } catch (err) {
       console.error(err);
-      if (err.code === 'auth/requires-recent-login') {
-        setError(lang === 'ru' ? 'В целях безопасности необходимо перелогиниться перед выполнением этого действия.' : 'For security reasons, please log out and log in again before doing this.');
-      } else {
-        setError(err.message);
-      }
+      setError(err.message || 'Failed to update password');
     } finally {
       setLoadingPassword(false);
     }
@@ -137,37 +130,35 @@ const SecurityTab = () => {
           </ListGroup.Item>
         </ListGroup>
 
-        {!hasPassword && (
-          <div className="p-3 modal-section-themed rounded mt-2">
-            <h6 className="fw-bold mb-2 d-flex align-items-center gap-2">
-              <ShieldAlert size={16} className="text-warning" />
-              {t('profile.auth_add_password')}
-            </h6>
-            <p className="small text-muted mb-3 opacity-75">
-              {t('profile.auth_password_set_desc')}
-            </p>
-            <Form onSubmit={handleLinkPassword}>
-              <Form.Group className="mb-3 d-flex gap-2">
-                <Form.Control
-                  type="password"
-                  placeholder={t('auth.password_placeholder')}
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  disabled={loadingPassword}
-                  className="shadow-none flex-grow-1"
-                />
-                <Button 
-                  type="submit" 
-                  variant="primary" 
-                  disabled={loadingPassword || !passwordInput.trim()}
-                  className="px-4 fw-bold"
-                >
-                  {loadingPassword ? <Spinner size="sm" animation="border" /> : t('common.save')}
-                </Button>
-              </Form.Group>
-            </Form>
-          </div>
-        )}
+        <div className="p-3 modal-section-themed rounded mt-2">
+          <h6 className="fw-bold mb-2 d-flex align-items-center gap-2">
+            <ShieldAlert size={16} className="text-warning" />
+            {t('profile.auth_add_password')}
+          </h6>
+          <p className="small text-muted mb-3 opacity-75">
+            {t('profile.auth_password_set_desc')}
+          </p>
+          <Form onSubmit={handleLinkPassword}>
+            <Form.Group className="mb-3 d-flex gap-2">
+              <Form.Control
+                type="password"
+                placeholder={t('auth.password_placeholder')}
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                disabled={loadingPassword}
+                className="shadow-none flex-grow-1"
+              />
+              <Button 
+                type="submit" 
+                variant="primary" 
+                disabled={loadingPassword || !passwordInput.trim()}
+                className="px-4 fw-bold"
+              >
+                {loadingPassword ? <Spinner size="sm" animation="border" /> : t('common.save')}
+              </Button>
+            </Form.Group>
+          </Form>
+        </div>
 
       </Card.Body>
     </Card>

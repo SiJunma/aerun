@@ -10,37 +10,34 @@
  *   changes, so stale/malformed entries never survive a deploy.
  */
 
-import { Timestamp } from 'firebase/firestore';
-
-const DM_CACHE_PREFIX = 'aerun_dm_';
-const DM_CACHE_BUILD_KEY = 'aerun_dm_build';
-const MAX_CACHED_MESSAGES = 50;
-
-// Injected by Vite at build time (see vite.config.js -> define).
-// Falls back to 'dev' when the constant is unavailable (Node/tests).
-const CURRENT_BUILD = typeof __APP_BUILD_TIME__ !== 'undefined' ? __APP_BUILD_TIME__ : 'dev';
-
 /**
- * Generates the cache key for a specific user and conversation.
- */
-const getCacheKey = (uid, convId) => `${DM_CACHE_PREFIX}${uid}_${convId}`;
-
-/**
- * Firestore Timestamps serialize to a plain { seconds, nanoseconds } object
- * via JSON.stringify and lose their methods. If they are not revived after
- * reading from localStorage, `new Date(plainObject)` yields Invalid Date (NaN),
- * the merge sort silently breaks and stale cached messages "invade" the order
- * of fresh ones.
+ * Timestamps serialize to a plain { seconds, nanoseconds } object
+ * or ISO string via JSON.stringify and lose methods.
+ * Revives values so .toMillis() and .toDate() work consistently.
  */
 const reviveTimestamp = (value) => {
   if (value == null) return value;
-  if (typeof value.toMillis === 'function') return value; // already a Timestamp
+  if (typeof value.toMillis === 'function') return value;
   if (typeof value === 'object' && typeof value.seconds === 'number') {
-    const nanos = typeof value.nanoseconds === 'number' ? value.nanoseconds : 0;
-    return Timestamp.fromMillis(value.seconds * 1000 + Math.floor(nanos / 1e6));
+    const millis = value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1e6);
+    return {
+      seconds: value.seconds,
+      nanoseconds: value.nanoseconds || 0,
+      toMillis: () => millis,
+      toDate: () => new Date(millis),
+      toISOString: () => new Date(millis).toISOString()
+    };
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : Timestamp.fromDate(parsed);
+  const date = new Date(value);
+  const millis = date.getTime();
+  if (Number.isNaN(millis)) return value;
+  return {
+    seconds: Math.floor(millis / 1000),
+    nanoseconds: (millis % 1000) * 1e6,
+    toMillis: () => millis,
+    toDate: () => date,
+    toISOString: () => date.toISOString()
+  };
 };
 
 /**

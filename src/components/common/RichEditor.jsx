@@ -9,8 +9,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
-import { db } from '../../../firebase';
-import { collection, query, orderBy, startAt, endAt, limit, getDocs } from 'firebase/firestore';
+import { pb } from '../../api/pocketbase';
 
 const RichEditor = forwardRef(({
   value, onChange, placeholder, rows = 6, minHeight, maxHeight, id = 'rich-editor',
@@ -659,18 +658,10 @@ const RichEditor = forwardRef(({
       return;
     }
     setIsSearchingUsers(true);
-    try {
-      // Very basic prefix search on nickname. Note: Case-sensitive in Firestore.
-      const q = query(
-        collection(db, 'users'),
-        orderBy('nickname'),
-        startAt(queryText),
-        endAt(queryText + '\uf8ff'),
-        limit(5)
-      );
-      const snap = await getDocs(q);
-      const results = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUserSearchResults(results);
+      const records = await pb.collection('users').getList(1, 5, {
+        filter: `nickname ~ "${queryText}"`,
+      });
+      setUserSearchResults(records.items.map(doc => ({ id: doc.id, ...doc })));
     } catch (err) {
       console.error(err);
       setUserSearchResults([]);

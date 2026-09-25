@@ -1,109 +1,84 @@
-import { db } from '../../firebase';
-import {
-  collection,
-  addDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  where,
-  getDocs,
-  serverTimestamp,
-  documentId
-} from 'firebase/firestore';
-
-/**
- * topic_subscriptions schema:
- * {
- *   topic_id: string,
- *   user_id: string,
- *   created_at: Timestamp
- * }
- */
+import { sendApi, pb } from './pocketbase';
 
 export const subscribeToTopicStatus = (topicId, userId, callback) => {
-  if (!userId) {
+  if (!topicId || !userId) {
     callback(false);
     return () => {};
   }
 
   let isSubscribed = true;
-  const q = query(
-    collection(db, 'topic_subscriptions'),
-    where('topic_id', '==', topicId),
-    where('user_id', '==', userId)
-  );
+  sendApi(`/api/aerun/topics/${topicId}/subscription`)
+    .then(data => {
+      if (isSubscribed) {
+        callback(!!data?.subscribed);
+      }
+    })
+    .catch(err => {
+      console.warn('[subscribeToTopicStatus]', err);
+      if (isSubscribed) callback(false);
+    });
 
-  getDocs(q)
-    .then(snap => { if (isSubscribed) callback(!snap.empty); })
-    .catch(err => console.error('[subscribeToTopicStatus]', err));
-
-  // Возвращаем функцию-заглушку (совместимость с useEffect cleanup)
-  return () => { isSubscribed = false; };
+  return () => {
+    isSubscribed = false;
+  };
 };
 
 export const toggleSubscription = async (topicId, userId) => {
-  if (!userId) return;
-  
-  const q = query(
-    collection(db, 'topic_subscriptions'),
-    where('topic_id', '==', topicId),
-    where('user_id', '==', userId)
-  );
-  const snap = await getDocs(q);
-  
-  if (snap.empty) {
-    // Follow
-    await addDoc(collection(db, 'topic_subscriptions'), {
-      topic_id: topicId,
-      user_id: userId,
-      created_at: serverTimestamp()
-    });
-    return true;
+  if (!topicId || !userId) return false;
+
+  const current = await sendApi(`/api/aerun/topics/${topicId}/subscription`);
+  if (current?.subscribed) {
+    const res = await sendApi(`/api/aerun/topics/${topicId}/unsubscribe`, { method: 'POST' });
+    return !!res?.subscribed;
   } else {
-    // Unfollow
-    const promises = snap.docs.map(d => deleteDoc(d.ref));
-    await Promise.all(promises);
-    return false;
+    const res = await sendApi(`/api/aerun/topics/${topicId}/subscribe`, { method: 'POST' });
+    return !!res?.subscribed;
   }
 };
 
 export const getTopicSubscribers = async (topicId) => {
-  const q = query(collection(db, 'topic_subscriptions'), where('topic_id', '==', topicId));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => d.data().user_id);
+  if (!topicId) return [];
+  try {
+    const list = await pb.collection('topic_subscriptions').getFullList({
+      filter: `topic_id = "${topicId}"`,
+      fields: 'user_id'
+    });
+    return list.map(r => r.user_id);
+  } catch (err) {
+    console.warn('[getTopicSubscribers]', err);
+    return [];
+  }
 };
 
 export const fetchUserSubscribedTopics = async (userId) => {
   if (!userId) return [];
-  const q = query(
-    collection(db, 'topic_subscriptions'),
-    where('user_id', '==', userId)
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return [];
+  try {
+    const res = await sendApi('/api/aerun/me/subscriptions?limit=100');
+    const items = res?.items || [];
+    const topicIds = items.map(item => item.topic_id).filter(Boolean);
+    if (topicIds.length === 0) return [];
 
-  const topicIds = [...new Set(snap.docs.map(d => d.data().topic_id).filter(Boolean))];
-  if (topicIds.length === 0) return [];
-
-  const topicsMap = {};
-  for (let i = 0; i < topicIds.length; i += 30) {
-    const chunk = topicIds.slice(i, i + 30);
-    const tQuery = query(
-      collection(db, 'topics'),
-      where(documentId(), 'in', chunk)
+    const topics = await Promise.all(
+      topicIds.map(async (id) => {
+        try {
+          const t = await sendApi(`/api/aerun/topics/${id}`);
+          return t?.topic || null;
+        } catch {
+          return null;
+        }
+      })
     );
-    const tSnap = await getDocs(tQuery);
-    tSnap.forEach(doc => {
-      topicsMap[doc.id] = { id: doc.id, ...doc.data() };
+
+    const validTopics = topics.filter(Boolean);
+    validTopics.sort((a, b) => {
+      const aTime = a.last_post_at ? new Date(a.last_post_at).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+      const bTime = b.last_post_at ? new Date(b.last_post_at).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+      return bTime - aTime;
     });
+
+    return validTopics;
+  } catch (err) {
+    console.warn('[fetchUserSubscribedTopics]', err);
+    return [];
   }
-
-  const result = topicIds.map(id => topicsMap[id]).filter(Boolean);
-  result.sort((a, b) => {
-    const aTime = a.last_post_at?.toMillis?.() || 0;
-    const bTime = b.last_post_at?.toMillis?.() || 0;
-    return bTime - aTime;
-  });
-
-  return result;
 };
