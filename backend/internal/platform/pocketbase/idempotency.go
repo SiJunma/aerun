@@ -228,8 +228,20 @@ func runCommand(app core.App, claim idemClaim, fn func(txApp core.App) (int, any
 		record.Set("response_json", string(envelope))
 		record.Set("status", "completed")
 		if err := txApp.Save(record); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE constraint failed") &&
-				strings.Contains(err.Error(), idempotencyCollection) {
+			errStr := err.Error()
+			// PocketBase v0.40 may surface the SQLite error as raw
+			// "UNIQUE constraint failed" or wrap it into its own
+			// validation format ("validation_not_unique" / "must be
+			// unique"). Since this is the idempotency record Save
+			// (the very last write in the transaction), any unique
+			// violation here means the key already exists — treat
+			// it as the concurrent-duplicate sentinel regardless of
+			// which error format surfaces.
+			isSQLiteUnique := strings.Contains(errStr, "UNIQUE constraint failed") &&
+				strings.Contains(errStr, idempotencyCollection)
+			isPBValidationUnique := strings.Contains(errStr, "validation_not_unique") ||
+				strings.Contains(errStr, "must be unique")
+			if isSQLiteUnique || isPBValidationUnique {
 				return errIdempotentReplay
 			}
 			return err

@@ -97,3 +97,112 @@ func TestClampLimit(t *testing.T) {
 		t.Fatalf("expected 15, got %d", got)
 	}
 }
+
+func TestValidateReputationVote(t *testing.T) {
+	cases := []struct {
+		name        string
+		voterID     string
+		targetID    string
+		value       int
+		comment     string
+		wantErr     error
+		wantVal     int
+		wantComment string
+	}{
+		{
+			name:        "valid upvote",
+			voterID:     "voter1",
+			targetID:    "target1",
+			value:       1,
+			comment:     "Great job!",
+			wantErr:     nil,
+			wantVal:     1,
+			wantComment: "Great job!",
+		},
+		{
+			name:        "valid downvote",
+			voterID:     "voter1",
+			targetID:    "target1",
+			value:       -1,
+			comment:     "",
+			wantErr:     nil,
+			wantVal:     -1,
+			wantComment: "",
+		},
+		{
+			name:     "self vote prohibited",
+			voterID:  "user1",
+			targetID: "user1",
+			value:    1,
+			comment:  "",
+			wantErr:  forum.ErrReputationSelfVote,
+		},
+		{
+			name:     "invalid value zero",
+			voterID:  "voter1",
+			targetID: "target1",
+			value:    0,
+			comment:  "",
+			wantErr:  forum.ErrReputationInvalidValue,
+		},
+		{
+			name:     "invalid value large",
+			voterID:  "voter1",
+			targetID: "target1",
+			value:    5,
+			comment:  "",
+			wantErr:  forum.ErrReputationInvalidValue,
+		},
+		{
+			name:     "missing voter",
+			voterID:  "",
+			targetID: "target1",
+			value:    1,
+			comment:  "",
+			wantErr:  forum.ErrReputationVoterOrTargetRequired,
+		},
+		{
+			name:     "missing target",
+			voterID:  "voter1",
+			targetID: "",
+			value:    1,
+			comment:  "",
+			wantErr:  forum.ErrReputationVoterOrTargetRequired,
+		},
+		{
+			name:     "comment too long",
+			voterID:  "voter1",
+			targetID: "target1",
+			value:    1,
+			comment:  strings.Repeat("a", 1025),
+			wantErr:  forum.ErrReputationCommentTooLong,
+		},
+		{
+			name:        "comment trimmed",
+			voterID:     "voter1",
+			targetID:    "target1",
+			value:       1,
+			comment:     "  nice comment  ",
+			wantErr:     nil,
+			wantVal:     1,
+			wantComment: "nice comment",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			val, comment, err := forum.ValidateReputationVote(tc.voterID, tc.targetID, tc.value, tc.comment)
+			if err != tc.wantErr {
+				t.Fatalf("expected error %v, got %v", tc.wantErr, err)
+			}
+			if err == nil {
+				if val != tc.wantVal {
+					t.Fatalf("expected val %d, got %d", tc.wantVal, val)
+				}
+				if comment != tc.wantComment {
+					t.Fatalf("expected comment %q, got %q", tc.wantComment, comment)
+				}
+			}
+		})
+	}
+}

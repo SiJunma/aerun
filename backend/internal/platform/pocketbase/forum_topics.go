@@ -264,7 +264,17 @@ func updateTopicHandler(e *core.RequestEvent) error {
 			if err != nil {
 				return 0, nil, validationError(err.Error())
 			}
+			oldTitle := topic.GetString("title")
 			topic.Set("title", newTitle)
+			if !isAuthor {
+				if err := recordAuditLog(txApp, "topic_title_edit", e.Auth.Id, map[string]any{
+					"topic_id":  id,
+					"old_title": oldTitle,
+					"new_title": newTitle,
+				}); err != nil {
+					return 0, nil, err
+				}
+			}
 		}
 
 		if form.Locked != nil {
@@ -272,6 +282,12 @@ func updateTopicHandler(e *core.RequestEvent) error {
 				return 0, nil, forbiddenError("you cannot lock/unlock topics")
 			}
 			topic.Set("locked", *form.Locked)
+			if err := recordAuditLog(txApp, "topic_lock", e.Auth.Id, map[string]any{
+				"topic_id": id,
+				"locked":   *form.Locked,
+			}); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		if form.Pinned != nil {
@@ -279,6 +295,12 @@ func updateTopicHandler(e *core.RequestEvent) error {
 				return 0, nil, forbiddenError("you cannot pin/unpin topics")
 			}
 			topic.Set("pinned", *form.Pinned)
+			if err := recordAuditLog(txApp, "topic_pin", e.Auth.Id, map[string]any{
+				"topic_id": id,
+				"pinned":   *form.Pinned,
+			}); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		if err := txApp.Save(topic); err != nil {
@@ -328,9 +350,18 @@ func moveTopicHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("target category not found")
 		}
 
+		oldCategoryID := topic.GetString("category_id")
 		topic.Set("category_id", form.CategoryID)
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to move topic", err)
+		}
+
+		if err := recordAuditLog(txApp, "topic_move", e.Auth.Id, map[string]any{
+			"topic_id":        id,
+			"old_category_id": oldCategoryID,
+			"new_category_id": form.CategoryID,
+		}); err != nil {
+			return 0, nil, err
 		}
 
 		return http.StatusOK, map[string]any{
@@ -367,6 +398,15 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 		topic.Set("deleted", true)
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to delete topic", err)
+		}
+
+		if !isAuthor {
+			if err := recordAuditLog(txApp, "topic_delete", e.Auth.Id, map[string]any{
+				"topic_id":  id,
+				"author_id": topic.GetString("author_id"),
+			}); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		return http.StatusOK, map[string]any{

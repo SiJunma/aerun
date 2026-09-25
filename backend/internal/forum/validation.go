@@ -7,12 +7,34 @@ import (
 )
 
 var (
-	ErrTopicTitleRequired  = errors.New("topic title is required")
-	ErrTopicTitleTooLong   = errors.New("topic title must not exceed 256 characters")
-	ErrPostContentRequired = errors.New("post content is required")
-	ErrPostContentTooLong  = errors.New("post content must not exceed 65536 characters")
-	ErrCategoryIDRequired  = errors.New("category_id is required")
+	ErrTopicTitleRequired              = errors.New("topic title is required")
+	ErrTopicTitleTooLong               = errors.New("topic title must not exceed 256 characters")
+	ErrPostContentRequired             = errors.New("post content is required")
+	ErrPostContentTooLong              = errors.New("post content must not exceed 65536 characters")
+	ErrCategoryIDRequired              = errors.New("category_id is required")
+	ErrReputationSelfVote              = errors.New("cannot vote for yourself")
+	ErrReputationInvalidValue          = errors.New("reputation value must be 1 or -1")
+	ErrReputationCommentTooLong        = errors.New("reputation comment must not exceed 1024 characters")
+	ErrReputationVoterOrTargetRequired = errors.New("voter and target are required")
 )
+
+// ValidateReputationVote validates voter vs target, vote value and comment length.
+func ValidateReputationVote(voterID, targetID string, value int, comment string) (int, string, error) {
+	if voterID == "" || targetID == "" {
+		return 0, "", ErrReputationVoterOrTargetRequired
+	}
+	if voterID == targetID {
+		return 0, "", ErrReputationSelfVote
+	}
+	if value != 1 && value != -1 {
+		return 0, "", ErrReputationInvalidValue
+	}
+	trimmedComment := strings.TrimSpace(comment)
+	if utf8.RuneCountInString(trimmedComment) > MaxReputationCommentLen {
+		return 0, "", ErrReputationCommentTooLong
+	}
+	return value, trimmedComment, nil
+}
 
 // ValidateTopicTitle validates title length and presence.
 func ValidateTopicTitle(title string) (string, error) {

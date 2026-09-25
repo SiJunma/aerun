@@ -104,7 +104,7 @@ Every response carries an `X-Request-ID` header: a valid incoming ID is echoed
 The same value is returned in the health body as `request_id` and is available
 to handlers for structured-log correlation.
 
-## Aerun command endpoints (Sprint 2 & 3)
+## Aerun command endpoints (Sprint 2, 3 & 4)
 
 All business commands live under `/api/aerun/*` and resolve the access context
 (role + status + permissions) from the AccessResolver middleware. Deny-by-
@@ -160,6 +160,22 @@ All errors return the machine-readable error contract:
 - `PATCH /api/aerun/posts/:id` — edit post content (`moderate_content` or author).
 - `DELETE /api/aerun/posts/:id` — soft delete post, updates visible post count and topic `last_post_*` fallback.
 - `POST /api/aerun/topics/:id/posts/move` — move posts between topics, resequencing in target topic and updating projections for both topics in one transaction.
+ 
+### Reputation, Subscriptions and Audit (Sprint 4)
+ 
+- `POST /api/aerun/posts/:id/vote` — cast or update vote on a post (`value`: `1` or `-1`, `comment` up to 1024 chars). Atomically updates post score and author profile reputation. Requires `use_reputation` permission.
+- `DELETE /api/aerun/posts/:id/vote` — remove voter's own vote on a post, reverting post and user scores atomically.
+- `POST /api/aerun/users/:id/vote` — cast or update a profile reputation vote. Requires `use_reputation` permission.
+- `DELETE /api/aerun/users/:id/vote` — remove voter's own profile vote.
+- `DELETE /api/aerun/reputation/:id` — administrative deletion of any reputation vote (`delete_reputation` permission). Automatically appends an audit log entry.
+- `GET /api/aerun/posts/:id/voters` — get voters for a post. Enforces category access control: users without category view permission receive `403 Forbidden`.
+- `GET /api/aerun/users/:id/reputation` — list reputation history with keyset pagination. Enforces privacy masking (`rep_show_history`, `rep_show_comments`) for non-staff callers, and scrubs post ID / topic title for votes on posts in restricted categories.
+- `POST /api/aerun/topics/:id/subscribe` — subscribe to topic updates. Strictly idempotent: duplicate requests cannot create duplicate subscription records.
+- `POST /api/aerun/topics/:id/unsubscribe` & `DELETE /api/aerun/topics/:id/subscription` — unsubscribe from topic updates. Idempotent no-op if not subscribed.
+- `GET /api/aerun/topics/:id/subscription` — check caller's subscription status for a topic.
+- `GET /api/aerun/me/subscriptions` — list topics the caller is subscribed to with keyset pagination.
+- `GET /api/aerun/admin/audit-logs` — keyset-paginated audit trail for administrative actions (`view_audit_log` permission: root/admin). Supports filtering by `action_type` and `performer_id`.
+
 
 Email stays hard-disabled (`AERUN_MAIL_MODE=disabled`): the PB verification
 and password-reset endpoints answer `204` while the mailer guard blocks every

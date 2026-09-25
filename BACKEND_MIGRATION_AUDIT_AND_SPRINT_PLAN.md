@@ -1365,3 +1365,54 @@ models. No frontend or Cloud Functions change: the legacy Firebase app keeps
 its own `DEFAULT_ROLES`, and `src/constants/permissions.js` only needs the same
 value when it is switched onto this backend.
 
+
+### 2026-09-25 — Sprint 4: Reputation, subscriptions and audit completed
+
+**Stage:** Sprint 4 of the backend migration plan.
+
+**Done**
+
+- Schema migration `internal/migrations/1766300000_sprint4_reputation_subscriptions_audit.go`:
+  - `reputation_votes` table: tracks post and profile votes; partial unique indexes `idx_rep_voter_post` (`UNIQUE(voter_id, post_id)` where `post_id != ''`) and `idx_rep_voter_profile` (`UNIQUE(voter_id, target_id)` where `post_id = ''`); keyset indexes `idx_rep_target_created` and `idx_rep_post_created`; browser rules locked;
+  - `topic_subscriptions` table: tracks topic follows with unique index `idx_sub_topic_user` (`UNIQUE(topic_id, user_id)`); keyset index `idx_sub_user_created`; browser rules locked;
+  - `audit_logs` table: append-only ledger for staff moderation actions (`action_type`, `performer_id`, `details`, `created`); keyset index `idx_audit_created_id` (`created DESC, id DESC`); browser writes and deletions locked;
+  - Added `reputation` integer counter field to `users` and `posts` collections;
+  - Added `permissions` JSON field to `categories` collection for per-category role ACLs.
+- Domain rules and validation (`internal/forum`):
+  - `ValidateReputationVote`: verifies voter != target (prohibits self-voting), value in `{-1, 1}`, comment length <= 1024 runes;
+  - Unit tests in `internal/forum/validation_test.go`.
+- Idempotency middleware resilience (`internal/platform/pocketbase/idempotency.go`):
+  - Broadened duplicate detection in `runCommand` to handle PocketBase's wrapped `validation_not_unique` error format as well as SQLite's raw `UNIQUE constraint failed`.
+- Reputation voting and queries (`internal/platform/pocketbase/reputation.go`):
+  - `POST /api/aerun/posts/:id/vote`: transactional vote creation or controlled replacement, updates post score and target author reputation atomically;
+  - `DELETE /api/aerun/posts/:id/vote`: voter vote withdrawal, reverting scores;
+  - `POST /api/aerun/users/:id/vote`: profile reputation vote;
+  - `DELETE /api/aerun/users/:id/vote`: profile vote withdrawal;
+  - `DELETE /api/aerun/reputation/:id`: administrative vote deletion by staff, appends audit log (`reputation_deleted`);
+  - `GET /api/aerun/posts/:id/voters`: lists voters on a post; enforces category visibility (`403 Forbidden` if category access is denied);
+  - `GET /api/aerun/users/:id/reputation`: keyset-paginated reputation history; enforces user privacy settings (`rep_show_history`, `rep_show_comments`) for non-staff, and strips `post_id`/`topic_title` for votes originating from categories the caller cannot view.
+- Subscriptions (`internal/platform/pocketbase/subscriptions.go`):
+  - `POST /api/aerun/topics/:id/subscribe`: idempotent subscription command, verifies category access;
+  - `POST /api/aerun/topics/:id/unsubscribe` & `DELETE /api/aerun/topics/:id/subscription`: idempotent unsubscription command;
+  - `GET /api/aerun/topics/:id/subscription`: subscription status inquiry;
+  - `GET /api/aerun/me/subscriptions`: keyset-paginated subscriptions for the caller.
+- Audit logging (`internal/platform/pocketbase/audit.go`):
+  - Server-side `recordAuditLog` integrated inside administrative forum actions (`topic_pin`, `topic_lock`, `topic_title_edit`, `topic_move`, `topic_delete`, `post_edit`, `post_delete`, `posts_move`, `reputation_deleted`);
+  - `GET /api/aerun/admin/audit-logs`: keyset-paginated audit inquiry gated by `view_audit_log` permission (root/admin only), with filtering by `action_type` and `performer_id`.
+- Category access control helper (`internal/platform/pocketbase/category_access.go`):
+  - `canViewCategory` and `canViewTopic` evaluate role access against category `permissions` JSON (`view_forum` role list) and caller status.
+- Verification and DoD compliance (`internal/platform/pocketbase/sprint4_test.go` and `internal/migrations/sprint4_test.go`):
+  - Schema migration assertions;
+  - Voting, score updates, replacements, and vote deletions;
+  - Idempotent subscriptions without toggle races;
+  - Administrative audit logging across moderation commands;
+  - DoD test: 20 concurrent identical vote requests and 20 concurrent subscribe requests produce strictly 1 database record each, correct scores without inflation, and byte-identical replays;
+  - DoD test: secret category post never leaks through post voters endpoint (`403`) or user reputation history (masked data).
+- Formatting and clean verification:
+  - `gofmt -l .` empty;
+  - `go vet ./...` clean;
+  - `go test ./...` 100% passing across all packages.
+
+**Sprint 4 DoD status:** Complete.
+
+

@@ -183,4 +183,21 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.PATCH("/posts/{id}", editPostHandler).BindFunc(enforceIdempotency)
 	group.DELETE("/posts/{id}", deletePostHandler).BindFunc(enforceIdempotency)
 	group.POST("/topics/{id}/posts/move", movePostsHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)
+
+	// Sprint 4 reputation, subscriptions and audit routes.
+	group.GET("/admin/audit-logs", adminListAuditLogsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
+
+	group.POST("/topics/{id}/subscribe", subscribeTopicHandler).BindFunc(enforceIdempotency)
+	group.POST("/topics/{id}/unsubscribe", unsubscribeTopicHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/topics/{id}/subscription", unsubscribeTopicHandler).BindFunc(enforceIdempotency)
+	group.GET("/topics/{id}/subscription", getTopicSubscriptionStatusHandler)
+	group.GET("/me/subscriptions", listUserSubscriptionsHandler)
+
+	group.POST("/posts/{id}/vote", votePostHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
+	group.DELETE("/posts/{id}/vote", deletePostVoteHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
+	group.POST("/users/{id}/vote", voteUserHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
+	group.DELETE("/users/{id}/vote", deleteUserVoteHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
+	group.DELETE("/reputation/{id}", deleteReputationHandler).BindFunc(RequirePermission(auth.PermDeleteReputation)).BindFunc(enforceIdempotency)
+	group.GET("/posts/{id}/voters", getPostVotersHandler)
+	group.GET("/users/{id}/reputation", getUserReputationLogsHandler)
 }

@@ -271,6 +271,16 @@ func editPostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to update post", err)
 		}
 
+		if !isAuthor && hasMod {
+			if err := recordAuditLog(txApp, "post_edit", e.Auth.Id, map[string]any{
+				"post_id":   postID,
+				"topic_id":  topic.Id,
+				"author_id": post.GetString("author_id"),
+			}); err != nil {
+				return 0, nil, err
+			}
+		}
+
 		return http.StatusOK, map[string]any{
 			"post":       postPayload(post),
 			"request_id": requestIDFrom(e),
@@ -347,6 +357,16 @@ func deletePostHandler(e *core.RequestEvent) error {
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic metadata after post deletion", err)
+		}
+
+		if !isAuthor {
+			if err := recordAuditLog(txApp, "post_delete", e.Auth.Id, map[string]any{
+				"post_id":   post.Id,
+				"topic_id":  topic.Id,
+				"author_id": post.GetString("author_id"),
+			}); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		return http.StatusOK, map[string]any{
@@ -427,6 +447,14 @@ func movePostsHandler(e *core.RequestEvent) error {
 		// Recalculate projections for both source and target
 		recalcTopicProjection(txApp, sourceTopic)
 		recalcTopicProjection(txApp, targetTopic)
+
+		if err := recordAuditLog(txApp, "posts_move", e.Auth.Id, map[string]any{
+			"source_topic_id": sourceTopic.Id,
+			"target_topic_id": targetTopic.Id,
+			"post_ids":        form.PostIDs,
+		}); err != nil {
+			return 0, nil, err
+		}
 
 		return http.StatusOK, map[string]any{
 			"moved_count": len(form.PostIDs),
