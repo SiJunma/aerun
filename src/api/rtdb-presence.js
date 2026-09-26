@@ -163,6 +163,26 @@ export const subscribeToDailyActiveUsers = (callback) => {
   return subscribeToOnlineUsers(callback);
 };
 
+/**
+ * Subscribes to the list of currently active *guests* (unauthenticated visitors).
+ *
+ * Guests are not a tracked presence in the PocketBase backend: they have no
+ * auth record, so there is no id to heartbeat with and nothing to count in
+ * `GET /presence/online-users` (which returns accounts only). The Firebase RTDB
+ * implementation counted `/status/*` rows, and that data source is gone with the
+ * RTDB removal, so this reports an empty list instead of leaving the import
+ * dangling in ForumStats.
+ *
+ * The counter therefore reads 0 until anonymous presence is reintroduced. That
+ * needs a product decision, not a shim: either a `guest_presence` collection
+ * keyed by a client-generated visitor id, or dropping the counter from the
+ * stats panel. Tracked in the migration plan's open tails.
+ */
+export const subscribeToActiveGuestsRtdb = (callback) => {
+  callback([]);
+  return () => {};
+};
+
 export const initRtdbGuestPresence = (guestId) => {
   return () => {};
 };

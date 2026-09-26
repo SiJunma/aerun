@@ -1725,14 +1725,33 @@ document the next sprint (domain writer) implements against.
   `foreignKeyErrors: null`. Rationale: every live account has a role, so a
   missing one can only be a half-written row.
 
-**Fix:** `src/components/common/RichEditor.jsx` shipped in `2591610` with a
-dangling `} catch` (the `try {` of `handleUserSearch` was lost), which failed
-the Babel parse of the whole app — `npm run dev` could not boot. Restored; a
-parse sweep of all 90 files under `src/` is now clean.
+**Two Sprint 6 build breaks found while verifying the commit** (neither was
+visible from the Go side, both stopped `npm run dev` from booting):
+
+1. `src/components/common/RichEditor.jsx` shipped in `2591610` with a dangling
+   `} catch` — the `try {` of `handleUserSearch` was lost. Babel could not parse
+   the module, which fails the whole app, not just the editor. Restored.
+2. `src/components/layout/ForumStats.jsx` still imported
+   `subscribeToActiveGuestsRtdb` from `src/api/rtdb-presence.js`, which Sprint 6
+   dropped together with the RTDB status rows. A named import that no longer
+   exists is a hard rollup error, so the production build failed too. Re-added as
+   an honest stub: **guest presence is not tracked on the new backend** (a guest
+   has no auth record to heartbeat with, and `GET /presence/online-users` returns
+   accounts only), so the stats panel reports 0 guests until the product decides
+   between reintroducing anonymous visitor tracking (a `guest_presence`
+   collection keyed by a client-generated id) and dropping the counter.
+   `initRtdbGuestPresence` / `removeRtdbGuestPresence` are no-ops for the same
+   reason and were already left in place by Sprint 6.
+
+Lesson recorded: a parse sweep of `src/` is not a build gate. `npm run build`
+is — it is the only check that resolves every named import against its module,
+and it is now part of the verification below.
 
 **Verification:** `go build ./...`, `go vet ./...`, `gofmt -l` clean,
 `go test ./... -count=1` all packages ok, `node --test snapshot.test.mjs` 4/4,
-and two `import-rehearse` runs over the real export produce byte-identical
+`npm run build` (3379 modules, built in 8.67s) and the dev server serving `/`,
+`src/api/rtdb-presence.js` and `src/components/layout/ForumStats.jsx` with
+`200`; two `import-rehearse` runs over the real export produce byte-identical
 `mapping.json`/`report.json`.
 
 
