@@ -132,10 +132,18 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 
 		if form.Role != nil {
 			role := strings.TrimSpace(*form.Role)
-			if !slices.Contains(auth.AllRoleValues(), role) {
-				return 0, nil, validationError("invalid role value")
+			// The role column holds legacy custom role ids verbatim
+			// (1766500000), so the compiled value list is no longer the
+			// authority on what may be assigned. The roles collection is: an
+			// id with no row there would resolve to deny-by-default at
+			// request time (access.go falls back to the compiled matrix, which
+			// knows no such role), so it is rejected here instead of silently
+			// producing an account that can do nothing.
+			if err := requireKnownRole(txApp, role); err != nil {
+				return 0, nil, err
 			}
 			targetUser.Set("role", role)
+			targetUser.Set("custom_role_id", customRoleIDFor(txApp, role))
 		}
 
 		if form.Status != nil {
@@ -167,6 +175,53 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
+// requireKnownRole rejects a role id that has no row in the roles collection.
+//
+// A role is valid if the roles collection knows it — whether a compiled system
+// role or an imported custom role. The compiled list alone is not enough since
+// 1766500000: it would refuse every legacy custom role id and make the four
+// imported roles unassignable, while still accepting the ids the matrix knows.
+//
+// An empty id is rejected too: users.role is required, and an empty value would
+// make every permission check fall through to deny-by-default.
+func requireKnownRole(app core.App, role string) error {
+	if role == "" {
+		return validationError("invalid role value")
+	}
+	collection, err := app.FindCachedCollectionByNameOrId(rolesCollectionName)
+	if err != nil {
+		return internalError("roles collection unavailable", err)
+	}
+	records, err := app.FindAllRecords(collection, dbx.HashExp{"role_id": role})
+	if err != nil {
+		return internalError("role lookup failed", err)
+	}
+	if len(records) != 1 {
+		// Zero: unknown role. More than one: a duplicated role_id would make
+		// the permission lookup in access.go ambiguous, so it is refused too.
+		return validationError("invalid role value")
+	}
+	return nil
+}
+
+// customRoleIDFor returns the id of the system role a custom role derives from,
+// or "" for a system role. Keeping it in its own column means "is this account
+// staff?" stays answerable from the compiled matrix even though the role column
+// now holds opaque legacy ids (see 1766500000).
+func customRoleIDFor(app core.App, role string) string {
+	collection, err := app.FindCachedCollectionByNameOrId(rolesCollectionName)
+	if err != nil {
+		return ""
+	}
+	records, err := app.FindAllRecords(collection, dbx.HashExp{"role_id": role})
+	if err != nil || len(records) != 1 {
+		return ""
+	}
+	return records[0].GetString("base_role_id")
+}
+
+// adminDeleteUserHandler is registered after adminUpdateUserHandler in
+// registerRoutes.
 func adminDeleteUserHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {

@@ -44,12 +44,21 @@ func TestIdentityRbacMigration(t *testing.T) {
 		t.Fatal("the PocketBase demo field name must not survive the adoption")
 	}
 
-	roleField, ok := users.Fields.GetByName("role").(*core.SelectField)
+	// 1766500000 makes the role column free text so imported custom role ids
+	// are storable. It must stay a required text field: a select could only
+	// ever hold the six compiled ids, so no legacy custom role could be
+	// assigned. The command layer (admin_users.go requireKnownRole) is what
+	// validates the value now, against the roles collection.
+	roleField, ok := users.Fields.GetByName("role").(*core.TextField)
 	if !ok {
-		t.Fatal("role must be a select field")
+		t.Fatalf("role must be a text field so custom role ids are storable, got %T",
+			users.Fields.GetByName("role"))
 	}
-	if !slices.Equal(roleField.Values, auth.AllRoleValues()) {
-		t.Fatalf("role values drifted: %v", roleField.Values)
+	if !roleField.Required {
+		t.Fatal("role must stay required: an empty role denies every permission")
+	}
+	if users.Fields.GetByName("custom_role_id") == nil {
+		t.Fatal("users must carry custom_role_id to keep staff checks answerable")
 	}
 
 	statusField, ok := users.Fields.GetByName("status").(*core.SelectField)
