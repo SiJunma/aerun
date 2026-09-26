@@ -193,6 +193,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.DELETE("/posts/{id}", deletePostHandler).BindFunc(enforceIdempotency)
 	group.POST("/topics/{id}/posts/move", movePostsHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)
 
+	// Draft posts (drafts page + in-topic editing).
+	group.GET("/me/drafts", listMyDraftsHandler)
+	group.GET("/topics/{id}/draft", getDraftHandler)
+	group.PUT("/topics/{id}/draft", upsertDraftHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/drafts/{id}", deleteDraftHandler).BindFunc(enforceIdempotency)
+	group.POST("/drafts/{id}/publish", publishDraftHandler).BindFunc(enforceIdempotency)
+
 	// Sprint 4 reputation, subscriptions and audit routes.
 	group.GET("/admin/audit-logs", adminListAuditLogsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
 

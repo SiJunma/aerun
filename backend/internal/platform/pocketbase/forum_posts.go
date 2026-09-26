@@ -157,7 +157,10 @@ func listPostsHandler(e *core.RequestEvent) error {
 	}
 
 	query := e.App.RecordQuery(postsCollectionName).
-		AndWhere(dbx.HashExp{"topic_id": topicID})
+		AndWhere(dbx.HashExp{"topic_id": topicID}).
+		// Drafts are private to their author and surfaced through the
+		// drafts routes, never in the public post feed.
+		AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL"))
 
 	if afterSeq > 0 {
 		query = query.AndWhere(dbx.NewExp("sequence > {:after_seq}", dbx.Params{"after_seq": afterSeq}))
@@ -201,7 +204,7 @@ func getPostBySequenceHandler(e *core.RequestEvent) error {
 
 	record, err := e.App.FindFirstRecordByFilter(
 		postsCollectionName,
-		"topic_id = {:topic_id} && sequence = {:seq}",
+		"topic_id = {:topic_id} && sequence = {:seq} && is_draft = false",
 		dbx.Params{"topic_id": topicID, "seq": seq},
 	)
 	if err != nil || record == nil {
