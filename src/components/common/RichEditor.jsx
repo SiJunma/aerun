@@ -658,6 +658,7 @@ const RichEditor = forwardRef(({
       return;
     }
     setIsSearchingUsers(true);
+    try {
       const records = await pb.collection('users').getList(1, 5, {
         filter: `nickname ~ "${queryText}"`,
       });
