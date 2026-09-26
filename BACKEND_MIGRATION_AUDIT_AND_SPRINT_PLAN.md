@@ -1511,5 +1511,231 @@ value when it is switched onto this backend.
 **Sprint 6 DoD status:** Complete.
 
 
+### 2026-09-25 — Sprint 7: idempotent importer core and two identical rehearsals completed
+
+**Stage:** Sprint 7 of the backend migration plan (migration tooling and
+rehearsals), building on the offline exporter/staging pipeline from
+2026-09-17.
+
+**Implemented** (`backend/tools/migration/importer/`)
+
+- Per-record legacy → PocketBase mapping (`map.go`, Sprint 7 task 2):
+  - Target ids are **derived** — SHA-256 of (collection space, legacy id)
+    mapped onto PocketBase's 15-char `A-Za-z0-9` alphabet — so a re-run of the
+    same export addresses the same row instead of duplicating it, and two runs
+    yield byte-identical `mapping.json` without any database. Only `users` has
+    a `legacy_firebase_uid` column; every other relation is a bare `Max: 15`
+    text column, which is why the id itself must be stable.
+  - `Mappings.Add` refuses derived-id collisions (imports stop before writing
+    rather than silently losing a record), the table is canonicalised
+    (sorted by space, legacy id), written with `O_EXCL` like the Node staging
+    pipeline, and reloadable as a checkpoint — `LoadMappingTable` re-derives
+    every row and rejects a stale file.
+  - Character subcollection rows and derived `dm_members` rows are mapped
+    under their own spaces; composite `uid/characters/cid` keys never get
+    record ids.
+- Legacy identity compatibility (`compat.go`):
+  - `MapUserRole` translates the legacy convention of encoding account state
+    inside `role_id` (`pending`/`banned` pseudo-roles with the real role parked
+    in `previous_role_id`) into the target's separate role/status model, folds
+    custom role documents (`is_system=false`, e.g. `Demon`, `NorthbayCitizen+`)
+    to their `base_role_id`, maps `guest` to `player` (a stored account is
+    never a guest) and falls back to `player` for dangling role references —
+    every non-trivial decision is reported, never silent.
+  - `AuditPlan` aggregates role transitions, target statuses and
+    representability findings (missing post sequences, category groups with no
+    target table, folded custom roles, character docs folded into user
+    settings). Examples are the 10 lexicographically smallest ids, not
+    "first seen", because Go map order would otherwise make two reports of the
+    same export differ and destroy the report diff the DoD relies on.
+- Rehearsal driver + CLI (`rehearse.go`, `cmd/import-rehearse`):
+  `Rehearse(ledger, auth)` runs load → plan → mapping → FK validation →
+  `AuditPlan` → counter recomputation → reconciliation and reports elapsed
+  time; `report.json` deliberately omits durations so two reports of one
+  export diff clean, `mapping.json`/`report.json` are exclusively created, and
+  non-zero exit is reserved for input errors or dangling foreign keys.
+- Classification fixes found by running against the real export: per-user
+  `readmap` and `drafts` subcollections are now named skips
+  (`user_readmap`, `user_drafts`) instead of `unclassified` warnings;
+  `AuditPlan` no longer audits `uid/characters/*` rows as accounts (they were
+  producing fake `role_id missing` findings).
+
+**Verification**
+
+- Tests: new `map_test.go` (derivation format, stability across processes,
+  collision refusal, checkpoint round-trip/staleness, full-bucket coverage)
+  and `compat_test.go` (role/status translation table incl. the real export's
+  `root`/custom-role cases, finding determinism across two plan builds).
+  `gofmt -l .` empty, `go build ./...`, `go vet ./...`,
+  `go test ./... -count=1` all green (importer package: ok; platform
+  pocketbase suite: ok); Node staging tests 7/7 pass.
+- Six full rehearsals of the real 11.3 MB `stage-1.json` + official Auth
+  export: **5140 records, 5149 mapped ids (incl. derived dm_members), 0
+  foreign-key errors, 9 findings, 3 counter mismatches, ~230 ms each run;
+  `mapping.json` (SHA-256 `168468d0…50f`) and `report.json`
+  (SHA-256 `50AB9784…3439CA`) byte-identical across all six runs** —
+  Sprint 7 DoD's
+  "two imports of the same export yield the same target state" holds for the
+  analysis stage.
+- The 3 counter mismatches are all stale cached values vs recomputed actuals
+  (`user/…/post_count cached=335 actual=333`, two `reputation` deltas) —
+  exactly the explainable class task 3 says to recompute rather than import.
+
+**Not yet done in Sprint 7 / limits**
+
+- This is still analysis + mapping + rehearsal output, **not a PocketBase
+  writer**: no records are inserted into a database, sequence reconstruction,
+  password import/linking, file reference validation and the Storage export
+  remain. The mapping table is the checkpoint the writer will consume.
+- Known input caveat: the ledger's top-level checksum is written in the Node
+  canonical form, so Go logs a warning and skips strict checksum validation
+  (the Node staging CLI validates it at creation).
+- `readmap` is treated as a rebuildable cache; `drafts` (1 doc in the export)
+  have no target collection and are reported as a gap for product decision.
+
+**Sprint 7 DoD status:** analysis-stage DoD demonstrated (identical target
+state from two rehearsals, all mismatches explained above); full sprint DoD
+pending the writer and Storage/Auth finalization.
+
+---
+
+## Roles migration (first real write path)
+
+The **system** roles are migrated from the snapshot by **reconciling the target
+registry against the compiled matrix**, not by copying the source documents. This
+is a deliberate decision, and the source data is what forces it:
+
+- The target `roles` collection is the runtime authority and is already seeded
+  from `auth.SystemRoles()` by migration `1766000000`. A compiled role id is the
+  only id the runtime matrix knows, so a row with any other value could never be
+  authorised.
+- The snapshot's 5 system role documents *do* carry a `permissions` array, and
+  they have drifted from the compiled specs. Importing them verbatim would let a
+  stale export redefine what a role may do.
+
+Reconciliation of the real `stage-1.json` (exit 0, nothing written in dry run):
+
+| role | snapshot | compiled | verdict |
+|---|---|---|---|
+| `admin` | `Admin`, 37 perms | `Administrator`, 37 perms | permissions match, name differs |
+| `guest` | 1 perm | 1 perm | match |
+| `moderator` | 22 perms incl. `delete_reputation`, `edit_others_*`, `use_direct_messages` | 22 perms incl. `view_audit_log` | drift both ways |
+| `player` | 13 perms | 14 perms incl. `view_master_dice` | compiled superset |
+| `spectator` | 3 perms incl. `edit_self_avatar`, `edit_self_nickname`, `use_direct_messages` | 1 perm | legacy is broader |
+| `root` | **no document** | 37 perms | target-only, seeded |
+
+Imported verbatim since migration `1766500000`: the 4 legacy **custom** roles
+(`Demon`, `Anaptix`, `NorthbayСitizen`, `NorthbayCitizen+`) holding 7 users. The
+first pass of this plan folded them into `base_role_id` (`player` for all four)
+and reported it; that was wrong, and the source data is what proved it:
+`categories.permissions.view_forum` is a list of **role ids** that names custom
+roles directly — category "Скрытые игры" is granted to
+`PYaDjGY5XvWHNEjTswuz` and to nobody else. Folding the role away would both
+erase the granted permission set and open that category to every player.
+
+The schema now carries custom roles instead of excluding them:
+
+- `users.role` is a `TextField` (was a closed `SelectField` over the six
+  compiled ids, so a custom role could not even be assigned);
+  `users.custom_role_id` remembers the system role a custom role derives from,
+  which keeps "am I staff?" answerable from the compiled matrix and keeps rank
+  ordering defined;
+- `roles.base_role_id` and `roles.max_characters_limit` mirror the legacy role
+  document; `categories.allowed_roles` replaces the inline permission map (an
+  empty list = public, i.e. every role holding `view_forum`);
+- the command layer (`admin_users.go`) validates a role against the **roles
+  collection** rather than the compiled list, so an imported custom role is
+  assignable and an unknown id is still rejected (it would otherwise resolve to
+  deny-by-default).
+
+Verified against a real throwaway database (`import-roles`):
+
+- first run over a migrated db: `created=0 updated=0 unchanged=6 changed=false`
+  (the migration seed already produced the correct registry);
+- after deliberately corrupting `guest` (rank 999, wrong permission) and
+  deleting `root`: `created=1 updated=1 unchanged=4 changed=true`, and both were
+  restored to the compiled values;
+- third run: `created=0 updated=0 unchanged=6 changed=false` — idempotent;
+- with the 4 custom roles present: `created=4 unchanged=6` on the first run,
+  `unchanged=10 changed=false` on the second — the custom rows are written
+  idempotently too.
+
+The permission enum still guards the **system** roles: an attempt to save `guest`
+with a permission outside the enum is rejected by PocketBase
+(`permissions: Invalid value delete_topic`), which is why a bad export cannot
+widen a system role. A custom role's permission list is checked by the importer
+against `auth.PermissionValues()`; an unknown entry is reported as a finding
+(`custom_role_permission_unknown`) rather than written.
+
+Code: `internal/platform/pocketbase/role_import.go` (writer, in the adapter
+package because it is the only one allowed to import PocketBase),
+`importer/roles.go` (reconciliation/audit), `cmd/import-roles` (CLI with
+`-dry-run`).
+
+Still not done: `users`, `categories`, `topics`, `posts` and the rest of the
+domain writes, sequence reconstruction, password import/linking, file reference
+validation, Storage export. The per-collection target schema, the id policy and
+the level-ordered import map live in `POCKETBASE_SCHEMA_AND_MIGRATION_MAP.md` —
+that document is the contract for the next sprint.
+
+---
+
+### 2026-09-26 — Target schema map, custom roles as data, drafts as posts
+
+**Stage:** Sprint 7 continued. The analysis artefacts of the previous session
+(mapping table, rehearsal report) were turned into a written contract, and the
+three schema decisions the rehearsal exposed were implemented.
+
+**New: `POCKETBASE_SCHEMA_AND_MIGRATION_MAP.md`** — the per-collection target
+schema, the PocketBase id policy (derived 15-char ids from SHA-256 of
+(space, legacy id); `legacy_firebase_uid` for `users`; `role_id` as the roles
+business key), the 10-level import order with its foreign-key preconditions, and
+the frontend contract for the drafts page. It replaces nothing and is the
+document the next sprint (domain writer) implements against.
+
+**Decisions taken from the snapshot**
+
+- *Custom roles are data, not a fold.* `1766500000` makes `users.role` free
+  text, adds `users.custom_role_id`, `roles.base_role_id`,
+  `roles.max_characters_limit` and `categories.allowed_roles`; `importer/roles.go`
+  now plans `CustomRows` (verbatim `role_id`, validated permissions, finding
+  `custom_role_permission_unknown`) and `import-roles` writes them
+  (`created=4 unchanged=6`, then `unchanged=10` — idempotent). The previous
+  "custom role cannot be represented, fold to base" plan is retracted above.
+- *Characters are rows, not a settings blob.* `1766600000` adds `characters`
+  (owner_id, name, status_line, signature, avatar_url + historical dates) and
+  `designs` (css/js/theme/welcome_message, one active per user), both
+  server-only. The rehearsal used to fold 9 character documents into
+  `users.settings`; `posts.author_character_id` needs them addressable.
+- *Drafts are posts.* `1766700000` adds `posts.is_draft`, makes `sequence`
+  optional, restricts the `topic_id+sequence` unique index to `sequence > 0`
+  and adds `unique(author_id, topic_id) where is_draft` — the Firestore rule
+  "one draft per author per topic" (the doc id *was* the topic id) is now a
+  database constraint. `internal/platform/pocketbase/drafts.go` adds
+  `GET /me/drafts` (orphans first), `GET|PUT /topics/{id}/draft`,
+  `DELETE /drafts/{id}`, `POST /drafts/{id}/publish` (sequence + topic
+  projections in one transaction, `409` for an orphan), and the public post
+  reads filter drafts out. Integration test `drafts_test.go` covers the whole
+  loop including idempotent re-save.
+- *A user document without `role_id` is a dead record, not a role-less user.*
+  The importer drops it (`orphan_user_dropped`) together with the reputation
+  entries that point at it (`orphan_reputation_dropped`); auth rows with no
+  profile at all are reported as `orphan_auth_record_dropped`. On the real
+  export: 1 user + 1 reputation row dropped, mapping 5148 records,
+  `foreignKeyErrors: null`. Rationale: every live account has a role, so a
+  missing one can only be a half-written row.
+
+**Fix:** `src/components/common/RichEditor.jsx` shipped in `2591610` with a
+dangling `} catch` (the `try {` of `handleUserSearch` was lost), which failed
+the Babel parse of the whole app — `npm run dev` could not boot. Restored; a
+parse sweep of all 90 files under `src/` is now clean.
+
+**Verification:** `go build ./...`, `go vet ./...`, `gofmt -l` clean,
+`go test ./... -count=1` all packages ok, `node --test snapshot.test.mjs` 4/4,
+and two `import-rehearse` runs over the real export produce byte-identical
+`mapping.json`/`report.json`.
+
+
+
 
 
