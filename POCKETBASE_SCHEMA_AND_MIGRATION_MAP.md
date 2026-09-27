@@ -33,7 +33,7 @@ field inventory `_inventory.json`.
 | `settings` | 1 | импорт → `settings` (одна запись) |
 | `designs` | 1 | импорт → `designs` (коллекция создана миграцией 1766600000) |
 | `forum_stats` | 1 | НЕ импортируется: производная, пересчитывается |
-| `guest_activity` | 241 | НЕ импортируется: эфемерное присутствие |
+| `guest_activity` | 241 | НЕ импортируется: эфемерное присутствие (устарела ещё в Firebase; живая модель — `guest_presence`, см. §4) |
 | `users/{uid}/readmap` | 12 | НЕ импортируется: перестраивается на первом визите |
 | `users/{uid}/drafts` | 1 | импорт → `posts` c `is_draft=true` (id дока = topic_id, пара owner+topic сохраняется; см. §4) |
 | Auth export (uid-записи) | 21 | мержится с `users` по `legacy_firebase_uid` |
@@ -229,6 +229,29 @@ lastSignInTime`, providerData (Google/password); пароли не перено�
 Репетиция уже считает планы (`rehearsal-map/report.json`), писатель
 опирается на `mapping.json`.
 Полевые составы — зеркала слепка (§1) плюс правила ниже.
+
+### guest_presence (1766800000) — присутствие гостей
+`guest_id` (text req ≤64, unique `idx_guest_presence_guest_id`), `first_seen`,
+`last_seen` (datetime, индекс `idx_guest_presence_last_seen`). Коллекция
+server-only (все правила nil), как и остальные доменные: единственный писатель
+— presence-роуты (`POST /presence/heartbeat`, `POST /presence/guest/leave`),
+читатели — `GET /presence/guests` и счётчик `guests_count` в
+`GET /presence/online-users` (оба идут через один хелпер, поэтому не могут
+разойтись).
+Гость — не аккаунт: id генерирует браузер
+(`Math.random().toString(36).substring(2) + Date.now().toString(36)`,
+lowercase alnum, 18–19 символов) и хранит в `localStorage.guest_id`. Из слепка
+коллекция не импортируется: `guest_activity` устарела ещё в Firebase — её
+заменила RTDB-нода `guest_presence` ради экономии записи, и та же модель
+перенесена сюда.
+PII намеренно нет: только id и две метки времени — ни IP, ни user-agent, ни
+путей. Окно онлайна 15 минут (как в legacy и в панели статистики), ретенция
+1 час (cron-джоб `__aerunGuestPresencePrune__`, `*/10 * * * *`). Heartbeat —
+раз в минуту плюс при возврате фокуса во вкладку; leave — `sendBeacon` на
+`pagehide` и при логине (аналог `onDisconnect().remove()`).
+Анти-спам: id валидируется по форме до записи, а на heartbeat стоит бюджет
+30 запросов в минуту на IP — встроенный `Settings().RateLimits` PocketBase в
+этом деплое выключен (`Enabled: false`), поэтому защита живёт рядом с данными.
 
 ### Правила преобразования (важно)
 

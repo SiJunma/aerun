@@ -44,6 +44,12 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		se.Router.BindFunc(assignRequestID)
+		// PocketBase starts its scheduler from an OnServe hook bound at
+		// priority 999, so a job registered here is always in place before the
+		// first tick (see registerGuestPresenceCron).
+		if err := registerGuestPresenceCron(se.App); err != nil {
+			return err
+		}
 		registerRoutes(se, cfg)
 		return se.Next()
 	})
@@ -174,8 +180,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// Categories
 	group.GET("/categories", listCategoriesHandler)
 
-	// Presence
+	// Presence. One heartbeat route serves both identities: an authenticated
+	// beat refreshes the in-process member map, an anonymous one upserts a
+	// guest_presence row. Guests leave through a POST (navigator.sendBeacon
+	// can only POST) and read the public counter through GET /presence/guests.
 	group.POST("/presence/heartbeat", heartbeatHandler)
+	group.POST("/presence/guest/leave", guestLeaveHandler)
+	group.GET("/presence/guests", listGuestsHandler)
 	group.GET("/presence/online-users", listOnlineUsersHandler)
 
 	// Sprint 3 forum command layer.

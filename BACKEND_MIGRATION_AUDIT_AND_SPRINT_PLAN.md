@@ -1741,7 +1741,8 @@ visible from the Go side, both stopped `npm run dev` from booting):
    between reintroducing anonymous visitor tracking (a `guest_presence`
    collection keyed by a client-generated id) and dropping the counter.
    `initRtdbGuestPresence` / `removeRtdbGuestPresence` are no-ops for the same
-   reason and were already left in place by Sprint 6.
+   reason and were already left in place by Sprint 6. **Closed the same day:**
+   the `guest_presence` collection is real — see the entry below.
 
 Lesson recorded: a parse sweep of `src/` is not a build gate. `npm run build`
 is — it is the only check that resolves every named import against its module,
@@ -1753,6 +1754,62 @@ and it is now part of the verification below.
 `src/api/rtdb-presence.js` and `src/components/layout/ForumStats.jsx` with
 `200`; two `import-rehearse` runs over the real export produce byte-identical
 `mapping.json`/`report.json`.
+
+### 2026-09-26 — Guest presence restored as a first-class collection (1766800000)
+
+**Stage:** the guest counter in the stats panel is real again, and the product
+decision left open by the Sprint 6 break above is settled: anonymous visitors are
+tracked, in PocketBase, holding no PII.
+
+The legacy contract was recovered from the repository instead of invented.
+`database.rules.json` already carried `guest_presence/{guest_id} =
+{ guest_id, last_seen }` with public read; `PROJECT_CONTEXT.md` marks the older
+Firestore `guest_activity` collection DEPRECATED ("replaced by RTDB
+guest_presence to eliminate document write costs"); and the pre-Sprint-6
+`src/api/rtdb-presence.js` shows the exact client behaviour — a one-shot write on
+connect, `onDisconnect().remove()`, a 15-minute window, and
+`Math.random().toString(36).substring(2) + Date.now().toString(36)` as the
+visitor id generator. All four survive in the new shape, which is why this is a
+restoration rather than a new feature.
+
+**What was built**
+
+- `guest_presence` collection (migration 1766800000): `guest_id` (unique index),
+  `first_seen`, `last_seen` (indexed). Server-only rules — the legacy node was
+  world-writable (`.write: true`), the rewrite is not.
+- Writes: `POST /presence/heartbeat` (the anonymous branch upserts a row; an
+  authenticated beat stays on the in-process member map and can never create a
+  guest row) and `POST /presence/guest/leave`.
+- Reads: `GET /presence/guests` (`count`, `guests[]`, `window_seconds`) and
+  `guests_count` on `GET /presence/online-users`, both served from one helper so
+  the two endpoints cannot disagree. The list is public, like the legacy node and
+  like the sibling endpoint that already publishes member nicknames.
+- Retention prune on the PocketBase cron (`*/10 * * * *`), which replaces the old
+  "the map only shrinks when somebody reads it" behaviour.
+- Frontend: `initRtdbGuestPresence` beats once a minute and on tab refocus, sends
+  a `sendBeacon` leave on `pagehide` (the HTTP stand-in for
+  `onDisconnect().remove()`), `subscribeToActiveGuestsRtdb` polls the list into
+  the `{ id, last_seen }` shape ForumStats already filters on, and AuthProvider
+  generates the visitor id and clears it on login.
+
+**Why a collection and not the in-memory map that already held guests:** the
+anonymous heartbeat is the only unauthenticated write in the API, and its map key
+was client-chosen, so the map could grow without bound as long as nobody listed
+it. A row is bounded by a schema, collected on a schedule, survives a restart, and
+`first_seen` keeps a unique-visitor question answerable later.
+
+**Anti-abuse, because PocketBase ships `Settings().RateLimits.Enabled = false`**
+and this deployment never enables it: the visitor id is validated (lowercase
+alphanumeric, 8–64 characters) before any write, and the heartbeat carries its own
+30-requests-per-minute per-IP budget. Both are covered by tests.
+
+**Verification:** `go build`, `go vet`, `gofmt -l` clean; `go test ./...` all
+packages ok (10 new tests in `presence_guest_test.go` and
+`guest_presence_test.go`, including a live HTTP round trip through the real
+router); `npm run build` clean; `npx eslint` on the two touched frontend files
+adds no findings; and a backend started on a throwaway data dir answers
+`count=1` after one heartbeat, `guests_count=1` on the sibling endpoint, and
+`count=0` after the leave beacon.
 
 
 

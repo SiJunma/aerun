@@ -76,6 +76,20 @@ export const AuthProvider = ({ children }) => {
   const readMapRef = useRef({});
   readMapRef.current = readMap;
 
+  // getOrCreateGuestId returns the opaque per-browser visitor id used for
+  // anonymous presence. It is generated once (the legacy generator: a random
+  // base36 part plus a timestamp) and lives in localStorage; the backend only
+  // ever sees this id and a timestamp. Logging in clears it (see below), so a
+  // new guest session starts fresh after a logout.
+  const getOrCreateGuestId = useCallback(() => {
+    let gid = localStorage.getItem('guest_id');
+    if (!gid) {
+      gid = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      localStorage.setItem('guest_id', gid);
+    }
+    return gid;
+  }, []);
+
   // Initialize Auth State from PocketBase authStore
   const syncUserFromAuthStore = useCallback(() => {
     if (pb.authStore.isValid && pb.authStore.record) {
@@ -137,12 +151,26 @@ export const AuthProvider = ({ children }) => {
     };
   }, [syncUserFromAuthStore]);
 
-  // Presence and DM subscriptions
+  // Presence and DM subscriptions. A signed-in visitor beats as a member; an
+  // anonymous one beats as a guest so the stats panel can count them.
   useEffect(() => {
     if (user?.uid && profile) {
       return initRtdbPresence(user.uid, profile);
     }
-  }, [user?.uid, profile]);
+    return initRtdbGuestPresence(getOrCreateGuestId());
+  }, [user?.uid, profile, getOrCreateGuestId]);
+
+  // Logging in ends the guest session: the guest_presence row and the stored id
+  // both go, so a visitor who registers or signs in is never counted as a guest
+  // (the heartbeat switches to the member path) and a later logout starts a new
+  // guest identity instead of resurrecting the old one.
+  useEffect(() => {
+    if (!user?.uid) return;
+    const guestId = localStorage.getItem('guest_id');
+    if (!guestId) return;
+    removeRtdbGuestPresence(guestId);
+    localStorage.removeItem('guest_id');
+  }, [user?.uid]);
 
   useEffect(() => {
     return subscribeToOnlineUsers(setActiveUsers);

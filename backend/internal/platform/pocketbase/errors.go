@@ -74,6 +74,13 @@ func internalError(message string, cause any) error {
 	return newContractError(http.StatusInternalServerError, errKindInternal, message, cause)
 }
 
+// rateLimitedError reports that the caller exhausted its write budget. The
+// contract marks rate_limited as retryable, so a client learns the identical
+// request may succeed later instead of treating it as a payload problem.
+func rateLimitedError(message string) error {
+	return newContractError(http.StatusTooManyRequests, errKindRateLimited, message, nil)
+}
+
 // errorContractMiddleware wraps the whole /api/aerun group: it converts the
 // error returned by the inner chain into the contract envelope. It is bound
 // after the AccessResolver and before the idempotency middleware, so both
