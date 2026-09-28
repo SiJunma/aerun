@@ -1,4 +1,4 @@
-import { sendApi, pb } from './pocketbase';
+import { sendApi } from './pocketbase';
 import { logAdminAction } from './audit';
 import { DEFAULT_ROLES } from '../constants/permissions';
 
@@ -98,7 +98,8 @@ export const subscribeToRoles = (callback) => {
     }
 
     try {
-      const records = await pb.collection('roles').getFullList({ sort: 'rank' });
+      const res = await sendApi('/api/aerun/roles');
+      const records = res?.items || [];
       const rolesData = records.map(d => ({
         id: d.role_id || d.id,
         name: d.name,
@@ -124,14 +125,16 @@ export const subscribeToRoles = (callback) => {
 
 export const addRole = async (roleData, performerId) => {
   try {
-    const record = await pb.collection('roles').create({
-      ...roleData,
-      role_id: roleData.name.toLowerCase().replace(/[^a-z0-9]/g, '_'),
-      is_system: false
+    const res = await sendApi('/api/aerun/roles', {
+      method: 'POST',
+      body: {
+        ...roleData,
+        role_id: roleData.name.toLowerCase().replace(/[^a-z0-9]/g, '_')
+      }
     });
     invalidateRolesCache();
-    await logAdminAction('role_created', performerId, { targetId: record.id, roleName: roleData.name });
-    return record.id;
+    await logAdminAction('role_created', performerId, { targetId: res?.id, roleName: roleData.name });
+    return res?.id;
   } catch (err) {
     console.warn('[addRole err]', err);
   }
@@ -139,7 +142,10 @@ export const addRole = async (roleData, performerId) => {
 
 export const updateRole = async (id, roleData, performerId) => {
   try {
-    await pb.collection('roles').update(id, roleData);
+    await sendApi(`/api/aerun/roles/${id}`, {
+      method: 'PATCH',
+      body: roleData
+    });
     invalidateRolesCache();
     await logAdminAction('role_updated', performerId, { targetId: id, roleName: roleData.name });
   } catch (err) {
@@ -152,7 +158,9 @@ export const deleteRole = async (id, isSystem, performerId) => {
     throw new Error('System roles cannot be deleted');
   }
   try {
-    await pb.collection('roles').delete(id);
+    await sendApi(`/api/aerun/roles/${id}`, {
+      method: 'DELETE'
+    });
     invalidateRolesCache();
     await logAdminAction('role_deleted', performerId, { targetId: id });
   } catch (err) {

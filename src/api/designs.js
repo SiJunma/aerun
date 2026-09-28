@@ -1,4 +1,4 @@
-import { pb } from './pocketbase';
+import { sendApi } from './pocketbase';
 
 const LOCAL_STORAGE_KEY = 'aerun_custom_designs';
 
@@ -29,10 +29,9 @@ export const subscribeToDesigns = (callback) => {
 
 export const getDesigns = async () => {
   try {
-    if (pb) {
-      const records = await pb.collection('designs').getFullList({ sort: '-created' });
-      return records.map(r => ({ id: r.id, ...r }));
-    }
+    const res = await sendApi('/api/aerun/designs');
+    const items = res?.items || [];
+    return items.map(r => ({ id: r.id, ...r }));
   } catch {
     // collection might not exist in PocketBase schema; fallback to local designs
   }
@@ -41,8 +40,8 @@ export const getDesigns = async () => {
 
 export const getDesign = async (id) => {
   try {
-    if (pb) {
-      const record = await pb.collection('designs').getOne(id);
+    const record = await sendApi(`/api/aerun/designs/${id}`);
+    if (record) {
       return { id: record.id, ...record };
     }
   } catch {}
@@ -51,8 +50,11 @@ export const getDesign = async (id) => {
 
 export const createDesign = async (designData) => {
   try {
-    if (pb) {
-      const record = await pb.collection('designs').create(designData);
+    const record = await sendApi('/api/aerun/designs', {
+      method: 'POST',
+      body: designData
+    });
+    if (record?.id) {
       return record.id;
     }
   } catch {}
@@ -65,10 +67,11 @@ export const createDesign = async (designData) => {
 
 export const updateDesign = async (id, designData) => {
   try {
-    if (pb) {
-      await pb.collection('designs').update(id, designData);
-      return;
-    }
+    await sendApi(`/api/aerun/designs/${id}`, {
+      method: 'PATCH',
+      body: designData
+    });
+    return;
   } catch {}
   const list = getLocalDesigns().map(d => d.id === id ? { ...d, ...designData, updatedAt: new Date().toISOString() } : d);
   setLocalDesigns(list);
@@ -76,10 +79,10 @@ export const updateDesign = async (id, designData) => {
 
 export const deleteDesign = async (id) => {
   try {
-    if (pb) {
-      await pb.collection('designs').delete(id);
-      return;
-    }
+    await sendApi(`/api/aerun/designs/${id}`, {
+      method: 'DELETE'
+    });
+    return;
   } catch {}
   const list = getLocalDesigns().filter(d => d.id !== id);
   setLocalDesigns(list);

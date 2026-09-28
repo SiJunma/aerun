@@ -168,6 +168,9 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 		})
 	})
 
+	// Unified status & health probe (combines liveness check with presence stats)
+	group.GET("/status", statusHandler)
+
 	group.GET("/me", meHandler)
 	group.PUT("/me/settings", updateSettingsHandler)
 
@@ -176,6 +179,20 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/admin/users", adminListUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
 	group.PATCH("/admin/users/{id}", adminUpdateUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	group.DELETE("/admin/users/{id}", adminDeleteUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+
+	// Catalog & metadata commands (public read + permissioned CRUD)
+	group.GET("/roles", listRolesHandler)
+	group.POST("/roles", createRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
+	group.PATCH("/roles/{id}", updateRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
+	group.DELETE("/roles/{id}", deleteRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
+
+	group.GET("/designs", listDesignsHandler)
+	group.GET("/designs/{id}", getDesignHandler)
+	group.POST("/designs", createDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
+	group.PATCH("/designs/{id}", updateDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
+	group.DELETE("/designs/{id}", deleteDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
+
+	group.GET("/category-groups", listCategoryGroupsHandler)
 
 	// Categories
 	group.GET("/categories", listCategoriesHandler)

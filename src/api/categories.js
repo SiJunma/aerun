@@ -22,11 +22,11 @@ export const subscribeToCategoryGroups = (callback) => {
       }
     } catch { /* Cache corrupted */ }
 
-    // 2. Fetch from PocketBase or local fallback
+    // 2. Fetch from Aerun backend or local fallback
     try {
-      const records = await pb.collection('category_groups').getFullList({ sort: 'sort_order' });
+      const res = await sendApi('/api/aerun/category-groups');
       if (!isSubscribed) return;
-      const data = records.map(r => ({ id: r.id, ...r }));
+      const data = res?.items || [];
       localStorage.setItem(CAT_GROUPS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
       callback(data);
     } catch {

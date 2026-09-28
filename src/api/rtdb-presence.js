@@ -2,16 +2,104 @@ import { sendApi, pb } from './pocketbase';
 
 let heartbeatTimer = null;
 let currentActiveCharacter = null;
+let cachedOnlineUsers = [];
+let cachedGuests = [];
+const onlineSubscribers = new Set();
+const guestSubscribers = new Set();
+
+const notifyOnlineSubscribers = (users) => {
+  cachedOnlineUsers = users;
+  onlineSubscribers.forEach(cb => {
+    try { cb(users); } catch { /* one bad subscriber must not starve the rest */ }
+  });
+};
+
+const notifyGuestSubscribers = (guests) => {
+  cachedGuests = guests;
+  guestSubscribers.forEach(cb => {
+    try { cb(guests); } catch { /* one bad subscriber must not starve the rest */ }
+  });
+};
+
+// parseLastSeen normalises the server's date string into milliseconds. The stats
+// panel drops guests outside its own window, so a value it cannot parse must
+// never look like "seen just now".
+const parseLastSeen = (value) => {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const handlePresenceSnapshot = (presence) => {
+  if (!presence) return;
+  if (Array.isArray(presence.users)) {
+    const list = presence.users.map(u => ({
+      id: u.id,
+      nickname: u.nickname || 'User',
+      avatar_url: u.avatar_url || '',
+      role_id: u.role || 'player',
+      post_count: u.post_count || 0,
+      status_line: u.status_line || '',
+      signature: u.signature || '',
+      active_character: u.active_character || null,
+      last_seen: u.last_seen ? new Date(u.last_seen).getTime() : Date.now()
+    }));
+    notifyOnlineSubscribers(list);
+  }
+  if (Array.isArray(presence.guests)) {
+    const list = presence.guests.map(guest => ({
+      id: guest.id,
+      last_seen: parseLastSeen(guest.last_seen)
+    }));
+    notifyGuestSubscribers(list);
+  }
+};
+
+// Snapshot seeding: the first subscriber starts one shared GET /api/aerun/status
+// poll; heartbeat responses feed the same caches, so the poll only covers the
+// gaps between beats and there is never more than one fetch in flight.
+const STATUS_POLL_MS = 20000;
+let statusPollTimer = null;
+let statusFetchInFlight = false;
+
+const fetchStatusSnapshot = async () => {
+  if (statusFetchInFlight) return;
+  statusFetchInFlight = true;
+  try {
+    const res = await sendApi('/api/aerun/status');
+    if (res?.presence) handlePresenceSnapshot(res.presence);
+  } catch {
+    // Non-fatal: the next beat or poll tick retries.
+  } finally {
+    statusFetchInFlight = false;
+  }
+};
+
+const startStatusPolling = () => {
+  if (statusPollTimer) return;
+  fetchStatusSnapshot();
+  statusPollTimer = setInterval(fetchStatusSnapshot, STATUS_POLL_MS);
+};
+
+const stopStatusPollingIfIdle = () => {
+  if (onlineSubscribers.size > 0 || guestSubscribers.size > 0) return;
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer);
+    statusPollTimer = null;
+  }
+};
 
 const sendHeartbeat = async (character = null) => {
   if (!pb.authStore.isValid) return;
   try {
-    await sendApi('/api/aerun/presence/heartbeat', {
+    const res = await sendApi('/api/aerun/presence/heartbeat', {
       method: 'POST',
       body: {
         active_character: character || currentActiveCharacter || null
       }
     });
+    if (res?.presence) {
+      handlePresenceSnapshot(res.presence);
+    }
   } catch (err) {
     // Non-fatal presence heartbeat failure
   }
@@ -69,37 +157,22 @@ export const setRtdbOffline = async (uid, isLogout = false) => {
 
 /**
  * Subscribes to the list of currently online users.
+ *
+ * Reads the shared presence cache instead of opening its own listener: the
+ * current cache is delivered immediately, and the shared /api/aerun/status poll
+ * starts (or is already running) so the first snapshot lands right away. Every
+ * later snapshot — poll tick or heartbeat response — re-delivers through
+ * notifyOnlineSubscribers.
  */
 export const subscribeToOnlineUsers = (callback) => {
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
-      const res = await sendApi('/api/aerun/presence/online-users');
-      if (!isSubscribed) return;
-      const list = (res?.users || []).map(u => ({
-        id: u.id,
-        nickname: u.nickname || 'User',
-        avatar_url: u.avatar_url || '',
-        role_id: u.role || 'player',
-        post_count: u.post_count || 0,
-        status_line: u.status_line || '',
-        signature: u.signature || '',
-        active_character: u.active_character || null,
-        last_seen: u.last_seen ? new Date(u.last_seen).getTime() : Date.now()
-      }));
-      callback(list);
-    } catch {
-      if (isSubscribed) callback([]);
-    }
-  };
-
-  load();
-  const interval = setInterval(load, 20000);
+  onlineSubscribers.add(callback);
+  startStatusPolling();
+  // Immediate delivery of the last snapshot; a throwing subscriber is isolated.
+  try { callback(cachedOnlineUsers); } catch { /* reported, not fatal */ }
 
   return () => {
-    isSubscribed = false;
-    clearInterval(interval);
+    onlineSubscribers.delete(callback);
+    stopStatusPollingIfIdle();
   };
 };
 
@@ -109,55 +182,25 @@ export const subscribeToUserOnlineStatus = (uid, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
-  const load = async () => {
-    try {
-      const res = await sendApi('/api/aerun/presence/online-users');
-      if (!isSubscribed) return;
-      const found = (res?.users || []).some(u => u.id === uid);
-      callback(found);
-    } catch {
-      if (isSubscribed) callback(false);
-    }
-  };
-
-  load();
-  const interval = setInterval(load, 25000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
+  // Derived from the online-user cache: false until the first snapshot lands,
+  // then re-evaluated on every snapshot.
+  return subscribeToOnlineUsers((users) => {
+    callback(users.some(u => u.id === uid));
+  });
 };
 
-export const subscribeToRtdbStatuses = (callback) => {
-  let isSubscribed = true;
-  const load = async () => {
-    try {
-      const res = await sendApi('/api/aerun/presence/online-users');
-      if (!isSubscribed) return;
-      const map = {};
-      (res?.users || []).forEach(u => {
-        map[u.id] = {
-          state: 'online',
-          nickname: u.nickname,
-          last_seen: u.last_seen
-        };
-      });
-      callback(map);
-    } catch {
-      if (isSubscribed) callback({});
-    }
-  };
-
-  load();
-  const interval = setInterval(load, 25000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
-};
+export const subscribeToRtdbStatuses = (callback) =>
+  subscribeToOnlineUsers((users) => {
+    const map = {};
+    users.forEach(u => {
+      map[u.id] = {
+        state: 'online',
+        nickname: u.nickname,
+        last_seen: u.last_seen
+      };
+    });
+    callback(map);
+  });
 
 export const subscribeToDailyActiveUsers = (callback) => {
   return subscribeToOnlineUsers(callback);
@@ -179,17 +222,19 @@ export const subscribeToDailyActiveUsers = (callback) => {
 //     React StrictMode in dev), and a delete racing the next beat would drop a
 //     live visitor for a whole interval. Only pagehide and login remove it.
 const GUEST_HEARTBEAT_MS = 60 * 1000;
-const GUEST_POLL_MS = 20 * 1000;
 
 let guestHeartbeatTimer = null;
 let guestDetachListeners = null;
 
 const sendGuestHeartbeat = async (guestId) => {
   try {
-    await sendApi('/api/aerun/presence/heartbeat', {
+    const res = await sendApi('/api/aerun/presence/heartbeat', {
       method: 'POST',
       body: { guest_id: guestId }
     });
+    if (res?.presence) {
+      handlePresenceSnapshot(res.presence);
+    }
   } catch {
     // Non-fatal: presence is best effort and the next beat retries.
   }
@@ -220,40 +265,20 @@ const stopGuestHeartbeat = () => {
   }
 };
 
-// parseLastSeen normalises the server's date string into milliseconds. The stats
-// panel drops guests outside its own window, so a value it cannot parse must
-// never look like "seen just now".
-const parseLastSeen = (value) => {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
 /**
  * Subscribes to the active guests as [{ id, last_seen }] with last_seen in
- * milliseconds — the shape the stats panel filters on.
+ * milliseconds — the shape the stats panel filters on. Same cache + shared
+ * status poll as subscribeToOnlineUsers, through the guest subscriber set.
  */
 export const subscribeToActiveGuestsRtdb = (callback) => {
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
-      const res = await sendApi('/api/aerun/presence/guests');
-      if (!isSubscribed) return;
-      callback((res?.guests || []).map(guest => ({
-        id: guest.id,
-        last_seen: parseLastSeen(guest.last_seen)
-      })));
-    } catch {
-      if (isSubscribed) callback([]);
-    }
-  };
-
-  load();
-  const interval = setInterval(load, GUEST_POLL_MS);
+  guestSubscribers.add(callback);
+  startStatusPolling();
+  // Immediate delivery of the last snapshot; a throwing subscriber is isolated.
+  try { callback(cachedGuests); } catch { /* reported, not fatal */ }
 
   return () => {
-    isSubscribed = false;
-    clearInterval(interval);
+    guestSubscribers.delete(callback);
+    stopStatusPollingIfIdle();
   };
 };
 

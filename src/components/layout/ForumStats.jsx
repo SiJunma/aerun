@@ -52,7 +52,8 @@ const ForumStats = () => {
     };
   }, [activeUsers, activeGuestsRaw, currentTime, user]);
 
-  // Prefer RTDB-sourced daily active users (0 Firestore reads), fall back to context
+  // Prefer snapshot-sourced online users (heartbeat/status presence), fall back
+  // to the context value loaded with the main-page data.
   const dailyActiveUsers = dailyFromRtdb.length > 0 ? dailyFromRtdb : (contextDailyUsers || []);
   const totalTopics = forumStats?.totalTopics ?? categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
   const totalPosts = forumStats?.totalPosts ?? categories.reduce((sum, cat) => sum + (cat.posts_count || 0), 0);

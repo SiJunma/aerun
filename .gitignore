@@ -69,3 +69,7 @@ Thumbs.db
 # contain personal data)
 backend/migration-data/
 backend/pb_data/
+# Local backend build artifacts and run logs (..local-run holds the dev
+# aerun.exe plus its stdout/stderr capture from local launches)
+backend/..local-run/
+backend/.local-run/

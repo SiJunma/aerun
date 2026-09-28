@@ -140,64 +140,8 @@ export const subscribeToUser = (uid, callback) => {
   };
 };
 
-export const subscribeToActiveUsers = (callback) => {
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
-      const res = await sendApi('/api/aerun/presence/online-users');
-      if (!isSubscribed) return;
-      const list = (res?.users || []).map(u => ({
-        id: u.id,
-        nickname: u.nickname || 'User',
-        avatar_url: u.avatar_url || '',
-        role_id: u.role || 'player',
-        post_count: u.post_count || 0,
-        status_line: u.status_line || '',
-        signature: u.signature || '',
-        active_character: u.active_character || null,
-        last_seen: u.last_seen ? new Date(u.last_seen).getTime() : Date.now()
-      }));
-      callback(list);
-    } catch {
-      if (isSubscribed) callback([]);
-    }
-  };
-
-  load();
-  const interval = setInterval(load, 20000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
-};
-
-export const subscribeToActiveUserIds = (callback) => {
-  return subscribeToActiveUsers((users) => {
-    callback(new Set(users.map(u => u.id)));
-  });
-};
-
-export const fetchDailyActiveUsers = async () => {
-  try {
-    const res = await sendApi('/api/aerun/presence/online-users');
-    return (res?.users || []).map(u => ({
-      id: u.id,
-      nickname: u.nickname || 'User',
-      avatar_url: u.avatar_url || '',
-      role_id: u.role || 'player',
-      last_seen: u.last_seen ? new Date(u.last_seen).getTime() : Date.now()
-    }));
-  } catch {
-    return [];
-  }
-};
-
-export const subscribeToActiveGuests = (callback) => {
-  callback([]);
-  return () => {};
-};
+// Presence subscriptions (active users / guest ids / daily actives) moved to
+// ./rtdb-presence, which reads the consolidated heartbeat/status snapshots.
 
 export const subscribeToAllUsers = (callback) => {
   let isSubscribed = true;

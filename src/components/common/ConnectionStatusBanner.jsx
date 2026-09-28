@@ -25,11 +25,11 @@ const ConnectionStatusBanner = () => {
     window.addEventListener('offline', handleBrowserOffline);
     window.addEventListener('online', handleBrowserOnline);
 
-    // 2. Periodic backend health check probe
+    // 2. Periodic backend health check probe (consolidated via /status)
     let isMounted = true;
     const checkHealth = async () => {
       try {
-        await sendApi('/api/aerun/health');
+        await sendApi('/api/aerun/status');
         if (!isMounted) return;
         if (disconnectTimerRef.current) {
           clearTimeout(disconnectTimerRef.current);

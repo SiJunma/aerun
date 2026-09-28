@@ -192,10 +192,15 @@ func heartbeatHandler(e *core.RequestEvent) error {
 		}
 		presenceMu.Unlock()
 
-		return e.JSON(http.StatusOK, map[string]any{
+		snapshot, _ := buildStatusSnapshot(e.App, now)
+		resp := map[string]any{
 			"ok":         true,
 			"request_id": requestIDFrom(e),
-		})
+		}
+		if snapshot != nil {
+			resp["presence"] = snapshot["presence"]
+		}
+		return e.JSON(http.StatusOK, resp)
 	}
 
 	if !validGuestID(form.GuestID) {
@@ -208,10 +213,15 @@ func heartbeatHandler(e *core.RequestEvent) error {
 		return internalError("guest presence could not be recorded", err)
 	}
 
-	return e.JSON(http.StatusOK, map[string]any{
+	snapshot, _ := buildStatusSnapshot(e.App, now)
+	resp := map[string]any{
 		"ok":         true,
 		"request_id": requestIDFrom(e),
-	})
+	}
+	if snapshot != nil {
+		resp["presence"] = snapshot["presence"]
+	}
+	return e.JSON(http.StatusOK, resp)
 }
 
 // guestLeaveHandler removes a guest row. It is the stand-in for RTDB's
