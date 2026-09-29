@@ -152,8 +152,18 @@ const MembersPage = () => {
         aVal = getUserLastSeen(a);
         bVal = getUserLastSeen(b);
       } else if (sortField === 'created_at' || sortField === 'updated_at') {
-        aVal = a[sortField]?.toMillis?.() || 0;
-        bVal = b[sortField]?.toMillis?.() || 0;
+        // toMillis, not `?.[sortField]?.toMillis?.() || 0`. The members row
+        // carries created_at as an ISO *string* (withLegacyDates normalises
+        // PocketBase's "YYYY-MM-DD HH:MM:SS.sssZ" into it), so it has no
+        // toMillis method at all: the optional call silently short-circuited to
+        // undefined, the `|| 0` turned every row into 0, and the comparator
+        // then saw "all equal" and fell through to the nickname tiebreak. In
+        // other words Newest/Oldest First did nothing at all and just re-sorted
+        // by name -- which reads as "the sort is broken" without ever looking
+        // broken. The rows also carry the same value under the bare `created`
+        // key, so that spelling is accepted as a fallback.
+        aVal = toMillis(a[sortField]) || toMillis(a[sortField.replace(/_at$/, '')]);
+        bVal = toMillis(b[sortField]) || toMillis(b[sortField.replace(/_at$/, '')]);
       } else {
         aVal = a[sortField];
         bVal = b[sortField];

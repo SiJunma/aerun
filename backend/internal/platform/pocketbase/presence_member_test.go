@@ -395,3 +395,40 @@ func TestUserImportPreservesLiveLastSeen(t *testing.T) {
 		t.Fatalf("a dump replay that rewinds nothing must report no updates, got %v", report.Updated)
 	}
 }
+
+// TestVerifyPresenceSchemaRejectsAnUnmigratedDataDir pins the boot guard.
+//
+// The failure it exists to catch is silent by construction: the heartbeat is
+// best-effort, so a missing column means every write is dropped at WARN while
+// the endpoint still answers 200, and the members table quietly shows
+// registration dates forever. A guard that returns nil here would restore
+// exactly the silence this was added to end.
+func TestVerifyPresenceSchemaRejectsAnUnmigratedDataDir(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// The test app has migrations applied, so the healthy path must pass.
+	if err := verifyPresenceSchema(app); err != nil {
+		t.Fatalf("a migrated data dir must pass the guard: %v", err)
+	}
+
+	// Drop the field from the collection definition and re-check. The cached
+	// collection is what OnServe reads, so this mirrors a binary that predates
+	// the migration.
+	users, err := app.FindCachedCollectionByNameOrId(usersCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users.Fields.RemoveByName(userLastSeenField)
+	if err := app.Save(users); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.ReloadCachedCollections(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := verifyPresenceSchema(app); err == nil {
+		t.Fatal("the guard must reject a data dir without the last_seen column; " +
+			"otherwise the members table degrades silently again")
+	}
+}

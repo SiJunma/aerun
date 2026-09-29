@@ -31,6 +31,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -76,6 +77,40 @@ var (
 // Five minutes is well inside the resolution a "last seen" column is read at,
 // and it cuts the write rate by 10x.
 const memberLastSeenWriteInterval = 5 * time.Minute
+
+// verifyPresenceSchema asserts at boot that the durable last-seen column
+// actually exists.
+//
+// It exists because of how this failure presents. touchMemberLastSeen is
+// deliberately best-effort, so a write against a schema without the column
+// fails, is logged at WARN and dropped -- and the heartbeat still answers 200.
+// Every symptom is then downstream of that: the members table shows the
+// registration date for everyone, the column never moves, and nothing in the UI
+// or the API says a word about it. That is exactly the state this feature was
+// built to eliminate, reintroduced by an old binary pointed at a database that
+// had not been migrated yet.
+//
+// apis.Serve applies every migration before OnServe runs, so reaching this
+// hook with the column missing is not a race and not a first-boot condition --
+// it means the binary and the data directory disagree, and continuing would
+// serve a forum whose activity column is quietly wrong. Refusing to start is
+// the honest outcome: the fix is to run the migrations, which any restart of a
+// current binary does automatically.
+func verifyPresenceSchema(app core.App) error {
+	users, err := app.FindCachedCollectionByNameOrId(usersCollectionName)
+	if err != nil {
+		return fmt.Errorf("users collection unavailable: %w", err)
+	}
+	if users.Fields.GetByName(userLastSeenField) == nil {
+		return fmt.Errorf(
+			"users.%s is missing: this binary and the data directory are out of sync "+
+				"(migrations run automatically on start -- if you are seeing this, the "+
+				"process is running a build from before migration 1767300000, and every "+
+				"member's last-seen timestamp will silently stay empty)",
+			userLastSeenField)
+	}
+	return nil
+}
 
 // userLastSeenField mirrors the column added by migration 1767300000. The
 // durable "last visit" clock, as opposed to the onlineMembers map, which is the

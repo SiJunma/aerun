@@ -50,6 +50,13 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := registerGuestPresenceCron(se.App); err != nil {
 			return err
 		}
+		// Fail fast on a binary/data-directory mismatch. touchMemberLastSeen
+		// cannot report this: it is best-effort by design, so a missing column
+		// would degrade the members table to registration dates with a 200 on
+		// every heartbeat and no other signal anywhere.
+		if err := verifyPresenceSchema(se.App); err != nil {
+			return err
+		}
 		// Sprint 2 task 3: the Google login follows the environment on every
 		// startup (same defense-in-depth idea as the SMTP reset in OnBootstrap
 		// below). It runs here — after apis.Serve applied RunAllMigrations —
