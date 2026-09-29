@@ -135,6 +135,12 @@ func createPostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to update topic projection", err)
 		}
 
+		// The author's own counter moves in the same transaction, for the same
+		// reason: a member list that lags a reply by one is a visible lie.
+		if err := adjustUserPostCount(txApp, e.Auth.Id, 1); err != nil {
+			return 0, nil, err
+		}
+
 		resp := map[string]any{
 			"post":       postPayload(post),
 			"request_id": requestIDFrom(e),
@@ -325,6 +331,14 @@ func deletePostHandler(e *core.RequestEvent) error {
 		post.Set("content", "")
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to delete post", err)
+		}
+
+		// The post's AUTHOR loses a post, not the caller. A moderator deleting
+		// someone else's post must not move their own counter, and the
+		// soft-deleted post is excluded from the count by definition, so this
+		// is a decrement of exactly one.
+		if err := adjustUserPostCount(txApp, post.GetString("author_id"), -1); err != nil {
+			return 0, nil, err
 		}
 
 		// Update topic: recalculate visible posts count

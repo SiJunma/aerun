@@ -309,6 +309,12 @@ func publishDraftHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to update topic projection", err)
 		}
 
+		// Publishing turns a draft into a real post, so the author's post count
+		// moves now — the draft was deliberately not counted before this.
+		if err := adjustUserPostCount(txApp, e.Auth.Id, 1); err != nil {
+			return 0, nil, err
+		}
+
 		return http.StatusOK, map[string]any{
 			"post":       postPayload(post),
 			"request_id": requestIDFrom(e),

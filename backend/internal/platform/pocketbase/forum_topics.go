@@ -138,6 +138,15 @@ func createTopicHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to update topic projection", err)
 		}
 
+		// 4. The author gains one topic AND its opening post. Both counters move
+		// here, in the same transaction as the rows that justify them.
+		if err := adjustUserPostCount(txApp, e.Auth.Id, 1); err != nil {
+			return 0, nil, err
+		}
+		if err := adjustUserTopicCount(txApp, e.Auth.Id, 1); err != nil {
+			return 0, nil, err
+		}
+
 		resp := map[string]any{
 			"topic":      topicPayload(topic),
 			"first_post": postPayload(post),
@@ -398,6 +407,14 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 		topic.Set("deleted", true)
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to delete topic", err)
+		}
+
+		// The topic leaves the author's topic count, but its posts stay in the
+		// database (a soft-deleted topic keeps its rows and its posts are still
+		// non-deleted), so posts_count is deliberately NOT touched here — the
+		// recompute pass uses the same rule, and the two must agree.
+		if err := adjustUserTopicCount(txApp, topic.GetString("author_id"), -1); err != nil {
+			return 0, nil, err
 		}
 
 		if !isAuthor {
