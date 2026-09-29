@@ -375,7 +375,15 @@ export const MAX_ROLE_PERMISSIONS = {
 };
 
 export const resolveUserRoleId = (userEmail, roleId) => {
-  if (userEmail === import.meta.env.VITE_ADMIN_EMAIL) return CHIEF_ADMIN_ID;
+  // Both sides must be real values before they can be equal. The staff DTO
+  // deliberately does not serve email, so userEmail is undefined for every row
+  // the members table renders, and VITE_ADMIN_EMAIL is only present in
+  // .env.development / .env.production. If either is missing, the bare
+  // comparison below is `undefined === undefined`, which is true -- and every
+  // account on the forum would be promoted to Chief Admin and render an Admin
+  // badge. It is a one-line guard against a silently total failure.
+  const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
+  if (adminEmail && userEmail && userEmail === adminEmail) return CHIEF_ADMIN_ID;
   if (roleId === CHIEF_ADMIN_ID) return CHIEF_ADMIN_ID;
   return roleId || 'player';
 };

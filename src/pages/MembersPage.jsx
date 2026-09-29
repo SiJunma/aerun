@@ -9,28 +9,36 @@ import { subscribeToRtdbStatuses } from '../api/rtdb-presence';
 import { resolveAvatarUrl } from '../api/avatars';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
+import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import Timestamp from '../components/common/Timestamp';
 
-const ROLE_PRIORITY = {
-  'root': 120,
-  'admin': 100,
-  'moderator': 80,
-  'player': 60,
-  'banned': 40,
-  'pending': 20
+// The two legacy pseudo-roles. They cannot reach the role sort as role ids any
+// more -- users.role is validated against the roles registry and the
+// active/pending/banned lifecycle moved to users.status -- but the badge still
+// special-cases them, so the sort has to agree with the badge rather than let
+// getRoleVisuals fall back to "Player" and sort a Banned account under a name
+// it is not wearing.
+const LEGACY_PSEUDO_ROLE_LABELS = {
+  banned: 'Banned',
+  pending: 'Pending',
+  deleted: 'Deleted'
 };
 
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const MembersPage = () => {
   const { t, lang } = useI18n();
-  const { profile, updateSettings, settings } = useAuth();
+  const { profile, updateSettings, settings, roles } = useAuth();
   const { setPageTitle } = usePageTitle();
   const [users, setUsers] = useState([]);
   const [rtdbStatuses, setRtdbStatuses] = useState({});
   const [search, setSearch] = useState('');
-  const [sortField, setSortField] = useState('nickname');
-  const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'desc'
+  // Default order is most recently active first. The members table exists to
+  // answer "who is around", so activity is the useful default rather than the
+  // alphabetical one; `last_seen-desc` is a real entry in the sort dropdown, so
+  // the control still shows the active state on first paint.
+  const [sortField, setSortField] = useState('last_seen');
+  const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
 
   useEffect(() => {
     setPageTitle(t('nav.members', 'Участники'));
@@ -134,6 +142,24 @@ const MembersPage = () => {
     }
   };
 
+  // roleLabel returns the exact string the role badge renders for a member, so
+  // that sorting by role and reading the column can never disagree.
+  //
+  // It deliberately goes through the same two resolvers ForumRoleBadge uses --
+  // resolveUserRoleId for the root alias, getRoleVisuals for the registry row
+  // and its Player fallback. Calling them here rather than reimplementing the
+  // lookup is the point: the previous hardcoded ROLE_PRIORITY table ranked
+  // roles by permission weight instead of by the label on screen, and it only
+  // knew the six compiled system roles, so every imported custom role
+  // (NorthbayCitizen, Demon, Anaptix, ...) missed the lookup and was pinned to
+  // 60 -- all of them tied with player, with their real order then decided by
+  // the nickname tiebreak.
+  const roleLabel = useCallback((u) => {
+    const pseudo = LEGACY_PSEUDO_ROLE_LABELS[u.role_id];
+    if (pseudo) return pseudo;
+    return getRoleVisuals(resolveUserRoleId(u.email, u.role_id), roles).name;
+  }, [roles]);
+
   const sortedAndFilteredUsers = useMemo(() => {
     let result = users.filter(u =>
       u.nickname?.toLowerCase().includes(search.toLowerCase())
@@ -143,9 +169,20 @@ const MembersPage = () => {
       let aVal, bVal;
 
       if (sortField === 'role_id') {
-        aVal = ROLE_PRIORITY[a.role_id] || 60;
-        bVal = ROLE_PRIORITY[b.role_id] || 60;
-      } else if (sortField === 'last_seen') {
+        // Alphabetical by the rendered label, and it has to be its own compare:
+        // the generic branch below orders with < / >, which is a code-unit
+        // comparison. That sorts by UTF-16 unit, so "NorthbayСitizen" (Cyrillic
+        // С, an imported custom role) lands after every Latin letter rather
+        // than beside its Latin twin, which reads as random. localeCompare is
+        // collation-aware and treats case and accents as equal.
+        const cmp = roleLabel(a).localeCompare(roleLabel(b), undefined, { sensitivity: 'base' });
+        if (cmp !== 0) return sortOrder === 'asc' ? cmp : -cmp;
+        // Same fixed nickname tiebreak the other columns use, so a group of
+        // members sharing a role label still reads in a stable order.
+        return (a.nickname || '').toLowerCase().localeCompare((b.nickname || '').toLowerCase());
+      }
+
+      if (sortField === 'last_seen') {
         // getUserLastSeen already normalises to epoch ms, so the sort compares
         // two plain numbers instead of re-deriving the value at a second call
         // site (which is how the two spellings drifted apart before).
@@ -182,15 +219,18 @@ const MembersPage = () => {
     });
 
     return result;
-  }, [users, getUserLastSeen, search, sortField, sortOrder]);
+  }, [users, getUserLastSeen, roleLabel, search, sortField, sortOrder]);
 
   const handleSort = (field) => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      // Default to desc for count/date fields, asc for text
-      if (['post_count', 'reputation', 'created_at', 'last_seen', 'role_id'].includes(field)) {
+      // Default to desc for count/date fields, asc for text. role_id is a text
+      // sort now (alphabetical by the rendered label), so it belongs with the
+      // ascending group: opening it on Z-A would put the rarest label first for
+      // no reason.
+      if (['post_count', 'reputation', 'created_at', 'last_seen'].includes(field)) {
         setSortOrder('desc');
       } else {
         setSortOrder('asc');
@@ -263,16 +303,21 @@ const MembersPage = () => {
                     setSortOrder(order);
                   }}
                 >
+                  {/* Activity first: it is the default order, so the control opens
+                      on the option that is actually in effect. */}
+                  <option value="last_seen-desc">{lang === 'ru' ? 'Сначала активные' : 'Recently Active'}</option>
+                  <option value="last_seen-asc">{lang === 'ru' ? 'Сначала неактивные' : 'Least Recently Active'}</option>
                   <option value="nickname-asc">{lang === 'ru' ? 'Имя (A-Z)' : 'Name (A-Z)'}</option>
                   <option value="nickname-desc">{lang === 'ru' ? 'Имя (Z-A)' : 'Name (Z-A)'}</option>
-                  <option value="role_id-desc">{lang === 'ru' ? 'Ранг (по убыванию)' : 'Rank (Desc)'}</option>
-                  <option value="role_id-asc">{lang === 'ru' ? 'Ранг (по возрастанию)' : 'Rank (Asc)'}</option>
+                  {/* Role is alphabetical by the label shown on the badge, so the
+                      options are named A-Z / Z-A. They used to read "Ранг"
+                      (Rank), which described the old permission-weight order. */}
+                  <option value="role_id-asc">{lang === 'ru' ? 'Роль (А-Я)' : 'Role (A-Z)'}</option>
+                  <option value="role_id-desc">{lang === 'ru' ? 'Роль (Я-А)' : 'Role (Z-A)'}</option>
                   <option value="post_count-desc">{lang === 'ru' ? 'Больше постов' : 'Most Posts'}</option>
                   <option value="post_count-asc">{lang === 'ru' ? 'Меньше постов' : 'Fewest Posts'}</option>
                   <option value="reputation-desc">{lang === 'ru' ? 'Выше репутация' : 'Highest Rep'}</option>
                   <option value="reputation-asc">{lang === 'ru' ? 'Ниже репутация' : 'Lowest Rep'}</option>
-                  <option value="last_seen-desc">{lang === 'ru' ? 'Сначала активные' : 'Recently Active'}</option>
-                  <option value="last_seen-asc">{lang === 'ru' ? 'Сначала неактивные' : 'Least Recently Active'}</option>
                   <option value="created_at-desc">{lang === 'ru' ? 'Сначала новые' : 'Newest First'}</option>
                   <option value="created_at-asc">{lang === 'ru' ? 'Сначала старые' : 'Oldest First'}</option>
                 </Form.Select>
