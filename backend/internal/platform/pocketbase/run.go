@@ -50,6 +50,13 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := registerGuestPresenceCron(se.App); err != nil {
 			return err
 		}
+		// TASK-4: the outbox worker existed but was never scheduled, so no
+		// queued email could ever leave the queue. Registered here, at the same
+		// point and for the same reason as the prune above: PocketBase starts
+		// its scheduler at priority 999, after this hook.
+		if err := registerOutboxWorkerCron(se.App); err != nil {
+			return err
+		}
 		// Fail fast on a binary/data-directory mismatch. touchMemberLastSeen
 		// cannot report this: it is best-effort by design, so a missing column
 		// would degrade the members table to registration dates with a 200 on
@@ -211,9 +218,26 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.DELETE("/designs/{id}", deleteDesignHandler).BindFunc(RequirePermission(auth.PermManageDesigns)).BindFunc(enforceIdempotency)
 
 	group.GET("/category-groups", listCategoryGroupsHandler)
+	group.POST("/category-groups", createCategoryGroupHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
+	group.PATCH("/category-groups/{id}", updateCategoryGroupHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
+	group.DELETE("/category-groups/{id}", deleteCategoryGroupHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 
 	// Categories
 	group.GET("/categories", listCategoriesHandler)
+	group.POST("/categories", createCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
+	group.PATCH("/categories/{id}", updateCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
+	group.DELETE("/categories/{id}", deleteCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
+
+	// Characters (masks). Reads follow the users profile visibility rule;
+	// writes are owner-only and self-service (ADR-5).
+	group.GET("/users/{id}/characters", listUserCharactersHandler)
+	group.GET("/characters/{id}", getCharacterHandler)
+	group.POST("/me/characters", createCharacterHandler).BindFunc(enforceIdempotency)
+	group.PATCH("/characters/{id}", updateCharacterHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/characters/{id}", deleteCharacterHandler).BindFunc(enforceIdempotency)
+	// No enforceIdempotency: multipart upload, same documented deviation as
+	// PUT /me/avatar (ADR-4, avatar_upload.go header).
+	group.PUT("/characters/{id}/avatar", uploadCharacterAvatarHandler)
 
 	// Presence. One heartbeat route serves both identities: an authenticated
 	// beat refreshes the in-process member map, an anonymous one upserts a

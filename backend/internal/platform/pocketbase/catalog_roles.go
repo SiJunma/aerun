@@ -2,7 +2,10 @@ package pocketbase
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/pocketbase/dbx"
@@ -129,6 +132,17 @@ func createRoleHandler(e *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
+	if err := validateRoleRank(form.Rank); err != nil {
+		return err
+	}
+	// The UNIQUE check below only covers rows that exist. A reserved id that has
+	// not been created yet would pass it and then shadow the compiled matrix:
+	// the resolver finds the registry row first and the account loses the
+	// system role's permissions silently (a root row named "root" that is
+	// is_system=false is exactly that failure, with extra steps).
+	if isReservedRoleID(roleID) {
+		return validationError("role_id '" + roleID + "' is reserved by the compiled role matrix")
+	}
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		col, err := txApp.FindCollectionByNameOrId(rolesCollectionName)
@@ -210,6 +224,17 @@ func updateRoleHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// ADR-3: system roles are reconciled from the compiled matrix by
+		// import-roles, so an API edit would be reverted on the next run — and
+		// until that run, the registry would disagree with the fallback the
+		// resolver uses when a lookup fails. Refusing the whole row (including
+		// color) is simpler to reason about than a per-field allowlist nobody
+		// would trust.
+		if rec.GetBool("is_system") {
+			return 0, nil, forbiddenError(
+				"system roles are reconciled from the compiled matrix and are not editable")
+		}
+
 		if nameRaw, ok := form["name"]; ok {
 			name, ok := nameRaw.(string)
 			name = strings.TrimSpace(name)
@@ -221,6 +246,9 @@ func updateRoleHandler(e *core.RequestEvent) error {
 
 		if rankRaw, ok := form["rank"]; ok {
 			if r, ok := rankRaw.(float64); ok {
+				if err := validateRoleRank(int(r)); err != nil {
+					return 0, nil, err
+				}
 				rec.Set("rank", int(r))
 			}
 		}
@@ -296,6 +324,32 @@ func deleteRoleHandler(e *core.RequestEvent) error {
 		}
 
 		roleID := rec.GetString("role_id")
+
+		// A deleted role leaves users.role and categories.allowed_roles
+		// pointing at nothing. Neither is a foreign key (see 1766500000 for why
+		// they are plain text), so nothing would stop the write and every
+		// affected account would silently fall back to the compiled deny path:
+		// an admin who deleted an unused-looking role would lock its holders
+		// out of the forum without an error anywhere.
+		holders, err := txApp.CountRecords(usersCollectionName, dbx.HashExp{"role": roleID})
+		if err != nil {
+			return 0, nil, internalError("failed to count role holders", err)
+		}
+		if holders > 0 {
+			return 0, nil, conflictError(
+				"this role is assigned to " + fmt.Sprint(holders) + " account(s); move them to another role first")
+		}
+
+		categories, err := categoriesGrantingRole(txApp, roleID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if len(categories) > 0 {
+			return 0, nil, conflictError(
+				"this role grants visibility of category(ies) " + strings.Join(categories, ", ") +
+					"; remove it from their allowed_roles first")
+		}
+
 		targetID := rec.Id
 		if err := txApp.Delete(rec); err != nil {
 			return 0, nil, internalError("failed to delete role", err)
@@ -312,4 +366,59 @@ func deleteRoleHandler(e *core.RequestEvent) error {
 		}, nil
 	})
 	return writeCommandResult(e, outcome, err)
+}
+
+// categoriesGrantingRole returns the slugs of categories whose allowed_roles
+// name the given role.
+//
+// The scan reads each row and parses its JSON rather than using a SQL LIKE: the
+// collection is small (tens of rows), and matching inside a JSON document with
+// LIKE is exactly the shortcut that later reports a role as unreferenced when it
+// is referenced — a substring match on `player` also hits `player_two`.
+// Correctness here is worth the full scan.
+func categoriesGrantingRole(app core.App, roleID string) ([]string, error) {
+	records, err := app.FindAllRecords(categoriesCollectionName, nil)
+	if err != nil {
+		return nil, internalError("failed to query categories", err)
+	}
+
+	var slugs []string
+	for _, rec := range records {
+		if slices.Contains(decodeRoleIDList(rec.Get("allowed_roles")), roleID) {
+			slug := rec.GetString("slug")
+			if slug == "" {
+				slug = rec.Id
+			}
+			slugs = append(slugs, slug)
+		}
+	}
+	sort.Strings(slugs)
+	return slugs, nil
+}
+
+// isReservedRoleID reports whether an id belongs to the compiled role matrix.
+// Those ids are the wire contract with the legacy data and the fallback the
+// access resolver uses; a custom row must never take one of their names.
+func isReservedRoleID(roleID string) bool {
+	return slices.Contains(auth.AllRoleValues(), roleID)
+}
+
+// validateRoleRank bounds the authority rank.
+//
+// The compiled bands are 200/300/400/600/800/1000. The upper bound of 10000
+// leaves room for a custom role to sort above every system role without letting
+// a typo turn into a 10^9 that reorders the whole board.
+//
+// The LOWER bound is 1, not 0, and that is not a preference: `roles.rank` is a
+// Required NumberField, so PocketBase answers 0 with
+// `validation_required: "Cannot be blank"`. Validating only `rank < 0` here
+// would let 0 through this function and turn it into a 500 further down, so the
+// caller would learn nothing about what was actually wrong with their payload.
+// Rejecting it here keeps the refusal a 400 with a message that names the
+// range.
+func validateRoleRank(rank int) error {
+	if rank < 1 || rank > 10000 {
+		return validationError("rank must be between 1 and 10000")
+	}
+	return nil
 }

@@ -13,10 +13,12 @@ const categoryGroupsCollectionName = "category_groups"
 
 // listCategoryGroupsHandler serves GET /api/aerun/category-groups.
 //
-// Honest reader: If the table does not exist yet in the database, it returns
-// an honest 200 with items: [] and available: false, suppressing client 404/403
-// noise until the target schema lands. Once the table exists, it returns the rows
-// sorted by sort_order.
+// The `available` flag survives from the era when the collection did not exist
+// at all: migration 1767500000 created it, so the answer is always true now, but
+// the frontend already reads the flag and removing it would be a second,
+// unrelated change. The honest-degradation branch stays as a safety net for a
+// database that predates the migration (an operator pointing the binary at an
+// old pb_data before its first serve).
 func listCategoryGroupsHandler(e *core.RequestEvent) error {
 	col, err := e.App.FindCachedCollectionByNameOrId(categoryGroupsCollectionName)
 	if err != nil {
@@ -37,11 +39,7 @@ func listCategoryGroupsHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, 0, len(records))
 	for _, r := range records {
-		items = append(items, map[string]any{
-			"id":         r.Id,
-			"title":      r.Get("title"),
-			"sort_order": r.GetInt("sort_order"),
-		})
+		items = append(items, categoryGroupPayload(r))
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{

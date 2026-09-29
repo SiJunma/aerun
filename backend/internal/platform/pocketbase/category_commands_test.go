@@ -1,0 +1,305 @@
+package pocketbase
+
+// Tests for the TASK-2 category / category-group commands.
+//
+// The admin Categories tab was dead because its writes went to a locked browser
+// API, so these exercise the raw HTTP surface end to end (plan §7): permission
+// matrix, validation, conflict answers, idempotent replay and the audit row that
+// must land in the same transaction as the domain change.
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"testing"
+
+	"github.com/pocketbase/dbx"
+)
+
+// bytesContains is a short alias for the payload assertions below; every check
+// is a substring test on the raw JSON, which keeps the expectations readable.
+func bytesContains(payload []byte, needle string) bool {
+	return bytes.Contains(payload, []byte(needle))
+}
+
+// categoryCall performs a JSON command request with the standard headers.
+func categoryCall(t testing.TB, method, path, body, token, idemKey string) (int, []byte, http.Header) {
+	t.Helper()
+	req, err := http.NewRequest(method, path, bodyReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", token)
+	}
+	if idemKey != "" {
+		req.Header.Set("Idempotency-Key", idemKey)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	payload, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.StatusCode, payload, res.Header
+}
+
+func TestCreateCategoryPermissionMatrix(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	body := `{"name":"Lore","description":"Backstory","allowed_roles":["player","admin"],"sort_order":3}`
+
+	cases := []struct {
+		name   string
+		actor  string
+		status int
+	}{
+		{name: "anonymous is refused", actor: "", status: http.StatusUnauthorized},
+		{name: "player is forbidden", actor: "player", status: http.StatusForbidden},
+		{name: "moderator is forbidden", actor: "moderator", status: http.StatusForbidden},
+		{name: "admin may create", actor: "root", status: http.StatusCreated},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, payload, _ := categoryCall(t, http.MethodPost,
+				ts.URL+"/api/aerun/categories", body, tokens[tc.actor],
+				"test-idem-cat-create-"+string(rune('a'+i)))
+			if status != tc.status {
+				t.Fatalf("expected %d, got %d: %s", tc.status, status, payload)
+			}
+		})
+	}
+}
+
+func TestCreateCategoryValidationAndSlug(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	t.Run("missing name is rejected", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories", `{"description":"no name"}`,
+			tokens["root"], "test-idem-cat-noname")
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", status, payload)
+		}
+	})
+
+	t.Run("unknown role id names the offender", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories", `{"name":"Ghost","allowed_roles":["nosuchrole"]}`,
+			tokens["root"], "test-idem-cat-badrole")
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, "nosuchrole") {
+			t.Fatalf("the 400 must name the unknown role: %s", payload)
+		}
+	})
+
+	t.Run("a custom role id is accepted", func(t *testing.T) {
+		// ADR-2: custom roles are first-class rows, and the legacy data grants a
+		// category to one by id. Rejecting it would make "Скрытые игры"
+		// impossible to reproduce.
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/roles",
+			`{"role_id":"demon","name":"Demon","rank":250,"base_role_id":"player","permissions":["view_forum"]}`,
+			tokens["root"], "test-idem-role-demon")
+		if status != http.StatusCreated {
+			t.Fatalf("failed to create the custom role: %d %s", status, payload)
+		}
+
+		status, payload, _ = categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories", `{"name":"Hidden Games","allowed_roles":["demon"]}`,
+			tokens["root"], "test-idem-cat-customrole")
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201 for a custom-role category, got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, `"allowed_roles":["demon"]`) {
+			t.Fatalf("the stored list must name the custom role: %s", payload)
+		}
+	})
+
+	t.Run("slug is derived from the name", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories", `{"name":"Общий раздел","slug":"client-supplied"}`,
+			tokens["root"], "test-idem-cat-slug")
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", status, payload)
+		}
+		// О-б-щ-и-й → o-b-sch-i-i, " раздел" → "razdel". The exact spelling is
+		// the point only up to "derived on the server": what must not happen is
+		// the client's slug surviving, because it is the UNIQUE key.
+		if !bytesContains(payload, `"slug":"obschii-razdel"`) {
+			t.Fatalf("slug must be server-derived and transliterated: %s", payload)
+		}
+		if bytesContains(payload, "client-supplied") {
+			t.Fatalf("the client slug must be ignored: %s", payload)
+		}
+	})
+
+	t.Run("duplicate slug is a conflict", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories", `{"name":"Общий раздел"}`,
+			tokens["root"], "test-idem-cat-dupslug")
+		if status != http.StatusConflict {
+			t.Fatalf("expected 409 for a duplicate slug, got %d: %s", status, payload)
+		}
+	})
+}
+
+func TestCategoryIdempotentReplayAndAudit(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	body := `{"name":"Replays","allowed_roles":["player"],"sort_order":7}`
+	const key = "test-idem-cat-replay"
+
+	status, first, _ := categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/categories", body, tokens["root"], key)
+	if status != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", status, first)
+	}
+
+	status, second, header := categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/categories", body, tokens["root"], key)
+	if status != http.StatusCreated {
+		t.Fatalf("replay must return the original status, got %d: %s", status, second)
+	}
+	if header.Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("replay must be flagged: %v", header)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("replay must return the stored bytes verbatim:\n first: %s\nsecond: %s", first, second)
+	}
+
+	count, err := app.CountRecords(categoriesCollectionName, dbx.HashExp{"slug": "replays"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("a replayed create must not duplicate the row, got %d rows", count)
+	}
+
+	// The audit row is written in the same transaction as the domain change.
+	logs, err := app.FindRecordsByFilter(auditLogsCollectionName, "action_type = 'category_created'", "", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected exactly one category_created audit row, got %d", len(logs))
+	}
+	if logs[0].GetString("performer_id") != fixRootID {
+		t.Fatalf("audit row must name the performer, got %q", logs[0].GetString("performer_id"))
+	}
+}
+
+func TestCategoryGroupLifecycle(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	t.Run("player cannot create a group", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/category-groups", `{"title":"Lore"}`,
+			tokens["player"], "test-idem-group-player")
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", status, payload)
+		}
+	})
+
+	var groupID string
+	t.Run("root creates a group at the tail of the list", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/category-groups", `{"title":"Lore"}`,
+			tokens["root"], "test-idem-group-create")
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", status, payload)
+		}
+		var created struct {
+			ID        string `json:"id"`
+			SortOrder int    `json:"sort_order"`
+		}
+		if err := json.Unmarshal(payload, &created); err != nil {
+			t.Fatalf("decode: %v (%s)", err, payload)
+		}
+		groupID = created.ID
+		if created.SortOrder != 0 {
+			t.Fatalf("the first group must land at sort_order 0, got %d", created.SortOrder)
+		}
+	})
+
+	var catID string
+	t.Run("a category can join the group", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories",
+			`{"name":"Grouped","group_id":"`+groupID+`","allowed_roles":["player"]}`,
+			tokens["root"], "test-idem-cat-grouped")
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", status, payload)
+		}
+		var created struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(payload, &created); err != nil {
+			t.Fatal(err)
+		}
+		catID = created.ID
+	})
+
+	t.Run("a referenced group cannot be deleted", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodDelete,
+			ts.URL+"/api/aerun/category-groups/"+groupID, "",
+			tokens["root"], "test-idem-group-delete-ref")
+		if status != http.StatusConflict {
+			t.Fatalf("expected 409 while the group still holds categories, got %d: %s", status, payload)
+		}
+	})
+
+	t.Run("an unknown group reference is rejected", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories",
+			`{"name":"Nowhere","group_id":"doesnotexist99"}`,
+			tokens["root"], "test-idem-cat-badgroup")
+		if status != http.StatusBadRequest {
+			t.Fatalf("expected 400 for a dangling group_id, got %d: %s", status, payload)
+		}
+	})
+
+	t.Run("the group is deletable once it is empty", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPatch,
+			ts.URL+"/api/aerun/categories/"+catID, `{"group_id":""}`,
+			tokens["root"], "test-idem-cat-ungroup")
+		if status != http.StatusOK {
+			t.Fatalf("failed to ungroup the category: %d %s", status, payload)
+		}
+
+		status, payload, _ = categoryCall(t, http.MethodDelete,
+			ts.URL+"/api/aerun/category-groups/"+groupID, "",
+			tokens["root"], "test-idem-group-delete")
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 once empty, got %d: %s", status, payload)
+		}
+	})
+}

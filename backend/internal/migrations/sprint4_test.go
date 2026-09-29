@@ -30,13 +30,25 @@ func TestSprint4MigrationSchema(t *testing.T) {
 		t.Fatal("expected reputation field on posts collection")
 	}
 
-	// 2. Check permissions field on categories
+	// 2. Check the category visibility field.
+	//
+	// This assertion used to require the legacy `permissions` JSON map. TASK-1
+	// (ADR-1) made `allowed_roles` the single visibility input and migration
+	// 1767400000 dropped `permissions` once every row was backfilled, so the
+	// check is inverted: the old field must be GONE, or two readers of one rule
+	// would still coexist and the next backfill would have nothing to read.
 	categories, err := app.FindCollectionByNameOrId("categories")
 	if err != nil {
 		t.Fatalf("categories collection missing: %v", err)
 	}
-	if categories.Fields.GetByName("permissions") == nil {
-		t.Fatal("expected permissions field on categories collection")
+	if categories.Fields.GetByName("allowed_roles") == nil {
+		t.Fatal("expected allowed_roles field on categories collection")
+	}
+	if categories.Fields.GetByName("permissions") != nil {
+		t.Fatal("categories.permissions must be removed after the allowed_roles backfill")
+	}
+	if categories.Fields.GetByName("group_id") == nil {
+		t.Fatal("expected group_id field on categories collection (1767500000)")
 	}
 
 	// 3. Check reputation_votes collection

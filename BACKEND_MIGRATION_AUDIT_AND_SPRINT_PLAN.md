@@ -62,14 +62,36 @@ React SPA ── PocketBase SDK (safe reads, auth, SSE) + /api/aerun/* commands
 | 2 — Identity, RBAC, secure reads | register, settings, admin users, Google OAuth | **DONE** (OAuth closed 2026-09-28) |
 | 3 — Forum transactional commands | topics/posts/move/lock/pin, cursors, 100-concurrency DoD | **DONE** |
 | 4 — Reputation, subscriptions, audit | transactional votes/subscribe, append-only audit | **DONE** |
-| 5 — DMs, notifications, outbox | conversations, unread, outbox rows + worker logic | **HOLE**: `OutboxWorker` is tested but never scheduled in the serve path → TASK-4 |
-| 6 — Frontend adapter | `src/api/*` on `/api/aerun/*`, PB auth store, presence | **GAPS**: characters and admin category CRUD still on dead paths → TASK-2, TASK-3 |
-| 7 — Migration tooling | exporter, staging, rehearsal, 4 domain writers | **~40% of writer half**: users/roles/avatars/characters done; categories/topics/posts/DMs/notifications/reputation/audit/settings + sequence reconstruction remain → TASK-1, TASK-6 |
+| 5 — DMs, notifications, outbox | conversations, unread, outbox rows + worker logic | **DONE** 2026-09-29 — worker is scheduled in the serve path (TASK-4) |
+| 6 — Frontend adapter | `src/api/*` on `/api/aerun/*`, PB auth store, presence | **DONE** 2026-09-29 — categories + characters CRUD moved onto the command layer (TASK-2, TASK-3) |
+| 7 — Migration tooling | exporter, staging, rehearsal, 4 domain writers | **~40% of writer half**: users/roles/avatars/characters done; categories/topics/posts/DMs/notifications/reputation/audit/settings + sequence reconstruction remain → TASK-6 |
 | 8 — VPS production readiness | DNS/TLS/systemd/backups/restore drill | **NOT STARTED** |
 | 9 — Cutover | final export, import delta, reconciliation, switch | **NOT STARTED** |
 
-Live verification state: `go test ./...` all packages ok (2026-09-29),
-`node --test backend/tools/migration/snapshot.test.mjs` 4/4. The CI channel
+**Checkpoint 2026-09-29 — «runtime command layer closed».** TASK-1 … TASK-5 of §5
+are landed and green: the P0 showstopper (category visibility), the dead admin
+board (category + category-group commands), the characters domain API that
+replaces the retracted `settings.characters` fold, the outbox worker that now
+actually runs, and the role hardening. The next checkpoint is **TASK-6**, the
+remaining import writers — the largest single block left before Sprint 8.
+
+**Known gaps deliberately left for TASK-6** (recorded here so they are not
+mistaken for oversights):
+
+- `categories.topics_count` / `posts_count` are not in the target schema. The
+  admin board and the main page read them with a `|| 0` fallback and therefore
+  render `0` rather than crashing; the real numbers arrive with the post writer
+  and `recompute-counters`.
+- The category modal still shows separate EN/RU inputs. The command contract
+  stores one string, and `pickTitle` submits the RU value (falling back to EN), so
+  an EN-only label survives and a bilingual one is stored in Russian only. That is
+  the contract the brief specifies, not an accident of the adapter.
+- `src/constants/permissions.js` still exports `DEFAULT_ROLES` and
+  `MAX_ROLE_PERMISSIONS`; the runtime authority is now the `roles` collection
+  (§3.2), so those constants are a fallback for the role-construction UI only.
+
+Live verification state: `go test ./...` all packages ok, `npm run build` ok,
+`eslint` clean on the touched files (2026-09-29). The CI channel
 (`origin/ci-report`, §7) is the authoritative external check.
 
 ### 2.1 Legacy facts that must survive the migration window
@@ -262,7 +284,29 @@ their role_id is listed; banned root is denied (banned beats bypass);
 backfill migration copies a legacy map, writes the full sorted list for an
 empty map, and removes the field. Run `go test ./...` and `npm run build`.
 
-**Status:** ☐ open → assignee/date on completion.
+**Status:** ☑ DONE 2026-09-29 (checkpoint «runtime command layer»).
+
+**Delivered**
+
+- `backend/internal/migrations/1767400000_category_allowed_roles_backfill.go`
+  — copies a non-empty legacy `permissions.view_forum` verbatim, writes the full
+  role list (ascending, guest included) otherwise, then drops
+  `categories.permissions`. Down path restores the field and clears
+  `allowed_roles`.
+- `canViewCategory` rewritten on `allowed_roles` alone: empty/absent = root-only,
+  `root` is the only bypass, banned is refused before the bypass,
+  `custom_role_id` is not consulted.
+- `listCategoriesHandler` now also serves `group_id` and `allowed_roles` — without
+  them the admin board cannot re-submit a category without silently wiping its
+  role list.
+- Tests: `category_access_test.go` (visibility matrix + the HTTP read model) and
+  `internal/migrations/category_allowed_roles_test.go` (both backfill branches,
+  idempotency, field removal). `sprint4_test.go` was **inverted**: it asserted
+  the legacy `permissions` field exists, which is exactly what ADR-1 retires.
+
+**Deviation from the brief:** the brief named migration `1767300000_…`, but that
+timestamp is taken by `1767300000_user_last_seen.go`; the new migration is
+`1767400000_…`.
 
 ### 5.B TASK-2 — Category and category-group management commands (P0 — admin UI is dead today)
 
@@ -311,7 +355,36 @@ audits now) — `logAdminAction` in `audit.js` is already a no-op stub.
 idempotent replay returns the same body; audit row exists; the adapted
 `AdminPage.jsx` flows still compile (`npm run build`).
 
-**Status:** ☐ open.
+**Status:** ☑ DONE 2026-09-29 (checkpoint «runtime command layer»).
+
+**Delivered**
+
+- `backend/internal/migrations/1767500000_category_groups_and_group_id.go` —
+  creates `category_groups` (title, sort_order, historical dates) and adds
+  `categories.group_id`. Both were assumed to exist by the brief; neither did.
+  `GET /category-groups` degraded honestly (`available: false`) instead of
+  failing, which is why the gap stayed invisible.
+- `backend/internal/platform/pocketbase/category_commands.go` — six commands with
+  `RequirePermission(manage_categories)` + `enforceIdempotency`, every mutation
+  writing its audit row inside the same transaction. Server-derived slug with
+  Cyrillic transliteration and 409 on collision; `allowed_roles` validated
+  against the roles registry (custom ids allowed, ADR-2); `group_id` validated,
+  with the UI's `unassigned` sentinel mapped to "no group"; delete refusals for a
+  non-empty group (409) and a category with live topics (409, ADR-7).
+- Frontend `src/api/categories.js` rewritten onto `sendApi`; `logAdminAction`
+  removed from the write paths (the server audits now). The read model is
+  normalised in one place (`toCategory`), so the {en,ru} collapse to single
+  strings and `sort_order` → `order` never reach a page component.
+- Tests: `category_commands_test.go` — permission matrix, missing name, unknown
+  role id naming the offender, custom role accepted, transliterated server slug,
+  duplicate slug 409, byte-identical replay + single audit row, group lifecycle
+  with the 409-while-referenced rule.
+
+**Bug found while writing the tests:** the first implementation assigned record
+ids with `security.RandomString(15)`, whose default alphabet is mixed-case.
+`categories.id` is `^[a-z0-9]{15}$`, so every create answered **500
+`id: Invalid value format`** — a server fault on the happy path. Fixed with an
+explicit `recordIDAlphabet` constant.
 
 ### 5.C TASK-3 — Characters domain API (P0 — feature parity + import alignment)
 
@@ -365,7 +438,44 @@ message), owner-only 403 for other users, public read of active owner,
 404 for pending owner, delete-with-reference 409, avatar upload round trip
 (magic bytes + size), idempotent replay of create/update/delete.
 
-**Status:** ☐ open.
+**Status:** ☑ DONE 2026-09-29 (checkpoint «runtime command layer»).
+
+**Delivered**
+
+- `backend/internal/platform/pocketbase/characters.go` — six routes:
+  `GET /users/{id}/characters`, `GET /characters/{id}`, `POST /me/characters`,
+  `PATCH|DELETE /characters/{id}`, `PUT /characters/{id}/avatar`. Reads follow the
+  users profile ViewRule (active = public; pending/banned = 404, and the owner
+  still reads their own). Mutations are owner-only and idempotency-enveloped,
+  except the avatar upload (ADR-4). Delete refuses with 409 while the character
+  is the owner's `last_selected_character_id`, or referenced by a live post.
+- Frontend `src/api/character.js` rewritten onto the new endpoints; the
+  `subscribeTo*` signatures are unchanged so no page component moved. Every
+  `settings.characters` read/write is gone (ADR-5) and `avatar_url` is never sent
+  from the client.
+- Tests: `characters_test.go` — visibility through the read model, the cap at the
+  boundary (fill to the limit, then 409 with no row written), ownership refusals
+  that leave the row untouched, the delete refusals being actionable, byte-identical
+  replay, and a PATCH that must not blank omitted fields.
+
+**Decisions recorded**
+
+- **Character cap default = 3.** The brief required checking the legacy default
+  first; there is none. `src/constants/permissions.js` has no character cap and
+  the legacy profile UI only gated the "add" button on `create_self_mask`, while
+  PROJECT_SPEC.md §278 defers the number entirely to `roles.max_characters_limit`.
+  3 is therefore a documented placeholder, defined once as
+  `defaultCharacterLimit` in characters.go. Change it there when product decides.
+- **Post read models are deferred.** `postPayload` does not denormalise
+  `author_nickname`/`author_avatar` at all, so there is nothing to extend yet;
+  `author_character_id`, `author_character_name` and `author_character_avatar`
+  arrive with the TASK-6 post writer that freezes display identity. The delete
+  guard asks the schema (`postsHaveAuthorCharacter`) instead of assuming, so it
+  does not 500 in the meantime.
+- Character avatar uploads are audited best-effort rather than in a transaction:
+  the body read would hold the SQLite write lock, and the file is already stored
+  by the time the audit row is written, so failing the request would report a
+  broken upload that succeeded.
 
 ### 5.D TASK-4 — Wire the outbox worker into the serve path (P1)
 
@@ -393,7 +503,28 @@ would ever leave the queue even after SMTP is configured on the VPS.
 **Tests:** ADR-6 unit test (SMTP disabled → rows untouched, exit 0); overlap
 skip test; reuse `TestSprint5OutboxWorkerRetryAndDoD` unchanged.
 
-**Status:** ☐ open.
+**Status:** ☑ DONE 2026-09-29 (checkpoint «runtime command layer»).
+
+**Delivered**
+
+- `backend/internal/platform/pocketbase/outbox_dispatch.go` —
+  `registerOutboxWorkerCron(app)` schedules `* * * * *` next to
+  `registerGuestPresenceCron` in the OnServe hook (same reason: PocketBase starts
+  its scheduler at priority 999). `dispatchOutboxOnce` runs the batch through
+  `app.NewMailClient()`, so `MailHardDisableGuard` remains the second boundary.
+- ADR-6 is checked **before** the query and before the overlap flag: with SMTP
+  disabled the worker logs at debug and returns 0, touching no row. The brief's
+  wording ("leave them pending, untouched") only holds if nothing is attempted —
+  a batch that tried and failed would burn every pending event's retry budget and
+  end as `failed`, and enabling SMTP later would find an empty queue.
+- Overlap: `outboxDispatchInFlight atomic.Bool`, compare-and-swap. A tick that
+  finds a batch running skips rather than queues — the next tick is a minute away.
+  The batch also carries a 30 s context timeout so a hung relay cannot hold the
+  flag forever and silently stop the queue.
+- Tests: `outbox_dispatch_test.go` — ADR-6 (status/attempts/last_error all
+  unchanged), the skipped overlapping tick, idempotent cron registration, and a
+  blank recipient being an error rather than a silent "sent".
+  `TestSprint5OutboxWorkerRetryAndDoD` is reused unchanged.
 
 ### 5.E TASK-5 — Role command hardening (P1)
 
@@ -424,7 +555,25 @@ that users or categories reference would dangle `users.role` /
 category → 409; delete unused custom role → 200 + audit row; reserved role_id
 → 400; rank bounds.
 
-**Status:** ☐ open.
+**Status:** ☑ DONE 2026-09-29 (checkpoint «runtime command layer»).
+
+**Delivered** in `catalog_roles.go`:
+
+- `updateRoleHandler` refuses any PATCH on `is_system=true` with 403 and the ADR-3
+  message, before touching a field. Every field is covered, `color` included.
+- `deleteRoleHandler` refuses (409) while any `users` row carries the role,
+  naming the count, and while any category's `allowed_roles` contains it, naming
+  the category slugs. The category scan parses each row's JSON instead of using a
+  SQL LIKE: a LIKE for `player` also matches `player_two`, which is precisely the
+  "unreferenced" answer that is wrong.
+- `createRoleHandler` rejects the six compiled ids. The UNIQUE index only covers
+  rows that exist, so a reserved id that was never seeded would pass it and then
+  shadow the matrix for every account holding that role.
+- `rank` is bounded to 0..10000 on create and update.
+- Tests: `role_commands_test.go` — four refused PATCH variants leaving the row
+  unchanged, all six reserved ids, rank bounds at both edges, and the delete
+  matrix (unused → 200 + audit row, held by an account → 409, granted to a
+  category → 409 naming the slug, system → 403).
 
 ### 5.F TASK-6 — Finish the domain import writers (Sprint 7 completion, P1)
 
