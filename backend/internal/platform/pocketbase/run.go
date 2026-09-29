@@ -50,6 +50,14 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := registerGuestPresenceCron(se.App); err != nil {
 			return err
 		}
+		// Sprint 2 task 3: the Google login follows the environment on every
+		// startup (same defense-in-depth idea as the SMTP reset in OnBootstrap
+		// below). It runs here — after apis.Serve applied RunAllMigrations —
+		// so credentials that arrive after a first credential-less boot still
+		// enable the provider without a new migration.
+		if err := configureOAuth2(se.App, cfg); err != nil {
+			return err
+		}
 		registerRoutes(se, cfg)
 		return se.Next()
 	})

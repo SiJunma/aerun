@@ -108,8 +108,11 @@ func TestIdentityRbacMigration(t *testing.T) {
 	if users.OTP.Enabled {
 		t.Fatal("OTP auth must stay disabled in this sprint")
 	}
+	// Migrations run exactly once, so they only establish the disabled
+	// baseline: the credential-driven enablement happens in the serve-time
+	// configureOAuth2 reconcile (internal/platform/pocketbase/oauth2.go).
 	if users.OAuth2.Enabled {
-		t.Fatal("OAuth2 must stay disabled until the Google provider is tested")
+		t.Fatal("migrations must keep OAuth2 disabled, got enabled")
 	}
 	if !users.PasswordAuth.Enabled {
 		t.Fatal("password auth must stay enabled for the upcoming registration command")

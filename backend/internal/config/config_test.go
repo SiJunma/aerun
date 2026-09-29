@@ -78,3 +78,29 @@ func TestLoadProductionRequiresExplicitOriginsAndKey(t *testing.T) {
 func envGetter(env map[string]string) func(string) string {
 	return func(key string) string { return env[key] }
 }
+
+func TestLoadGoogleCredentialsPair(t *testing.T) {
+	pair := map[string]string{
+		"AERUN_GOOGLE_CLIENT_ID":     "test-client-id.apps.googleusercontent.com",
+		"AERUN_GOOGLE_CLIENT_SECRET": "GOCSPX-test-secret",
+	}
+	cfg, err := Load(envGetter(pair))
+	if err != nil {
+		t.Fatalf("a complete credential pair must load: %v", err)
+	}
+	if cfg.GoogleClientID != pair["AERUN_GOOGLE_CLIENT_ID"] ||
+		cfg.GoogleClientSecret != pair["AERUN_GOOGLE_CLIENT_SECRET"] {
+		t.Fatal("the credential pair must survive loading verbatim")
+	}
+
+	// A half pair is a misconfiguration: the provider would never work, so it
+	// must fail startup instead of silently enabling a broken provider.
+	for _, half := range []map[string]string{
+		{"AERUN_GOOGLE_CLIENT_ID": pair["AERUN_GOOGLE_CLIENT_ID"]},
+		{"AERUN_GOOGLE_CLIENT_SECRET": pair["AERUN_GOOGLE_CLIENT_SECRET"]},
+	} {
+		if _, err := Load(envGetter(half)); err == nil {
+			t.Errorf("incomplete Google credential pair must be rejected, got nil for %v", half)
+		}
+	}
+}

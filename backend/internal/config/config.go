@@ -20,6 +20,12 @@ type Config struct {
 	EncryptionKeySet bool
 	// MailMode defines email delivery mode: "disabled" (explicit no-SMTP) or "smtp".
 	MailMode string
+	// GoogleClientID and GoogleClientSecret configure the optional Google login
+	// on the users collection (both or neither, enforced by Validate). The
+	// values are never logged; once the provider is enabled they end up in the
+	// collection JSON inside pb_data (gitignored).
+	GoogleClientID     string
+	GoogleClientSecret string
 }
 
 // Validate re-checks a Config (optionally against the raw environment) without
@@ -35,6 +41,9 @@ func Validate(cfg Config, get func(string) string) error {
 	mailMode := value("AERUN_MAIL_MODE", "disabled", get)
 	if mailMode != "disabled" && mailMode != "smtp" {
 		return fmt.Errorf("AERUN_MAIL_MODE must be \"disabled\" or \"smtp\"")
+	}
+	if (cfg.GoogleClientID == "") != (cfg.GoogleClientSecret == "") {
+		return fmt.Errorf("AERUN_GOOGLE_CLIENT_ID and AERUN_GOOGLE_CLIENT_SECRET must be provided together")
 	}
 	host, port, err := net.SplitHostPort(cfg.Listen)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
@@ -90,6 +99,10 @@ func Load(get func(string) string) (Config, error) {
 		PublicURL:   value("AERUN_PUBLIC_URL", "http://127.0.0.1:8090"),
 		MailMode:    value("AERUN_MAIL_MODE", "disabled"),
 	}
+	// Optional Google login credentials: an empty pair keeps the provider off
+	// (password login unaffected); a half pair fails validation in Validate.
+	cfg.GoogleClientID = strings.TrimSpace(get("AERUN_GOOGLE_CLIENT_ID"))
+	cfg.GoogleClientSecret = strings.TrimSpace(get("AERUN_GOOGLE_CLIENT_SECRET"))
 	if key := get("AERUN_ENCRYPTION_KEY"); key != "" {
 		cfg.EncryptionKeySet = true
 	}

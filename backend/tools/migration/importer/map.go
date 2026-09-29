@@ -29,15 +29,24 @@ import (
 const (
 	// pbIDLength mirrors the length PocketBase generates for record ids.
 	pbIDLength = 15
-	// pbIDAlphabet is PocketBase's default id alphabet
-	// (tools/security defaultRandomAlphabet in v0.40.4). Ids must stay inside
-	// it so imported rows are indistinguishable from runtime rows.
-	pbIDAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	// pbIDAlphabet is PocketBase's *record id* alphabet. v0.40.4 generates ids
+	// from core/db.go DefaultIdAlphabet and validates every collection's id
+	// field against core/collection_model.go defaultLowercaseRecordIdPattern
+	// ("^[a-z0-9]+$", Min/Max 15): uppercase letters are rejected with
+	// "id: Invalid value format." Older PocketBase releases accepted a
+	// 62-character alphabet for ids, but nothing does any more, so an id
+	// outside this set can never be written.
+	pbIDAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 	// keySeparator delimits the space from the legacy id inside a map key.
 	// It cannot appear in a Firestore document id or collection name.
 	keySeparator = "\x1f"
 	// MappingTableVersion is the on-disk schema version.
-	MappingTableVersion = 1
+	//
+	// v2 corrected pbIDAlphabet to PocketBase's lowercase record id alphabet:
+	// version 1 derived 62-character-alphabet ids whose uppercase letters the
+	// target schema rejects, so every table written by an earlier rehearsal is
+	// refused on load instead of being silently reused with unusable ids.
+	MappingTableVersion = 2
 )
 
 // IDSpace namespaces a legacy id so the same id string in two different
@@ -62,11 +71,12 @@ const (
 	SpaceRole          IDSpace = "role"
 )
 
-// DeriveID maps (space, legacyID) onto a 15 character [A-Za-z0-9] id.
+// DeriveID maps (space, legacyID) onto a 15 character [a-z0-9] id — the exact
+// format the target schema's id field validates (see pbIDAlphabet).
 //
 // The result is stable across processes, machines and Go versions because it
 // depends only on SHA-256 and the constants above. Taking digest bytes modulo
-// len(alphabet) is slightly biased (256 is not a multiple of 62); that is
+// len(alphabet) is slightly biased (256 is not a multiple of 36); that is
 // irrelevant here, since the digest is a deterministic seed, not entropy.
 func DeriveID(space IDSpace, legacyID string) string {
 	sum := sha256.Sum256([]byte(string(space) + keySeparator + legacyID))

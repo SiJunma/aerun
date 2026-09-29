@@ -46,16 +46,18 @@ func TestDeriveID_ShapeAndStability(t *testing.T) {
 // TestDeriveID_GoldenValues fails if the derivation function is ever changed.
 // That is deliberate: changing it would invalidate every mapping table written
 // by an earlier rehearsal and silently turn a rehearsed import into a different
-// database.
+// database. The goldens were recomputed when pbIDAlphabet was corrected to
+// PocketBase's lowercase record id alphabet (MappingTableVersion 2): the old
+// goldens contained uppercase letters, which the target schema rejects.
 func TestDeriveID_GoldenValues(t *testing.T) {
 	golden := []struct {
 		space  IDSpace
 		legacy string
 		want   string
 	}{
-		{SpaceUser, "KunGboFv3gcADRDOWwmlWeCzkbo1", "M9prT4Y0Fe1S3at"},
-		{SpaceTopic, "NjyrN2ofUwEUuD5HDljX", "W0V2zP0iHIQaXpJ"},
-		{SpaceRole, "player", "usO42MmmVJWQQ33"},
+		{SpaceUser, "KunGboFv3gcADRDOWwmlWeCzkbo1", "25lxtkoqluxy9gz"},
+		{SpaceTopic, "NjyrN2ofUwEUuD5HDljX", "2wls5fgo7y6g3vp"},
+		{SpaceRole, "player", "qiou8222vzwwgzj"},
 	}
 	for _, tc := range golden {
 		if got := DeriveID(tc.space, tc.legacy); got != tc.want {

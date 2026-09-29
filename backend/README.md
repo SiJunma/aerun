@@ -52,6 +52,37 @@ go run ./cmd/aerun
 The process fails startup when command-line flags are used; this keeps one
 configuration path between local and VPS deployments.
 
+## Google login (optional, Sprint 2 task 3)
+
+The `users` collection exposes the Google provider only while both credentials
+exist in the process environment:
+
+```powershell
+$env:AERUN_GOOGLE_CLIENT_ID='…apps.googleusercontent.com'
+$env:AERUN_GOOGLE_CLIENT_SECRET='…'
+```
+
+Local runs may keep the pair in `.env.local` at the repository root instead
+(gitignored): `cmd/aerun` seeds unset keys from it before `config.Load` (cwd
+first, then its parent, so a server started from `backend/` finds the root
+file), and a real environment variable always wins. On every startup
+`configureOAuth2` reconciles the collection with the environment — with the
+pair present it enables the `google` provider (endpoints, PKCE and scopes come
+from PocketBase's Google defaults; only the client id/secret are stored),
+without it OAuth2 goes back to the migration baseline of off. Password login
+is unaffected either way; `GET /api/collections/users/auth-methods` reports
+the result.
+
+The Google Cloud console must list the exact redirect URI of the PocketBase
+URL: `<AERUN_PUBLIC_URL origin>/api/oauth2-redirect` (locally
+`http://127.0.0.1:8090/api/oauth2-redirect`), plus the frontend origins
+`http://localhost:5173` / `http://127.0.0.1:5173`. Known limits: once enabled
+the client secret lives in the collection JSON inside `pb_data/` (gitignored —
+keep `pb_data` out of repositories and shared backups), and a Google account
+whose email is not in `users` yet cannot self-register through Google (the
+required Aerun profile fields are not derivable from the provider); imported
+and registered accounts link by email on their first Google login.
+
 ## CI
 
 GitHub Actions (`.github/workflows/backend.yml`) runs gofmt, `go build`,

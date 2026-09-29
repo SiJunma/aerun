@@ -1521,7 +1521,8 @@ rehearsals), building on the offline exporter/staging pipeline from
 
 - Per-record legacy → PocketBase mapping (`map.go`, Sprint 7 task 2):
   - Target ids are **derived** — SHA-256 of (collection space, legacy id)
-    mapped onto PocketBase's 15-char `A-Za-z0-9` alphabet — so a re-run of the
+    mapped onto PocketBase's 15-char `a-z0-9` record id alphabet (v0.40 rejects
+    uppercase ids) — so a re-run of the
     same export addresses the same row instead of duplicating it, and two runs
     yield byte-identical `mapping.json` without any database. Only `users` has
     a `legacy_firebase_uid` column; every other relation is a bare `Max: 15`
@@ -1847,4 +1848,72 @@ runner sees, before deciding.
 `go build ./...` ok, `go vet ./...` ok, `go test ./... -count=1` every package ok
 (`platform/pocketbase` alone 36.9s — itself the proof that a 35s failure could
 only be the gofmt step).
+
+
+---
+
+### 2026-09-28 — Sprint 2 task 3 closed: Google OAuth enabled end-to-end (credentials in place)
+
+**Stage:** the human prerequisite landed — `.env.local` at the repository root
+(gitignored) now carries `AERUN_GOOGLE_CLIENT_ID` / `AERUN_GOOGLE_CLIENT_SECRET`
+for the `aerun-test` Google Cloud project, so the last open Sprint 2 item could
+be closed. The one step that needs a human is the browser click itself (consent
+as `sijunma116@gmail.com`).
+
+**Diagnosis:** `Missing or invalid provider "google"` is thrown by the
+PocketBase JS SDK *before* any network round trip — it reads
+`GET /api/collections/users/auth-methods` and refuses a provider that is not
+listed. The server answered `{"oauth2":{"providers":[],"enabled":false}}`
+because `1766000000_identity_rbac.go:115` deliberately sets
+`users.OAuth2.Enabled = false` while the provider was unconfigured.
+
+**Decision — reconcile at serve time, not a new migration.** Credentials are
+environment state, not schema, and a migration runs exactly once: a first
+credential-less boot would enable nothing and never look again, and a rotated
+secret would strand a stale `clientSecret` in `pb_data` until the next schema
+change. The new `configureOAuth2` (`internal/platform/pocketbase/oauth2.go`)
+therefore runs from the existing `OnServe` hook in `Run` — after `apis.Serve`
+applied `RunAllMigrations` (`apis/serve.go:67` vs the `OnServe` trigger at
+`:217`) — and rewrites `users.OAuth2` from the configuration on every startup:
+a complete pair enables exactly the `google` provider (client id/secret only;
+endpoints, PKCE and scopes stay on PocketBase's Google defaults), anything
+else restores the migration baseline of disabled. Password auth is untouched,
+and `identity_test.go` still pins the disabled migration baseline — its message
+now says who enables it and why.
+
+**Second find — the Go process never saw `.env.local`.** A repository-root
+`.env.local` is a Vite/Node convention; the backend reads the process
+environment only (`config.Load(os.Getenv)`, as documented in
+`backend/.env.example`), so the credentials would never have reached it.
+`config.SeedDotEnv` (`internal/config/envfile.go`) closes that gap: no new
+dependency, probes `.env.local` in the working directory and then its parent
+(so a server started from `backend/` finds the root file), and seeds only keys
+that are not already set — a real environment variable always wins, and
+production ships no such file. `cmd/aerun` calls it before `config.Load` and
+logs the path, never values. A malformed line fails startup loudly instead of
+silently dropping a credential, and `Load` rejects a half pair
+(`AERUN_GOOGLE_CLIENT_ID` xor `AERUN_GOOGLE_CLIENT_SECRET`).
+
+**Verification:** `gofmt -l .` empty (new files are LF in the worktree — the CI
+run 12 lesson), `go vet ./...` and `go test ./... -count=1` green, including
+`TestConfigureOAuth2ReconcilesGoogleLogin` (enable / idempotent / half pair /
+withdraw, with password auth and the unmapped fields proven to survive),
+`TestParseDotEnv*`, `TestSeedDotEnv*` and `TestLoadGoogleCredentialsPair`.
+Live probe on the restarted process: `local env file seeded path=../.env.local`,
+`auth-methods` returns `{"providers":[{"name":"google","displayName":"Google",
+"codeChallengeMethod":"S256",…}],"enabled":true}` with the client id from
+`.env.local`, and the assembled authorization URL answered **302 to
+accounts.google.com** — a wrong client id or an unregistered redirect URI
+would have produced a 400 `redirect_uri_mismatch`, so the console entry
+`http://127.0.0.1:8090/api/oauth2-redirect` is confirmed correct. A read-only
+dump of `pb_data` shows `sijunma116@gmail.com` as the active, verified `Arin`
+record with zero `_external_auths` rows, so the first Google login links by
+email and never touches the password.
+
+**Limits recorded:** the client secret now lives in the collection JSON inside
+`pb_data` (gitignored — keep it out of repositories and shared backups), and a
+Google account whose email is not in `users` yet still cannot self-register
+through Google (the required Aerun profile fields are not derivable from the
+provider; registration stays the explicit `POST /api/aerun/auth/register`
+path).
 

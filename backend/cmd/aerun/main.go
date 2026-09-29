@@ -17,6 +17,19 @@ func main() {
 		logger.Error("startup rejected", "reason", "use environment configuration; command-line arguments are not supported")
 		os.Exit(1)
 	}
+	// Local credential convenience: seed unset environment keys from a
+	// .env.local next to the working directory (or its parent, so a server
+	// started from backend/ finds the repository-root file). Real environment
+	// variables always win; production configures the process environment
+	// directly and ships no .env.local (it is gitignored).
+	seeded, err := config.SeedDotEnv()
+	if err != nil {
+		logger.Error("invalid local env file", "error", err)
+		os.Exit(1)
+	}
+	if seeded != "" {
+		logger.Info("local env file seeded", "path", seeded)
+	}
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		logger.Error("invalid configuration", "error", err)
