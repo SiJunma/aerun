@@ -181,6 +181,9 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	group.GET("/me", meHandler)
 	group.PUT("/me/settings", updateSettingsHandler)
+	// No enforceIdempotency: that middleware buffers the body and caps it at
+	// 512 KB, which a multipart avatar can never satisfy (see avatar_upload.go).
+	group.PUT("/me/avatar", uploadMyAvatarHandler)
 
 	// Sprint 2 identity commands.
 	group.POST("/auth/register", registerHandler)

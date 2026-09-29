@@ -10,11 +10,15 @@ const isStorageEnabled = true;
  * Props:
  *   value        – current avatar URL (string)
  *   onChange     – called with new URL when upload/URL change is confirmed
+ *   onUpload     – async (blob, filename) => newUrl. REQUIRED for the file
+ *                  picker: the component no longer fabricates a data URL,
+ *                  because `avatar_url` is a 512-character text column and an
+ *                  inline base64 image can never fit it.
  *   storagePath  – Storage path / identifier
  *   size         – preview circle size in px (default 80)
  *   label        – optional label text
  */
-const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabled = false, canUpload = true, allowGifs = true }) => {
+const AvatarUploader = ({ value, onChange, onUpload, storagePath, size = 80, label, disabled = false, canUpload = true, allowGifs = true }) => {
   const fileInputRef = useRef(null);
   const { t } = useI18n();
   const [mode, setMode] = useState('preview'); // 'preview' | 'url'
@@ -99,26 +103,34 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
     setProgress(50);
 
     try {
+      // resizeImage returns a Blob (a File is passed through for GIFs, which
+      // are not re-encoded so animation survives). The bytes go to the server
+      // as multipart; the response carries the new avatar_url, which is what
+      // gets committed to state.
       const uploadData = await resizeImage(file);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result;
-        if (typeof dataUrl === 'string') {
-          onChange(dataUrl);
-          setProgress(100);
-          setUploading(false);
-          setMode('preview');
-        }
-      };
-      reader.onerror = () => {
-        setError(t('profile.error_upload_failed'));
-        setUploading(false);
-      };
-      reader.readAsDataURL(uploadData);
-    } catch (err) {
-      console.error('[AvatarUploader] Resize error:', err);
+      setProgress(80);
+
+      if (typeof onUpload !== 'function') {
+        throw new Error('no upload handler');
+      }
+      const newUrl = await onUpload(uploadData, file.name || 'avatar.png');
+      if (!newUrl) {
+        throw new Error('upload returned no avatar url');
+      }
+
+      onChange(newUrl);
+      setProgress(100);
       setUploading(false);
-      setError(t('profile.error_upload_failed'));
+      setMode('preview');
+    } catch (err) {
+      console.error('[AvatarUploader] Upload error:', err);
+      setUploading(false);
+      setProgress(0);
+      setError(
+        err?.message === 'no upload handler'
+          ? 'Avatar upload is not available here yet.'
+          : (t('profile.error_upload_failed') || 'Upload failed')
+      );
     }
 
     // Reset input so the same file can be re-selected

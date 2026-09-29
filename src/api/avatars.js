@@ -1,4 +1,4 @@
-import { pb, pbUrl } from './pocketbase';
+import { pb, pbUrl, sendApi } from './pocketbase';
 
 /**
  * Avatar URLs come in three shapes, and every render site has to handle all
@@ -6,10 +6,13 @@ import { pb, pbUrl } from './pocketbase';
  *
  *  1. A PocketBase file path — "/api/files/<collectionId>/<recordId>/<file>",
  *     stored host-agnostically by the avatar importer so the same rows survive
- *     a domain change. This is what the migrated accounts carry today.
+ *     a domain change. This is what the migrated accounts carry today, and what
+ *     a new upload writes back.
  *  2. An absolute remote URL — still used by the DiceBear placeholder avatars
  *     and by the one account whose avatar is hosted elsewhere.
- *  3. An inline data URL, produced by the browser-side uploader.
+ *  3. An inline data URL — a legacy shape. New uploads no longer produce one
+ *     (see uploadMyAvatar), but rows written by the old browser uploader may
+ *     still carry it until they are re-saved.
  *
  * resolveAvatarUrl returns something an <img src> can actually load: only the
  * relative PocketBase path needs the backend origin prefixed. Passing it
@@ -22,6 +25,33 @@ export function resolveAvatarUrl(value) {
   if (!trimmed) return '';
   if (trimmed.startsWith('/')) return `${pbUrl.replace(/\/+$/, '')}${trimmed}`;
   return trimmed;
+}
+
+/**
+ * uploadMyAvatar stores the caller's avatar as a real file and returns the new
+ * host-agnostic avatar_url.
+ *
+ * The bytes go to the server, never into avatar_url: that column is a
+ * TextField capped at 512 characters, and an inline data URL is orders of
+ * magnitude larger, so a client-side upload could only ever fail validation.
+ * The server sniffs the format from the bytes, stores the file on the record
+ * and rewrites avatar_url to the /api/files path every render site already
+ * knows how to resolve.
+ *
+ * A Blob is accepted directly (the uploader resizes to a Blob); a File is a
+ * Blob, so both work.
+ */
+export async function uploadMyAvatar(blob, filename = 'avatar.png') {
+  const form = new FormData();
+  form.append('file', blob, filename);
+
+  const res = await sendApi('/api/aerun/me/avatar', {
+    method: 'PUT',
+    body: form
+    // No Content-Type: the browser must set it with the multipart boundary.
+  });
+
+  return res?.avatar_url || '';
 }
 
 /**

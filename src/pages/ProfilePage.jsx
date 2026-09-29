@@ -16,7 +16,7 @@ import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
 import { subscribeToDesigns } from '../api/designs';
-import { resolveAvatarUrl } from '../api/avatars';
+import { resolveAvatarUrl, uploadMyAvatar } from '../api/avatars';
 import Timestamp from '../components/common/Timestamp';
 import BBCode from '../components/common/BBCode';
 
@@ -1281,6 +1281,7 @@ const ProfilePage = () => {
                             }
                             value={accountFormData.avatar_url}
                             onChange={(url) => setAccountFormData({ ...accountFormData, avatar_url: url })}
+                            onUpload={uploadMyAvatar}
                             allowGifs={settings?.allowGifAvatars !== false}
                             storagePath={`users/${uid}/avatar`}
                             size={100}
@@ -1714,6 +1715,12 @@ const ProfilePage = () => {
             value={formData.avatar_url}
             allowGifs={settings?.allowGifAvatars !== false}
             onChange={(url) => setFormData({ ...formData, avatar_url: url })}
+            // No onUpload: a character avatar has nowhere to be stored yet.
+            // The `characters` collection is server-only (all browser rules
+            // are nil) and has no command layer, so there is no endpoint to
+            // send bytes to — the control stays visible but refuses clearly
+            // instead of producing a data URL that could never be saved.
+            canUpload={false}
             storagePath={`users/${uid}/characters/avatar`}
             size={100}
           />
