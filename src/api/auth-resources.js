@@ -169,12 +169,19 @@ export const subscribeToAllUsers = (callback) => {
     try {
       const res = await sendApi('/api/aerun/admin/users?perPage=100');
       if (!isSubscribed) return;
+      // The DTO whitelist is deliberate and must stay that way: the staff
+      // endpoint also returns `email`, and this state is handed to the members
+      // table, so spreading the record would put staff-visible addresses into
+      // every row. `created` is listed explicitly because withLegacyDates reads
+      // it from this literal — drop it and the JOINED column silently empties
+      // for exactly the people who can see the staff endpoint.
       const users = (res?.items || []).map(u => withLegacyDates({
         id: u.id,
         nickname: u.nickname,
         avatar_url: u.avatar_url,
         role_id: u.role,
-        status: u.status
+        status: u.status,
+        created: u.created
       }));
       callback(users);
     } catch {
