@@ -146,11 +146,30 @@ export const subscribeToUser = (uid, callback) => {
 export const subscribeToAllUsers = (callback) => {
   let isSubscribed = true;
 
+  // The pages still speak the legacy vocabulary: MembersPage renders its
+  // JOINED column from `created_at`, and sorts by it. PocketBase names its
+  // autodate columns `created`/`updated`, so both sources are normalized to the
+  // legacy names here instead of teaching every consumer about the rename.
+  //
+  // PocketBase serializes a DateTime as "2006-01-02 15:04:05.999Z" — a space
+  // where ISO 8601 wants "T". V8 parses it, but it is not a format every
+  // browser guarantees to accept, so it is normalized on the way out. Only
+  // `created_at` is mapped: `updated_at` is a record *edit* time, and on this
+  // backend it moves whenever an import or a settings write touches the row,
+  // which would make it actively misleading.
+  const withLegacyDates = (u) => {
+    const created = u.created_at ?? u.created;
+    return {
+      ...u,
+      created_at: typeof created === 'string' ? created.replace(' ', 'T') : created,
+    };
+  };
+
   const load = async () => {
     try {
       const res = await sendApi('/api/aerun/admin/users?perPage=100');
       if (!isSubscribed) return;
-      const users = (res?.items || []).map(u => ({
+      const users = (res?.items || []).map(u => withLegacyDates({
         id: u.id,
         nickname: u.nickname,
         avatar_url: u.avatar_url,
@@ -161,7 +180,7 @@ export const subscribeToAllUsers = (callback) => {
     } catch {
       try {
         const list = await pb.collection('users').getFullList({ sort: 'nickname' });
-        if (isSubscribed) callback(list.map(u => ({ id: u.id, ...u })));
+        if (isSubscribed) callback(list.map(u => withLegacyDates({ id: u.id, ...u })));
       } catch {
         if (isSubscribed) callback([]);
       }

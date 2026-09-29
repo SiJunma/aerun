@@ -84,7 +84,13 @@ const MembersPage = () => {
           );
       if (lastActive > 0) return lastActive;
     }
-    return u.last_seen || u.updated_at || u.created_at;
+    // Only live presence counts as "last seen". The legacy fallback chain
+    // (updated_at / created_at) is deliberately NOT restored: this backend keeps
+    // no activity history, and a record's edit time (it moves on every import
+    // or settings write) or its registration date is not the moment the user was
+    // last here. Showing one of those under a "Last seen" label would be a
+    // confident wrong answer instead of an honest "...".
+    return u.last_seen || 0;
   };
 
   const formatLastSeen = (timestamp) => {
