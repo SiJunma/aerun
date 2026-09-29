@@ -46,6 +46,7 @@ func listRolesHandler(e *core.RequestEvent) error {
 		"request_id": requestIDFrom(e),
 	})
 }
+
 type roleCreateForm struct {
 	RoleID             string   `json:"role_id"`
 	Name               string   `json:"name"`
@@ -312,4 +313,3 @@ func deleteRoleHandler(e *core.RequestEvent) error {
 	})
 	return writeCommandResult(e, outcome, err)
 }
-

@@ -198,4 +198,3 @@ func TestCatalogAndBootstrapEndpointsAccess(t *testing.T) {
 		}
 	})
 }
-

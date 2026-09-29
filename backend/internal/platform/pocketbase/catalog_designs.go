@@ -65,6 +65,7 @@ func getDesignHandler(e *core.RequestEvent) error {
 
 	return e.JSON(http.StatusOK, designRecordPayload(rec))
 }
+
 type designMutationForm struct {
 	Name           string `json:"name"`
 	Description    string `json:"description"`
@@ -242,4 +243,3 @@ func deleteDesignHandler(e *core.RequestEvent) error {
 	})
 	return writeCommandResult(e, outcome, err)
 }
-
