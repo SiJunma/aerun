@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
+import { resolveAvatarUrl } from '../../api/avatars';
 
 // In-memory cache for avatar URLs
 const avatarCache = new Map();
@@ -32,7 +33,11 @@ const ForumAuthorAvatar = ({
 
   const cachedAvatar = cacheKey ? avatarCache.get(cacheKey) : null;
   const placeholder = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName || 'Guest')}&size=${size}`;
-  const finalAvatar = initialAvatar || cachedAvatar || placeholder;
+  // Every author snapshot (topics, posts, drafts, last-post info) arrives here,
+  // so this is the single place that has to turn a stored avatar reference into
+  // something loadable — the importer writes a host-agnostic /api/files path,
+  // while DiceBear and legacy data URLs are already absolute.
+  const finalAvatar = resolveAvatarUrl(initialAvatar || cachedAvatar) || placeholder;
 
   // Dot size scales with avatar: small avatars get a smaller dot
   const dotSize = size >= 80 ? 12 : size >= 48 ? 10 : 8;

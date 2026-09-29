@@ -6,6 +6,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { subscribeToRtdbStatuses } from '../api/rtdb-presence';
+import { resolveAvatarUrl } from '../api/avatars';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import Timestamp from '../components/common/Timestamp';
@@ -284,7 +285,7 @@ const MembersPage = () => {
                   <td className="ps-4 py-3 border-0" data-label={lang === 'ru' ? 'Участник' : 'Member'}>
                     <div className="d-flex align-items-center gap-3">
                       <Image
-                        src={u.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nickname || 'U')}&background=random`}
+                        src={resolveAvatarUrl(u.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nickname || 'U')}&background=random`}
                         roundedCircle
                         style={{ width: '40px', height: '40px', objectFit: 'cover' }}
                         onError={(e) => {

@@ -204,11 +204,12 @@ view_forum` ссылается на кастомные id напрямую («С
 обязан работать импортёр. Все доменные коллекции — deny-by-default (правила
 nil), писатели — только Go-команды (инвариант 2 плана).
 
-### users (auth; 1766000000 + 1766500000)
+### users (auth; 1766000000 + 1766500000 + 1766900000 + 1767000000)
 `nickname` (req ≤64), `nickname_normalized` (req ≤128, unique partial),
 `role` (text req ≤64, валидируется по `roles.role_id`), `custom_role_id`
 (≤64), `status` (select, `auth.AllStatusValues()`), `legacy_firebase_uid`
-(hidden ≤128, unique partial), `avatar_url` (≤512), `settings` (JSON ≤256KB).
+(hidden ≤128, unique partial), `avatar` (file, maxSelect 1, ≤5 MB,
+image/jpeg|png|webp|gif), `avatar_url` (≤512), `settings` (JSON ≤256KB).
 Публичное правило чтения: `status = "active" || id = @request.auth.id`.
 Из слепка: `nickname`, `avatar_url`, `bio`, `birthday`, `contacts`,
 `interests`, `location`, `occupation`, `status_line`, `admin_message`,
@@ -263,6 +264,18 @@ PII намеренно нет: только id и две метки времен
 - **Денормализованные снапшоты** (`author_name`, `author_avatar`,
   `author_role_id`, `author_status_line`, `last_post_*`): переносим,
   но все id через маппинг, а аватарные URL — на новые storage-ссылки.
+- **Аватары (`avatar` + `avatar_url`, миграция 1767000000)**: файл лежит
+  в PocketBase (`pb_data/storage/<collectionId>/<recordId>/`), а
+  `avatar_url` хранит **независимый от хоста** путь
+  `/api/files/<collectionId>/<recordId>/<file>`, а не абсолютный URL: при
+  смене домена строки остаются валидными, а фронт резолвит их через
+  `VITE_POCKETBASE_URL` (`src/api/avatars.js`). Байты переносятся
+  `import-avatars` из верифицированного экспорта Sprint 0 с проверкой md5
+  по `storage-manifest.json`. Доступ к файлу — по ViewRule коллекции
+  (`apis/file.go`), поэтому аватар активного аккаунта публичен, а
+  pending/banned — нет. Денормализованные копии (`author_avatar`,
+  `last_post_author_avatar`) получают **тот же путь**: писатель контента
+  копирует `users.avatar_url` автора, а не разыменовывает файл.
 - **Счётчики и производные** (`posts_count`, `topics_count`, `views`,
   `reputation`, `last_post_*`, `unread`, `forum_stats`): пересчитываются,
   никогда не переносятся (в слепке уже есть расхождения кэша:

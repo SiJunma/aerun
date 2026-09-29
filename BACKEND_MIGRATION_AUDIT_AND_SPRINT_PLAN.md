@@ -1917,3 +1917,70 @@ through Google (the required Aerun profile fields are not derivable from the
 provider; registration stays the explicit `POST /api/aerun/auth/register`
 path).
 
+
+---
+
+### 2026-09-29 — Legacy avatars moved into PocketBase (Sprint 7 storage half)
+
+**Stage:** the operator asked for the remaining Firebase avatar links to be
+re-hosted. The legacy bucket is scheduled for deletion in Sprint 9, so every
+`firebasestorage` hotlink was a 404 waiting for the teardown.
+
+**Shape of the data, measured before writing anything:** `topics`, `posts`,
+`characters` and the DM tables are still empty — the forum content has not been
+imported — so the only live avatar references are the 11 `users.avatar_url`
+values. Seven of them are legacy Firebase objects; three are DiceBear URLs
+(generated from a seed, nothing to copy) and one is an Instagram CDN link on
+somebody else's host. The bytes were already local: the Sprint 0 export holds
+all eight `users/<uid>/avatar` objects, md5-verified in
+`storage-manifest.json`. A spot check against the live bucket confirmed the
+exported bytes still match what the URLs serve (114943 and 23046, byte for
+byte), so the offline export is the source of truth and re-downloading would
+only add a way to get a different answer.
+
+**Decision — a native FileField, and a host-agnostic URL.** Migration
+`1767000000` re-adds the `avatar` file field that `1766000000` had removed as a
+scaffold leftover: at that point no file lived on the record, so a text URL was
+the only option. `avatar_url` stays, because the denormalized copies
+(`author_avatar`, `last_post_author_avatar`, the presence DTO) carry a plain
+string and never hold a record — but it now stores
+`/api/files/<collectionId>/<recordId>/<file>` instead of an absolute URL, so
+the same rows survive a domain change. That is exactly the path
+`pb.files.getURL` builds, which is why the frontend resolves it with one
+helper (`src/api/avatars.js`) instead of guessing per render site.
+
+**Deliberately not touched:** the DiceBear and Instagram avatars. Copying a
+third party's hosted image is not a migration, and a seeded generator has
+nothing to store; both are reported with a reason instead of being silently
+skipped. The importer also refuses to fetch anything that is not on the legacy
+storage host, so `-download` has no request-forgery surface — the same concern
+PB itself guards in `record_auth_with_oauth2.go` when it downloads an OAuth2
+avatar.
+
+**Found and fixed on the way:** two bugs the tests caught, both of which would
+have shipped silently. (1) The "already imported" check ran *after* the
+legacy-host classification, so on a second pass every migrated row — whose URL
+is now a local path — was reported as a third-party URL left alone
+(`re-run: unchanged=0`, the import would have looked like it had reverted
+everything). (2) `-dry-run` printed "planned" while still writing; the option
+now genuinely skips the two `Save` calls, and a test asserts the row is
+untouched.
+
+**Verification:** `gofmt -l .` empty, `go vet ./...` 0, `go test ./... -count=1`
+green, including the new `TestImportUserAvatars_*` cases (moves the bucket,
+proves the bytes, skips everything else with a reason, idempotent re-run,
+dry-run writes nothing, missing export file is a skip, host-spoofing URLs are
+refused). Dry run first: `planned=7 unchanged=0 skipped=4 md5_verified=7
+md5_mismatch=0`. Real run: the same seven imported, and a second run reported
+`imported=0 unchanged=7 changed=false`. Every one of the seven then served
+`200` over HTTP with the right magic bytes and a size identical to the manifest
+(Akira 8410, Arin 114943, Kieran 10654, Nice 16506, Roui 13988, Shimadzu
+23046, Siero 14714). `pb_data` was backed up before the first write.
+
+**Scope note, not a fix:** `AvatarUploader` still turns an upload into an
+inline data URL and hands it to `avatar_url` — a 512-character text column that
+a resized image can never fit, and a write the deny-by-default `users`
+`UpdateRule` would refuse anyway. Making avatar upload work is a server
+command like the rest of the domain writes, not a migration; it is untouched
+here on purpose.
+

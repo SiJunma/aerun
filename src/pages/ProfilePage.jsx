@@ -16,6 +16,7 @@ import ForumModal from '../components/common/ForumModal';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
 import { subscribeToDesigns } from '../api/designs';
+import { resolveAvatarUrl } from '../api/avatars';
 import Timestamp from '../components/common/Timestamp';
 import BBCode from '../components/common/BBCode';
 
@@ -497,7 +498,7 @@ const ProfilePage = () => {
                     <Skeleton variant="avatar" width={72} height={72} className="rounded-circle d-block mx-auto shadow-sm" style={{ border: '3px solid var(--border-color)' }} />
                   ) : (
                     <Image
-                      src={viewedProfile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
+                      src={resolveAvatarUrl(viewedProfile?.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
                       roundedCircle
                       className="border border-3 border-light shadow-sm"
                       style={{ width: '72px', height: '72px', objectFit: 'cover' }}
@@ -725,7 +726,7 @@ const ProfilePage = () => {
                               {/* Top row: avatar + name/status */}
                               <div className="d-flex align-items-center gap-3">
                                 <Image
-                                  src={char.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(char.name)}&background=random`}
+                                  src={resolveAvatarUrl(char.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(char.name)}&background=random`}
                                   roundedCircle
                                   style={{ width: '64px', height: '64px', objectFit: 'cover' }}
                                   className="border border-2 border-accent shadow-sm flex-shrink-0"

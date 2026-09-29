@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Image as BSImage, Button, Form, Spinner, InputGroup } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
+import { resolveAvatarUrl } from '../../api/avatars';
 
 const isStorageEnabled = true;
 
@@ -23,7 +24,10 @@ const AvatarUploader = ({ value, onChange, storagePath, size = 80, label, disabl
   const [error, setError] = useState('');
 
   const placeholderSrc = `https://ui-avatars.com/api/?name=?&background=666&color=fff&size=${size * 2}`;
-  const displaySrc = value || placeholderSrc;
+  // The stored value may be a host-agnostic PocketBase file path (what the
+  // avatar importer writes), so the preview resolves it; the value itself is
+  // left untouched, because it is what gets saved.
+  const displaySrc = resolveAvatarUrl(value) || placeholderSrc;
 
   const resizeImage = (file, minSide = 250) => {
     return new Promise((resolve) => {

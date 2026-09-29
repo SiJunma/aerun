@@ -8,6 +8,7 @@ import {
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
+import { resolveAvatarUrl } from '../api/avatars';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns, createDesign, updateDesign, deleteDesign } from '../api/designs';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
@@ -989,7 +990,7 @@ const AdminPage = () => {
               <tr key={u.id} className="align-middle">
                 <td>
                   <div className="d-flex align-items-center">
-                    {u.avatar_url && <img src={u.avatar_url} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
+                    {resolveAvatarUrl(u.avatar_url) && <img src={resolveAvatarUrl(u.avatar_url)} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
                     <div>
                       <div className="fw-bold">{u.nickname || (isRootAdmin ? u.email : '***')}</div>
                       {isRootAdmin && <div className="small text-muted">{u.email}</div>}
@@ -1817,9 +1818,9 @@ const AdminPage = () => {
         {editingUser && (
           <Form>
             <div className="mb-4 d-flex align-items-center modal-section-themed p-3 rounded shadow-sm">
-              {editingUser.avatar_url && (
+              {resolveAvatarUrl(editingUser.avatar_url) && (
                 <img
-                  src={editingUser.avatar_url}
+                  src={resolveAvatarUrl(editingUser.avatar_url)}
                   alt=""
                   className="rounded-circle me-3 border border-2 border-card"
                   style={{ width: '48px', height: '48px', objectFit: 'cover' }}

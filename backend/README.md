@@ -235,6 +235,29 @@ exposed by this entry point because it intentionally rejects command-line
 arguments; if manual control is needed later, it will be added behind the same
 environment-validated path.
 
+## Legacy avatar import
+
+`users.avatar` is a PocketBase file field (migration `1767000000`) and
+`users.avatar_url` holds the host-agnostic `/api/files/...` reference to it, so
+the rows survive a domain change. The bytes come out of the verified Sprint 0
+export (`migration-data/storage`) and every file is checked against the md5 in
+`storage-manifest.json`:
+
+```powershell
+go run ./tools/migration/importer/cmd/import-avatars `
+    -data pb_data -storage migration-data -dry-run
+go run ./tools/migration/importer/cmd/import-avatars `
+    -data pb_data -storage migration-data
+```
+
+Stop the running backend first — it holds the SQLite handle. The run is
+idempotent (`unchanged=N` on a second pass), never deletes anything, and
+touches only legacy Firebase objects: a DiceBear or third-party avatar is
+reported with a reason and left alone. `-download` re-fetches from the live
+bucket instead of the export, for an avatar that changed after the snapshot.
+Files are served under the collection `ViewRule`, so an active account's
+avatar is public and a pending/banned one is not.
+
 ## Current limitations
 
 - Email delivery is deliberately disabled (`AERUN_MAIL_MODE=disabled`).
