@@ -1984,3 +1984,49 @@ a resized image can never fit, and a write the deny-by-default `users`
 command like the rest of the domain writes, not a migration; it is untouched
 here on purpose.
 
+
+---
+
+### 2026-09-29 — Two frontend lessons from the avatar cutover (same class of bug, twice)
+
+**Context:** the avatar import made `avatar_url` host-agnostic
+(`/api/files/...`) instead of an absolute URL. Two frontend bugs followed, and
+they are worth writing down because the second one is the *same* mistake as the
+first, one layer up.
+
+**Lesson 1 — a relative path needs a resolver, and every render site needs it.**
+The navbar rendered the stored path verbatim, so the browser resolved it against
+the frontend origin (`localhost:5173/api/files/...`) and 404'd; the members
+table, the profile header and the admin list worked. Not a subtle degradation —
+a broken image in the most visible element on the page.
+
+The first pass patched the sites a truncated grep had surfaced, and stopped
+there. A later sweep of every `src=` that carries an avatar value found **12
+sites through the resolver, 0 unresolved** — the five that had been missed
+(navbar, post-voters modal, the RichEditor mention list, three DirectMessages
+spots whose avatar arrives as `targetProfile.avatar_url` / `participantAvatars`)
+all had the same one-word gap. The lesson is the method, not the count: a
+truncated search result is not an inventory, and a fix that touches "the places
+grep found" is not the same as a fix that covers the feature. Worth noting that
+every missed site was in a component the first pass never opened, so the gap was
+invisible from inside the files that *had* been checked.
+
+`resolveAvatarUrl` is idempotent by construction (absolute, data-URL and
+DiceBear values pass through untouched), which is what makes it safe to apply
+defensively at render time — including on values that were already resolved.
+
+**Lesson 2 — do not verify a hand-written stand-in for real code.** The staff
+branch of `subscribeToAllUsers` was broken for exactly the users who can reach
+`/api/aerun/admin/users` (a five-field literal, no `created`), while the public
+fallback worked — so the symptom was "dates render when logged out". The first
+verification modelled that branch in Node *with* `created: u.created` inside, and
+reported 11/11 parseable dates. It had verified a shape the code never
+produces. The fix was to extract the real function from the module the dev
+server actually serves, run it against the exact payload `admin_users.go`
+builds, and assert the result — which failed immediately and honestly.
+
+Two things fall out of that: a test double must be derived from the code rather
+than from memory of it, and "it works in one branch" is not "it works" — the
+branch difference was the entire bug. A logged-in staff session is the only
+state in which it reproduces, which is exactly why the report was needed.
+
