@@ -416,8 +416,16 @@ func TestGuestThrottleBudgetIsPerAddressAndPerWindow(t *testing.T) {
 	throttle := newGuestThrottle(2, time.Minute)
 	start := time.Now()
 
-	if !throttle.allow("10.0.0.1", start) || !throttle.allow("10.0.0.1", start) {
-		t.Fatal("the budget must allow exactly `limit` beats inside a window")
+	// Both beats are evaluated into variables before being asserted. Written as
+	// `!allow(..) || !allow(..)` the second call is skipped whenever the first is
+	// refused, and `allow` has a side effect (it consumes budget) — so a throttle
+	// that wrongly refused the first beat would be reported without the second
+	// call ever exercising it.
+	firstBeat := throttle.allow("10.0.0.1", start)
+	secondBeat := throttle.allow("10.0.0.1", start)
+	if !firstBeat || !secondBeat {
+		t.Fatalf("the budget must allow exactly `limit` beats inside a window (got first=%v second=%v)",
+			firstBeat, secondBeat)
 	}
 	if throttle.allow("10.0.0.1", start.Add(time.Second)) {
 		t.Fatal("the beat after the budget must be refused")

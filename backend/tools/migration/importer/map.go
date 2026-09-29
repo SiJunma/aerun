@@ -57,6 +57,7 @@ type IDSpace string
 // One space per legacy collection the importer understands.
 const (
 	SpaceUser          IDSpace = "user"
+	SpaceCharacter     IDSpace = "character"
 	SpaceCategoryGroup IDSpace = "category_group"
 	SpaceCategory      IDSpace = "category"
 	SpaceTopic         IDSpace = "topic"
@@ -208,6 +209,11 @@ func BuildMappings(plan *ImportPlan, projectID string) (*Mappings, error) {
 		skipComposite bool
 	}{
 		{SpaceUser, plan.Users, true},
+		// Characters are keyed by the composite "uid/characters/cid" legacy
+		// path, so skipComposite is false: the composite key IS the stable
+		// identity here, and topics/posts will resolve author_character_id
+		// through this space when the content writers land.
+		{SpaceCharacter, plan.Characters, false},
 		{SpaceCategoryGroup, plan.CategoryGroups, false},
 		{SpaceCategory, plan.Categories, false},
 		{SpaceTopic, plan.Topics, false},

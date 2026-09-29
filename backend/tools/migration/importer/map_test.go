@@ -32,7 +32,13 @@ func TestDeriveID_ShapeAndStability(t *testing.T) {
 		}
 	}
 
-	if DeriveID(SpaceTopic, "NjyrN2ofUwEUuD5HDljX") != DeriveID(SpaceTopic, "NjyrN2ofUwEUuD5HDljX") {
+	// Determinism is asserted by calling the function twice and comparing the
+	// two results. Writing it as DeriveID(x) != DeriveID(x) reads as a typo
+	// (and staticcheck flags it as identical operands), even though comparing a
+	// call to itself is precisely the property being pinned.
+	first := DeriveID(SpaceTopic, "NjyrN2ofUwEUuD5HDljX")
+	second := DeriveID(SpaceTopic, "NjyrN2ofUwEUuD5HDljX")
+	if first != second {
 		t.Fatal("DeriveID is not deterministic")
 	}
 	if DeriveID(SpaceTopic, "NjyrN2ofUwEUuD5HDljX") == DeriveID(SpacePost, "NjyrN2ofUwEUuD5HDljX") {
@@ -84,7 +90,7 @@ func newTestPlan() *ImportPlan {
 		},
 		DMMessages: map[string]map[string]any{"conv-1/messages/m-1": {"text": "hi"}},
 		Drafts: map[string]map[string]any{
-			"uid-1/drafts/top-1": map[string]any{
+			"uid-1/drafts/top-1": {
 				"topic_id": "top-1", "author_id": "uid-1", "is_draft": true, "content": "wip",
 			},
 		},

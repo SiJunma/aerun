@@ -152,9 +152,9 @@ func BuildUserPlan(plan *ImportPlan, isReservedNickname func(string) bool) *User
 	roots := make([]string, 0, 1)
 	for _, uid := range sortedKeys(plan.Users) {
 		if containsSlash(uid) {
-			// Character subcollection rows share this bucket with their
-			// parent account (importer.go classifies them here). They are not
-			// accounts, and they are imported into the characters collection.
+			// Defensive: character rows live in plan.Characters (the classifier
+			// routes them there), so a composite key here would mean the
+			// classifier regressed. Skipped rather than imported as an account.
 			continue
 		}
 		fields := plan.Users[uid]
@@ -363,11 +363,11 @@ func userCounterFields(fields map[string]any) []string {
 }
 
 // characterRowCount counts the character subcollection rows the classifier
-// parked under this uid in plan.Users.
+// filed under this uid in plan.Characters.
 func characterRowCount(plan *ImportPlan, uid string) int {
 	prefix := uid + "/characters/"
 	count := 0
-	for key := range plan.Users {
+	for key := range plan.Characters {
 		if strings.HasPrefix(key, prefix) {
 			count++
 		}

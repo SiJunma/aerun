@@ -204,12 +204,13 @@ view_forum` ссылается на кастомные id напрямую («С
 обязан работать импортёр. Все доменные коллекции — deny-by-default (правила
 nil), писатели — только Go-команды (инвариант 2 плана).
 
-### users (auth; 1766000000 + 1766500000 + 1766900000 + 1767000000)
+### users (auth; 1766000000 + 1766500000 + 1766900000 + 1767000000 + 1767100000)
 `nickname` (req ≤64), `nickname_normalized` (req ≤128, unique partial),
 `role` (text req ≤64, валидируется по `roles.role_id`), `custom_role_id`
 (≤64), `status` (select, `auth.AllStatusValues()`), `legacy_firebase_uid`
 (hidden ≤128, unique partial), `avatar` (file, maxSelect 1, ≤5 MB,
-image/jpeg|png|webp|gif), `avatar_url` (≤512), `settings` (JSON ≤256KB).
+image/jpeg|png|webp|gif), `avatar_url` (≤512), `settings` (JSON ≤256KB),
+**счётчики** `posts_count`, `topics_count`, `reputation` (number, onlyInt).
 Публичное правило чтения: `status = "active" || id = @request.auth.id`.
 Из слепка: `nickname`, `avatar_url`, `bio`, `birthday`, `contacts`,
 `interests`, `location`, `occupation`, `status_line`, `admin_message`,
@@ -219,6 +220,18 @@ JSON (TODO-решение; текущий выбор репетиции — sett
 пересчитать. Auth-мерж: email, `emailVerified`, `metadata.creationTime/
 lastSignInTime`, providerData (Google/password); пароли не переносятся
 (сброс/линковка — отдельная задача Sprint 7 limits).
+
+**Счётчики (1767100000).** Значения не переносятся из слепка, а выводятся из
+строк: `posts_count` — посты автора с `deleted = false` и `is_draft = false`
+(та же предикация, что у `topics.posts_count`; черновик постом не считается),
+`topics_count` — темы автора с `deleted = false`, `reputation` — сумма
+`reputation_votes` с пустым `post_id` (только голоса за профиль; голос за пост
+уже учёл в `posts.reputation` при касте). Командный слой двигает их в той же
+транзакции, что и сам пост/тему/голос, а `RecomputeUserCounters`
+(`tools/migration/importer/cmd/recompute-counters`) пересобирает их из строк —
+идемпотентно, без удалений. Это же и починка: счётчик, который двигают только
+команды, стартует с нуля, поэтому база, наполненная импортом, имеет верные
+колонки и неверные числа до запуска пересчёта.
 
 ### roles (1766000000 + 1766500000) — см. §3.1
 

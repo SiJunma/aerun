@@ -69,7 +69,12 @@ Thumbs.db
 # contain personal data)
 backend/migration-data/
 backend/pb_data/
-# Local backend build artifacts and run logs (..local-run holds the dev
-# aerun.exe plus its stdout/stderr capture from local launches)
-backend/..local-run/
+# Local backend build artifacts and run logs. The binary is built to the
+# REPOSITORY-ROOT .local-run/ (go build -o ../.local-run/aerun.exe), and the
+# stdout/stderr capture from local launches lands beside it. Two directories
+# also exist under backend/ from earlier local launches — including a literal
+# "..local-run" (two dots) — so all three are ignored rather than just the two
+# the current build command produces.
+/.local-run/
 backend/.local-run/
+backend/..local-run/

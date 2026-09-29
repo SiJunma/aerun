@@ -165,6 +165,13 @@ type AuthExport struct {
 type ImportPlan struct {
 	// Users maps Firebase UID -> decoded user profile fields.
 	Users map[string]map[string]any
+	// Characters maps "uid/characters/cid" -> decoded character fields. The
+	// composite legacy path is the key: a character id is only unique within
+	// its owner's subcollection, and DeriveID(SpaceCharacter, key) turns that
+	// pair into a stable target id. Rows live in their own bucket rather than
+	// under plan.Users so the account planner cannot mistake one for an
+	// account and so the mapping table can give characters their own space.
+	Characters map[string]map[string]any
 	// AuthUsers maps Firebase UID -> auth export metadata.
 	AuthUsers map[string]*AuthExportUser
 	// CategoryGroups maps Firestore doc ID -> decoded fields.
@@ -245,16 +252,17 @@ func LoadStagingLedger(path string) (*StagingLedger, error) {
 		return nil, fmt.Errorf("staging ledger has no projectId")
 	}
 
-	// Verify top-level checksum.
-	clone := ledger
-	clone.Checksum = ""
+	// Verify top-level checksum. The payload deliberately re-lists the five
+	// covered fields instead of marshalling the whole ledger, so the stored
+	// Checksum is excluded by construction — it used to be "cleared" on a
+	// clone first, which was a write to a field nothing ever read.
 	payload, _ := json.Marshal(struct {
 		Version   int             `json:"version"`
 		ProjectID string          `json:"projectId"`
 		StartedAt string          `json:"startedAt"`
 		Snapshot  string          `json:"snapshot"`
 		Records   []StagingRecord `json:"records"`
-	}{clone.Version, clone.ProjectID, clone.StartedAt, clone.Snapshot, clone.Records})
+	}{ledger.Version, ledger.ProjectID, ledger.StartedAt, ledger.Snapshot, ledger.Records})
 	actual := fmt.Sprintf("%x", sha256.Sum256(payload))
 	if actual != ledger.Checksum {
 		// The checksum uses the Node.js canonical() format, not Go's json.Marshal.
@@ -290,6 +298,7 @@ func LoadAuthExport(path string) (*AuthExport, error) {
 func BuildPlan(ledger *StagingLedger, authExport *AuthExport, logger *slog.Logger) (*ImportPlan, error) {
 	plan := &ImportPlan{
 		Users:          make(map[string]map[string]any),
+		Characters:     make(map[string]map[string]any),
 		AuthUsers:      make(map[string]*AuthExportUser),
 		CategoryGroups: make(map[string]map[string]any),
 		Categories:     make(map[string]map[string]any),
@@ -376,10 +385,12 @@ func classifyFirestoreRecord(plan *ImportPlan, rec StagingRecord, logger *slog.L
 		}
 		plan.Users[docID] = fields
 	case collection == "users" && len(parts) == 4 && parts[2] == "characters":
-		// User characters are subcollections — stored as settings in PB.
-		// We'll handle these when importing users.
+		// A character is a row, not a settings blob (1766600000 retracted the
+		// fold the analysis stage used as a stopgap): topics and posts
+		// reference characters by id, so they get their own bucket and their
+		// own id space. The composite path is the legacy identity.
 		key := fmt.Sprintf("%s/characters/%s", docID, parts[3])
-		plan.Users[key] = fields
+		plan.Characters[key] = fields
 	case collection == "users" && len(parts) >= 4 && parts[2] == "readmap":
 		// Per-topic read receipts. Pure client state, recomputed by the target
 		// on first visit; never imported (Sprint 7 task 3).

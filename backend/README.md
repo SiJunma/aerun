@@ -166,9 +166,15 @@ the self-edit rights, `banned` denies everything.
   get `403`; pending accounts keep their legacy self-service rights.
 - `GET /api/aerun/admin/users` — staff-only account list
   (`admin_access` permission: root/admin only; moderators get `403`).
-  Supports `page`, `perPage` (max 100) and `status` filters; includes email
-  for staff account management (not a public response) and never exposes
-  `tokenKey`, `password` or `legacy_firebase_uid`.
+  Supports `page`, `perPage` (default and cap both `30`) and `status` filters.
+  The payload is an explicit whitelist: it carries `id`, `nickname`, `role`,
+  `status`, `verified`, `avatar_url`, `created`, `updated`, `post_count`,
+  `topics_count` and `reputation` — and **never** `email`, `tokenKey`,
+  `password` or `legacy_firebase_uid`. Addresses are authentication
+  credentials, not profile data, so they are absent rather than masked; staff
+  who need one use the PocketBase console. Consumers must page through the
+  result instead of asking for one large page — a `perPage` above the cap is
+  clamped, not honoured.
 
 ### Forum Command Layer (Sprint 3)
 
@@ -226,6 +232,104 @@ All errors return the machine-readable error contract:
 `AERUN_MAIL_MODE`: supports `disabled` (explicit no-SMTP mode for local development and tests) and `smtp` (production relay). Disabling SMTP permits all forum and DM actions without interruption. Outbox worker processes events with exponential backoff and never re-dispatches already successful events.
 
 
+## Full migration runbook (Firebase -> PocketBase)
+
+The cutover is a sequence of CLI tools. Every step is idempotent: re-running any
+of them against a **fresher** dump converges on the same rows instead of
+duplicating them, so release day is "take a new dump, run the same commands
+again" rather than a bespoke procedure.
+
+Two rules make re-runs safe:
+
+- **Every row writer is an upsert keyed by a derived id.** `DeriveID(space, key)`
+  is a pure function of the legacy identity, so the same legacy row always
+  resolves to the same PocketBase id — which is what keeps posts referencing
+  characters (and characters referencing accounts) pointing at the right record
+  across runs.
+- **`avatar_url` is co-owned.** The row importer copies the legacy URL; the
+  storage importer then replaces it with a `/api/files` path. Once a row carries
+  a local path the row importer leaves it alone, so the two steps never undo
+  each other.
+
+Run every command from `backend/`. Stop the running backend first for any
+command that takes `-data` — it holds the SQLite handle. Every command supports
+`-dry-run`, which reports exactly what a real run would do and writes nothing.
+
+```powershell
+# ── 0. Extract a fresh snapshot (Node.js; needs firebase-admin credentials) ──
+node tools/migration/cli.mjs snapshot                 # Firestore + RTDB + Storage
+node tools/migration/cli.mjs stage                    # -> migration-data/stage-*.json
+# the official Firebase Auth export stays a separate artefact:
+#   migration-data/auth-official-<date>.json
+
+# ── 1. Analyse before writing anything (needs no database) ──
+go run ./tools/migration/importer/cmd/import-rehearse `
+    -ledger migration-data/stage-1.json `
+    -auth    migration-data/auth-official-2026-09-18.json `
+    -out     migration-data/rehearsal
+
+# ── 2. Write. Order matters: each step is a dependency of the next. ──
+go run ./tools/migration/importer/cmd/import-roles -data pb_data -dry-run
+go run ./tools/migration/importer/cmd/import-roles -data pb_data
+
+go run ./tools/migration/importer/cmd/import-users `
+    -ledger migration-data/stage-1.json `
+    -auth   migration-data/auth-official-2026-09-18.json `
+    -data   pb_data -dry-run
+go run ./tools/migration/importer/cmd/import-users `
+    -ledger migration-data/stage-1.json `
+    -auth   migration-data/auth-official-2026-09-18.json `
+    -data   pb_data
+
+# characters need their owner to exist, so this comes after import-users
+go run ./tools/migration/importer/cmd/import-characters `
+    -ledger migration-data/stage-1.json `
+    -auth   migration-data/auth-official-2026-09-18.json `
+    -data   pb_data -dry-run
+go run ./tools/migration/importer/cmd/import-characters `
+    -ledger migration-data/stage-1.json `
+    -auth   migration-data/auth-official-2026-09-18.json `
+    -data   pb_data
+
+# ── 3. Storage: turn legacy avatar URLs into real files ──
+go run ./tools/migration/importer/cmd/import-avatars `
+    -data pb_data -storage migration-data -scope all -dry-run
+go run ./tools/migration/importer/cmd/import-avatars `
+    -data pb_data -storage migration-data -scope all
+
+# ── 4. Derive the counters from the rows that now exist ──
+go run ./tools/migration/importer/cmd/recompute-counters -data pb_data -dry-run
+go run ./tools/migration/importer/cmd/recompute-counters -data pb_data
+
+go run ./cmd/aerun        # migrations apply at startup
+```
+
+`import-avatars -scope all` covers both collections. A re-run reports
+`unchanged=N` and `-dry-run` reports `planned=N`, so "did anything change?" is
+answered by the output instead of by remembering.
+
+### What does not exist yet
+
+An honest inventory, because a runbook that implies more coverage than it has is
+worse than none:
+
+| Legacy collection | Writer | Status |
+| --- | --- | --- |
+| `roles` | `import-roles` | done |
+| `users` | `import-users` | done |
+| `users/{uid}/characters/{cid}` | `import-characters` | done |
+| Firebase Storage avatars | `import-avatars` | done (users + characters) |
+| derived counters | `recompute-counters` | done (needs posts first) |
+| `category_groups`, `categories` | — | **not written yet** |
+| `topics`, `posts`, `topic_subscriptions` | — | **not written yet** |
+| `reputation_logs`, `audit_logs`, `notifications` | — | **not written yet** |
+| `dms`, `dms/{id}/messages` | — | **not written yet** |
+| `designs` | — | skipped by design (theme, not forum data) |
+
+Until the content writers land, `posts`/`topics`/`reputation_votes` are empty, so
+`recompute-counters` correctly reports every counter as 0 — the derived value,
+not a bug. Run it again after the content import.
+
 ## Migrations
 
 Migrations are embedded Go files in `internal/migrations`; PocketBase applies
@@ -235,12 +339,28 @@ exposed by this entry point because it intentionally rejects command-line
 arguments; if manual control is needed later, it will be added behind the same
 environment-validated path.
 
-## Legacy avatar import
+## Avatar upload
 
 `users.avatar` is a PocketBase file field (migration `1767000000`) and
 `users.avatar_url` holds the host-agnostic `/api/files/...` reference to it, so
-the rows survive a domain change. The bytes come out of the verified Sprint 0
-export (`migration-data/storage`) and every file is checked against the md5 in
+the rows survive a domain change. `PUT /api/aerun/me/avatar` writes both:
+multipart `file` part, ≤2 MB, PNG/JPEG/WebP/GIF.
+
+The format is sniffed from the **bytes**, never from the client's
+`Content-Type` or filename, and the stored name is derived from the sniffed
+extension so PocketBase serves the right type back. Any authenticated forum
+account may change its own avatar; banned accounts get `403`.
+
+That route is deliberately **not** bound to `enforceIdempotency`: the middleware
+buffers the whole body into the idempotency envelope and caps it at 512 KB, so a
+multipart avatar can never satisfy it. The command is safe without the envelope
+because it replaces rather than accumulates — PocketBase deletes the previous
+file when a single-select `FileField` is overwritten.
+
+### Legacy avatar import
+
+The bytes come out of the verified Sprint 0 export
+(`migration-data/storage`) and every file is checked against the md5 in
 `storage-manifest.json`:
 
 ```powershell
@@ -257,6 +377,35 @@ reported with a reason and left alone. `-download` re-fetches from the live
 bucket instead of the export, for an avatar that changed after the snapshot.
 Files are served under the collection `ViewRule`, so an active account's
 avatar is public and a pending/banned one is not.
+
+## User activity counters
+
+`users.posts_count`, `users.topics_count` and `users.reputation` (migrations
+`1766300000` + `1767100000`) are denormalised. They are defined by the rows, not
+by events:
+
+- `posts_count` — posts with `author_id` = user, `deleted = false` and
+  `is_draft = false` (an unsent draft is not a post).
+- `topics_count` — topics with `author_id` = user and `deleted = false`.
+- `reputation` — the sum of `reputation_votes` where `post_id` is empty, i.e.
+  profile votes only. A post vote moved `posts.reputation` when it was cast and
+  is not counted again here.
+
+The command layer moves all three inside the same transaction as the post, topic
+or vote that justifies the change, so the members table never lags the forum. A
+counter that is only ever moved by a command, however, starts at zero — so a
+database filled by the import has the right columns and wrong numbers until the
+recompute pass runs:
+
+```powershell
+go run ./tools/migration/importer/cmd/recompute-counters -data pb_data -dry-run
+go run ./tools/migration/importer/cmd/recompute-counters -data pb_data
+```
+
+Stop the running backend first (it holds the SQLite handle). The pass is
+idempotent — a second run reports `updated=0` — never deletes anything, and
+prints record ids with their derived values, never email addresses. Run it after
+any bulk content import.
 
 ## Current limitations
 

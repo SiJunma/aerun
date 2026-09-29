@@ -62,10 +62,11 @@ func forbiddenError(message string) error {
 	return newContractError(http.StatusForbidden, errKindForbidden, message, nil)
 }
 
-func unauthorizedError(message string) error {
-	return newContractError(http.StatusUnauthorized, errKindUnauthorized, message, nil)
-}
-
+// note: there is deliberately no unauthorizedError constructor. A 401 on the
+// command routes is produced by the router helper at the point of refusal
+// (RequirePermission / access_routes), which already sets the envelope the
+// contract middleware then fills in; a second constructor here would only give
+// two spellings of the same response.
 func notFoundError(message string) error {
 	return newContractError(http.StatusNotFound, errKindNotFound, message, nil)
 }

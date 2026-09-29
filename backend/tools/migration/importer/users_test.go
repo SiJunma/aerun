@@ -38,7 +38,6 @@ func newUserTestPlan() *ImportPlan {
 				"bio":           "I run this place",
 				"settings":      map[string]any{"theme": "dark", "signature": "cheers"},
 			},
-			"rootOwner/characters/c1": {"name": "Tavern Keeper"},
 			"mutedMod": {
 				"nickname":         "Muted",
 				"role_id":          "pending",
@@ -72,6 +71,11 @@ func newUserTestPlan() *ImportPlan {
 		},
 		Roles: map[string]map[string]any{
 			"custom1": {"name": "Demon", "base_role_id": "moderator", "is_system": false},
+		},
+		// A character row lives in plan.Characters (the classifier routes
+		// users/{uid}/characters/{cid} there), not in the account bucket.
+		Characters: map[string]map[string]any{
+			"rootOwner/characters/c1": {"name": "Tavern Keeper"},
 		},
 	}
 }
