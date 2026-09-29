@@ -369,6 +369,38 @@ func knownRoleIDs(app core.App) (map[string]bool, error) {
 	return out, nil
 }
 
+// migratedAvatarPrefix is the host-agnostic path the storage import writes
+// (ImportUserAvatars / ImportCharacterAvatars).
+const migratedAvatarPrefix = "/api/files/"
+
+// isMigratedAvatar reports whether a stored avatar_url is already a local
+// PocketBase file reference rather than a legacy or third-party URL.
+//
+// It exists because avatar_url is co-owned by two steps of the migration. The
+// row importer (import-users / import-characters) copies the legacy URL out of
+// the ledger; the storage import (import-avatars) then replaces it with a
+// /api/files path. Without this guard the two steps undo each other: re-running
+// the row importer against a fresh dump — which is exactly what release day
+// does — would write the legacy URL back over the migrated one, and the next
+// avatar pass would re-import the file it already has. The import would still
+// "work", but every re-run would rewrite seven rows and churn every stored
+// file name, which is churn that looks like real change and is not.
+//
+// So once a row carries a local file reference, that value wins: the storage
+// step is the authority for it from then on.
+func isMigratedAvatar(url string) bool {
+	return strings.HasPrefix(url, migratedAvatarPrefix)
+}
+
+// avatarURLToWrite returns the avatar_url an upsert should store: the incoming
+// legacy URL, unless the row already holds a migrated local reference.
+func avatarURLToWrite(rec *core.Record, incoming string) string {
+	if isMigratedAvatar(rec.GetString(avatarURLFieldName)) {
+		return rec.GetString(avatarURLFieldName)
+	}
+	return incoming
+}
+
 // applyUserUpsert writes the desired state onto a record. It never touches the
 // password or the created date: those are create-only values with their own
 // rules in ImportUsers.
@@ -381,7 +413,7 @@ func applyUserUpsert(rec *core.Record, u UserUpsert) {
 	rec.Set("custom_role_id", u.CustomRoleID)
 	rec.Set("status", u.Status)
 	rec.Set("legacy_firebase_uid", u.LegacyUID)
-	rec.Set("avatar_url", u.AvatarURL)
+	rec.Set("avatar_url", avatarURLToWrite(rec, u.AvatarURL))
 	rec.Set("bio", u.Profile.Bio)
 	rec.Set("location", u.Profile.Location)
 	rec.Set("birthday", u.Profile.Birthday)
@@ -423,7 +455,7 @@ func userRecordMatches(rec *core.Record, u UserUpsert) bool {
 		rec.GetString("custom_role_id") == u.CustomRoleID &&
 		rec.GetString("status") == u.Status &&
 		rec.GetString("legacy_firebase_uid") == u.LegacyUID &&
-		rec.GetString("avatar_url") == u.AvatarURL &&
+		rec.GetString("avatar_url") == avatarURLToWrite(rec, u.AvatarURL) &&
 		rec.GetString("bio") == u.Profile.Bio &&
 		rec.GetString("location") == u.Profile.Location &&
 		rec.GetString("birthday") == u.Profile.Birthday &&

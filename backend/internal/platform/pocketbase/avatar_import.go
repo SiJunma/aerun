@@ -60,6 +60,10 @@ import (
 )
 
 const (
+	// charactersCollectionName is the server-only collection created by
+	// migration 1766600000. It is referenced from the avatar importer, which
+	// needs a name for it rather than a bare string.
+	charactersCollectionName = "characters"
 	// avatarFieldName is the FileField added by migration 1767000000.
 	avatarFieldName = "avatar"
 	// avatarURLFieldName is the legacy URL column this import rewrites.
@@ -150,6 +154,12 @@ func ImportUserAvatars(app core.App, opts AvatarImportOptions) (*AvatarImportRep
 	if err != nil {
 		return nil, fmt.Errorf("avatar import: %w", err)
 	}
+	// A collection that predates 1767000000 has no avatar field, and writing
+	// one would fail validation. Saying so is clearer than a save error.
+	if collection.Fields.GetByName(avatarFieldName) == nil {
+		return nil, fmt.Errorf(
+			"avatar import: users.%s is missing; run the migrations first", avatarFieldName)
+	}
 
 	manifest, err := loadStorageManifest(opts.StorageDir)
 	if err != nil {
@@ -219,24 +229,63 @@ func ImportUserAvatars(app core.App, opts AvatarImportOptions) (*AvatarImportRep
 			continue
 		}
 
-		file, err := filesystem.NewFileFromBytes(data, avatarFileName(data))
-		if err != nil {
-			return nil, fmt.Errorf("avatar import: %s: build file: %w", nickname, err)
-		}
-		record.Set(avatarFieldName, file)
-		// The stored name (a random id plus the base name) is only known
-		// after the save, which is why avatar_url is set in a second write.
-		if err := app.Save(record); err != nil {
-			return nil, fmt.Errorf("avatar import: %s: store file: %w", nickname, err)
-		}
-
-		record.Set(avatarURLFieldName, AvatarFilePath(collection.Id, record.Id, record.GetString(avatarFieldName)))
-		if err := app.Save(record); err != nil {
-			return nil, fmt.Errorf("avatar import: %s: rewrite url: %w", nickname, err)
+		if err := storeImportedAvatar(app, record, data, nickname); err != nil {
+			return nil, err
 		}
 		report.Linked = append(report.Linked, nickname)
 	}
 	return report, nil
+}
+
+// verifyAgainstManifest proves the bytes match the audited export, counting a
+// verified file and recording a mismatch. It is shared by both avatar imports
+// so the integrity rule cannot drift between collections.
+//
+// A mismatch is reported, never fatal: -download is the expected way to produce
+// one, and a reviewer needs to see it rather than have the run abort.
+func verifyAgainstManifest(
+	manifest map[string]storageEntry,
+	objectPath string,
+	data []byte,
+	verified *int,
+	label string,
+	mismatches *[]string,
+) error {
+	entry, tracked := manifest[objectPath]
+	if !tracked || entry.MD5Hash == "" {
+		return nil
+	}
+	sum := md5.Sum(data)
+	if got := base64.StdEncoding.EncodeToString(sum[:]); got != entry.MD5Hash {
+		*mismatches = append(*mismatches, label)
+		return nil
+	}
+	*verified++
+	return nil
+}
+
+// storeImportedAvatar writes the bytes onto a record's avatar field and
+// rewrites avatar_url to the host-agnostic path.
+//
+// Two saves are required: PocketBase assigns the stored file name (a random id
+// plus the base name) during the save, so avatar_url can only be built once the
+// name is known. The single-select FileField deletes the previous file on
+// overwrite, so a re-run converges instead of accumulating.
+func storeImportedAvatar(app core.App, record *core.Record, data []byte, label string) error {
+	file, err := filesystem.NewFileFromBytes(data, avatarFileName(data))
+	if err != nil {
+		return fmt.Errorf("avatar import: %s: build file: %w", label, err)
+	}
+	record.Set(avatarFieldName, file)
+	if err := app.Save(record); err != nil {
+		return fmt.Errorf("avatar import: %s: store file: %w", label, err)
+	}
+
+	record.Set(avatarURLFieldName, AvatarFilePath(record.Collection().Id, record.Id, record.GetString(avatarFieldName)))
+	if err := app.Save(record); err != nil {
+		return fmt.Errorf("avatar import: %s: rewrite url: %w", label, err)
+	}
+	return nil
 }
 
 // AvatarFilePath is the host-agnostic path of a file owned by a record. The
@@ -335,6 +384,147 @@ func avatarExtension(data []byte) string {
 	default:
 		return ".bin"
 	}
+}
+
+// CharacterAvatarImportReport states what the character-avatar run changed.
+// It is a separate type from AvatarImportReport because the rows are
+// identified by character name, not by the owner's nickname: three different
+// owners can each have a character called the same thing, so the owner is
+// reported alongside the name to keep a report line unambiguous.
+type CharacterAvatarImportReport struct {
+	// Linked holds "owner nickname / character name" labels whose avatar file
+	// was stored and whose avatar_url now points at PocketBase.
+	Linked []string
+	// Unchanged holds labels an earlier run already imported.
+	Unchanged []string
+	// Skipped holds labels whose avatar_url is not a legacy Firebase object,
+	// with the reason it was left alone.
+	Skipped []AvatarSkip
+	// VerifiedMD5 counts files proven byte-identical to the audited export.
+	VerifiedMD5 int
+	// MismatchMD5 lists labels whose bytes differ from the export manifest.
+	MismatchMD5 []string
+	// NoOwner lists character rows whose owner_id does not resolve to a users
+	// row, so the label could not be resolved. They are not an error: the
+	// importer can legitimately run before (or without) the account list.
+	NoOwner []string
+}
+
+// Changed reports whether the run modified anything.
+func (r *CharacterAvatarImportReport) Changed() bool { return len(r.Linked) > 0 }
+
+// ImportCharacterAvatars moves every legacy Firebase avatar of the
+// `characters` collection into the character's own avatar file and rewrites
+// avatar_url to the local PocketBase path.
+//
+// It is the same mechanism as ImportUserAvatars — same object-path parsing,
+// same export read, same md5 verification, same dry-run and the same
+// never-delete rule — applied to a different collection. The two are kept as
+// separate entry points because the collections differ in a way that matters:
+// `users.avatar` is served world-readable through the collection ViewRule,
+// while `characters` is server-only, and the labels a human needs to review
+// are character names rather than account nicknames.
+//
+// Every hard error is returned; per-row problems become skips, so one
+// unreachable object never strands the rest of the batch.
+func ImportCharacterAvatars(app core.App, opts AvatarImportOptions) (*CharacterAvatarImportReport, error) {
+	if strings.TrimSpace(opts.StorageDir) == "" && !opts.Download {
+		return nil, errors.New("character avatar import: a storage directory is required unless Download is set")
+	}
+
+	collection, err := app.FindCollectionByNameOrId(charactersCollectionName)
+	if err != nil {
+		return nil, fmt.Errorf("character avatar import: %w", err)
+	}
+	if collection.Fields.GetByName(avatarFieldName) == nil {
+		return nil, fmt.Errorf(
+			"character avatar import: characters.%s is missing; run the migrations first", avatarFieldName)
+	}
+
+	manifest, err := loadStorageManifest(opts.StorageDir)
+	if err != nil {
+		return nil, err
+	}
+
+	records, err := app.FindAllRecords(charactersCollectionName, nil)
+	if err != nil {
+		return nil, fmt.Errorf("character avatar import: list characters: %w", err)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		a, b := records[i], records[j]
+		if a.GetString("name") != b.GetString("name") {
+			return a.GetString("name") < b.GetString("name")
+		}
+		return a.GetString("owner_id") < b.GetString("owner_id")
+	})
+
+	report := &CharacterAvatarImportReport{}
+	for _, record := range records {
+		_, label, resolved := characterLabel(app, record)
+		if !resolved {
+			// An owner_id with no users row cannot be resolved to a readable
+			// label. The file is still importable, but reporting the
+			// unresolvable row is the honest thing rather than renaming it to
+			// a blank string.
+			report.NoOwner = append(report.NoOwner, record.GetString("name"))
+		}
+
+		legacyURL := record.GetString(avatarURLFieldName)
+		objectPath, isLegacyObject := legacyStorageObject(legacyURL)
+
+		// The already-migrated check comes first, for the same reason as the
+		// user import: after a run avatar_url is a local /api/files path, which
+		// legacyStorageObject would classify as "not a legacy object".
+		if record.GetString(avatarFieldName) != "" && strings.HasPrefix(legacyURL, "/api/files/") {
+			report.Unchanged = append(report.Unchanged, label)
+			continue
+		}
+
+		if !isLegacyObject {
+			report.Skipped = append(report.Skipped, AvatarSkip{
+				Nickname: label,
+				Reason:   externalAvatarReason(legacyURL),
+			})
+			continue
+		}
+
+		data, err := readAvatarBytes(opts, objectPath, legacyURL)
+		if err != nil {
+			report.Skipped = append(report.Skipped, AvatarSkip{Nickname: label, Reason: err.Error()})
+			continue
+		}
+		if err := verifyAgainstManifest(manifest, objectPath, data, &report.VerifiedMD5, label, &report.MismatchMD5); err != nil {
+			return nil, err
+		}
+
+		if opts.DryRun {
+			// The stored file name is assigned by PocketBase during the save,
+			// so a dry run can only report that the row would be rewritten.
+			report.Linked = append(report.Linked, label)
+			continue
+		}
+
+		if err := storeImportedAvatar(app, record, data, label); err != nil {
+			return nil, err
+		}
+		report.Linked = append(report.Linked, label)
+	}
+	return report, nil
+}
+
+// characterLabel resolves a character row to a human-readable "owner / name"
+// label. The nickname is only for the report — it is never written anywhere.
+func characterLabel(app core.App, record *core.Record) (*core.Record, string, bool) {
+	name := record.GetString("name")
+	ownerID := record.GetString("owner_id")
+	if ownerID == "" {
+		return nil, name, false
+	}
+	owner, err := app.FindRecordById(usersCollectionName, ownerID)
+	if err != nil || owner == nil {
+		return nil, name, false
+	}
+	return owner, owner.GetString("nickname") + " / " + name, true
 }
 
 // loadStorageManifest reads the export manifest into a lookup by object name.

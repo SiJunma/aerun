@@ -8,6 +8,16 @@
 // avatar *URL* into users.avatar_url, and this writer replaces it with a file
 // the record owns plus a host-agnostic /api/files/... reference.
 //
+// Two collections are covered, because both carry a legacy avatar URL and both
+// now have a real FileField (users.avatar from 1767000000, characters.avatar
+// from 1767200000):
+//
+//   - -scope users (default): account avatars, reported by nickname.
+//   - -scope characters: character avatars, reported by "owner / name". Note
+//     that this only has rows to work on once the characters themselves are
+//     imported; against an empty collection it reports nothing, which is the
+//     correct outcome rather than an error.
+//
 // The bytes come from the verified Sprint 0 export by default
 // (migration-data/storage, checked against storage-manifest.json md5s), so
 // the run is offline and reproducible. -download re-fetches the live Firebase
@@ -41,17 +51,22 @@ func main() {
 	var (
 		dataDir    = flag.String("data", "", "PocketBase data directory to write into")
 		storageDir = flag.String("storage", "", "root of the verified legacy export (holds storage/ and storage-manifest.json)")
+		scope      = flag.String("scope", "users", "which collection to migrate: users | characters | all")
 		download   = flag.Bool("download", false, "re-fetch avatars from the live legacy bucket instead of the export")
 		dryRun     = flag.Bool("dry-run", false, "report without writing")
 	)
 	flag.Parse()
 
 	if *dataDir == "" {
-		fmt.Fprintln(os.Stderr, "usage: import-avatars -data <pb_data dir> [-storage <export root>] [-download] [-dry-run]")
+		fmt.Fprintln(os.Stderr, "usage: import-avatars -data <pb_data dir> [-storage <export root>] [-scope users|characters|all] [-download] [-dry-run]")
 		os.Exit(2)
 	}
 	if *storageDir == "" && !*download {
 		fmt.Fprintln(os.Stderr, "import-avatars: -storage <export root> is required unless -download is set")
+		os.Exit(2)
+	}
+	if *scope != "users" && *scope != "characters" && *scope != "all" {
+		fmt.Fprintf(os.Stderr, "import-avatars: unknown -scope %q (want users, characters or all)\n", *scope)
 		os.Exit(2)
 	}
 
@@ -61,34 +76,67 @@ func main() {
 	}
 	defer closeApp(pbApp)
 
-	report, err := pb.ImportUserAvatars(pbApp, pb.AvatarImportOptions{
+	opts := pb.AvatarImportOptions{
 		StorageDir: *storageDir,
 		Download:   *download,
 		DryRun:     *dryRun,
-	})
-	if err != nil {
-		fail("import", err)
 	}
 
-	mode := "imported"
-	if *dryRun {
-		mode = "planned"
+	if *scope == "users" || *scope == "all" {
+		report, err := pb.ImportUserAvatars(pbApp, opts)
+		if err != nil {
+			fail("import", err)
+		}
+		mode := "imported"
+		if *dryRun {
+			mode = "planned"
+		}
+		fmt.Printf("avatars: %s=%d unchanged=%d skipped=%d md5_verified=%d md5_mismatch=%d changed=%t\n",
+			mode, len(report.Linked), len(report.Unchanged), len(report.Skipped),
+			report.VerifiedMD5, len(report.MismatchMD5), report.Changed())
+		for _, nickname := range report.Linked {
+			fmt.Printf("  %s %s\n", mode, nickname)
+		}
+		for _, nickname := range report.Unchanged {
+			fmt.Printf("  unchanged %s\n", nickname)
+		}
+		for _, skip := range report.Skipped {
+			fmt.Printf("  skipped %s (%s)\n", skip.Nickname, skip.Reason)
+		}
+		for _, nickname := range report.MismatchMD5 {
+			fmt.Printf("  md5 differs from the export manifest %s\n", nickname)
+		}
 	}
-	fmt.Printf("avatars: %s=%d unchanged=%d skipped=%d md5_verified=%d md5_mismatch=%d changed=%t\n",
-		mode, len(report.Linked), len(report.Unchanged), len(report.Skipped),
-		report.VerifiedMD5, len(report.MismatchMD5), report.Changed())
-	for _, nickname := range report.Linked {
-		fmt.Printf("  %s %s\n", mode, nickname)
+
+	if *scope == "characters" || *scope == "all" {
+		report, err := pb.ImportCharacterAvatars(pbApp, opts)
+		if err != nil {
+			fail("import characters", err)
+		}
+		mode := "imported"
+		if *dryRun {
+			mode = "planned"
+		}
+		fmt.Printf("character_avatars: %s=%d unchanged=%d skipped=%d md5_verified=%d md5_mismatch=%d no_owner=%d changed=%t\n",
+			mode, len(report.Linked), len(report.Unchanged), len(report.Skipped),
+			report.VerifiedMD5, len(report.MismatchMD5), len(report.NoOwner), report.Changed())
+		for _, label := range report.Linked {
+			fmt.Printf("  %s %s\n", mode, label)
+		}
+		for _, label := range report.Unchanged {
+			fmt.Printf("  unchanged %s\n", label)
+		}
+		for _, skip := range report.Skipped {
+			fmt.Printf("  skipped %s (%s)\n", skip.Nickname, skip.Reason)
+		}
+		for _, label := range report.MismatchMD5 {
+			fmt.Printf("  md5 differs from the export manifest %s\n", label)
+		}
+		for _, name := range report.NoOwner {
+			fmt.Printf("  owner not found for character %q; reported without a nickname\n", name)
+		}
 	}
-	for _, nickname := range report.Unchanged {
-		fmt.Printf("  unchanged %s\n", nickname)
-	}
-	for _, skip := range report.Skipped {
-		fmt.Printf("  skipped %s (%s)\n", skip.Nickname, skip.Reason)
-	}
-	for _, nickname := range report.MismatchMD5 {
-		fmt.Printf("  md5 differs from the export manifest %s\n", nickname)
-	}
+
 	if *dryRun {
 		fmt.Println("dry run: nothing was written")
 	}
