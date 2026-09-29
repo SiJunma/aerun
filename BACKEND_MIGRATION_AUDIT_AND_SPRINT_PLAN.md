@@ -1811,7 +1811,40 @@ adds no findings; and a backend started on a throwaway data dir answers
 `count=1` after one heartbeat, `guests_count=1` on the sibling endpoint, and
 `count=0` after the leave beacon.
 
+---
 
+### 2026-09-28 — CI run 12 red at `gofmt`: the LF/CRLF trap (`d778b0a`)
 
+**Stage:** commit `5e5e8ce` (feat(api): consolidate presence status and expose
+catalog routes) pushed a red backend run. Run 12 failed after 35s with
+`"checks": {}` — not one key, which by the channel contract of section 5 means
+the first step (`gofmt`) failed and build, vet and test never ran at all.
 
+**Root cause:** three of the new files were not gofmt-clean. `catalog_designs.go`
+and `catalog_roles.go` lacked the blank line before their mutation-form type
+declaration, and `catalog_test.go` ended with a trailing blank line. Locally the
+same files were reported by `gofmt -l` too, but the Windows worktree held them as
+CRLF, and `gofmt` answers a CRLF file with a whole-file rewrite — so the real
+hunks were buried inside a diff that read as a pure line-ending artifact and was
+dismissed as one. The committed blobs are LF (`.gitattributes`:
+`backend/**/*.go text eol=lf`) and the runner checks out LF, where the three hunks
+are all that remain: exactly why "clean locally" and "clean on the runner"
+disagreed. The `i/lf w/crlf` state is invisible to `git status` (git normalizes
+both sides), which is how it survived review.
+
+**Fix (`d778b0a`):** the three hunks formatted, and the touched Go files
+normalized to LF in the worktree, so a local `gofmt -l .` now agrees with the
+runner instead of contradicting it.
+
+**Lesson recorded** in `.agent/rules/commands.md` ("Local gofmt must see LF"): a
+`gofmt -l` finding is never dismissed as an encoding artifact — check
+`git ls-files --eol <path>` for `w/crlf`, then gofmt the committed blob
+(`cmd /c "git cat-file blob HEAD:<path> > %TEMP%\blob.go"`) to see what the Linux
+runner sees, before deciding.
+
+**Verification:** CI run 13 on `d778b0a` — `gofmt`, `build`, `vet`, `test` all
+`ok` (report on the `ci-report` branch). Locally: `gofmt -l .` empty,
+`go build ./...` ok, `go vet ./...` ok, `go test ./... -count=1` every package ok
+(`platform/pocketbase` alone 36.9s — itself the proof that a 35s failure could
+only be the gofmt step).
 

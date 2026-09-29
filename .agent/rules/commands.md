@@ -34,3 +34,25 @@ Interpreting the report (`schema: aerun-ci-report/1`):
 A red report blocks further work: fix the failing check, push again, and re-read
 the report. Details: `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md` §5 and
 `backend/README.md`.
+
+### Local gofmt must see LF
+
+`gofmt` answers a CRLF file with a whole-file rewrite, so on a Windows worktree a
+genuine formatting hunk hides inside a diff that reads like a pure line-ending
+artifact. A CRLF file under an `eol=lf` attribute is also invisible to
+`git status`, because git normalizes both sides before comparing. Never dismiss a
+`gofmt -l` finding on that basis:
+
+```
+git ls-files --eol backend                       # a "w/crlf" row for a *.go file is the trap
+cmd /c "git cat-file blob HEAD:backend/<path>.go > %TEMP%\blob.go"
+gofmt -l "%TEMP%\blob.go"                        # what the Linux runner actually sees
+```
+
+`gofmt -w <path>` normalizes such a file to LF as a side effect. This is the
+failure mode of CI run 12 (`5e5e8ce`): three hunks — a missing blank line before
+two mutation-form type declarations and a trailing blank line at EOF — sat under
+CRLF noise, the run died in 35s with an empty `checks` object, and run 13
+(`d778b0a`) cleared it. See `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`, progress
+log entry 2026-09-28.
+
