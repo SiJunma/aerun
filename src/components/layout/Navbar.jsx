@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useTheme } from '../../contexts/ThemeProvider';
+import { resolveAvatarUrl } from '../../api/avatars';
 import { useDesign } from '../../contexts/DesignProvider';
 import { Bell, User, LogOut, MessageCircle, Palette, Check } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/rtdb-notifications';
@@ -226,7 +227,7 @@ const Navigation = () => {
               title={
                 <div className="d-flex align-items-center gap-2 py-0">
                   <Image
-                    src={profile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.nickname || user.displayName || 'User')}&background=random`}
+                    src={resolveAvatarUrl(profile?.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.nickname || user.displayName || 'User')}&background=random`}
                     roundedCircle
                     style={{ width: '32px', height: '32px', objectFit: 'cover', display: 'block' }}
                     alt="Avatar"

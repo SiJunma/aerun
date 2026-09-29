@@ -5,6 +5,7 @@ import { Spinner, Button } from 'react-bootstrap';
 import ForumModal from './ForumModal';
 import Timestamp from './Timestamp';
 import { fetchPostVoters } from '../../api/reputation';
+import { resolveAvatarUrl } from '../../api/avatars';
 
 /**
  * PostVotersModal
@@ -95,7 +96,7 @@ const PostVotersModal = ({
                     <div className="post-voter-avatar-wrapper">
                       {hasAvatar ? (
                         <img
-                          src={voter.avatar_url}
+                          src={resolveAvatarUrl(voter.avatar_url)}
                           alt={voterName}
                           className="post-voter-avatar"
                         />

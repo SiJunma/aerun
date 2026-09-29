@@ -10,6 +10,7 @@ import {
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
 import { pb } from '../../api/pocketbase';
+import { resolveAvatarUrl } from '../../api/avatars';
 
 const RichEditor = forwardRef(({
   value, onChange, placeholder, rows = 6, minHeight, maxHeight, id = 'rich-editor',
@@ -1295,7 +1296,7 @@ const RichEditor = forwardRef(({
                       >
                         <div style={{ width: 24, height: 24, borderRadius: '50%', backgroundColor: 'var(--bs-gray-300)', overflow: 'hidden' }}>
                           {u.avatar_url ? (
-                            <img src={u.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={resolveAvatarUrl(u.avatar_url)} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           ) : (
                             <div className="d-flex align-items-center justify-content-center h-100 text-white small fw-bold">
                               {u.nickname?.charAt(0).toUpperCase()}

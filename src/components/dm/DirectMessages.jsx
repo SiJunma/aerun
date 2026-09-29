@@ -6,6 +6,7 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useToast } from '../../contexts/ToastProvider';
 import RichEditor from '../common/RichEditor';
+import { resolveAvatarUrl } from '../../api/avatars';
 import BBCode from '../common/BBCode';
 import {
   getOrCreateConversation,
@@ -488,7 +489,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             <ArrowLeft size={18} color="#ffffff" />
           </Button>
           <Image
-            src={activePeer.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(activePeer.name)}&background=random`}
+            src={resolveAvatarUrl(activePeer.avatar) || `https://ui-avatars.com/api/?name=${encodeURIComponent(activePeer.name)}&background=random`}
             roundedCircle
             style={{ width: '32px', height: '32px', objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.2)' }}
             onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(activePeer.name)}&background=666&color=fff`; }}
@@ -581,7 +582,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     >
                       {!isMe && (
                         <Image
-                          src={activePeer?.avatar || '/default-avatar.png'}
+                          src={resolveAvatarUrl(activePeer?.avatar) || '/default-avatar.png'}
                           roundedCircle
                           className="me-2"
                           style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', flexShrink: 0, objectFit: 'cover' }}
@@ -787,7 +788,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 >
                   <div className="position-relative">
                     <Image
-                      src={peerAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(peerName)}&background=random`}
+                      src={resolveAvatarUrl(peerAvatar) || `https://ui-avatars.com/api/?name=${encodeURIComponent(peerName)}&background=random`}
                       roundedCircle
                       style={{ width: '44px', height: '44px', objectFit: 'cover', flexShrink: 0 }}
                       onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=U&background=666&color=fff`; }}
