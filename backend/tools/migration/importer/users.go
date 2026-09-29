@@ -104,6 +104,15 @@ type UserRow struct {
 	// CreatedAt is the historical registration date (zero when unknown), so
 	// the target keeps the account's real age.
 	CreatedAt time.Time
+	// LastSeen is the legacy last-visit timestamp (zero when the document has
+	// none). It is the persistent activity clock the legacy backend kept next
+	// to live presence, and it is the only real "when was this person last
+	// here" value that survives the move — the target's own last_seen starts
+	// empty and is rebuilt from this.
+	//
+	// It is applied monotonically by the writer, so a dump re-run can only move
+	// it forward.
+	LastSeen time.Time
 	// Password is applied ONLY when the row is created. The root bootstrap
 	// sets it so the owner can sign in while mail and OAuth2 are disabled;
 	// left empty, the writer generates an unusable random password.
@@ -255,6 +264,11 @@ func buildUserRow(plan *ImportPlan, uid string, fields map[string]any, isReserve
 	}
 	row.Settings = userSettings(&row, uid, fields)
 	row.CreatedAt = userCreatedAt(fields, authUser)
+	// The legacy last-visit clock. Read straight off the document: it is
+	// durable source data, not a cache, which is why it is carried instead of
+	// recomputed the way the counters are. Zero when the document has none, and
+	// the writer then simply leaves the target's own value alone.
+	row.LastSeen = timeField(fields, "last_seen")
 
 	if isFirebaseStorageURL(row.AvatarURL) {
 		row.note("avatar_url_pending_storage_rewrite", uid)
@@ -538,6 +552,7 @@ func (up *UserPlan) Upserts() []pb.UserUpsert {
 			},
 			Settings:  row.Settings,
 			CreatedAt: row.CreatedAt,
+			LastSeen:  row.LastSeen,
 		})
 	}
 	return out

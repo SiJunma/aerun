@@ -41,7 +41,13 @@ const handlePresenceSnapshot = (presence) => {
       status_line: u.status_line || '',
       signature: u.signature || '',
       active_character: u.active_character || null,
-      last_seen: u.last_seen ? new Date(u.last_seen).getTime() : Date.now()
+      // The server sends the real time of the member's last heartbeat. It used
+      // to omit the field, and this line then substituted Date.now() — so every
+      // connected member was reported as "seen this exact second" regardless of
+      // when they actually last beat, and a value nobody measured was presented
+      // as a measurement. 0 now means "unknown", which is honest: the members
+      // table falls through to the durable users.last_seen for an answer.
+      last_seen: parseLastSeen(u.last_seen)
     }));
     notifyOnlineSubscribers(list);
   }

@@ -53,6 +53,64 @@ var (
 	presenceTTL   = 75 * time.Second
 )
 
+// memberLastSeenWriteInterval throttles how often a heartbeat is allowed to
+// persist users.last_seen.
+//
+// The browser beats every 30 seconds, so an unthrottled write would be 120 row
+// updates per member per hour — each one also moving the `updated` autodate and
+// firing a PocketBase realtime event to that member's own open ProfilePage / DM
+// subscription. Presence is best-effort telemetry; it does not deserve to be the
+// noisiest writer in the system.
+//
+// The throttle still gives a hard accuracy guarantee, which is what the members
+// table actually needs:
+//
+//   - The FIRST beat after any idle period always writes, because the stored
+//     value is older than the interval. So a session's arrival is always
+//     recorded exactly, and "last seen" can never predate the visit that
+//     produced it.
+//   - After that, writes land every interval for as long as the member stays.
+//     When the member finally drops off, the stored value is at most one
+//     interval behind their true departure.
+//
+// Five minutes is well inside the resolution a "last seen" column is read at,
+// and it cuts the write rate by 10x.
+const memberLastSeenWriteInterval = 5 * time.Minute
+
+// userLastSeenField mirrors the column added by migration 1767300000. The
+// durable "last visit" clock, as opposed to the onlineMembers map, which is the
+// "online right now" clock and is deliberately disposable.
+const userLastSeenField = "last_seen"
+
+// touchMemberLastSeen advances the durable last-seen timestamp for a beating
+// member, subject to memberLastSeenWriteInterval.
+//
+// It is deliberately best-effort and never propagates an error: presence is
+// telemetry, and a failed write must not turn a 200 heartbeat into a 500 and
+// make the client retry harder. The cost of losing one is that the column lags
+// by up to one interval, which is the same bound the throttle already accepts.
+//
+// authRecord is the record PocketBase resolved for this request, so the
+// staleness test costs nothing: it is current as of this beat. Only when the
+// write is actually due is a fresh copy loaded, which keeps the common path —
+// four out of five beats — free of any extra query.
+func touchMemberLastSeen(app core.App, authRecord *core.Record, now time.Time) {
+	stored := authRecord.GetDateTime(userLastSeenField)
+	if !stored.IsZero() && now.Sub(stored.Time()) < memberLastSeenWriteInterval {
+		return
+	}
+
+	record, err := app.FindRecordById(usersCollectionName, authRecord.Id)
+	if err != nil {
+		app.Logger().Warn("member last seen could not be read", "user", authRecord.Id, "error", err)
+		return
+	}
+	record.Set(userLastSeenField, now)
+	if err := app.Save(record); err != nil {
+		app.Logger().Warn("member last seen could not be persisted", "user", authRecord.Id, "error", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Guests: the guest_presence collection
 // ---------------------------------------------------------------------------
@@ -191,6 +249,12 @@ func heartbeatHandler(e *core.RequestEvent) error {
 			LastSeen:  now,
 		}
 		presenceMu.Unlock()
+
+		// The in-process map above answers "online right now" and is thrown
+		// away  presenceTTL later. This is the durable half: it is what the
+		// members table renders once the member is gone from the map, which is
+		// the entire reason that column could previously only ever show "...".
+		touchMemberLastSeen(e.App, e.Auth, now)
 
 		snapshot, _ := buildStatusSnapshot(e.App, now)
 		resp := map[string]any{
@@ -480,6 +544,15 @@ func activeMembersAt(now time.Time) []map[string]any {
 			"nickname":   member.Nickname,
 			"avatar_url": member.AvatarURL,
 			"role":       member.Role,
+			// The actual time of the last beat, not the time of this read.
+			// The frontend used to receive no value here and substitute
+			// Date.now() for the missing field, which made every connected
+			// member read as "seen this exact second" — a value that is wrong
+			// by up to a full beat interval and, more importantly, fabricated
+			// rather than measured. RFC 3339 rather than DateTime.String(),
+			// because the string form uses a space where ISO 8601 wants a "T"
+			// and `new Date()` is not guaranteed to accept it everywhere.
+			"last_seen": member.LastSeen.UTC().Format(time.RFC3339),
 		})
 	}
 	return activeMembers

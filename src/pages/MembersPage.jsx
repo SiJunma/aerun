@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Container, Table, Form, InputGroup, Image, Badge, Row, Col, Card } from 'react-bootstrap';
 import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -73,25 +73,56 @@ const MembersPage = () => {
     }
   };
 
-  const getUserLastSeen = (u) => {
-    const rtdb = rtdbStatuses[u.id] || rtdbStatuses[u.uid];
-    if (rtdb) {
-      const lastActive = typeof rtdb.last_activity === 'number'
-        ? rtdb.last_activity
-        : (typeof rtdb.last_seen === 'number'
-            ? rtdb.last_seen
-            : (rtdb.last_activity ? new Date(rtdb.last_activity).getTime() : (rtdb.last_seen ? new Date(rtdb.last_seen).getTime() : 0))
-          );
+  // toMillis normalises anything date-shaped into epoch ms, or 0 when there is
+  // no usable value. `last_seen` arrives as an ISO string from the staff DTO
+  // and as epoch ms from the live presence cache, so both spellings have to be
+  // accepted in one place rather than at each call site.
+  const toMillis = (value) => {
+    if (!value) return 0;
+    if (typeof value === 'number') return value;
+    const parsed = value.toMillis
+      ? value.toMillis()
+      : (typeof value.toDate === 'function' ? value.toDate().getTime() : Date.parse(value));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  // getUserLastSeen resolves the LAST SEEN column through three sources, most
+  // precise first.
+  //
+  // This chain is what makes the column non-empty. It previously had exactly
+  // one working source — the live presence cache — and that cache is a
+  // deliberately disposable in-process map that drops a member 75 seconds after
+  // their last heartbeat (and is empty entirely after a server restart). So the
+  // column was blank for every member who was not connected at that instant,
+  // which is nearly all of them, and the "..." was not a transient state but
+  // the permanent resting state of the column.
+  //
+  //   1. Live presence. Exact to the last beat, but only while connected.
+  //   2. users.last_seen. The durable last-visit clock the backend persists
+  //      (migration 1767300000, written by the heartbeat and by registration).
+  //      This is the real answer for an offline member.
+  //   3. created_at. Registration is itself real activity, so this is a true
+  //      lower bound rather than a placeholder — the one case where the column
+  // can legitimately show the account's age and nothing more.
+  //
+  // `updated_at` is deliberately NOT in the chain: it is a record edit time and
+  // moves on every import and settings write, so it would confidently display
+  // the date of the last import as if it were the date the person was last
+  // seen. That is why the backend grew a real column instead.
+  // getUserLastSeen is memoised because the sorted/filtered list below depends
+  // on it: without useCallback it is a new function on every render, so the
+  // useMemo would be invalidated on every render and stop memoising anything.
+  // Its only closure is rtdbStatuses, so the memo invalidates exactly when the
+  // presence snapshot does — the same cadence the old dependency list gave by
+  // accident.
+  const getUserLastSeen = useCallback((u) => {
+    const live = rtdbStatuses[u.id] || rtdbStatuses[u.uid];
+    if (live) {
+      const lastActive = toMillis(live.last_activity) || toMillis(live.last_seen);
       if (lastActive > 0) return lastActive;
     }
-    // Only live presence counts as "last seen". The legacy fallback chain
-    // (updated_at / created_at) is deliberately NOT restored: this backend keeps
-    // no activity history, and a record's edit time (it moves on every import
-    // or settings write) or its registration date is not the moment the user was
-    // last here. Showing one of those under a "Last seen" label would be a
-    // confident wrong answer instead of an honest "...".
-    return u.last_seen || 0;
-  };
+    return toMillis(u.last_seen) || toMillis(u.created_at ?? u.created) || 0;
+  }, [rtdbStatuses]);
 
   const formatLastSeen = (timestamp) => {
     if (!timestamp) return '...';
@@ -115,10 +146,11 @@ const MembersPage = () => {
         aVal = ROLE_PRIORITY[a.role_id] || 60;
         bVal = ROLE_PRIORITY[b.role_id] || 60;
       } else if (sortField === 'last_seen') {
-        const aSeen = getUserLastSeen(a);
-        const bSeen = getUserLastSeen(b);
-        aVal = typeof aSeen === 'number' ? aSeen : (aSeen?.toMillis?.() || (aSeen ? new Date(aSeen).getTime() : 0));
-        bVal = typeof bSeen === 'number' ? bSeen : (bSeen?.toMillis?.() || (bSeen ? new Date(bSeen).getTime() : 0));
+        // getUserLastSeen already normalises to epoch ms, so the sort compares
+        // two plain numbers instead of re-deriving the value at a second call
+        // site (which is how the two spellings drifted apart before).
+        aVal = getUserLastSeen(a);
+        bVal = getUserLastSeen(b);
       } else if (sortField === 'created_at' || sortField === 'updated_at') {
         aVal = a[sortField]?.toMillis?.() || 0;
         bVal = b[sortField]?.toMillis?.() || 0;
@@ -140,7 +172,7 @@ const MembersPage = () => {
     });
 
     return result;
-  }, [users, rtdbStatuses, search, sortField, sortOrder]);
+  }, [users, getUserLastSeen, search, sortField, sortOrder]);
 
   const handleSort = (field) => {
     if (sortField === field) {

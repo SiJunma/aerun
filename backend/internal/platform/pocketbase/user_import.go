@@ -115,6 +115,16 @@ type UserUpsert struct {
 	// CreatedAt is the historical registration date. Zero leaves PocketBase's
 	// "now"; a real value is preserved through SetRaw.
 	CreatedAt time.Time
+	// LastSeen is the legacy document's last-visit timestamp — the persistent
+	// activity clock the legacy backend kept separately from live presence
+	// (see PROJECT_CONTEXT.md, users.last_seen). It is durable source data, not
+	// a derived counter, so unlike post_count it IS carried across rather than
+	// recomputed: for the accounts that have not yet been active on this
+	// backend, it is the only honest answer the members table can give.
+	//
+	// It is applied monotonically — see lastSeenToWrite — so replaying a dump
+	// can never rewind an account that has been active since the export.
+	LastSeen time.Time
 }
 
 // UserImportReport states what the import changed, so a rehearsal can prove
@@ -401,6 +411,42 @@ func avatarURLToWrite(rec *core.Record, incoming string) string {
 	return incoming
 }
 
+// lastSeenToWrite returns the last_seen value an upsert should store: the later
+// of what the row already holds and what the snapshot carries.
+//
+// This is the same class of guard as avatarURLToWrite above, for the same
+// reason. A fresh dump re-run is a routine release-day operation, and
+// `last_seen` is a clock that has been running since the dump was taken. Writing
+// the incoming value unconditionally would rewind every account that has been
+// active in the meantime — a member who used the forum all morning would go back
+// to reading as last seen last night, and the members table would confidently
+// display a stale answer. The import would still report success, which is what
+// makes this the dangerous kind of bug.
+//
+// Taking the later of the two makes the field monotonic, so:
+//   - a re-run against the same dump writes nothing and reports unchanged;
+//   - a re-run after real activity advances the column further, never back;
+//   - the first re-run after migration 1767300000 upgrades the `created`
+//     backfill to the genuine legacy activity time, because that is later.
+//
+// An incoming zero (a document with no last_seen) leaves the stored value
+// alone, and a stored zero adopts the incoming one.
+func lastSeenToWrite(rec *core.Record, incoming time.Time) types.DateTime {
+	stored := rec.GetDateTime(userLastSeenField)
+	if !stored.IsZero() && (incoming.IsZero() || !stored.Time().Before(incoming)) {
+		return stored
+	}
+	// A zero `incoming` with a zero `stored` reaches here and yields a zero
+	// DateTime, which is the correct "nothing known" value.
+	parsed, err := types.ParseDateTime(incoming)
+	if err != nil {
+		// Unreachable for a time.Time; falling back to the stored value keeps
+		// the monotonic rule intact even if that ever changes.
+		return stored
+	}
+	return parsed
+}
+
 // applyUserUpsert writes the desired state onto a record. It never touches the
 // password or the created date: those are create-only values with their own
 // rules in ImportUsers.
@@ -422,6 +468,8 @@ func applyUserUpsert(rec *core.Record, u UserUpsert) {
 	rec.Set("contacts", u.Profile.Contacts)
 	rec.Set("status_line", u.Profile.StatusLine)
 	rec.Set("last_selected_character_id", u.Profile.LastSelectedCharacter)
+	// Monotonic, for the rewind reason documented on lastSeenToWrite.
+	rec.Set(userLastSeenField, lastSeenToWrite(rec, u.LastSeen))
 	rec.Set("settings", settingsRaw(u.Settings))
 }
 
@@ -464,6 +512,11 @@ func userRecordMatches(rec *core.Record, u UserUpsert) bool {
 		rec.GetString("contacts") == u.Profile.Contacts &&
 		rec.GetString("status_line") == u.Profile.StatusLine &&
 		rec.GetString("last_selected_character_id") == u.Profile.LastSelectedCharacter &&
+		// Monotonic like the write itself, so a row that has advanced past the
+		// snapshot still compares equal and is reported unchanged instead of
+		// being rewritten on every run.
+		rec.GetDateTime(userLastSeenField).Equal(lastSeenToWrite(rec, u.LastSeen)) &&
+
 		settingsEqual(rec.Get("settings"), u.Settings)
 }
 

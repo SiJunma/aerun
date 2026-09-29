@@ -135,17 +135,36 @@ Worker wiring rules: §5.D.
 
 PocketBase SSE for authorised record changes; the UI refetches the affected
 cursor, it never receives an all-forum cache. Presence:
-`POST /presence/heartbeat` every 45–60 s; `presence_sessions(expires_at)` for
-members; `guest_presence` rows for anonymous visitors (server-only rules,
-30 req/min per-IP budget, `*/10` retention prune cron — copy that pattern for
-the outbox cron). No `onDisconnect` clone; `sendBeacon` on `pagehide` is the
-leave signal.
+`POST /presence/heartbeat` every 30 s (members) / 60 s (guests);
+`guest_presence` rows for anonymous visitors (server-only rules, 30 req/min
+per-IP budget, `*/10` retention prune cron — copy that pattern for the outbox
+cron). No `onDisconnect` clone; `sendBeacon` on `pagehide` is the leave signal.
+
+**Two separate clocks, and both are required.** The legacy backend kept
+`last_seen` (online now) and `last_activity` (last visit) apart on purpose, and
+collapsing them is what broke the members table:
+
+- **Online now** — an in-process map, `presenceTTL` 75 s, disposable by design
+  (a restart legitimately forgets it; every open tab rebuilds it within one
+  beat). `GET /api/aerun/status` and the heartbeat response publish it.
+- **Last visit** — `users.last_seen`, migration 1767300000. Server-owned, written
+  by the heartbeat with a 5-minute throttle and by account creation, backfilled
+  from `created` and seeded from the legacy document by `import-users`
+  (monotonically). Read through `GET /api/aerun/admin/users`, which substitutes
+  `created` if the column is somehow empty, so the members table can never
+  render a blank Last Seen.
+
+The `presence_sessions(expires_at)` table sketched here earlier is **not**
+implemented and is not required: the durable column answers the historical
+question without a second store to prune. Do not add it without a decision —
+a session table would have to be reconciled against `users.last_seen` on every
+restart, and the two can disagree.
 
 ### 3.5 Data model essentials
 
 | Collection | Key constraints |
 |---|---|
-| `users` (auth) | §3.1; `avatar` FileField ≤5 MB; `settings` JSON ≤256 KB, depth ≤8, wholesale replace via `PUT /me/settings` |
+| `users` (auth) | §3.1; `avatar` FileField ≤5 MB; `settings` JSON ≤256 KB, depth ≤8, wholesale replace via `PUT /me/settings`; `last_seen` date, server-owned, never empty (§3.4) |
 | `roles` | §3.2; `role_id` UNIQUE business key |
 | `category_groups`, `categories` | categories: `slug` UNIQUE, `group_id`, `sort_order`, `allowed_roles` JSON (contract §5.A); no browser writes |
 | `topics` | `category_id`, `author_id`, state, `posts_count`, `next_post_sequence`, `last_post_*` — maintained transactionally |

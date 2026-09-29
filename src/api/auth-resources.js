@@ -157,11 +157,19 @@ export const subscribeToAllUsers = (callback) => {
   // `created_at` is mapped: `updated_at` is a record *edit* time, and on this
   // backend it moves whenever an import or a settings write touches the row,
   // which would make it actively misleading.
+  //
+  // `last_seen` is normalized for the same reason and is NOT the same thing as
+  // `updated_at`: it is the durable last-visit clock (migration 1767300000),
+  // written only by the heartbeat and by account creation. It is what the
+  // members table falls back to once a member is no longer in the live
+  // presence map.
+  const isoFromPB = (value) => (typeof value === 'string' ? value.replace(' ', 'T') : value);
   const withLegacyDates = (u) => {
     const created = u.created_at ?? u.created;
     return {
       ...u,
-      created_at: typeof created === 'string' ? created.replace(' ', 'T') : created,
+      created_at: isoFromPB(created),
+      last_seen: isoFromPB(u.last_seen),
     };
   };
 
@@ -174,6 +182,11 @@ export const subscribeToAllUsers = (callback) => {
   //
   // `created` is listed explicitly because withLegacyDates reads it from this
   // literal — drop it and the JOINED column silently empties.
+  //
+  // `last_seen` is the durable last-visit timestamp (backend migration
+  // 1767300000). It is listed for the same reason as `created`: the staff DTO
+  // must be naming it, or the members table loses its only offline answer and
+  // degrades to "..." for everyone who is not currently connected.
   //
   // The counters are normalised to the legacy singular names the pages already
   // sort and render on (`post_count`), because the two sources spell them
@@ -189,7 +202,8 @@ export const subscribeToAllUsers = (callback) => {
     topics_count: u.topics_count ?? 0,
     reputation: u.reputation ?? 0,
     verified: u.verified,
-    created: u.created
+    created: u.created,
+    last_seen: u.last_seen
   });
 
   const load = async () => {

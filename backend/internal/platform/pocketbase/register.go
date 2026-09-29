@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -92,6 +93,12 @@ func registerHandler(e *core.RequestEvent) error {
 	record.Set("status", string(auth.StatusPending))
 	record.Set("avatar_url", "")
 	record.Set("settings", map[string]any{})
+	// Registering is real activity, and it is the one moment we know for certain
+	// that the account was here. Seeding last_seen from the server clock makes
+	// the never-empty contract hold from the very first row: without this, an
+	// account that registered and never returned would sit at the zero time
+	// until its first heartbeat.
+	record.Set(userLastSeenField, time.Now())
 	// emailVisibility stays false (the PB default): the public profile rule
 	// hides email until a future explicit command opts in.
 

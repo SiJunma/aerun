@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
+	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
@@ -91,6 +92,18 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 			"avatar_url": record.GetString("avatar_url"),
 			"created":    record.GetDateTime("created"),
 			"updated":    record.GetDateTime("updated"),
+			// The durable last-visit clock (migration 1767300000), which is
+			// what the members table renders once a member is no longer in the
+			// live presence map.
+			//
+			// The `created` fallback is the never-empty guarantee, enforced at
+			// the boundary where the value is actually consumed rather than
+			// trusted to every writer. Registration is provably real activity,
+			// so falling back to it can only understate how recently someone
+			// was here — it can never invent a visit. Emitting a zero time
+			// instead would push the problem onto every client and this column
+			// is read by exactly one of them.
+			"last_seen": lastSeenOrCreated(record),
 			// Denormalised counters. Emitted under the legacy names the
 			// frontend already reads (MembersPage sorts on `post_count` and
 			// `reputation`), so no consumer has to learn a third vocabulary.
@@ -110,6 +123,33 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 		"items":      items,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// lastSeenOrCreated returns the account's last-visit timestamp, falling back to
+// its registration date when the column is empty.
+//
+// The two writers of users.last_seen (the heartbeat and account creation) both
+// fill it, and migration 1767300000 backfills every pre-existing row, so the
+// empty case is already meant to be unreachable. It stays reachable in exactly
+// one realistic way: a row restored from a backup taken before the migration
+// and never re-imported. Rather than let that surface as a blank column in the
+// members table, the read answers with `created` — which is a real, provable
+// activity time for the account, so the result can only ever be conservative.
+//
+// It also guards the ordering, so a caller cannot get a last-seen that predates
+// the account's own registration. That would be nonsense data rather than
+// missing data, and it is exactly the sort of thing that survives into a release
+// because no row happens to hit it.
+func lastSeenOrCreated(record *core.Record) types.DateTime {
+	created := record.GetDateTime("created")
+	lastSeen := record.GetDateTime(userLastSeenField)
+	if lastSeen.IsZero() {
+		return created
+	}
+	if !created.IsZero() && lastSeen.Time().Before(created.Time()) {
+		return created
+	}
+	return lastSeen
 }
 
 // parseAdminPagination normalises the page/perPage query parameters.
