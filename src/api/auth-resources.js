@@ -165,33 +165,73 @@ export const subscribeToAllUsers = (callback) => {
     };
   };
 
+  // toMembersRow is the single shape the members table and the admin user
+  // table consume, and it is an explicit whitelist on purpose: neither source
+  // row is spread into page state. The staff endpoint does not serve email at
+  // all any more, and the public record carries columns (legacy_firebase_uid
+  // is hidden, but settings and the profile block are not) that have no
+  // business in a shared table.
+  //
+  // `created` is listed explicitly because withLegacyDates reads it from this
+  // literal — drop it and the JOINED column silently empties.
+  //
+  // The counters are normalised to the legacy singular names the pages already
+  // sort and render on (`post_count`), because the two sources spell them
+  // differently: the admin DTO already emits post_count/topics_count, while a
+  // public record carries the raw posts_count/topics_count columns.
+  const toMembersRow = (u) => ({
+    id: u.id,
+    nickname: u.nickname,
+    avatar_url: u.avatar_url,
+    role_id: u.role_id ?? u.role,
+    status: u.status,
+    post_count: u.post_count ?? u.posts_count ?? 0,
+    topics_count: u.topics_count ?? 0,
+    reputation: u.reputation ?? 0,
+    verified: u.verified,
+    created: u.created
+  });
+
   const load = async () => {
     try {
-      const res = await sendApi('/api/aerun/admin/users?perPage=100');
-      if (!isSubscribed) return;
-      // The DTO whitelist is deliberate and must stay that way: the staff
-      // endpoint also returns `email`, and this state is handed to the members
-      // table, so spreading the record would put staff-visible addresses into
-      // every row. `created` is listed explicitly because withLegacyDates reads
-      // it from this literal — drop it and the JOINED column silently empties
-      // for exactly the people who can see the staff endpoint.
-      const users = (res?.items || []).map(u => withLegacyDates({
-        id: u.id,
-        nickname: u.nickname,
-        avatar_url: u.avatar_url,
-        role_id: u.role,
-        status: u.status,
-        created: u.created
-      }));
+      // The staff endpoint caps a page at 30 (server-side: perPage above the
+      // cap is clamped, not honoured). The members table sorts and filters the
+      // WHOLE board client-side, so asking for one big page is not an option —
+      // the pages are walked instead and the result is the same. The walk is
+      // bounded by the server's own totalPages, so it cannot loop forever on a
+      // board that grows mid-request.
+      //
+      // A null result means the subscription was cancelled mid-walk, not a
+      // failure: only a real request error reaches the fallback below.
+      const users = await fetchAllAdminUsers();
+      if (users === null) return;
       callback(users);
     } catch {
       try {
         const list = await pb.collection('users').getFullList({ sort: 'nickname' });
-        if (isSubscribed) callback(list.map(u => withLegacyDates({ id: u.id, ...u })));
+        if (isSubscribed) callback(list.map(u => withLegacyDates(toMembersRow(u))));
       } catch {
         if (isSubscribed) callback([]);
       }
     }
+  };
+
+  // fetchAllAdminUsers walks every page of the staff endpoint and returns the
+  // rows already mapped to the members-table shape, or null when the caller
+  // unsubscribed part-way through (nothing should be delivered after that).
+  const fetchAllAdminUsers = async () => {
+    const rows = [];
+    let page = 1;
+    for (;;) {
+      const res = await sendApi(`/api/aerun/admin/users?page=${page}`);
+      if (!isSubscribed) return null;
+      const items = res?.items || [];
+      rows.push(...items.map(toMembersRow));
+      const totalPages = res?.totalPages ?? 1;
+      if (page >= totalPages || items.length === 0) break;
+      page += 1;
+    }
+    return rows.map(withLegacyDates);
   };
 
   load();

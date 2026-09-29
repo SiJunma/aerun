@@ -955,9 +955,12 @@ const AdminPage = () => {
 
 
   const renderUsers = () => {
+    // Nickname only. The staff endpoint does not serve email addresses, so an
+    // email search term matches nothing — the previous `u.email` branch here
+    // was already dead against the PocketBase data source, and keeping it
+    // would suggest a capability that does not exist.
     const filteredUsers = users.filter(u =>
-      u.nickname?.toLowerCase().includes(userSearch.toLowerCase()) ||
-      (isRootAdmin && u.email?.toLowerCase().includes(userSearch.toLowerCase()))
+      u.nickname?.toLowerCase().includes(userSearch.toLowerCase())
     );
 
     return (
@@ -992,8 +995,7 @@ const AdminPage = () => {
                   <div className="d-flex align-items-center">
                     {resolveAvatarUrl(u.avatar_url) && <img src={resolveAvatarUrl(u.avatar_url)} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
                     <div>
-                      <div className="fw-bold">{u.nickname || (isRootAdmin ? u.email : '***')}</div>
-                      {isRootAdmin && <div className="small text-muted">{u.email}</div>}
+                      <div className="fw-bold">{u.nickname || t('admin.users.unnamed', 'Без имени')}</div>
                     </div>
                   </div>
                 </td>

@@ -448,9 +448,15 @@ func TestAdminUsersListAccessMatrix(t *testing.T) {
 }
 
 // TestAdminUsersListPayload pins the staff read model contract: status
-// filtering works, pagination metadata is present, email is visible to staff
-// (an admin read model is not a public response), while private auth columns
-// (token key, password, legacy uid) can never leak into the payload.
+// filtering works, pagination metadata is present, the activity counters are
+// exposed under the legacy names the frontend reads, and NO credential
+// material can reach the payload.
+//
+// The email case is the important one: it was part of this response until the
+// leak was fixed, and `pending@example.com` sitting in NotExpectedContent is
+// the regression guard. Everything else in the list (tokenKey, password,
+// legacy_firebase_uid) is named nowhere in the handler, so those assertions
+// only prove the map is assembled by hand.
 func TestAdminUsersListPayload(t *testing.T) {
 	scenario := tests.ApiScenario{
 		Name:           "root lists pending accounts only with private columns stripped",
@@ -461,14 +467,21 @@ func TestAdminUsersListPayload(t *testing.T) {
 		ExpectedContent: []string{
 			`"totalItems":1`,
 			`"totalPages":1`,
-			`"email":"pending@example.com"`,
+			`"post_count":0`,
+			`"topics_count":0`,
+			`"reputation":0`,
 			fixPendingID,
 			`"status":"pending"`,
 			`"request_id":"`,
 		},
 		NotExpectedContent: []string{
+			// The leak: an authentication credential must never be in this
+			// response, for any account, including the one being acted on.
+			`pending@example.com`,
 			`player@example.com`,
 			`mod@example.com`,
+			`root@example.com`,
+			`"email"`,
 			`tokenKey`,
 			`token_key`,
 			`legacy_firebase_uid`,
@@ -479,4 +492,81 @@ func TestAdminUsersListPayload(t *testing.T) {
 		scenario.Headers = authHeader(seedIdentityFixtures(t, app)["root"])
 	}
 	scenario.Test(t)
+}
+
+// TestAdminUsersListNeverLeaksEmail runs the unfiltered list as root, which is
+// the response the members table actually renders, and asserts that not one
+// account's address appears in it. The status-filtered test above proves the
+// key is absent; this one proves no value can be smuggled through a different
+// field, and it covers every fixture account at once.
+func TestAdminUsersListNeverLeaksEmail(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:           "root lists every account without any email",
+		Method:         http.MethodGet,
+		URL:            "/api/aerun/admin/users",
+		TestAppFactory: newAerunTestApp,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"totalItems":5`,
+			fixRootID,
+			fixPlayerID,
+		},
+		NotExpectedContent: []string{
+			`@example.com`,
+			`"email"`,
+		},
+	}
+	scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+		scenario.Headers = authHeader(seedIdentityFixtures(t, app)["root"])
+	}
+	scenario.Test(t)
+}
+
+// TestAdminUsersPagination pins the page size contract. The ceiling is the
+// security-relevant half: before it was capped at 30 a single caller could
+// pull the entire table in one response, and the frontend did exactly that
+// (perPage=100) to feed a client-side table.
+func TestAdminUsersPagination(t *testing.T) {
+	cases := []struct {
+		name       string
+		query      string
+		expectPage int
+		expectSize int
+	}{
+		{name: "defaults to 30", query: "", expectPage: 1, expectSize: 30},
+		{name: "explicit 30 is honoured", query: "?perPage=30", expectPage: 1, expectSize: 30},
+		{name: "an oversized request is capped", query: "?perPage=100", expectPage: 1, expectSize: 30},
+		{name: "a huge request is capped", query: "?perPage=100000", expectPage: 1, expectSize: 30},
+		{name: "a negative request falls back to the default", query: "?perPage=-5", expectPage: 1, expectSize: 30},
+		{name: "garbage falls back to the default", query: "?perPage=abc", expectPage: 1, expectSize: 30},
+		{name: "an explicit page is honoured", query: "?page=2&perPage=10", expectPage: 2, expectSize: 10},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			page, perPage := parseAdminPagination(
+				queryValue(tc.query, "page"),
+				queryValue(tc.query, "perPage"),
+			)
+			if page != tc.expectPage {
+				t.Errorf("page = %d, want %d", page, tc.expectPage)
+			}
+			if perPage != tc.expectSize {
+				t.Errorf("perPage = %d, want %d", perPage, tc.expectSize)
+			}
+			if perPage > adminListMaxPerPage {
+				t.Errorf("perPage %d exceeds the cap %d", perPage, adminListMaxPerPage)
+			}
+		})
+	}
+}
+
+// queryValue pulls one parameter out of a raw query string for the table test.
+func queryValue(query, key string) string {
+	for _, part := range strings.Split(query, "&") {
+		if k, v, ok := strings.Cut(strings.TrimPrefix(part, "?"), "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
 }

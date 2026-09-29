@@ -17,13 +17,36 @@ import (
 // Sprint 2 command (plan §4 Sprint 2 task 5): GET /api/aerun/admin/users —
 // the staff-only admin read model. It is gated by the admin_access
 // permission (root and admin roles only: moderators deliberately do not have
-// it), and email is included because staff account management needs it —
-// this is not a public response, so the Sprint 2 DoD ("email never appears
-// in a public response") is not affected.
+// it).
 //
-// tokenKey, password and legacy_firebase_uid are never part of the payload:
-// the map is assembled field by field so private columns cannot leak.
-const adminListMaxPerPage = 100
+// The response is assembled field by field, never by serialising the record,
+// and that whitelist is the whole security property of this endpoint:
+//
+//   - email is NOT in it. The address is an authentication credential, not
+//     profile data: it is the password-reset target and the OAuth2 subject,
+//     and it travels to the browser of every admin who opens the members
+//     table. Nothing in the product needs it — the admin UI shows the
+//     nickname, and a staff member who must reach an address uses the
+//     PocketBase console, which is already a superuser surface. It is
+//     deliberately absent rather than masked, so a client cannot mistake a
+//     redacted value for a real one.
+//   - tokenKey, password and legacy_firebase_uid can never leak for the same
+//     reason: they are simply not named.
+//
+// The counters (posts_count, topics_count, reputation) are denormalised
+// columns maintained by the command layer and rebuildable by
+// RecomputeUserCounters; they are safe to expose because they are already
+// public on the profile (1766000000 publishes every non-hidden field of an
+// active account).
+const (
+	// adminListDefaultPerPage is the page size when the caller does not ask
+	// for one.
+	adminListDefaultPerPage = 30
+	// adminListMaxPerPage caps it. 30 is both the default and the ceiling:
+	// this endpoint feeds a table that the client paginates, and a larger
+	// page would let one caller pull the whole table into one response.
+	adminListMaxPerPage = 30
+)
 
 func adminListUsersHandler(e *core.RequestEvent) error {
 	query := e.Request.URL.Query()
@@ -61,7 +84,6 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 	for _, record := range records {
 		items = append(items, map[string]any{
 			"id":         record.Id,
-			"email":      record.Email(),
 			"nickname":   record.GetString("nickname"),
 			"role":       record.GetString("role"),
 			"status":     record.GetString("status"),
@@ -69,6 +91,12 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 			"avatar_url": record.GetString("avatar_url"),
 			"created":    record.GetDateTime("created"),
 			"updated":    record.GetDateTime("updated"),
+			// Denormalised counters. Emitted under the legacy names the
+			// frontend already reads (MembersPage sorts on `post_count` and
+			// `reputation`), so no consumer has to learn a third vocabulary.
+			"post_count":   record.GetInt("posts_count"),
+			"topics_count": record.GetInt("topics_count"),
+			"reputation":   record.GetInt("reputation"),
 		})
 	}
 
@@ -86,7 +114,8 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 
 // parseAdminPagination normalises the page/perPage query parameters.
 // Invalid or non-positive values fall back to the defaults; perPage is
-// capped so one caller cannot pull the whole table in a single response.
+// capped at adminListMaxPerPage so no caller can pull the whole table in a
+// single response, however it spells the request.
 func parseAdminPagination(pageRaw, perPageRaw string) (int, int) {
 	page, err := strconv.Atoi(pageRaw)
 	if err != nil || page < 1 {
@@ -94,7 +123,7 @@ func parseAdminPagination(pageRaw, perPageRaw string) (int, int) {
 	}
 	perPage, err := strconv.Atoi(perPageRaw)
 	if err != nil || perPage < 1 {
-		perPage = 30
+		perPage = adminListDefaultPerPage
 	}
 	if perPage > adminListMaxPerPage {
 		perPage = adminListMaxPerPage
