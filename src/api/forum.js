@@ -630,6 +630,9 @@ export const createTopicFromPosts = async (postIds, topicData, performerId) => {
     views: 0,
     reputation: 0,
     posts_count: 0, // will be updated below
+    // Marks the post that is the topic itself, so deletePost can refuse to
+    // delete it as a side effect of removing a reply.
+    first_post_id: firstPost.id,
     last_post_at: null,
     last_post_author: null,
     last_post_author_id: null,

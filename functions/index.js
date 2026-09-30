@@ -1458,6 +1458,36 @@ exports.deletePost = onCall(
       throw new HttpsError("failed-precondition", "Topic is locked.");
     }
     const topic = topicSnap.exists ? topicSnap.data() : {};
+
+    // Deleting a post must never take the topic with it. The first post of a
+    // topic is the topic itself, so removing it is a topic-level operation and
+    // must go through deleteTopics. The client used to decide this from the
+    // post's index within the *current page*, which made the first post of page
+    // 2+ delete the whole thread; refusing it here makes that class of bug
+    // impossible regardless of what the client asks for.
+    if (topic.first_post_id === postId) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Cannot delete a topic's first post here — delete the topic instead."
+      );
+    }
+    // Legacy topics created before first_post_id existed have no such field.
+    // Fall back to an authoritative "is this the oldest post?" check so those
+    // topics cannot be wiped through this path either.
+    if (!topic.first_post_id) {
+      const oldest = await db.collection("posts")
+        .where("topic_id", "==", post.topic_id)
+        .orderBy("created_at", "asc")
+        .limit(1)
+        .get();
+      if (!oldest.empty && oldest.docs[0].id === postId) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Cannot delete a topic's first post here — delete the topic instead."
+        );
+      }
+    }
+
     const wasLast = !!topic.last_post_id && topic.last_post_id === postId;
     const expectedCount = Math.max(0, (topic.posts_count || 0) - 1);
 
@@ -1531,7 +1561,10 @@ exports.createTopic = onCall(
       views: 0,
       reputation: 0,
       created_at: timestamp,
-      posts_count: 0
+      posts_count: 0,
+      // Identifies the post that *is* the topic. Deleting it is a topic-level
+      // operation, so deletePost uses this to refuse instead of cascading.
+      first_post_id: postRef.id
     };
     const firstPostDoc = {
       ...firstPostData,

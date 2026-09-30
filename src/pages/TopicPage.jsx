@@ -48,6 +48,26 @@ import ErrorCard from '../components/common/ErrorCard';
 import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 
+/**
+ * True only for the topic's genuine first post.
+ *
+ * `posts` contains a single server-side page, so `posts[0]` is the first post of
+ * the *current page* — on page 2+ that is an ordinary reply, not the first post
+ * of the topic. Deleting it must never delete the topic, so the first-post test
+ * has to consider the absolute post number, not the local array index.
+ *
+ * The pinned first-post card is excluded too: it is a separate render path for
+ * the same document and never occupies a slot in `posts`.
+ */
+const isTopicFirstPost = (post, pagePosts, pageNumber, itemsPerPage) => {
+  if (!post) return false;
+  const absoluteIndex = (Number(pageNumber) - 1) * itemsPerPage + pagePosts.findIndex(p => p.id === post.id);
+  if (absoluteIndex === 0) return true;
+  // Legacy topics whose counter is short of the real first post (e.g. after an
+  // off-by-one pagination read) still identify it by being the oldest entry.
+  return absoluteIndex < 0 && pagePosts[0]?.id === post.id;
+};
+
 const TopicPage = () => {
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -1194,7 +1214,9 @@ const TopicPage = () => {
 
   const handleMovePosts = async (postIds, targetTopicId) => {
     try {
-      const isFirstPostMoved = posts.length > 0 && postIds.includes(posts[0].id);
+      // Moving the topic's real first post empties the topic, so the page must
+      // leave. Judging by posts[0] made any page's first post redirect away.
+      const isFirstPostMoved = postIds.some(pid => isTopicFirstPost({ id: pid }, posts, currentPage, ITEMS_PER_PAGE));
       const categoryId = topic?.category_id;
       const movedCount = postIds.length;
 
@@ -1858,15 +1880,22 @@ const TopicPage = () => {
       if (deletingPost.is_draft) {
         await deleteDraftPost(user.uid, id);
       } else {
-        const isFirstPost = posts.length > 0 && posts[0].id === deletingPost.id;
+        // Only the topic's real first post may delete the topic. Using
+        // posts[0].id here made every first post of *any* page delete the whole
+        // topic (reproduced on a 2-page topic: deleting the lone post on page 2
+        // wiped all 21 posts).
+        const isFirstPost = isTopicFirstPost(deletingPost, posts, currentPage, ITEMS_PER_PAGE);
         const categoryId = topic?.category_id;
 
         if (isFirstPost) {
-          if ((posts.length > 1 || (topic?.posts_count || 0) > 1) && !hasPermission('moderate_content')) {
+          // The first post is the thread itself. Deleting it removes the topic
+          // and all replies, which is only ever allowed when nothing else was
+          // written — otherwise it must go through the explicit topic action.
+          if ((topic?.posts_count || posts.length) > 1) {
             showToast(
               lang === 'ru'
-                ? 'Нельзя удалить тему, в которой уже есть ответы других участников. Обратитесь к модератору.'
-                : 'Cannot delete a topic that already has replies from other users. Please contact a moderator.',
+                ? 'Это первое сообщение темы. Удаление темы целиком доступно через меню темы.'
+                : 'This is the topic\'s first post. Use the topic menu to delete the whole topic.',
               'warning'
             );
             setDeletingPost(null);
@@ -3474,7 +3503,8 @@ const TopicPage = () => {
 
         {/* Modals */}
         {(() => {
-          const isFirstPost = deletingPost && !deletingPost.is_draft && posts.length > 0 && posts[0].id === deletingPost.id;
+          const isFirstPost = !deletingPost?.is_draft
+            && isTopicFirstPost(deletingPost, posts, currentPage, ITEMS_PER_PAGE);
           return (
             <ConfirmModal
               show={!!deletingPost}
