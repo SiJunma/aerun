@@ -760,6 +760,44 @@ rehearsals, FK validation.
   live idempotency bug, masked by a comparison against a field that was never
   there. Both the write and the comparison are removed.
 
+### 5.F.7 DONE — two-database record equivalence (the TASK-6 DoD)
+
+- `cmd/verify-equivalence` (`-a <pb_data A> -b <pb_data B>`), plus migration
+  `1767600000_deterministic_seed_ids`.
+- **Result on the 2026-09 export: 5132 rows across 14 collections, 0
+  differences.** Both databases were created from empty directories and
+  populated by the full pipeline; neither is warmed by the other.
+- **Why two databases and not two runs on one.** Two runs on one database prove
+  idempotency. They cannot prove determinism: a writer whose output depends on
+  map iteration order, or that only writes a row when another row is present,
+  reproduces its own leftovers perfectly and produces something else entirely on
+  a clean database. That is precisely the exposure here — the sequence
+  reconstruction, the duplicate-collapse rules, the per-participant unread
+  translation.
+- **The comparison found two real defects on its first run** — which is the
+  argument for building the tool before claiming the result:
+  - **`roles` and `categories` differed; 12 of 14 collections were identical.**
+    Every difference was a **migration-seeded row under a random id**. The role
+    registry (1766000000) and the bootstrap "General" category (1766100000) were
+    created with `core.NewRecord` and no id, so PocketBase assigned one. Every
+    other row is written with a derived, reproducible id, so those two
+    collections were the only ones two fresh installs could never agree on.
+  - **Custom roles differed too** (4 of 10). A legacy `role_id` is a slug like
+    `skrytye-igry` — dashes and Cyrillic — and cannot be a PocketBase id
+    (`^[a-z0-9]{15}$`), so `ImportRoleRegistry` had been letting PocketBase
+    generate one. It now derives it with the same formula the migration uses.
+- **The fix is a new migration, not an edit to the two seeds**, because an
+  applied migration must never be rewritten — and a rewritten seed would not
+  re-run on an existing database anyway. The rename is guarded: the bootstrap
+  category is only re-identified while **no topic references it**, so a database
+  that already uses "General" keeps its id rather than orphaning posts. Roles
+  need no such guard because `users.role` and `categories.allowed_roles` hold the
+  slug, not `roles.id`.
+- `created`/`updated` are excluded: they are PocketBase-owned AutodateFields, and
+  the two databases are written minutes apart by construction, so comparing them
+  would flag every row and bury a real difference. Everything else is compared
+  byte for byte, and the report names the row, the field and both values.
+
 ### 5.F.5 (half) DONE — rehearsal on a real database
 
 `cmd/import-board` runs L2 → L3 → L5 → L6 as one ordered pipeline and checks

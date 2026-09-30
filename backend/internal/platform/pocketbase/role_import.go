@@ -27,6 +27,7 @@ package pocketbase
 // duplicate insert.
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"slices"
 	"sort"
@@ -35,6 +36,29 @@ import (
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
+
+// roleIDLength is the width every PocketBase record id must have.
+const roleIDLength = 15
+
+// roleRecordID derives a stable record id for a role from its role_id.
+//
+// The input string is deliberately identical to the one migration 1767600000
+// uses (`"seed_role:" + role_id`) even though the two helpers live in different
+// packages — this package cannot import internal/migrations, and migrations
+// cannot import this one. Sharing the exact input means the two agree by
+// construction: a system role seeded by the migration and the same role created
+// by this writer (only possible on a database that somehow lacks it) get the
+// same id, so the value never depends on which code path happened to create the
+// row.
+func roleRecordID(roleID string) string {
+	sum := sha256.Sum256([]byte("seed_role:" + roleID))
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	out := make([]byte, roleIDLength)
+	for i := range out {
+		out[i] = alphabet[int(sum[i])%len(alphabet)]
+	}
+	return string(out)
+}
 
 // RoleUpsert is the desired state of one registry row, mirroring the target
 // collection fields. It is the platform package's own type so this file does not
@@ -134,6 +158,18 @@ func ImportRoleRegistry(app core.App, upserts []RoleUpsert) (RoleImportReport, e
 			rec, ok := existing[id]
 			if !ok {
 				rec = core.NewRecord(col)
+				// A custom role arrives from the legacy snapshot with an
+				// arbitrary `role_id` (a slug like "skrytye-igry", with dashes and
+				// Cyrillic), which cannot be a record id: the column is
+				// `^[a-z0-9]{15}$`. The id therefore has to be DERIVED.
+				//
+				// Leaving it to PocketBase would hand the row a random id, and
+				// that is not cosmetic: the two-database equivalence check found
+				// it. Every custom role landed under a different id in each fresh
+				// database, so no two installs could ever be proven to hold the
+				// same data and a restored backup could not be proven equal to a
+				// rebuilt one.
+				rec.Set("id", roleRecordID(u.RoleID))
 				applyRoleUpsert(rec, u)
 				if err := txApp.Save(rec); err != nil {
 					return fmt.Errorf("create role %s: %w", id, err)

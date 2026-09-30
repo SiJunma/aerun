@@ -412,9 +412,16 @@ by events:
 - `posts_count` — posts with `author_id` = user, `deleted = false` and
   `is_draft = false` (an unsent draft is not a post).
 - `topics_count` — topics with `author_id` = user and `deleted = false`.
-- `reputation` — the sum of `reputation_votes` where `post_id` is empty, i.e.
-  profile votes only. A post vote moved `posts.reputation` when it was cast and
-  is not counted again here.
+- `reputation` — the sum of `value` over **every** `reputation_votes` row whose
+  `target_id` is the user, profile votes and post votes alike. A post vote moves
+  `posts.reputation` *and* `users.reputation` in the same command
+  (`reputation.go`), so a recompute that counted only profile votes would build a
+  base the command layer disagrees with. Checked against the export: the legacy
+  cached value matches the all-votes sum for 10 of 11 users, the profile-only sum
+  for 4.
+- `posts.reputation` — the sum over the votes that name that post, rebuilt by
+  `RecomputePostReputation`. The importer writes zero and never copies the legacy
+  cache, so a stale score cannot sit next to the votes that contradict it.
 
 The command layer moves all three inside the same transaction as the post, topic
 or vote that justifies the change, so the members table never lags the forum. A
@@ -426,6 +433,30 @@ recompute pass runs:
 go run ./tools/migration/importer/cmd/recompute-counters -data pb_data -dry-run
 go run ./tools/migration/importer/cmd/recompute-counters -data pb_data
 ```
+
+## 5. Prove the result: two independent databases, compared
+
+Not a re-run. Two runs on ONE database prove idempotency, not determinism: a
+writer that depends on map iteration order, or that only writes a row when another
+row happens to be present, reproduces its own leftovers perfectly and produces
+something else entirely on a clean database. Create two empty data directories,
+run the whole pipeline into each, then compare.
+
+```powershell
+go run ./tools/migration/importer/cmd/verify-equivalence -a pb_data_a -b pb_data_b
+```
+
+Exits non-zero and names the row, the field and both values on any difference.
+`created`/`updated` are PocketBase-owned and are excluded on purpose — the two
+databases are written minutes apart, so comparing them would flag every row and
+hide a real one.
+
+On the 2026-09 export this reports **5132 rows across 14 collections, 0
+differences**. Building it was worth it: the first run found that migration-seeded
+rows (the role registry, the bootstrap "General" category) and imported custom
+roles were being created with RANDOM PocketBase ids, so no two fresh installs
+could ever be proven to hold the same data. Fixed by migration
+`1767600000_deterministic_seed_ids` and by deriving the id in the role writer.
 
 Stop the running backend first (it holds the SQLite handle). The pass is
 idempotent — a second run reports `updated=0` — never deletes anything, and
