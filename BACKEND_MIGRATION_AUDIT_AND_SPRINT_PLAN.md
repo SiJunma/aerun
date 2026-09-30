@@ -669,6 +669,52 @@ rehearsals, FK validation.
   `TestNullReferenceIsAbsentNotPresent`. This affected every planner that shares
   the helper, not just this one.
 
+### 5.F.4 DONE — L8/L9: notifications, direct messages, audit logs
+
+- `importer/social.go` (`BuildSocialPlan`) and
+  `platform/pocketbase/social_import.go` (`ImportSocial`).
+- Rehearsed: **963 notifications, 9 conversations, 16 members, 300 messages,
+  239 audit logs**; second run reports everything unchanged.
+- **What the rehearsal found, all from reading the actual documents:**
+  - **`clearedAt` is a per-participant MAP, not a date.** Reading it as a scalar
+    stringified the whole map into `map[<uid>:{...}]` and blew the 64-character
+    column limit. It is read the same way as `unread`, per participant.
+  - **`lastTimestamp` is a tagged Firestore timestamp, not the decimal string I
+    assumed.** I had written a decimal-string parser for it; the ledger decodes
+    it to a `time.Time`, so `stringField` formatted it with `%v` into
+    `2026-05-06 15:50:24.389 +0000 UTC`. Deleted that parser — it was dead code
+    with a confident comment attached.
+  - **The export references accounts it does not contain.** One UID
+    (`aCetMf…`) appears 15 times across DMs and messages but has no `users/`
+    record; a second is referenced once by an audit log; a third once by a
+    notification. These are deleted accounts, not a broken predicate.
+- **The judgement call that took the longest.** My first version dropped an
+  entire conversation when one participant failed to resolve, because
+  `dm_members.user_id` is Required. That deletes ~5 real messages from a real
+  person because of one account the backup never captured, and the runtime can
+  still show the thread to the member who *did* import. The rule is now: drop the
+  unresolvable member, keep the conversation if at least one member survives, and
+  drop only that member's own messages (`sender_id` is Required too). A
+  conversation with no surviving member is still dropped — every read path joins
+  through `dm_members`, so it would be invisible anyway. This recovered 2
+  conversations and 3 messages.
+- **`audit_logs.details` is copied verbatim, deliberately.** It is a free-form
+  forensic blob with **30 different key spellings** in the export (`targetId` and
+  `target_id`, `authorId` and `author_id`, …) and no schema in the target.
+  Rewriting it would mean guessing which spellings are ids, and an audit record
+  is the last thing a migration should corrupt on a guess. `performer_id`, which
+  *is* a real reference, is rewritten like every other one. The verbatim copy is
+  reported on all 239 rows.
+- **Notification payloads ARE rewritten.** Unlike `details`, the payload has a
+  known, closed set of id keys (`post_id`, `topic_id`, `first_post_id`,
+  `last_post_id`) and a link behind each one: a reader who clicks "you were
+  mentioned" must land on a real topic. Prose keys such as `topic_title` are
+  copied untouched.
+- **DM sequence is reconstructed from timestamps**, same rule as forum posts
+  (ascending, ties on the legacy key). Unlike posts, there are no drafts, so
+  every conversation runs 1..n with no zeros and the pre-flight check rejects
+  sequence 0.
+
 ### 5.F.5 (half) DONE — rehearsal on a real database
 
 `cmd/import-board` runs L2 → L3 → L5 → L6 as one ordered pipeline and checks
@@ -704,13 +750,12 @@ first and the role exists in the registry.
 
 **Still open in TASK-6:**
 
-3. **L8–L9** — `notifications` (964 legacy rows, 5 types), `dm_conversations` /
-   `dm_members` / `dm_messages` (9 conversations, 305 messages with a
-   per-conversation sequence to reconstruct exactly like posts),
-   `audit_logs` (247 rows, `performer_id` is a legacy UID that must become a
-   derived id), and `settings` — the last one needs a decision, since the
-   classifier currently skips it as cache-only and there is no `settings`
-   collection in the target schema.
+3. **`settings`** — the only remaining item, and it is a decision rather than a
+   coding task. The classifier skips it as cache-only, and the target schema has
+   no `settings` collection. The audit doc carries the open question: whether the
+   legacy document is per-user state (which belongs on `users`) or global config
+   (which belongs in `PB_SETTINGS_*` — environment, not the database). Whoever
+   owns the deployment has to answer that; the importer must not guess.
 4. **Post-import pass** — counters for users/categories/topics,
    `forum_stats` recompute, file-reference validation. `users.posts_count` and
    `users.reputation` can now be recomputed from real rows for the first time,

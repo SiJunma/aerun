@@ -275,7 +275,112 @@ func runEngagement(app *pocketbase.PocketBase, plan *importer.ImportPlan, userEx
 		len(subReport.SubscriptionsCreated), len(subReport.SubscriptionsUpdated),
 		len(subReport.ExtraSubscriptionIDs))
 
-	return ep, nil
+	// --- L8/L9: notifications, direct messages, audit logs -----------------
+	// These depend only on users, so they could be planned earlier; they run
+	// here because that is where userExists is in scope and a single pass is
+	// easier to reason about than two.
+	return ep, runSocial(app, plan, userExists, verbose)
+}
+
+// runSocial plans and writes L8 + L9.
+func runSocial(app *pocketbase.PocketBase, plan *importer.ImportPlan, userExists func(string) bool, verbose bool) error {
+	sp := importer.BuildSocialPlan(plan, userExists)
+	fmt.Printf("L8+L9 planned: notifications=%d conversations=%d members=%d messages=%d audit=%d (dm sequences=%d)\n",
+		len(sp.NotificationRows), len(sp.ConversationRows), len(sp.MemberRows),
+		len(sp.MessageRows), len(sp.AuditRows), sp.SequenceCount)
+	fmt.Printf("skipped: notifications=%d dm=%d audit=%d\n",
+		len(sp.SkippedNotification), len(sp.SkippedDM), len(sp.SkippedAudit))
+	for _, line := range sp.SortedFindingLines() {
+		fmt.Printf("  finding %s\n", line)
+	}
+	for _, id := range sp.SkippedNotification {
+		fmt.Printf("  skipped notification %s\n", id)
+	}
+	if verbose {
+		for _, line := range sp.SortedRowLines() {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+
+	report, err := pb.ImportSocial(
+		app,
+		notificationUpserts(sp),
+		conversationUpserts(sp),
+		memberUpserts(sp),
+		messageUpserts(sp),
+		auditUpserts(sp),
+	)
+	if err != nil {
+		return fmt.Errorf("social: %w", err)
+	}
+	fmt.Printf("L8 notifications: created=%d extra=%d\n",
+		len(report.NotificationsCreated), len(report.ExtraNotificationIDs))
+	fmt.Printf("L8 dm_conversations: created=%d extra=%d\n",
+		len(report.ConversationsCreated), len(report.ExtraConversationIDs))
+	fmt.Printf("L8 dm_members: created=%d extra=%d\n",
+		len(report.MembersCreated), len(report.ExtraMemberIDs))
+	fmt.Printf("L8 dm_messages: created=%d extra=%d\n",
+		len(report.MessagesCreated), len(report.ExtraMessageIDs))
+	fmt.Printf("L9 audit_logs: created=%d extra=%d\n",
+		len(report.AuditCreated), len(report.ExtraAuditIDs))
+	return nil
+}
+
+func notificationUpserts(sp *importer.SocialPlan) []pb.NotificationUpsert {
+	out := make([]pb.NotificationUpsert, 0, len(sp.NotificationRows))
+	for _, r := range sp.NotificationRows {
+		out = append(out, pb.NotificationUpsert{
+			TargetID: r.TargetID, RecipientID: r.RecipientID, SenderID: r.SenderID,
+			Type: r.Type, Title: r.Title, PayloadJSON: r.PayloadJSON,
+			Read: r.Read, Archived: r.Archived, CreatedAt: r.CreatedAt,
+		})
+	}
+	return out
+}
+
+func conversationUpserts(sp *importer.SocialPlan) []pb.DMConversationUpsert {
+	out := make([]pb.DMConversationUpsert, 0, len(sp.ConversationRows))
+	for _, r := range sp.ConversationRows {
+		out = append(out, pb.DMConversationUpsert{
+			TargetID: r.TargetID, LastMessage: r.LastMessage,
+			LastMessageAt: r.LastMessageAt, MessagesCount: r.MessagesCount,
+			CreatedAt: r.CreatedAt,
+		})
+	}
+	return out
+}
+
+func memberUpserts(sp *importer.SocialPlan) []pb.DMMemberUpsert {
+	out := make([]pb.DMMemberUpsert, 0, len(sp.MemberRows))
+	for _, r := range sp.MemberRows {
+		out = append(out, pb.DMMemberUpsert{
+			TargetID: r.TargetID, ConversationID: r.ConversationID, UserID: r.UserID,
+			LastReadSequence: r.LastReadSequence, ClearedAt: r.ClearedAt,
+		})
+	}
+	return out
+}
+
+func messageUpserts(sp *importer.SocialPlan) []pb.DMMessageUpsert {
+	out := make([]pb.DMMessageUpsert, 0, len(sp.MessageRows))
+	for _, r := range sp.MessageRows {
+		out = append(out, pb.DMMessageUpsert{
+			TargetID: r.TargetID, ConversationID: r.ConversationID, SenderID: r.SenderID,
+			Sequence: r.Sequence, Text: r.Text, CreatedAt: r.CreatedAt,
+		})
+	}
+	return out
+}
+
+func auditUpserts(sp *importer.SocialPlan) []pb.AuditLogUpsert {
+	out := make([]pb.AuditLogUpsert, 0, len(sp.AuditRows))
+	for _, r := range sp.AuditRows {
+		out = append(out, pb.AuditLogUpsert{
+			TargetID: r.TargetID, ActionType: r.ActionType, PerformerID: r.PerformerID,
+			DetailsJSON: r.DetailsJSON, CreatedAt: r.CreatedAt,
+		})
+	}
+	return out
 }
 
 // presentTopics / presentPosts report whether a DERIVED id exists in the target.
