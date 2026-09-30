@@ -227,7 +227,112 @@ func runImport(app *pocketbase.PocketBase, plan *importer.ImportPlan, verbose bo
 		len(forumReport.PostsCreated), len(forumReport.PostsUpdated),
 		len(forumReport.ExtraPostIDs))
 	fmt.Printf("sequences assigned: %d\n", fp.SequenceCount)
+
+	// --- L7: votes and subscriptions -------------------------------------
+	// Both resolve against what the previous levels just wrote, so they run here
+	// rather than being planned up front: a vote on a post that was skipped would
+	// otherwise carry a reference to nothing.
+	engagement, err := runEngagement(app, plan, userExists, verbose)
+	if err != nil {
+		return err
+	}
+	_ = engagement
 	return nil
+}
+
+// runEngagement plans and writes L7 (reputation votes + topic subscriptions).
+func runEngagement(app *pocketbase.PocketBase, plan *importer.ImportPlan, userExists func(string) bool, verbose bool) (*importer.EngagementPlan, error) {
+	topics := presentTopics(app)
+	posts := presentPosts(app)
+
+	ep := importer.BuildEngagementPlan(plan, userExists, topics, posts)
+	fmt.Printf("L7 planned: votes=%d subscriptions=%d skipped_votes=%d skipped_subscriptions=%d\n",
+		len(ep.VoteRows), len(ep.SubscriptionRows), len(ep.SkippedVoteIDs), len(ep.SkippedSubIDs))
+	for _, line := range ep.SortedFindingLines() {
+		fmt.Printf("  finding %s\n", line)
+	}
+	for _, id := range ep.SkippedVoteIDs {
+		fmt.Printf("  skipped vote %s (see the finding above; never written)\n", id)
+	}
+	if verbose {
+		for _, line := range ep.SortedRowLines() {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+
+	voteReport, err := pb.ImportReputationVotes(app, voteUpserts(ep))
+	if err != nil {
+		return ep, fmt.Errorf("reputation votes: %w", err)
+	}
+	fmt.Printf("L7 reputation_votes: created=%d updated=%d extra=%d\n",
+		len(voteReport.VotesCreated), len(voteReport.VotesUpdated), len(voteReport.ExtraVoteIDs))
+
+	subReport, err := pb.ImportSubscriptions(app, subscriptionUpserts(ep))
+	if err != nil {
+		return ep, fmt.Errorf("topic subscriptions: %w", err)
+	}
+	fmt.Printf("L7 topic_subscriptions: created=%d updated=%d extra=%d\n",
+		len(subReport.SubscriptionsCreated), len(subReport.SubscriptionsUpdated),
+		len(subReport.ExtraSubscriptionIDs))
+
+	return ep, nil
+}
+
+// presentTopics / presentPosts report whether a DERIVED id exists in the target.
+//
+// Like the category predicate, they ask the database rather than the report:
+// on a converged database nothing is "created" any more, and a predicate built
+// from that list would make the second run skip every vote.
+func presentTopics(app *pocketbase.PocketBase) func(string) bool {
+	return presentByDerivedID(app, "topics", importer.SpaceTopic)
+}
+
+func presentPosts(app *pocketbase.PocketBase) func(string) bool {
+	return presentByDerivedID(app, "posts", importer.SpacePost)
+}
+
+func presentByDerivedID(app *pocketbase.PocketBase, collection string, space importer.IDSpace) func(string) bool {
+	rows, err := app.FindAllRecords(collection, nil)
+	if err != nil {
+		fail("read "+collection, err)
+	}
+	present := make(map[string]bool, len(rows))
+	for _, rec := range rows {
+		present[rec.Id] = true
+	}
+	return func(legacyID string) bool {
+		return present[importer.DeriveID(space, legacyID)]
+	}
+}
+
+func voteUpserts(ep *importer.EngagementPlan) []pb.ReputationVoteUpsert {
+	out := make([]pb.ReputationVoteUpsert, 0, len(ep.VoteRows))
+	for _, row := range ep.VoteRows {
+		out = append(out, pb.ReputationVoteUpsert{
+			TargetID:     row.TargetID,
+			VoterID:      row.VoterID,
+			TargetUserID: row.TargetUserID,
+			PostID:       row.PostID,
+			TopicID:      row.TopicID,
+			Value:        row.Value,
+			Comment:      row.Comment,
+			CreatedAt:    row.CreatedAt,
+		})
+	}
+	return out
+}
+
+func subscriptionUpserts(ep *importer.EngagementPlan) []pb.SubscriptionUpsert {
+	out := make([]pb.SubscriptionUpsert, 0, len(ep.SubscriptionRows))
+	for _, row := range ep.SubscriptionRows {
+		out = append(out, pb.SubscriptionUpsert{
+			TargetID:  row.TargetID,
+			TopicID:   row.TopicID,
+			UserID:    row.UserID,
+			CreatedAt: row.CreatedAt,
+		})
+	}
+	return out
 }
 
 // presentCategories reports whether a LEGACY category id resolves to a row in

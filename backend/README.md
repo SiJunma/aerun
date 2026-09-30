@@ -330,16 +330,18 @@ worse than none:
 | `users/{uid}/characters/{cid}` | `import-characters` | done |
 | `category_groups`, `categories` | `import-board` | done (L2/L3) |
 | `topics`, `posts`, `users/{uid}/drafts/{tid}` | `import-board` | done (L5/L6, sequence reconstructed) |
+| `reputation_logs` | `import-board` | done (L7 → `reputation_votes`) |
+| `topic_subscriptions` | `import-board` | done (L7) |
 | Firebase Storage avatars | `import-avatars` | done (users + characters) |
 | derived counters | `recompute-counters` | done (needs posts first) |
-| `topic_subscriptions` | — | **not written yet** |
-| `reputation_logs`, `audit_logs`, `notifications` | — | **not written yet** |
+| `notifications` | — | **not written yet** |
 | `dms`, `dms/{id}/messages` | — | **not written yet** |
-| `designs` | — | skipped by design (theme, not forum data) |
+| `audit_logs` | — | **not written yet** |
+| `settings`, `designs` | — | skipped by design (theme/config, not forum data) |
 
-Until `reputation_logs`, `notifications`, the DMs and `audit_logs` land,
-`recompute-counters` correctly reports the reputation-derived counters as 0 — the
-derived value, not a bug. Run it again after those writers.
+Until `notifications`, the DMs and `audit_logs` land, `recompute-counters`
+correctly reports the reputation-derived counters as 0 — the derived value, not a
+bug. Run it again after those writers.
 
 ### Two things the board rehearsal taught, recorded so they are not re-learned
 

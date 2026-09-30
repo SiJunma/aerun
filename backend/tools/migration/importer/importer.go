@@ -694,9 +694,21 @@ func Reconcile(plan *ImportPlan, counters *RecomputedCounters) map[string]string
 // Helper functions
 // ---------------------------------------------------------------------------
 
+// stringField reads a legacy string field.
+//
+// A JSON null decodes to a Go nil, and the previous implementation formatted it
+// with %v — producing the literal string "<nil>", which every caller then read
+// as a PRESENT value. That is not a cosmetic bug: a reputation vote whose post_id
+// is null was treated as a vote on a post literally named "<nil>", and a topic
+// whose author_id is null was treated as written by an account named "<nil>".
+// Both happen to fail the reference check and get skipped, but the finding then
+// blames the data instead of the decoder, and any field that is only trimmed and
+// compared (rather than looked up) would store "<nil>" verbatim.
+//
+// nil therefore means "absent", which is what the callers already assume.
 func stringField(m map[string]any, key string) string {
 	v, ok := m[key]
-	if !ok {
+	if !ok || v == nil {
 		return ""
 	}
 	s, ok := v.(string)

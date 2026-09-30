@@ -636,6 +636,39 @@ rehearsals, FK validation.
 - A post or topic whose reference does not resolve is **skipped and reported**,
   never written with a dangling id and never re-parented onto a substitute.
 
+### 5.F.3 DONE — L7: reputation votes + topic subscriptions
+
+- `importer/engagement.go` (`BuildEngagementPlan`) and
+  `platform/pocketbase/engagement_import.go` (`ImportReputationVotes`,
+  `ImportSubscriptions`).
+- Rehearsed: **400 votes + 5 subscriptions, 0 skipped**, second run reports
+  everything unchanged.
+- **Two real data problems found by the rehearsal, both handled explicitly:**
+  - **`applied` flag dropped.** 290 of the 403 legacy votes carry
+    `applied: true`, 113 carry none. It was checked for a derivable meaning and
+    there is none: the split is not self-votes (there are none), not post-vs-
+    profile votes, not a value pattern. It is Cloud Function bookkeeping that did
+    not always run. All votes are imported and the 113 are counted under
+    `reputation_vote_without_applied_flag`, because dropping a third of the
+    forum's recorded votes would invent data loss while honouring an
+    unexplainable flag would invent intent.
+  - **Duplicate profile votes collapsed.** The target is UNIQUE on
+    (voter_id, target_id) where post_id = '', and the legacy data violates it:
+    two pairs appear twice. The plan keeps the **earliest** vote and reports the
+    rest under `reputation_vote_duplicate_profile_vote`. Earliest is the
+    defensible winner because a profile vote is a standing statement, not a
+    tally — a later duplicate is the same statement written twice. Ties break on
+    the document id, so the survivor is the same on every run. Post votes are
+    never collapsed: the (voter, post) index already covers them, and merging
+    votes on two different posts of the same author would delete a real vote.
+- **A JSON `null` used to decode as the literal string `"<nil>"`.** The shared
+  `stringField` formatted a Go nil with `%v`, so a profile vote storing
+  `post_id: null` was treated as a vote on a post named `<nil>` — the finding
+  blamed the data and the row's index selection was decided by a reference that
+  never existed. Fixed in `importer.go` (nil means absent) and pinned by
+  `TestNullReferenceIsAbsentNotPresent`. This affected every planner that shares
+  the helper, not just this one.
+
 ### 5.F.5 (half) DONE — rehearsal on a real database
 
 `cmd/import-board` runs L2 → L3 → L5 → L6 as one ordered pipeline and checks
@@ -671,11 +704,17 @@ first and the role exists in the registry.
 
 **Still open in TASK-6:**
 
-3. **L7–L9** — `reputation_logs` (+ recompute of user reputation and post
-   scores), `topic_subscriptions`, `notifications`, `dm_conversations` /
-   `dm_members` / `dm_messages`, `audit_logs`, `settings`.
+3. **L8–L9** — `notifications` (964 legacy rows, 5 types), `dm_conversations` /
+   `dm_members` / `dm_messages` (9 conversations, 305 messages with a
+   per-conversation sequence to reconstruct exactly like posts),
+   `audit_logs` (247 rows, `performer_id` is a legacy UID that must become a
+   derived id), and `settings` — the last one needs a decision, since the
+   classifier currently skips it as cache-only and there is no `settings`
+   collection in the target schema.
 4. **Post-import pass** — counters for users/categories/topics,
-   `forum_stats` recompute, file-reference validation.
+   `forum_stats` recompute, file-reference validation. `users.posts_count` and
+   `users.reputation` can now be recomputed from real rows for the first time,
+   because L5/L6/L7 have landed.
 5. **Two-database record-equivalence** — the current proof is a byte-identical
    *report* across two runs on one database. The DoD asks for a per-table
    id/content dump-compare of two independent `pb_data` directories.
