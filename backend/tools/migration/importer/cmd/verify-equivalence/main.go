@@ -177,12 +177,17 @@ func dumpCollection(app core.App, name string) (map[string]row, error) {
 }
 
 // diff reports every way the two dumps disagree.
+//
+// The collection name is part of every message rather than only the caller's:
+// a difference line is often the only artefact anyone reads, and "posts.sequence"
+// is actionable while "sequence" is a puzzle.
 func diff(collection string, a, b map[string]row) []string {
+	prefix := collection + ": "
 	var out []string
 	for id, rowA := range a {
 		rowB, ok := b[id]
 		if !ok {
-			out = append(out, fmt.Sprintf("%s: present in A, absent in B", id))
+			out = append(out, fmt.Sprintf("%s%s present in A, absent in B", prefix, id))
 			continue
 		}
 		fields := map[string]bool{}
@@ -199,13 +204,13 @@ func diff(collection string, a, b map[string]row) []string {
 		sort.Strings(names)
 		for _, f := range names {
 			if rowA[f] != rowB[f] {
-				out = append(out, fmt.Sprintf("%s.%s: A=%q B=%q", id, f, rowA[f], rowB[f]))
+				out = append(out, fmt.Sprintf("%s%s.%s: A=%q B=%q", prefix, id, f, rowA[f], rowB[f]))
 			}
 		}
 	}
 	for id := range b {
 		if _, ok := a[id]; !ok {
-			out = append(out, fmt.Sprintf("%s: present in B, absent in A", id))
+			out = append(out, fmt.Sprintf("%s%s present in B, absent in A", prefix, id))
 		}
 	}
 	sort.Strings(out)

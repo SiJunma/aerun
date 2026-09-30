@@ -114,11 +114,34 @@ func main() {
 	if result.Roles != nil {
 		printRoles(result.Roles)
 	}
+	printGlobalSettings(result.GlobalSettings)
 
 	// A rehearsal with dangling foreign keys must not look like a success even
 	// though every artefact was written for review.
 	if len(result.ForeignKeyErrors) > 0 {
 		os.Exit(1)
+	}
+}
+
+// printGlobalSettings renders the settings/global handover list.
+//
+// The wording matters more than usual here. These values are NOT in the
+// database and never will be — the owner decision keeps global forum settings in
+// the process environment. So this block is the only place the values exist in
+// reviewable form, and the `enforced_in_code` rows are called out explicitly:
+// someone reading an env-var table that says `whitelistMode=false` must not
+// conclude that registration is now a config switch.
+func printGlobalSettings(rows []importer.GlobalSettingRow) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Printf("global_settings: %d keys — NOT imported; set these as env vars\n", len(rows))
+	for _, row := range rows {
+		line := fmt.Sprintf("  %-30s %-22s %s", row.EnvVar, row.Class, row.Value)
+		if row.Note != "" {
+			line += "\n      ↳ " + row.Note
+		}
+		fmt.Println(line)
 	}
 }
 

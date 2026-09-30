@@ -59,6 +59,13 @@ type RehearsalResult struct {
 	// (roles.go). Nil when the caller passed no system rows, which only happens
 	// in unit tests.
 	Roles *RolePlan `json:"roles,omitempty"`
+
+	// GlobalSettings classifies the legacy `settings/global` document. These are
+	// deployment configuration, not forum data: by owner decision they stay in
+	// the process environment (PB_SETTINGS_*) and are never written to a
+	// collection. The report exists so the values are carried across as env vars
+	// deliberately rather than the collection disappearing silently.
+	GlobalSettings []GlobalSettingRow `json:"globalSettings,omitempty"`
 }
 
 // Rehearse runs the full pipeline over a staging ledger (and, optionally, the
@@ -126,6 +133,7 @@ func Rehearse(ledgerPath, authPath string, systemRoles []RoleRow, allowedPermiss
 		CounterMismatches: Reconcile(plan, RecomputeCounters(plan)),
 		MappingDigest:     fmt.Sprintf("%x", sha256.Sum256(payload)),
 		Roles:             roles,
+		GlobalSettings:    ClassifyGlobalSettings(plan),
 	}, table, nil
 }
 

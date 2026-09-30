@@ -24,7 +24,14 @@ func socialFixture() *ImportPlan {
 
 func socialAt(sec int64) time.Time { return time.Unix(sec, 0).UTC() }
 
-func dmMessage(conv, msg, sender, text string, at time.Time) map[string]any {
+// dmMessage builds one legacy DM message document.
+//
+// It takes no conversation or message id: both are already carried by the
+// `plan.DMMessages` key ("conv/messages/msg"), so passing them again would be a
+// second source of truth that a test could get subtly wrong without the planner
+// ever noticing. What the document actually contains is sender, text and
+// timestamp.
+func dmMessage(sender, text string, at time.Time) map[string]any {
 	return map[string]any{
 		"sender_uid": sender, "text": text, "timestamp": at,
 	}
@@ -40,9 +47,9 @@ func TestDMSequenceFollowsTimestamps(t *testing.T) {
 	}
 	// Stored deliberately out of order: the map key sort must not decide the
 	// sequence, only the timestamps may.
-	plan.DMMessages["u1_u2/messages/m3"] = dmMessage("u1_u2", "m3", "u1", "third", socialAt(300))
-	plan.DMMessages["u1_u2/messages/m1"] = dmMessage("u1_u2", "m1", "u1", "first", socialAt(100))
-	plan.DMMessages["u1_u2/messages/m2"] = dmMessage("u1_u2", "m2", "u2", "second", socialAt(200))
+	plan.DMMessages["u1_u2/messages/m3"] = dmMessage("u1", "third", socialAt(300))
+	plan.DMMessages["u1_u2/messages/m1"] = dmMessage("u1", "first", socialAt(100))
+	plan.DMMessages["u1_u2/messages/m2"] = dmMessage("u2", "second", socialAt(200))
 
 	sp := BuildSocialPlan(plan, existsAlways)
 
@@ -68,7 +75,7 @@ func TestDMSequenceFollowsTimestamps(t *testing.T) {
 func TestDMSequenceStartsAtOne(t *testing.T) {
 	plan := socialFixture()
 	plan.DMs["u1_u2"] = map[string]any{"participants": []any{"u1", "u2"}}
-	plan.DMMessages["u1_u2/messages/only"] = dmMessage("u1_u2", "only", "u1", "hello", socialAt(100))
+	plan.DMMessages["u1_u2/messages/only"] = dmMessage("u1", "hello", socialAt(100))
 
 	sp := BuildSocialPlan(plan, existsAlways)
 
@@ -83,8 +90,8 @@ func TestDMConversationsAreIndependentlyNumbered(t *testing.T) {
 	plan := socialFixture()
 	plan.DMs["u1_u2"] = map[string]any{"participants": []any{"u1", "u2"}}
 	plan.DMs["u3_u4"] = map[string]any{"participants": []any{"u3", "u4"}}
-	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1_u2", "a", "u1", "hi", socialAt(100))
-	plan.DMMessages["u3_u4/messages/b"] = dmMessage("u3_u4", "b", "u3", "yo", socialAt(50))
+	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1", "hi", socialAt(100))
+	plan.DMMessages["u3_u4/messages/b"] = dmMessage("u3", "yo", socialAt(50))
 
 	sp := BuildSocialPlan(plan, existsAlways)
 
@@ -111,8 +118,8 @@ func TestUnreadCountBecomesLastReadSequence(t *testing.T) {
 		"unread":       map[string]any{"u1": float64(2), "u2": float64(0)},
 	}
 	for i := 0; i < 5; i++ {
-		plan.DMMessages["u1_u2/messages/m"+string(rune('a'+i))] = dmMessage(
-			"u1_u2", "m", "u1", "msg", socialAt(int64(100+i)))
+		plan.DMMessages["u1_u2/messages/m"+string(rune('a'+i))] =
+			dmMessage("u1", "msg", socialAt(int64(100+i)))
 	}
 
 	sp := BuildSocialPlan(plan, existsAlways)
@@ -138,7 +145,7 @@ func TestUnreadLargerThanTotalClamps(t *testing.T) {
 		"participants": []any{"u1", "u2"},
 		"unread":       map[string]any{"u1": float64(99)},
 	}
-	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1_u2", "a", "u1", "hi", socialAt(100))
+	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1", "hi", socialAt(100))
 
 	sp := BuildSocialPlan(plan, existsAlways)
 
@@ -159,7 +166,7 @@ func TestLastMessageComesFromTheRowsNotTheHeader(t *testing.T) {
 		"lastMessage":   "STALE HEADER",
 		"lastTimestamp": "1789181253.239000000",
 	}
-	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1_u2", "a", "u1", "the real last", socialAt(100))
+	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1", "the real last", socialAt(100))
 
 	sp := BuildSocialPlan(plan, existsAlways)
 
@@ -205,7 +212,7 @@ func TestClearedAtIsAPerParticipantMap(t *testing.T) {
 		"participants": []any{"u1", "u2"},
 		"clearedAt":    map[string]any{"u1": socialAt(500)},
 	}
-	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1_u2", "a", "u1", "hi", socialAt(100))
+	plan.DMMessages["u1_u2/messages/a"] = dmMessage("u1", "hi", socialAt(100))
 
 	sp := BuildSocialPlan(plan, existsAlways)
 
@@ -238,8 +245,8 @@ func TestClearedAtIsAPerParticipantMap(t *testing.T) {
 func TestConversationKeepsTheKnownMemberWhenOneAccountIsMissing(t *testing.T) {
 	plan := socialFixture()
 	plan.DMs["u1_ghost"] = map[string]any{"participants": []any{"u1", "ghost"}}
-	plan.DMMessages["u1_ghost/messages/a"] = dmMessage("u1_ghost", "a", "u1", "from u1", socialAt(100))
-	plan.DMMessages["u1_ghost/messages/b"] = dmMessage("u1_ghost", "b", "ghost", "from ghost", socialAt(200))
+	plan.DMMessages["u1_ghost/messages/a"] = dmMessage("u1", "from u1", socialAt(100))
+	plan.DMMessages["u1_ghost/messages/b"] = dmMessage("ghost", "from ghost", socialAt(200))
 
 	sp := BuildSocialPlan(plan, existsExcept("ghost"))
 
@@ -272,7 +279,7 @@ func TestConversationKeepsTheKnownMemberWhenOneAccountIsMissing(t *testing.T) {
 func TestConversationWithNoKnownMemberIsDropped(t *testing.T) {
 	plan := socialFixture()
 	plan.DMs["g1_g2"] = map[string]any{"participants": []any{"g1", "g2"}}
-	plan.DMMessages["g1_g2/messages/a"] = dmMessage("g1_g2", "a", "g1", "hi", socialAt(100))
+	plan.DMMessages["g1_g2/messages/a"] = dmMessage("g1", "hi", socialAt(100))
 
 	sp := BuildSocialPlan(plan, existsExcept("g1", "g2"))
 
@@ -449,7 +456,7 @@ func TestSocialPlanIsDeterministic(t *testing.T) {
 		plan.DMs["u1_u2"] = map[string]any{"participants": []any{"u2", "u1"}}
 		for i := 0; i < 4; i++ {
 			key := "u1_u2/messages/m" + string(rune('a'+i))
-			plan.DMMessages[key] = dmMessage("u1_u2", "m", "u1", "x", socialAt(int64(100+i)))
+			plan.DMMessages[key] = dmMessage("u1", "x", socialAt(int64(100+i)))
 		}
 		plan.Notifications["n1"] = map[string]any{"recipient_uid": "u1", "type": "post_quoted"}
 		plan.Notifications["n2"] = map[string]any{"recipient_uid": "u2", "type": "topic_reply"}

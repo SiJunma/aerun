@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ---------------------------------------------------------------------------
@@ -208,6 +209,17 @@ type ImportPlan struct {
 
 	// Skipped collections (cache-only or non-migrated).
 	Skipped map[string]int
+
+	// GlobalSettings holds the legacy `settings/*` documents, which are
+	// deployment configuration rather than forum data.
+	//
+	// They are captured here and never written: the owner decision is that global
+	// forum settings stay system config in the process environment
+	// (PB_SETTINGS_*), while per-user preferences live in `users.settings` (which
+	// IS imported, by the user writer). Keeping the document in the plan lets the
+	// rehearsal report each key with the env var it belongs in, so the values are
+	// carried across deliberately instead of vanishing.
+	GlobalSettings map[string]map[string]any
 }
 
 // ImportReport summarises the results of an import run.
@@ -291,6 +303,180 @@ func LoadAuthExport(path string) (*AuthExport, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Owner decision (2026-09-29), recorded here so the next reader does not have
+// to re-derive it:
+//
+//   - **Global** forum settings stay system configuration in the process
+//     environment (`PB_SETTINGS_*`). They are NOT imported into the database,
+//     and no `settings` collection is created for them: config that changes
+//     only at deploy time does not belong in a backup someone restores.
+//   - **Per-user** settings (UI preferences, notification toggles, the selected
+//     character) are stored in the `users.settings` JSON column, and the user
+//     writer already copies them verbatim.
+//
+// ClassifyGlobalSettings exists for the first half: it turns the legacy
+// document into a report the rehearsal prints, so the values are carried across
+// as env vars deliberately instead of the collection disappearing silently.
+//
+// The classification is deliberately opinionated about ONE thing: whether the
+// backend already enforces the behaviour. Several of these keys
+// (`whitelistMode`, `requireApproval`) are moderation switches the runtime
+// hard-codes, and an env var that LOOKS like it could disable them is a trap.
+// Those are marked EnforcedInCode so nobody reads "set PB_SETTINGS_*" as
+// "moderation is now configurable".
+
+// GlobalSettingClass says how a single legacy settings key is carried across.
+type GlobalSettingClass string
+
+const (
+	// GlobalSettingEnv is plain deployment configuration: it maps to one env var
+	// and nothing in the runtime hard-codes it.
+	GlobalSettingEnv GlobalSettingClass = "env"
+	// GlobalSettingEnforced is a behaviour the backend already implements in
+	// code. The env var is informational only; flipping it does NOT change what
+	// the server does.
+	GlobalSettingEnforced GlobalSettingClass = "enforced_in_code"
+	// GlobalSettingBranding is presentation (theme, logo, backgrounds) that the
+	// frontend reads. It is not a server behaviour at all.
+	GlobalSettingBranding GlobalSettingClass = "branding"
+)
+
+// enforcedInCode lists the keys whose behaviour the runtime already decides.
+//
+// A reviewer seeing `whitelistMode=false` in an env-var table must not conclude
+// that opening registration is a config change. Registration is gated by the
+// compiled permission matrix and the account status, not by a flag.
+var enforcedInCode = map[string]string{
+	"whitelistMode":       "registration gating is the compiled role matrix plus users.status",
+	"requireApproval":     "account approval is users.status, enforced by the command layer",
+	"enableReputation":    "votes are a first-class command; there is no off switch",
+	"registrationEnabled": "account creation is an auth-collection rule",
+}
+
+// brandingKeys are presentation values the frontend reads.
+var brandingKeys = map[string]bool{
+	"forumName":      true,
+	"welcomeMessage": true,
+	"logoUrl":        true,
+	"bgLight":        true,
+	"bgDark":         true,
+	"bgNeutral":      true,
+	"bgOpacityLight": true,
+	"bgOpacityDark":  true,
+}
+
+// GlobalSettingRow is one classified key of the legacy settings document.
+type GlobalSettingRow struct {
+	Key   string
+	Value string
+	// EnvVar is the PB_SETTINGS_* name the value belongs in.
+	EnvVar string
+	Class  GlobalSettingClass
+	// Note carries the reason for an EnforcedInCode row, and is empty otherwise.
+	Note string
+}
+
+// ClassifyGlobalSettings reports how each key of the legacy `settings/global`
+// document should be carried across.
+//
+// It never returns an error and never mutates the plan: this is reporting, not
+// writing. An unknown key is classified Env with a name derived from its own
+// spelling, because a key the importer has never seen is still a value the
+// deployment owner has to set by hand.
+func ClassifyGlobalSettings(plan *ImportPlan) []GlobalSettingRow {
+	fields, ok := plan.GlobalSettings["global"]
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	rows := make([]GlobalSettingRow, 0, len(keys))
+	for _, key := range keys {
+		row := GlobalSettingRow{
+			Key:    key,
+			Value:  describeSettingValue(fields[key]),
+			EnvVar: "PB_SETTINGS_" + envNameFor(key),
+		}
+		note, enforced := enforcedInCode[key]
+		switch {
+		case enforced:
+			row.Class = GlobalSettingEnforced
+			row.Note = note
+		case brandingKeys[key]:
+			row.Class = GlobalSettingBranding
+		default:
+			row.Class = GlobalSettingEnv
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// envNameFor turns a camelCase legacy key into a screaming-snake env name.
+//
+// The uppercase test is done on the RUNE, and the case change through
+// unicode.ToUpper rather than arithmetic. The arithmetic version (`r-'a'+'A'`)
+// is subtly wrong — it ADDS the offset instead of subtracting it, so `M` became
+// `-` and `whitelistMode` came out as `whitelist_-ode`. An env var name is not a
+// place for a hand-rolled case conversion to be approximately right.
+func envNameFor(key string) string {
+	var out []rune
+	for i, r := range key {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				out = append(out, '_')
+			}
+			out = append(out, unicode.ToUpper(r))
+			continue
+		}
+		out = append(out, r)
+	}
+	return string(out)
+}
+
+// maxSettingValueChars bounds a rendered value. The report is a table, and
+// `welcomeMessage` alone is several kilobytes of HTML per language — printing it
+// in full would push every other row off the screen.
+const maxSettingValueChars = 48
+
+// describeSettingValue renders a setting value for a human-readable report.
+//
+// Nested objects (forumName, welcomeMessage) print as their leaf keys rather
+// than a Go map dump: the report is read by whoever writes the env vars, and
+// `map[ru:Мир Аэрун en:World of Aerun]` is less useful than the two leaves. The
+// same truncation applies to a leaf, because a leaf can be a page of HTML.
+func describeSettingValue(raw any) string {
+	switch value := raw.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(value))
+		for k := range value {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%s", k, truncateValue(value[k])))
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	default:
+		return truncateValue(raw)
+	}
+}
+
+// truncateValue renders one value, shortening anything long enough to break the
+// table layout.
+func truncateValue(raw any) string {
+	text := fmt.Sprintf("%v", raw)
+	if len(text) <= maxSettingValueChars {
+		return text
+	}
+	return fmt.Sprintf("%q…(%d chars)", text[:maxSettingValueChars], len(text))
+}
+
 // Plan builder: decode all records into typed maps
 // ---------------------------------------------------------------------------
 
@@ -314,6 +500,7 @@ func BuildPlan(ledger *StagingLedger, authExport *AuthExport, logger *slog.Logge
 		Drafts:         make(map[string]map[string]any),
 		DroppedUsers:   make(map[string]bool),
 		Skipped:        make(map[string]int),
+		GlobalSettings: make(map[string]map[string]any),
 	}
 
 	// Index auth export users by UID.
@@ -425,8 +612,18 @@ func classifyFirestoreRecord(plan *ImportPlan, rec StagingRecord, logger *slog.L
 		plan.DMMessages[key] = fields
 	case collection == "roles" && len(parts) == 2:
 		plan.Roles[docID] = fields
+	case collection == "settings" && len(parts) == 2:
+		// Deployment configuration, not forum data. Kept out of the write plan on
+		// purpose: the target has no `settings` collection and must not grow one,
+		// because these values belong in PB_SETTINGS_* (process environment),
+		// not in the database — see the owner decision recorded on
+		// ClassifyGlobalSettings. Capturing the document here lets the rehearsal
+		// print an actionable env-var list instead of silently dropping a
+		// collection nobody has to think about.
+		plan.GlobalSettings[docID] = fields
+		plan.Skipped[collection]++
 	case collection == "guest_activity" || collection == "forum_stats" ||
-		collection == "settings" || collection == "designs":
+		collection == "designs":
 		// Cache-only or non-migrated collections; count but skip.
 		plan.Skipped[collection]++
 	default:

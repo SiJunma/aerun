@@ -798,6 +798,44 @@ rehearsals, FK validation.
   would flag every row and bury a real difference. Everything else is compared
   byte for byte, and the report names the row, the field and both values.
 
+### 5.F.8 DONE — `settings` resolved by owner decision
+
+**Decision (2026-09-29):** global forum settings stay system configuration in
+the process environment (`PB_SETTINGS_*`). Per-user settings (UI preferences,
+notification toggles, the selected character) live in `users.settings`.
+
+- **The per-user half was already implemented** — `users.go` copies the legacy
+  preferences object verbatim and `user_import.go` writes it to the JSON column.
+  No change was needed; this records that it is the intended behaviour and not
+  an accident.
+- **The global half is now classified instead of lumped in with the cache.**
+  `settings/*` used to sit in the same `guest_activity / forum_stats / designs`
+  bucket, described as "cache-only" — which was simply untrue. It is
+  configuration. The document is now captured in the plan, and
+  `ClassifyGlobalSettings` turns it into a report the rehearsal prints: every key
+  with its value, the `PB_SETTINGS_*` name it belongs in, and a class.
+- **25 keys** in the 2026-09 export. Three classes:
+  - `branding` (9) — `forumName`, `welcomeMessage`, `logoUrl`, the backgrounds
+    and their opacities. Presentation the frontend reads; not a server behaviour.
+  - `env` (12) — `maxUploadSize`, `postsPerPage`, `maintenanceMode`,
+    `reputationStyle`, the GIF and character toggles, and so on.
+  - `enforced_in_code` (4) — **`whitelistMode`, `requireApproval`,
+    `registrationEnabled`, `enableReputation`**. Each row states where the
+    behaviour actually lives, because a reviewer reading
+    `PB_SETTINGS_whitelist_Mode=false` in a manifest must not conclude that
+    registration became a config switch. Registration is the compiled role matrix
+    plus `users.status`; approval is `users.status` through the command layer;
+    votes have no off switch. An env var that LOOKS like it could turn
+    moderation off is a trap, so the report says so explicitly.
+- **Nothing is written to any collection**, and no `settings` collection is
+  created. Config that changes only at deploy time does not belong in a backup
+  someone restores.
+- Two bugs in this new code, both caught by running it on the real document: the
+  camelCase→SNAKE conversion did `r-'a'+'A'`, which ADDS the case offset instead
+  of subtracting it and turned `whitelistMode` into `whitelist_-ode`; and the
+  length bound only applied to scalar values, so a 2.4 KB `welcomeMessage`
+  printed in full. Both fixed and pinned by `global_settings_test.go`.
+
 ### 5.F.5 (half) DONE — rehearsal on a real database
 
 `cmd/import-board` runs L2 → L3 → L5 → L6 as one ordered pipeline and checks
@@ -831,21 +869,10 @@ first and the role exists in the registry.
    missing column are both no-ops; `SetRaw` on the AutodateField survives) and
    pinned by `TestImportCategoriesPreservesHistoricalDate`.
 
-**Still open in TASK-6:**
-
-3. **`settings`** — the only remaining item, and it is a decision rather than a
-   coding task. The classifier skips it as cache-only, and the target schema has
-   no `settings` collection. The audit doc carries the open question: whether the
-   legacy document is per-user state (which belongs on `users`) or global config
-   (which belongs in `PB_SETTINGS_*` — environment, not the database). Whoever
-   owns the deployment has to answer that; the importer must not guess.
-4. **Post-import pass** — counters for users/categories/topics,
-   `forum_stats` recompute, file-reference validation. `users.posts_count` and
-   `users.reputation` can now be recomputed from real rows for the first time,
-   because L5/L6/L7 have landed.
-5. **Two-database record-equivalence** — the current proof is a byte-identical
-   *report* across two runs on one database. The DoD asks for a per-table
-   id/content dump-compare of two independent `pb_data` directories.
+**Nothing is left open in TASK-6.** The `settings` question was answered by the
+owner and is implemented (see §5.F.8); every other level has a writer, every
+writer has a rehearsal on a real database, and the two-database equivalence check
+reports 0 differences.
 
 **Constraints (unchanged, all honoured):** writers live in
 `internal/platform/pocketbase/*_import.go`; planning stays in

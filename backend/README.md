@@ -337,7 +337,29 @@ worse than none:
 | `notifications` | `import-board` | done (L8, payload ids rewritten) |
 | `dms`, `dms/{id}/messages` | `import-board` | done (L8, per-conversation sequence) |
 | `audit_logs` | `import-board` | done (L9, `details` verbatim) |
-| `settings`, `designs` | — | skipped by design (theme/config, not forum data) |
+| `settings` | — | deployment config → env, reported by `import-rehearse` |
+| `designs` | — | skipped by design (theme, not forum data) |
+
+### `settings`: global vs per-user
+
+Two different things share the word, and they land in two different places.
+
+- **Per-user settings** (UI preferences, notification toggles, the selected
+  character) are stored in the `users.settings` JSON column and **are imported** —
+  the user writer copies the legacy object verbatim.
+- **Global forum settings** (25 keys in the 2026-09 export: branding, page size,
+  upload limit, feature toggles) are **deployment configuration**. They are not
+  written to any collection and no `settings` collection is created, because
+  config that changes only at deploy time does not belong in a backup someone
+  restores.
+
+`import-rehearse` prints the handover list — every key, its value, and the
+`PB_SETTINGS_*` name it belongs in. Four keys are marked `enforced_in_code` and
+explain where the behaviour really lives: `whitelistMode`, `requireApproval`,
+`registrationEnabled` and `enableReputation` are decided by the compiled role
+matrix and `users.status`, not by a flag. A manifest that lists
+`PB_SETTINGS_whitelist_Mode=false` is documenting the old value, **not** making
+registration configurable.
 
 `recompute-counters` rebuilds `users.posts_count`, `users.topics_count`,
 `users.reputation` and `posts.reputation` from the rows that exist — never from
