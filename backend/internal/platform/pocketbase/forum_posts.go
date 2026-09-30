@@ -327,6 +327,22 @@ func deletePostHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("parent topic not found")
 		}
 
+		// Deleting a post must never take the topic with it. The first post of a
+		// topic *is* the topic, so removing it is a topic-level operation and
+		// must go through DELETE /topics/{id}. Production lost a whole topic
+		// this way: the client decided "is this the first post?" from the post's
+		// index within the *current page*, so on page 2+ an ordinary reply was
+		// treated as the first post and took the topic-delete branch, which
+		// cascaded over every post. Refusing it here makes that class of bug
+		// impossible regardless of what the client asks for.
+		//
+		// posts.sequence is Required and 1-based for published posts (topic
+		// creation writes 1 for the opening post); 0 is reserved for drafts,
+		// which are removed through the draft commands and never through here.
+		if post.GetInt("sequence") <= 1 {
+			return 0, nil, conflictError("cannot delete a topic's first post here - delete the topic instead")
+		}
+
 		post.Set("deleted", true)
 		post.Set("content", "")
 		if err := txApp.Save(post); err != nil {

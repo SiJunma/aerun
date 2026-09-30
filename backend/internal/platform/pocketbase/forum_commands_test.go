@@ -531,6 +531,113 @@ func TestEditAndDeletePost(t *testing.T) {
 	}
 }
 
+// TestDeletePostRefusesFirstPost guards the production incident where deleting
+// a post on page 2+ destroyed the whole topic. The first post *is* the topic, so
+// DELETE /posts/{id} must refuse it and force the caller through the explicit
+// topic route; only the topic command may remove a topic.
+func TestDeletePostRefusesFirstPost(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	catID := getGeneralCategoryID(t, app)
+
+	topicsCol, _ := app.FindCollectionByNameOrId(topicsCollectionName)
+	topic := core.NewRecord(topicsCol)
+	topic.Set("category_id", catID)
+	topic.Set("author_id", fixPlayerID)
+	topic.Set("title", "First Post Guard")
+	topic.Set("posts_count", 2)
+	if err := app.Save(topic); err != nil {
+		t.Fatal(err)
+	}
+
+	postsCol, _ := app.FindCollectionByNameOrId(postsCollectionName)
+	first := core.NewRecord(postsCol)
+	first.Set("topic_id", topic.Id)
+	first.Set("author_id", fixPlayerID)
+	first.Set("sequence", 1)
+	first.Set("content", "Opening post")
+	first.Set("deleted", false)
+	if err := app.Save(first); err != nil {
+		t.Fatal(err)
+	}
+
+	reply := core.NewRecord(postsCol)
+	reply.Set("topic_id", topic.Id)
+	reply.Set("author_id", fixPlayerID)
+	reply.Set("sequence", 2)
+	reply.Set("content", "A reply")
+	reply.Set("deleted", false)
+	if err := app.Save(reply); err != nil {
+		t.Fatal(err)
+	}
+
+	server := newTestServer(t, app)
+	defer server.Close()
+	client := server.Client()
+
+	// The first post must be refused, even for a moderator.
+	modReq, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/posts/%s", server.URL, first.Id), nil)
+	modReq.Header.Set("Authorization", tokens["moderator"])
+	modReq.Header.Set("Idempotency-Key", "del-first-post-mod")
+	modResp, err := client.Do(modReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer modResp.Body.Close()
+
+	if modResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 when deleting a topic's first post, got %d", modResp.StatusCode)
+	}
+
+	// Neither the post nor the topic may have been touched.
+	afterMod, _ := app.FindRecordById(postsCollectionName, first.Id)
+	if afterMod.GetBool("deleted") {
+		t.Fatal("first post must not be soft-deleted")
+	}
+	topicAfter, _ := app.FindRecordById(topicsCollectionName, topic.Id)
+	if topicAfter.GetBool("deleted") {
+		t.Fatal("topic must not be deleted when refusing a first post")
+	}
+
+	// The same holds for the post's own author.
+	authorReq, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/posts/%s", server.URL, first.Id), nil)
+	authorReq.Header.Set("Authorization", tokens["player"])
+	authorReq.Header.Set("Idempotency-Key", "del-first-post-author")
+	authorResp, err := client.Do(authorReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer authorResp.Body.Close()
+
+	if authorResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for the author deleting the first post, got %d", authorResp.StatusCode)
+	}
+
+	// A reply is still deletable, so the guard is not over-broad.
+	replyReq, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/posts/%s", server.URL, reply.Id), nil)
+	replyReq.Header.Set("Authorization", tokens["player"])
+	replyReq.Header.Set("Idempotency-Key", "del-reply-ok")
+	replyResp, err := client.Do(replyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replyResp.Body.Close()
+
+	if replyResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 deleting a reply, got %d", replyResp.StatusCode)
+	}
+	replyAfter, _ := app.FindRecordById(postsCollectionName, reply.Id)
+	if !replyAfter.GetBool("deleted") {
+		t.Fatal("reply should have been soft-deleted")
+	}
+	topicFinal, _ := app.FindRecordById(topicsCollectionName, topic.Id)
+	if topicFinal.GetBool("deleted") {
+		t.Fatal("topic must survive deleting a reply")
+	}
+}
+
 func TestUpdateTopicAndMoveTopic(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
