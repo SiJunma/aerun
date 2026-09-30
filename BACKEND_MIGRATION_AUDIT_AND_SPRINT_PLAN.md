@@ -64,16 +64,22 @@ React SPA ── PocketBase SDK (safe reads, auth, SSE) + /api/aerun/* commands
 | 4 — Reputation, subscriptions, audit | transactional votes/subscribe, append-only audit | **DONE** |
 | 5 — DMs, notifications, outbox | conversations, unread, outbox rows + worker logic | **DONE** 2026-09-29 — worker is scheduled in the serve path (TASK-4) |
 | 6 — Frontend adapter | `src/api/*` on `/api/aerun/*`, PB auth store, presence | **DONE** 2026-09-29 — categories + characters CRUD moved onto the command layer (TASK-2, TASK-3) |
-| 7 — Migration tooling | exporter, staging, rehearsal, 4 domain writers | **~40% of writer half**: users/roles/avatars/characters done; categories/topics/posts/DMs/notifications/reputation/audit/settings + sequence reconstruction remain → TASK-6 |
+| 7 — Migration tooling | exporter, staging, rehearsal, 4 domain writers | **board import landed** 2026-09-29 — categories/groups (L2/L3), topics/posts/drafts (L5/L6) with sequence reconstruction; L7–L9 (reputation, subscriptions, notifications, DMs, audit, settings) + post-import counters remain → TASK-6 |
 | 8 — VPS production readiness | DNS/TLS/systemd/backups/restore drill | **NOT STARTED** |
 | 9 — Cutover | final export, import delta, reconciliation, switch | **NOT STARTED** |
 
-**Checkpoint 2026-09-29 — «runtime command layer closed».** TASK-1 … TASK-5 of §5
+**Checkpoint 2026-09-29 #1 — «runtime command layer closed».** TASK-1 … TASK-5 of §5
 are landed and green: the P0 showstopper (category visibility), the dead admin
 board (category + category-group commands), the characters domain API that
 replaces the retracted `settings.characters` fold, the outbox worker that now
-actually runs, and the role hardening. The next checkpoint is **TASK-6**, the
-remaining import writers — the largest single block left before Sprint 8.
+actually runs, and the role hardening.
+
+**Checkpoint 2026-09-29 #2 — «board import».** TASK-6 sub-items 1 and 2 (L2/L3/L5/L6)
+are landed and rehearsed on a real database: 5 groups, 15 categories, 34 topics,
+3124 posts (3123 sequenced + 1 draft) from the 2026-09 export, with a second run
+proving idempotency. Two bugs were caught by that rehearsal and fixed. What
+remains for TASK-6 is L7–L9, the post-import counter pass, and the
+two-database record-equivalence comparison.
 
 **Known gaps deliberately left for TASK-6** (recorded here so they are not
 mistaken for oversights):
@@ -577,50 +583,108 @@ category → 409; delete unused custom role → 200 + audit row; reserved role_i
 
 ### 5.F TASK-6 — Finish the domain import writers (Sprint 7 completion, P1)
 
-**Already done:** roles (L0), users (L1), user avatars, characters + character
-avatars (L4). Deterministic derived ids (`importer/map.go`),
-`legacy_firebase_uid` upsert key, byte-identical rehearsals, FK validation.
+**Status:** ◐ PARTIAL 2026-09-29 (checkpoint «board import»). Sub-items **1, 2**
+and the idempotency half of **5** are DONE. Sub-items **3** (L7–L9), the
+post-import counter pass (**4**) and the two-database record-equivalence
+comparison (**5**) are open and are the next checkpoint.
 
-**Remaining writers, in the order of §5 of
-`POCKETBASE_SCHEMA_AND_MIGRATION_MAP.md`:**
+**Already done before this checkpoint:** roles (L0), users (L1), user avatars,
+characters + character avatars (L4). Deterministic derived ids
+(`importer/map.go`), `legacy_firebase_uid` upsert key, byte-identical
+rehearsals, FK validation.
 
-1. **category_groups (L2) + categories (L3).** Category rows write
-   `allowed_roles` per the ADR-1 translation: legacy `permissions.view_forum`
-   non-empty → verbatim role-id list; empty/absent → the FULL public list
-   (all `role_id` values from L0, sorted ascending — identical rule and sort
-   as the 1767300000 backfill so both paths agree). Legacy `{ru,en}` maps
-   collapse to the `ru` string; record `category_i18n_collapsed` findings
-   with counts. Report the final list per category.
-2. **topics (L5) + posts (L6) + drafts.** Sequence reconstruction: order a
-   topic's non-draft posts by legacy `created` ascending (Firestore
-   timestamps, nanosecond precision), assign `sequence = 1..n` contiguously,
-   set `topics.next_post_sequence = n+1`, `posts_count = n`, and rebuild
-   `last_post_*` projections from the real newest post — never from cached
-   legacy projection fields (they are stale; the rehearsal already proves the
-   mismatch class). Drafts: `is_draft=true`, no sequence, `topic_id` from the
-   doc id. Deleted posts keep their tombstone (`deleted=true`) and STILL
-   occupy their sequence (the legacy soft-delete model).
-3. **L7–L9:** `reputation_logs` (recompute user reputation + post scores
-   afterwards), `topic_subscriptions` (unique pair), `notifications`,
-   `dm_conversations` + `dm_members` + `dm_messages` (per-conversation
-   sequence from legacy message order), `audit_logs` last, `settings` (one
-   row, constant id).
-4. **Post-import pass:** counters for users/categories/topics, `forum_stats`
-   recompute, file-reference validation (every `avatar_url` / character
-   legacy reference must resolve to a local file or a recorded skip reason).
-5. **Dress rehearsal on a real DB:** run the full chain twice into two fresh
-   `pb_data` dirs from the same snapshot; the databases must be
-   record-equivalent (per-table id/content dump-compare; PocketBase-managed
-   autodate columns excluded) — that is the writer-half Sprint 7 DoD.
+### 5.F.1 DONE — category_groups (L2) + categories (L3)
 
-**Constraints (unchanged):** writers live in
+- `importer/categories.go` (`BuildCategoryPlan`) and
+  `platform/pocketbase/category_import.go` (`ImportCategoryGroups`,
+  `ImportCategories`).
+- `allowed_roles` follows ADR-1 with the **same rule and the same ascending sort
+  as migration 1767400000**, so the backfill and the importer cannot disagree on
+  what "public" means. A role id the registry does not hold is reported
+  (`category_allowed_role_unknown`) and dropped rather than written, because
+  `allowed_roles` is validated against `roles.role_id` by the command layer and
+  one unknown id makes the whole row un-saveable.
+- The legacy `{en, ru}` label maps collapse to one string: Russian wins,
+  English is the fallback, and every collapse is counted. Slug collisions get a
+  deterministic counter suffix (never a random one — the importer re-runs).
+- **Deliberate deviation from the brief:** it asked to record
+  `category_i18n_collapsed`. The actual codes are `label_collapsed_ru_wins`,
+  `label_ru_only`, `label_en_only`, because "how many labels lost a language" and
+  "which language won" are different questions and one aggregate number answers
+  neither.
+- Slug is derived from the title, and a title with no latin characters falls back
+  to the derived record id rather than an empty string (the column is NOT NULL).
+
+### 5.F.2 DONE — topics (L5) + posts (L6) + drafts
+
+- `importer/forum.go` (`BuildForumPlan`) and
+  `platform/pocketbase/forum_import.go` (`ImportForum`).
+- **Sequence reconstruction.** Posts are ordered by `created` ASCENDING at full
+  nanosecond precision, ties broken by legacy document id so the order is total.
+  Verified against the 2026-09 export: 0 duplicate timestamps inside a topic,
+  3123 posts across 34 topics, one topic holding 1316.
+- **`topics.next_post_sequence` does not exist** — the brief asked for it, and the
+  column was never created. The runtime derives the next number from
+  `MAX(sequence)` inside the create transaction (`forum_posts.go`), so there is
+  nothing to write and nothing to keep in sync.
+- Projections are recomputed, never copied: `posts_count` counts visible posts
+  only, and `last_post_*` points at the newest **visible** post. When every post
+  is a tombstone the topic falls back to its own `created` date, because a NULL
+  `last_post_created` would drop the row out of the keyset index.
+- A deleted post **keeps its sequence slot** and loses only its text; drafts get
+  `is_draft=true` and `sequence 0`, take no number and move no projection.
+- A post or topic whose reference does not resolve is **skipped and reported**,
+  never written with a dangling id and never re-parented onto a substitute.
+
+### 5.F.5 (half) DONE — rehearsal on a real database
+
+`cmd/import-board` runs L2 → L3 → L5 → L6 as one ordered pipeline and checks
+each precondition against the **target**, not against the plan. Rehearsed on a
+clean `pb_data` from the 2026-09 export:
+
+```
+run 1: groups created=5  categories created=15  topics created=34  posts created=3124
+       sequences assigned=3123   skipped_topics=0  skipped_posts=0
+run 2: everything unchanged (changed=false), no row written twice
+```
+
+The custom-role case from the audit resolves end to end: `skrytye-igry` imports
+with `allowed_roles=PYaDjGY5XvWHNEjTswuz` verbatim, because `import-roles` ran
+first and the role exists in the registry.
+
+**Two bugs the rehearsal caught that no unit test had:**
+
+1. **The pipeline was not idempotent.** The topic planner asked "which categories
+   did THIS run create", so a second run over a converged database saw an empty
+   set and skipped all 34 topics. It now asks the target whether the derived row
+   exists, which is the only authoritative answer and the one that survives a
+   re-run.
+2. **`categories.created_at` does not exist.** The collection carries
+   AutodateFields named `created`/`updated`; the writer used the
+   `created_at`/`updated_at` names that `category_groups` and `characters` use.
+   Writing to a non-existent column **succeeds silently and stores nothing**, so
+   every run afterwards compared a wanted date against an empty stored one and
+   reported `updated=15` forever, and the imported board rendered every category
+   at the zero time. Verified directly against v0.40.4 (`Set` and `SetRaw` on a
+   missing column are both no-ops; `SetRaw` on the AutodateField survives) and
+   pinned by `TestImportCategoriesPreservesHistoricalDate`.
+
+**Still open in TASK-6:**
+
+3. **L7–L9** — `reputation_logs` (+ recompute of user reputation and post
+   scores), `topic_subscriptions`, `notifications`, `dm_conversations` /
+   `dm_members` / `dm_messages`, `audit_logs`, `settings`.
+4. **Post-import pass** — counters for users/categories/topics,
+   `forum_stats` recompute, file-reference validation.
+5. **Two-database record-equivalence** — the current proof is a byte-identical
+   *report* across two runs on one database. The DoD asks for a per-table
+   id/content dump-compare of two independent `pb_data` directories.
+
+**Constraints (unchanged, all honoured):** writers live in
 `internal/platform/pocketbase/*_import.go`; planning stays in
 `tools/migration/importer`; every batch is validated before its transaction
 opens; a re-run over its own output is a no-op (`changed=false`); rows in the
-target but absent from the batch are reported, never deleted; exit non-zero
-only on input errors or dangling FKs.
-
-**Status:** ☐ open (sub-items 1–5 tick separately).
+target but absent from the batch are reported, never deleted.
 
 ## 6. Cutover exporter requirements (Sprint 9 gate)
 

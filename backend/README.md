@@ -291,6 +291,16 @@ go run ./tools/migration/importer/cmd/import-characters `
     -auth   migration-data/auth-official-2026-09-18.json `
     -data   pb_data
 
+# the board itself: groups -> categories -> topics -> posts + drafts.
+# It needs import-roles (allowed_roles names roles) and import-users (authors),
+# and it runs the four levels internally in that order.
+go run ./tools/migration/importer/cmd/import-board `
+    -ledger migration-data/stage-1.json -dry-run
+go run ./tools/migration/importer/cmd/import-board `
+    -ledger migration-data/stage-1.json -data pb_data
+# -verbose prints every planned row, including the per-category allowed_roles
+# list — the field that decides who can see a board section.
+
 # ── 3. Storage: turn legacy avatar URLs into real files ──
 go run ./tools/migration/importer/cmd/import-avatars `
     -data pb_data -storage migration-data -scope all -dry-run
@@ -318,17 +328,30 @@ worse than none:
 | `roles` | `import-roles` | done |
 | `users` | `import-users` | done |
 | `users/{uid}/characters/{cid}` | `import-characters` | done |
+| `category_groups`, `categories` | `import-board` | done (L2/L3) |
+| `topics`, `posts`, `users/{uid}/drafts/{tid}` | `import-board` | done (L5/L6, sequence reconstructed) |
 | Firebase Storage avatars | `import-avatars` | done (users + characters) |
 | derived counters | `recompute-counters` | done (needs posts first) |
-| `category_groups`, `categories` | — | **not written yet** |
-| `topics`, `posts`, `topic_subscriptions` | — | **not written yet** |
+| `topic_subscriptions` | — | **not written yet** |
 | `reputation_logs`, `audit_logs`, `notifications` | — | **not written yet** |
 | `dms`, `dms/{id}/messages` | — | **not written yet** |
 | `designs` | — | skipped by design (theme, not forum data) |
 
-Until the content writers land, `posts`/`topics`/`reputation_votes` are empty, so
-`recompute-counters` correctly reports every counter as 0 — the derived value,
-not a bug. Run it again after the content import.
+Until `reputation_logs`, `notifications`, the DMs and `audit_logs` land,
+`recompute-counters` correctly reports the reputation-derived counters as 0 — the
+derived value, not a bug. Run it again after those writers.
+
+### Two things the board rehearsal taught, recorded so they are not re-learned
+
+- **Every writer keys its rows by `DeriveID(space, legacyID)`**, and a re-run
+  recomputes the same ids. That is what makes `-data pb_data` safe to run twice:
+  the second run reports `unchanged`, never a duplicate.
+- **A column that does not exist is silently ignored on write.** The category
+  writer shipped writing `created_at` while `categories` only has the autodate
+  `created`/`updated`, and every run afterwards reported `updated=15` forever
+  without a single error. `TestImportCategoriesPreservesHistoricalDate` now
+  asserts the stored date, not just the idempotency — an empty stored value and a
+  wrong one fail the same way.
 
 ## Migrations
 
