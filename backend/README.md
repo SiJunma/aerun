@@ -333,14 +333,15 @@ worse than none:
 | `reputation_logs` | `import-board` | done (L7 → `reputation_votes`) |
 | `topic_subscriptions` | `import-board` | done (L7) |
 | Firebase Storage avatars | `import-avatars` | done (users + characters) |
-| derived counters | `recompute-counters` | done (needs posts first) |
+| derived counters | `recompute-counters` | done (users + post reputation) |
 | `notifications` | `import-board` | done (L8, payload ids rewritten) |
 | `dms`, `dms/{id}/messages` | `import-board` | done (L8, per-conversation sequence) |
 | `audit_logs` | `import-board` | done (L9, `details` verbatim) |
 | `settings`, `designs` | — | skipped by design (theme/config, not forum data) |
 
-Until `recompute-counters` is re-run after the board import, the
-reputation-derived counters are 0 — the derived value, not a bug.
+`recompute-counters` rebuilds `users.posts_count`, `users.topics_count`,
+`users.reputation` and `posts.reputation` from the rows that exist — never from
+the legacy cached values. It is idempotent and safe to re-run.
 
 ### Two things the board rehearsal taught, recorded so they are not re-learned
 

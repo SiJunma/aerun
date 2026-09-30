@@ -50,7 +50,6 @@ type TopicUpsert struct {
 	LastPostID       string
 	LastPostCreated  string
 	LastPostAuthorID string
-	Reputation       int
 	// CreatedAt / UpdatedAt override the Autodate columns. The topics collection
 	// uses AutodateField, so a historical date has to be written through SetRaw.
 	CreatedAt string
@@ -356,7 +355,10 @@ func applyTopicUpsert(rec *core.Record, u TopicUpsert) {
 	rec.Set("pinned", u.Pinned)
 	rec.Set("deleted", u.Deleted)
 	rec.Set("posts_count", u.PostsCount)
-	rec.Set("reputation", u.Reputation)
+	// No `reputation` write: the topics collection has no such column (1766100000),
+	// so setting it was a silent no-op that read as a successful import. The
+	// legacy topic reputation has no home in the target schema and is reported by
+	// the rehearsal's counter reconciliation instead.
 
 	rec.Set("last_post_id", u.LastPostID)
 	rec.Set("last_post_author_id", u.LastPostAuthorID)
@@ -419,7 +421,11 @@ func topicMatches(rec *core.Record, u TopicUpsert) bool {
 		rec.GetBool("pinned") == u.Pinned &&
 		rec.GetBool("deleted") == u.Deleted &&
 		rec.GetInt("posts_count") == u.PostsCount &&
-		rec.GetInt("reputation") == u.Reputation &&
+		// No `reputation` comparison: the column does not exist on topics, so
+		// GetInt returned 0 while the upsert carried the legacy cached score.
+		// Any topic with a non-zero cached reputation therefore never matched
+		// and was rewritten on every single run — a real idempotency bug that hid
+		// behind a comparison against a field that was never there.
 		rec.GetString("last_post_id") == u.LastPostID &&
 		rec.GetString("last_post_author_id") == u.LastPostAuthorID &&
 		autodateMatches(rec, "last_post_created", u.LastPostCreated) &&

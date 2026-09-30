@@ -164,16 +164,20 @@ func BuildForumPlan(plan *ImportPlan, userExists, categoryExists func(string) bo
 	for _, id := range sortedKeys(plan.Topics) {
 		fields := plan.Topics[id]
 		row := TopicRow{
-			LegacyID:   id,
-			TargetID:   DeriveID(SpaceTopic, id),
-			Findings:   map[string]string{},
-			Title:      strings.TrimSpace(stringField(fields, "title")),
-			Locked:     legacyBoolField(fields, "is_locked"),
-			Pinned:     legacyBoolField(fields, "is_pinned"),
-			Deleted:    legacyBoolField(fields, "is_deleted"),
-			Reputation: intField(fields, "reputation"),
-			CreatedAt:  TimestampToISO(timeField(fields, "created_at")),
-			UpdatedAt:  TimestampToISO(timeField(fields, "updated_at")),
+			LegacyID: id,
+			TargetID: DeriveID(SpaceTopic, id),
+			Findings: map[string]string{},
+			Title:    strings.TrimSpace(stringField(fields, "title")),
+			Locked:   legacyBoolField(fields, "is_locked"),
+			Pinned:   legacyBoolField(fields, "is_pinned"),
+			Deleted:  legacyBoolField(fields, "is_deleted"),
+			// topics has no `reputation` column at all (see 1766100000), so the
+			// legacy value has nowhere to go. It is not carried into
+			// TopicUpsert any more: the field was being written into a record
+			// that had no such field, which is a silent no-op that only read as
+			// "the topic's reputation was imported".
+			CreatedAt: TimestampToISO(timeField(fields, "created_at")),
+			UpdatedAt: TimestampToISO(timeField(fields, "updated_at")),
 		}
 
 		if row.Title == "" {
@@ -284,14 +288,20 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 		}
 
 		row := PostRow{
-			LegacyID:   p.legacyID,
-			TargetID:   DeriveID(SpacePost, p.legacyID),
-			TopicID:    topic.TargetID,
-			AuthorID:   DeriveID(SpaceUser, authorRef),
-			Sequence:   sequence,
-			IsDraft:    false,
-			Deleted:    p.deleted,
-			Reputation: intField(p.fields, "reputation"),
+			LegacyID: p.legacyID,
+			TargetID: DeriveID(SpacePost, p.legacyID),
+			TopicID:  topic.TargetID,
+			AuthorID: DeriveID(SpaceUser, authorRef),
+			Sequence: sequence,
+			IsDraft:  false,
+			Deleted:  p.deleted,
+			// Deliberately NOT intField(p.fields, "reputation"). The comment on
+			// PostRow.Reputation says this is recomputed, and until now the code
+			// contradicted its own comment by copying the legacy cache.
+			// posts.reputation is rebuilt by RecomputePostReputation from the
+			// reputation_votes rows this same import writes, so a stale cached
+			// score cannot survive next to the votes that produced it.
+			Reputation: 0,
 			EditedAt:   TimestampToISO(timeField(p.fields, "edited_at")),
 			CreatedAt:  TimestampToISO(p.created),
 			UpdatedAt:  TimestampToISO(p.created),

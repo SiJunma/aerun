@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
@@ -70,6 +71,33 @@ func main() {
 		fmt.Printf("  %s %s posts=%d topics=%d reputation=%d\n",
 			verb, id, v.Posts, v.Topics, v.Rep)
 	}
+
+	// posts.reputation is a separate pass because it answers a different
+	// question: not "how much has this member been voted" but "how much has this
+	// one post been voted". It reads the same reputation_votes rows, restricted to
+	// the votes that name a post.
+	postReport, err := pb.RecomputePostReputation(pbApp, pb.PostReputationRecomputeOptions{
+		DryRun: *dryRun,
+	})
+	if err != nil {
+		fail("recompute post reputation", err)
+	}
+	fmt.Printf("post_reputation: %s=%d unchanged=%d changed=%t\n",
+		verb, len(postReport.Updated), len(postReport.Unchanged), postReport.Changed())
+	// Only the posts that actually carry votes are worth a log line; a post with
+	// no votes going to 0 is the expected majority and 3000 identical lines would
+	// bury the ones that changed.
+	voted := make([]string, 0, 32)
+	for id, score := range postReport.Values {
+		if score != 0 {
+			voted = append(voted, id)
+		}
+	}
+	sort.Strings(voted)
+	for _, id := range voted {
+		fmt.Printf("  %s %s reputation=%d\n", verb, id, postReport.Values[id])
+	}
+
 	if *dryRun {
 		fmt.Println("dry run: nothing was written")
 	}

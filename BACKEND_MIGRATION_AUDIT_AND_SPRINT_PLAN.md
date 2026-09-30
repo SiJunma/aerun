@@ -715,6 +715,51 @@ rehearsals, FK validation.
   every conversation runs 1..n with no zeros and the pre-flight check rejects
   sequence 0.
 
+### 5.F.6 DONE — post-import pass: reputation recompute (and two bugs it found)
+
+- `platform/pocketbase/post_reputation.go` (`RecomputePostReputation`), wired
+  into `recompute-counters`.
+- **`users.reputation` was being rebuilt from the wrong set of votes.** The
+  formula was `WHERE post_id = ''` — profile votes only — on the reasoning that a
+  post vote "already moved the author as a side effect, so counting it again
+  would double it". That reasoning names the very thing being recomputed: a post
+  vote moves **both** `posts.reputation` and `users.reputation` in one command
+  (`reputation.go` does `targetUser.Set("reputation", ...+val)` on the create and
+  replace paths alike). Excluding them rebuilds a base the command layer does not
+  agree with, so the first live post vote after cutover would move a member by a
+  delta computed against a different total than every other vote they received.
+
+  Checked against the export rather than argued: the legacy cached `reputation`
+  matches the **all-votes** sum for **10 of 11** users and the **profile-only**
+  sum for **4**. The single all-votes mismatch is off by one point — the legacy
+  cache drift this pass exists to discard.
+
+  On the rehearsal database the effect is stark: the total across all members
+  went from roughly a dozen points to 400, which is exactly the number of votes
+  imported. Every member's reputation was previously being flattened to a
+  handful.
+
+  The test that "validated" this (`TestRecomputeUserCountersSumsProfileVotesOnly`)
+  asserted the wrong rule, which is how it stayed hidden. It is replaced with
+  `TestRecomputeUserCountersSumsEveryVote`, which states the invariant the
+  command layer actually implements.
+
+- **`posts.reputation` was copied from the legacy cache, against its own
+  comment.** `PostRow.Reputation` has been documented as "recomputed from the
+  votes, never copied" since it was written; the planner was calling
+  `intField(fields, "reputation")` two lines away. The planner now writes zero and
+  the pass owns the column, so a stale cached score cannot sit next to the votes
+  that contradict it.
+
+- **`topics.reputation` was a write to a column that does not exist.** The
+  `topics` collection has no `reputation` field (1766100000), so
+  `rec.Set("reputation", …)` was a silent no-op that read as a successful import.
+  Worse, `topicMatches` then compared `rec.GetInt("reputation")` — always 0 —
+  against the legacy cached score, so **any topic with a non-zero cached
+  reputation never matched and was rewritten on every single run**. That was a
+  live idempotency bug, masked by a comparison against a field that was never
+  there. Both the write and the comparison are removed.
+
 ### 5.F.5 (half) DONE — rehearsal on a real database
 
 `cmd/import-board` runs L2 → L3 → L5 → L6 as one ordered pipeline and checks

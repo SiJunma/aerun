@@ -510,7 +510,6 @@ func topicUpserts(fp *importer.ForumPlan) []pb.TopicUpsert {
 			LastPostID:       row.LastPostID,
 			LastPostCreated:  row.LastPostCreated,
 			LastPostAuthorID: row.LastPostAuthorID,
-			Reputation:       row.Reputation,
 			CreatedAt:        row.CreatedAt,
 			UpdatedAt:        row.UpdatedAt,
 		})

@@ -85,7 +85,7 @@ func RecomputeUserCounters(app core.App, opts UserCounterRecomputeOptions) (User
 	if err != nil {
 		return UserCounterRecomputeReport{}, fmt.Errorf("count topics: %w", err)
 	}
-	reputation, err := sumProfileVotes(app)
+	reputation, err := sumVotes(app)
 	if err != nil {
 		return UserCounterRecomputeReport{}, fmt.Errorf("sum reputation: %w", err)
 	}
@@ -259,23 +259,35 @@ func countByAuthor(app core.App, collection, predicate string) (map[string]int, 
 	return out, nil
 }
 
-// sumProfileVotes sums reputation_votes per target_id.
+// sumVotes sums reputation_votes per target_id.
 //
-// Only votes with an empty post_id are counted: those are the votes cast on a
-// *profile*, which is what users.reputation has always meant. A post vote
-// (post_id set) already moved posts.reputation at cast time and moved the
-// author as a side effect of the same command, so counting it here as well
-// would double it. The partial unique indexes from 1766300000 make
-// (voter_id, target_id) unique among profile votes, so the sum is one vote per
-// voter and cannot be inflated by re-voting.
-func sumProfileVotes(app core.App) (map[string]int, error) {
+// EVERY vote counts — profile votes and post votes alike. This was previously
+// restricted to profile votes (`post_id = ”`) on the reasoning that a post vote
+// "already moved the author as a side effect", so counting it again would double
+// it. That reasoning was wrong in a way that mattered: the side effect it named
+// is exactly the thing being recomputed. A post vote moves BOTH posts.reputation
+// and users.reputation in one command (reputation.go, the create and replace
+// paths both do `targetUser.Set("reputation", ... + val)`), so leaving post votes
+// out rebuilds a base that the command layer does not agree with — the first live
+// post vote after cutover would move a member by a delta computed from a
+// different total than every other vote they ever received.
+//
+// Checked against the 2026-09 export rather than argued: the legacy cached
+// `reputation` matches the all-votes sum for 10 of 11 users, and the
+// profile-only sum for 4. The single all-votes mismatch is off by one point,
+// which is the legacy cache drift this whole pass exists to discard.
+//
+// The two partial unique indexes from 1766300000 still make the sum safe: one
+// vote per (voter, post) and one per (voter, profile), so re-voting replaces
+// rather than accumulates and the total cannot be inflated.
+func sumVotes(app core.App) (map[string]int, error) {
 	type targetTotal struct {
 		TargetID string `db:"target_id"`
 		Total    int    `db:"total"`
 	}
 	var rows []targetTotal
 	if err := app.DB().NewQuery(
-		"SELECT target_id, SUM(value) AS total FROM reputation_votes WHERE post_id = '' GROUP BY target_id",
+		"SELECT target_id, SUM(value) AS total FROM reputation_votes GROUP BY target_id",
 	).All(&rows); err != nil {
 		return nil, err
 	}

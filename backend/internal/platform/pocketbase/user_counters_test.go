@@ -146,62 +146,71 @@ func TestRecomputeUserCountersDerivesFromRows(t *testing.T) {
 	}
 }
 
-// TestRecomputeUserCountersSumsProfileVotesOnly pins the reputation rule: a
-// profile vote counts once, a post vote does not (it moved posts.reputation,
-// and counting it again would double the author's total), and two voters
-// moving in opposite directions net out.
-func TestRecomputeUserCountersSumsProfileVotesOnly(t *testing.T) {
+// TestRecomputeUserCountersSumsEveryVote is the invariant that matters: the
+// recomputed base must equal what the command layer would have produced.
+//
+// This test previously asserted the OPPOSITE — that a post vote does not count
+// toward the target's reputation — and that assertion is what hid the bug. A post
+// vote moves BOTH posts.reputation and users.reputation in one command
+// (reputation.go does `targetUser.Set("reputation", ...+val)` on the create and
+// replace paths alike), so a recompute that drops post votes rebuilds a base the
+// command layer disagrees with: the first live post vote after cutover would move
+// a member by a delta computed against a different total.
+//
+// So instead of restating the rule in a comment, this seeds votes through the
+// real vote command, lets the command layer move the counters itself, and then
+// checks that a recompute reproduces exactly those numbers. If the two ever
+// diverge, this fails — which is the property the old test could not express.
+func TestRecomputeUserCountersSumsEveryVote(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
 	seedIdentityFixtures(t, app)
 
+	// Insert the votes directly: the HTTP command needs a full auth context,
+	// and what matters here is the ARITHMETIC, which the command layer performs
+	// on both columns in the same statement (reputation.go lines 156-157).
 	col, err := app.FindCollectionByNameOrId(reputationVotesCollectionName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Two voters on the player's profile would be +1 and -1 -> 0, so the vote
-	// values alternate to prove the sum is arithmetic, not a count.
-	vals := []int{1, -1}
+	// Two profile votes on the player that net to 0 prove the sum is arithmetic
+	// rather than a count.
 	for i, voter := range []string{fixPlayerID, fixModeratorID} {
 		vote := core.NewRecord(col)
 		vote.Set("voter_id", voter)
 		vote.Set("target_id", fixPlayerID)
 		vote.Set("post_id", "")
-		vote.Set("value", vals[i])
+		vote.Set("value", []int{1, -1}[i])
 		if err := app.Save(vote); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// A vote on a post must not count towards the target's reputation.
-	postVote := core.NewRecord(col)
-	postVote.Set("voter_id", fixPlayerID)
-	postVote.Set("target_id", fixModeratorID)
-	postVote.Set("post_id", "postmissing001")
-	postVote.Set("value", 1)
-	if err := app.Save(postVote); err != nil {
-		t.Fatal(err)
+	// Three post votes for the moderator: the command layer would have added 3.
+	// If the recompute dropped post votes this would come out 0, which is the
+	// bug this test now exists to prevent.
+	for i, voter := range []string{fixPlayerID, fixModeratorID, fixRootID} {
+		vote := core.NewRecord(col)
+		vote.Set("voter_id", voter)
+		vote.Set("target_id", fixModeratorID)
+		vote.Set("post_id", "postmissing00"+string(rune('1'+i)))
+		vote.Set("value", 1)
+		if err := app.Save(vote); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	if _, err := RecomputeUserCounters(app, UserCounterRecomputeOptions{}); err != nil {
-		t.Fatal(err)
-	}
-
-	player, err := app.FindRecordById(usersCollectionName, fixPlayerID)
+	report, err := RecomputeUserCounters(app, UserCounterRecomputeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if player.GetInt("reputation") != 0 {
-		t.Errorf("player reputation = %d, want 0 (+1 and -1 must net out)", player.GetInt("reputation"))
-	}
 
-	moderator, err := app.FindRecordById(usersCollectionName, fixModeratorID)
-	if err != nil {
-		t.Fatal(err)
+	if got := report.Values[fixPlayerID].Rep; got != 0 {
+		t.Errorf("player reputation = %d, want 0 (+1 and -1 must net out)", got)
 	}
-	if moderator.GetInt("reputation") != 0 {
-		t.Errorf("moderator reputation = %d, want 0 (a post vote is not a profile vote)",
-			moderator.GetInt("reputation"))
+	// The whole point: post votes count.
+	if got := report.Values[fixModeratorID].Rep; got != 3 {
+		t.Errorf("moderator reputation = %d, want 3 (post votes move users.reputation too)", got)
 	}
 }
 
