@@ -2,14 +2,10 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { pb, sendApi } from '../api/pocketbase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
-import { markTopicNotificationsRead } from '../api/notifications';
 import {
   markAllTopicsRead,
-  recordGuestActivity as apiRecordGuestActivity,
-  deleteGuestActivity as apiDeleteGuestActivity,
   subscribeToReadMap,
-  recordTopicVisit as apiRecordTopicVisit,
-  subscribeToLatestTopics
+  recordTopicVisit as apiRecordTopicVisit
 } from '../api/auth-resources';
 import {
   initRtdbPresence,
@@ -23,9 +19,7 @@ import { subscribeToDmUnread } from '../api/dms';
 import { clearAllDmCache } from '../api/dm-cache';
 import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
-import { logAdminAction } from '../api/audit';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
-import { generateRandomNickname } from '../utils/nickname';
 
 const AuthContext = createContext();
 const FORUM_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
@@ -49,19 +43,19 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [emailUnverified, setEmailUnverified] = useState(false);
   const [readMap, setReadMap] = useState({});
-  const [readMapReady, setReadMapReady] = useState(true);
+  const [readMapReady] = useState(true);
   const [latestTopics, setLatestTopics] = useState([]);
   const [categories, setCategories] = useState([]);
   const [forumStateLoading, setForumStateLoading] = useState(true);
   const [forumStateError, setForumStateError] = useState(null);
   const [forumStats, setForumStats] = useState(null);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
-  const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
+  const [unreadTopicsCount] = useState(0);
   const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {} });
   const [activeDmConvId, setActiveDmConvId] = useState(null);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState(DEFAULT_ROLES);
-  const [authError, setAuthError] = useState(null);
+  const [authError] = useState(null);
   const [activeUsers, setActiveUsers] = useState([]);
   const activeUserIds = useMemo(() => new Set(activeUsers.map(u => u.id)), [activeUsers]);
 
@@ -355,12 +349,17 @@ export const AuthProvider = ({ children }) => {
     if (data.stats) setForumStats(data.stats);
   }, []);
 
-  const updateLocalTopicLastPost = useCallback((topicId, categoryId, topicTitle, lastPost, postsCount) => {
+  // The optimistic post-count bump was a Firestore-era local patch for the
+  // category counters. Counts now come back from the server on every poll, so
+  // the optimistic update is not just redundant — it would briefly show a
+  // number the backend has not agreed to yet. The ref stamp stays: it is what
+  // tells applyForumState to trust the incoming snapshot.
+  const updateLocalTopicLastPost = useCallback((topicId, _categoryId, _topicTitle, lastPost, _postsCount) => {
     if (!topicId || !lastPost) return;
     lastOptimisticForumUpdateRef.current = Date.now();
   }, []);
 
-  const updateLocalTopicPostsCount = useCallback((topicId, delta) => {}, []);
+  const updateLocalTopicPostsCount = useCallback((_topicId, _delta) => {}, []);
 
   const markTopicRead = useCallback(async (topicId, offset = null) => {
     if (!user?.uid || !topicId) return;
@@ -373,7 +372,6 @@ export const AuthProvider = ({ children }) => {
     if (!user?.uid || latestTopicsRef.current.length === 0 || isMarkingAllRead) return;
     setIsMarkingAllRead(true);
     try {
-      const now = Date.now();
       const topicIds = latestTopicsRef.current.map(t => t.id);
       await markAllTopicsRead(user.uid, topicIds);
     } finally {

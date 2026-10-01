@@ -40,7 +40,10 @@ export const subscribeToUserNotifications = (uid, callback) => {
     pb.collection('notifications').subscribe('*', () => {
       load();
     }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
+  } catch {
+    // Best-effort realtime: the interval above already polls, so a failed
+    // subscription costs freshness, not correctness.
+  }
 
   return () => {
     isSubscribed = false;
@@ -59,7 +62,7 @@ export const subscribeToAdminNotifications = (callback) => {
 /**
  * Marks a notification as read.
  */
-export const markNotificationRead = async (uid, notifId, isAdmin = false) => {
+export const markNotificationRead = async (_uid, notifId, _isAdmin = false) => {
   if (!notifId) return;
   try {
     await sendApi(`/api/aerun/me/notifications/${notifId}/read`, {
@@ -84,7 +87,7 @@ export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {
 /**
  * Deletes / archives a notification.
  */
-export const deleteNotification = async (uid, notifId, isAdmin = false) => {
+export const deleteNotification = async (_uid, notifId, _isAdmin = false) => {
   if (!notifId) return;
   try {
     await sendApi(`/api/aerun/me/notifications/${notifId}/archive`, {
@@ -98,7 +101,7 @@ export const deleteNotification = async (uid, notifId, isAdmin = false) => {
 /**
  * Marks all notifications as read.
  */
-export const markAllNotificationsRead = async (uid, notifs = []) => {
+export const markAllNotificationsRead = async (_uid, _notifs = []) => {
   try {
     await sendApi('/api/aerun/me/notifications/read-all', {
       method: 'POST'

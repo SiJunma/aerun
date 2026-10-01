@@ -82,9 +82,9 @@ export const subscribeToLatestTopics = (callback, limitCount = 50) => {
 
 // ── Guest Activity ──────────────────────────────────────────────────────────
 
-export const recordGuestActivity = async (guestId) => {};
+export const recordGuestActivity = async (_guestId) => {};
 
-export const deleteGuestActivity = async (guestId) => {};
+export const deleteGuestActivity = async (_guestId) => {};
 
 // ── Statistics & Global Content ─────────────────────────────────────────────
 
@@ -132,7 +132,10 @@ export const subscribeToUser = (uid, callback) => {
         callback(e.record ? { id: e.record.id, ...e.record } : null);
       }
     }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
+  } catch {
+    // Best-effort realtime: the caller polls on its own interval, so a
+    // failed subscription degrades to polling rather than breaking the view.
+  }
 
   return () => {
     isSubscribed = false;

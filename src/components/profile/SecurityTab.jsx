@@ -7,7 +7,7 @@ import { Key, Mail, ShieldAlert } from 'lucide-react';
 
 const SecurityTab = () => {
   const { user } = useAuth();
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
 
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [loadingPassword, setLoadingPassword] = useState(false);

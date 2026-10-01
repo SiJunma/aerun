@@ -79,7 +79,10 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
     pb.collection('dm_conversations').subscribe('*', () => {
       load();
     }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
+  } catch {
+    // Best-effort realtime: the interval above already polls, so a failed
+    // subscription costs freshness, not correctness.
+  }
 
   return () => {
     isSubscribed = false;
@@ -177,7 +180,10 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
         load();
       }
     }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
+  } catch {
+    // Best-effort realtime: the interval above already polls, so a failed
+    // subscription costs freshness, not correctness.
+  }
 
   return () => {
     isSubscribed = false;
@@ -189,7 +195,9 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
 /**
  * Send a message in a conversation.
  */
-export const sendDmMessage = async (conversationId, senderUid, text, recipientUid) => {
+// `senderUid` / `recipientUid` are no longer read: the backend derives both
+// from the auth token and refuses to let a client post as somebody else.
+export const sendDmMessage = async (conversationId, _senderUid, text, _recipientUid) => {
   if (!conversationId || !text) return;
   const { content: processedContent } = processDiceRolls(text);
 
@@ -204,7 +212,7 @@ export const sendDmMessage = async (conversationId, senderUid, text, recipientUi
 /**
  * Reset unread count for current user in conversation.
  */
-export const markDmRead = async (conversationId, uid) => {
+export const markDmRead = async (conversationId, _uid) => {
   if (!conversationId) return;
   try {
     await sendApi(`/api/aerun/dms/${conversationId}/read`, {
@@ -218,7 +226,7 @@ export const markDmRead = async (conversationId, uid) => {
 /**
  * Deletes / clears the conversation history for current user.
  */
-export const deleteConversation = async (conversationId, uid) => {
+export const deleteConversation = async (conversationId, _uid) => {
   if (!conversationId) return;
   try {
     await sendApi(`/api/aerun/dms/${conversationId}/clear`, {

@@ -1,5 +1,4 @@
 import { sendApi, pb } from './pocketbase';
-import { logAdminAction } from './audit';
 import { processDiceRolls } from '../utils/dice';
 
 const normalizeTopic = (t) => {
@@ -67,7 +66,10 @@ export const subscribeToTopics = (categoryId, callback) => {
     pb.collection('topics').subscribe('*', () => {
       load();
     }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
+  } catch {
+    // Best-effort realtime: the interval above already polls, so a failed
+    // subscription costs freshness, not correctness.
+  }
 
   return () => {
     isSubscribed = false;
@@ -106,7 +108,10 @@ export const subscribeToTopic = (topicId, callback) => {
     pb.collection('topics').subscribe(topicId, () => {
       load();
     }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
+  } catch {
+    // Best-effort realtime: the interval above already polls, so a failed
+    // subscription costs freshness, not correctness.
+  }
 
   return () => {
     isSubscribed = false;
@@ -199,7 +204,10 @@ export const subscribeToPosts = (topicId, callback) => {
     pb.collection('posts').subscribe('*', (e) => {
       if (e.record?.topic_id === topicId) load();
     }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
+  } catch {
+    // Best-effort realtime: the interval above already polls, so a failed
+    // subscription costs freshness, not correctness.
+  }
 
   return () => {
     isSubscribed = false;
@@ -208,15 +216,20 @@ export const subscribeToPosts = (topicId, callback) => {
   };
 };
 
-export const subscribeToNewPostsRtdb = (topicId, sinceTimestamp, callback) => {
+// RTDB realtime subscriptions are gone: every mutation now goes through the
+// Go backend, and the row writes that used to fire the realtime events are
+// gone with them. These signatures keep their parameters so existing call
+// sites do not have to change — they are documented above each function, and
+// the parameters are prefixed `_` to say "accepted, not read".
+export const subscribeToNewPostsRtdb = (_topicId, _sinceTimestamp, _callback) => {
   return () => {};
 };
 
-export const subscribeToPostRemovalsRtdb = (topicId, callback) => {
+export const subscribeToPostRemovalsRtdb = (_topicId, _callback) => {
   return () => {};
 };
 
-export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null) => {
+export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, _lastVisit = null) => {
   const res = await sendApi(`/api/aerun/topics/${topicId}/posts?page=${page}&limit=${pageSize}`);
   return {
     posts: (res?.posts || []).map(normalizePost),
@@ -226,7 +239,7 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVi
   };
 };
 
-export const fetchUserPosts = async (targetUid, page = 1, pageSize = 20, postFilter = 'all') => {
+export const fetchUserPosts = async (targetUid, page = 1, pageSize = 20, _postFilter = 'all') => {
   try {
     const list = await pb.collection('posts').getList(page, pageSize, {
       filter: `author_id = "${targetUid}"`,
@@ -340,13 +353,17 @@ export const locatePost = async (postId, itemsPerPage = 20) => {
   }
 };
 
-export const locateUnreadPost = async (topicId, lastVisitMs, itemsPerPage = 20) => {
+export const locateUnreadPost = async (_topicId, _lastVisitMs, _itemsPerPage = 20) => {
   return 1;
 };
 
 // ── Mutations ────────────────────────────────────────────────────────────────
 
-export const updatePost = async (postId, content, metadata = {}, performerId, authorId, topicUpdates = null) => {
+// `performerId` / `authorId` / `topicUpdates` are no longer read: the Go
+// backend derives the actor from the auth token and writes the audit row
+// inside the same transaction (see forum_posts.go / forum_topics.go). The
+// parameters stay so call sites do not change.
+export const updatePost = async (postId, content, _metadata = {}, _performerId, _authorId, _topicUpdates = null) => {
   const { content: processedContent } = processDiceRolls(content);
   return await sendApi(`/api/aerun/posts/${postId}`, {
     method: 'PATCH',
@@ -356,7 +373,7 @@ export const updatePost = async (postId, content, metadata = {}, performerId, au
   });
 };
 
-export const updateTopic = async (topicId, data, performerId, authorId) => {
+export const updateTopic = async (topicId, data, _performerId, _authorId) => {
   const body = {};
   if (data.title !== undefined) body.title = data.title;
   if (data.is_locked !== undefined) body.locked = data.is_locked;
@@ -368,13 +385,13 @@ export const updateTopic = async (topicId, data, performerId, authorId) => {
   });
 };
 
-export const deletePost = async (post, performerId) => {
+export const deletePost = async (post, _performerId) => {
   return await sendApi(`/api/aerun/posts/${post.id}`, {
     method: 'DELETE'
   });
 };
 
-export const updateUser = async (uid, userData, performerId) => {
+export const updateUser = async (uid, userData, _performerId) => {
   return await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
     body: userData
@@ -396,7 +413,7 @@ export const checkNicknameExists = async (nickname, excludeUid = null) => {
   }
 };
 
-export const deleteTopics = async (topicIds, performerId) => {
+export const deleteTopics = async (topicIds, _performerId) => {
   for (const id of topicIds) {
     await sendApi(`/api/aerun/topics/${id}`, {
       method: 'DELETE'
@@ -404,7 +421,7 @@ export const deleteTopics = async (topicIds, performerId) => {
   }
 };
 
-export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
+export const moveTopics = async (topicIds, targetCategoryId, _performerId) => {
   for (const id of topicIds) {
     await sendApi(`/api/aerun/topics/${id}/move`, {
       method: 'POST',
@@ -415,7 +432,7 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
   }
 };
 
-export const movePosts = async (postIds, targetTopicId, performerId) => {
+export const movePosts = async (postIds, targetTopicId, _performerId) => {
   return await sendApi(`/api/aerun/topics/${targetTopicId}/posts/move`, {
     method: 'POST',
     body: {

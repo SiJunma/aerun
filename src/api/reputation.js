@@ -4,7 +4,7 @@ import { sendApi, pb } from './pocketbase';
  * voteOnPost
  * Allows a user to vote on a specific post.
  */
-export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, comment, topicTitle, postNumber, voterNickname = 'User') => {
+export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, comment, _topicTitle, _postNumber, _voterNickname = 'User') => {
   if (!targetUid) throw new Error('Cannot vote on guest posts.');
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
@@ -47,7 +47,7 @@ export const getVotesInTopic = async (voterUid, topicId) => {
  * voteOnProfile
  * Allows a user to vote on another's profile with a comment.
  */
-export const voteOnProfile = async (voterUid, targetUid, value, comment, voterNickname = 'User') => {
+export const voteOnProfile = async (voterUid, targetUid, value, comment, _voterNickname = 'User') => {
   if (voterUid === targetUid) throw new Error('You cannot vote for yourself.');
 
   return await sendApi(`/api/aerun/users/${targetUid}/vote`, {
@@ -99,7 +99,7 @@ export const updateReputationComment = async (logId, newComment, postId = null) 
  * fetchReputationLogs
  * Fetches reputation changes for a user securely through backend API.
  */
-export const fetchReputationLogs = async (uid, page = 1, pageSize = 20, seekLogId = null) => {
+export const fetchReputationLogs = async (uid, _page = 1, pageSize = 20, _seekLogId = null) => {
   if (!uid) return { logs: [], total: 0, hidden: false };
   try {
     const res = await sendApi(`/api/aerun/users/${uid}/reputation?limit=${pageSize}`);
@@ -152,7 +152,7 @@ export const checkPostVote = async (voterUid, postId) => {
  * deleteReputation
  * Allows an admin/moderator to delete a reputation log entry.
  */
-export const deleteReputation = async (logId, performerId) => {
+export const deleteReputation = async (logId, _performerId) => {
   if (!logId) return;
   return await sendApi(`/api/aerun/reputation/${logId}`, {
     method: 'DELETE'

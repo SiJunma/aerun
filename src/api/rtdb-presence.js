@@ -106,8 +106,9 @@ const sendHeartbeat = async (character = null) => {
     if (res?.presence) {
       handlePresenceSnapshot(res.presence);
     }
-  } catch (err) {
-    // Non-fatal presence heartbeat failure
+  } catch {
+    // Non-fatal presence heartbeat failure: the caller keeps its optimistic
+    // local state and the next 30s tick retries.
   }
 };
 
@@ -154,7 +155,7 @@ export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
   await sendHeartbeat(activeCharacter);
 };
 
-export const setRtdbOffline = async (uid, isLogout = false) => {
+export const setRtdbOffline = async (_uid, _isLogout = false) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
@@ -334,6 +335,6 @@ export const removeRtdbGuestPresence = async (guestId) => {
   }
 };
 
-export const recordActivity = async (uid) => {
+export const recordActivity = async (_uid) => {
   await sendHeartbeat();
 };

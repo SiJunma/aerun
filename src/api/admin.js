@@ -12,7 +12,6 @@ const DEFAULT_GLOBAL_SETTINGS = {
 };
 
 export const getGlobalSettings = (callback) => {
-  let isSubscribed = true;
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     const data = raw ? JSON.parse(raw) : DEFAULT_GLOBAL_SETTINGS;
@@ -20,9 +19,10 @@ export const getGlobalSettings = (callback) => {
   } catch {
     callback(DEFAULT_GLOBAL_SETTINGS);
   }
-  return () => {
-    isSubscribed = false;
-  };
+  // Settings are read from localStorage and delivered once, so there is
+  // nothing to unsubscribe from. The no-op is kept because callers treat the
+  // return value as a cleanup handle.
+  return () => {};
 };
 
 export const updateGlobalSettings = async (settings, performerId) => {
@@ -168,6 +168,6 @@ export const deleteRole = async (id, isSystem, performerId) => {
   }
 };
 
-export const seedSystemRoles = async (defaultRoles) => {
+export const seedSystemRoles = async (_defaultRoles) => {
   // System roles are already seeded by Go backend migration
 };

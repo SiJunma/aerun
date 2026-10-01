@@ -1,9 +1,9 @@
-import { sendApi, pb } from './pocketbase';
+import { sendApi } from './pocketbase';
 
 /**
  * Logs an administrative or moderative action.
  */
-export const logAdminAction = async (actionType, performerId, details = {}) => {
+export const logAdminAction = async (actionType, performerId, _details = {}) => {
   // In the PocketBase backend architecture, mutations log to audit trail atomically
   // on the server inside transactions.
 };
