@@ -167,45 +167,6 @@ const MovePostsModal = ({
     topicPlaceholder = t('forum.move_posts_select_topic');
   }
 
-  // ── Pagination buttons (compact for long lists) ─────────────────────────────
-  const renderPageButtons = () => {
-    if (totalPostPages <= 1) return null;
-
-    // Show at most 5 page buttons with ellipsis
-    const pages = Array.from({ length: totalPostPages }, (_, i) => i + 1);
-
-    return (
-      <div className="d-flex align-items-center justify-content-center gap-1 mt-2 flex-wrap">
-        <Button
-          variant="outline-secondary"
-          size="sm"
-          disabled={safePostPage === 1}
-          onClick={() => setPostPage(p => Math.max(1, p - 1))}
-          className="py-0 px-2"
-          style={{ minWidth: '28px' }}
-        >‹</Button>
-        {pages.map(pg => (
-          <Button
-            key={pg}
-            variant={safePostPage === pg ? 'primary' : 'outline-secondary'}
-            size="sm"
-            onClick={() => setPostPage(pg)}
-            className="py-0 px-2"
-            style={{ minWidth: '30px', fontSize: '0.8rem' }}
-          >{pg}</Button>
-        ))}
-        <Button
-          variant="outline-secondary"
-          size="sm"
-          disabled={safePostPage === totalPostPages}
-          onClick={() => setPostPage(p => Math.min(totalPostPages, p + 1))}
-          className="py-0 px-2"
-          style={{ minWidth: '28px' }}
-        >›</Button>
-      </div>
-    );
-  };
-
   return (
     <ForumModal
       show={show}

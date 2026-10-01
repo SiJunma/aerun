@@ -1408,7 +1408,7 @@ const TopicPage = () => {
 
       try {
         localStorage.removeItem(`reply_draft_${id}`);
-      } catch (e) {
+      } catch {
         // ignore
       }
 

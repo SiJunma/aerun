@@ -3,11 +3,8 @@ import {
   collection,
   addDoc,
   doc,
-  onSnapshot,
   query,
-  orderBy,
   where,
-  limit,
   updateDoc,
   getDocs,
   writeBatch,
@@ -169,7 +166,7 @@ export const markNotificationRead = async (notifId, uid = null, isAdmin = false)
   if (!isAdmin) {
     try {
       await updateDoc(doc(db, 'notifications', notifId), { read: true }).catch(() => { });
-    } catch (e) { }
+    } catch { /* best effort only */ }
   }
 };
 
@@ -196,7 +193,7 @@ export const deleteNotification = async (notifId, uid = null, isAdmin = false) =
     try {
       const { deleteDoc } = await import('firebase/firestore');
       await deleteDoc(doc(db, 'notifications', notifId)).catch(() => { });
-    } catch (e) { }
+    } catch { /* best effort only */ }
   }
 };
 

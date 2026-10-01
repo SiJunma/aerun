@@ -223,6 +223,14 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // --- Reputation Reverts (server-only idempotency markers) ---
+    // Written by onReputationLogDeleted through the Admin SDK to make the
+    // reputation revert exactly-once under at-least-once trigger delivery.
+    // No client ever needs it.
+    match /reputation_reverts/{logId} {
+      allow read, write: if false;
+    }
+
     // --- Reputation Logs ---
     match /reputation_logs/{logId} {
       // Users can only read their own logs (either as target or voter) or admins can read all

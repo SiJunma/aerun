@@ -190,7 +190,7 @@ const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disa
         placement="top"
         flip
       >
-        {({ placement, arrowProps, show: _show, popper, ...props }) => {
+        {({ placement, arrowProps, show: _show, popper: _popper, ...props }) => {
           // Prevent React/Popper warning about ref by passing a wrapped overlay element
           return React.cloneElement(popover, {
             ...props,

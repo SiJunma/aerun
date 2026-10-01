@@ -112,7 +112,7 @@ export const updateRtdbActiveCharacter = async (uid, characterData) => {
  * Sets user status to online in RTDB when user resumes activity.
  * Updates BOTH last_seen (online presence) and last_activity (persistent visit timestamp).
  */
-export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
+export const setRtdbOnline = async (uid, profile) => {
   if (!uid || !rtdb) return;
   try {
     const userStatusRef = ref(rtdb, `status/${uid}`);
@@ -262,7 +262,7 @@ export const subscribeToUserOnlineStatus = (uid, callback) => {
       console.warn('[subscribeToUserOnlineStatus error]', err);
       callback(false);
     });
-  } catch (err) {
+  } catch {
     callback(false);
     return () => {};
   }

@@ -9,7 +9,7 @@ import {
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
-import { subscribeToDesigns, createDesign, updateDesign, deleteDesign } from '../api/designs';
+import { subscribeToDesigns } from '../api/designs';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
 import Timestamp from '../components/common/Timestamp';
 import { InputGroup } from 'react-bootstrap';
@@ -78,13 +78,6 @@ const AdminPage = () => {
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState({ role_id: '' });
-
-  const [showDesignModal, setShowDesignModal] = useState(false);
-  const [editingDesign, setEditingDesign] = useState(null);
-  const [designForm, setDesignForm] = useState({
-    name: '', description: '', logoUrl: '', forumTitle: '',
-    welcomeMessage: '', css: '', js: '', showInList: true
-  });
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({

@@ -14,7 +14,8 @@
     "deploy:prod": "npm run build:prod && firebase deploy --only \"hosting,firestore,storage,functions\" --project default",
     "lint:js": "eslint .",
     "test:first-post-guard": "node scripts/check-first-post-guard.mjs",
-    "test": "npm run test:first-post-guard && npm run lint:js",
+    "test:topic-delete-cleanup": "node scripts/check-topic-delete-cleanup.mjs",
+    "test": "npm run test:first-post-guard && npm run test:topic-delete-cleanup && npm run lint:js",
     "lint:rules": "firebase emulators:exec --project demo-test --only firestore \"node -e \\\"console.log('Firestore rules OK')\\\"\"",
     "lint": "npm run lint:js && npm run lint:rules",
     "preview": "vite preview"

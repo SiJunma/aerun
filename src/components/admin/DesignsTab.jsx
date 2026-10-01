@@ -6,7 +6,7 @@ import { createDesign, updateDesign, deleteDesign } from '../../api/designs';
 import { useToast } from '../../contexts/ToastProvider';
 import ConfirmModal from '../common/ConfirmModal';
 
-const DesignsTab = ({ designs, settings, updateSettings, userId }) => {
+const DesignsTab = ({ designs, settings, updateSettings }) => {
   const { t } = useI18n();
   const { showToast } = useToast();
   
@@ -69,7 +69,7 @@ const DesignsTab = ({ designs, settings, updateSettings, userId }) => {
 
   const handleClone = async (design) => {
     try {
-      const { id, ...data } = design;
+      const { id: _id, ...data } = design;
       await createDesign({
         ...data,
         name: `${data.name} (Copy)`,

@@ -11,7 +11,7 @@ import EmailVerificationBanner from '../common/EmailVerificationBanner';
 import ScrollButtons from '../common/ScrollButtons';
 
 const Layout = ({ children }) => {
-  const { settings, profile, PERMISSIONS, emailUnverified, resendVerificationEmail, checkVerificationStatus } = useAuth();
+  const { settings, PERMISSIONS } = useAuth();
   const { lang, t } = useI18n();
   const { activeDesign } = useDesign();
   const location = useLocation();

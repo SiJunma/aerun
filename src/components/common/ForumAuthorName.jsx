@@ -5,9 +5,6 @@ import React from 'react';
  * Uses the frozen/provided name directly without spawning real-time Firestore listeners.
  */
 const ForumAuthorName = ({
-  userId,
-  characterId,
-  isCharacter,
   fallbackName,
   className = '',
   onClick
