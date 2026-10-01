@@ -23,10 +23,16 @@ import (
 // exact shape it wants to count (a draft, a deleted post) without going
 // through commands that would normalise it away.
 //
+// The record is returned so a test can build a fixture that REFERENCES it.
+// sumVotes resolves a vote's visibility through the post row (post_id IN
+// (SELECT id FROM posts WHERE deleted = false AND topic_id IN (...))), so a
+// vote on a made-up post id is correctly excluded — a test that wants its
+// votes counted has to vote on posts that exist.
+//
 // seq must be unique per topic: the schema has a UNIQUE(topic_id, sequence)
 // backstop, and a fixture that collided with it would fail for a reason that
 // has nothing to do with counters.
-func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string, seq int, deleted, draft bool) {
+func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string, seq int, deleted, draft bool) *core.Record {
 	t.Helper()
 	col, err := app.FindCollectionByNameOrId(postsCollectionName)
 	if err != nil {
@@ -42,6 +48,7 @@ func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string,
 	if err := app.Save(rec); err != nil {
 		t.Fatal(err)
 	}
+	return rec
 }
 
 // seedCounterTopic writes one topic row directly.
@@ -189,11 +196,20 @@ func TestRecomputeUserCountersSumsEveryVote(t *testing.T) {
 	// Three post votes for the moderator: the command layer would have added 3.
 	// If the recompute dropped post votes this would come out 0, which is the
 	// bug this test now exists to prevent.
+	//
+	// The votes point at posts that REALLY EXIST. sumVotes resolves a vote's
+	// visibility through the post row and its topic, so the fixture has to have
+	// the shape the predicate expects — the previous made-up ids ("postmissing001")
+	// were silently excluded by that subquery and the test failed for a reason
+	// that had nothing to do with the rule it claims to pin.
+	votedTopic := seedCounterTopic(t, app, fixPlayerID, false)
 	for i, voter := range []string{fixPlayerID, fixModeratorID, fixRootID} {
+		voted := seedCounterPost(t, app, votedTopic.Id, fixModeratorID, i+1, false, false)
 		vote := core.NewRecord(col)
 		vote.Set("voter_id", voter)
 		vote.Set("target_id", fixModeratorID)
-		vote.Set("post_id", "postmissing00"+string(rune('1'+i)))
+		vote.Set("post_id", voted.Id)
+		vote.Set("topic_id", votedTopic.Id)
 		vote.Set("value", 1)
 		if err := app.Save(vote); err != nil {
 			t.Fatal(err)

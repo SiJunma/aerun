@@ -23,9 +23,10 @@ package pocketbase
 // are still there" a worse answer than it sounds: they are unreachable, so
 // nothing that reads them will ever reconcile them.
 //
-// NOT VERIFIED: `go` is not installed on the machine where these tests were
-// written, so they are UNCOMPILED. Run `go build ./... && go test ./...` before
-// relying on them.
+// Verified 2026-10-01: all four pass under `go test ./...`. Getting here first
+// required fixing a compile error in forum_topics.go — the package had never
+// been built, so none of this had ever run. See "Verification found" in
+// markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md.
 
 import (
 	"fmt"

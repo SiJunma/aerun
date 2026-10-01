@@ -373,7 +373,7 @@ func deletePostHandler(e *core.RequestEvent) error {
 		}
 		var voteSum voteTotal
 		if err := txApp.DB().NewQuery(
-			"SELECT COALESCE(SUM(value), 0) AS total FROM "+reputationVotesCollectionName+
+			"SELECT COALESCE(SUM(value), 0) AS total FROM " + reputationVotesCollectionName +
 				" WHERE post_id = {:post}",
 		).Bind(dbx.Params{"post": post.Id}).One(&voteSum); err != nil {
 			return 0, nil, internalError("failed to sum reputation votes for post deletion", err)
