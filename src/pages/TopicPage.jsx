@@ -706,10 +706,24 @@ const TopicPage = () => {
   const alreadyJumpedRef = useRef(false);
   const { key: locationKey } = useLocation();
 
+  // `isJumping` below is derived from alreadyJumpedRef during render, but the
+  // flag is flipped from effects, promise callbacks and setTimeout callbacks.
+  // Writing a ref does not re-render, so when a jump finished without any other
+  // state change the `topic-jump-loading` class (which hides the whole page
+  // behind TopicPageSkeleton) stayed forever. Guests hit this every time:
+  // nothing else re-renders the page — no read map, no mark-as-read write, no
+  // presence tick — so the ref flipped while the overlay stayed on screen.
+  const [, forceJumpRender] = React.useReducer(x => x + 1, 0);
+  const setAlreadyJumped = React.useCallback((value) => {
+    if (alreadyJumpedRef.current === value) return;
+    alreadyJumpedRef.current = value;
+    forceJumpRender();
+  }, []);
+
   // Reset jump flag when navigating to a DIFFERENT topic or clicking a new link
   useEffect(() => {
-    alreadyJumpedRef.current = false;
-  }, [id, locationKey]);
+    setAlreadyJumped(false);
+  }, [id, locationKey, setAlreadyJumped]);
 
   // Reset locatingPostIdRef ONLY when the topic changes
   useEffect(() => {
@@ -782,7 +796,7 @@ const TopicPage = () => {
           if (result.found) {
             if (result.topicId === id) {
               if (result.page !== currentPage) {
-                alreadyJumpedRef.current = false;
+                setAlreadyJumped(false);
                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
               } else {
                 if (!searchParams.has('page')) {
@@ -800,7 +814,7 @@ const TopicPage = () => {
               clearOrphanedPostNotifications(user.uid, queryPostId).catch(err => console.error('[Cleanup Orphaned Notification error]', err));
             }
             setIsPageLoading(false);
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
 
             setSearchParams(prev => {
               const params = new URLSearchParams(prev);
@@ -816,7 +830,7 @@ const TopicPage = () => {
           locatingPostIdRef.current = null;
           console.error('[TopicPage navigation locator error]', err);
           setIsPageLoading(false);
-          alreadyJumpedRef.current = true;
+          setAlreadyJumped(true);
         });
         return;
       }
@@ -836,7 +850,7 @@ const TopicPage = () => {
         locatePost(postId, ITEMS_PER_PAGE).then(result => {
           if (result.found && result.topicId === id) {
             if (result.page !== currentPage) {
-              alreadyJumpedRef.current = false;
+              setAlreadyJumped(false);
               setSearchParams({ page: result.page }, { preventScrollReset: true });
               // hash stays in window.location.hash natively
             } else {
@@ -845,12 +859,12 @@ const TopicPage = () => {
           } else {
             locatingPostIdRef.current = null;
             setIsPageLoading(false);
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
           }
         }).catch(() => {
           locatingPostIdRef.current = null;
           setIsPageLoading(false);
-          alreadyJumpedRef.current = true;
+          setAlreadyJumped(true);
         });
         return;
       }
@@ -883,8 +897,13 @@ const TopicPage = () => {
         // for this topic. Only now may the posts_count fallback run: while the
         // read map is still loading it would race ahead of the server-side
         // unread resolution and throw the user onto the last page.
+        // A goLast load that is still in flight resolves the page itself; writing
+        // the URL now would consume no skip flag (the pending response sets it
+        // only when it lands) and fire a second, identical getSecuredPosts call.
+        // The effect re-runs when the response arrives (posts change), and by then
+        // the server-resolved page is already in the URL.
         const hasExplicitPage = searchParams.has('page');
-        if (!hasExplicitPage && topic?.posts_count) {
+        if (!hasExplicitPage && !isFetchingPostsRef.current && topic?.posts_count) {
           const finalTargetPage = Math.ceil(topic.posts_count / ITEMS_PER_PAGE) || 1;
           if (currentPage !== finalTargetPage) {
             setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
@@ -911,7 +930,7 @@ const TopicPage = () => {
           el.classList.add('highlight-new-post');
           setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
           if (goLast || searchParams.get('post')) {
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
           }
           setIsPageLoading(false);
         } else {
@@ -920,7 +939,7 @@ const TopicPage = () => {
             setTimeout(tryScroll, 100);
           } else {
             setIsPageLoading(false);
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
           }
         }
       };
@@ -930,13 +949,13 @@ const TopicPage = () => {
       if (isJumpRequested || searchParams.get('post') || goLast) {
         if (posts.length > 0 || !isFetchingPostsRef.current) {
           setIsPageLoading(false);
-          alreadyJumpedRef.current = true;
+          setAlreadyJumped(true);
         }
       } else if (posts.length > 0 || !isFetchingPostsRef.current) {
         setIsPageLoading(false);
       }
     }
-  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE]);
+  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped]);
   const getLiveOwnerName = (post) => {
     if (post.author_id === user?.uid) {
       return profile?.nickname || post.owner_name;
@@ -1350,7 +1369,7 @@ const TopicPage = () => {
     };
 
     if (targetPage !== currentPage) {
-      alreadyJumpedRef.current = false;
+      setAlreadyJumped(false);
       setSearchParams({ page: targetPage }, {
         preventScrollReset: true,
         state: { pendingPostId: tempId }
@@ -1639,7 +1658,7 @@ const TopicPage = () => {
     };
 
     if (targetPage !== currentPage) {
-      alreadyJumpedRef.current = false;
+      setAlreadyJumped(false);
       setSearchParams({ page: targetPage }, {
         preventScrollReset: true,
         state: { pendingPostId: tempId }
