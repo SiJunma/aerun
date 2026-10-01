@@ -12,7 +12,7 @@ export const useI18n = () => {
 };
 
 export const I18nProvider = ({ children }) => {
-  const { profile, settings, updateSettings } = useAuth();
+  const { profile, updateSettings } = useAuth();
   
   // Detect browser language or use saved preference
   const getInitialLang = () => {

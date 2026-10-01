@@ -1,4 +1,3 @@
-/* global __APP_BUILD_TIME__ */
 /**
  * DM Local Cache Management (localStorage)
  * 

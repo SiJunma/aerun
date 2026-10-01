@@ -137,6 +137,39 @@
 }
 ```
 
+#### Инвариант `posts.category_id`
+
+`posts.category_id` — это id **категории**, а не темы. Он обязан совпадать с
+`topics.category_id` темы, в которой лежит пост. Инвариант обеспечивается:
+
+- `firestore.rules` при создании поста требует
+  `request.resource.data.category_id == getTopicData(topic_id).category_id`;
+- `onTopicUpdated` при переносе темы (`moveTopics`) переписывает `category_id`
+  у всех постов этой темы.
+
+Пока это выполняется, правила читают пост так:
+
+```js
+allow read: if isAdmin() || resource == null
+          || hasCategoryPermission(resource.data.category_id, 'view_forum');
+```
+
+**Почему поле критично, а не просто денормализация.** `hasCategoryPermission()`
+при отсутствии явных `permissions` у категории откатывается на глобальное право
+роли. Пост без `category_id` разрешается как категория с пустым документом, то
+есть тоже уходит в этот откат и читается любым, у кого есть глобальный
+`view_forum` — даже если пост фактически лежит в закрытом разделе. Пропущенное
+поле = дыра в доступе, а не только неверный знаменатель счётчика.
+
+Из этого следует практическое правило: **счётчик `categories.posts_count`
+нельзя пересчитывать запросом по `posts.category_id`, пока не выполнен
+backfill**. Иначе посты, созданные до появления поля или перенесённые до
+появления синхронизации, не попадут в счётчик, и реальные разделы покажут 0.
+
+Backfill: `node scripts/backfill-post-category.mjs [--apply]`
+(проставляет отсутствующее поле и исправляет расхождения с темой),
+затем `node scripts/recompute-counters.mjs --apply --include-categories`.
+
 ### 2.7 Коллекция `reputation_logs` & RTDB `post_voters`
 ```
 Firestore `reputation_logs/{logId}`:
@@ -166,6 +199,36 @@ RTDB `post_voters/{post_id}/{log_id}` (кеш для быстрого откры
 // Политика кэша: до 50 записей на пост. Удаляется при onPostDeleted/onTopicDeleted, 
 // а также периодическим scheduled таском (очистка записей старше 48ч без активности). 
 // Полная история всегда хранится в Firestore `reputation_logs`.
+
+// ЖИЗНЕННЫЙ ЦИКЛ `reputation_logs` (важно)
+//   Создание:  onReputationLogCreated начисляет репутацию пользователю и посту
+//              и ставит флаг `applied: true` (защита от повторного начисления).
+//   Удаление:  onReputationLogDeleted — ЕДИНСТВЕННЫЙ владелец отката репутации.
+//              Он вычитает `value` из users[target_id].reputation, из
+//              posts[post_id].reputation (если пост ещё жив) и удаляет запись из
+//              RTDB post_voters. Дублировать откуда-либо ещё нельзя.
+//   Откат ровно один раз: триггеры Firestore срабатывают как минимум один раз, а
+//              документ к моменту срабатывания уже удалён, поэтому флаг-claim
+//              внутри него невозможен. Маркер хранится в отдельной коллекции:
+//                reputation_reverts/{logId} = { log_id, target_id, post_id, value, reverted_at }
+//              create() падает, если маркер уже есть → повторная доставка откат
+//              не повторит. Правила firestore.rules запрещают клиентский доступ.
+
+// УДАЛЕНИЕ ТЕМЫ (onTopicDeleted) обязано чистить за собой всё, что относится к
+// её содержимому, иначе «зависшие» записи навсегда искажают счётчики:
+//   posts                 — каскадом, пачками по 400
+//   users.post_count      — минус число постов каждого автора в теме.
+//                           onPostDeleted этого НЕ делает: для каскадных постов он
+//                           выходит раньше (документ темы уже удалён), поэтому
+//                           уменьшение перенесено сюда.
+//   categories.posts_count/topics_count, forum_stats/global — одним батчем
+//   reputation_logs       — по topic_id. Иначе пользователи навсегда сохраняют
+//                           репутацию за удалённые посты, а логи ссылаются на
+//                           несуществующие post_id.
+//   topic_subscriptions   — по topic_id. Удаляет только этот триггер.
+//   notifications         — по payload.topic_id
+//   RTDB                  — topic_posts_cache/{id}, main_page_cache/latest_topics/{id},
+//                           main_page_cache/stats
 ```
 
 ### 2.8 Коллекция `direct_messages` (ЛС)

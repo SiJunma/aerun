@@ -400,6 +400,27 @@ exports.onReputationLogDeleted = onDocumentDeleted("reputation_logs/{logId}", as
 
   try {
     const db = admin.firestore();
+
+    // Firestore triggers are at-least-once. onReputationLogCreated claims the
+    // log through an `applied` flag for exactly this reason, but this path had no
+    // equivalent guard, so a redelivery reverted the reputation twice. Deleting a
+    // whole topic now removes many logs at once, which multiplies that risk, so
+    // the revert is claimed with a create() that fails when the marker already
+    // exists — an in-document flag cannot work here, the document is gone.
+    const claimRef = db.collection("reputation_reverts").doc(snap.id);
+    try {
+      await claimRef.create({
+        log_id: snap.id,
+        target_id,
+        post_id: post_id || null,
+        value,
+        reverted_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } catch {
+      logger.info(`onReputationLogDeleted: log ${snap.id} already reverted, skipping`);
+      return;
+    }
+
     const batch = db.batch();
 
     // batch.update() on a missing document aborts the WHOLE commit, and both
@@ -1458,6 +1479,36 @@ exports.deletePost = onCall(
       throw new HttpsError("failed-precondition", "Topic is locked.");
     }
     const topic = topicSnap.exists ? topicSnap.data() : {};
+
+    // Deleting a post must never take the topic with it. The first post of a
+    // topic is the topic itself, so removing it is a topic-level operation and
+    // must go through deleteTopics. The client used to decide this from the
+    // post's index within the *current page*, which made the first post of page
+    // 2+ delete the whole thread; refusing it here makes that class of bug
+    // impossible regardless of what the client asks for.
+    if (topic.first_post_id === postId) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Cannot delete a topic's first post here — delete the topic instead."
+      );
+    }
+    // Legacy topics created before first_post_id existed have no such field.
+    // Fall back to an authoritative "is this the oldest post?" check so those
+    // topics cannot be wiped through this path either.
+    if (!topic.first_post_id) {
+      const oldest = await db.collection("posts")
+        .where("topic_id", "==", post.topic_id)
+        .orderBy("created_at", "asc")
+        .limit(1)
+        .get();
+      if (!oldest.empty && oldest.docs[0].id === postId) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Cannot delete a topic's first post here — delete the topic instead."
+        );
+      }
+    }
+
     const wasLast = !!topic.last_post_id && topic.last_post_id === postId;
     const expectedCount = Math.max(0, (topic.posts_count || 0) - 1);
 
@@ -1531,7 +1582,10 @@ exports.createTopic = onCall(
       views: 0,
       reputation: 0,
       created_at: timestamp,
-      posts_count: 0
+      posts_count: 0,
+      // Identifies the post that *is* the topic. Deleting it is a topic-level
+      // operation, so deletePost uses this to refuse instead of cascading.
+      first_post_id: postRef.id
     };
     const firstPostDoc = {
       ...firstPostData,
@@ -2060,6 +2114,21 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
       await queueIncrement(batch, db.collection("users").doc(author_id), "topics_count", -1);
     }
 
+    // Every author who wrote in this topic loses post_count by the number of
+    // THEIR posts that are about to disappear. onPostDeleted cannot do this: it
+    // returns early for cascade posts because the topic document is already gone
+    // (see the guard there), so relying on it leaves every author's post_count
+    // permanently inflated after a topic deletion.
+    const perAuthor = new Map();
+    for (const d of postsSnap.docs) {
+      const aid = d.data().author_id;
+      if (!aid) continue;
+      perAuthor.set(aid, (perAuthor.get(aid) || 0) + 1);
+    }
+    for (const [aid, n] of perAuthor) {
+      await queueIncrement(batch, db.collection("users").doc(aid), "post_count", -n);
+    }
+
     // Global pre-aggregated statistics
     const globalStatsRef = db.collection("forum_stats").doc("global");
     batch.set(globalStatsRef, {
@@ -2092,6 +2161,27 @@ exports.onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => 
       }
       logger.info(`onTopicDeleted: deleted ${docs.length} notifications for topic ${event.params.topicId}`);
     }
+
+    // 3b. Reputation logs for this topic.
+    // These must go: a log left behind points at a post that no longer exists,
+    // and — because onReputationLogDeleted is the sole owner of the revert —
+    // the voters' reputation is never taken back. The users keep permanent
+    // reputation for content that is gone. Deleting the logs hands the revert
+    // to that trigger, which already reverses users.reputation and drops the
+    // RTDB post_voters entry.
+    await deleteAllByQuery(
+      db,
+      db.collection("reputation_logs").where("topic_id", "==", event.params.topicId),
+      `reputation_logs for topic ${event.params.topicId}`
+    );
+
+    // 3c. Subscriptions. Nothing else removes these, so they would linger as
+    // rows pointing at a topic that does not exist.
+    await deleteAllByQuery(
+      db,
+      db.collection("topic_subscriptions").where("topic_id", "==", event.params.topicId),
+      `topic_subscriptions for topic ${event.params.topicId}`
+    );
 
     // 4. Metadata Sync (Fallback)
     if (category_id) {
@@ -2860,6 +2950,27 @@ async function queueIncrement(batch, ref, field, delta) {
     batch.update(ref, { [field]: admin.firestore.FieldValue.increment(delta) });
   }
   return true;
+}
+
+/**
+ * Deletes every document a query returns, in 400-doc batches, paginating so
+ * that a single large topic cannot exceed the Firestore response limit.
+ * Used for the collections a topic deletion has to clean up, so nothing is
+ * silently left behind.
+ */
+async function deleteAllByQuery(db, ref, label) {
+  let deleted = 0;
+  while (true) {
+    const snap = await ref.limit(400).get();
+    if (snap.empty) break;
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    deleted += snap.docs.length;
+    if (snap.docs.length < 400) break;
+  }
+  if (deleted) logger.info(`onTopicDeleted: deleted ${deleted} ${label}`);
+  return deleted;
 }
 
 /**
