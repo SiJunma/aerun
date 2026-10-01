@@ -9,6 +9,30 @@
  *   changes, so stale/malformed entries never survive a deploy.
  */
 
+// These constants were lost in 2591610 ("runtime Firebase elimination"),
+// which rewrote reviveTimestamp below and took the whole declaration block
+// with it while replacing the Firebase Timestamp import. Nothing caught it
+// because `/* global __APP_BUILD_TIME__ */` (removed in be6ca82, once
+// eslint.config.js declared the constant) had been the only reason eslint
+// was silent about the rest of the file — the other three identifiers were
+// never in that comment, so no-undef sat unnoticed until the comment left.
+//
+// Every one of these is referenced below. Without them the module throws a
+// ReferenceError the first time anything touches localStorage, which takes
+// out the DM cache AND signOut() (AuthProvider calls clearAllDmCache).
+const DM_CACHE_PREFIX = 'aerun_dm_';
+const DM_CACHE_BUILD_KEY = 'aerun_dm_build';
+const MAX_CACHED_MESSAGES = 50;
+
+// Injected by Vite at build time (see vite.config.js -> define).
+// Falls back to 'dev' when the constant is unavailable (Node/tests).
+const CURRENT_BUILD = typeof __APP_BUILD_TIME__ !== 'undefined' ? __APP_BUILD_TIME__ : 'dev';
+
+/**
+ * Generates the cache key for a specific user and conversation.
+ */
+const getCacheKey = (uid, convId) => `${DM_CACHE_PREFIX}${uid}_${convId}`;
+
 /**
  * Timestamps serialize to a plain { seconds, nanoseconds } object
  * or ISO string via JSON.stringify and lose methods.
