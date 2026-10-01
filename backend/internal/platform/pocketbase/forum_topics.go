@@ -511,7 +511,7 @@ func purgeTopicResidue(txApp core.App, topic *core.Record) error {
 	}
 	var totals []voteTotal
 	if err := txApp.DB().NewQuery(
-		"SELECT target_id, SUM(value) AS total FROM "+reputationVotesCollectionName+
+		"SELECT target_id, SUM(value) AS total FROM " + reputationVotesCollectionName +
 			" WHERE topic_id = {:topic} GROUP BY target_id",
 	).Bind(dbx.Params{"topic": topic.Id}).All(&totals); err != nil {
 		return internalError("failed to sum reputation votes for topic cleanup", err)
@@ -530,7 +530,7 @@ func purgeTopicResidue(txApp core.App, topic *core.Record) error {
 	//    the authors the payout above just reduced. Restoring the topic leaves
 	//    them at 0, which is correct: the vote rows that would refill them
 	//    belong to a topic nobody can read until the restore.
-	if err := txApp.DB().NewQuery(
+	if _, err := txApp.DB().NewQuery(
 		"UPDATE posts SET reputation = 0 WHERE topic_id = {:topic}",
 	).Bind(dbx.Params{"topic": topic.Id}).Execute(); err != nil {
 		return internalError("failed to clear post reputation for topic cleanup", err)
