@@ -189,7 +189,30 @@ func adjustUserTopicCount(txApp core.App, userID string, delta int) error {
 	return adjustUserCount(txApp, userID, "topics_count", delta)
 }
 
+// adjustUserCount applies a delta to one of the denormalized user counters,
+// clamping the result at zero (see applyUserCountDelta).
 func adjustUserCount(txApp core.App, userID, field string, delta int) error {
+	return applyUserCountDelta(txApp, userID, field, delta, true)
+}
+
+// adjustUserReputation moves a user's denormalized reputation by delta WITHOUT
+// the zero clamp the count helpers apply.
+//
+// A negative score is legitimate here: reputation is the sum of vote values, and
+// downvotes are negative. Clamping would make this helper disagree with
+// sumVotes, which derives the same field from the same rows and does not clamp —
+// and a command layer that disagrees with the repair tool is how drift comes
+// back (see the deletion rules in
+// markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md).
+func adjustUserReputation(txApp core.App, userID string, delta int) error {
+	return applyUserCountDelta(txApp, userID, "reputation", delta, false)
+}
+
+// applyUserCountDelta is the shared body. An unresolvable user or a missing
+// column is deliberately NOT an error: the import maps author ids through the
+// identity table, so a row whose author was dropped has nowhere to write, and
+// failing there would make one orphan post block an unrelated command.
+func applyUserCountDelta(txApp core.App, userID, field string, delta int, clampAtZero bool) error {
 	if userID == "" || delta == 0 {
 		return nil
 	}
@@ -204,7 +227,7 @@ func adjustUserCount(txApp core.App, userID, field string, delta int) error {
 		return nil
 	}
 	next := user.GetInt(field) + delta
-	if next < 0 {
+	if clampAtZero && next < 0 {
 		next = 0
 	}
 	user.Set(field, next)
@@ -226,6 +249,13 @@ func adjustUserCount(txApp core.App, userID, field string, delta int) error {
 // member's number disagree with what the forum displays. A topic is countable
 // when it is not soft-deleted. Both tables carry a `deleted` column written as
 // false by the command layer, so `= false` is exact.
+//
+// A post inside a soft-deleted topic IS counted, and that is deliberate: the
+// post rows survive the delete and an un-delete brings them back, so the
+// counter keeps counting content that still exists (migration 1767100000 states
+// this rule). purgeTopicResidue still pays the reputation back immediately so
+// the visible number is honest while the topic is hidden; this predicate is
+// about existence, not visibility.
 const (
 	countablePostRows  = "deleted = false AND is_draft = false"
 	countableTopicRows = "deleted = false"
@@ -286,8 +316,21 @@ func sumVotes(app core.App) (map[string]int, error) {
 		Total    int    `db:"total"`
 	}
 	var rows []targetTotal
+	// A vote only counts while the thing it was cast on is visible. A vote on a
+	// post whose topic is soft-deleted must be excluded, or the recompute would
+	// hand back the reputation purgeTopicResidue just paid out and the drift
+	// would return on the next run — which is the class of bug be6ca82 had to
+	// repair by hand on the Firestore branch. Profile votes (empty post_id) are
+	// unaffected: they are about the person, not a topic.
+	//
+	// The rows are kept, not deleted, so un-deleting the topic restores the
+	// reputation on the next recompute. See purgeTopicResidue for why.
 	if err := app.DB().NewQuery(
-		"SELECT target_id, SUM(value) AS total FROM reputation_votes GROUP BY target_id",
+		"SELECT target_id, SUM(value) AS total FROM "+reputationVotesCollectionName+
+			" WHERE post_id = '' OR post_id IN ("+
+			"SELECT id FROM posts WHERE deleted = false"+
+			" AND topic_id IN (SELECT id FROM topics WHERE deleted = false))"+
+			" GROUP BY target_id",
 	).All(&rows); err != nil {
 		return nil, err
 	}

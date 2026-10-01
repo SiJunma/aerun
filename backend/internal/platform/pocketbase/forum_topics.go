@@ -417,6 +417,24 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// ── Residue cleanup ──────────────────────────────────────────────────
+		//
+		// Production deleted a whole topic on 2026-09-30 (main: be6ca82) and
+		// everything DENORMALIZED around it kept pointing at content that no
+		// longer existed: members kept the reputation they had earned on the
+		// deleted posts, and topic_subscriptions leaked. This layer soft-deletes
+		// instead of cascading, so nothing is destroyed — but "nothing was
+		// destroyed" is not "nothing is left behind", and a soft-deleted topic
+		// is refused by canViewTopic, so its rows are unreachable by anything
+		// that would ever reconcile them.
+		//
+		// See purgeTopicResidue for what is paid back, what is hard-deleted,
+		// and what is deliberately kept. It all runs inside this transaction,
+		// so a failure leaves the topic alive rather than half-cleaned.
+		if err := purgeTopicResidue(txApp, topic); err != nil {
+			return 0, nil, err
+		}
+
 		if !isAuthor {
 			if err := recordAuditLog(txApp, "topic_delete", e.Auth.Id, map[string]any{
 				"topic_id":  id,
@@ -434,6 +452,109 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 	})
 
 	return writeCommandResult(e, outcome, err)
+}
+
+// purgeTopicResidue removes every row that outlives a topic deletion but has
+// no meaning once the topic is hidden: its subscriptions, the votes cast on its
+// posts, and the reputation those votes paid out.
+//
+// The three lessons from the 2026-09-30 production incident (main: abed3e8 +
+// be6ca82) are all enforced here, and each maps to one of the cleanup steps:
+//
+//  1. Per-author aggregate, never a per-post loop with early returns. On
+//     Firestore the cascade deleted the posts first, so the trigger that owned
+//     the per-author decrement returned early ("the topic document is already
+//     gone") and nobody decremented anything. Here the decrement is aggregated
+//     from the surviving rows before they are touched, so the count always has
+//     an owner.
+//
+//  2. Reputation is reverted by deleting the votes, not by re-deriving a
+//     number. The votes ARE the authority for reputation (that is the rule
+//     RecomputeUserCounters follows too), so removing them and paying back their
+//     summed value is the only way the two can agree. Payment is aggregated per
+//     target user and applied once, which also makes a duplicate delivery
+//     impossible: the votes are already gone, so a second pass finds nothing to
+//     pay. be6ca82 needed a separate reputation_reverts/{logId} claim document
+//     on Firestore because Cloud Functions are at-least-once; inside this
+//     transaction the deletion itself is the claim.
+//
+//  3. Cleanup happens in the same transaction as the tombstone. The Firestore
+//     version applied the tombstone and the cleanup as separate batches, so a
+//     failure between them is exactly the half-deleted state be6ca82 had to
+//     repair by hand on 2081 documents.
+func purgeTopicResidue(txApp core.App, topic *core.Record) error {
+	// 1. Reputation: sum the topic's votes per target and pay each back.
+	//    Summing means a target with many votes is written once instead of once
+	//    per vote, and it is the same aggregate be6ca82 had to add on the
+	//    Firestore branch after the cascade left every per-author decrement
+	//    without an owner.
+	//
+	//    The vote ROWS ARE KEPT. Deleting a topic here is a soft delete and the
+	//    whole point of that design (see the incident doc) is that a mistaken
+	//    delete is recoverable — hard-deleting the votes would make reputation
+	//    the one thing a restore could not bring back. Instead the vote is
+	//    marked as belonging to a hidden topic by virtue of the topic_id it
+	//    already carries, and sumVotes in user_counters.go ignores votes whose
+	//    topic is deleted. That is the same mechanism the post counter uses
+	//    (1767100000: a post in a soft-deleted topic is not counted), so the
+	//    projection and the recompute agree, and un-deleting the topic restores
+	//    the reputation automatically because the recompute derives it again.
+	//
+	//    The payout is what makes the CACHED column agree with that rule right
+	//    now, without waiting for a recompute run. Because it is derived from
+	//    the surviving rows and applied inside this transaction, a redelivery
+	//    cannot apply it twice: there is no separate trigger to replay, and the
+	//    tombstone makes the command a no-op on the second attempt.
+	type voteTotal struct {
+		TargetID string `db:"target_id"`
+		Total    int    `db:"total"`
+	}
+	var totals []voteTotal
+	if err := txApp.DB().NewQuery(
+		"SELECT target_id, SUM(value) AS total FROM "+reputationVotesCollectionName+
+			" WHERE topic_id = {:topic} GROUP BY target_id",
+	).Bind(dbx.Params{"topic": topic.Id}).All(&totals); err != nil {
+		return internalError("failed to sum reputation votes for topic cleanup", err)
+	}
+	for _, row := range totals {
+		if row.TargetID == "" || row.Total == 0 {
+			continue
+		}
+		if err := adjustUserReputation(txApp, row.TargetID, -row.Total); err != nil {
+			return err
+		}
+	}
+
+	// 2. The per-post totals are the same money, counted a second time. They are
+	//    zeroed rather than recomputed so the tombstone and its posts agree with
+	//    the authors the payout above just reduced. Restoring the topic leaves
+	//    them at 0, which is correct: the vote rows that would refill them
+	//    belong to a topic nobody can read until the restore.
+	if err := txApp.DB().NewQuery(
+		"UPDATE posts SET reputation = 0 WHERE topic_id = {:topic}",
+	).Bind(dbx.Params{"topic": topic.Id}).Execute(); err != nil {
+		return internalError("failed to clear post reputation for topic cleanup", err)
+	}
+
+	// 3. Subscriptions, which ARE hard-deleted. Unlike a vote, a subscription is
+	//    not content and not recoverable state: it is a pointer that keeps a
+	//    topic id alive in a member's list, and the member cannot unsubscribe
+	//    from a topic the API refuses to serve. be6ca82 leaked these on the
+	//    Firestore branch for the same reason.
+	subs, err := txApp.FindAllRecords(
+		topicSubscriptionsCollectionName,
+		dbx.NewExp("topic_id = {:topic}", dbx.Params{"topic": topic.Id}),
+	)
+	if err != nil {
+		return internalError("failed to read subscriptions for topic cleanup", err)
+	}
+	for _, sub := range subs {
+		if err := txApp.Delete(sub); err != nil {
+			return internalError("failed to delete topic subscription", err)
+		}
+	}
+
+	return nil
 }
 
 func parseIntParam(val string, defaultVal int) int {

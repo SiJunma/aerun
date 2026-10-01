@@ -349,6 +349,45 @@ func deletePostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to delete post", err)
 		}
 
+		// Reputation earned on a post the forum now shows as a tombstone must
+		// be paid back. be6ca82 fixed exactly this on the Firestore branch,
+		// where the reputation_logs outlived the topic and members kept scores
+		// for posts that no longer existed.
+		//
+		// The sum is taken from the vote rows because the votes are the
+		// authority RecomputeUserCounters derives from; post.reputation is only
+		// a projection of them. The rows themselves are KEPT, for the same
+		// reason purgeTopicResidue keeps them: a soft delete must stay
+		// reversible, and sumVotes already ignores a vote whose post is
+		// soft-deleted, so the recompute agrees with this payout instead of
+		// re-granting the score.
+		//
+		// There is no separate "already reverted" claim. be6ca82 needed a
+		// reputation_reverts/{logId} document because Cloud Functions are
+		// at-least-once and a redelivery applied the revert twice; here the
+		// payout and the tombstone share one transaction, and the command
+		// refuses to run against an already-deleted post, so a second delivery
+		// is a 404 rather than a second payout.
+		type voteTotal struct {
+			Total int `db:"total"`
+		}
+		var voteSum voteTotal
+		if err := txApp.DB().NewQuery(
+			"SELECT COALESCE(SUM(value), 0) AS total FROM "+reputationVotesCollectionName+
+				" WHERE post_id = {:post}",
+		).Bind(dbx.Params{"post": post.Id}).One(&voteSum); err != nil {
+			return 0, nil, internalError("failed to sum reputation votes for post deletion", err)
+		}
+		if voteSum.Total != 0 {
+			if err := adjustUserReputation(txApp, post.GetString("author_id"), -voteSum.Total); err != nil {
+				return 0, nil, err
+			}
+		}
+		post.Set("reputation", 0)
+		if err := txApp.Save(post); err != nil {
+			return 0, nil, internalError("failed to clear deleted post reputation", err)
+		}
+
 		// The post's AUTHOR loses a post, not the caller. A moderator deleting
 		// someone else's post must not move their own counter, and the
 		// soft-deleted post is excluded from the count by definition, so this
@@ -474,6 +513,28 @@ func movePostsHandler(e *core.RequestEvent) error {
 			post.Set("sequence", currentSeq)
 			if err := txApp.Save(post); err != nil {
 				return 0, nil, internalError("failed to move post", err)
+			}
+
+			// The votes travel with the post. `reputation_votes.topic_id` is a
+			// denormalised copy of the post's topic, and leaving it behind is
+			// not cosmetic: purgeTopicResidue pays reputation back by summing
+			// the votes of the topic being deleted, so a vote still pointing at
+			// the SOURCE would make deleting the source pay out for a post that
+			// now lives in the target — and would keep counting against the
+			// target in `sumVotes`, which resolves visibility through
+			// post.topic_id, not through the vote's own copy.
+			postVotes, err := txApp.FindAllRecords(
+				reputationVotesCollectionName,
+				dbx.NewExp("post_id = {:post}", dbx.Params{"post": pid}),
+			)
+			if err != nil {
+				return 0, nil, internalError("failed to read reputation votes for moved post", err)
+			}
+			for _, vote := range postVotes {
+				vote.Set("topic_id", targetTopic.Id)
+				if err := txApp.Save(vote); err != nil {
+					return 0, nil, internalError("failed to move post's reputation votes", err)
+				}
 			}
 		}
 
