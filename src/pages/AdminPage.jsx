@@ -11,7 +11,9 @@ import { subscribeToAllUsers } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns } from '../api/designs';
-import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
+import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID } from '../constants/permissions';
+import TransferRootModal from '../components/modals/TransferRootModal';
+import { transferRoot } from '../api/admin';
 import Timestamp from '../components/common/Timestamp';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
@@ -50,6 +52,12 @@ const AdminPage = () => {
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
+  // Root handover. Only the account that IS the chief admin sees the button,
+  // and the candidates exclude yourself — the server refuses you as your own
+  // successor, so offering the choice would be a dialog that cannot succeed.
+  const [showTransferRoot, setShowTransferRoot] = useState(false);
+  const [transferring, setTransferring] = useState(false);
+  const isSelfRoot = isChiefAdmin(user?.email, user?.role_id);
   const [userSearch, setUserSearch] = useState('');
   const [designs, setDesigns] = useState([]);
 
@@ -484,6 +492,30 @@ const AdminPage = () => {
     } catch (err) {
       console.error(err);
       showToast(t('admin.users.error_ban'), 'danger');
+    }
+  };
+
+  const handleTransferRoot = async ({ successorId, password, confirmPhrase }) => {
+    setTransferring(true);
+    try {
+      const res = await transferRoot({ successorId, password, confirmPhrase });
+      showToast(
+        currentLang === 'ru'
+          ? `Роль передана. Новый главный администратор: ${res?.new_root_nickname || ''}`
+          : `Role transferred. New chief admin: ${res?.new_root_nickname || ''}`,
+        'success'
+      );
+      setShowTransferRoot(false);
+      // The caller is now an admin and this page's role assignment is stale —
+      // reload so the badge and the button both change.
+      window.location.reload();
+    } catch (err) {
+      showToast(
+        err?.message || (currentLang === 'ru' ? 'Не удалось передать роль' : 'Failed to transfer the role'),
+        'danger'
+      );
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -1068,7 +1100,23 @@ const AdminPage = () => {
                     </div>
                   )}
                   {isChiefAdmin(u.email, u.role_id) && (
-                    <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>
+                    /* The protected badge sits where the actions would be. For
+                       the CURRENT chief admin it also offers the handover — it is
+                       the one account that can act on it at all. */
+                    <div className="d-flex align-items-center gap-2 justify-content-end flex-wrap">
+                      <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>
+                      {isSelfRoot && (
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          className="text-nowrap"
+                          onClick={() => setShowTransferRoot(true)}
+                        >
+                          <ShieldAlert size={14} className="me-1" />
+                          {currentLang === 'ru' ? 'Передать роль' : 'Transfer role'}
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </td>
               </tr>
@@ -2020,6 +2068,18 @@ const AdminPage = () => {
           </Form.Group>
         </Form>
       </ForumModal>
+
+      {/* The root handover lives with the members table because that is where
+          the protected chief admin already shows up — the button appears on
+          that row, for that account only. */}
+      <TransferRootModal
+        show={showTransferRoot}
+        onHide={() => setShowTransferRoot(false)}
+        candidates={users}
+        onConfirm={handleTransferRoot}
+        busy={transferring}
+        currentNickname={user?.displayName || user?.name || ''}
+      />
     </Container>
   );
 };

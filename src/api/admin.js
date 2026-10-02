@@ -37,6 +37,36 @@ export const updateGlobalSettings = async (settings, performerId) => {
   }
 };
 
+// --- Root handover ---
+
+/**
+ * The exact phrase the server requires to confirm a root handover.
+ *
+ * Exported so the modal asks for the same string the backend demands. A second
+ * hardcoded copy would be free to drift, and the failure would be a dialog that
+ * says "confirmed" while the server answers 400 — which is precisely the kind
+ * of false success this command is meant to prevent.
+ */
+export const TRANSFER_PHRASE = 'TRANSFER ROOT';
+
+/**
+ * Hand the chief-admin role to another account. ONE-WAY and irreversible: the
+ * caller becomes an admin and cannot take the role back, because
+ * `PATCH /admin/users/{id}` refuses to write `root` for anybody.
+ *
+ * @param {{successorId: string, password: string, confirmPhrase: string}} input
+ */
+export const transferRoot = async ({ successorId, password, confirmPhrase }) => {
+  return await sendApi('/api/aerun/admin/transfer-root', {
+    method: 'POST',
+    body: {
+      successor_id: successorId,
+      password,
+      confirm_phrase: confirmPhrase
+    }
+  });
+};
+
 // --- User Management ---
 export const approveUser = async (uid, performerId) => {
   await sendApi(`/api/aerun/admin/users/${uid}`, {

@@ -446,12 +446,34 @@ export const updateUser = async (uid, userData, _performerId) => {
   });
 };
 
+// The uniqueness key must be the SAME one the server stores.
+//
+// The server derives `users.nickname_normalized` with Unicode NFKC, lowercasing
+// and whitespace COLLAPSING (internal/auth/nickname.go, NormalizeNickname).
+// This used to use `.trim().toLowerCase()`, which disagrees in two ways that
+// matter:
+//
+//   - NFKC folds presentation variants, so a fullwidth "Ａ" collides with "a"
+//     server-side but not here.
+//   - The server COLLAPSES runs of whitespace and the client did not, so
+//     "Player  One" was free to the client and taken by the server.
+//
+// The pre-check is only a convenience — the UNIQUE index stays the real
+// enforcement — so a mismatch showed up as a nickname passing this check and
+// then being refused by the server, which reads as the form lying to the user.
+export const nicknameKey = (value) =>
+  (value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export const checkNicknameExists = async (nickname, excludeUid = null) => {
   if (!nickname) return false;
   try {
-    const cleanNick = nickname.trim().toLowerCase();
+    const key = nicknameKey(nickname);
     const records = await pb.collection('users').getList(1, 1, {
-      filter: `nickname_normalized = "${cleanNick}"`
+      filter: `nickname_normalized = "${key.replace(/"/g, '\\"')}"`
     });
     if (records.items.length === 0) return false;
     if (excludeUid && records.items[0].id === excludeUid) return false;
