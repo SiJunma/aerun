@@ -91,6 +91,12 @@ var roleSpecs = []RoleSpec{
 			PermDeleteSelfPost,
 			PermDeleteSelfTopic,
 			PermEditOthersMask,
+			// The owner ranks a moderator as able to edit profile fields of
+			// STRICTLY LOWER accounts only, so `edit_others_nicknames` is
+			// required for the nickname matrix to be reachable at all. The rank
+			// restriction that actually bounds it is not expressible as a
+			// permission and is enforced in the handler.
+			PermEditOthersNicknames,
 			PermEditOthersPosts,
 			PermEditOthersTopics,
 			PermEditSelfAvatar,

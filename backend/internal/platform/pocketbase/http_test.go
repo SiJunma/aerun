@@ -27,6 +27,10 @@ const (
 	fixBannedID    = "userbanned00001"
 	fixModeratorID = "usermoder000001"
 	fixRootID      = "userroot0000001"
+	// fixAdminID exists so the rank matrix is testable: the owner rules differ
+	// for an admin (equal rank allowed) than for a moderator (strictly lower
+	// only), and without an admin account that branch is unreachable.
+	fixAdminID = "useradmin000001"
 )
 
 // newAerunTestApp is the TestAppFactory for the scenarios below. The fresh

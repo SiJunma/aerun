@@ -198,6 +198,12 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// No enforceIdempotency: that middleware buffers the body and caps it at
 	// 512 KB, which a multipart avatar can never satisfy (see avatar_upload.go).
 	group.PUT("/me/avatar", uploadMyAvatarHandler)
+	// Nicknames. Self-service needs no route-level permission: the handler
+	// checks `edit_self_nickname` so a role that has it revoked by the status
+	// narrowing is refused, and the rank matrix lives in the handler because
+	// it is not expressible as a single permission.
+	group.PATCH("/me/nickname", changeMyNicknameHandler).BindFunc(enforceIdempotency)
+	group.PATCH("/users/{id}/nickname", changeUserNicknameHandler).BindFunc(enforceIdempotency)
 
 	// Sprint 2 identity commands.
 	group.POST("/auth/register", registerHandler)
