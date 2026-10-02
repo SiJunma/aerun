@@ -1588,7 +1588,7 @@ const TopicPage = () => {
   };
 
   const handlePublishDraft = async () => {
-    if (topic?.is_locked && !hasPermission('moderate_content')) {
+    if (topic?.is_locked && !hasPermission(PERMISSIONS.CLOSE_TOPICS)) {
       showToast(t('forum.draft_locked_error'), 'danger');
       return;
     }
@@ -2011,10 +2011,30 @@ const TopicPage = () => {
     }
   };
 
-  const canManagePost = (post) => {
+  // Edit and delete are SEPARATE questions now, and one umbrella for both is
+  // exactly what made the permission split pointless: a role granted
+  // edit_others_posts but not delete_others_posts would still be shown a Delete
+  // button that the server answers with 403.
+  //
+  // An `_others_` key only ever widens WHO may act on a post that is not
+  // theirs. The author comparison is still what proves ownership — a
+  // permission never substitutes for it.
+  const canActOnPost = (post) => {
     if (!user || profile?.role_id === 'pending') return false;
     if (post?._isOptimistic || (typeof post?.id === 'string' && post.id.startsWith('temp_'))) return false;
-    return post.author_id === user.uid || hasPermission('moderate_content');
+    return true;
+  };
+
+  const canEditPost = (post) => {
+    if (!canActOnPost(post)) return false;
+    return post.author_id === user.uid ||
+      hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS);
+  };
+
+  const canDeletePost = (post) => {
+    if (!canActOnPost(post)) return false;
+    return post.author_id === user.uid ||
+      hasPermission(PERMISSIONS.DELETE_OTHERS_POSTS);
   };
 
   const getRoleBadge = (post, extraClass = 'mb-2') => {
@@ -2476,7 +2496,7 @@ const TopicPage = () => {
                       </div>
                     </div>
                     {/* Quote button */}
-                    {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                    {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                       <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-end align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
                         <Button
                           variant="link"
@@ -2952,7 +2972,7 @@ const TopicPage = () => {
 
                     {/* Post Management Links — only render if at least one button is visible */}
                     {((user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator') || hasPermission(PERMISSIONS.POST_REPLY, { category })) && (
-                      (!topic?.is_locked || hasPermission('moderate_content')) || canManagePost(post)
+                      (!topic?.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) || canEditPost(post) || canDeletePost(post)
                     ) && (
                         <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
                           {/* Left side: Profile Links (Mobile Only) */}
@@ -2980,9 +3000,9 @@ const TopicPage = () => {
 
                           {/* Right side: Management Actions */}
                           <div className="d-flex gap-2 gap-md-3">
-                            {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                            {canDeletePost(post) && (!topic.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                               <>
-                                {(!((index + indexOfFirstItem) === 0) || (posts.length <= 1 && (topic?.posts_count || 0) <= 1) || hasPermission('moderate_content')) && (
+                                {(!((index + indexOfFirstItem) === 0) || (posts.length <= 1 && (topic?.posts_count || 0) <= 1) || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                                   <Button
                                     variant="link"
                                     size="sm"
@@ -2992,17 +3012,19 @@ const TopicPage = () => {
                                     {lang === 'ru' ? 'Удалить' : 'Delete'}
                                   </Button>
                                 )}
-                                <Button
-                                  variant="link"
-                                  size="sm"
-                                  className="footer-link p-0"
-                                  onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
-                                >
-                                  {lang === 'ru' ? 'Редактировать' : 'Edit'}
-                                </Button>
+                                {canEditPost(post) && (
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="footer-link p-0"
+                                    onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
+                                  >
+                                    {lang === 'ru' ? 'Редактировать' : 'Edit'}
+                                  </Button>
+                                )}
                               </>
                             )}
-                            {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                            {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                               <Button
                                 variant="link"
                                 size="sm"
@@ -3385,7 +3407,7 @@ const TopicPage = () => {
                 </Card.Body>
               </Card>
             </div>
-          ) : topic.is_locked && !hasPermission('moderate_content') ? (
+          ) : topic.is_locked && !hasPermission(PERMISSIONS.CLOSE_TOPICS) ? (
             <div className="mt-5 p-4 text-center text-muted rounded" style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }} ref={replyRef}>
               <div className="mb-3">
                 <MessageSquareOff size={48} className="opacity-25" />
