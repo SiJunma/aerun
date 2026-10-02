@@ -115,11 +115,11 @@ func createTopicHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to create topic", err)
 		}
 
-		// 2. Create initial post with sequence = 1
+		// 2. The opening post. It carries no sequence: ordering is by `created`,
+		// and this post is by construction the earliest in the topic.
 		post := core.NewRecord(postsCol)
 		post.Set("topic_id", topic.Id)
 		post.Set("author_id", e.Auth.Id)
-		post.Set("sequence", 1)
 		post.Set("content", content)
 
 		if err := txApp.Save(post); err != nil {
@@ -260,10 +260,15 @@ func updateTopicHandler(e *core.RequestEvent) error {
 		}
 
 		isAuthor := e.Auth != nil && topic.GetString("author_id") == e.Auth.Id
-		hasMod := auth.Has(acc.Permissions, auth.PermModerateContent)
+		// Editing and deleting a stranger's topic are separately assignable, and
+		// the delete key deliberately does not imply the edit key. `hasMod` is
+		// kept for the three unrelated settings below (lock/pin/move) that are
+		// gated by their own dedicated keys OR the legacy umbrella.
+		canEdit := isAuthor || auth.Has(acc.Permissions, auth.PermEditOthersTopics)
+		hasMod := canEdit || auth.Has(acc.Permissions, auth.PermDeleteOthersTopics)
 
 		if form.Title != nil {
-			if !isAuthor && !hasMod {
+			if !canEdit {
 				return 0, nil, forbiddenError("you cannot change this topic's title")
 			}
 			newTitle, err := forum.ValidateTopicTitle(*form.Title)
@@ -415,9 +420,50 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 		}
 
 		isAuthor := e.Auth != nil && topic.GetString("author_id") == e.Auth.Id
-		hasMod := auth.Has(acc.Permissions, auth.PermModerateContent)
-		if !isAuthor && !hasMod {
+		// `delete_others_topics` is the only way to remove a topic belonging to
+		// another account. It is granted to admins and root, and deliberately
+		// NOT to moderators.
+		byModeration := !isAuthor && auth.Has(acc.Permissions, auth.PermDeleteOthersTopics)
+		if !isAuthor && !byModeration {
 			return 0, nil, forbiddenError("you cannot delete this topic")
+		}
+
+		// A MODERATOR may remove their own topic only while it still holds
+		// nothing but their opening post. This is the owner's narrowed reading
+		// of the moderator matrix: without `delete_others_topics`, the only
+		// topic a moderator can delete is their own, and it must be one that
+		// contains nobody else's words. Once somebody has replied, the topic
+		// holds another account's content and removing it would destroy a post
+		// that a moderator's mandate no longer covers.
+		//
+		// It also composes with `delete_others_posts`, which a moderator KEEPS:
+		// they may remove individual replies all day, and once the thread is
+		// down to their single opening post they may remove it too.
+		//
+		// SCOPE — MODERATORS ONLY, not every author. The request was made about
+		// the moderator matrix specifically, and a player deleting their own
+		// thread with replies is long-standing legacy behaviour that this
+		// change must not quietly alter. The asymmetry is intentional and
+		// temporary: it is the price of not granting the moderator
+		// `delete_others_topics`. Whether a PLAYER should face the same limit is
+		// an open product question, not something to decide inside a handler.
+		//
+		// `moderate_content` is the marker here rather than a rank lookup: it is
+		// what separates "staff with moderation powers" from "ordinary member"
+		// without importing the role registry, and every role that can edit or
+		// delete others' posts carries it.
+		isModerator := auth.Has(acc.Permissions, auth.PermModerateContent) &&
+			!auth.Has(acc.Permissions, auth.PermDeleteOthersTopics)
+		if isAuthor && isModerator {
+			others, err := countOtherAuthorsInTopic(txApp, topic.Id, e.Auth.Id)
+			if err != nil {
+				return 0, nil, internalError("failed to check topic participants", err)
+			}
+			if others > 0 {
+				return 0, nil, conflictError(
+					"a moderator can only delete their own topic while nobody else has replied to it",
+				)
+			}
 		}
 
 		// Everything that must be READ is read here, before a single row is

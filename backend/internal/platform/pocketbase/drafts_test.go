@@ -38,7 +38,6 @@ func seedDraftTopic(t testing.TB, app *tests.TestApp, authorID, title string) st
 	post := core.NewRecord(postsCol)
 	post.Set("topic_id", rec.Id)
 	post.Set("author_id", authorID)
-	post.Set("sequence", 1)
 	post.Set("content", "opening post")
 	if err := app.Save(post); err != nil {
 		t.Fatalf("seed opening post: %v", err)
@@ -174,9 +173,11 @@ func TestDraftsUpsertFeedPublishDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if published.GetBool("is_draft") || published.GetInt("sequence") != 2 {
-		t.Fatalf("published post wrong: is_draft=%v seq=%d",
-			published.GetBool("is_draft"), published.GetInt("sequence"))
+	// A published draft is identified by is_draft alone: `sequence` is gone,
+	// ordering is `created` + id. The topic projection is what proves it
+	// actually became a post in the feed.
+	if published.GetBool("is_draft") {
+		t.Fatalf("published post still marked as draft")
 	}
 	topicBRec, _ := app.FindRecordById(topicsCollectionName, topicB)
 	if topicBRec.GetInt("posts_count") != 2 {

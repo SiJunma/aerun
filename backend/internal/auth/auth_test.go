@@ -6,9 +6,13 @@ import (
 )
 
 func TestAllPermissionsMatchLegacyRegistrySize(t *testing.T) {
-	// 37 keys in the legacy src/constants/permissions.js registry.
-	if got := len(allPermissions); got != 37 {
-		t.Fatalf("expected 37 permissions, got %d", got)
+	// The legacy registry had 37 keys. Migration 1767800000 adds eight more —
+	// the edit/delete split by subject and ownership — so 45 is the new count.
+	// The floor is the meaningful part: the count may only ever GROW as the
+	// product gains a capability, and a silent DROP is what this guards.
+	const legacyCount = 37
+	if got := len(allPermissions); got < legacyCount {
+		t.Fatalf("expected at least %d permissions, got %d", legacyCount, got)
 	}
 	if !slices.IsSorted(AllPermissions()) {
 		t.Fatal("AllPermissions must stay sorted for stable seeds")

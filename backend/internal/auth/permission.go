@@ -33,6 +33,29 @@ const (
 	PermCloseTopics     Permission = "close_topics"
 	PermPinTopics       Permission = "pin_topics"
 
+	// Post and topic moderation are split by subject (post vs topic) and by
+	// ownership (self vs others), so a role can be given the narrow one.
+	//
+	// `moderate_content` used to gate all six of these at once, which made
+	// "a moderator who edits but never deletes" unrepresentable. The four
+	// _self_ keys are redundant with authorship checks for an ordinary account,
+	// but they are what makes the pair a complete, separately assignable set:
+	// a custom role can be denied `delete_others_posts` and keep the rest.
+	//
+	// `_self_` keys never grant access to ANOTHER account's row — the
+	// authorship comparison stays mandatory at every call site. A key answers
+	// "may this account perform this action on a post that is not theirs?",
+	// with the _self_ variant existing so the pair can be reasoned about
+	// together, not as a bypass.
+	PermEditSelfPost       Permission = "edit_self_post"
+	PermEditOthersPosts    Permission = "edit_others_posts"
+	PermDeleteSelfPost     Permission = "delete_self_post"
+	PermDeleteOthersPosts  Permission = "delete_others_posts"
+	PermEditSelfTopic      Permission = "edit_self_topic"
+	PermEditOthersTopics   Permission = "edit_others_topics"
+	PermDeleteSelfTopic    Permission = "delete_self_topic"
+	PermDeleteOthersTopics Permission = "delete_others_topics"
+
 	PermViewForum   Permission = "view_forum"
 	PermPostReply   Permission = "post_reply"
 	PermCreateTopic Permission = "create_topic"
@@ -64,18 +87,26 @@ var allPermissions = func() []Permission {
 		PermCreateSelfMask,
 		PermCreateTopic,
 		PermDeleteOthersMask,
+		PermDeleteOthersPosts,
+		PermDeleteOthersTopics,
 		PermDeleteReputation,
 		PermDeleteSelfMask,
+		PermDeleteSelfPost,
+		PermDeleteSelfTopic,
 		PermDeleteUsers,
 		PermEditOthersAvatars,
 		PermEditOthersMask,
 		PermEditOthersNicknames,
+		PermEditOthersPosts,
 		PermEditOthersSignatures,
 		PermEditOthersStatuses,
+		PermEditOthersTopics,
 		PermEditSelfAvatar,
 		PermEditSelfNickname,
+		PermEditSelfPost,
 		PermEditSelfSignature,
 		PermEditSelfStatus,
+		PermEditSelfTopic,
 		PermManageCategories,
 		PermManageDesigns,
 		PermManageForum,
@@ -97,6 +128,74 @@ var allPermissions = func() []Permission {
 // AllPermissions returns a fresh sorted copy of every known permission key.
 func AllPermissions() []Permission {
 	return slices.Clone(allPermissions)
+}
+
+// Forum limit bounds. The EFFECTIVE post limit and page size are tunable rows
+// in the `forum_settings` collection (migration 1767800000) because the admin
+// panel is supposed to set them; these constants are the CEILINGS around that
+// tuning, not the values themselves.
+//
+// The distinction matters. Before this, the panel's `maxPostsPerTopic` lived
+// only in localStorage while the server enforced forum.MaxPostsPerTopic, so the
+// number a reader was shown and the number the server applied were unrelated,
+// and the panel's change applied to one browser only. A ceiling is a property
+// of the build: no configuration, however entered, can produce a forum with
+// unbounded topics, an unpaginatable page, or a limit of zero that would make
+// every topic unpostable.
+const (
+	// HardMaxPostsPerTopic is the largest value a forum may configure for
+	// posts per topic. The owner's cap, chosen to keep a runaway topic from
+	// degrading the topic page for everyone.
+	HardMaxPostsPerTopic = 5000
+	// MinMaxPostsPerTopic keeps at least one reply possible: a limit of 1
+	// would allow the opening post and nothing else, and 0 would make every
+	// topic permanently unpostable.
+	MinMaxPostsPerTopic = 2
+	// DefaultMaxPostsPerTopic is the seeded value and the fallback when the
+	// settings row is missing. 2000 is what the Firestore snapshot carried.
+	DefaultMaxPostsPerTopic = 2000
+
+	// HardMaxPostsPerPage bounds the page size. It sits above the largest
+	// sensible forum page and below the point where one response stops being
+	// cheap to render.
+	HardMaxPostsPerPage = 100
+	// MinPostsPerPage is 1: a page smaller than a single post would render an
+	// empty feed.
+	MinPostsPerPage = 1
+	// DefaultPostsPerPage matches the legacy default and the UI default.
+	DefaultPostsPerPage = 20
+)
+
+// ClampMaxPostsPerTopic bounds a configured value into the permitted range.
+// A zero or negative value means "unset" and yields the default rather than
+// the floor, so a settings row that lost its value degrades to normal forum
+// behaviour instead of locking every topic.
+func ClampMaxPostsPerTopic(configured int) int {
+	if configured <= 0 {
+		return DefaultMaxPostsPerTopic
+	}
+	if configured < MinMaxPostsPerTopic {
+		return MinMaxPostsPerTopic
+	}
+	if configured > HardMaxPostsPerTopic {
+		return HardMaxPostsPerTopic
+	}
+	return configured
+}
+
+// ClampPostsPerPage bounds a configured page size, with the same "unset means
+// default" rule.
+func ClampPostsPerPage(configured int) int {
+	if configured <= 0 {
+		return DefaultPostsPerPage
+	}
+	if configured < MinPostsPerPage {
+		return MinPostsPerPage
+	}
+	if configured > HardMaxPostsPerPage {
+		return HardMaxPostsPerPage
+	}
+	return configured
 }
 
 // AllPermissionValues returns every permission key as plain strings (sorted),

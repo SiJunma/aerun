@@ -258,7 +258,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	group.POST("/topics/{id}/posts", createPostHandler).BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
 	group.GET("/topics/{id}/posts", listPostsHandler)
-	group.GET("/topics/{id}/posts/by-sequence/{sequence}", getPostBySequenceHandler)
+	group.GET("/posts/{id}", getPostHandler)
 	group.PATCH("/posts/{id}", editPostHandler).BindFunc(enforceIdempotency)
 	group.DELETE("/posts/{id}", deletePostHandler).BindFunc(enforceIdempotency)
 	group.POST("/topics/{id}/posts/move", movePostsHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)

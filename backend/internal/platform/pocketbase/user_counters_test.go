@@ -45,7 +45,6 @@ func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string,
 	rec := core.NewRecord(col)
 	rec.Set("topic_id", topicID)
 	rec.Set("author_id", authorID)
-	rec.Set("sequence", seq)
 	rec.Set("content", "counter fixture")
 	rec.Set("is_draft", draft)
 	if err := app.Save(rec); err != nil {

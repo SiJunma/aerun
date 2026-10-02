@@ -33,10 +33,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 // seedResidueFixture builds a live topic with two posts by DIFFERENT authors.
@@ -66,13 +68,23 @@ func seedResidueFixture(t testing.TB, app *tests.TestApp, firstAuthor, secondAut
 	if err != nil {
 		t.Fatal(err)
 	}
-	mk := func(seq int, author, body string) *core.Record {
+	// `order` sets an EXPLICIT `created` timestamp. The fixture used to express
+	// "this post came first" by writing a `sequence` ordinal, and with that
+	// column gone the intent had nowhere to live: two rows saved in the same
+	// millisecond tie, and the id tie-breaker then decides which one the feed
+	// calls the opening post — which can promote a reply and refuse a
+	// legitimate delete with 409. Stating the arrival time makes the ordering a
+	// property of the data rather than an accident of how fast the loop ran.
+	mk := func(order int, author, body string) *core.Record {
 		p := core.NewRecord(postsCol)
 		p.Set("topic_id", topic.Id)
 		p.Set("author_id", author)
-		p.Set("sequence", seq)
 		p.Set("content", body)
 		p.Set("is_draft", false)
+		// SetRaw, not Set: `created` is an AutodateField, and only a raw
+		// assignment survives the save. A plain Set is overwritten with "now",
+		// which is how the fixture ended up with two identical timestamps.
+		p.SetRaw("created", types.NowDateTime().Add(time.Duration(order-1)*time.Hour))
 		if err := app.Save(p); err != nil {
 			t.Fatal(err)
 		}

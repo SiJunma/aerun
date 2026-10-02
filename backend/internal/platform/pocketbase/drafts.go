@@ -98,7 +98,6 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 			post = core.NewRecord(postsCol)
 			post.Set("topic_id", topicID)
 			post.Set("author_id", e.Auth.Id)
-			post.Set("sequence", 0)
 		}
 		post.Set("is_draft", true)
 		post.Set("content", content)
@@ -219,7 +218,18 @@ func draftBefore(a, b draftItem) bool {
 	return pa < pb
 }
 
-// deleteDraftHandler hard-deletes the caller's own draft.
+// deleteDraftHandler hard-deletes a draft.
+//
+// AUTHOR ONLY, with no permission that widens it. The owner was explicit:
+// "nobody can see anyone else's drafts except the owner, in principle", and
+// a moderator deleting someone's draft is therefore not a capability at all.
+// This handler previously accepted `moderate_content` for foreign drafts,
+// which contradicted both that rule and the drafts page itself (whose feed is
+// scoped to `author_id = caller`) — the one place in the product where a
+// stranger's draft was readable and destroyable.
+//
+// Consequence: a draft whose author is gone is unreachable, not auto-purgeable.
+// Orphan cleanup is deliberately absent rather than a staff backdoor.
 func deleteDraftHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -232,7 +242,10 @@ func deleteDraftHandler(e *core.RequestEvent) error {
 		if err != nil || post == nil || !post.GetBool("is_draft") {
 			return 0, nil, notFoundError("draft not found")
 		}
-		if post.GetString("author_id") != e.Auth.Id && !auth.Has(AccessFrom(e).Permissions, auth.PermModerateContent) {
+		if post.GetString("author_id") != e.Auth.Id {
+			// 403, not 404: the caller proved the row exists by naming a
+			// draft id, and a draft is not secret state in the way a password
+			// is — but the id is never resolved to its content or author here.
 			return 0, nil, forbiddenError("only the author may delete a draft")
 		}
 		if err := txApp.Delete(post); err != nil {
@@ -247,13 +260,9 @@ func deleteDraftHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// forumMaxPostsPerTopic mirrors the compiled forum ceiling used by
-// createPostHandler (forum.MaxPostsPerTopic); drafts obey it on publish.
-const forumMaxPostsPerTopic = 2000
-
-// publishDraftHandler atomically turns a draft into a real post: assigns the
-// next per-topic sequence, clears is_draft and advances the topic projections
-// in one transaction. An orphan draft can never be published.
+// publishDraftHandler atomically turns a draft into a real post: clears
+// is_draft and advances the topic projections in one transaction. An orphan
+// draft can never be published.
 func publishDraftHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -276,26 +285,26 @@ func publishDraftHandler(e *core.RequestEvent) error {
 			return 0, nil, conflictError("draft is orphaned: its topic no longer exists")
 		}
 		acc := AccessFrom(e)
-		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermModerateContent) {
+		// Same rule as createPostHandler: `close_topics` bypasses the lock, and
+		// the post limit below still applies to it.
+		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermCloseTopics) {
 			return 0, nil, conflictError("topic is locked")
 		}
 
-		type maxSeqResult struct {
-			MaxSeq int `db:"max_seq"`
+		// The same settings-backed limit as createPostHandler, and the same
+		// asymmetry: `close_topics` got past the lock above, but the post cap is
+		// not bypassable. A draft saved before a limit was lowered cannot be
+		// published into a topic that is already full.
+		limit := effectiveMaxPostsPerTopic(txApp)
+		existing, err := countPublishedPosts(txApp, topicID)
+		if err != nil {
+			return 0, nil, internalError("failed to count topic posts", err)
 		}
-		var seqRes maxSeqResult
-		if err := txApp.DB().NewQuery("SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM posts WHERE topic_id = {:topic_id}").
-			Bind(dbx.Params{"topic_id": topicID}).
-			One(&seqRes); err != nil {
-			return 0, nil, internalError("failed to calculate next post sequence", err)
-		}
-		nextSeq := seqRes.MaxSeq + 1
-		if nextSeq > forumMaxPostsPerTopic {
+		if existing >= limit {
 			return 0, nil, conflictError("topic has reached the maximum post limit")
 		}
 
 		post.Set("is_draft", false)
-		post.Set("sequence", nextSeq)
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to publish draft", err)
 		}

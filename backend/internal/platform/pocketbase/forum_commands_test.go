@@ -8,10 +8,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 // helper to get seeded category id (General)
@@ -61,7 +64,6 @@ func TestCreateTopicAndFirstPost(t *testing.T) {
 			`"title":"My First Topic"`,
 			`"posts_count":1`,
 			`"content":"This is the opening post of my first topic."`,
-			`"sequence":1`,
 			`"request_id":"`,
 		},
 		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
@@ -85,12 +87,15 @@ func TestCreateTopicAndFirstPost(t *testing.T) {
 			if topic.GetString("last_post_id") == "" {
 				t.Fatal("expected last_post_id to be set")
 			}
+			// The opening post is the earliest by `created`, and the topic
+			// projection points at it as the last (only) post.
 			post, err := app.FindRecordById(postsCollectionName, topic.GetString("last_post_id"))
 			if err != nil || post == nil {
 				t.Fatalf("initial post missing: %v", err)
 			}
-			if post.GetInt("sequence") != 1 {
-				t.Fatalf("expected post sequence=1, got %d", post.GetInt("sequence"))
+			if post.GetString("topic_id") != topic.Id || post.GetString("author_id") != fixPlayerID {
+				t.Fatalf("opening post is wrong: topic=%s author=%s",
+					post.GetString("topic_id"), post.GetString("author_id"))
 			}
 		},
 	}
@@ -191,7 +196,6 @@ func TestCreatePostSequenceAndLockedTopic(t *testing.T) {
 		TestAppFactory: newAerunTestApp,
 		ExpectedStatus: http.StatusCreated,
 		ExpectedContent: []string{
-			`"sequence":2`,
 			`"content":"Reply number 1"`,
 		},
 		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
@@ -216,7 +220,6 @@ func TestCreatePostSequenceAndLockedTopic(t *testing.T) {
 			p1 := core.NewRecord(postsCol)
 			p1.Set("topic_id", topicID)
 			p1.Set("author_id", fixPlayerID)
-			p1.Set("sequence", 1)
 			p1.Set("content", "First post")
 			_ = app.Save(p1)
 
@@ -272,7 +275,6 @@ func Test100ConcurrentPostsAndIdempotency(t *testing.T) {
 	p1 := core.NewRecord(postsCol)
 	p1.Set("topic_id", topic.Id)
 	p1.Set("author_id", fixPlayerID)
-	p1.Set("sequence", 1)
 	p1.Set("content", "Initial post")
 	if err := app.Save(p1); err != nil {
 		t.Fatal(err)
@@ -297,7 +299,6 @@ func Test100ConcurrentPostsAndIdempotency(t *testing.T) {
 
 	type postResult struct {
 		StatusCode int
-		Sequence   int
 		PostID     string
 	}
 	results := make([]postResult, concurrentN)
@@ -324,15 +325,13 @@ func Test100ConcurrentPostsAndIdempotency(t *testing.T) {
 
 			var parsed struct {
 				Post struct {
-					ID       string `json:"id"`
-					Sequence int    `json:"sequence"`
+					ID string `json:"id"`
 				} `json:"post"`
 			}
 			_ = json.NewDecoder(resp.Body).Decode(&parsed)
 
 			results[idx] = postResult{
 				StatusCode: resp.StatusCode,
-				Sequence:   parsed.Post.Sequence,
 				PostID:     parsed.Post.ID,
 			}
 		}()
@@ -340,23 +339,40 @@ func Test100ConcurrentPostsAndIdempotency(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify all 100 returned 201 Created
-	sequences := make(map[int]bool)
+	// Every concurrent request must have produced its OWN row. With `sequence`
+	// gone there is no per-topic ordinal to collide, so the property under test
+	// is the one that actually matters: 100 simultaneous posts yield 100
+	// distinct rows, and the projection counts every one of them.
+	//
+	// The test keeps its original purpose — the write path is safe under
+	// concurrency — but asserts it through ids and the counter rather than
+	// through an ordinal that no longer exists.
+	seen := make(map[string]bool, len(results))
 	for i, r := range results {
 		if r.StatusCode != http.StatusCreated {
 			t.Fatalf("request %d failed with status %d", i, r.StatusCode)
 		}
-		if sequences[r.Sequence] {
-			t.Fatalf("duplicate sequence found: %d", r.Sequence)
+		if r.PostID == "" {
+			t.Fatalf("request %d returned no post id", i)
 		}
-		sequences[r.Sequence] = true
+		if seen[r.PostID] {
+			t.Fatalf("duplicate post id returned: %s", r.PostID)
+		}
+		seen[r.PostID] = true
 	}
 
-	// Verify sequences are contiguous from 2 to 101
-	for seq := 2; seq <= 101; seq++ {
-		if !sequences[seq] {
-			t.Fatalf("missing sequence %d in sequence space", seq)
-		}
+	// The database must agree: 100 replies plus the opening post.
+	var rowCount struct {
+		Cnt int `db:"cnt"`
+	}
+	if err := app.DB().NewQuery(
+		"SELECT COUNT(*) AS cnt FROM " + postsCollectionName +
+			" WHERE topic_id = {:topic} AND (is_draft = false OR is_draft IS NULL)",
+	).Bind(dbx.Params{"topic": topic.Id}).One(&rowCount); err != nil {
+		t.Fatal(err)
+	}
+	if rowCount.Cnt != 101 {
+		t.Fatalf("expected 101 persisted posts, got %d", rowCount.Cnt)
 	}
 
 	// Verify topic posts_count is exactly 101
@@ -389,15 +405,16 @@ func Test100ConcurrentPostsAndIdempotency(t *testing.T) {
 
 	var replayBody struct {
 		Post struct {
-			ID       string `json:"id"`
-			Sequence int    `json:"sequence"`
+			ID string `json:"id"`
 		} `json:"post"`
 	}
 	_ = json.NewDecoder(replayResp.Body).Decode(&replayBody)
 
-	if replayBody.Post.ID != results[0].PostID || replayBody.Post.Sequence != results[0].Sequence {
-		t.Fatalf("replay returned different post: expected ID=%s Seq=%d, got ID=%s Seq=%d",
-			results[0].PostID, results[0].Sequence, replayBody.Post.ID, replayBody.Post.Sequence)
+	// A replay must return the ORIGINAL post, not a new one. Identity is the
+	// post id, which is the whole point: the replay is the same row.
+	if replayBody.Post.ID != results[0].PostID {
+		t.Fatalf("replay returned a different post: expected ID=%s, got ID=%s",
+			results[0].PostID, replayBody.Post.ID)
 	}
 
 	// Verify posts_count is STILL 101 after replay
@@ -443,19 +460,24 @@ func TestEditAndDeletePost(t *testing.T) {
 	topic.Set("posts_count", 2)
 	_ = app.Save(topic)
 
+	// Explicit `created` on both posts, an hour apart, so "Post 1 is the opening
+	// post" is a property of the data rather than of how fast the loop ran.
+	// SetRaw is required: `created` is an AutodateField, and a plain Set is
+	// overwritten with "now" on save, which left both rows sharing a timestamp
+	// and made the id tie-breaker decide which one the feed opens with.
 	postsCol, _ := app.FindCollectionByNameOrId(postsCollectionName)
 	p1 := core.NewRecord(postsCol)
 	p1.Set("topic_id", topic.Id)
 	p1.Set("author_id", fixPlayerID)
-	p1.Set("sequence", 1)
 	p1.Set("content", "Post 1")
+	p1.SetRaw("created", types.NowDateTime())
 	_ = app.Save(p1)
 
 	p2 := core.NewRecord(postsCol)
 	p2.Set("topic_id", topic.Id)
 	p2.Set("author_id", fixPlayerID)
-	p2.Set("sequence", 2)
 	p2.Set("content", "Post 2")
+	p2.SetRaw("created", types.NowDateTime().Add(time.Hour))
 	_ = app.Save(p2)
 
 	topic.Set("last_post_id", p2.Id)
@@ -516,8 +538,20 @@ func TestEditAndDeletePost(t *testing.T) {
 	}
 
 	// 3. Deep link lookup by sequence
+	// Deep links address a post by its ID, the way the legacy client did.
+	// There is no by-sequence route: `sequence` was an invented ordinal and a
+	// link built from it would break the moment a post was deleted, because
+	// deleting shifts every later ordinal.
+	postRec, err := app.FindFirstRecordByFilter(
+		postsCollectionName,
+		"topic_id = {:topic} && is_draft = false",
+		dbx.Params{"topic": topic.Id},
+	)
+	if err != nil || postRec == nil {
+		t.Fatal("expected a post to deep-link to")
+	}
 	deepLinkReq, _ := http.NewRequest(http.MethodGet,
-		fmt.Sprintf("%s/api/aerun/topics/%s/posts/by-sequence/1", server.URL, topic.Id), nil)
+		fmt.Sprintf("%s/api/aerun/posts/%s", server.URL, postRec.Id), nil)
 	deepLinkResp, err := client.Do(deepLinkReq)
 	if err != nil {
 		t.Fatal(err)
@@ -554,7 +588,6 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 	first := core.NewRecord(postsCol)
 	first.Set("topic_id", topic.Id)
 	first.Set("author_id", fixPlayerID)
-	first.Set("sequence", 1)
 	first.Set("content", "Opening post")
 	if err := app.Save(first); err != nil {
 		t.Fatal(err)
@@ -563,7 +596,6 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 	reply := core.NewRecord(postsCol)
 	reply.Set("topic_id", topic.Id)
 	reply.Set("author_id", fixPlayerID)
-	reply.Set("sequence", 2)
 	reply.Set("content", "A reply")
 	if err := app.Save(reply); err != nil {
 		t.Fatal(err)
@@ -738,21 +770,18 @@ func TestMovePostsBetweenTopics(t *testing.T) {
 	pA1 := core.NewRecord(postsCol)
 	pA1.Set("topic_id", topicA.Id)
 	pA1.Set("author_id", fixPlayerID)
-	pA1.Set("sequence", 1)
 	pA1.Set("content", "Topic A Post 1")
 	_ = app.Save(pA1)
 
 	pA2 := core.NewRecord(postsCol)
 	pA2.Set("topic_id", topicA.Id)
 	pA2.Set("author_id", fixPlayerID)
-	pA2.Set("sequence", 2)
 	pA2.Set("content", "Topic A Post 2")
 	_ = app.Save(pA2)
 
 	pB1 := core.NewRecord(postsCol)
 	pB1.Set("topic_id", topicB.Id)
 	pB1.Set("author_id", fixPlayerID)
-	pB1.Set("sequence", 1)
 	pB1.Set("content", "Topic B Post 1")
 	_ = app.Save(pB1)
 
@@ -779,10 +808,11 @@ func TestMovePostsBetweenTopics(t *testing.T) {
 		t.Fatalf("move posts failed: %d", moveResp.StatusCode)
 	}
 
-	// Verify pA2 is now in Topic B with sequence 2
+	// A moved post changes topic only. Its position follows `created`, which
+	// travels with the row, so there is no ordinal to renumber.
 	pA2Moved, _ := app.FindRecordById(postsCollectionName, pA2.Id)
-	if pA2Moved.GetString("topic_id") != topicB.Id || pA2Moved.GetInt("sequence") != 2 {
-		t.Fatalf("pA2 topic/sequence not updated: topic=%s seq=%d", pA2Moved.GetString("topic_id"), pA2Moved.GetInt("sequence"))
+	if pA2Moved.GetString("topic_id") != topicB.Id {
+		t.Fatalf("pA2 topic not updated: topic=%s", pA2Moved.GetString("topic_id"))
 	}
 
 	// Verify Topic A posts_count is 1, Topic B posts_count is 2

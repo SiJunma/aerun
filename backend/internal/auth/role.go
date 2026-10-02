@@ -65,6 +65,20 @@ var roleSpecs = []RoleSpec{
 		Rank:     600,
 		Color:    "info",
 		IsSystem: true,
+		// A moderator keeps the full set `moderate_content` used to imply, so
+		// nothing is lost in the split — every action the umbrella key gated is
+		// still gated, now by its own key.
+		//
+		// EXCEPT `delete_others_topics`, which is deliberately absent: the owner
+		// ruled that a moderator does not delete another account's topic. They
+		// keep `delete_others_posts` (removing an individual reply is a normal
+		// moderation act) and they keep `edit_others_topics`.
+		//
+		// The consequence is enforced in deleteTopicHandler, not here: a
+		// moderator may remove their OWN topic only while it still holds just
+		// their opening post. Once somebody has replied, deleting the topic
+		// would destroy their post, which is exactly the loss of other people's
+		// content that removing the key is meant to prevent.
 		Permissions: []Permission{
 			PermBypassHideTags,
 			PermCloseTopics,
@@ -72,12 +86,19 @@ var roleSpecs = []RoleSpec{
 			PermCreateSelfMask,
 			PermCreateTopic,
 			PermDeleteOthersMask,
+			PermDeleteOthersPosts,
 			PermDeleteSelfMask,
+			PermDeleteSelfPost,
+			PermDeleteSelfTopic,
 			PermEditOthersMask,
+			PermEditOthersPosts,
+			PermEditOthersTopics,
 			PermEditSelfAvatar,
 			PermEditSelfNickname,
+			PermEditSelfPost,
 			PermEditSelfSignature,
 			PermEditSelfStatus,
+			PermEditSelfTopic,
 			PermModerateContent,
 			PermMoveTopics,
 			PermPinTopics,
@@ -100,10 +121,14 @@ var roleSpecs = []RoleSpec{
 			PermCreateSelfMask,
 			PermCreateTopic,
 			PermDeleteSelfMask,
+			PermDeleteSelfPost,
+			PermDeleteSelfTopic,
 			PermEditSelfAvatar,
 			PermEditSelfNickname,
+			PermEditSelfPost,
 			PermEditSelfSignature,
 			PermEditSelfStatus,
+			PermEditSelfTopic,
 			PermPostReply,
 			PermUseDice,
 			PermUseDirectMessages,

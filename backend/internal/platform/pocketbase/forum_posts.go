@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/pocketbase/dbx"
@@ -35,7 +34,6 @@ func postPayload(record *core.Record) map[string]any {
 		"id":        record.Id,
 		"topic_id":  record.GetString("topic_id"),
 		"author_id": record.GetString("author_id"),
-		"sequence":  record.GetInt("sequence"),
 		"created":   record.GetDateTime("created").String(),
 		"updated":   record.GetDateTime("updated").String(),
 	}
@@ -87,7 +85,11 @@ func createPostHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("topic not found")
 		}
 
-		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermModerateContent) {
+		// Replying into a locked topic is bypassed by `close_topics`, the same
+		// key that grants the right to close a topic in the first place: one
+		// capability, not two. The post limit is NOT bypassed by it — that is a
+		// separate global ceiling checked below.
+		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermCloseTopics) {
 			return 0, nil, conflictError("topic is locked")
 		}
 
@@ -96,29 +98,24 @@ func createPostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("posts collection unavailable", err)
 		}
 
-		// Sequence assignment: query max sequence for this topic
-		type maxSeqResult struct {
-			MaxSeq int `db:"max_seq"`
-		}
-		var seqRes maxSeqResult
-		err = txApp.DB().NewQuery("SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM posts WHERE topic_id = {:topic_id}").
-			Bind(dbx.Params{"topic_id": topicID}).
-			One(&seqRes)
+		// The post limit is read from the server-side settings row and clamped to
+		// the build's ceiling (auth.HardMaxPostsPerTopic), so the number enforced
+		// here is the same one the reader is shown. `close_topics` bypasses a
+		// LOCKED topic but NOT this limit: the owner was explicit that the
+		// post cap holds even for accounts allowed to write into closed topics.
+		limit := effectiveMaxPostsPerTopic(txApp)
+		existing, err := countPublishedPosts(txApp, topicID)
 		if err != nil {
-			return 0, nil, internalError("failed to calculate next post sequence", err)
+			return 0, nil, internalError("failed to count topic posts", err)
 		}
-
-		nextSeq := seqRes.MaxSeq + 1
-		if nextSeq > forum.MaxPostsPerTopic {
+		if existing >= limit {
 			return 0, nil, conflictError("topic has reached the maximum post limit")
 		}
 
 		post := core.NewRecord(postsCol)
 		post.Set("topic_id", topicID)
 		post.Set("author_id", e.Auth.Id)
-		post.Set("sequence", nextSeq)
 		post.Set("content", content)
-		post.Set("deleted", false)
 
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to save post", err)
@@ -150,11 +147,27 @@ func createPostHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// listPostsHandler lists posts in a topic with cursor pagination.
+// listPostsHandler lists posts in a topic, oldest first.
+//
+// ORDERING is `created ASC, id ASC` — the legacy contract, verified against the
+// Firestore export. `posts.sequence` was an invented per-topic counter and is
+// being removed; `created` is the real arrival order, and the id is the
+// tie-breaker that makes the order total and therefore the pagination window
+// deterministic. Two posts written in the same millisecond must not be able to
+// swap places between page loads, which is exactly the "posts appear on two
+// pages" drift the incident doc lists as uninvestigated.
+//
+// PAGE PAGINATION, not cursor. The counter (posts_count) IS the window the
+// client paginates against, and a hard delete makes the two agree by
+// construction: a post either has a row and is counted, or it does not exist.
 func listPostsHandler(e *core.RequestEvent) error {
 	topicID := e.Request.PathValue("id")
-	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), forum.DefaultPageLimit), forum.DefaultPageLimit)
-	afterSeq := parseIntParam(e.Request.URL.Query().Get("after_sequence"), 0)
+	settings := loadForumSettings(e.App)
+	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.PostsPerPage), settings.PostsPerPage)
+	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
+	if page < 1 {
+		page = 1
+	}
 
 	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
 	if err != nil || topic == nil {
@@ -165,23 +178,14 @@ func listPostsHandler(e *core.RequestEvent) error {
 		AndWhere(dbx.HashExp{"topic_id": topicID}).
 		// Drafts are private to their author and surfaced through the
 		// drafts routes, never in the public post feed.
-		AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL"))
-
-	if afterSeq > 0 {
-		query = query.AndWhere(dbx.NewExp("sequence > {:after_seq}", dbx.Params{"after_seq": afterSeq}))
-	}
-
-	query = query.OrderBy("sequence ASC").Limit(int64(limit + 1))
+		AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
+		OrderBy("created ASC", "id ASC").
+		Limit(int64(limit)).
+		Offset(int64((page - 1) * limit))
 
 	var records []*core.Record
 	if err := query.All(&records); err != nil {
 		return internalError("failed to list posts", err)
-	}
-
-	var nextSeq int
-	if len(records) > limit {
-		nextSeq = records[limit-1].GetInt("sequence")
-		records = records[:limit]
 	}
 
 	items := make([]map[string]any, len(records))
@@ -190,32 +194,32 @@ func listPostsHandler(e *core.RequestEvent) error {
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
-		"items":               items,
-		"topic_id":            topicID,
-		"posts_count":         topic.GetInt("posts_count"),
-		"next_after_sequence": nextSeq,
-		"request_id":          requestIDFrom(e),
+		"items":       items,
+		"topic_id":    topicID,
+		"posts_count": topic.GetInt("posts_count"),
+		"page":        page,
+		"per_page":    limit,
+		"request_id":  requestIDFrom(e),
 	})
 }
 
-// getPostBySequenceHandler returns a post by topic ID and sequence number.
-func getPostBySequenceHandler(e *core.RequestEvent) error {
-	topicID := e.Request.PathValue("id")
-	seqStr := e.Request.PathValue("sequence")
-	seq, err := strconv.Atoi(seqStr)
-	if err != nil || seq <= 0 {
-		return validationError("invalid sequence number")
-	}
-
-	record, err := e.App.FindFirstRecordByFilter(
-		postsCollectionName,
-		"topic_id = {:topic_id} && sequence = {:seq} && is_draft = false",
-		dbx.Params{"topic_id": topicID, "seq": seq},
-	)
-	if err != nil || record == nil {
+// getPostHandler returns a single post by its record id.
+//
+// This is the deep-link route. Posts are addressed by ID, never by a per-topic
+// ordinal: `sequence` was an invented column, and a link built from it breaks
+// the instant any earlier post is deleted, because every later ordinal shifts.
+// The id is stable for the life of the row — and a deleted post's id simply
+// stops resolving, which is the honest answer.
+//
+// A draft is NOT reachable here even by id: it is not in the public feed, and
+// this route is public. The author reads their own draft through the drafts
+// routes, which are authenticated and owner-scoped.
+func getPostHandler(e *core.RequestEvent) error {
+	id := e.Request.PathValue("id")
+	record, err := e.App.FindRecordById(postsCollectionName, id)
+	if err != nil || record == nil || record.GetBool("is_draft") {
 		return notFoundError("post not found")
 	}
-
 	return e.JSON(http.StatusOK, map[string]any{
 		"post":       postPayload(record),
 		"request_id": requestIDFrom(e),
@@ -254,9 +258,18 @@ func editPostHandler(e *core.RequestEvent) error {
 		}
 
 		isAuthor := e.Auth != nil && post.GetString("author_id") == e.Auth.Id
-		hasMod := auth.Has(acc.Permissions, auth.PermModerateContent)
+		// Split permission, not an umbrella: editing and deleting a stranger's
+		// post are separately assignable, so a role can be given one without
+		// the other. The authorship check above is mandatory either way —
+		// `edit_others_posts` widens WHO may act, it never substitutes for the
+		// author comparison. `delete_others_posts` is deliberately NOT accepted
+		// here: the right to remove a post is not the right to rewrite it.
+		canEdit := isAuthor || auth.Has(acc.Permissions, auth.PermEditOthersPosts)
+		// A moderator editing a stranger's post is staff activity and is
+		// audited; the author editing their own post is not.
+		isModerated := !isAuthor && auth.Has(acc.Permissions, auth.PermEditOthersPosts)
 
-		if !isAuthor && !hasMod {
+		if !canEdit {
 			return 0, nil, forbiddenError("you cannot edit this post")
 		}
 
@@ -265,13 +278,13 @@ func editPostHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("parent topic not found")
 		}
 
-		if topic.GetBool("locked") && !hasMod {
+		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermCloseTopics) {
 			return 0, nil, conflictError("topic is locked")
 		}
 
 		post.Set("content", content)
 		post.Set("edited", types.NowDateTime())
-		if !isAuthor && hasMod {
+		if isModerated {
 			post.Set("editor_id", e.Auth.Id)
 		}
 
@@ -279,7 +292,7 @@ func editPostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to update post", err)
 		}
 
-		if !isAuthor && hasMod {
+		if isModerated {
 			if err := recordAuditLog(txApp, "post_edit", e.Auth.Id, map[string]any{
 				"post_id":   postID,
 				"topic_id":  topic.Id,
@@ -328,9 +341,11 @@ func deletePostHandler(e *core.RequestEvent) error {
 		}
 
 		isAuthor := e.Auth != nil && post.GetString("author_id") == e.Auth.Id
-		hasMod := auth.Has(acc.Permissions, auth.PermModerateContent)
+		// Same split as editing, and the same asymmetry kept on purpose: the
+		// right to delete a stranger's post does not imply the right to edit it.
+		byModeration := !isAuthor && auth.Has(acc.Permissions, auth.PermDeleteOthersPosts)
 
-		if !isAuthor && !hasMod {
+		if !isAuthor && !byModeration {
 			return 0, nil, forbiddenError("you cannot delete this post")
 		}
 
@@ -348,10 +363,15 @@ func deletePostHandler(e *core.RequestEvent) error {
 		// cascaded over every post. Refusing it here makes that class of bug
 		// impossible regardless of what the client asks for.
 		//
-		// posts.sequence is Required and 1-based for published posts (topic
-		// creation writes 1 for the opening post); 0 is reserved for drafts,
-		// which are removed through the draft commands and never through here.
-		if post.GetInt("sequence") <= 1 {
+		// The first post of a topic IS the topic. With `sequence` gone it is
+		// identified as the EARLIEST `created` in the topic, ties broken by id
+		// — the same total order the feed uses, so this can never disagree with
+		// what page 1 shows as the opening post.
+		isFirstPost, err := isTopicOpeningPost(txApp, topic.Id, post.Id)
+		if err != nil {
+			return 0, nil, internalError("failed to identify the topic's first post", err)
+		}
+		if isFirstPost {
 			return 0, nil, conflictError("cannot delete a topic's first post here - delete the topic instead")
 		}
 
@@ -407,7 +427,7 @@ func deletePostHandler(e *core.RequestEvent) error {
 			"topic_id":    topic.Id,
 			"topic_title": topic.GetString("title"),
 			"author_id":   authorID,
-			"sequence":    post.GetInt("sequence"),
+			"created":     post.GetDateTime("created").String(),
 			"by_author":   isAuthor,
 			"content":     post.GetString("content"),
 		}); err != nil {
@@ -446,7 +466,7 @@ func deletePostHandler(e *core.RequestEvent) error {
 			err = txApp.RecordQuery(postsCollectionName).
 				AndWhere(dbx.HashExp{"topic_id": topic.Id}).
 				AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
-				OrderBy("sequence DESC").
+				OrderBy("created DESC", "id DESC").
 				Limit(1).
 				All(&latestPosts)
 			if err != nil {
@@ -515,28 +535,16 @@ func movePostsHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("target topic not found")
 		}
 
-		// Find target topic max sequence
-		type maxSeqResult struct {
-			MaxSeq int `db:"max_seq"`
-		}
-		var seqRes maxSeqResult
-		err = txApp.DB().NewQuery("SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM posts WHERE topic_id = {:target}").
-			Bind(dbx.Params{"target": targetTopic.Id}).
-			One(&seqRes)
-		if err != nil {
-			return 0, nil, internalError("failed to get target max sequence", err)
-		}
-
-		currentSeq := seqRes.MaxSeq
-
+		// No sequence renumbering: `created` travels with the post, so a moved
+		// post keeps its original arrival time and lands in the target thread at
+		// the position that time earned. Renumbering would have been the only
+		// reason this handler needed the target's max sequence.
 		for _, pid := range form.PostIDs {
 			post, err := txApp.FindRecordById(postsCollectionName, pid)
 			if err != nil || post == nil || post.GetString("topic_id") != sourceTopicID {
 				return 0, nil, validationError(fmt.Sprintf("post %s does not belong to source topic", pid))
 			}
-			currentSeq++
 			post.Set("topic_id", targetTopic.Id)
-			post.Set("sequence", currentSeq)
 			if err := txApp.Save(post); err != nil {
 				return 0, nil, internalError("failed to move post", err)
 			}
@@ -601,10 +609,12 @@ func recalcTopicProjection(txApp core.App, topic *core.Record) {
 	topic.Set("posts_count", cRes.Cnt)
 
 	var latestPosts []*core.Record
+	// Latest = newest by `created`, id breaking a tie. Same order as the feed,
+	// so "the last post" and "the bottom of page N" can never disagree.
 	err := txApp.RecordQuery(postsCollectionName).
 		AndWhere(dbx.HashExp{"topic_id": topic.Id}).
 		AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
-		OrderBy("sequence DESC").
+		OrderBy("created DESC", "id DESC").
 		Limit(1).
 		All(&latestPosts)
 	if err == nil && len(latestPosts) > 0 {

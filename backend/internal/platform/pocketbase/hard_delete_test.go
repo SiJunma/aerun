@@ -129,7 +129,6 @@ func TestHardDeleteMovesEveryAuthorsCounter(t *testing.T) {
 	extra := core.NewRecord(mustCol(t, app, postsCollectionName))
 	extra.Set("topic_id", topicID)
 	extra.Set("author_id", fixPendingID)
-	extra.Set("sequence", 3)
 	extra.Set("content", "a second reply from the same author")
 	extra.Set("is_draft", false)
 	if err := app.Save(extra); err != nil {
@@ -282,7 +281,6 @@ func TestEveryDeleteIsAuditedWithItsText(t *testing.T) {
 	post := core.NewRecord(mustCol(t, app, postsCollectionName))
 	post.Set("topic_id", topicID)
 	post.Set("author_id", fixPendingID)
-	post.Set("sequence", 3)
 	post.Set("content", secret)
 	post.Set("is_draft", false)
 	if err := app.Save(post); err != nil {
