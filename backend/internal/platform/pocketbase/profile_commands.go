@@ -58,6 +58,16 @@ type profileForm struct {
 	Occupation *string `json:"occupation"`
 	Interests  *string `json:"interests"`
 	Contacts   *string `json:"contacts"`
+	// LastSelectedCharacterID is which mask the author posts as.
+	//
+	// It is NOT a profile field a member may see or staff may change, so it is
+	// excluded from applyProfile's allowlist and accepted ONLY on the self path.
+	// It needs a route of its own anyway: the legacy UI saved it through the
+	// admin endpoint, which requires admin_access and only carries role and
+	// status — so picking a character answered 403 for every ordinary member.
+	// The Firestore rules allowed exactly this one key on a user's own record
+	// (PROJECT_CONTEXT.md, users.allow update), which is why it exists.
+	LastSelectedCharacterID *string `json:"last_selected_character_id"`
 }
 
 // profileFieldNames is the ALLOWLIST. Fields are applied by iterating this list
@@ -148,6 +158,11 @@ func updateMyProfileHandler(e *core.RequestEvent) error {
 	record := e.Auth
 	if err := applyProfile(record, form); err != nil {
 		return err
+	}
+	// Self-only, and deliberately OUTSIDE applyProfile so the staff path can
+	// never set it: choosing a mask is the author's own business.
+	if form.LastSelectedCharacterID != nil {
+		record.Set("last_selected_character_id", strings.TrimSpace(*form.LastSelectedCharacterID))
 	}
 	if err := e.App.Save(record); err != nil {
 		return internalError("failed to save the profile", err)

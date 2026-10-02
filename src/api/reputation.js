@@ -76,23 +76,45 @@ export const getProfileVote = async (voterUid, targetUid) => {
 };
 
 /**
- * updateReputationComment
- * Allows a user to edit their reputation comment.
+ * Edit the comment on a reputation vote you cast.
+ *
+ * The previous version wrote `pb.collection('reputation_votes').update(...)`
+ * for a PROFILE vote — and that collection is locked to the server
+ * (lockBrowserRules in migration 1766300000), so the write always failed. It
+ * was swallowed by a try/catch that returned undefined, and ProfilePage showed
+ * "Reputation comment updated" anyway: a success message for a write that never
+ * happened.
+ *
+ * Both kinds of vote now go through the command layer, which UPDATES the
+ * existing vote rather than creating a second one — `voteUserHandler` looks up
+ * the voter's existing vote and rewrites its value and comment, so re-sending
+ * the current value with a new comment is an edit and not a second vote.
+ *
+ * @param {{id: string, post_id?: string, target_id?: string, value?: number}} vote
+ * @param {string} newComment
  */
-export const updateReputationComment = async (logId, newComment, postId = null) => {
-  if (postId) {
-    return await sendApi(`/api/aerun/posts/${postId}/vote`, {
+export const updateReputationComment = async (vote, newComment = '') => {
+  if (!vote || !vote.id) return null;
+  const text = newComment || '';
+
+  // A vote on a post: the route knows the post from the URL.
+  if (vote.post_id) {
+    return await sendApi(`/api/aerun/posts/${vote.post_id}/vote`, {
       method: 'POST',
-      body: { comment: newComment || '' }
+      body: { value: vote.value, comment: text }
     });
   }
-  try {
-    return await pb.collection('reputation_votes').update(logId, {
-      comment: newComment || ''
+
+  // A vote on a profile. target_id and value must both travel, or the server
+  // would validate an empty value and reject the request.
+  if (vote.target_id) {
+    return await sendApi(`/api/aerun/users/${vote.target_id}/vote`, {
+      method: 'POST',
+      body: { value: vote.value, comment: text }
     });
-  } catch (err) {
-    console.warn('[updateReputationComment]', err);
   }
+
+  throw new Error('updateReputationComment needs a post_id or target_id');
 };
 
 /**

@@ -438,7 +438,11 @@ const ProfilePage = () => {
   const handleUpdateLogComment = async (logId) => {
     setSavingLogComment(true);
     try {
-      await updateReputationComment(logId, editLogComment);
+      // The whole log row travels, not just its id: the command needs the
+      // target and the current value to make this an EDIT of the existing
+      // vote rather than a second one.
+      const log = repLogs.find((l) => l.id === logId);
+      await updateReputationComment(log, editLogComment);
       setEditingLogId(null);
       showToast(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
     } catch (err) {
@@ -998,7 +1002,7 @@ const ProfilePage = () => {
                                               onClick={async () => {
                                                 if (window.confirm(lang === 'ru' ? 'Удалить комментарий?' : 'Delete comment?')) {
                                                   try {
-                                                    await updateReputationComment(log.id, '');
+                                                    await updateReputationComment(log, '');
                                                     showToast(lang === 'ru' ? 'Комментарий удален' : 'Comment deleted');
                                                   } catch (err) {
                                                     showToast(err.message, 'danger');

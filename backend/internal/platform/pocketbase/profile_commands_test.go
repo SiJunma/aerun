@@ -173,6 +173,41 @@ func TestProfileEditRejectsOverlongFields(t *testing.T) {
 	}
 }
 
+func TestProfileEditSavesSelectedCharacter(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// Picking the mask you post as. The legacy UI saved this through the ADMIN
+	// endpoint, which answers 403 for an ordinary member — so the control was
+	// broken in the core posting flow. Set and clear both have to work.
+	for _, tc := range []struct{ name, value string }{
+		{"select a character", "charplayer00001"},
+		{"clear the selection", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"last_selected_character_id":%q}`, tc.value)
+			req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/aerun/me/profile", strings.NewReader(body))
+			req.Header.Set("Authorization", tokens["player"])
+			req.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", res.StatusCode)
+			}
+			if got := profileField(t, app, fixPlayerID, "last_selected_character_id"); got != tc.value {
+				t.Errorf("last_selected_character_id = %q, want %q", got, tc.value)
+			}
+		})
+	}
+}
+
 // TestProfileEditDoesNotWriteNickname: nickname keeps its own audited command
 // and its rank matrix, so it must not be reachable through this one.
 func TestProfileEditDoesNotWriteNickname(t *testing.T) {

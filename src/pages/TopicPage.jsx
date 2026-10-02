@@ -1184,7 +1184,7 @@ const TopicPage = () => {
     if (!selectedVote || !user) return;
     setSavingRepComment(true);
     try {
-      await updateReputationComment(selectedVote.id, editingRepComment, selectedVote.post_id);
+      await updateReputationComment(selectedVote, editingRepComment);
 
       const updatedVote = { ...selectedVote, comment: editingRepComment };
       setSelectedVote(updatedVote);

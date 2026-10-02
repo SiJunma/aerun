@@ -425,6 +425,21 @@ export const deletePost = async (post, _performerId) => {
 };
 
 export const updateUser = async (uid, userData, _performerId) => {
+  // `last_selected_character_id` used to be saved HERE, and that was the wrong
+  // route: this targets PATCH /admin/users/{id}, which requires admin_access and
+  // carries only role and status. Picking a character to post as answered 403
+  // for every ordinary member — and it sits in the reply and topic forms, so it
+  // was broken in the core posting flow, not an edge case.
+  //
+  // Choosing a mask is the author's own business, so it goes to /me/profile,
+  // which accepts it on the self path only.
+  if (userData && Object.keys(userData).length === 1 && 'last_selected_character_id' in userData) {
+    return await sendApi(`/api/aerun/me/profile`, {
+      method: 'PATCH',
+      body: { last_selected_character_id: userData.last_selected_character_id }
+    });
+  }
+
   return await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
     body: userData
