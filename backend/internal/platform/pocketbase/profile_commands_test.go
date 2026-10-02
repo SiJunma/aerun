@@ -114,10 +114,14 @@ func TestProfileEditOfAnotherAccountIsRankBounded(t *testing.T) {
 		return res.StatusCode
 	}
 
-	// WHO may edit another account follows the legacy profile matrix, not the
-	// nickname one. `edit_others_statuses` is an ADMIN key; moderators never had
-	// it and this change does not quietly hand it over. The rank matrix still
-	// applies on top of it — see the root case below.
+	// WHO may edit another account follows the PROFILE matrix, not the nickname
+	// one. `edit_others_profile` is admin-only by default and is deliberately
+	// not `edit_others_statuses`: that key names the one-line status under a
+	// nickname, and borrowing it made the permission list describe something the
+	// code did not do. Moderators edit content (posts, topics, nicknames); these
+	// are personal facts.
+	//
+	// The RANK matrix from renaming still applies on top — see the root case.
 	if got := patch(adminToken, fixPlayerID, `{"bio":"moderated"}`, "prof-adm-1"); got != http.StatusOK {
 		t.Errorf("admin editing a player's bio = %d, want 200", got)
 	}
@@ -126,7 +130,7 @@ func TestProfileEditOfAnotherAccountIsRankBounded(t *testing.T) {
 	}
 
 	if got := patch(tokens["moderator"], fixPlayerID, `{"bio":"nope"}`, "prof-mod-1"); got != http.StatusForbidden {
-		t.Errorf("moderator editing a player's bio = %d, want 403 (no edit_others_statuses)", got)
+		t.Errorf("moderator editing a player's bio = %d, want 403 (no edit_others_profile)", got)
 	}
 	if got := profileField(t, app, fixPlayerID, "bio"); got != "moderated" {
 		t.Errorf("a refused edit changed the bio: %q", got)

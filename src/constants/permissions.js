@@ -14,6 +14,12 @@ export const PERMISSIONS = {
   EDIT_SELF_AVATAR: 'edit_self_avatar',
   EDIT_SELF_STATUS: 'edit_self_status',
   EDIT_SELF_SIGNATURE: 'edit_self_signature',
+  // The BIOGRAPHICAL block — bio, location, birthday, occupation, interests,
+  // contacts. Separate from edit_self/others_statuses, which name the one-line
+  // status under a nickname. edit_others_profile is admin-only by default:
+  // moderators edit content, these are personal facts.
+  EDIT_SELF_PROFILE: 'edit_self_profile',
+  EDIT_OTHERS_PROFILE: 'edit_others_profile',
   MANAGE_ROLES: 'manage_roles',
   MANAGE_CATEGORIES: 'manage_categories',
   DELETE_USERS: 'delete_users',
@@ -80,6 +86,8 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.EDIT_SELF_AVATAR]: { en: 'Edit Own Avatar', ru: 'Смена своего аватара' },
   [PERMISSIONS.EDIT_SELF_STATUS]: { en: 'Edit Own Status', ru: 'Смена своего статуса' },
   [PERMISSIONS.EDIT_SELF_SIGNATURE]: { en: 'Edit Own Signature', ru: 'Смена своей подписи' },
+  [PERMISSIONS.EDIT_SELF_PROFILE]: { en: 'Edit Own Profile Fields', ru: 'Смена своих данных профиля' },
+  [PERMISSIONS.EDIT_OTHERS_PROFILE]: { en: "Edit Others' Profile Fields", ru: 'Правка чужих данных профиля' },
   [PERMISSIONS.MANAGE_ROLES]: { en: 'Manage Roles', ru: 'Управление ролями' },
   [PERMISSIONS.MANAGE_CATEGORIES]: { en: 'Manage Categories', ru: 'Управление категориями' },
   [PERMISSIONS.DELETE_USERS]: { en: 'Delete Users', ru: 'Удаление пользователей' },
@@ -147,10 +155,14 @@ export const PERMISSION_GROUPS = [
       PERMISSIONS.EDIT_OTHERS_AVATARS,
       PERMISSIONS.EDIT_OTHERS_STATUSES,
       PERMISSIONS.EDIT_OTHERS_SIGNATURES,
+      // Bio, location, birthday, occupation, interests, contacts. Moderators
+      // edit content; these are personal facts, so `_others_` is admin-only.
+      PERMISSIONS.EDIT_OTHERS_PROFILE,
       PERMISSIONS.EDIT_SELF_NICKNAME,
       PERMISSIONS.EDIT_SELF_AVATAR,
       PERMISSIONS.EDIT_SELF_STATUS,
-      PERMISSIONS.EDIT_SELF_SIGNATURE
+      PERMISSIONS.EDIT_SELF_SIGNATURE,
+      PERMISSIONS.EDIT_SELF_PROFILE
     ]
   },
   {

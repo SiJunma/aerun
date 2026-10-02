@@ -23,10 +23,30 @@ const (
 	PermEditSelfAvatar       Permission = "edit_self_avatar"
 	PermEditSelfStatus       Permission = "edit_self_status"
 	PermEditSelfSignature    Permission = "edit_self_signature"
-	PermManageRoles          Permission = "manage_roles"
-	PermManageCategories     Permission = "manage_categories"
-	PermDeleteUsers          Permission = "delete_users"
-	PermViewAuditLog         Permission = "view_audit_log"
+	// PermEditSelfProfile and PermEditOthersProfile cover the BIOGRAPHICAL
+	// block — bio, location, birthday, occupation, interests, contacts.
+	//
+	// These are their own keys rather than riding on edit_self_status /
+	// edit_others_statuses, which name a different thing: the one-line status
+	// under a nickname. Gating a stranger's birthday behind a key called
+	// "statuses" is a lie in the permission list, and the next reader trusts it.
+	//
+	// ONE key for all seven, not seven keys: they are one panel, submitted
+	// together, and nobody wants a role that may edit a bio but not a location.
+	// A custom role that must not touch them drops this one key.
+	//
+	// NOT granted to moderators by default, and that is the deliberate call.
+	// Moderators edit CONTENT (posts, topics, now nicknames); these are personal
+	// FACTS, and the three sibling edit_others_* keys — avatar, status,
+	// signature — have all been admin-only since the legacy app. Widening it is
+	// one edit in the admin panel; narrowing it after a moderator has read
+	// somebody's contacts list is not reversible.
+	PermEditSelfProfile   Permission = "edit_self_profile"
+	PermEditOthersProfile Permission = "edit_others_profile"
+	PermManageRoles       Permission = "manage_roles"
+	PermManageCategories  Permission = "manage_categories"
+	PermDeleteUsers       Permission = "delete_users"
+	PermViewAuditLog      Permission = "view_audit_log"
 
 	PermModerateContent Permission = "moderate_content"
 	PermMoveTopics      Permission = "move_topics"
@@ -115,12 +135,14 @@ var allPermissions = func() []Permission {
 		PermEditOthersMask,
 		PermEditOthersNicknames,
 		PermEditOthersPosts,
+		PermEditOthersProfile,
 		PermEditOthersSignatures,
 		PermEditOthersStatuses,
 		PermEditOthersTopics,
 		PermEditSelfAvatar,
 		PermEditSelfNickname,
 		PermEditSelfPost,
+		PermEditSelfProfile,
 		PermEditSelfSignature,
 		PermEditSelfStatus,
 		PermEditSelfTopic,

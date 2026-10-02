@@ -132,7 +132,7 @@ func updateMyProfileHandler(e *core.RequestEvent) error {
 	if acc.Status == auth.StatusBanned {
 		return forbiddenError("banned accounts cannot edit their profile")
 	}
-	if !auth.Has(acc.Permissions, auth.PermEditSelfStatus) {
+	if !auth.Has(acc.Permissions, auth.PermEditSelfProfile) {
 		return forbiddenError("you are not allowed to edit your profile")
 	}
 
@@ -170,7 +170,15 @@ func updateUserProfileHandler(e *core.RequestEvent) error {
 	targetID := e.Request.PathValue("id")
 	acc := AccessFrom(e)
 
-	if !auth.Has(acc.Permissions, auth.PermEditOthersStatuses) {
+	// The biographical block is gated on `edit_others_profile`, NOT on
+	// `edit_others_statuses` — that key names the one-line status under a
+	// nickname, and reusing it here made the permission list say something the
+	// code did not do.
+	//
+	// Default holder: admins only. Moderators have never held
+	// edit_others_avatars, _statuses or _signatures either, so this keeps the
+	// family consistent; a custom role can be granted the key per member.
+	if !auth.Has(acc.Permissions, auth.PermEditOthersProfile) {
 		return forbiddenError("you are not allowed to edit other members' profiles")
 	}
 
