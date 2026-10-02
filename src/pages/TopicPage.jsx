@@ -12,6 +12,7 @@ import {
 
 import { pb } from '../api/pocketbase';
 import { processDiceRolls } from '../utils/dice';
+import { createInFlight, newIdempotencyKey } from '../utils/inflight';
 import { subscribeToCharacters } from '../api/character';
 
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -103,6 +104,16 @@ const TopicPage = () => {
   const [pinnedFirstPost, setPinnedFirstPost] = useState(null);
   const [myDraft, setMyDraft] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // The in-flight latch for the reply form. A REF, not state: `submitting`
+  // above still drives the button's disabled style, but it is read from the
+  // render closure and React batches state writes, so two clicks in the same
+  // tick both see `submitting === false` and both post. A ref write is not
+  // batched, so the second click sees the first one's write immediately.
+  // See markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md and utils/inflight.js.
+  const replyInFlightRef = useRef(null);
+  if (replyInFlightRef.current === null) {
+    replyInFlightRef.current = createInFlight();
+  }
   const [authorStats, setAuthorStats] = useState({}); // { uid: { post_count: N } }
   const [maskStats, setMaskStats] = useState({}); // { charId: { status_line: '' } }
 
@@ -1267,8 +1278,22 @@ const TopicPage = () => {
 
   const handleReply = async (e) => {
     e?.preventDefault?.();
-    if (submitting) return;
+    // The latch is taken FIRST, before any await and before the optimistic
+    // insert, so the second click of a double click cannot get past this line.
+    // The state guard alone is not enough: it is read from the render closure.
+    if (!replyInFlightRef.current.begin()) return;
+    try {
+      await submitReply();
+    } finally {
+      replyInFlightRef.current.end();
+    }
+  };
 
+  const submitReply = async () => {
+    // ONE key per logical submit, reused by every request this attempt makes.
+    // The latch above stops the second click; this stops the server treating
+    // any duplicate that does escape as a second post. Neither alone is enough.
+    const idempotencyKey = newIdempotencyKey('post');
     if (!replyContent.trim()) {
       showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
       return;
@@ -1393,7 +1418,7 @@ const TopicPage = () => {
     setSubmitting(true);
 
     try {
-      const replyResult = await createPost(postData);
+      const replyResult = await createPost(postData, idempotencyKey);
       const newPostId = replyResult?.postId;
       navigateToCreatedPost(tempId, newPostId);
 

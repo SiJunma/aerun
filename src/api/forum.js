@@ -271,11 +271,18 @@ export const subscribeToUserPosts = (uid, limitCount, callback) => {
   return () => { isSubscribed = false; };
 };
 
-export const createPost = async (postData) => {
+// `idempotencyKey` is OPTIONAL but should be supplied by the caller for anything
+// a person can double-click. Without it sendApi mints a fresh random key per
+// request, so a duplicate that slips past a client-side guard is treated by the
+// server as a genuinely new command — and the member gets two posts. Passing
+// the SAME key for every request of one logical submit makes the server replay
+// the first response instead. See utils/inflight.js.
+export const createPost = async (postData, idempotencyKey) => {
   const { content: processedContent } = processDiceRolls(postData.content);
 
   const res = await sendApi(`/api/aerun/topics/${postData.topic_id}/posts`, {
     method: 'POST',
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
       content: processedContent.trim()
     }

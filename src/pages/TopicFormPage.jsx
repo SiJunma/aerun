@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Container, Card, Form, Button, Dropdown } from 'react-bootstrap';
 import { User } from 'lucide-react';
@@ -9,6 +9,7 @@ import { createTopic, updateUser } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { resolveField } from '../utils/text';
+import { createInFlight } from '../utils/inflight';
 import { useToast } from '../contexts/ToastProvider';
 
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -32,6 +33,14 @@ const TopicFormPage = () => {
   const [characters, setCharacters] = useState([]);
   const [category, setCategory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // Same reason as TopicPage: `submitting` is read from the render closure and
+  // React batches state writes, so two clicks in one tick both see false. The
+  // ref latch is taken before any await and is not batched. See
+  // utils/inflight.js and markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md.
+  const submitInFlightRef = useRef(null);
+  if (submitInFlightRef.current === null) {
+    submitInFlightRef.current = createInFlight();
+  }
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [pinFirstPost, setPinFirstPost] = useState(false);
 
@@ -88,8 +97,18 @@ const TopicFormPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (submitting) return;
+    // The state guard below still drives the button style, but it cannot stop
+    // a same-tick double click: both clicks read `submitting` from the render
+    // closure. The latch can.
+    if (!submitInFlightRef.current.begin()) return;
+    try {
+      await runSubmit();
+    } finally {
+      submitInFlightRef.current.end();
+    }
+  };
 
+  const runSubmit = async () => {
     if (!title.trim()) {
       showToast(lang === 'ru' ? 'Пожалуйста, введите заголовок темы' : 'Please enter a topic title', 'danger');
       return;
