@@ -31,15 +31,237 @@ type sendDMMessageForm struct {
 	Text string `json:"text"`
 }
 
+type editDMMessageForm struct {
+	Text string `json:"text"`
+}
+
+// requireDMMember reports whether userID is a participant in conversationID.
+//
+// Every DM command passes through this rather than trusting the conversation id
+// in the URL: rows in dm_messages carry a conversation_id but no per-viewer
+// access rule, so "is this my conversation" has to be asked explicitly or a
+// member could read and rewrite somebody else's mail by guessing an id.
+func requireDMMember(txApp core.App, conversationID, userID string) error {
+	member, err := txApp.FindFirstRecordByFilter(
+		dmMembersCollectionName,
+		"conversation_id = {:c} && user_id = {:u}",
+		dbx.Params{"c": conversationID, "u": userID},
+	)
+	if err != nil || member == nil {
+		return forbiddenError("this conversation is not yours")
+	}
+	return nil
+}
+
+// editDMMessageHandler lets a sender correct a message they sent.
+//
+// Sender-only, deliberately. The recipient cannot edit what the other person
+// wrote — that would make a private conversation forgeable by its audience —
+// and neither can a moderator: a DM is not forum content, and staff authority
+// over the forum does not extend into it. `edit_others_posts` does NOT apply
+// here.
+//
+// A tombstone is not editable. Once deleted there is no text left to correct,
+// and accepting an edit would quietly resurrect a message the sender took back.
+func editDMMessageHandler(e *core.RequestEvent) error {
+	claim, err := claimFrom(e)
+	if err != nil {
+		return err
+	}
+	if e.Auth == nil {
+		return forbiddenError("authentication required")
+	}
+	id := e.Request.PathValue("id")
+
+	raw, err := readBodyLimited(e, maxDMBodyBytes)
+	if err != nil {
+		return err
+	}
+	var form editDMMessageForm
+	if err := json.Unmarshal(raw, &form); err != nil {
+		return validationError("invalid JSON body")
+	}
+	cleanText, err := messaging.ValidateMessageText(form.Text)
+	if err != nil {
+		return validationError(err.Error())
+	}
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
+		msg, err := txApp.FindRecordById(dmMessagesCollectionName, id)
+		if err != nil || msg == nil {
+			return 0, nil, notFoundError("message not found")
+		}
+		if err := requireDMMember(txApp, msg.GetString("conversation_id"), e.Auth.Id); err != nil {
+			return 0, nil, err
+		}
+		if msg.GetString("sender_id") != e.Auth.Id {
+			return 0, nil, forbiddenError("you can only edit messages you sent")
+		}
+		if !msg.GetDateTime("deleted_at").IsZero() {
+			return 0, nil, conflictError("this message was deleted and can no longer be edited")
+		}
+
+		msg.Set("text", cleanText)
+		msg.Set("edited", types.NowDateTime())
+		if err := txApp.Save(msg); err != nil {
+			return 0, nil, internalError("failed to edit the message", err)
+		}
+
+		// The conversation preview is a copy of the newest message's text, so
+		// an edit that left it stale would show the old words in the list.
+		if err := refreshConversationPreview(txApp, msg.GetString("conversation_id")); err != nil {
+			return 0, nil, err
+		}
+
+		return http.StatusOK, map[string]any{
+			"message":    dmMessagePayload(msg),
+			"request_id": requestIDFrom(e),
+		}, nil
+	})
+	return writeCommandResult(e, outcome, err)
+}
+
+// deleteDMMessageHandler soft-deletes a message the caller SENT.
+//
+// The row survives with an emptied text and a `deleted_at`, so the thread keeps
+// its shape and the other participant can see that something was said and
+// removed. This is the deliberate opposite of the forum, where deleting a post
+// removes it completely.
+//
+// Sender-only, for the same reason editing is. The counterpart — "delete for
+// me" — is the `clear` route that already exists, and that one IS per-viewer.
+func deleteDMMessageHandler(e *core.RequestEvent) error {
+	claim, err := claimFrom(e)
+	if err != nil {
+		return err
+	}
+	if e.Auth == nil {
+		return forbiddenError("authentication required")
+	}
+	id := e.Request.PathValue("id")
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
+		msg, err := txApp.FindRecordById(dmMessagesCollectionName, id)
+		if err != nil || msg == nil {
+			return 0, nil, notFoundError("message not found")
+		}
+		if err := requireDMMember(txApp, msg.GetString("conversation_id"), e.Auth.Id); err != nil {
+			return 0, nil, err
+		}
+		if msg.GetString("sender_id") != e.Auth.Id {
+			return 0, nil, forbiddenError("you can only delete messages you sent")
+		}
+		if !msg.GetDateTime("deleted_at").IsZero() {
+			// Idempotent by outcome, and deliberately does NOT rewrite
+			// deleted_at: that timestamp is the record of when the message
+			// actually went, and a second delete must not move it.
+			return http.StatusOK, map[string]any{
+				"deleted":    true,
+				"id":         id,
+				"request_id": requestIDFrom(e),
+			}, nil
+		}
+
+		msg.Set("text", "")
+		msg.Set("deleted_at", types.NowDateTime())
+		if err := txApp.Save(msg); err != nil {
+			return 0, nil, internalError("failed to delete the message", err)
+		}
+
+		// messages_count deliberately does NOT change: the row is still a
+		// message in this conversation. Only the preview moves.
+		if err := refreshConversationPreview(txApp, msg.GetString("conversation_id")); err != nil {
+			return 0, nil, err
+		}
+
+		if err := recordAuditLog(txApp, "dm_message_delete", e.Auth.Id, map[string]any{
+			"message_id":      msg.Id,
+			"conversation_id": msg.GetString("conversation_id"),
+			"sequence":        msg.GetInt("sequence"),
+		}); err != nil {
+			return 0, nil, err
+		}
+
+		return http.StatusOK, map[string]any{
+			"deleted":    true,
+			"id":         id,
+			"request_id": requestIDFrom(e),
+		}, nil
+	})
+	return writeCommandResult(e, outcome, err)
+}
+
+// refreshConversationPreview re-derives a conversation's `last_message` from the
+// newest NON-DELETED row, and clears it when every message was deleted.
+//
+// Without this the conversation list would keep showing the text of a message
+// that has just been deleted — the most visible way a soft delete could leak
+// the very content it was supposed to remove.
+func refreshConversationPreview(txApp core.App, conversationID string) error {
+	conv, err := txApp.FindRecordById(dmConversationsCollectionName, conversationID)
+	if err != nil || conv == nil {
+		return internalError("conversation missing for a message", err)
+	}
+	rows, err := txApp.FindAllRecords(
+		dmMessagesCollectionName,
+		dbx.NewExp("conversation_id = {:c}", dbx.Params{"c": conversationID}),
+	)
+	if err != nil {
+		return internalError("failed to read a conversation's messages", err)
+	}
+
+	preview := ""
+	lastAt := types.DateTime{}
+	bestSeq := -1
+	for _, row := range rows {
+		if !row.GetDateTime("deleted_at").IsZero() {
+			continue
+		}
+		if seq := row.GetInt("sequence"); seq > bestSeq {
+			bestSeq = seq
+			preview = row.GetString("text")
+			lastAt = row.GetDateTime("created")
+		}
+	}
+
+	conv.Set("last_message", preview)
+	if !lastAt.IsZero() {
+		conv.Set("last_message_at", lastAt)
+	}
+	return txApp.Save(conv)
+}
+
 func dmMessagePayload(rec *core.Record) map[string]any {
-	return map[string]any{
+	// A deleted message keeps its row, its place in the sequence and its
+	// position in the thread — the conversation must not develop a hole. Only
+	// the text is gone, and `deleted` says so, so the client can render a
+	// tombstone instead of pretending nothing was ever sent.
+	//
+	// The text is never echoed back after deletion, not even empty: an empty
+	// string in a payload reads as "a message with no content" to a client
+	// that does not check the flag, which is how a deleted message turns back
+	// into a blank row in the UI.
+	payload := map[string]any{
 		"id":              rec.Id,
 		"conversation_id": rec.GetString("conversation_id"),
 		"sender_id":       rec.GetString("sender_id"),
 		"sequence":        rec.GetInt("sequence"),
-		"text":            rec.GetString("text"),
 		"created":         rec.GetDateTime("created").String(),
+		"edited":          "",
+		"deleted":         false,
 	}
+
+	if deletedAt := rec.GetDateTime("deleted_at"); !deletedAt.IsZero() {
+		payload["deleted"] = true
+		payload["deleted_at"] = deletedAt.String()
+		return payload
+	}
+
+	payload["text"] = rec.GetString("text")
+	if edited := rec.GetDateTime("edited"); !edited.IsZero() {
+		payload["edited"] = edited.String()
+	}
+	return payload
 }
 
 // createOrReplyDMHandler initiates a new DM conversation or sends the first message.

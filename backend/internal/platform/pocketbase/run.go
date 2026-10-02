@@ -305,6 +305,11 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/dms/{id}/messages", listDMMessagesHandler)
 	group.POST("/dms/{id}/read", markConversationReadHandler)
 	group.POST("/dms/{id}/clear", clearConversationHandler)
+	// Message lifecycle. No RequirePermission: authority here is MEMBERSHIP and
+	// authorship, both checked in the handler, because `edit_others_posts` must
+	// not extend into a private conversation.
+	group.PATCH("/dm-messages/{id}", editDMMessageHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/dm-messages/{id}", deleteDMMessageHandler).BindFunc(enforceIdempotency)
 
 	group.GET("/me/notifications", listUserNotificationsHandler)
 	group.PATCH("/me/notifications/{id}/read", markNotificationReadHandler)
