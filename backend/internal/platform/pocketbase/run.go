@@ -204,6 +204,11 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// it is not expressible as a single permission.
 	group.PATCH("/me/nickname", changeMyNicknameHandler).BindFunc(enforceIdempotency)
 	group.PATCH("/users/{id}/nickname", changeUserNicknameHandler).BindFunc(enforceIdempotency)
+	// Profile fields. The legacy profile form used to save through the ADMIN
+	// route, which silently discarded everything but role and status — see
+	// profile_commands.go for the two ways that failed.
+	group.PATCH("/me/profile", updateMyProfileHandler)
+	group.PATCH("/users/{id}/profile", updateUserProfileHandler).BindFunc(enforceIdempotency)
 
 	// Sprint 2 identity commands.
 	group.POST("/auth/register", registerHandler)

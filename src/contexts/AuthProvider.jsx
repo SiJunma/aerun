@@ -291,18 +291,57 @@ export const AuthProvider = ({ children }) => {
     }));
   };
 
+  // updateProfile saves the profile form.
+  //
+  // It used to merge everything into local state and call nothing for your own
+  // account, so a changed status line, bio or nickname looked saved and vanished
+  // on reload. Editing somebody ELSE went to the admin endpoint, which requires
+  // admin_access and whose body only carries role and status — a moderator got a
+  // 403 and an admin got a 200 that silently dropped every field.
+  //
+  // Each group now goes to the command that actually owns it:
+  //
+  //   nickname → its own command, because renaming is audited with the old AND
+  //              new value and bounded by the rank matrix (a moderator may only
+  //              rename strictly lower accounts). Sending it as a profile field
+  //              would lose both the audit and the rank rule.
+  //   profile  → /me/profile or /users/{id}/profile
+  //   settings → the existing settings command, which REPLACES the object
+  //
+  // Sequential, not parallel: two PATCHes to the same row can interleave, and a
+  // failure in the second must not leave the caller believing nothing saved.
   const updateProfile = async (newData, targetUid = null) => {
     if (!user) return;
     const finalUid = targetUid || user.uid;
-    if (finalUid !== user.uid) {
-      await sendApi(`/api/aerun/admin/users/${finalUid}`, {
-        method: 'PATCH',
-        body: newData
-      });
-    } else {
-      if (newData.settings) {
-        await updateSettings(newData.settings);
-      }
+    const isOwn = finalUid === user.uid;
+
+    const { nickname, ...rest } = newData;
+    const body = {};
+    for (const key of ['status_line', 'bio', 'location', 'birthday', 'occupation', 'interests', 'contacts']) {
+      if (rest[key] !== undefined) body[key] = rest[key];
+    }
+
+    if (Object.keys(body).length > 0) {
+      await sendApi(
+        isOwn ? '/api/aerun/me/profile' : `/api/aerun/users/${finalUid}/profile`,
+        { method: 'PATCH', body }
+      );
+    }
+
+    if (nickname !== undefined && nickname !== null && String(nickname).trim() !== '') {
+      await sendApi(
+        isOwn ? '/api/aerun/me/nickname' : `/api/aerun/users/${finalUid}/nickname`,
+        { method: 'PATCH', body: { nickname: String(nickname).trim() } }
+      );
+    }
+
+    if (newData.settings && isOwn) {
+      await updateSettings(newData.settings);
+    }
+
+    // Only AFTER the server confirmed, so a rejected save cannot leave the UI
+    // showing a nickname the database does not hold.
+    if (isOwn) {
       setProfile(prev => ({ ...prev, ...newData }));
     }
   };
