@@ -181,6 +181,9 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
+	// The caller's resolved role, needed by checkRoleChange: which roles this
+	// account may hand out is a rank question about WHO IS ASKING.
+	acc := AccessFrom(e)
 
 	userID := e.Request.PathValue("id")
 	raw, err := readBodyLimited(e, 32*1024)
@@ -209,6 +212,11 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 			// knows no such role), so it is rejected here instead of silently
 			// producing an account that can do nothing.
 			if err := requireKnownRole(txApp, role); err != nil {
+				return 0, nil, err
+			}
+			// Rank and appointment rules, in one place. `role` is validated
+			// above, so anything reaching here is a role id that really exists.
+			if err := checkRoleChange(txApp, acc.Role, targetUser.GetString("role"), role); err != nil {
 				return 0, nil, err
 			}
 			targetUser.Set("role", role)
@@ -242,6 +250,58 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 	})
 
 	return writeCommandResult(e, outcome, err)
+}
+
+// checkRoleChange is the authority rule for changing an account's role.
+//
+//	admin → may act on STRICTLY LOWER accounts only, and may not appoint an
+//	        admin. Demoting an admin is therefore impossible for an admin,
+//	        because an admin target is not strictly lower.
+//	root  → may act on anyone, but may still not WRITE the `root` role.
+//
+// The last clause is the owner's ruling and it is the reason this function
+// exists rather than a simple rank comparison: root is TRANSFERRED, never
+// granted. She was asked about appointing additional root admins, decided that
+// was a bad idea, and asked for a dedicated one-way transfer instead. So a
+// plain role write can create and destroy every other role, and `root` can
+// only ever be entered through that transfer command — a second root created
+// here would be an escalation with no ceremony and no record of the decision.
+//
+// Every other case is a rank question, and the rank comes from the `roles`
+// row, which is the runtime authority (see rankFor).
+func checkRoleChange(txApp core.App, actor auth.Role, currentRole, newRole string) error {
+	newAuthRole := auth.Role(newRole)
+
+	// Nobody writes `root` through this path. Transfer is the only way in.
+	if newAuthRole == auth.RoleRoot {
+		return forbiddenError(
+			"the root admin role cannot be assigned directly; it is transferred through a separate procedure",
+		)
+	}
+
+	if actor == auth.RoleRoot {
+		return nil
+	}
+
+	if actor != auth.RoleAdmin {
+		return forbiddenError("only an administrator or the chief admin may change roles")
+	}
+
+	// An admin may not appoint another admin. `newRole` was already checked
+	// against the role registry, so anything reaching here that is an admin is
+	// that exact role.
+	if newAuthRole == auth.RoleAdmin {
+		return forbiddenError("only the chief admin may appoint an administrator")
+	}
+
+	// And only on a strictly lower account, which is also what makes demoting
+	// an admin unreachable.
+	if rankFor(txApp, auth.Role(currentRole)) >= rankFor(txApp, actor) {
+		return forbiddenError(
+			"you can only change the role of an account ranked strictly below yours",
+		)
+	}
+	return nil
 }
 
 // requireKnownRole rejects a role id that has no row in the roles collection.

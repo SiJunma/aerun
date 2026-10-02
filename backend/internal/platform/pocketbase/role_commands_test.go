@@ -1,20 +1,28 @@
 package pocketbase
 
-// Tests for the TASK-5 role command hardening (ADR-3).
+// role_commands_test.go — part 1: the TASK-5 role command hardening (ADR-3).
 //
 // Each rule here exists because the previous handler produced a state nobody
 // could reason about: an edited system role that import-roles would silently
 // revert, a deleted role that left users.role dangling, and a custom role that
 // could take a system role's name.
+//
+// Part 2 (at the bottom of this file) pins the rank matrix for handing roles
+// out: an admin acts only on strictly lower accounts and may never appoint an
+// admin, while `root` is TRANSFERRED rather than granted.
 
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pocketbase/dbx"
+
+	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
 func TestSystemRoleIsNotEditable(t *testing.T) {
@@ -231,4 +239,104 @@ func TestDeleteRoleRefusesWhileReferenced(t *testing.T) {
 			t.Fatalf("expected 403 for a system role, got %d: %s", status, payload)
 		}
 	})
+}
+
+// Part 2: the rank matrix for handing roles out.
+//
+//	admin → strictly lower accounts only, and never the admin role itself
+//	root  → anything except writing `root`
+//
+// The third rule is the one that will be attempted first by anyone poking at
+// the admin panel: `PATCH /admin/users/{id} {"role":"root"}`. It must fail, and
+// for the stated reason — root is TRANSFERRED, never granted — because a role
+// write that can mint root is an escalation with no ceremony and no record.
+
+// setRole issues PATCH /admin/users/{id} with a role body as `actor`.
+func setRole(t *testing.T, serverURL, token, targetID, newRole, key string) int {
+	t.Helper()
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		fmt.Sprintf("%s/api/aerun/admin/users/%s", serverURL, targetID),
+		strings.NewReader(fmt.Sprintf(`{"role":%q}`, newRole)),
+	)
+	req.Header.Set("Authorization", token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", key)
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	return res.StatusCode
+}
+
+func TestRoleChangeRankMatrix(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	adminToken := createTestUser(t, app, fixAdminID, "admin@example.com", "AdminOne", auth.RoleAdmin, auth.StatusActive)
+	// A second admin, so "admin may not demote an admin" is reachable: the
+	// target must be a peer, not the caller.
+	// Fixed 15-char record id, as every PocketBase id in this codebase is.
+	const peerAdminID = "useradminpeer01"
+	createTestUser(t, app, peerAdminID, "admin2@example.com", "AdminTwo", auth.RoleAdmin, auth.StatusActive)
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	cases := []struct {
+		name   string
+		actor  string
+		target string
+		role   string
+		want   int
+	}{
+		{"admin promotes a player to moderator", adminToken, fixPlayerID, string(auth.RoleModerator), http.StatusOK},
+		{"admin demotes a moderator to player", adminToken, fixModeratorID, string(auth.RolePlayer), http.StatusOK},
+		{"admin may NOT appoint an admin", adminToken, fixPlayerID, string(auth.RoleAdmin), http.StatusForbidden},
+		{"admin may NOT demote a peer admin", adminToken, peerAdminID, string(auth.RolePlayer), http.StatusForbidden},
+		{"admin may NOT touch root", adminToken, fixRootID, string(auth.RolePlayer), http.StatusForbidden},
+		{"root appoints an admin", tokens["root"], fixPlayerID, string(auth.RoleAdmin), http.StatusOK},
+		{"root demotes an admin", tokens["root"], peerAdminID, string(auth.RolePlayer), http.StatusOK},
+		// The transfer guard, for BOTH actors.
+		{"root may NOT write the root role", tokens["root"], fixPlayerID, string(auth.RoleRoot), http.StatusForbidden},
+		{"admin may NOT write the root role", adminToken, fixPlayerID, string(auth.RoleRoot), http.StatusForbidden},
+		{"a moderator may not change roles at all", tokens["moderator"], fixPlayerID, string(auth.RolePlayer), http.StatusForbidden},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := setRole(t, server.URL, tc.actor, tc.target, tc.role, fmt.Sprintf("role-%d", i)); got != tc.want {
+				t.Fatalf("status = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRoleChangeIsAudited: a role change is the most consequential write in the
+// product, so the resulting role has to survive in the ledger.
+func TestRoleChangeIsAudited(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	if got := setRole(t, server.URL, tokens["root"], fixPlayerID, string(auth.RoleModerator), "role-audit-1"); got != http.StatusOK {
+		t.Fatalf("promotion = %d, want 200", got)
+	}
+
+	for _, entry := range auditLogsFor(t, app, "admin_user_update") {
+		details, _ := entry["details"].(map[string]any)
+		if details == nil {
+			continue
+		}
+		if role, _ := details["role"].(string); role == string(auth.RoleModerator) {
+			return
+		}
+	}
+	t.Error("a role change must be audited with the resulting role")
 }
