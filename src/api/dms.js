@@ -197,15 +197,49 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
  */
 // `senderUid` / `recipientUid` are no longer read: the backend derives both
 // from the auth token and refuses to let a client post as somebody else.
-export const sendDmMessage = async (conversationId, _senderUid, text, _recipientUid) => {
+export const sendDmMessage = async (conversationId, _senderUid, text, _recipientUid, idempotencyKey) => {
   if (!conversationId || !text) return;
   const { content: processedContent } = processDiceRolls(text);
 
   return await sendApi(`/api/aerun/dms/${conversationId}/messages`, {
     method: 'POST',
+    // A stable key per logical send. sendApi otherwise mints a fresh random one
+    // per call, so a double-click that escapes the in-flight latch is two posts.
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
       text: processedContent.trim()
     }
+  });
+};
+
+/**
+ * Edit a message you sent.
+ *
+ * Sender-only on the server: the recipient cannot rewrite what somebody else
+ * wrote, and staff authority over the forum does not extend into private mail.
+ * A tombstone answers 409 — there is no text left to correct, and accepting an
+ * edit would quietly resurrect a message the sender took back.
+ */
+export const editDmMessage = async (messageId, text) => {
+  if (!messageId || !text) return null;
+  const { content: processedContent } = processDiceRolls(text);
+  return await sendApi(`/api/aerun/dm-messages/${messageId}`, {
+    method: 'PATCH',
+    body: { text: processedContent.trim() }
+  });
+};
+
+/**
+ * Delete a message you sent, leaving a TOMBSTONE.
+ *
+ * The row survives and keeps its place in the thread, so the other participant
+ * still sees that something was said and removed — the opposite of the forum,
+ * where a deleted post is simply gone. `messages_count` does not move.
+ */
+export const deleteDmMessage = async (messageId) => {
+  if (!messageId) return null;
+  return await sendApi(`/api/aerun/dm-messages/${messageId}`, {
+    method: 'DELETE'
   });
 };
 

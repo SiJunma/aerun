@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Card, Button, Image, Badge, Spinner } from 'react-bootstrap';
+import { Card, Button, Image, Badge, Spinner, Form } from 'react-bootstrap';
 import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2, ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -14,10 +14,13 @@ import {
   subscribeToDmMessages,
   fetchOlderDmMessages,
   sendDmMessage,
+  editDmMessage,
+  deleteDmMessage,
   markDmRead,
   deleteConversation,
 } from '../../api/dms';
 import { getCachedDmMessages, setCachedDmMessages } from '../../api/dm-cache';
+import { createInFlight, newIdempotencyKey } from '../../utils/inflight';
 import { subscribeToUser } from '../../api/auth-resources';
 import { playNotificationSound } from '../../utils/notificationSound';
 import Timestamp from '../common/Timestamp';
@@ -365,7 +368,60 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     navigate(`/messages/${peerUid}`);
   };
 
+  // ── Edit / delete a message you sent ───────────────────────────────────────
+  // The server is the authority on both: only the sender may edit or delete,
+  // and a tombstone cannot be edited. These are the UI affordances for that,
+  // not a second copy of the rule — a staff account has no extra power here,
+  // because private mail is not forum content.
+  const [editingMsgId, setEditingMsgId] = useState(null);
+  const [editingText, setEditingText] = useState('');
+
+  const handleStartDmEdit = (msg) => {
+    setEditingMsgId(msg.id);
+    setEditingText(msg.text || '');
+  };
+
+  const handleCancelDmEdit = () => {
+    setEditingMsgId(null);
+    setEditingText('');
+  };
+
+  const handleSaveDmEdit = async (msg) => {
+    if (!editingText.trim()) return;
+    try {
+      await editDmMessage(msg.id, editingText);
+      handleCancelDmEdit();
+      showToast(lang === 'ru' ? 'Сообщение изменено' : 'Message edited');
+    } catch (err) {
+      console.error('[handleSaveDmEdit]', err);
+      showToast(lang === 'ru' ? 'Не удалось изменить сообщение' : 'Failed to edit message', 'danger');
+    }
+  };
+
+  const handleDeleteDm = async (msg) => {
+    try {
+      await deleteDmMessage(msg.id);
+      handleCancelDmEdit();
+      showToast(
+        lang === 'ru'
+          ? 'Сообщение удалено. Оно остаётся видимым в переписке.'
+          : 'Message deleted. It stays visible in the conversation.'
+      );
+    } catch (err) {
+      console.error('[handleDeleteDm]', err);
+      showToast(lang === 'ru' ? 'Не удалось удалить сообщение' : 'Failed to delete message', 'danger');
+    }
+  };
+
   // ── Send message ─────────────────────────────────────────────────────────
+  // The in-flight latch is a REF, not the `sending` state above. React batches
+  // state writes, so two clicks in the same tick both read `sending === false`
+  // from the render closure and both post. A ref write is not batched.
+  const sendInFlightRef = useRef(null);
+  if (sendInFlightRef.current === null) {
+    sendInFlightRef.current = createInFlight();
+  }
+
   const handleSend = async () => {
     if (!messageText.trim() || !activeChatId || !activePeer) return;
 
@@ -379,10 +435,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       return;
     }
 
+    if (!sendInFlightRef.current.begin()) return;
+
     setSending(true);
-    sentByMeRef.current = true; // flag to force scroll when Firestore message arrives
+    sentByMeRef.current = true; // flag to force scroll when the message arrives
     try {
-      await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid);
+      // ONE key per logical send, reused by anything that retries. Without it
+      // sendApi mints a fresh random key per call, so a duplicate that escapes
+      // the latch would be a genuinely second message.
+      await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid, newIdempotencyKey('dm'));
       setMessageText('');
       editorRef.current?.focus();
       const container = getScrollContainer();
@@ -394,6 +455,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       showToast(lang === 'ru' ? 'Ошибка отправки сообщения' : 'Failed to send message', 'danger');
     } finally {
       setSending(false);
+      sendInFlightRef.current.end();
     }
   };
 
@@ -600,13 +662,85 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                         }}
                       >
-                        <div className="w-100"><BBCode rolls={allConversationRolls} isDM={true}>{msg.text}</BBCode></div>
-                        <div
-                          className="text-end mt-1"
-                          style={{ fontSize: '0.875rem', opacity: 0.6 }}
-                        >
-                          {formatTs(msg.timestamp)}
-                        </div>
+                        {/* Editing replaces the bubble in place, so the surrounding thread does not
+                            jump while somebody fixes a typo. */}
+                        {editingMsgId === msg.id ? (
+                          <div className="w-100">
+                            <Form.Control
+                              as="textarea"
+                              rows={3}
+                              value={editingText}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              autoFocus
+                            />
+                            <div className="d-flex gap-2 justify-content-end mt-2">
+                              <Button size="sm" variant="outline-secondary" onClick={handleCancelDmEdit}>
+                                {lang === 'ru' ? 'Отмена' : 'Cancel'}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={!editingText.trim()}
+                                onClick={() => handleSaveDmEdit(msg)}
+                              >
+                                {lang === 'ru' ? 'Сохранить' : 'Save'}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {msg.deleted ? (
+                              <div className="w-100 fst-italic opacity-75">
+                                {lang === 'ru' ? 'Сообщение удалено' : 'Message deleted'}
+                              </div>
+                            ) : (
+                              <div className="w-100">
+                                <BBCode rolls={allConversationRolls} isDM={true}>{msg.text}</BBCode>
+                              </div>
+                            )}
+                            <div
+                              className="text-end mt-1"
+                              style={{ fontSize: '0.875rem', opacity: 0.6 }}
+                            >
+                              {formatTs(msg.timestamp)}
+                              {/* An edited message says so. A client that cannot
+                                  show this should omit the marker rather than print
+                                  a raw timestamp. */}
+                              {msg.edited && !msg.deleted && (
+                                <span className="ms-2">· {lang === 'ru' ? 'изменено' : 'edited'}</span>
+                              )}
+                            </div>
+                            {/* Actions on YOUR OWN messages only. There is no
+                                permission key here and there must not be: the server
+                                decides by authorship, and a staff account gets no
+                                extra power inside somebody else's conversation.
+                                A tombstone offers neither action — there is no text
+                                left to correct. */}
+                            {isMe && !msg.deleted && editingMsgId !== msg.id && (
+                              <div
+                                className="d-flex gap-2 justify-content-end mt-1"
+                                style={{ fontSize: '0.8rem', opacity: 0.75 }}
+                              >
+                                <button
+                                  type="button"
+                                  className="btn btn-link p-0"
+                                  style={{ color: 'inherit', fontSize: 'inherit' }}
+                                  onClick={() => handleStartDmEdit(msg)}
+                                >
+                                  {lang === 'ru' ? 'Изменить' : 'Edit'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-link p-0"
+                                  style={{ color: 'inherit', fontSize: 'inherit' }}
+                                  onClick={() => handleDeleteDm(msg)}
+                                >
+                                  {lang === 'ru' ? 'Удалить' : 'Delete'}
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
                   );
