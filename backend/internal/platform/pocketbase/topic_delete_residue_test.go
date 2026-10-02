@@ -202,8 +202,10 @@ func TestDeleteTopicRevertsReputationAndCleansResidue(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
+	// root holds `delete_others_topics`; the thread has a reply from another
+	// member, so the author alone may not remove it.
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-	req.Header.Set("Authorization", tokens["player"])
+	req.Header.Set("Authorization", tokens["root"])
 	req.Header.Set("Idempotency-Key", "topic-delete-residue")
 	res, err := server.Client().Do(req)
 	if err != nil {
@@ -338,8 +340,9 @@ func TestDeleteTopicPaysBackReputationExactlyOnce(t *testing.T) {
 	defer server.Close()
 
 	deleteTopic := func(key string) int {
+		// root, for the same reason: the thread carries another member's reply.
 		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-		req.Header.Set("Authorization", tokens["player"])
+		req.Header.Set("Authorization", tokens["root"])
 		req.Header.Set("Idempotency-Key", key)
 		res, err := server.Client().Do(req)
 		if err != nil {
@@ -387,8 +390,14 @@ func TestRecomputeAgreesWithTopicPayout(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
+	// The actor is root, and that is the SUBJECT of this test: the settlement
+	// of a thread that other members have replied to. `delete_others_topics` is
+	// exactly that power, and the author cannot delete this topic any more —
+	// the cascade right is off by default. Which account performs the delete
+	// is not what these tests are about; what they are about is that nothing
+	// denormalized outlives the topic.
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-	req.Header.Set("Authorization", tokens["player"])
+	req.Header.Set("Authorization", tokens["root"])
 	req.Header.Set("Idempotency-Key", "recompute-agrees-delete")
 	res, err := server.Client().Do(req)
 	if err != nil {

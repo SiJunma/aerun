@@ -584,11 +584,17 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Explicit `created`, an hour apart. The fixture used to declare which post
+	// came first by writing a `sequence` ordinal; with that column gone, two
+	// rows saved in the same millisecond tie and the id tie-breaker decides
+	// which one the feed opens with — so "first" would be an accident of how
+	// fast this loop ran. SetRaw is required for an AutodateField.
 	postsCol, _ := app.FindCollectionByNameOrId(postsCollectionName)
 	first := core.NewRecord(postsCol)
 	first.Set("topic_id", topic.Id)
 	first.Set("author_id", fixPlayerID)
 	first.Set("content", "Opening post")
+	first.SetRaw("created", types.NowDateTime())
 	if err := app.Save(first); err != nil {
 		t.Fatal(err)
 	}
@@ -597,6 +603,7 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 	reply.Set("topic_id", topic.Id)
 	reply.Set("author_id", fixPlayerID)
 	reply.Set("content", "A reply")
+	reply.SetRaw("created", types.NowDateTime().Add(time.Hour))
 	if err := app.Save(reply); err != nil {
 		t.Fatal(err)
 	}

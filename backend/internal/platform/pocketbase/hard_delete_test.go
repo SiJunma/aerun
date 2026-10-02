@@ -27,10 +27,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 func mustCol(t *testing.T, app *tests.TestApp, name string) *core.Collection {
@@ -78,8 +80,10 @@ func TestHardDeleteRemovesTopicAndItsPosts(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
+	// root holds `delete_others_topics`; the thread has a reply from another
+	// member, so its author may not delete it (the cascade right is off).
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-	req.Header.Set("Authorization", tokens["player"])
+	req.Header.Set("Authorization", tokens["root"])
 	req.Header.Set("Idempotency-Key", "hard-delete-topic")
 	res, err := server.Client().Do(req)
 	if err != nil {
@@ -150,7 +154,7 @@ func TestHardDeleteMovesEveryAuthorsCounter(t *testing.T) {
 	defer server.Close()
 
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-	req.Header.Set("Authorization", tokens["player"])
+	req.Header.Set("Authorization", tokens["root"])
 	req.Header.Set("Idempotency-Key", "hard-delete-counters")
 	res, err := server.Client().Do(req)
 	if err != nil {
@@ -278,11 +282,19 @@ func TestEveryDeleteIsAuditedWithItsText(t *testing.T) {
 	const secret = "the exact words that must survive the delete"
 
 	// The post belongs to fixPendingID and carries text worth reviewing.
+	//
+	// `created` is stamped explicitly, well after the fixture's own posts. It is
+	// a REPLY being deleted, not the opening post, and with no explicit time it
+	// could tie with the fixture rows inside the same millisecond — at which
+	// point the id tie-breaker alone decides which post the feed opens with, and
+	// a legitimate delete is refused with 409. SetRaw is required for an
+	// AutodateField.
 	post := core.NewRecord(mustCol(t, app, postsCollectionName))
 	post.Set("topic_id", topicID)
 	post.Set("author_id", fixPendingID)
 	post.Set("content", secret)
 	post.Set("is_draft", false)
+	post.SetRaw("created", types.NowDateTime().Add(48*time.Hour))
 	if err := app.Save(post); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +348,37 @@ func TestTopicDeleteIsAuditedForItsAuthor(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
+	// The author deletes their OWN topic, which is the point of the test. For
+	// that to be allowed the topic must hold nothing but their opening post:
+	// the cascade right (`delete_own_topic_with_replies`) is off by default, so
+	// an author cannot remove a thread other members have replied to.
+	//
+	// The reply is therefore removed first, by a moderator holding
+	// `delete_others_posts` — which also leaves the topic in exactly the state
+	// the new rule treats as permission-free ("my own topic, nobody else's
+	// words in it").
+	// The reply specifically — filtering on the topic alone would return the
+	// opening post, which is the author's own and must NOT be the one removed.
+	reply, err := app.FindFirstRecordByFilter(
+		postsCollectionName,
+		"topic_id = {:topic} && is_draft = false && author_id != {:author}",
+		dbx.Params{"topic": topicID, "author": fixPlayerID},
+	)
+	if err != nil || reply == nil {
+		t.Fatal("expected a reply from another account to remove first")
+	}
+	dropReq, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/posts/%s", server.URL, reply.Id), nil)
+	dropReq.Header.Set("Authorization", tokens["moderator"])
+	dropReq.Header.Set("Idempotency-Key", "audit-drop-reply")
+	dropRes, err := server.Client().Do(dropReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropRes.Body.Close()
+	if dropRes.StatusCode != http.StatusOK {
+		t.Fatalf("removing the other member's reply = %d, want 200", dropRes.StatusCode)
+	}
+
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
 	req.Header.Set("Authorization", tokens["player"])
 	req.Header.Set("Idempotency-Key", "audit-topic-author")
@@ -344,6 +387,9 @@ func TestTopicDeleteIsAuditedForItsAuthor(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("the author deleting their own otherwise-empty topic = %d, want 200", res.StatusCode)
+	}
 
 	for _, entry := range auditLogsFor(t, app, "topic_delete") {
 		details, _ := entry["details"].(map[string]any)

@@ -423,47 +423,39 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 		// `delete_others_topics` is the only way to remove a topic belonging to
 		// another account. It is granted to admins and root, and deliberately
 		// NOT to moderators.
-		byModeration := !isAuthor && auth.Has(acc.Permissions, auth.PermDeleteOthersTopics)
-		if !isAuthor && !byModeration {
+		if !isAuthor && !auth.Has(acc.Permissions, auth.PermDeleteOthersTopics) {
 			return 0, nil, forbiddenError("you cannot delete this topic")
 		}
 
-		// A MODERATOR may remove their own topic only while it still holds
-		// nothing but their opening post. This is the owner's narrowed reading
-		// of the moderator matrix: without `delete_others_topics`, the only
-		// topic a moderator can delete is their own, and it must be one that
-		// contains nobody else's words. Once somebody has replied, the topic
-		// holds another account's content and removing it would destroy a post
-		// that a moderator's mandate no longer covers.
+		// Deleting your OWN topic has two cases, and the difference is whether
+		// anybody else's words are in it:
 		//
-		// It also composes with `delete_others_posts`, which a moderator KEEPS:
-		// they may remove individual replies all day, and once the thread is
-		// down to their single opening post they may remove it too.
+		//  1. Nothing but your own opening post. Allowed with NO permission.
+		//     There is no other member's content to destroy, so the delete costs
+		//     nobody anything — and the author must always have a way to remove
+		//     a thread that did not take off.
+		//  2. Replies from other members present. Refused unless the account
+		//     holds `delete_own_topic_with_replies`, the MyBB-shaped cascade
+		//     right. It is granted to no built-in role on purpose, so this power
+		//     is handed out per custom role instead of being inherited from
+		//     "can create a topic".
 		//
-		// SCOPE — MODERATORS ONLY, not every author. The request was made about
-		// the moderator matrix specifically, and a player deleting their own
-		// thread with replies is long-standing legacy behaviour that this
-		// change must not quietly alter. The asymmetry is intentional and
-		// temporary: it is the price of not granting the moderator
-		// `delete_others_topics`. Whether a PLAYER should face the same limit is
-		// an open product question, not something to decide inside a handler.
-		//
-		// `moderate_content` is the marker here rather than a rank lookup: it is
-		// what separates "staff with moderation powers" from "ordinary member"
-		// without importing the role registry, and every role that can edit or
-		// delete others' posts carries it.
-		isModerator := auth.Has(acc.Permissions, auth.PermModerateContent) &&
-			!auth.Has(acc.Permissions, auth.PermDeleteOthersTopics)
-		if isAuthor && isModerator {
+		// A player, moderator and root are all subject to case 2 equally. The
+		// asymmetry that would otherwise exist (staff can, members cannot) is
+		// deliberate and was checked: the staff escape hatch is
+		// `delete_others_topics`, which admins and root hold.
+		needsCascadeRight := false
+		if isAuthor && !auth.Has(acc.Permissions, auth.PermDeleteOthersTopics) {
 			others, err := countOtherAuthorsInTopic(txApp, topic.Id, e.Auth.Id)
 			if err != nil {
 				return 0, nil, internalError("failed to check topic participants", err)
 			}
-			if others > 0 {
-				return 0, nil, conflictError(
-					"a moderator can only delete their own topic while nobody else has replied to it",
-				)
-			}
+			needsCascadeRight = others > 0
+		}
+		if needsCascadeRight && !auth.Has(acc.Permissions, auth.PermDeleteOwnTopicWithReplies) {
+			return 0, nil, conflictError(
+				"this topic has replies from other members; removing it would delete their posts too",
+			)
 		}
 
 		// Everything that must be READ is read here, before a single row is
@@ -521,8 +513,9 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 // with twelve of their posts must cost twelve — computed before any row is
 // touched, so nothing can read a half-deleted state.
 //
-// Drafts are deleted with the topic (their topic is gone, so they can never be
-// published again) but were never counted, so they move no counter.
+// DRAFTS SURVIVE, and they were never counted anyway — an unsent draft moves no
+// counter, so the per-author aggregation above (which counts only published
+// posts) is unaffected by leaving them behind.
 func deleteTopicPosts(txApp core.App, topic *core.Record) error {
 	type authorCount struct {
 		AuthorID string `db:"author_id"`
@@ -555,6 +548,16 @@ func deleteTopicPosts(txApp core.App, topic *core.Record) error {
 		return internalError("failed to delete votes for a deleted topic", err)
 	}
 
+	// Only PUBLISHED posts are removed. Drafts SURVIVE the deletion of their
+	// topic, and that is the point of the `orphan` flag the drafts feed already
+	// carries: an author must not lose unsent text because somebody removed the
+	// thread. The previous code deleted every row in the topic, which made the
+	// orphan branch of listMyDraftsHandler unreachable in practice — the state
+	// it exists to present could only arise from a corrupted database.
+	//
+	// A surviving draft cannot be published: publishDraftHandler resolves the
+	// topic first and answers 409 when it is gone, and the drafts feed shows it
+	// under "orphans" with copy-forward and delete as the only actions.
 	posts, err := txApp.FindAllRecords(
 		postsCollectionName,
 		dbx.NewExp("topic_id = {:topic}", dbx.Params{"topic": topic.Id}),
@@ -563,6 +566,11 @@ func deleteTopicPosts(txApp core.App, topic *core.Record) error {
 		return internalError("failed to read the posts of a deleted topic", err)
 	}
 	for _, post := range posts {
+		// A draft is the author's unsent work, not forum content. Deleting the
+		// topic is not consent to delete it.
+		if post.GetBool("is_draft") {
+			continue
+		}
 		if err := txApp.Delete(post); err != nil {
 			return internalError("failed to delete a post of a deleted topic", err)
 		}

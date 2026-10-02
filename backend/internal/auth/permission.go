@@ -56,6 +56,22 @@ const (
 	PermDeleteSelfTopic    Permission = "delete_self_topic"
 	PermDeleteOthersTopics Permission = "delete_others_topics"
 
+	// PermDeleteOwnTopicWithReplies is the MyBB-shaped right: the author may
+	// delete their own topic AND every post under it, including replies other
+	// people wrote.
+	//
+	// It is NOT granted to any built-in role. That is the owner's explicit
+	// decision: a cascade that erases other members' posts is a power that has
+	// to be handed out deliberately, per custom role, rather than inherited from
+	// simply being able to create a topic. Without this key, an author who
+	// started a thread that people replied to can no longer remove it once
+	// replies exist — which is a real change from the legacy forum, so it is a
+	// decision recorded here and in the role spec rather than a default.
+	//
+	// Removing a topic that holds nothing but your own opening post needs NO
+	// permission at all: there is nobody else's content to destroy.
+	PermDeleteOwnTopicWithReplies Permission = "delete_own_topic_with_replies"
+
 	PermViewForum   Permission = "view_forum"
 	PermPostReply   Permission = "post_reply"
 	PermCreateTopic Permission = "create_topic"
@@ -89,6 +105,7 @@ var allPermissions = func() []Permission {
 		PermDeleteOthersMask,
 		PermDeleteOthersPosts,
 		PermDeleteOthersTopics,
+		PermDeleteOwnTopicWithReplies,
 		PermDeleteReputation,
 		PermDeleteSelfMask,
 		PermDeleteSelfPost,
