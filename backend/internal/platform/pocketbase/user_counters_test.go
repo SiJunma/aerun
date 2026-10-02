@@ -20,19 +20,23 @@ import (
 )
 
 // seedCounterPost writes one post row directly, so a test can produce the
-// exact shape it wants to count (a draft, a deleted post) without going
-// through commands that would normalise it away.
+// exact shape it wants to count (a draft) without going through commands that
+// would normalise it away.
+//
+// There is no `deleted` argument any more: deletion is a hard delete
+// (1767700000), so a deleted post has no row and cannot be seeded. A test that
+// used to assert "a soft-deleted post is not counted" now asserts that deleting
+// the row removes it from the count — which is the real-world path.
 //
 // The record is returned so a test can build a fixture that REFERENCES it.
-// sumVotes resolves a vote's visibility through the post row (post_id IN
-// (SELECT id FROM posts WHERE deleted = false AND topic_id IN (...))), so a
-// vote on a made-up post id is correctly excluded — a test that wants its
-// votes counted has to vote on posts that exist.
+// sumVotes resolves a vote through the post row, so a vote on a made-up post id
+// is correctly excluded — a test that wants its votes counted has to vote on
+// posts that exist.
 //
 // seq must be unique per topic: the schema has a UNIQUE(topic_id, sequence)
 // backstop, and a fixture that collided with it would fail for a reason that
 // has nothing to do with counters.
-func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string, seq int, deleted, draft bool) *core.Record {
+func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string, seq int, draft bool) *core.Record {
 	t.Helper()
 	col, err := app.FindCollectionByNameOrId(postsCollectionName)
 	if err != nil {
@@ -43,7 +47,6 @@ func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string,
 	rec.Set("author_id", authorID)
 	rec.Set("sequence", seq)
 	rec.Set("content", "counter fixture")
-	rec.Set("deleted", deleted)
 	rec.Set("is_draft", draft)
 	if err := app.Save(rec); err != nil {
 		t.Fatal(err)
@@ -52,7 +55,7 @@ func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string,
 }
 
 // seedCounterTopic writes one topic row directly.
-func seedCounterTopic(t testing.TB, app *tests.TestApp, authorID string, deleted bool) *core.Record {
+func seedCounterTopic(t testing.TB, app *tests.TestApp, authorID string) *core.Record {
 	t.Helper()
 	col, err := app.FindCollectionByNameOrId(topicsCollectionName)
 	if err != nil {
@@ -63,7 +66,6 @@ func seedCounterTopic(t testing.TB, app *tests.TestApp, authorID string, deleted
 	rec.Set("author_id", authorID)
 	rec.Set("title", "Counter fixture")
 	rec.Set("posts_count", 0)
-	rec.Set("deleted", deleted)
 	if err := app.Save(rec); err != nil {
 		t.Fatal(err)
 	}
@@ -106,20 +108,37 @@ func TestUserCounterColumnsExist(t *testing.T) {
 }
 
 // TestRecomputeUserCountersDerivesFromRows is the main case: a board with two
-// live posts, one soft-deleted post, one draft and one live topic must produce
-// posts=2, topics=1 — not the cached legacy numbers and not zeros.
+// live posts, one draft and one live topic must produce posts=2, topics=1 —
+// not the cached legacy numbers and not zeros.
+//
+// It used to seed a soft-deleted post and a soft-deleted topic as well. Those
+// states no longer exist (1767700000), so the fixture builds the same situation
+// the way it now occurs in production: by DELETING the rows. The expectation is
+// unchanged, and so is the property under test — the recompute derives from the
+// rows that exist, not from a flag.
 func TestRecomputeUserCountersDerivesFromRows(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
 	seedIdentityFixtures(t, app)
-	topic := seedCounterTopic(t, app, fixPlayerID, false)
-	seedCounterPost(t, app, topic.Id, fixPlayerID, 1, false, false)
-	seedCounterPost(t, app, topic.Id, fixPlayerID, 2, false, false)
-	seedCounterPost(t, app, topic.Id, fixPlayerID, 3, true, false) // deleted
-	seedCounterPost(t, app, topic.Id, fixPlayerID, 4, false, true) // draft
-	seedCounterTopic(t, app, fixPlayerID, true)                    // deleted topic
-	seedCounterPost(t, app, topic.Id, fixModeratorID, 5, false, false)
+	topic := seedCounterTopic(t, app, fixPlayerID)
+	seedCounterPost(t, app, topic.Id, fixPlayerID, 1, false)
+	seedCounterPost(t, app, topic.Id, fixPlayerID, 2, false)
+
+	// A post that was deleted: the row is gone, so it cannot be counted.
+	doomed := seedCounterPost(t, app, topic.Id, fixPlayerID, 3, false)
+	if err := app.Delete(doomed); err != nil {
+		t.Fatal(err)
+	}
+	// A draft is authored but never published, so it is not counted either.
+	seedCounterPost(t, app, topic.Id, fixPlayerID, 4, true)
+
+	// A topic that was deleted, gone the same way.
+	doomedTopic := seedCounterTopic(t, app, fixPlayerID)
+	if err := app.Delete(doomedTopic); err != nil {
+		t.Fatal(err)
+	}
+	seedCounterPost(t, app, topic.Id, fixModeratorID, 5, false)
 
 	report, err := RecomputeUserCounters(app, UserCounterRecomputeOptions{})
 	if err != nil {
@@ -202,9 +221,9 @@ func TestRecomputeUserCountersSumsEveryVote(t *testing.T) {
 	// the shape the predicate expects — the previous made-up ids ("postmissing001")
 	// were silently excluded by that subquery and the test failed for a reason
 	// that had nothing to do with the rule it claims to pin.
-	votedTopic := seedCounterTopic(t, app, fixPlayerID, false)
+	votedTopic := seedCounterTopic(t, app, fixPlayerID)
 	for i, voter := range []string{fixPlayerID, fixModeratorID, fixRootID} {
-		voted := seedCounterPost(t, app, votedTopic.Id, fixModeratorID, i+1, false, false)
+		voted := seedCounterPost(t, app, votedTopic.Id, fixModeratorID, i+1, false)
 		vote := core.NewRecord(col)
 		vote.Set("voter_id", voter)
 		vote.Set("target_id", fixModeratorID)
@@ -237,8 +256,8 @@ func TestRecomputeUserCountersIsIdempotent(t *testing.T) {
 	defer app.Cleanup()
 
 	seedIdentityFixtures(t, app)
-	topic := seedCounterTopic(t, app, fixPlayerID, false)
-	seedCounterPost(t, app, topic.Id, fixPlayerID, 1, false, false)
+	topic := seedCounterTopic(t, app, fixPlayerID)
+	seedCounterPost(t, app, topic.Id, fixPlayerID, 1, false)
 
 	first, err := RecomputeUserCounters(app, UserCounterRecomputeOptions{})
 	if err != nil {
@@ -267,8 +286,8 @@ func TestRecomputeUserCountersDryRunWritesNothing(t *testing.T) {
 	defer app.Cleanup()
 
 	seedIdentityFixtures(t, app)
-	topic := seedCounterTopic(t, app, fixPlayerID, false)
-	seedCounterPost(t, app, topic.Id, fixPlayerID, 1, false, false)
+	topic := seedCounterTopic(t, app, fixPlayerID)
+	seedCounterPost(t, app, topic.Id, fixPlayerID, 1, false)
 
 	dry, err := RecomputeUserCounters(app, UserCounterRecomputeOptions{DryRun: true})
 	if err != nil {

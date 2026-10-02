@@ -58,7 +58,6 @@ func seedResidueFixture(t testing.TB, app *tests.TestApp, firstAuthor, secondAut
 	topic.Set("author_id", firstAuthor)
 	topic.Set("title", "Residue Fixture")
 	topic.Set("posts_count", 2)
-	topic.Set("deleted", false)
 	if err := app.Save(topic); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +72,6 @@ func seedResidueFixture(t testing.TB, app *tests.TestApp, firstAuthor, secondAut
 		p.Set("author_id", author)
 		p.Set("sequence", seq)
 		p.Set("content", body)
-		p.Set("deleted", false)
 		p.Set("is_draft", false)
 		if err := app.Save(p); err != nil {
 			t.Fatal(err)
@@ -210,10 +208,9 @@ func TestDeleteTopicRevertsReputationAndCleansResidue(t *testing.T) {
 		t.Errorf("reputation after topic delete = %d, want -1 (only the profile vote remains)", got)
 	}
 
-	// The post vote rows are KEPT — a soft delete must stay reversible — so what
-	// matters is that the recompute no longer counts them. If it did, the next
-	// run would hand the reputation straight back and the drift would return,
-	// which is how be6ca82's manual repairs were undone.
+	// The post vote rows are GONE. There is no reversible delete any more, so
+	// keeping them would leave votes pointing at a post that no longer exists —
+	// an orphan sumVotes can never attribute to anyone.
 	postVotes, err := app.FindAllRecords(
 		reputationVotesCollectionName,
 		dbx.NewExp("post_id = {:p}", dbx.Params{"p": firstPostID}),
@@ -221,21 +218,26 @@ func TestDeleteTopicRevertsReputationAndCleansResidue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(postVotes) != 2 {
-		t.Errorf("vote rows must survive a soft delete so it stays reversible, got %d", len(postVotes))
+	if len(postVotes) != 0 {
+		t.Errorf("votes on a deleted post must be removed, %d remain", len(postVotes))
 	}
 
-	// Subscriptions, by contrast, are hard-deleted: they pin a hidden topic id
-	// in the member's list and the member cannot unsubscribe from a topic the
-	// API will not serve.
+	// Subscriptions are removed for the same reason: they pin a topic id in the
+	// member's list and the member cannot unsubscribe from a topic that no
+	// longer exists.
 	if n := countRows(t, app, topicSubscriptionsCollectionName, "topic_id = {:t}", map[string]any{"t": topicID}); n != 0 {
 		t.Errorf("expected subscriptions to be cleaned up, %d remain", n)
 	}
 
-	// The posts survive the soft delete — that is the recoverability win over
-	// Firestore — so this asserts we did NOT cascade.
-	if n := countRows(t, app, postsCollectionName, "topic_id = {:t}", map[string]any{"t": topicID}); n != 2 {
-		t.Errorf("posts must survive a soft delete, got %d", n)
+	// Deleting a topic CASCADES: its posts go with it. This is the behaviour
+	// that lost 21 posts on 2026-09-30, and it is now explicit — the protection
+	// against it is the 409 on DELETE /posts/{id} for a first post, plus the
+	// client's absolute-index check, not a soft delete.
+	if n := countRows(t, app, postsCollectionName, "topic_id = {:t}", map[string]any{"t": topicID}); n != 0 {
+		t.Errorf("deleting a topic must delete its posts, %d remain", n)
+	}
+	if _, err := app.FindRecordById(topicsCollectionName, topicID); err == nil {
+		t.Error("the topic row itself must be gone")
 	}
 
 	// And the repair tool agrees with the payout: run against the same database
@@ -296,14 +298,10 @@ func TestDeletePostRevertsReputation(t *testing.T) {
 		t.Errorf("recomputed reputation = %d, want 0 (a vote on a deleted post must not count)", got)
 	}
 
-	// The tombstone's own per-post total must not keep displaying a score that
-	// no longer exists anywhere else.
-	post, err := app.FindRecordById(postsCollectionName, replyPostID)
-	if err != nil || post == nil {
-		t.Fatalf("deleted post missing: %v", err)
-	}
-	if got := post.GetInt("reputation"); got != 0 {
-		t.Errorf("tombstone reputation = %d, want 0", got)
+	// The post row is GONE — that is what a hard delete means, and it is why the
+	// counter and the feed can no longer disagree.
+	if after, err := app.FindRecordById(postsCollectionName, replyPostID); err == nil && after != nil {
+		t.Fatalf("a deleted post must not survive as a row (reputation %d)", after.GetInt("reputation"))
 	}
 }
 
@@ -442,7 +440,6 @@ func TestMovePostCarriesItsVotes(t *testing.T) {
 	target.Set("author_id", fixPlayerID)
 	target.Set("title", "Move Target")
 	target.Set("posts_count", 1)
-	target.Set("deleted", false)
 	if err := app.Save(target); err != nil {
 		t.Fatal(err)
 	}

@@ -208,7 +208,6 @@ func TestCreatePostSequenceAndLockedTopic(t *testing.T) {
 			topic.Set("posts_count", 1)
 			topic.Set("locked", false)
 			topic.Set("pinned", false)
-			topic.Set("deleted", false)
 			_ = app.Save(topic)
 			topicID = topic.Id
 
@@ -262,7 +261,6 @@ func Test100ConcurrentPostsAndIdempotency(t *testing.T) {
 	topic.Set("posts_count", 1)
 	topic.Set("locked", false)
 	topic.Set("pinned", false)
-	topic.Set("deleted", false)
 	if err := app.Save(topic); err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +556,6 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 	first.Set("author_id", fixPlayerID)
 	first.Set("sequence", 1)
 	first.Set("content", "Opening post")
-	first.Set("deleted", false)
 	if err := app.Save(first); err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +565,6 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 	reply.Set("author_id", fixPlayerID)
 	reply.Set("sequence", 2)
 	reply.Set("content", "A reply")
-	reply.Set("deleted", false)
 	if err := app.Save(reply); err != nil {
 		t.Fatal(err)
 	}
@@ -591,14 +587,16 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 		t.Fatalf("expected 409 when deleting a topic's first post, got %d", modResp.StatusCode)
 	}
 
-	// Neither the post nor the topic may have been touched.
-	afterMod, _ := app.FindRecordById(postsCollectionName, first.Id)
-	if afterMod.GetBool("deleted") {
-		t.Fatal("first post must not be soft-deleted")
+	// Neither the post nor the topic may have been touched. Under a hard
+	// delete "untouched" means the row is still there — there is no flag to
+	// check any more, so existence IS the assertion.
+	afterMod, err := app.FindRecordById(postsCollectionName, first.Id)
+	if err != nil || afterMod == nil {
+		t.Fatalf("refusing a first post must not remove it: %v", err)
 	}
-	topicAfter, _ := app.FindRecordById(topicsCollectionName, topic.Id)
-	if topicAfter.GetBool("deleted") {
-		t.Fatal("topic must not be deleted when refusing a first post")
+	topicAfter, err := app.FindRecordById(topicsCollectionName, topic.Id)
+	if err != nil || topicAfter == nil {
+		t.Fatalf("refusing a first post must not remove the topic: %v", err)
 	}
 
 	// The same holds for the post's own author.
@@ -628,13 +626,13 @@ func TestDeletePostRefusesFirstPost(t *testing.T) {
 	if replyResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 deleting a reply, got %d", replyResp.StatusCode)
 	}
-	replyAfter, _ := app.FindRecordById(postsCollectionName, reply.Id)
-	if !replyAfter.GetBool("deleted") {
-		t.Fatal("reply should have been soft-deleted")
+	// The reply is really gone — that is the point of a hard delete.
+	if after, err := app.FindRecordById(postsCollectionName, reply.Id); err == nil && after != nil {
+		t.Fatal("a deleted reply must not survive as a row")
 	}
-	topicFinal, _ := app.FindRecordById(topicsCollectionName, topic.Id)
-	if topicFinal.GetBool("deleted") {
-		t.Fatal("topic must survive deleting a reply")
+	topicFinal, err := app.FindRecordById(topicsCollectionName, topic.Id)
+	if err != nil || topicFinal == nil {
+		t.Fatalf("deleting a reply must not take the topic with it: %v", err)
 	}
 }
 

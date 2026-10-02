@@ -40,7 +40,6 @@ func seedDraftTopic(t testing.TB, app *tests.TestApp, authorID, title string) st
 	post.Set("author_id", authorID)
 	post.Set("sequence", 1)
 	post.Set("content", "opening post")
-	post.Set("deleted", false)
 	if err := app.Save(post); err != nil {
 		t.Fatalf("seed opening post: %v", err)
 	}
@@ -115,14 +114,16 @@ func TestDraftsUpsertFeedPublishDelete(t *testing.T) {
 		t.Fatalf("expected exactly 1 draft after re-upsert, got %d", draftCount)
 	}
 
-	// 3. Feed ordering: soft-delete topic A so its draft becomes orphaned,
-	// then add a draft in the still-live topic B.
+	// 3. Feed ordering: delete topic A so its draft becomes orphaned, then add
+	// a draft in the still-live topic B. Hard delete (1767700000): the draft
+	// under it is deleted with the topic, so the orphan case below is now
+	// exercised by the DELETED DRAFT path rather than by a surviving draft
+	// pointing at a missing topic.
 	topicARec, err := app.FindRecordById(topicsCollectionName, topicA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	topicARec.Set("deleted", true)
-	if err := app.Save(topicARec); err != nil {
+	if err := app.Delete(topicARec); err != nil {
 		t.Fatal(err)
 	}
 	status, _ = doJSON(t, server.URL, http.MethodPut, "/api/aerun/topics/"+topicB+"/draft",
