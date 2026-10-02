@@ -24,6 +24,24 @@ export const PERMISSIONS = {
   MOVE_TOPICS: 'move_topics',
   CLOSE_TOPICS: 'close_topics',
   PIN_TOPICS: 'pin_topics',
+
+  // Post and topic moderation, split by subject and by ownership (2026-10-02).
+  // MODERATE_CONTENT used to gate all of these at once, which made "a moderator
+  // who edits but never deletes" unrepresentable. An `_others_` key widens WHO
+  // may act; it never substitutes for an ownership check the server makes.
+  EDIT_SELF_POST: 'edit_self_post',
+  EDIT_OTHERS_POSTS: 'edit_others_posts',
+  DELETE_SELF_POST: 'delete_self_post',
+  DELETE_OTHERS_POSTS: 'delete_others_posts',
+  EDIT_SELF_TOPIC: 'edit_self_topic',
+  EDIT_OTHERS_TOPICS: 'edit_others_topics',
+  DELETE_SELF_TOPIC: 'delete_self_topic',
+  DELETE_OTHERS_TOPICS: 'delete_others_topics',
+  // The MyBB-shaped right: delete your own topic AND every post under it,
+  // including other people's replies. Granted to no built-in role on purpose —
+  // it is handed out per custom role. Removing a topic that holds nothing but
+  // your own opening post needs no permission at all.
+  DELETE_OWN_TOPIC_WITH_REPLIES: 'delete_own_topic_with_replies',
   
   // General Usage
   VIEW_FORUM: 'view_forum',
@@ -70,6 +88,18 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.MOVE_TOPICS]: { en: 'Move Topics', ru: 'Перемещение тем' },
   [PERMISSIONS.CLOSE_TOPICS]: { en: 'Close/Open Topics', ru: 'Закрытие/Открытие тем' },
   [PERMISSIONS.PIN_TOPICS]: { en: 'Pin Topics', ru: 'Закрепление тем' },
+  [PERMISSIONS.EDIT_SELF_POST]: { en: 'Edit Own Post', ru: 'Правка своего поста' },
+  [PERMISSIONS.EDIT_OTHERS_POSTS]: { en: "Edit Others' Posts", ru: 'Правка чужих постов' },
+  [PERMISSIONS.DELETE_SELF_POST]: { en: 'Delete Own Post', ru: 'Удаление своего поста' },
+  [PERMISSIONS.DELETE_OTHERS_POSTS]: { en: "Delete Others' Posts", ru: 'Удаление чужих постов' },
+  [PERMISSIONS.EDIT_SELF_TOPIC]: { en: 'Edit Own Topic', ru: 'Правка своей темы' },
+  [PERMISSIONS.EDIT_OTHERS_TOPICS]: { en: "Edit Others' Topics", ru: 'Правка чужих тем' },
+  [PERMISSIONS.DELETE_SELF_TOPIC]: { en: 'Delete Own Topic', ru: 'Удаление своей темы' },
+  [PERMISSIONS.DELETE_OTHERS_TOPICS]: { en: "Delete Others' Topics", ru: 'Удаление чужих тем' },
+  [PERMISSIONS.DELETE_OWN_TOPIC_WITH_REPLIES]: {
+    en: 'Delete Own Topic With Replies',
+    ru: 'Удаление своей темы вместе с ответами',
+  },
   [PERMISSIONS.VIEW_FORUM]: { en: 'View Forum', ru: 'Просмотр форума' },
   [PERMISSIONS.POST_REPLY]: { en: 'Post Reply', ru: 'Отправка ответов' },
   [PERMISSIONS.CREATE_TOPIC]: { en: 'Create Topic', ru: 'Создание тем' },
@@ -130,7 +160,16 @@ export const PERMISSION_GROUPS = [
       PERMISSIONS.MODERATE_CONTENT,
       PERMISSIONS.MOVE_TOPICS,
       PERMISSIONS.CLOSE_TOPICS,
-      PERMISSIONS.PIN_TOPICS
+      PERMISSIONS.PIN_TOPICS,
+      PERMISSIONS.EDIT_SELF_POST,
+      PERMISSIONS.EDIT_OTHERS_POSTS,
+      PERMISSIONS.DELETE_SELF_POST,
+      PERMISSIONS.DELETE_OTHERS_POSTS,
+      PERMISSIONS.EDIT_SELF_TOPIC,
+      PERMISSIONS.EDIT_OTHERS_TOPICS,
+      PERMISSIONS.DELETE_SELF_TOPIC,
+      PERMISSIONS.DELETE_OTHERS_TOPICS,
+      PERMISSIONS.DELETE_OWN_TOPIC_WITH_REPLIES
     ]
   },
   {

@@ -21,6 +21,9 @@ const normalizeTopic = (t) => {
   };
 };
 
+// No `sequence`: the per-post ordinal the backend used to invent is gone, and
+// the forum orders by `created` then id. Nothing client-side may depend on a
+// number that shifts whenever an earlier post is deleted.
 const normalizePost = (p) => {
   if (!p) return null;
   return {
@@ -29,7 +32,6 @@ const normalizePost = (p) => {
     topic_id: p.topic_id,
     author_id: p.author_id,
     content: p.content || '',
-    sequence: p.sequence || 1,
     created_at: p.created,
     updated_at: p.updated,
     created_at_ms: p.created ? new Date(p.created).getTime() : 0,
@@ -333,20 +335,44 @@ export const publishDraft = async (uid, topicId) => {
 
 // ── Navigation & Post Locating ───────────────────────────────────────────────
 
-export const locatePost = async (postId, itemsPerPage = 20) => {
+// locatePost finds which page holds a post, so a deep link can open the exact
+// topic, page and post.
+//
+// It CANNOT be an arithmetic lookup any more. The old version read the post's
+// `sequence` and divided it by the page size, which was only correct while
+// every post had a stable ordinal — and a hard delete destroys that property:
+// removing one post shifts every later ordinal, so a link built before a delete
+// would open the wrong page afterwards.
+//
+// So the page is DISCOVERED by walking the topic's pages and looking for the
+// id. `startPage` is the page the reader is already on, and it is searched
+// first: the common case is a link to a post in the thread being read, and
+// starting there makes it one request instead of a walk from page 1.
+//
+// The walk is bounded by `maxPages` so a stale link to a deleted post cannot
+// page through an entire 5000-post topic before giving up.
+export const locatePost = async (postId, itemsPerPage = 20, startPage = 1, maxPages = 40) => {
   try {
     const postRecord = await pb.collection('posts').getOne(postId);
     if (!postRecord) return null;
 
     const topicId = postRecord.topic_id;
-    const seq = postRecord.sequence || 1;
-    const page = Math.ceil(seq / itemsPerPage);
+    if (!topicId) return null;
 
-    return {
-      topicId,
-      page,
-      postId
-    };
+    const first = Math.max(1, startPage || 1);
+    for (let page = first; page < first + maxPages; page += 1) {
+      const res = await sendApi(
+        `/api/aerun/topics/${topicId}/posts?limit=${itemsPerPage}&page=${page}`
+      );
+      // The Go command layer answers with `items` (forum_posts.go
+      // listPostsHandler). Read that, not the PocketBase SDK shape.
+      const items = res?.items || [];
+      if (items.length === 0) break;
+      if (items.some((p) => p && p.id === postId)) {
+        return { topicId, page, postId };
+      }
+    }
+    return null;
   } catch (err) {
     console.error('[locatePost error]', err);
     return null;
