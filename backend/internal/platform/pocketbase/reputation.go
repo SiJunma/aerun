@@ -94,7 +94,7 @@ func votePostHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		post, err := txApp.FindRecordById(postsCollectionName, postID)
-		if err != nil || post == nil || post.GetBool("deleted") {
+		if err != nil || post == nil {
 			return 0, nil, notFoundError("post not found")
 		}
 
@@ -409,7 +409,7 @@ func deleteReputationHandler(e *core.RequestEvent) error {
 func getPostVotersHandler(e *core.RequestEvent) error {
 	postID := e.Request.PathValue("id")
 	post, err := e.App.FindRecordById(postsCollectionName, postID)
-	if err != nil || post == nil || post.GetBool("deleted") {
+	if err != nil || post == nil {
 		return notFoundError("post not found")
 	}
 

@@ -244,21 +244,28 @@ func applyUserCountDelta(txApp core.App, userID, field string, delta int, clampA
 // it as NULL, so a single statement covering both tables would fail outright
 // the moment it was pointed at topics.
 //
-// A post is countable when it is not soft-deleted and not a draft: an unsent
-// draft is authored content the forum never showed, so counting it would make a
-// member's number disagree with what the forum displays. A topic is countable
-// when it is not soft-deleted. Both tables carry a `deleted` column written as
-// false by the command layer, so `= false` is exact.
+// The rule is EXISTENCE, not visibility: count the rows that are really there.
+// A deleted post or topic has no row at all (1767700000 dropped the `deleted`
+// column and made deletion a hard delete), so there is nothing left to exclude —
+// which is precisely why this predicate can no longer disagree with the feed.
+// Before that change this read `deleted = false AND is_draft = false` while
+// listPostsHandler filtered drafts only, so a tombstone sat in the feed and was
+// missing from the counter, and the counter is the pagination window.
 //
-// A post inside a soft-deleted topic IS counted, and that is deliberate: the
-// post rows survive the delete and an un-delete brings them back, so the
-// counter keeps counting content that still exists (migration 1767100000 states
-// this rule). purgeTopicResidue still pays the reputation back immediately so
-// the visible number is honest while the topic is hidden; this predicate is
-// about existence, not visibility.
+// A DRAFT is the one thing excluded: it is authored content the forum has
+// never shown, so counting it would make a member's number disagree with what
+// anyone can read. Drafts are promoted to real posts by publishDraft, which is
+// where the author's count increments.
+//
+// Nothing here mentions the topic's own state. A post inside a topic a member
+// has hidden from themselves still counts, and so does one inside a topic the
+// admin board does not display — the counter answers "how much did this person
+// write", and a per-viewer visibility filter (the planned blocklist) must never
+// touch it. This is the property that lets a post be hidden from one reader
+// while remaining a real, counted post for everyone else.
 const (
-	countablePostRows  = "deleted = false AND is_draft = false"
-	countableTopicRows = "deleted = false"
+	countablePostRows  = "is_draft = false OR is_draft IS NULL"
+	countableTopicRows = ""
 )
 
 // countByAuthor counts the countable rows of a collection per author_id.
@@ -266,16 +273,25 @@ const (
 // The table name and the predicate are interpolated because SQLite cannot bind
 // either. Both call sites pass a package constant, never request data, so there
 // is no injection surface here.
+//
+// An EMPTY predicate is the "every row counts" case — countableTopicRows, since
+// a deleted topic no longer has a row left to exclude. Emitting `WHERE ` with
+// nothing after it is a syntax error in SQLite, so the clause is dropped rather
+// than concatenated blindly.
 func countByAuthor(app core.App, collection, predicate string) (map[string]int, error) {
 	type authorCount struct {
 		AuthorID string `db:"author_id"`
 		Cnt      int    `db:"cnt"`
 	}
 	var rows []authorCount
-	if err := app.DB().NewQuery(fmt.Sprintf(
-		"SELECT author_id, COUNT(*) AS cnt FROM %s WHERE %s GROUP BY author_id",
-		collection, predicate,
-	)).All(&rows); err != nil {
+
+	query := fmt.Sprintf("SELECT author_id, COUNT(*) AS cnt FROM %s", collection)
+	if predicate != "" {
+		query += " WHERE " + predicate
+	}
+	query += " GROUP BY author_id"
+
+	if err := app.DB().NewQuery(query).All(&rows); err != nil {
 		return nil, err
 	}
 
@@ -316,20 +332,25 @@ func sumVotes(app core.App) (map[string]int, error) {
 		Total    int    `db:"total"`
 	}
 	var rows []targetTotal
-	// A vote only counts while the thing it was cast on is visible. A vote on a
-	// post whose topic is soft-deleted must be excluded, or the recompute would
-	// hand back the reputation purgeTopicResidue just paid out and the drift
-	// would return on the next run — which is the class of bug be6ca82 had to
-	// repair by hand on the Firestore branch. Profile votes (empty post_id) are
-	// unaffected: they are about the person, not a topic.
+	// A vote counts only while the thing it was cast on EXISTS. Deleting a post
+	// or a topic now removes the row, and deletePostHandler / deleteTopicPosts
+	// remove the vote rows in the same transaction, so the two cannot drift: if
+	// a vote is still here, its post and topic are still here too.
 	//
-	// The rows are kept, not deleted, so un-deleting the topic restores the
-	// reputation on the next recompute. See purgeTopicResidue for why.
+	// The EXISTS clauses are therefore no longer a correctness requirement for
+	// the normal path — they are what makes this pass agree with a database that
+	// reached that state some other way (a partial older import, a hand-edited
+	// row, a restore). Keeping them costs a subquery and removes a whole class
+	// of "recompute silently re-grants what the delete paid back", which is the
+	// drift class be6ca82 had to repair by hand on Firestore.
+	//
+	// Profile votes (empty post_id) are about the person, not a topic, so they
+	// are unconditional.
 	if err := app.DB().NewQuery(
 		"SELECT target_id, SUM(value) AS total FROM " + reputationVotesCollectionName +
 			" WHERE post_id = '' OR post_id IN (" +
-			"SELECT id FROM posts WHERE deleted = false" +
-			" AND topic_id IN (SELECT id FROM topics WHERE deleted = false))" +
+			"SELECT id FROM posts WHERE (is_draft = false OR is_draft IS NULL)" +
+			" AND topic_id IN (SELECT id FROM topics))" +
 			" GROUP BY target_id",
 	).All(&rows); err != nil {
 		return nil, err

@@ -56,7 +56,7 @@ func canViewCategory(app core.App, acc AccessContext, categoryID string) (bool, 
 // the topic (and its parent category).
 func canViewTopic(app core.App, acc AccessContext, topicID string) (bool, *core.Record, error) {
 	topic, err := app.FindRecordById(topicsCollectionName, topicID)
-	if err != nil || topic == nil || topic.GetBool("deleted") {
+	if err != nil || topic == nil {
 		return false, nil, err
 	}
 

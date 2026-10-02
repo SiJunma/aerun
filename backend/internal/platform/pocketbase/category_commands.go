@@ -456,7 +456,6 @@ func deleteCategoryHandler(e *core.RequestEvent) error {
 		// from removing an empty section forever.
 		count, err := txApp.CountRecords(topicsCollectionName, dbx.HashExp{
 			"category_id": rec.Id,
-			"deleted":     false,
 		})
 		if err != nil {
 			return 0, nil, internalError("failed to count topics in category", err)

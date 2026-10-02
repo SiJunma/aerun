@@ -30,7 +30,7 @@ func subscribeTopicHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
-		if err != nil || topic == nil || topic.GetBool("deleted") {
+		if err != nil || topic == nil {
 			return 0, nil, notFoundError("topic not found")
 		}
 

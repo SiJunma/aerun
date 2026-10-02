@@ -36,16 +36,15 @@ func postPayload(record *core.Record) map[string]any {
 		"topic_id":  record.GetString("topic_id"),
 		"author_id": record.GetString("author_id"),
 		"sequence":  record.GetInt("sequence"),
-		"deleted":   record.GetBool("deleted"),
 		"created":   record.GetDateTime("created").String(),
 		"updated":   record.GetDateTime("updated").String(),
 	}
 
-	if record.GetBool("deleted") {
-		payload["content"] = ""
-	} else {
-		payload["content"] = record.GetString("content")
-	}
+	// No `deleted` key: a deleted post is gone from the database, so the payload
+	// has nothing to report. The client cannot be handed a flag for a state the
+	// server no longer stores, and an always-false flag is worse than none — it
+	// invites a branch that can never be true.
+	payload["content"] = record.GetString("content")
 
 	edited := record.GetDateTime("edited")
 	if !edited.IsZero() {
@@ -158,7 +157,7 @@ func listPostsHandler(e *core.RequestEvent) error {
 	afterSeq := parseIntParam(e.Request.URL.Query().Get("after_sequence"), 0)
 
 	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
-	if err != nil || topic == nil || topic.GetBool("deleted") {
+	if err != nil || topic == nil {
 		return notFoundError("topic not found")
 	}
 
@@ -250,7 +249,7 @@ func editPostHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		post, err := txApp.FindRecordById(postsCollectionName, postID)
-		if err != nil || post == nil || post.GetBool("deleted") {
+		if err != nil || post == nil {
 			return 0, nil, notFoundError("post not found")
 		}
 
@@ -299,7 +298,20 @@ func editPostHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// deletePostHandler soft-deletes a post and recalculates topic projections if needed.
+// deletePostHandler HARD-deletes a post and recalculates the topic projections.
+//
+// Hard delete is the deliberate semantics: a deleted post is not listed, not
+// numbered and not counted, exactly as in the Firestore era this branch
+// migrates from and as in the reference engine (MyBB). There is no tombstone
+// row. See 1767700000_drop_deleted_flag.go, which drops the `deleted` column
+// this handler used to set.
+//
+// Because the row is GONE, "does a counter still point at it" cannot drift: a
+// post either exists and counts, or it does not exist. The follow-up risk that
+// makes a hard delete dangerous is orphaned denormalized copies — votes,
+// subscriptions, projections — so every one of them is settled HERE, in the same
+// transaction as the delete. Rules 1-3 of
+// markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md.
 func deletePostHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -311,7 +323,7 @@ func deletePostHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		post, err := txApp.FindRecordById(postsCollectionName, postID)
-		if err != nil || post == nil || post.GetBool("deleted") {
+		if err != nil || post == nil {
 			return 0, nil, notFoundError("post not found")
 		}
 
@@ -343,31 +355,22 @@ func deletePostHandler(e *core.RequestEvent) error {
 			return 0, nil, conflictError("cannot delete a topic's first post here - delete the topic instead")
 		}
 
-		post.Set("deleted", true)
-		post.Set("content", "")
-		if err := txApp.Save(post); err != nil {
-			return 0, nil, internalError("failed to delete post", err)
-		}
+		// Everything below reads state that the delete invalidates, so it is
+		// captured BEFORE the row goes. Rule 3 of the incident doc: aggregate
+		// first, then mutate — a loop that reads after its parent is gone is how
+		// the original decrement lost its owner.
+		authorID := post.GetString("author_id")
 
-		// Reputation earned on a post the forum now shows as a tombstone must
-		// be paid back. be6ca82 fixed exactly this on the Firestore branch,
-		// where the reputation_logs outlived the topic and members kept scores
-		// for posts that no longer existed.
+		// Reputation earned on a post that is about to stop existing must be paid
+		// back — be6ca82's exact fix, for the same reason: on Firestore the logs
+		// outlived the topic and members kept scores for posts nobody could read.
 		//
-		// The sum is taken from the vote rows because the votes are the
-		// authority RecomputeUserCounters derives from; post.reputation is only
-		// a projection of them. The rows themselves are KEPT, for the same
-		// reason purgeTopicResidue keeps them: a soft delete must stay
-		// reversible, and sumVotes already ignores a vote whose post is
-		// soft-deleted, so the recompute agrees with this payout instead of
-		// re-granting the score.
-		//
-		// There is no separate "already reverted" claim. be6ca82 needed a
-		// reputation_reverts/{logId} document because Cloud Functions are
-		// at-least-once and a redelivery applied the revert twice; here the
-		// payout and the tombstone share one transaction, and the command
-		// refuses to run against an already-deleted post, so a second delivery
-		// is a 404 rather than a second payout.
+		// The sum comes from the vote rows because the votes are the authority
+		// RecomputeUserCounters derives from. The rows are deleted below: with a
+		// hard delete there is no reversible state left to keep them for, and an
+		// orphaned vote is exactly the residue the incident was about. Removing
+		// them also makes the payout exactly-once by construction — a second pass
+		// finds no rows left to sum, so no claim document is needed.
 		type voteTotal struct {
 			Total int `db:"total"`
 		}
@@ -379,44 +382,77 @@ func deletePostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to sum reputation votes for post deletion", err)
 		}
 		if voteSum.Total != 0 {
-			if err := adjustUserReputation(txApp, post.GetString("author_id"), -voteSum.Total); err != nil {
+			if err := adjustUserReputation(txApp, authorID, -voteSum.Total); err != nil {
 				return 0, nil, err
 			}
 		}
-		post.Set("reputation", 0)
-		if err := txApp.Save(post); err != nil {
-			return 0, nil, internalError("failed to clear deleted post reputation", err)
-		}
 
-		// The post's AUTHOR loses a post, not the caller. A moderator deleting
-		// someone else's post must not move their own counter, and the
-		// soft-deleted post is excluded from the count by definition, so this
-		// is a decrement of exactly one.
-		if err := adjustUserPostCount(txApp, post.GetString("author_id"), -1); err != nil {
+		// The post's AUTHOR loses a post, not the caller: a moderator deleting
+		// someone else's post must not move their own counter. The row is about
+		// to stop existing, so the count drops by exactly one.
+		if err := adjustUserPostCount(txApp, authorID, -1); err != nil {
 			return 0, nil, err
 		}
 
-		// Update topic: recalculate visible posts count
+		// The audit row goes in the same transaction and carries the TEXT. The
+		// post is about to become unrecoverable, so this is the last place its
+		// content can live — the owner asked for exactly that: the admin log is
+		// the surviving record of what was said.
+		//
+		// EVERY delete is logged, not only staff ones. The previous guard
+		// (`if !isAuthor`) meant an ordinary player deleting their own post left
+		// no trace at all, which is precisely the traffic worth watching.
+		if err := recordAuditLog(txApp, "post_delete", e.Auth.Id, map[string]any{
+			"post_id":     post.Id,
+			"topic_id":    topic.Id,
+			"topic_title": topic.GetString("title"),
+			"author_id":   authorID,
+			"sequence":    post.GetInt("sequence"),
+			"by_author":   isAuthor,
+			"content":     post.GetString("content"),
+		}); err != nil {
+			return 0, nil, err
+		}
+
+		// Votes out, then the row. The order only matters in that the votes must
+		// be gone before anything could read them and pay a second time.
+		if _, err := txApp.DB().NewQuery(
+			"DELETE FROM " + reputationVotesCollectionName + " WHERE post_id = {:post}",
+		).Bind(dbx.Params{"post": post.Id}).Execute(); err != nil {
+			return 0, nil, internalError("failed to delete votes for deleted post", err)
+		}
+		if err := txApp.Delete(post); err != nil {
+			return 0, nil, internalError("failed to delete post", err)
+		}
+
+		// Recount AFTER the delete, so the projection reflects what is actually
+		// there. There is no deleted flag left to filter on, which is exactly why
+		// the counter and the feed can no longer disagree.
 		type countResult struct {
 			Cnt int `db:"cnt"`
 		}
 		var cRes countResult
-		err = txApp.DB().NewQuery("SELECT COUNT(*) AS cnt FROM posts WHERE topic_id = {:topic_id} AND deleted = false").
-			Bind(dbx.Params{"topic_id": topic.Id}).
-			One(&cRes)
-		if err == nil {
-			topic.Set("posts_count", cRes.Cnt)
+		if err := txApp.DB().NewQuery(
+			"SELECT COUNT(*) AS cnt FROM " + postsCollectionName +
+				" WHERE topic_id = {:topic_id} AND (is_draft = false OR is_draft IS NULL)",
+		).Bind(dbx.Params{"topic_id": topic.Id}).One(&cRes); err != nil {
+			return 0, nil, internalError("failed to recount topic posts", err)
 		}
+		topic.Set("posts_count", cRes.Cnt)
 
-		// If this was the last_post_id on topic, find the latest active post
+		// If this was the last_post_id on topic, find the latest remaining post
 		if topic.GetString("last_post_id") == post.Id {
 			var latestPosts []*core.Record
 			err = txApp.RecordQuery(postsCollectionName).
-				AndWhere(dbx.HashExp{"topic_id": topic.Id, "deleted": false}).
+				AndWhere(dbx.HashExp{"topic_id": topic.Id}).
+				AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
 				OrderBy("sequence DESC").
 				Limit(1).
 				All(&latestPosts)
-			if err == nil && len(latestPosts) > 0 {
+			if err != nil {
+				return 0, nil, internalError("failed to find the new last post", err)
+			}
+			if len(latestPosts) > 0 {
 				latest := latestPosts[0]
 				topic.Set("last_post_id", latest.Id)
 				topic.Set("last_post_created", latest.GetDateTime("created"))
@@ -429,16 +465,6 @@ func deletePostHandler(e *core.RequestEvent) error {
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic metadata after post deletion", err)
-		}
-
-		if !isAuthor {
-			if err := recordAuditLog(txApp, "post_delete", e.Auth.Id, map[string]any{
-				"post_id":   post.Id,
-				"topic_id":  topic.Id,
-				"author_id": post.GetString("author_id"),
-			}); err != nil {
-				return 0, nil, err
-			}
 		}
 
 		return http.StatusOK, map[string]any{
@@ -480,12 +506,12 @@ func movePostsHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		sourceTopic, err := txApp.FindRecordById(topicsCollectionName, sourceTopicID)
-		if err != nil || sourceTopic == nil || sourceTopic.GetBool("deleted") {
+		if err != nil || sourceTopic == nil {
 			return 0, nil, notFoundError("source topic not found")
 		}
 
 		targetTopic, err := txApp.FindRecordById(topicsCollectionName, form.TargetTopicID)
-		if err != nil || targetTopic == nil || targetTopic.GetBool("deleted") {
+		if err != nil || targetTopic == nil {
 			return 0, nil, notFoundError("target topic not found")
 		}
 
@@ -566,14 +592,18 @@ func recalcTopicProjection(txApp core.App, topic *core.Record) {
 		Cnt int `db:"cnt"`
 	}
 	var cRes countResult
-	_ = txApp.DB().NewQuery("SELECT COUNT(*) AS cnt FROM posts WHERE topic_id = {:topic_id} AND deleted = false").
-		Bind(dbx.Params{"topic_id": topic.Id}).
-		One(&cRes)
+	// No deleted filter: a deleted post has no row. Drafts are excluded because
+	// they are authored-but-unpublished and never occupy a slot in the feed.
+	_ = txApp.DB().NewQuery(
+		"SELECT COUNT(*) AS cnt FROM " + postsCollectionName +
+			" WHERE topic_id = {:topic_id} AND (is_draft = false OR is_draft IS NULL)",
+	).Bind(dbx.Params{"topic_id": topic.Id}).One(&cRes)
 	topic.Set("posts_count", cRes.Cnt)
 
 	var latestPosts []*core.Record
 	err := txApp.RecordQuery(postsCollectionName).
-		AndWhere(dbx.HashExp{"topic_id": topic.Id, "deleted": false}).
+		AndWhere(dbx.HashExp{"topic_id": topic.Id}).
+		AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
 		OrderBy("sequence DESC").
 		Limit(1).
 		All(&latestPosts)

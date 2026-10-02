@@ -354,7 +354,6 @@ func deleteCharacterHandler(e *core.RequestEvent) error {
 		if postsHaveAuthorCharacter(txApp) {
 			used, err := txApp.CountRecords(postsCollectionName, dbx.HashExp{
 				"author_character_id": rec.Id,
-				"deleted":             false,
 			})
 			if err != nil {
 				return 0, nil, internalError("failed to count character references", err)

@@ -77,7 +77,7 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
-		if err != nil || topic == nil || topic.GetBool("deleted") {
+		if err != nil || topic == nil {
 			return 0, nil, notFoundError("topic not found")
 		}
 
@@ -99,7 +99,6 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 			post.Set("topic_id", topicID)
 			post.Set("author_id", e.Auth.Id)
 			post.Set("sequence", 0)
-			post.Set("deleted", false)
 		}
 		post.Set("is_draft", true)
 		post.Set("content", content)
@@ -164,7 +163,7 @@ func listMyDraftsHandler(e *core.RequestEvent) error {
 	for _, r := range records {
 		it := item{payload: draftPayload(r), orphan: true, updated: r.GetDateTime("updated").String()}
 		topic, err := e.App.FindRecordById(topicsCollectionName, r.GetString("topic_id"))
-		if err == nil && topic != nil && !topic.GetBool("deleted") {
+		if err == nil && topic != nil {
 			it.orphan = false
 			it.payload["topic_title"] = topic.GetString("title")
 			it.payload["category_id"] = topic.GetString("category_id")
@@ -273,7 +272,7 @@ func publishDraftHandler(e *core.RequestEvent) error {
 
 		topicID := post.GetString("topic_id")
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
-		if err != nil || topic == nil || topic.GetBool("deleted") {
+		if err != nil || topic == nil {
 			return 0, nil, conflictError("draft is orphaned: its topic no longer exists")
 		}
 		acc := AccessFrom(e)
