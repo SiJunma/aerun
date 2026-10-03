@@ -214,6 +214,18 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.PATCH("/me/profile", updateMyProfileHandler)
 	group.PATCH("/users/{id}/profile", updateUserProfileHandler).BindFunc(enforceIdempotency)
 
+	// Sign-in credentials. The legacy Security tab called
+	// pb.collection('users').update(), which this backend refuses by design
+	// (users.UpdateRule = nil), so the whole tab had no save path — see
+	// account_credentials.go. Each mutation carries enforceIdempotency: they are
+	// destructive-if-repeated (a re-sent password change re-hashes, a re-sent
+	// email change is a second audit row) and a double-clicked Save must not
+	// produce two of either.
+	group.GET("/me/auth", listMyAuthMethodsHandler)
+	group.PUT("/me/password", changeMyPasswordHandler).BindFunc(enforceIdempotency)
+	group.PATCH("/me/email", changeMyEmailHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/me/auth/{provider}", unlinkMyAuthProviderHandler).BindFunc(enforceIdempotency)
+
 	// Sprint 2 identity commands.
 	group.POST("/auth/register", registerHandler)
 	group.GET("/admin/users", adminListUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
