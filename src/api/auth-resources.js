@@ -3,6 +3,63 @@ import { sendApi, pb } from './pocketbase';
 // render the same rows as the category page, and a second copy of this mapping
 // is exactly how the two drifted apart in the first place.
 import { normalizeTopic } from './forum';
+import { recordAvatarUrl, resolveAvatarUrl } from './avatars';
+
+// ── User profile normalisation ──────────────────────────────────────────────
+
+/**
+ * normalizeUserProfile maps a PocketBase `users` record onto the field names the
+ * pages actually speak.
+ *
+ * WHY THIS EXISTS. The pages predate the backend and read the Firestore
+ * vocabulary: `role_id`, `post_count`, `uid`. PocketBase spells the same facts
+ * `role`, `posts_count` and (only) `id`, and nothing in between renames them.
+ * Two independent mappers then read different fields and missed different ones:
+ *
+ *   - subscribeToUser spread the raw record, so every `role_id` read was
+ *     undefined. `resolveUserRoleId(undefined)` falls back to 'player', which is
+ *     why a member with a custom role was badged "Player"; `post_count` was
+ *     undefined for the same reason, so the profile card read 0 posts.
+ *   - AuthProvider built the signed-in user's profile from a hand-written
+ *     whitelist that listed neither the profile block (bio, location, birthday,
+ *     occupation, interests, contacts) nor the real counter names, so opening
+ *     Settings on your OWN profile pre-filled every field empty even though the
+ *     migrated database held the values.
+ *
+ * One mapper, used by both, is what stops them drifting apart a second time.
+ * The `??` chains read the PocketBase name first and fall back to the legacy
+ * one, so a row written before the rename keeps rendering.
+ *
+ * `status` is carried through unchanged: `banned` and `pending` are ACCOUNT
+ * STATUSES, not roles (internal/auth), and a caller that tests them against the
+ * role column is testing the wrong axis.
+ */
+export const normalizeUserProfile = (rec) => {
+  if (!rec) return null;
+  const settings = rec.settings || {};
+  return {
+    ...rec,
+    uid: rec.uid || rec.id,
+    displayName: rec.nickname || rec.displayName || '',
+    // The join key on `users` is `role`; `role_id` only exists on `roles`.
+    role_id: rec.role ?? rec.role_id ?? 'player',
+    // `custom_role_id` is the derived-role companion column. Exposed under the
+    // legacy name so a caller never has to know the pair.
+    custom_role_id: rec.custom_role_id ?? '',
+    avatar_url: recordAvatarUrl(rec) || resolveAvatarUrl(rec.avatar_url),
+    post_count: rec.posts_count ?? rec.post_count ?? 0,
+    topics_count: rec.topics_count ?? 0,
+    reputation: rec.reputation ?? 0,
+    status_line: rec.status_line || '',
+    bio: rec.bio || '',
+    location: rec.location || '',
+    birthday: rec.birthday || '',
+    occupation: rec.occupation || '',
+    interests: rec.interests || '',
+    contacts: rec.contacts || '',
+    settings
+  };
+};
 
 // ── Read Map (local / server-side "last visit" tracking) ─────────────────────────────
 
@@ -146,7 +203,7 @@ export const subscribeToUser = (uid, callback) => {
   let isSubscribed = true;
   pb.collection('users').getOne(uid).then(record => {
     if (isSubscribed) {
-      callback({ id: record.id, ...record });
+      callback(normalizeUserProfile({ ...record }));
     }
   }).catch(() => {
     if (isSubscribed) callback(null);
@@ -156,7 +213,7 @@ export const subscribeToUser = (uid, callback) => {
   try {
     pb.collection('users').subscribe(uid, (e) => {
       if (isSubscribed) {
-        callback(e.record ? { id: e.record.id, ...e.record } : null);
+        callback(e.record ? normalizeUserProfile({ ...e.record }) : null);
       }
     }).then(fn => { unsub = fn; }).catch(() => {});
   } catch {

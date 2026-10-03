@@ -5,7 +5,8 @@ import LoadingPreloader from '../components/common/LoadingPreloader';
 import {
   markAllTopicsRead,
   subscribeToReadMap,
-  recordTopicVisit as apiRecordTopicVisit
+  recordTopicVisit as apiRecordTopicVisit,
+  normalizeUserProfile
 } from '../api/auth-resources';
 import {
   initRtdbPresence,
@@ -106,15 +107,11 @@ export const AuthProvider = ({ children }) => {
         providerData: [{ providerId: 'password' }]
       };
       const p = {
-        id: rec.id,
-        uid: rec.id,
-        nickname: rec.nickname || rec.email?.split('@')[0] || 'User',
-        role_id: rec.role || 'player',
-        avatar_url: rec.avatar_url || '',
-        status: rec.status || 'active',
-        settings: rec.settings || {},
-        post_count: rec.post_count || 0,
-        status_line: rec.status_line || ''
+        ...normalizeUserProfile({ ...rec }),
+        // Only the caller's OWN record falls back to the mailbox name and then to
+        // a literal — the normalizer stays neutral about nicknames so a public
+        // profile never renders one derived from an email address.
+        nickname: rec.nickname || rec.email?.split('@')[0] || 'User'
       };
       setUser(u);
       setProfile(p);

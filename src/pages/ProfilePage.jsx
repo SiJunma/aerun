@@ -43,7 +43,13 @@ const ProfilePage = () => {
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
 
-  const isLimitedProfile = viewedProfile?.role_id === 'pending' || viewedProfile?.role_id === 'spectator' || viewedProfile?.role_id === 'banned';
+  // `pending` and `banned` are ACCOUNT STATUSES, not roles (internal/auth), so
+// they are read from the status column; only `spectator` is a role. Testing
+// them against role_id could never match, which left a banned member with a
+// full profile — the messaging button and the reputation controls included.
+const isLimitedProfile = viewedProfile?.status === 'pending'
+  || viewedProfile?.status === 'banned'
+  || viewedProfile?.role_id === 'spectator';
   const isOwn = profile?.uid === uid;
   const canEditNickname = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_NICKNAME) : hasPermission(PERMISSIONS.EDIT_OTHERS_NICKNAMES);
   const canEditAvatar = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_AVATAR) : hasPermission(PERMISSIONS.EDIT_OTHERS_AVATARS);
@@ -187,7 +193,11 @@ const ProfilePage = () => {
         const result = await fetchReputationLogs(uid, seekLogId ? 1 : currentPageRep, REP_PER_PAGE, seekLogId);
         if (isMounted) {
           setRepLogs(result.logs || []);
-          setTotalRepLogs(result.totalCount || 0);
+          // fetchReputationLogs names it `total` (reputation.js returns
+          // { logs, total, hidden }); reading `totalCount` here yielded
+          // undefined, so the pager always drew "1 of 0" and the reputation
+          // tab looked empty however many rows came back.
+          setTotalRepLogs(result.total || 0);
           
           if (result.page) {
             lastFetchedPageRef.current = result.page;
@@ -234,7 +244,9 @@ const ProfilePage = () => {
       const result = await fetchUserPosts(uid, currentPagePosts, POSTS_PER_PAGE, postFilter);
       if (isMounted) {
         setUserPosts(result.posts);
-        setTotalUserPosts(result.totalCount);
+        // fetchUserPosts names it `total` too; `totalCount` was undefined here,
+        // so the posts tab paginated against NaN and rendered no rows.
+        setTotalUserPosts(result.total || 0);
         setLoadingUserPosts(false);
       }
     };
@@ -535,7 +547,7 @@ const ProfilePage = () => {
                   </div>
 
                   {/* Send Message button */}
-                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.role_id !== 'banned' && uid !== profile?.uid && (
+                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.status !== 'banned' && uid !== profile?.uid && (
                     <div className="mb-2 text-lg-center">
                       <Button
                         as={Link}
@@ -566,7 +578,7 @@ const ProfilePage = () => {
                           <div className="fw-bold text-accent">
                             {!viewedProfile ? <Skeleton width="30px" height="1.2rem" /> : (viewedProfile?.reputation || 0)}
                           </div>
-                          {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && viewedProfile?.role_id !== 'pending' && (
+                          {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && viewedProfile?.status !== 'pending' && (
                             <div className="d-flex gap-1 align-items-center">
                               {!myVote ? (
                                 <>
