@@ -45,6 +45,11 @@ func draftPayload(r *core.Record) map[string]any {
 	if characterID := r.GetString("author_character_id"); characterID != "" {
 		payload["author_character_id"] = characterID
 	}
+	// The throws a draft carries. A draft is private to its author, so there is
+	// no reader to redact for here — the publish response is where that applies.
+	if rolls, err := decodeRolls(r.Get("rolls")); err == nil && len(rolls) > 0 {
+		payload["rolls"] = rolls
+	}
 	return payload
 }
 
@@ -78,6 +83,11 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 		// the identity the text was written under, and by then the author may
 		// have switched masks in the composer.
 		CharacterID string `json:"character_id"`
+		// Rolls travels with the text for the same reason it does on a post:
+		// the `[roll=<id>]` reference in the body is meaningless without it.
+		// A draft is published by promoting the row verbatim, so a throw lost
+		// here is a throw lost for good.
+		Rolls map[string]any `json:"rolls"`
 	}
 	if err := json.Unmarshal(raw, &form); err != nil {
 		return validationError("invalid JSON body")
@@ -113,6 +123,11 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 		}
 		post.Set("is_draft", true)
 		post.Set("content", content)
+		// Validated against the draft's own body, exactly as on create, so a
+		// draft promoted later carries the same throws the author saw.
+		if err := writeRolls(post, content, form.Rolls); err != nil {
+			return 0, nil, validationError(err.Error())
+		}
 		// The same server-owned resolution createPostHandler uses, for the same
 		// reason: the client names the mask it wants and the server answers with
 		// the one it will accept, so a draft can never be filed under somebody
@@ -367,6 +382,10 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		// vanish the moment the draft was published.
 		postOut := postPayload(post)
 		decoratePostAuthors(txApp, []map[string]any{postOut})
+		// Publishing turns a private row into forum content, so this is the first
+		// moment the answer needs the same per-reader redaction the list route
+		// applies — the stored throws are promoted verbatim, master dice included.
+		redactPostRolls([]map[string]any{postOut}, AccessFrom(e))
 
 		return http.StatusOK, map[string]any{
 			"post":       postOut,

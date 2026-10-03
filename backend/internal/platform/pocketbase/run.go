@@ -266,6 +266,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// Characters (masks). Reads follow the users profile visibility rule;
 	// writes are owner-only and self-service (ADR-5).
 	group.GET("/users/{id}/characters", listUserCharactersHandler)
+	// The profile's Posts tab. It used to read `posts` through the browser SDK,
+	// which lockBrowserRules answers with 403 for every non-superuser — see
+	// user_posts.go.
+	group.GET("/users/{id}/posts", listUserPostsHandler)
 	group.GET("/characters/{id}", getCharacterHandler)
 	group.POST("/me/characters", createCharacterHandler).BindFunc(enforceIdempotency)
 	group.PATCH("/characters/{id}", updateCharacterHandler).BindFunc(enforceIdempotency)

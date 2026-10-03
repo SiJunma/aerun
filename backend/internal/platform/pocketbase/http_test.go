@@ -31,6 +31,12 @@ const (
 	// for an admin (equal rank allowed) than for a moderator (strictly lower
 	// only), and without an admin account that branch is unreachable.
 	fixAdminID = "useradmin000001"
+	// fixSpectatorID exists so a role that genuinely LACKS a permission can be
+	// exercised. Spectator carries only view_forum, which makes it the right
+	// probe for view_master_dice: a guest proves nothing about a stored role,
+	// and `player` holds the permission (internal/auth role.go), so testing
+	// withholding against `player` would assert the opposite of the contract.
+	fixSpectatorID = "userspect000001"
 )
 
 // newAerunTestApp is the TestAppFactory for the scenarios below. The fresh
@@ -64,6 +70,25 @@ func testAerunConfig() config.Config {
 	}
 }
 
+// identityFixtureCount is the number of accounts seedIdentityFixtures creates.
+//
+// It is written down because the admin user list is an exact-count assertion, so
+// ADDING a role to that fixture without updating this number breaks two tests
+// that have nothing to do with the role — which is how the number drifts out of
+// date in the first place. The list is the source; the constant follows it.
+var identityFixtureRoles = []struct {
+	name string
+}{
+	{"player"},
+	{"pending"},
+	{"banned"},
+	{"moderator"},
+	{"root"},
+	{"spectator"},
+}
+
+func identityFixtureCount() int { return len(identityFixtureRoles) }
+
 // seedIdentityFixtures creates the standard identity matrix and returns the
 // auth tokens per actor ("player", "pending", "banned", "moderator", "root").
 func seedIdentityFixtures(t testing.TB, app *tests.TestApp) map[string]string {
@@ -74,6 +99,7 @@ func seedIdentityFixtures(t testing.TB, app *tests.TestApp) map[string]string {
 		"banned":    createTestUser(t, app, fixBannedID, "banned@example.com", "BannedOne", auth.RolePlayer, auth.StatusBanned),
 		"moderator": createTestUser(t, app, fixModeratorID, "mod@example.com", "ModOne", auth.RoleModerator, auth.StatusActive),
 		"root":      createTestUser(t, app, fixRootID, "root@example.com", "RootOne", auth.RoleRoot, auth.StatusActive),
+		"spectator": createTestUser(t, app, fixSpectatorID, "spec@example.com", "SpecOne", auth.RoleSpectator, auth.StatusActive),
 	}
 }
 

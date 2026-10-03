@@ -263,6 +263,29 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 	if !ok || mask.OwnerID != authorID {
 		return
 	}
+
+	// The ACCOUNT nickname is captured here, before the mask takes the display
+	// name, because that is the moment it exists in the payload at all: on a
+	// masked post `author_name` is the mask's name, so without this key the
+	// person behind the character is not named anywhere in the response.
+	//
+	// It is what the "Player: …" tooltip on the Character badge reads. That
+	// tooltip silently rendered for your own posts and for nobody else's,
+	// because the page could only fill it from its own `profile.nickname` or
+	// from `authorStats[uid].nickname`, which no hydration path ever writes —
+	// and from a guest session there is no local profile either, so the badge
+	// came out bare.
+	//
+	// `owner_name` is the name the legacy Firestore document used, so the
+	// tooltip's existing lookup starts working again with no client change.
+	// It discloses nothing new: the profile link already points at this very
+	// account (author_profile_id) and the post's counters are already stamped
+	// with it. A mask is a display layer over an identity the forum already
+	// publishes, not an anonymity feature.
+	if accountName, _ := payload["author_name"].(string); accountName != "" {
+		payload["owner_name"] = accountName
+	}
+
 	payload["is_character"] = true
 	payload["author_name"] = mask.Name
 	payload["author_avatar"] = mask.AvatarURL

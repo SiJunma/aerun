@@ -32,6 +32,10 @@ type createTopicForm struct {
 	// the OPENING post only; there is no other post in this transaction that
 	// could carry it.
 	PinFirstPost bool `json:"pin_first_post"`
+	// Rolls is the result of the opening post's dice, keyed by the `[roll=<id>]`
+	// reference processDiceRolls wrote into the content. Dropped before, so a
+	// new topic with a throw in it showed the raw tag to every reader.
+	Rolls map[string]any `json:"rolls"`
 }
 
 type updateTopicForm struct {
@@ -164,6 +168,11 @@ func createTopicHandler(e *core.RequestEvent) error {
 		// The topic and its opening message are always the same voice, so the
 		// mask is resolved ONCE and written to both rows.
 		post.Set("author_character_id", characterID)
+		// Same for the throws: validated against this body and stored with it,
+		// in the transaction that creates the post.
+		if err := writeRolls(post, content, form.Rolls); err != nil {
+			return 0, nil, validationError(err.Error())
+		}
 
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to create initial post", err)
@@ -209,6 +218,7 @@ func createTopicHandler(e *core.RequestEvent) error {
 		postOut := postPayload(post)
 		decorateTopicAuthors(txApp, []map[string]any{topicOut})
 		decoratePostAuthors(txApp, []map[string]any{postOut})
+		redactPostRolls([]map[string]any{postOut}, AccessFrom(e))
 
 		resp := map[string]any{
 			"topic":      topicOut,

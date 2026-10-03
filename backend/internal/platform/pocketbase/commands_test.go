@@ -1,6 +1,7 @@
 package pocketbase
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -425,7 +426,7 @@ func TestAdminUsersListAccessMatrix(t *testing.T) {
 			name:         "root lists accounts",
 			actor:        "root",
 			expectStatus: http.StatusOK,
-			expect:       []string{`"totalItems":5`},
+			expect:       []string{fmt.Sprintf(`"totalItems":%d`, identityFixtureCount())},
 		},
 	}
 
@@ -507,7 +508,7 @@ func TestAdminUsersListNeverLeaksEmail(t *testing.T) {
 		TestAppFactory: newAerunTestApp,
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
-			`"totalItems":5`,
+			fmt.Sprintf(`"totalItems":%d`, identityFixtureCount()),
 			fixRootID,
 			fixPlayerID,
 		},

@@ -18,6 +18,15 @@ const maxPostContentBodyBytes = 128 * 1024
 
 type createPostForm struct {
 	Content string `json:"content"`
+	// Rolls is the result of the dice the author threw: a map keyed by the
+	// `[roll=<id>]` reference that processDiceRolls wrote into the body.
+	//
+	// It was DROPPED on the floor before — createPost destructured only
+	// `{ content }` out of processDiceRolls and sent the text alone — so the
+	// throw was rendered from the optimistic card and then lost, and every
+	// reader after a reload saw the raw `[roll=…]` tag. The tag is a pointer
+	// with no payload of its own; this map is the payload.
+	Rolls map[string]any `json:"rolls"`
 	// CharacterID is the mask the author picked in the reply composer. Empty
 	// means "use the one stored on my profile" — see resolveAuthorCharacter,
 	// which is what actually decides the value that gets written.
@@ -26,6 +35,12 @@ type createPostForm struct {
 
 type editPostForm struct {
 	Content string `json:"content"`
+	// Rolls follows the same reasoning as createPostForm.Rolls. A POINTER for
+	// the same reason CharacterID is one: an edit that never touched the dice
+	// must leave the stored throws alone, and an absent key is the only way to
+	// say "I did not change them". A plain map would make every edit wipe the
+	// results of the post it was rewriting.
+	Rolls *map[string]any `json:"rolls"`
 	// CharacterID re-files the post under a different mask.
 	//
 	// A POINTER, not a string: the edit form sends this key only when the author
@@ -48,6 +63,20 @@ func postPayload(record *core.Record) map[string]any {
 		"author_id": record.GetString("author_id"),
 		"created":   record.GetDateTime("created").String(),
 		"updated":   record.GetDateTime("updated").String(),
+	}
+
+	// `rolls` is the RESULT of the post's dice throws, and it is what turns
+	// `[roll=roll_…]` back into a number. It travels with the payload because
+	// without it every reader — guest included — sees the raw tag: BBCode's
+	// roll branch falls back to printing `[roll=<id>]` when the id is not in
+	// the map it was given.
+	//
+	// The column is projected here RAW; per-reader redaction of master dice is
+	// a separate pass (redactPostRolls) for the same reason `author_character_id`
+	// is raw here and resolved by decoratePostAuthor — the shape a record has
+	// and what one reader may see of it are different questions.
+	if rolls, err := decodeRolls(record.Get("rolls")); err == nil && len(rolls) > 0 {
+		payload["rolls"] = rolls
 	}
 
 	// `author_character_id` travels RAW and unresolved on purpose. The read
@@ -142,6 +171,13 @@ func createPostHandler(e *core.RequestEvent) error {
 		post.Set("author_id", e.Auth.Id)
 		post.Set("content", content)
 
+		// The dice results are validated against the body that references them
+		// and stored in the same transaction as the post, so a throw can never
+		// outlive the tag that points at it or vice versa.
+		if err := writeRolls(post, content, form.Rolls); err != nil {
+			return 0, nil, validationError(err.Error())
+		}
+
 		// The mask is resolved HERE, inside the transaction, so the post and the
 		// profile it was chosen from cannot disagree. A reply never carries a
 		// pinned flag: pinning is a property of a topic's opening message, and
@@ -191,6 +227,7 @@ func createPostHandler(e *core.RequestEvent) error {
 		// only fills in on the next poll.
 		postOut := postPayload(post)
 		decoratePostAuthors(txApp, []map[string]any{postOut})
+		redactPostRolls([]map[string]any{postOut}, acc)
 
 		resp := map[string]any{
 			"post": postOut,
@@ -253,6 +290,10 @@ func listPostsHandler(e *core.RequestEvent) error {
 		items[i] = postPayload(r)
 	}
 	decoratePostAuthors(e.App, items)
+	// After the author pass, because redaction is the LAST thing that touches
+	// the payload: a master throw's value must not survive into a guest's
+	// response, and this is the route guests read the forum through.
+	redactPostRolls(items, AccessFrom(e))
 
 	// The pinned first post rides ALONGSIDE the page rather than inside it. It is
 	// the topic's EARLIEST post, so on page 1 it is already in `items` and
@@ -264,7 +305,7 @@ func listPostsHandler(e *core.RequestEvent) error {
 	// >= 2 queries it, so the common case costs nothing extra.
 	var pinnedPost map[string]any
 	if page > 1 && topic.GetBool("first_post_pinned") {
-		pinnedPost = loadTopicFirstPost(e.App, topicID)
+		pinnedPost = loadTopicFirstPost(e.App, topicID, AccessFrom(e))
 	}
 
 	resp := map[string]any{
@@ -307,7 +348,12 @@ func listPostsHandler(e *core.RequestEvent) error {
 // and the banner silently never appears. dbx emits plain SQL and says exactly
 // what it means — `IS NULL` included, which is the case that actually occurs
 // for every post written before the draft column existed.
-func loadTopicFirstPost(app core.App, topicID string) map[string]any {
+//
+// `acc` is the READER, and it is threaded in rather than left to a default
+// because the pinned post is served on the same public route as the page: a
+// master throw in the opening message would otherwise be one banner away from
+// reaching a guest unredacted.
+func loadTopicFirstPost(app core.App, topicID string, acc AccessContext) map[string]any {
 	var records []*core.Record
 	err := app.RecordQuery(postsCollectionName).
 		AndWhere(dbx.NewExp("topic_id = {:topic}", dbx.Params{"topic": topicID})).
@@ -320,6 +366,7 @@ func loadTopicFirstPost(app core.App, topicID string) map[string]any {
 	}
 	payload := postPayload(records[0])
 	decoratePostAuthors(app, []map[string]any{payload})
+	redactPostRolls([]map[string]any{payload}, acc)
 	return payload
 }
 
@@ -340,8 +387,12 @@ func getPostHandler(e *core.RequestEvent) error {
 	if err != nil || record == nil || record.GetBool("is_draft") {
 		return notFoundError("post not found")
 	}
+	payload := postPayload(record)
+	// This is a PUBLIC deep-link route, so the single-post answer redacts too:
+	// a permalink to a post with a master throw must not be the way around it.
+	redactPostRolls([]map[string]any{payload}, AccessFrom(e))
 	return e.JSON(http.StatusOK, map[string]any{
-		"post":       postPayload(record),
+		"post":       payload,
 		"request_id": requestIDFrom(e),
 	})
 }
@@ -408,6 +459,18 @@ func editPostHandler(e *core.RequestEvent) error {
 
 		post.Set("content", content)
 		post.Set("edited", types.NowDateTime())
+
+		// Rolls are re-validated against the NEW body whenever the request
+		// carries them, so an edit cannot leave a stored throw pointing at a tag
+		// that is no longer there. An absent key means "the dice were not part of
+		// this edit" and the stored results are left exactly as they were —
+		// which is the common case, since the edit form only re-rolls when the
+		// author typed a fresh `[dice=…]`.
+		if form.Rolls != nil {
+			if err := writeRolls(post, content, *form.Rolls); err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+		}
 		if isModerated {
 			post.Set("editor_id", e.Auth.Id)
 		}
@@ -469,6 +532,10 @@ func editPostHandler(e *core.RequestEvent) error {
 		// until a reload.
 		postOut := postPayload(post)
 		decoratePostAuthors(txApp, []map[string]any{postOut})
+		// The edited card is rendered straight from this answer, so the rolls it
+		// carries are the ones the page will show — and they go through the same
+		// redaction as the list route.
+		redactPostRolls([]map[string]any{postOut}, acc)
 
 		return http.StatusOK, map[string]any{
 			"post":       postOut,

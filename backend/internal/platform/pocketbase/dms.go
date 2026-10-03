@@ -25,14 +25,22 @@ type createDMForm struct {
 	RecipientIDs []string `json:"recipient_ids"`
 	Title        string   `json:"title"`
 	Text         string   `json:"text"`
+	// Rolls is the result of the dice in the message. See createPostForm.Rolls:
+	// the `[roll=<id>]` tag in the text is only a pointer, and this map is what
+	// it points into.
+	Rolls map[string]any `json:"rolls"`
 }
 
 type sendDMMessageForm struct {
-	Text string `json:"text"`
+	Text  string         `json:"text"`
+	Rolls map[string]any `json:"rolls"`
 }
 
 type editDMMessageForm struct {
 	Text string `json:"text"`
+	// A POINTER, like editPostForm.Rolls: an edit that did not touch the dice
+	// must not wipe the throws the message already carries.
+	Rolls *map[string]any `json:"rolls"`
 }
 
 // requireDMMember reports whether userID is a participant in conversationID.
@@ -102,6 +110,13 @@ func editDMMessageHandler(e *core.RequestEvent) error {
 		}
 
 		msg.Set("text", cleanText)
+		// Only when the request carries them: an edit that never touched the dice
+		// must leave the stored throws alone, exactly as editPostForm does.
+		if form.Rolls != nil {
+			if err := writeRolls(msg, cleanText, *form.Rolls); err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+		}
 		msg.Set("edited", types.NowDateTime())
 		if err := txApp.Save(msg); err != nil {
 			return 0, nil, internalError("failed to edit the message", err)
@@ -258,6 +273,12 @@ func dmMessagePayload(rec *core.Record) map[string]any {
 	}
 
 	payload["text"] = rec.GetString("text")
+	// The throws, resolved exactly as on a post. Both participants of a
+	// conversation are members of it, and `view_master_dice` is applied the same
+	// way here — a DM is not a place where a permission quietly stops applying.
+	if rolls, err := decodeRolls(rec.Get("rolls")); err == nil && len(rolls) > 0 {
+		payload["rolls"] = rolls
+	}
 	if edited := rec.GetDateTime("edited"); !edited.IsZero() {
 		payload["edited"] = edited.String()
 	}
@@ -371,6 +392,9 @@ func createDMHandler(e *core.RequestEvent) error {
 		msg.Set("sender_id", e.Auth.Id)
 		msg.Set("sequence", 1)
 		msg.Set("text", cleanText)
+		if err := writeRolls(msg, cleanText, form.Rolls); err != nil {
+			return 0, nil, validationError(err.Error())
+		}
 		if err := txApp.Save(msg); err != nil {
 			return 0, nil, internalError("failed to save message", err)
 		}
@@ -493,6 +517,9 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 		msg.Set("sender_id", e.Auth.Id)
 		msg.Set("sequence", nextSeq)
 		msg.Set("text", cleanText)
+		if err := writeRolls(msg, cleanText, form.Rolls); err != nil {
+			return 0, nil, validationError(err.Error())
+		}
 
 		if err := txApp.Save(msg); err != nil {
 			return 0, nil, internalError("failed to save message", err)

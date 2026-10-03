@@ -89,13 +89,19 @@ check(
 // ── A draft write must update the card ──────────────────────────────────────
 // This is the defect the user saw twice: the row was saved and the page
 // insisted it did not exist.
+// The two saveTopicDraft call sites now pass the PROCESSED text (the body the
+// server stores carries `[roll=…]` references) plus the roll map, so the gates
+// below match on the argument list rather than on `replyContent.trim()` /
+// `editContent.trim()` literally — what they are really asserting is that the
+// picked mask is the second-to-last thing sent, not which local variable holds
+// the text.
 check(
-  /await saveTopicDraft\(id, replyContent\.trim\(\)[^)]*\);[\s\S]{0,400}setMyDraft\(decorateDraft\(saved/.test(code.topicPage),
+  /await saveTopicDraft\(id, draftContent, selectedCharacterId,[\s\S]{0,200}?\);[\s\S]{0,400}setMyDraft\(decorateDraft\(saved/.test(code.topicPage),
   'handleSaveDraft must call setMyDraft after saving — the card renders from this state, so a ' +
     'silent write leaves the page claiming the draft does not exist until a manual reload'
 );
 check(
-  /await saveTopicDraft\(id, editContent\.trim\(\)[^)]*\);[\s\S]{0,400}setMyDraft\(decorateDraft\(saved/.test(code.topicPage),
+  /await saveTopicDraft\(\s*id,\s*draftContent,\s*editCharacterId,[\s\S]{0,200}?\);[\s\S]{0,400}setMyDraft\(decorateDraft\(saved/.test(code.topicPage),
   'handleUpdateDraft must call setMyDraft after saving — otherwise the card keeps rendering the ' +
     'pre-edit text, which is the second reported symptom'
 );
@@ -144,14 +150,22 @@ check(
     'and a topic list row renders the last speaker from that column alone'
 );
 check(
-  /await saveTopicDraft\(id, replyContent\.trim\(\), selectedCharacterId\)/.test(code.topicPage),
+  /await saveTopicDraft\(id, draftContent, selectedCharacterId, rolls\)/.test(code.topicPage),
   'handleSaveDraft must send the picked mask — the composer already knows it and the server needs ' +
     'it to stamp the draft row'
 );
 check(
-  /await saveTopicDraft\(id, editContent\.trim\(\), editCharacterId\)/.test(code.topicPage),
+  /await saveTopicDraft\(\s*id,\s*draftContent,\s*editCharacterId,/.test(code.topicPage),
   'handleUpdateDraft must send the edited mask — editing a draft under a different identity and ' +
     'keeping the previous one is the same bug on the update path'
+);
+// The rolls must reach the draft row too: publish promotes it verbatim, so a
+// throw that is not on the row at save time is a post carrying `[roll=…]` tags
+// that resolve to nothing.
+check(
+  /handleSaveDraft[\s\S]{0,600}processDiceRolls\(replyContent\.trim\(\)\)/.test(code.topicPage),
+  'handleSaveDraft must throw the dice BEFORE saving the draft — a draft stored with raw ' +
+    '[dice=…] markup publishes a post whose [roll=…] reference points at nothing'
 );
 check(
   /const maskId = draft\.author_character_id \|\| charId/.test(code.topicPage),

@@ -199,7 +199,10 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
 // from the auth token and refuses to let a client post as somebody else.
 export const sendDmMessage = async (conversationId, _senderUid, text, _recipientUid, idempotencyKey) => {
   if (!conversationId || !text) return;
-  const { content: processedContent } = processDiceRolls(text);
+  // Sent alongside the text for the same reason as on the forum: without the
+  // map the `[roll=<id>]` tag in the body is an unresolved pointer, and a DM
+  // rendered the raw tag on both sides of the conversation.
+  const { content: processedContent, rolls } = processDiceRolls(text);
 
   return await sendApi(`/api/aerun/dms/${conversationId}/messages`, {
     method: 'POST',
@@ -207,7 +210,8 @@ export const sendDmMessage = async (conversationId, _senderUid, text, _recipient
     // per call, so a double-click that escapes the in-flight latch is two posts.
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
-      text: processedContent.trim()
+      text: processedContent.trim(),
+      ...(rolls && Object.keys(rolls).length > 0 ? { rolls } : {})
     }
   });
 };

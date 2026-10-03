@@ -103,14 +103,136 @@ const normalizeUserProfile = new Function(
 }
 
 // ── 3. The list APIs and the page must agree on the total's name ─────────────
+//
+// The invariant is that fetchUserPosts still RETURNS a `total` the page can
+// read — not which SDK field it reads it from. The source moved from the
+// PocketBase SDK (`list.totalItems`, which answered 403 for every non-superuser
+// because the forum collections are locked) to the command layer (`res?.total`),
+// so the literal below follows the move. ProfilePage reading `result.total`
+// rather than `totalCount` is the part that was actually broken before.
 {
   const forum = fs.readFileSync(new URL('../src/api/forum.js', import.meta.url), 'utf8');
   const rep = fs.readFileSync(new URL('../src/api/reputation.js', import.meta.url), 'utf8');
-  assert.match(forum, /total:\s*list\.totalItems/, 'fetchUserPosts must return `total`');
+  assert.match(forum, /total:\s*res\?\.total/, 'fetchUserPosts must return `total`');
   assert.match(rep, /total:\s*res\?\.total/, 'fetchReputationLogs must return `total`');
   assert.ok(
     !/result\.totalCount/.test(page),
     'the page must not read totalCount from an API that names it total'
+  );
+  // The posts tab used to read the posts collection straight from the browser
+  // SDK, which lockBrowserRules answers with 403 "Only superusers can perform
+  // this action" — so the tab rendered empty for every member and every guest,
+  // and the catch turned that refusal into "this person has written nothing".
+  // The commented-out literal below the gate is DELIBERATE: a gate that matched
+  // its own documentation would have to be deleted rather than obeyed.
+  assert.ok(
+    !/pb\.collection\('posts'\)\.getList/.test(forum),
+    'fetchUserPosts must not read the posts collection through the browser SDK — those rules are ' +
+      'locked to superusers, so the profile tab answered 403 and rendered as empty'
+  );
+  assert.match(
+    forum,
+    /\/api\/aerun\/users\/\$\{targetUid\}\/posts/,
+    'fetchUserPosts must read the profile posts through the command layer'
+  );
+}
+
+// ── The Posts filter has to reach the server ─────────────────────────────────
+//
+// Reported: the dropdown (All messages / Account only / one per mask) changed
+// nothing. Both halves were missing it independently, and neither had a test, so
+// nothing failed.
+//
+//  · fetchUserPosts declared the parameter as `_postFilter` — the underscore is
+//    the codebase's own convention for "accepted and deliberately unused" — and
+//    never put it on the wire, so the server could not have honoured it.
+//  · listUserPostsHandler had no `filter` parameter to read at all.
+//
+// The literal below is the CONTRACT between the two: the client must send the
+// value, and the handler must read the same key. Asserting one without the other
+// is what let the pair drift apart while both halves compiled.
+{
+  const forum = fs.readFileSync(new URL('../src/api/forum.js', import.meta.url), 'utf8');
+  const userPostsGo = fs.readFileSync(
+    new URL('../backend/internal/platform/pocketbase/user_posts.go', import.meta.url), 'utf8'
+  );
+
+  assert.ok(
+    // Scoped to the SIGNATURE, not the whole file: a check that matched its own
+    // explanatory comment would have to be deleted rather than obeyed, which is
+    // how a guard quietly stops being one.
+    !/fetchUserPosts\s*=\s*async\s*\([^)]*_postFilter/.test(forum),
+    'fetchUserPosts must not declare the filter as `_postFilter` — the underscore means ' +
+      'deliberately unused, which is exactly how the Posts filter stopped working while every ' +
+      'dropdown item still looked selectable'
+  );
+  assert.match(
+    forum,
+    /filter=\$\{encodeURIComponent\(postFilter\)\}/,
+    'fetchUserPosts must send the filter as a query parameter — the endpoint is paginated, so ' +
+      'filtering the returned rows in the browser would page against an unfiltered total'
+  );
+  assert.match(
+    userPostsGo,
+    /Query\(\)\.Get\("filter"\)/,
+    'the profile posts endpoint must read a `filter` parameter, or the client has nothing to ' +
+      'filter on and every dropdown entry answers with the whole list'
+  );
+  // The pager divides by `total`, so a count built from a different expression than
+  // the page query offers pages that do not exist. Both must come from one scope.
+  assert.match(
+    userPostsGo,
+    /CountRecords\(postsCollectionName, scope\.\.\.\)/,
+    'the post count must reuse the filtered scope — a separate count paginates the filter ' +
+      'against every post the account ever wrote'
+  );
+}
+
+// ── A post card needs a headline and a themed mask badge ─────────────────────
+//
+// Two reported defects on the profile Posts tab, both of which look cosmetic
+// in a screenshot and are contract bugs underneath:
+//
+//  1. Every row rendered "..." instead of the topic title. ProfilePage falls
+//     back to that literal when `topic_title` is absent, so the key has to be
+//     on the payload — a working link next to an ellipsis is not a design, it is
+//     a missing field.
+//  2. The mask badge came out stock Bootstrap blue in EVERY theme. The theme
+//     rules are all scoped to `.role-badge.badge-character`, so a bare
+//     `badge-character` matches nothing and falls back to the library default.
+//     The component carries the `role-badge` class itself, so using the
+//     component is the fix; re-adding a hand-rolled <Badge> would reintroduce
+//     the bug with no compiler to stop it.
+{
+  const userPostsGo = fs.readFileSync(
+    new URL('../backend/internal/platform/pocketbase/user_posts.go', import.meta.url), 'utf8'
+  );
+  const characterBadge = fs.readFileSync(
+    new URL('../src/components/common/ForumCharacterBadge.jsx', import.meta.url), 'utf8'
+  );
+
+  assert.match(
+    userPostsGo,
+    /"topic_title"/,
+    'the profile posts endpoint must send topic_title — ProfilePage renders it as the headline ' +
+      'and falls back to "..." without it'
+  );
+  assert.match(
+    userPostsGo,
+    /loadTopicTitles/,
+    'topic titles must be resolved in one batched lookup, not per post'
+  );
+
+  assert.match(
+    characterBadge,
+    /role-badge badge-character/,
+    'ForumCharacterBadge must carry the role-badge class itself — the theme rules are scoped to ' +
+      '.role-badge.badge-character, so a badge without it renders stock Bootstrap blue'
+  );
+  assert.ok(
+    !/<Badge[^>]*badge-character/.test(page),
+    'ProfilePage must use ForumCharacterBadge for a mask, not a hand-rolled Badge: a bare ' +
+      '`badge-character` escapes the themed .role-badge.badge-character rules'
   );
 }
 

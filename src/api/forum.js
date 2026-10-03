@@ -195,7 +195,9 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
 // where the topic-not-found card greeted a topic that had in fact been created
 // successfully. A missing id is now an error the caller shows, not a URL.
 export const createTopic = async (topicData, firstPostData) => {
-  const { content: processedContent } = processDiceRolls(firstPostData.content);
+  // Same reason as createPost: the dice results are part of the opening message
+  // and were being dropped, so a throw in a new topic never resolved for anyone.
+  const { content: processedContent, rolls } = processDiceRolls(firstPostData.content);
 
   const res = await sendApi('/api/aerun/topics', {
     method: 'POST',
@@ -203,6 +205,7 @@ export const createTopic = async (topicData, firstPostData) => {
       category_id: topicData.category_id,
       title: topicData.title,
       content: processedContent.trim(),
+      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
       // Both of these used to be dropped on the floor. The form held
       // `selectedCharacterId` and `pinFirstPost` in state and sent neither, so
       // the server had nothing to record: every message came out under the
@@ -304,19 +307,49 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, _lastV
   };
 };
 
-export const fetchUserPosts = async (targetUid, page = 1, pageSize = 20, _postFilter = 'all') => {
+// The Posts tab of a profile.
+//
+// It used to read the posts collection straight from the browser SDK. Migration
+// 1766100000 locked the forum collections to superusers (lockBrowserRules), so
+// that call failed with 403 "Only superusers can perform this action" for every
+// ordinary member AND every guest — and the catch below turned the failure into
+// an empty list, which the page renders as "this person has written nothing".
+// The 403 was in the console and the UI claimed the opposite.
+//
+// The read goes through the command layer like every other forum read now, which
+// is also why the previews resolve their dice: the endpoint returns the same
+// decorated post shape the topic feed serves, `rolls` included.
+// `postFilter` is 'all' (default), 'account' for posts written without a mask,
+// or 'char_<id>' for one mask — the dropdown's own keys.
+//
+// This used to be `_postFilter`: the parameter was named as deliberately unused
+// and the filter never left the browser, so picking a mask relabelled the same
+// list. It has to be a QUERY parameter, not a post-hoc filter of the returned
+// rows, because this endpoint is paginated: the server owns `total` and the page
+// numbering, so a client-side filter would page through already-filtered results
+// against an unfiltered total and silently skip posts.
+export const fetchUserPosts = async (targetUid, page = 1, pageSize = 20, postFilter = 'all') => {
+  if (!targetUid) {
+    return { posts: [], total: 0, page: 1, totalPages: 0 };
+  }
+  // A key the dropdown cannot produce would be a silent no-op again, so only the
+  // two non-default axes are sent; 'all' stays absent to keep the URL clean.
+  const filter = postFilter === 'account' || /^char_[A-Za-z0-9_-]+$/.test(postFilter)
+    ? `&filter=${encodeURIComponent(postFilter)}`
+    : '';
   try {
-    const list = await pb.collection('posts').getList(page, pageSize, {
-      filter: `author_id = "${targetUid}"`,
-      sort: '-created'
-    });
+    const res = await sendApi(`/api/aerun/users/${targetUid}/posts?page=${page}&limit=${pageSize}${filter}`);
+    const items = (res?.items || []).map(normalizePost);
     return {
-      posts: list.items.map(normalizePost),
-      total: list.totalItems,
-      page: list.page,
-      totalPages: list.totalPages
+      posts: items,
+      total: res?.total ?? items.length,
+      page: res?.page || page,
+      totalPages: res?.total_pages ?? 0
     };
   } catch (err) {
+    // The empty shape keeps the page renderable, but the message must survive:
+    // a swallowed 403 is exactly what made this look like "no posts" instead of
+    // "the request was refused", which is the harder bug to notice.
     console.warn('[fetchUserPosts err]', err);
     return { posts: [], total: 0, page: 1, totalPages: 0 };
   }
@@ -341,13 +374,19 @@ export const subscribeToUserPosts = (uid, limitCount, callback) => {
 // the SAME key for every request of one logical submit makes the server replay
 // the first response instead. See utils/inflight.js.
 export const createPost = async (postData, idempotencyKey) => {
-  const { content: processedContent } = processDiceRolls(postData.content);
+  // The throws MUST travel with the text. `rolls` used to be destructured away
+  // here — `const { content } = processDiceRolls(...)` — so the roll was rendered
+  // in the optimistic card and then dropped on the floor: the `[roll=<id>]` tag
+  // reached the server with nothing pointing at it, and every reader after a
+  // reload saw the raw tag. The tag is a pointer; this map is the payload.
+  const { content: processedContent, rolls } = processDiceRolls(postData.content);
 
   const res = await sendApi(`/api/aerun/topics/${postData.topic_id}/posts`, {
     method: 'POST',
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
       content: processedContent.trim(),
+      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
       // The reply composer's mask picker, sent for the same reason the topic
       // form's is. Empty falls back to the mask stored on the profile, which is
       // what the picker writes when the author selects one.
@@ -398,10 +437,17 @@ export const getTopicDraft = async (topicId) => {
 // stores it on the draft row (ownership-checked there) and publish promotes the
 // row verbatim. Sending the text alone filed every draft under the account, so
 // publishing it produced a post with no mask — the reported "маска слетела".
-export const saveTopicDraft = async (topicId, content, characterId = '') => {
+export const saveTopicDraft = async (topicId, content, characterId = '', rolls = null) => {
   const res = await sendApi(`/api/aerun/topics/${topicId}/draft`, {
     method: 'PUT',
-    body: { content: (content || '').trim(), character_id: characterId || '' },
+    body: {
+      content: (content || '').trim(),
+      character_id: characterId || '',
+      // Publishing promotes the draft row verbatim, so the throws have to be on
+      // it — a draft saved with dice and published without them produced a post
+      // carrying `[roll=…]` tags nobody could resolve.
+      ...(rolls && Object.keys(rolls).length > 0 ? { rolls } : {})
+    },
   });
   return res?.draft || null;
 };
@@ -448,7 +494,13 @@ export const publishDraft = async (draftId) => {
 // page through an entire 5000-post topic before giving up.
 export const locatePost = async (postId, itemsPerPage = 20, startPage = 1, maxPages = 40) => {
   try {
-    const postRecord = await pb.collection('posts').getOne(postId);
+    // Resolving the post to its topic used to be `pb.collection('posts').getOne`,
+    // which lockBrowserRules answers with 403 for every non-superuser — so the
+    // deep link this function exists to serve could never resolve a topic at all
+    // and the walk below never ran. GET /api/aerun/posts/{id} is the public
+    // single-post read the command layer already owns, and it answers `post`.
+    const res = await sendApi(`/api/aerun/posts/${postId}`);
+    const postRecord = res?.post;
     if (!postRecord) return null;
 
     const topicId = postRecord.topic_id;
@@ -485,8 +537,23 @@ export const locateUnreadPost = async (_topicId, _lastVisitMs, _itemsPerPage = 2
 // inside the same transaction (see forum_posts.go / forum_topics.go). The
 // parameters stay so call sites do not change.
 export const updatePost = async (postId, content, metadata = {}, _performerId, _authorId, _topicUpdates = null) => {
-  const { content: processedContent } = processDiceRolls(content);
+  const { content: processedContent, rolls: freshRolls } = processDiceRolls(content);
   const body = { content: processedContent.trim() };
+
+  // Editing a post is the one write where the throws need MERGING rather than
+  // replacing. The text being edited already carries the post's existing
+  // `[roll=<id>]` references, so processDiceRolls finds no `[dice=…]` and returns
+  // nothing — sending that alone would leave the stored results untouched, and a
+  // throw typed fresh into the edit would be lost. Merging with what the post
+  // already has covers both.
+  //
+  // Deleting a throw needs no special case: the server only keeps rolls the new
+  // body still references, so entries the edit removed are dropped server-side.
+  const existingRolls = metadata?.rolls || {};
+  const mergedRolls = { ...existingRolls, ...(freshRolls || {}) };
+  if (Object.keys(mergedRolls).length > 0) {
+    body.rolls = mergedRolls;
+  }
 
   // The edit form's mask picker used to be dropped here: `metadata` was named
   // `_metadata` and never read, so the server received only `content` and the
