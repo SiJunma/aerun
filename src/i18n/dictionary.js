@@ -237,6 +237,9 @@ export const translations = {
     auth_password_hint: "Minimum {size} characters.",
     auth_provider_unavailable: "Not available on this server",
     auth_email_change_desc: "The address you sign in with. Confirmation emails are not sent on this server.",
+    auth_forgot_password: "Forgot your password?",
+    auth_reset_mail_disabled: "Password reset by email is not available: this server does not send mail, so no link can arrive. Sign in with Google instead, or ask an administrator to set a new password.",
+    auth_reset_sent: "If a reset link could be sent, it would be on its way. This server does not deliver mail, so check with an administrator.",
     auth_google_other_account: "That Google account belongs to somebody else — pick the one on this forum.",
       upload_file: "Upload File",
       by_url: "By URL",
@@ -272,6 +275,10 @@ export const translations = {
       no_rep_logs: "No reputation entries found.",
       tab_posts: "Posts",
       no_posts_user: "This user hasn't posted anything yet.",
+      // Shown INSTEAD of the line above when a filter is active: the account has
+      // posts, they just are not the ones on screen, and claiming otherwise
+      // sends the reader hunting for a bug.
+      no_posts_filtered: "No messages match this filter.",
       filter_all: "All messages",
       filter_account: "Account only",
       filter_masks: "Mask messages",
@@ -369,7 +376,13 @@ export const translations = {
       new_replies_tab_desc: "Topics with unread messages since your last visit.",
       top_discussed: "Most Discussed Topics",
       top_discussed_desc: "Top 50 forum topics, sorted by number of replies.",
-      no_topics: "No topics yet"
+      no_topics: "No topics yet",
+      no_topics_desc: "Once a topic is created, it will show up here sorted by activity.",
+      no_new_replies: "No unread topics",
+      no_new_replies_desc: "You are all caught up. Topics with new posts will appear here.",
+      no_subscriptions: "No subscriptions yet",
+      no_subscriptions_desc: "Subscribe to a topic to follow its updates, and it will appear here.",
+      subscribed_topics_desc: "Topics you are subscribed to, newest activity first."
     },
     time: {
       today: "Today",
@@ -941,6 +954,9 @@ export const translations = {
     auth_password_hint: "Минимум {size} символов.",
     auth_provider_unavailable: "Недоступно на этом сервере",
     auth_email_change_desc: "Адрес, с которым вы входите. Письма с подтверждением сервер не отправляет.",
+    auth_forgot_password: "Забыли пароль?",
+    auth_reset_mail_disabled: "Сброс пароля по почте недоступен: сервер не отправляет письма, поэтому ссылка не придёт. Войдите через Google или попросите администратора установить новый пароль.",
+    auth_reset_sent: "Если бы ссылка могла отправиться, она бы уже шла. Сервер не доставляет письма — обратитесь к администратору.",
     auth_google_other_account: "Этот Google Аккаунт принадлежит другому человеку — выберите свой.",
       upload_file: "Загрузить файл",
       by_url: "По ссылке",
@@ -976,6 +992,7 @@ export const translations = {
       no_rep_logs: "Записей о репутации не найдено.",
       tab_posts: "Сообщения",
       no_posts_user: "Этот пользователь еще ничего не опубликовал.",
+      no_posts_filtered: "Нет сообщений по этому фильтру.",
       filter_all: "Все сообщения",
       filter_account: "Только аккаунт",
       filter_masks: "Сообщения масок",
@@ -1074,7 +1091,13 @@ export const translations = {
       new_replies_tab_desc: "Темы с непрочитанными сообщениями с момента последнего визита.",
       top_discussed: "Самые обсуждаемые темы",
       top_discussed_desc: "Топ-50 тем форума, отсортированных по количеству ответов.",
-      no_topics: "Тем пока нет"
+      no_topics: "Тем пока нет",
+      no_topics_desc: "Как только появится тема, она отобразится здесь по активности.",
+      no_new_replies: "Непрочитанных тем нет",
+      no_new_replies_desc: "Вы всё прочитали. Темы с новыми сообщениями появятся здесь.",
+      no_subscriptions: "Подписок пока нет",
+      no_subscriptions_desc: "Подпишитесь на тему, чтобы следить за обновлениями, и она появится здесь.",
+      subscribed_topics_desc: "Темы, на обновления которых вы подписаны, по свежести активности."
     },
     time: {
       today: "Сегодня",

@@ -10,6 +10,7 @@ import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
 import ErrorCard from '../components/common/ErrorCard';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import { resolveField } from '../utils/text';
 import { usePageTitle } from '../contexts/TitleProvider';
 
@@ -147,15 +148,12 @@ const MainPage = () => {
 
         if (visibleCats.length === 0) {
           return (
-            <Card className="shadow-sm border-0">
-              <div className="p-5 text-center text-muted">
-                <div className="mb-3 d-flex justify-content-center">
-                  <Folder size={48} strokeWidth={1} />
-                </div>
-                <h5 className="mb-2">{t('forum.no_categories')}</h5>
-                <p className="mb-0 small">{t('forum.no_categories_desc')}</p>
-              </div>
-            </Card>
+            <ForumEmptyState
+              className="mb-4"
+              icon={Folder}
+              title={t('forum.no_categories')}
+              description={t('forum.no_categories_desc')}
+            />
           );
         }
 

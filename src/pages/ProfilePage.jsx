@@ -7,6 +7,7 @@ import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, 
 import { playNotificationSound } from '../utils/notificationSound';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
+import ForumCharacterBadge from '../components/common/ForumCharacterBadge';
 import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
 import { checkNicknameExists, fetchUserPosts } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
@@ -23,6 +24,7 @@ import BBCode from '../components/common/BBCode';
 import { useToast } from '../contexts/ToastProvider';
 import DirectMessages from '../components/dm/DirectMessages';
 import ForumPagination from '../components/common/ForumPagination';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import Skeleton from '../components/common/Skeleton';
 import SecurityTab from '../components/profile/SecurityTab';
 
@@ -730,8 +732,15 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                 </Card.Header>
                 <Card.Body className="p-0">
                   {characters.length === 0 ? (
-                    <div className="p-5 text-center text-muted">
-                      <p className="mb-0">{profile?.uid === uid ? t('profile.no_characters') : t('profile.no_characters_other')}</p>
+                    <div className="p-4">
+                      <ForumEmptyState
+                        icon={User}
+                        title={
+                          profile?.uid === uid
+                            ? t('profile.no_characters', 'У вас пока нет масок')
+                            : t('profile.no_characters_other', 'У этого пользователя нет масок')
+                        }
+                      />
                     </div>
                   ) : (
                     <Row className="g-3 p-3">
@@ -830,8 +839,11 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                     const visibleRepLogs = historyHidden ? repLogs.filter(l => l.voter_id === profile?.uid) : repLogs;
 
                     if (historyHidden && visibleRepLogs.length === 0) return (
-                      <div className="p-5 text-center text-muted">
-                        <p className="mb-0">{t('profile.rep_history_hidden')}</p>
+                      <div className="p-4">
+                        <ForumEmptyState
+                          icon={Lock}
+                          title={t('profile.rep_history_hidden', 'История репутации скрыта')}
+                        />
                       </div>
                     );
 
@@ -850,8 +862,11 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
 
                     if (visibleRepLogs.length === 0) {
                       return (
-                        <div className="p-5 text-center text-muted">
-                          <p className="mb-0">{t('profile.no_rep_logs')}</p>
+                        <div className="p-4">
+                          <ForumEmptyState
+                            icon={TrendingUp}
+                            title={t('profile.no_rep_logs', 'Записей о репутации нет.')}
+                          />
                         </div>
                       );
                     }
@@ -1154,9 +1169,19 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                       const totalPagesPosts = Math.ceil(totalUserPosts / POSTS_PER_PAGE);
 
                       if (userPosts.length === 0 && !loadingUserPosts) {
+                        // The message has to follow the FILTER. With a mask
+                        // selected, "This user hasn't posted anything yet" is
+                        // false and actively confusing — they have posts, just not
+                        // ones written as this character, and the reader is left
+                        // looking for a bug that isn't there.
                         return (
-                          <div className="p-5 text-center text-muted">
-                            <p className="mb-0">{t('profile.no_posts_user')}</p>
+                          <div className="p-4">
+                            <ForumEmptyState
+                              icon={MessageSquare}
+                              title={postFilter === 'all'
+                                ? t('profile.no_posts_user', 'Этот пользователь еще ничего не опубликовал.')
+                                : t('profile.no_posts_filtered', 'Нет сообщений по этому фильтру.')}
+                            />
                           </div>
                         );
                       }
@@ -1212,10 +1237,38 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                                         </span>
                                       </div>
                                     </div>
+                                    {/* THE MASK BADGE.
+                                        It carried only `badge-character`, so the
+                                        theme rules — which are all scoped to
+                                        `.role-badge.badge-character` — never matched
+                                        it and the row rendered the stock Bootstrap
+                                        blue, against every theme. Adding the
+                                        `role-badge` class is what puts it back in the
+                                        themed system: the same violet/amber ghost
+                                        styling a mask gets in a topic.
+
+                                        `size="sm"` keeps it from outweighing the
+                                        topic headline it sits beside, and the tooltip
+                                        carries the account nickname the server now
+                                        attaches, so the same "who is really behind
+                                        this mask" answer works here too.
+
+                                        `characterName` is what makes the badge name
+                                        the character rather than read "Char." for
+                                        every row: the server already swaps
+                                        `author_name` to the character's own name on
+                                        a masked post (applyMask), and this list has
+                                        no author header to show it, so the badge was
+                                        the only place it could appear. Two rows
+                                        written as two different characters were
+                                        otherwise indistinguishable. */}
                                     {post.is_character && (
-                                      <Badge className="ms-2 badge-character">
-                                        {post.author_name}
-                                      </Badge>
+                                      <ForumCharacterBadge
+                                        characterName={post.author_name}
+                                        ownerName={post.owner_name}
+                                        size="sm"
+                                        className="ms-2"
+                                      />
                                     )}
                                   </div>
                                   <div className="post-preview text-muted small text-break line-clamp-4">

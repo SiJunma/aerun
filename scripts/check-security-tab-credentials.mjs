@@ -121,10 +121,46 @@ assert.match(credsTest, /must never appear in the response/, 'the hash must be p
 for (const key of [
   'auth_change_password', 'auth_current_password', 'auth_new_password',
   'auth_confirm_password', 'auth_change_email', 'auth_unlink_google',
-  'auth_only_method', 'auth_password_hint'
+  'auth_only_method', 'auth_password_hint',
+  'auth_forgot_password', 'auth_reset_mail_disabled'
 ]) {
   const hits = (dict.match(new RegExp(`\\b${key}:`, 'g')) || []).length;
   assert.equal(hits, 2, `${key} must exist in both en and ru, found ${hits}`);
 }
 
+// ── "Forgot password" must not promise a mail this server cannot send ───────
+//
+// The reset flow is real and reachable from the login screen, but MailHardDisable
+// Guard aborts every send while AERUN_MAIL_MODE=disabled, and run.go clears SMTP
+// on every boot. So the Security tab's control is allowed to exist — a member who
+// has forgotten their password needs somewhere to be told what is actually true —
+// and it is NOT allowed to claim a link is on its way.
+//
+// This is the failure mode worth pinning: a control that returns 204 and says
+// "check your inbox" teaches members that the forum's mail works, and it is the
+// exact claim that sends someone away waiting for a message that can never exist.
+assert.match(
+  tab,
+  /auth_reset_mail_disabled/,
+  'the forgot-password disclosure must state that mail is not delivered'
+);
+assert.match(
+  dict,
+  /auth_reset_mail_disabled:[^\n]*(does not send mail|не отправляет письма)/,
+  'the reset notice must say the server does not send mail — in both languages'
+);
+assert.ok(
+  !/auth\.reset_link_sent/.test(tab),
+  'SecurityTab must not reuse the login screen\'s "reset link sent!" string: that one is ' +
+    'only truthful if mail actually leaves the server, and here it cannot'
+);
+// It must appear only where forgetting is possible: an account with no password
+// has nothing to forget.
+assert.match(
+  tab,
+  /\{auth\?\.hasPassword && \([\s\S]{0,400}?auth_forgot_password/,
+  'the forgot-password control must be gated on the account actually having a password'
+);
+
 console.log('OK  security tab: real state, command-layer writes, unlink guard');
+console.log('OK  forgot password: honest about mail, never claims an unsendable link');

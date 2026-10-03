@@ -17,6 +17,7 @@ import {
 } from '../api/notifications';
 import { Link } from 'react-router-dom';
 import ForumPagination from '../components/common/ForumPagination';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import Timestamp from '../components/common/Timestamp';
 import { useToast } from '../contexts/ToastProvider';
 
@@ -650,24 +651,6 @@ const NotificationsPage = () => {
           .icon-box:hover {
             opacity: 1;
           }
-          .empty-state-card {
-            background: rgba(255, 255, 255, 0.4) !important;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            border-radius: 20px !important;
-          }
-          [data-theme='dark'] .empty-state-card {
-            background: rgba(15, 23, 42, 0.5) !important;
-            border-color: rgba(255, 255, 255, 0.1) !important;
-          }
-          [data-theme='neutral'] .empty-state-card {
-            background: rgba(224, 219, 202, 0.6) !important;
-            border-color: rgba(67, 52, 34, 0.1) !important;
-          }
-          .empty-state-icon {
-            color: var(--primary-color);
-            opacity: 0.8;
-          }
         `}
       </style>
 
@@ -724,17 +707,11 @@ const NotificationsPage = () => {
       )}
 
       {currentSet.length === 0 ? (
-        <Card className="text-center py-5 border-1 empty-state-card shadow-sm">
-          <Card.Body>
-            <div className="mb-4 empty-state-icon text-muted">
-              <BellOff size={64} strokeWidth={1} />
-            </div>
-            <h4 className="fw-light mb-2 text-muted">
-              {t('notifications.no_notifications')}
-            </h4>
-            <p className="text-muted mb-0 small">{t('notifications.we_will_notify')}</p>
-          </Card.Body>
-        </Card>
+        <ForumEmptyState
+          icon={BellOff}
+          title={t('notifications.no_notifications')}
+          description={t('notifications.we_will_notify')}
+        />
       ) : (
         <>
           <div className="notifications-list mb-4">

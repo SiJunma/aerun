@@ -24,6 +24,7 @@
     "test:date-accessors": "node scripts/check-date-accessors.mjs",
     "test:audit-action-labels": "node scripts/check-audit-action-labels.mjs",
     "test:admin-empty-state": "node scripts/check-admin-empty-state.mjs",
+    "test:forum-empty-state": "node scripts/check-forum-empty-state.mjs",
     "test:admin-form-validation": "node scripts/check-admin-form-validation.mjs && node scripts/check-admin-form-validation-truth.mjs",
     "test:error-classification": "node scripts/check-error-classification.mjs",
     "test:forum-read-contract": "node scripts/check-forum-read-contract.mjs",
@@ -35,7 +36,7 @@
     "test:roles-live-update": "node scripts/check-roles-live-update.mjs",
     "test:account-status-axis": "node scripts/check-account-status-axis.mjs",
     "test:endpoints": "node scripts/audit-endpoints.mjs",
-    "test": "npm run test:first-post-guard && npm run test:topic-delete-cleanup && npm run test:golast-overlay && npm run test:dm-cache-constants && npm run test:inflight-guard && npm run test:jsx-comments && npm run test:category-subscriber && npm run test:manage-mode-affordance && npm run test:date-accessors && npm run test:audit-action-labels && npm run test:admin-empty-state && npm run test:admin-form-validation && npm run test:error-classification && npm run test:forum-read-contract && npm run test:drafts-and-settings && npm run test:identity-refresh && npm run test:user-profile-normalization && npm run test:security-tab && npm run test:last-selected-mask && npm run test:roles-live-update && npm run test:account-status-axis && npm run test:endpoints && npm run lint:js",
+    "test": "npm run test:first-post-guard && npm run test:topic-delete-cleanup && npm run test:golast-overlay && npm run test:dm-cache-constants && npm run test:inflight-guard && npm run test:jsx-comments && npm run test:category-subscriber && npm run test:manage-mode-affordance && npm run test:date-accessors && npm run test:audit-action-labels && npm run test:admin-empty-state && npm run test:forum-empty-state && npm run test:admin-form-validation && npm run test:error-classification && npm run test:forum-read-contract && npm run test:drafts-and-settings && npm run test:identity-refresh && npm run test:user-profile-normalization && npm run test:security-tab && npm run test:last-selected-mask && npm run test:roles-live-update && npm run test:account-status-axis && npm run test:endpoints && npm run lint:js",
     "lint:rules": "firebase emulators:exec --project demo-test --only firestore \"node -e \\\"console.log('Firestore rules OK')\\\"\"",
     "lint": "npm run lint:js && npm run lint:rules",
     "preview": "vite preview"

@@ -1039,11 +1039,23 @@ const TopicPage = () => {
       }
     }
   }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped]);
+  // The badge tooltip names the ACCOUNT behind a mask ("Player: …"), so it must
+  // resolve for every post, not only for the viewer's own.
+  //
+  // `owner_name` is the account nickname the server attaches when a mask takes
+  // over the display name — a masked post's `author_name` is the CHARACTER's
+  // name, so the person is named nowhere else in the payload. It is the first
+  // choice rather than the last fallback because it is the only one that needs
+  // no local state: `authorStats[uid].nickname` is written by no hydration path
+  // (loadPosts and the signature fallback both store counters, role and status
+  // only), and a guest has no `profile` at all — which is exactly why the badge
+  // rendered a tooltip on your own posts and on nobody else's.
   const getLiveOwnerName = (post) => {
+    if (post.owner_name) return post.owner_name;
     if (post.author_id === user?.uid) {
-      return profile?.nickname || post.owner_name;
+      return profile?.nickname || '';
     }
-    return authorStats[post.author_id]?.nickname || post.owner_name;
+    return authorStats[post.author_id]?.nickname || '';
   };
 
   const handleQuoteAuthor = (authorName) => {
@@ -1618,7 +1630,12 @@ const TopicPage = () => {
     if (!replyContent.trim() || hasDraft || draftSaving) return;
     setDraftSaving(true);
     try {
-      const saved = await saveTopicDraft(id, replyContent.trim(), selectedCharacterId);
+      // Thrown HERE, while the text still carries `[dice=…]`, and stored on the
+      // draft row: publish promotes that row verbatim, so a dice saved as raw
+      // markup and thrown at publish time would publish a post whose
+      // `[roll=…]` reference points at nothing.
+      const { content: draftContent, rolls } = processDiceRolls(replyContent.trim());
+      const saved = await saveTopicDraft(id, draftContent, selectedCharacterId, rolls);
       // The card is rendered from this state, so leaving it untouched is the
       // whole bug: the draft was on the server and the page said it did not
       // exist. The returned row is the one to show, not a guess at it.
@@ -1649,7 +1666,19 @@ const TopicPage = () => {
       // Addressed by the TOPIC, not by the draft row: the command is
       // (author, topic) unique, so the topic id is what identifies the draft
       // the editor is currently showing.
-      const saved = await saveTopicDraft(id, editContent.trim(), editCharacterId);
+      //
+      // The rolls are carried over from the stored draft and MERGED with anything
+      // newly typed: an edit that did not touch the dice must not strip the
+      // throws the draft already has, and the server keeps only what the new
+      // body still references.
+      const existingRolls = myDraft?.rolls || {};
+      const { content: draftContent, rolls: freshRolls } = processDiceRolls(editContent.trim());
+      const saved = await saveTopicDraft(
+        id,
+        draftContent,
+        editCharacterId,
+        { ...existingRolls, ...(freshRolls || {}) }
+      );
       // Re-render from the server's answer. Previously this wrote a different
       // object shape into localStorage and never touched `myDraft`, so the card
       // kept displaying the text from before the edit — the second reported

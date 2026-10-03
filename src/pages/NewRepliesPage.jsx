@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
+import { MessageSquare, Bell } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import TopicRow from '../components/common/TopicRow';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import ForumTabs from '../components/common/ForumTabs';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const TABS = { ALL: 'all', NEW: 'new_replies' };
@@ -112,86 +115,87 @@ const NewRepliesPage = () => {
       </div>
 
       {/* Tabs */}
-      <div className="mb-3">
-        <ul className="nav nav-tabs forum-tabs">
-          <li className="nav-item">
-            <button
-              className={`nav-link${activeTab === TABS.ALL ? ' active' : ''}`}
-              onClick={() => switchTab(TABS.ALL)}
-              id="tab-all-active"
-            >
-              {t('stats.active_topics_tab', 'Все активные')}
-            </button>
-          </li>
-          {user && (
-            <li className="nav-item">
-              <button
-                className={`nav-link d-flex align-items-center gap-2${activeTab === TABS.NEW ? ' active' : ''}`}
-                onClick={() => switchTab(TABS.NEW)}
-                id="tab-new-replies"
-              >
-                {t('stats.new_replies_tab', 'Новые ответы')}
-                {unreadTopicsCount > 0 && (
-                <span className="badge rounded-pill badge-theme" style={{ fontSize: '0.7em' }}>
-                    {unreadTopicsCount}
-                  </span>
-                )}
-              </button>
-            </li>
-          )}
-        </ul>
-      </div>
+      <ForumTabs
+        activeId={activeTab}
+        onChange={switchTab}
+        tabs={[
+          {
+            id: TABS.ALL,
+            label: t('stats.active_topics_tab', 'Все активные'),
+            icon: <MessageSquare size={16} />
+          },
+          ...(user
+            ? [{
+                id: TABS.NEW,
+                label: t('stats.new_replies_tab', 'Новые ответы'),
+                icon: <Bell size={16} />,
+                badge: unreadTopicsCount
+              }]
+            : [])
+        ]}
+      />
 
-      <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-        {loading ? (
+      {loading ? (
+        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
           <div className="p-5 text-center text-muted">
             <div className="spinner-border spinner-border-sm me-2" role="status" />
             {t('common.loading')}
           </div>
-        ) : displayTopics.length === 0 ? (
-          <div className="p-5 text-center text-muted">
-            {activeTab === TABS.NEW
-              ? t('stats.new_replies_tab_desc', 'Нет непрочитанных тем.')
-              : t('stats.no_topics')}
-          </div>
-        ) : (
-          <>
-            <Table hover responsive className="mb-0 align-middle forum-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '40%' }}>{t('forum.topic')}</th>
-                  <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category')}</th>
-                  <th className="text-center">{t('forum.replies')}</th>
-                  <th>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentTopics.map(topic => (
-                  <TopicRow
-                    key={topic.id}
-                    topic={topic}
-                    user={user}
-                    lang={lang}
-                    showCategory={true}
-                    showCategoryInColumn={true}
-                    categoryName={getCategoryName(topic.category_id)}
-                  />
-                ))}
-              </tbody>
-            </Table>
-
-            {totalPages > 1 && (
-              <div className="p-3 border-top d-flex justify-content-center">
-                <ForumPagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={handlePageChange}
+        </Card>
+      ) : displayTopics.length === 0 ? (
+        /* The empty list replaces the table card entirely: a table header over
+         * zero rows reads as a populated list whose data failed to load. */
+        <ForumEmptyState
+          className="mb-4"
+          icon={activeTab === TABS.NEW ? Bell : MessageSquare}
+          title={
+            activeTab === TABS.NEW
+              ? t('stats.no_new_replies', 'Непрочитанных тем нет')
+              : t('stats.no_topics', 'Тем пока нет')
+          }
+          description={
+            activeTab === TABS.NEW
+              ? t('stats.no_new_replies_desc', 'Вы всё прочитали.')
+              : t('stats.no_topics_desc', 'Как только появится тема, она отобразится здесь.')
+          }
+        />
+      ) : (
+        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
+          <Table hover responsive className="mb-0 align-middle forum-table">
+            <thead>
+              <tr>
+                <th style={{ width: '40%' }}>{t('forum.topic')}</th>
+                <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category')}</th>
+                <th className="text-center">{t('forum.replies')}</th>
+                <th>{t('forum.last_post')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentTopics.map(topic => (
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  user={user}
+                  lang={lang}
+                  showCategory={true}
+                  showCategoryInColumn={true}
+                  categoryName={getCategoryName(topic.category_id)}
                 />
-              </div>
-            )}
-          </>
-        )}
-      </Card>
+              ))}
+            </tbody>
+          </Table>
+
+          {totalPages > 1 && (
+            <div className="p-3 border-top d-flex justify-content-center">
+              <ForumPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="mt-4">
         <Link to="/" className="btn btn-outline-secondary">

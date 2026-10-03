@@ -34,6 +34,9 @@ const SecurityTab = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [emailInput, setEmailInput] = useState('');
+  // The "forgot your password?" disclosure starts CLOSED: it is an escape hatch
+  // for a locked-out member, not something to greet every visitor with.
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -282,6 +285,38 @@ const SecurityTab = () => {
               {busy === 'password' ? <Spinner size="sm" animation="border" /> : t('common.save')}
             </Button>
           </Form>
+
+          {/* FORGOT THE PASSWORD.
+              The reset flow exists and is reachable from the login screen
+              (ForgotPasswordForm), but this server sends NO mail at all:
+              MailHardDisableGuard aborts every send while
+              AERUN_MAIL_MODE=disabled, and run.go clears SMTP on each boot.
+
+              So this control must not claim a link is on its way — a reset that
+              silently never arrives is worse than no reset at all, because the
+              member waits for a mail that cannot come. It says plainly what is
+              true instead, and points at the two routes that actually work
+              without mail: signing in with Google, or an administrator setting a
+              new one. It only appears when the account actually HAS a password,
+              because that is the only case where somebody can have forgotten it. */}
+          {auth?.hasPassword && (
+            <div className="mt-3 pt-3 border-top">
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0 text-decoration-none small"
+                onClick={() => setForgotOpen(v => !v)}
+              >
+                {t('profile.auth_forgot_password')}
+              </Button>
+
+              {forgotOpen && (
+                <Alert variant="warning" className="py-2 small mt-2 mb-0 text-start">
+                  {t('profile.auth_reset_mail_disabled')}
+                </Alert>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="p-3 modal-section-themed rounded">

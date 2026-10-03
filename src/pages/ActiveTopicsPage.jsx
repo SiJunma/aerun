@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
+import { MessageSquare } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToTopTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import { resolveField } from '../utils/text';
 
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -56,17 +58,22 @@ const ActiveTopicsPage = () => {
         </p>
       </div>
 
-      <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-        {loading ? (
+      {loading ? (
+        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
           <div className="p-5 text-center text-muted">
             <div className="spinner-border spinner-border-sm me-2" role="status" />
             {t('common.loading')}
           </div>
-        ) : visibleTopics.length === 0 ? (
-          <div className="p-5 text-center text-muted">
-            {t('stats.no_topics')}
-          </div>
-        ) : (
+        </Card>
+      ) : visibleTopics.length === 0 ? (
+        <ForumEmptyState
+          className="mb-4"
+          icon={MessageSquare}
+          title={t('stats.no_topics', 'Тем пока нет')}
+          description={t('stats.no_topics_desc', 'Как только появится тема, она отобразится здесь.')}
+        />
+      ) : (
+        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
           <Table hover responsive className="mb-0 align-middle forum-table">
             <thead>
               <tr>
@@ -78,7 +85,7 @@ const ActiveTopicsPage = () => {
             </thead>
             <tbody>
               {visibleTopics.map(topic => (
-                <TopicRow 
+                <TopicRow
                   key={topic.id}
                   topic={topic}
                   user={user}
@@ -90,8 +97,8 @@ const ActiveTopicsPage = () => {
               ))}
             </tbody>
           </Table>
-        )}
-      </Card>
+        </Card>
+      )}
 
       <div className="mt-4">
         <Link to="/" className="btn btn-outline-secondary">
