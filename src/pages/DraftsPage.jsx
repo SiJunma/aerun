@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Badge, Button, Card, Container, Form } from 'react-bootstrap';
+import { Badge, Button, Card, Container } from 'react-bootstrap';
 import { AlertTriangle, Copy, FilePen, Send, Trash2 } from 'lucide-react';
 
 import { useI18n } from '../contexts/I18nProvider';
@@ -9,14 +9,11 @@ import { useToast } from '../contexts/ToastProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 import {
   listMyDrafts,
-  listAllTopics,
-  saveTopicDraft,
   deleteDraft,
   publishDraft,
 } from '../api/forum';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumEmptyState from '../components/common/ForumEmptyState';
-import ForumModal from '../components/common/ForumModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Timestamp from '../components/common/Timestamp';
 import BBCode from '../components/common/BBCode';
@@ -53,12 +50,6 @@ const DraftsPage = () => {
   // other rows' buttons the moment that stopped being true.
   const [busyId, setBusyId] = useState(null);
   const [deleting, setDeleting] = useState(null);
-
-  // The copy flow: which orphan is being rescued, and where to.
-  const [copying, setCopying] = useState(null);
-  const [copyTopics, setCopyTopics] = useState([]);
-  const [copyTopicsLoading, setCopyTopicsLoading] = useState(false);
-  const [copyTargetId, setCopyTargetId] = useState('');
 
   useEffect(() => {
     setPageTitle(t('drafts.title', 'Драфты'));
@@ -140,53 +131,21 @@ const DraftsPage = () => {
       setBusyId(null);
     }
   };
-const openCopy = async (draft) => {
-    setCopying(draft);
-    setCopyTargetId('');
-    setCopyTopicsLoading(true);
+const handleCopyText = async (draft) => {
+    // The RAW stored text, not what the card renders. The preview below runs it
+    // through BBCode, so what is on screen is the draft with its tags rendered —
+    // copying THAT would paste prose where the markup belongs, and pasting it back
+    // into the composer would strip every [b], [hide] and [roll=…]. The editor
+    // works in source, so the clipboard has to carry source.
+    const text = draft.content || '';
     try {
-      const all = await listAllTopics();
-      // Only topics in categories this author can see. The endpoint answers with
-      // every topic on the board, so this filter is what keeps the picker from
-      // offering a destination the forum would refuse to open.
-      const readable = all.filter(topic => {
-        const cat = categories.find(c => c.id === topic.category_id);
-        return !!cat;
-      });
-      setCopyTopics(readable);
-    } catch (err) {
-      console.error('[DraftsPage] copy topic load error:', err);
-      showToast(err?.message || t('drafts.load_error', 'Не удалось загрузить драфты'), 'danger');
-      setCopyTopics([]);
-    } finally {
-      setCopyTopicsLoading(false);
-    }
-  };
-
-  const handleCopy = async () => {
-    if (!copying || !copyTargetId) return;
-    setBusyId(copying.id);
-    try {
-      // The mask travels with the copy: publishing promotes the row verbatim, so
-      // a draft filed under the account would publish under the account, and the
-      // identity the text was written in would be lost.
-      await saveTopicDraft(
-        copyTargetId,
-        copying.content,
-        copying.author_character_id || '',
-        copying.rolls || null
-      );
-      setCopying(null);
-      // Deliberately NOT deleting the original. Copy is the rescue path for text
-      // that would otherwise be lost with a dead topic, and deleting the only
-      // surviving copy as a side effect of saving it is not a trade anybody
-      // asked for. Delete is one click away, and the toast says so.
-      showToast(t('drafts.copy_done', 'Драфт сохранён в выбранную тему.'), 'success');
+      await navigator.clipboard.writeText(text);
+      showToast(t('drafts.copied', 'Исходный текст скопирован'), 'success');
     } catch (err) {
       console.error('[DraftsPage] copy error:', err);
-      showToast(err?.message || t('common.error', 'Ошибка'), 'danger');
-    } finally {
-      setBusyId(null);
+      // clipboard.writeText needs a secure context and can be refused outright, so
+      // the fallback is a selectable prompt rather than a second silent failure.
+      showToast(t('drafts.copy_failed', 'Не удалось скопировать. Выделите текст вручную.'), 'danger');
     }
   };
 
@@ -251,11 +210,10 @@ const renderDraftCard = (draft, isOrphan) => {
                   variant="link"
                   size="sm"
                   className="p-0 footer-link"
-                  onClick={() => openCopy(draft)}
-                  disabled={busy}
+                  onClick={() => handleCopyText(draft)}
                 >
                   <Copy size={12} className="me-1" />
-                  {t('drafts.copy', 'Скопировать в тему')}
+                  {t('drafts.copy', 'Скопировать текст')}
                 </Button>
                 <Button
                   variant="link"
@@ -381,63 +339,6 @@ return (
         message={t('drafts.delete_message', 'Сохранённый текст будет удалён. Отменить это нельзя.')}
         confirmText={t('common.delete', 'Удалить')}
       />
-
-      <ForumModal
-        show={!!copying}
-        onHide={() => setCopying(null)}
-        title={t('drafts.copy_title', 'Скопировать драфт в тему')}
-        footer={
-          <>
-            <Button
-              variant="link"
-              className="text-decoration-none text-muted fw-bold me-2"
-              onClick={() => setCopying(null)}
-            >
-              {t('common.cancel', 'Отмена')}
-            </Button>
-            <Button
-              variant="primary"
-              className="px-4 fw-bold shadow-sm"
-              onClick={handleCopy}
-              disabled={!copyTargetId || !!busyId}
-            >
-              {t('drafts.copy', 'Скопировать в тему')}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-muted small">
-          {t('drafts.copy_desc', 'Выберите тему, в которую сохранить этот драфт.')}
-        </p>
-
-        {copyTopicsLoading ? (
-          <div className="text-center text-muted py-3">
-            <div className="spinner-border spinner-border-sm me-2" role="status" />
-            {t('common.loading', 'Загрузка...')}
-          </div>
-        ) : copyTopics.length === 0 ? (
-          <div className="text-muted small py-2">
-            {t('drafts.copy_no_topics', 'Нет доступных тем для копирования.')}
-          </div>
-        ) : (
-          <Form.Group>
-            <Form.Label className="fw-bold small">{t('drafts.copy_pick_topic', 'Тема')}</Form.Label>
-            <Form.Select
-              value={copyTargetId}
-              onChange={e => setCopyTargetId(e.target.value)}
-              aria-label={t('drafts.copy_pick_topic', 'Тема')}
-            >
-              <option value="">—</option>
-              {copyTopics.map(topic => (
-                <option key={topic.id} value={topic.id}>
-                  {categoryName(topic.category_id) ? `[${categoryName(topic.category_id)}] ` : ''}
-                  {topic.title}
-                </option>
-              ))}
-            </Form.Select>
-          </Form.Group>
-        )}
-      </ForumModal>
     </Container>
   );
 };

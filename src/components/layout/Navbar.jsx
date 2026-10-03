@@ -6,7 +6,7 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { useTheme } from '../../contexts/ThemeProvider';
 import { resolveAvatarUrl } from '../../api/avatars';
 import { useDesign } from '../../contexts/DesignProvider';
-import { Bell, User, LogOut, MessageCircle, Palette, Check } from 'lucide-react';
+import { Bell, User, LogOut, MessageCircle, Palette, Check, FilePen } from 'lucide-react';
 import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/rtdb-notifications';
 import { subscribeToDmUnread } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
@@ -251,6 +251,20 @@ const Navigation = () => {
                 <User size={16} />
                 {t('nav.profile')}
               </NavDropdown.Item>
+              {/* Drafts live under the account menu, not in the top-level nav.
+                  They are the signed-in member's own unsent text — a personal
+                  inbox, not a section of the forum — and a top-level link to
+                  somebody's private working notes is the wrong thing to put
+                  next to Members and Admin. */}
+              <NavDropdown.Item 
+                as={Link} 
+                to="/drafts" 
+                onClick={() => setExpanded(false)}
+                className="d-flex align-items-center gap-2"
+              >
+                <FilePen size={16} />
+                {t('nav.drafts')}
+              </NavDropdown.Item>
               <NavDropdown.Divider />
               <NavDropdown.Item onClick={() => { handleLogout(); setExpanded(false); }} className="d-flex align-items-center gap-2 text-danger">
                 <LogOut size={16} />
@@ -327,9 +341,6 @@ const Navigation = () => {
                 </Nav.Link>
                 <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)}>
                   {t('nav.subscriptions', 'Подписки')}
-                </Nav.Link>
-                <Nav.Link as={Link} to="/drafts" onClick={() => setExpanded(false)}>
-                  {t('nav.drafts', 'Драфты')}
                 </Nav.Link>
               </>
             )}
