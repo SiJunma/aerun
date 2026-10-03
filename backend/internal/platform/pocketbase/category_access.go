@@ -183,18 +183,31 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 	// The most recently active topic per category. ROW_NUMBER keeps exactly one
 	// row per category even when two topics share a timestamp, which the
 	// correlated MAX would have returned twice.
+	//
+	// last_post_author_character_id is part of this projection and not an
+	// optional extra: it is what tells the decorator that the last replier spoke
+	// under a MASK. The topic lists load whole topic records and therefore carry
+	// it, so the category page rendered "Kyle Haze" while this projection — the
+	// one behind the main page — named the ACCOUNT, because the column was never
+	// read out of the database here.
 	type latestTopic struct {
 		CategoryID string `db:"category_id"`
 		TopicID    string `db:"topic_id"`
 		Title      string `db:"title"`
 		Created    string `db:"last_post_created"`
 		AuthorID   string `db:"last_post_author_id"`
-		PostsCount int    `db:"posts_count"`
+		// May be NULL/empty, which is correct: the last post may have been
+		// written as the account. The column is a text field, so a missing value
+		// scans as "" rather than failing the row.
+		CharacterID string `db:"last_post_author_character_id"`
+		PostsCount  int    `db:"posts_count"`
 	}
 	var latest []latestTopic
 	if err := app.DB().NewQuery(
-		"SELECT category_id, id AS topic_id, title, last_post_created, last_post_author_id, posts_count FROM (" +
-			"SELECT category_id, id, title, last_post_created, last_post_author_id, posts_count, " +
+		"SELECT category_id, id AS topic_id, title, last_post_created, last_post_author_id, " +
+			"COALESCE(last_post_author_character_id, '') AS last_post_author_character_id, posts_count FROM (" +
+			"SELECT category_id, id, title, last_post_created, last_post_author_id, " +
+			"last_post_author_character_id, posts_count, " +
 			"ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY last_post_created DESC, id DESC) AS rn " +
 			"FROM " + topicsCollectionName + ") WHERE rn = 1",
 	).All(&latest); err != nil {
@@ -210,18 +223,23 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		projection["last_post_topic_title"] = row.Title
 		projection["last_post_at"] = row.Created
 		projection["last_post_author_id"] = row.AuthorID
+		projection["last_post_author_character_id"] = row.CharacterID
 		projection["last_post_topic_posts_count"] = row.PostsCount
 	}
 
-	// One lookup for every last-post author named above.
+	// One lookup for every last-post author named above, and one for every mask
+	// they posted under. The mask lookup is what makes this projection answer
+	// "who spoke last" the same way the topic lists do; without it the main page
+	// named the account where the category page named the mask.
 	var authorPayloads []map[string]any
 	for _, projection := range projections {
 		authorPayloads = append(authorPayloads, projection)
 	}
 	if len(authorPayloads) > 0 {
 		displays := loadAuthorDisplays(app, collectAuthorIDs(authorPayloads, "last_post_author_id"))
+		masks := loadCharacterDisplays(app, collectCharacterIDs(authorPayloads, "last_post_author_character_id"))
 		for _, payload := range authorPayloads {
-			decorateLastPostAuthor(payload, displays)
+			decorateLastPostAuthor(payload, displays, masks)
 		}
 	}
 

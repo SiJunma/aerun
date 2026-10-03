@@ -355,15 +355,10 @@ func decorateTopicAuthor(payload map[string]any, displays map[string]authorDispl
 	}
 	payload["last_post_author"] = display.Nickname
 	payload["last_post_author_avatar"] = display.AvatarURL
-	// Same rule as the topic author: the mask renames the LAST POSTER only. The
-	// unread dot and the reputation stay the account's.
-	if maskID, _ := payload["last_post_author_character_id"].(string); maskID != "" {
-		if mask, ok := masks[maskID]; ok && mask.OwnerID == lastID {
-			payload["last_post_author"] = mask.Name
-			payload["last_post_author_avatar"] = mask.AvatarURL
-			payload["last_post_is_character"] = true
-		}
-	}
+	// Same rule as the topic author, and the same implementation: the mask
+	// renames the LAST POSTER only, and the unread dot and reputation stay the
+	// account's.
+	applyLastPostMask(payload, lastID, masks)
 }
 
 // decorateTopicAuthors resolves and applies the author projection to a page of
@@ -385,9 +380,37 @@ func decorateTopicAuthors(app core.App, payloads []map[string]any) {
 	}
 }
 
+// applyLastPostMask renames the LAST POSTER to their mask, if they posted under
+// one.
+//
+// It is the single implementation of that rule, shared by the topic lists and
+// the category index. Both used to answer the same question differently — the
+// topic rows resolved the mask, the category projection named the account — and
+// the divergence was invisible because only the column differed between the
+// two sources.
+//
+// The owner check is not decoration: a payload must never borrow another
+// member's mask, so the mask must belong to the same account that authored the
+// post. A deleted mask leaves the account identity standing.
+func applyLastPostMask(payload map[string]any, authorID string, masks map[string]characterDisplay) {
+	maskID, _ := payload["last_post_author_character_id"].(string)
+	if maskID == "" || authorID == "" {
+		return
+	}
+	mask, ok := masks[maskID]
+	if !ok || mask.OwnerID != authorID {
+		return
+	}
+	// The mask renames the LAST POSTER only. The unread dot and the reputation
+	// stay the account's.
+	payload["last_post_author"] = mask.Name
+	payload["last_post_author_avatar"] = mask.AvatarURL
+	payload["last_post_is_character"] = true
+}
+
 // decorateLastPostAuthor applies only the last_post_author_* pair, for the
 // category index whose payload names a last-post author but no topic author.
-func decorateLastPostAuthor(payload map[string]any, displays map[string]authorDisplay) {
+func decorateLastPostAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
 	id, _ := payload["last_post_author_id"].(string)
 	if id == "" {
 		return
@@ -396,6 +419,7 @@ func decorateLastPostAuthor(payload map[string]any, displays map[string]authorDi
 		payload["last_post_author"] = display.Nickname
 		payload["last_post_author_avatar"] = display.AvatarURL
 	}
+	applyLastPostMask(payload, id, masks)
 }
 
 // signatureFromSettings reads users.settings.signature.
