@@ -35,6 +35,7 @@ const PAGES = [
   'pages/SubscriptionsPage.jsx',
   'pages/MainPage.jsx',
   'pages/ProfilePage.jsx',
+  'pages/DraftsPage.jsx',
 ];
 
 const dictionary = fs.readFileSync(path.join(SRC, 'i18n', 'dictionary.js'), 'utf8');

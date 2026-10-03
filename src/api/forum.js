@@ -700,3 +700,30 @@ export const batchUpdateTopics = async (topicIds, data, performerId) => {
     await updateTopic(id, data, performerId);
   }
 };
+
+// ── The drafts feed ──────────────────────────────────────────────────────────
+//
+// listMyDrafts is the drafts page's own read: this caller's drafts, orphans
+// first.
+//
+// The server already partitions them — an `orphan` flag per item, orphans sorted
+// ahead of the live ones — so this normalises rather than re-derives. A second
+// sort here would be a second ordering rule to keep in step with the server's,
+// and the two would disagree the first time either changed.
+
+// listAllTopics reads topics across every category, for the "copy this orphaned
+// draft somewhere it can be published" picker.
+//
+// subscribeToTopics cannot serve this: it requires a categoryId, answers [] for
+// an empty one, and polls every 15 seconds — none of which a one-shot picker
+// wants. The server treats an absent category_id as "no filter", which is the
+// whole point of asking it this way.
+export const listAllTopics = async (limit = 200) => {
+  const res = await sendApi(`/api/aerun/topics?limit=${limit}`);
+  return (res?.items || []).map(normalizeTopic);
+};
+
+export const listMyDrafts = async () => {
+  const res = await sendApi('/api/aerun/me/drafts');
+  return (res?.items || []).map(normalizePost);
+};

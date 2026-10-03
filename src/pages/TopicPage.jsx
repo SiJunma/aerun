@@ -1921,6 +1921,28 @@ const TopicPage = () => {
     }
   };
 
+  // ?draft=1 — what the drafts page's "Edit" links to.
+  //
+  // The draft arrives asynchronously (the getTopicDraft effect above), so the
+  // editor is opened when the draft LANDS, not when the page mounts: opening on
+  // mount would run against a null draft and never retry, which is the same class
+  // of bug as the old localStorage subscription that fired once and never again.
+  //
+  // The ref is what makes it once-only. Without it, cancelling the edit would
+  // set `myDraft`-adjacent state back to a shape that re-triggers this effect and
+  // reopen the editor the user just closed — the page would fight the reader.
+  const draftAutoOpenRef = useRef(false);
+  const wantDraftEditor = searchParams.get('draft') === '1';
+  useEffect(() => {
+    if (!wantDraftEditor || !myDraft || draftAutoOpenRef.current) return;
+    draftAutoOpenRef.current = true;
+    handleStartEdit(myDraft, false);
+    // handleStartEdit is re-created on every render and must not re-trigger this:
+    // the ref already guards it, and listing it here would make the effect fire
+    // on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantDraftEditor, myDraft]);
+
   const handleSaveEdit = async (postId) => {
     if (!editContent.trim()) {
       showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');

@@ -328,6 +328,9 @@ const Navigation = () => {
                 <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)}>
                   {t('nav.subscriptions', 'Подписки')}
                 </Nav.Link>
+                <Nav.Link as={Link} to="/drafts" onClick={() => setExpanded(false)}>
+                  {t('nav.drafts', 'Драфты')}
+                </Nav.Link>
               </>
             )}
             <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)}>
