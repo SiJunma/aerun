@@ -317,6 +317,7 @@ export const translations = {
         topic_reply: "{count} new replies in {topic}",
         post_quoted: "Your post was quoted in {topic}",
         post_mentioned: "You were mentioned in {topic}",
+        dm: "Direct message",
         reputation_change: "Reputation change"
       },
       reputation_increased: "Your reputation was increased by {user}",
@@ -474,7 +475,10 @@ export const translations = {
         seed_btn: "Initialize System Roles",
         toast_seeded: "System roles initialized!",
         confirm_delete_title: "Delete Role",
-        confirm_delete_message: "Are you sure you want to delete this role? This action cannot be undone."
+        confirm_delete_message: "Are you sure you want to delete this role? This action cannot be undone.",
+        // Shown under the name field while it is empty, so a disabled Save
+        // button always comes with a reason instead of silently doing nothing.
+        name_required_hint: "Enter a role name to enable Save."
       },
       categories: {
         title: "Forum Categories",
@@ -498,6 +502,16 @@ export const translations = {
         error_delete: "Error deleting category",
         modal_perms_title: "Access Permissions",
         modal_perms_hint: "Enable overrides for specific permissions. When toggled on, only the selected roles will have this permission in this category (overrides global role settings). Leave off to inherit from global role permissions.",
+        // ── The override block is COLLAPSED by default ──────────────────────
+        // Expanded, the role checkboxes pushed the modal past the viewport, and
+        // a block most admins never touch dominated the whole form.
+        perms_override_toggle: "Permission overrides",
+        perms_override_sub: "Optional. Off means this category follows the global role settings.",
+        perms_override_show: "Show overrides",
+        perms_override_hide: "Hide overrides",
+        perms_override_none: "No overrides — this category inherits every permission from the global roles.",
+        // {count} is interpolated; the plural is handled by the wording.
+        perms_override_active: "{count} override(s) active on this category.",
         perm_view: "View Topics",
         perm_create_topic: "Create Topics",
         perm_post_reply: "Post Replies",
@@ -514,7 +528,30 @@ export const translations = {
         modal_group_create: "Create Group",
         modal_group_edit: "Edit Group",
         modal_group_select: "Parent Group",
-        group_unassigned: "General"
+        // The pseudo-group for rows whose group_id matches nothing. It is drawn
+        // only when such legacy rows actually exist, and the label matches what
+        // the forum index calls the same section (MainPage: "Unassigned").
+        group_unassigned: "Unassigned",
+        // Rendered as a badge ON the group separator row. Without it the group's
+        // name sits in the Title column in bold — the same shape as a category
+        // row — so it read as the group having been duplicated into a category.
+        group_row_label: "Group",
+        // Shown in place of the table when groups exist but no category does.
+        scaffold_hint: "Add a category to this group to make it visible on the forum.",
+        groups_empty: "No groups yet",
+        groups_empty_desc: "A group is a top-level section of the forum. Create one first — every category lives inside a group.",
+        empty: "No categories yet",
+        need_group_first: "Create a group first — a category without a group is not visible on the forum.",
+        group_no_forums: "No forums in this group",
+        unassigned_warning: "These categories do not appear on the forum — none belongs to a group. Assign them one.",
+        // The two title inputs are alternatives, not a pair of required fields:
+        // api/categories.js pickTitle() sends `ru || en`, so EITHER one is
+        // enough. The hint therefore states the rule instead of marking a single
+        // input as required.
+        title_one_required: "Fill in at least one title (EN or RU) to enable Save.",
+        group_title_one_required: "Fill in at least one title (EN or RU) to enable Save.",
+        group_required: "Pick a group for this category — a category without one is never shown on the forum.",
+        desc_too_long: "Description is too long (1024 characters maximum)."
       },
       designs: {
         title: "Custom Designs",
@@ -558,7 +595,6 @@ export const translations = {
         table_details: "Details",
         empty: "No audit logs found.",
         actions: {
-          settings_updated: "Settings Updated",
           category_created: "Category Created",
           category_updated: "Category Updated",
           category_deleted: "Category Deleted",
@@ -568,28 +604,28 @@ export const translations = {
           role_created: "Role Created",
           role_updated: "Role Config Updated",
           role_deleted: "Role Deleted",
-          user_approved: "User Approved",
-          bulk_user_approval: "Bulk Approved Pending Users",
-          user_rejected: "User Rejected",
-          user_banned: "User Banned",
-          user_unbanned: "User Unbanned",
-          user_deleted: "User Deleted",
-          user_role_updated: "User's Role Changed",
-          post_edited_by_admin: "Post Edited",
-          post_deleted_by_admin: "Post Deleted",
-          topic_deleted: "Topic Deleted",
-          topic_moved: "Topic Moved",
-          topic_edited_by_admin: "Topic Edited",
-          topic_pinned: "Topic Pinned",
-          topic_unpinned: "Topic Unpinned",
-          topic_locked: "Topic Locked",
-          topic_unlocked: "Topic Unlocked",
-          user_profile_edited_by_admin: "Profile Edited",
-          user_registered: "New Registration",
-          banned_user_login_attempt: "Banned Login Attempt",
           reputation_deleted: "Reputation Entry Deleted",
-          nickname_changed: "Nickname Changed",
-          posts_moved: "Posts Moved"
+          admin_user_update: "User Record Updated",
+          admin_user_delete: "User Record Deleted",
+          character_created: "Mask Created",
+          character_updated: "Mask Updated",
+          character_deleted: "Mask Deleted",
+          character_avatar_changed: "Mask Avatar Changed",
+          design_created: "Design Created",
+          design_updated: "Design Updated",
+          design_deleted: "Design Deleted",
+          dm_message_delete: "Direct Message Deleted",
+          nickname_change: "Nickname Changed",
+          post_edit: "Post Edited",
+          post_delete: "Post Deleted",
+          posts_move: "Posts Moved",
+          profile_edit: "Profile Edited",
+          root_transfer: "Root Role Transferred",
+          topic_delete: "Topic Deleted",
+          topic_lock: "Topic Locked",
+          topic_move: "Topic Moved",
+          topic_pin: "Topic Pinned",
+          topic_title_edit: "Topic Renamed"
         },
         fields: {
           targetId: "Target",
@@ -965,6 +1001,7 @@ export const translations = {
         topic_reply: "{count} новых ответов в теме {topic}",
         post_quoted: "Ваш пост процитировали в {topic}",
         post_mentioned: "Вас упомянули в {topic}",
+        dm: "Личное сообщение",
         reputation_change: "Изменение репутации"
       },
       reputation_increased: "Вам повысили репутацию. Автор: {user}",
@@ -1123,7 +1160,10 @@ export const translations = {
         seed_btn: "Инициализировать системные роли",
         toast_seeded: "Системные роли инициализированы!",
         confirm_delete_title: "Удалить роль",
-        confirm_delete_message: "Вы уверены, что хотите удалить эту роль? Это действие нельзя отменить."
+        confirm_delete_message: "Вы уверены, что хотите удалить эту роль? Это действие нельзя отменить.",
+        // Показывается под полем названия, пока оно пустое: неактивная кнопка
+        // «Сохранить» всегда сопровождается причиной, а не молчанием.
+        name_required_hint: "Введите название роли, чтобы включить «Сохранить»."
       },
       categories: {
         title: "Категории форума",
@@ -1147,6 +1187,17 @@ export const translations = {
         error_delete: "Ошибка при удалении категории",
         modal_perms_title: "Права доступа",
         modal_perms_hint: "Включите переопределение прав. Если переключатель включён — только выбранные роли смогут выполнять это действие в данной категории (перекрывает глобальные настройки ролей). Если выключен — применяются глобальные права роли.",
+        // ── Блок переопределений СВЕРНУТ по умолчанию ───────────────────────
+        // В развёрнутом виде чекбоксы ролей растягивали модалку за пределы
+        // экрана, а блок, который большинство админов не трогает, занимал
+        // весь вид.
+        perms_override_toggle: "Переопределение прав",
+        perms_override_sub: "Необязательно. Выключено — категория следует глобальным настройкам ролей.",
+        perms_override_show: "Показать переопределения",
+        perms_override_hide: "Скрыть переопределения",
+        perms_override_none: "Переопределений нет — категория наследует все права от глобальных ролей.",
+        // {count} подставляется; множественное число обработано формулировкой.
+        perms_override_active: "Активных переопределений в этой категории: {count}.",
         perm_view: "Просматривать темы",
         perm_create_topic: "Создавать темы",
         perm_post_reply: "Писать ответы",
@@ -1163,7 +1214,30 @@ export const translations = {
         modal_group_create: "Создать группу",
         modal_group_edit: "Редактировать группу",
         modal_group_select: "Группа разделов",
-        group_unassigned: "Общее"
+        // Псевдо-группа для категорий, чей group_id ни с чем не совпадает.
+        // Рисуется только когда такие legacy-строки действительно есть, и
+        // называется так же, как этот же раздел на форуме (MainPage: «Без группы»).
+        group_unassigned: "Без группы",
+        // Бейдж НА строке-разделителе группы. Без него имя группы стоит в
+        // колонке «Заголовок» полужирным — ровно как строка категории — и
+        // выглядит так, будто группа продублировалась в категорию.
+        group_row_label: "Группа",
+        // Показывается вместо таблицы, когда группы есть, а категорий нет.
+        scaffold_hint: "Добавьте категорию в эту группу, чтобы она появилась на форуме.",
+        groups_empty: "Групп пока нет",
+        groups_empty_desc: "Группа — это верхний раздел форума. Сначала создайте группу — каждая категория находится внутри группы.",
+        empty: "Категорий пока нет",
+        need_group_first: "Сначала создайте группу — категория без группы не видна на форуме.",
+        group_no_forums: "В этой группе пока нет форумов",
+        unassigned_warning: "Эти категории не отображаются на форуме — они не входят ни в одну группу. Назначьте им группу.",
+        // Два поля заголовка — альтернативы, а не пара обязательных полей:
+        // pickTitle() в api/categories.js отправляет `ru || en`, поэтому
+        // достаточно ЛЮБОГО из них. Поэтому подсказка объясняет правило,
+        // а не помечает одно поле как обязательное.
+        title_one_required: "Заполните хотя бы один заголовок (EN или RU), чтобы включить «Сохранить».",
+        group_title_one_required: "Заполните хотя бы один заголовок (EN или RU), чтобы включить «Сохранить».",
+        group_required: "Выберите группу для этой категории — категория без группы не видна на форуме.",
+        desc_too_long: "Описание слишком длинное (максимум 1024 символа)."
       },
       designs: {
         title: "Кастомные дизайны",
@@ -1207,7 +1281,6 @@ export const translations = {
         table_details: "Детали",
         empty: "Записи в журнале отсутствуют.",
         actions: {
-          settings_updated: "Настройки изменены",
           category_created: "Категория создана",
           category_updated: "Категория обновлена",
           category_deleted: "Раздел удален",
@@ -1217,28 +1290,28 @@ export const translations = {
           role_created: "Роль создана",
           role_updated: "Настройки роли обновлены",
           role_deleted: "Роль удалена",
-          user_approved: "Пользователь одобрен",
-          bulk_user_approval: "Массовое одобрение пользователей",
-          user_rejected: "Пользователь отклонён",
-          user_banned: "Пользователь забанен",
-          user_unbanned: "Пользователь разбанен",
-          user_deleted: "Пользователь удалён",
-          user_role_updated: "Роль пользователя изменена",
-          post_edited_by_admin: "Пост изменён",
-          post_deleted_by_admin: "Пост удалён",
-          topic_deleted: "Тема удалена",
-          topic_moved: "Тема перемещена",
-          topic_edited_by_admin: "Тема изменена",
-          topic_pinned: "Тема закреплена",
-          topic_unpinned: "Тема откреплена",
-          topic_locked: "Тема закрыта",
-          topic_unlocked: "Тема открыта",
-          user_profile_edited_by_admin: "Профиль изменён",
-          user_registered: "Новая регистрация",
-          banned_user_login_attempt: "Попытка входа забаненного",
           reputation_deleted: "Запись репутации удалена",
-          nickname_changed: "Никнейм изменён",
-          posts_moved: "Сообщения перенесены"
+          admin_user_update: "Запись пользователя изменена",
+          admin_user_delete: "Запись пользователя удалена",
+          character_created: "Маска создана",
+          character_updated: "Маска изменена",
+          character_deleted: "Маска удалена",
+          character_avatar_changed: "Аватар маски изменён",
+          design_created: "Дизайн создан",
+          design_updated: "Дизайн изменён",
+          design_deleted: "Дизайн удалён",
+          dm_message_delete: "Личное сообщение удалено",
+          nickname_change: "Никнейм изменён",
+          post_edit: "Пост изменён",
+          post_delete: "Пост удалён",
+          posts_move: "Сообщения перенесены",
+          profile_edit: "Профиль изменён",
+          root_transfer: "Передача роли root",
+          topic_delete: "Тема удалена",
+          topic_lock: "Тема закрыта",
+          topic_move: "Тема перемещена",
+          topic_pin: "Тема закреплена",
+          topic_title_edit: "Тема переименована"
         },
         fields: {
           targetId: "Цель",

@@ -3,6 +3,7 @@ import { Alert, Button, Container } from 'react-bootstrap';
 import { WifiOff, AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { sendApi } from '../../api/pocketbase';
+import { notifyConnectionRestored } from '../../api/connection';
 
 /**
  * ConnectionStatusBanner — Global sticky alert when network or backend connection is lost.
@@ -12,6 +13,12 @@ const ConnectionStatusBanner = () => {
   const [isDisconnected, setIsDisconnected] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const disconnectTimerRef = useRef(null);
+
+  // Announce the recovery exactly once per transition, not on every passing probe.
+  // The banner is mounted globally, so it is the only component that knows the
+  // backend came back — without this signal nothing re-runs the reads that failed
+  // while we were down, and the page keeps showing the empty state it settled on.
+  const wasDisconnectedRef = useRef(false);
 
   useEffect(() => {
     // 1. Browser online/offline event
@@ -37,11 +44,22 @@ const ConnectionStatusBanner = () => {
         }
         setIsDisconnected(false);
         setDismissed(false);
+
+        // Only on a real offline→online transition. This probe succeeds most of
+        // the time, so announcing unconditionally would refetch the whole app
+        // every 25 seconds.
+        if (wasDisconnectedRef.current) {
+          wasDisconnectedRef.current = false;
+          notifyConnectionRestored();
+        }
       } catch {
         if (!isMounted) return;
         if (!disconnectTimerRef.current) {
           disconnectTimerRef.current = setTimeout(() => {
-            if (isMounted) setIsDisconnected(true);
+            if (isMounted) {
+              setIsDisconnected(true);
+              wasDisconnectedRef.current = true;
+            }
           }, 4000);
         }
       }
@@ -108,8 +126,9 @@ const ConnectionStatusBanner = () => {
             variant="link"
             size="sm"
             onClick={() => setDismissed(true)}
-            className="text-white p-1 text-decoration-none"
+            className="btn-dismiss p-1"
             title={lang === 'ru' ? 'Скрыть предупреждение' : 'Dismiss'}
+            aria-label={lang === 'ru' ? 'Скрыть предупреждение' : 'Dismiss'}
           >
             <X size={18} />
           </Button>

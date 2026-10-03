@@ -1,4 +1,5 @@
 import { sendApi, pb } from './pocketbase';
+import { subscribeToRefetch } from './connection';
 
 /**
  * Subscribes to real-time notifications for a user via PocketBase API.
@@ -35,6 +36,12 @@ export const subscribeToUserNotifications = (uid, callback) => {
   load();
   const interval = setInterval(load, 15000);
 
+  // The first read after a cold load during an outage resolves to [] and the poll
+  // would fix it within 15s — but only if the component is still mounted and the
+  // user has not navigated. Re-read immediately on recovery so the inbox is right
+  // the moment the banner disappears.
+  const offRestored = subscribeToRefetch(load);
+
   let unsub = () => {};
   try {
     pb.collection('notifications').subscribe('*', () => {
@@ -48,6 +55,7 @@ export const subscribeToUserNotifications = (uid, callback) => {
   return () => {
     isSubscribed = false;
     clearInterval(interval);
+    offRestored();
     unsub();
   };
 };
@@ -61,16 +69,18 @@ export const subscribeToAdminNotifications = (callback) => {
 
 /**
  * Marks a notification as read.
+ *
+ * The failure is RETHROWN, not swallowed. These used to `console.warn` and
+ * resolve normally, so the caller's `await` never rejected and the success toast
+ * fired even when the server returned 403/500 — telling the member their
+ * notification was read when it was not. Polling would eventually reconcile it,
+ * but a lie that self-corrects in 15 seconds is still a lie.
  */
 export const markNotificationRead = async (_uid, notifId, _isAdmin = false) => {
   if (!notifId) return;
-  try {
-    await sendApi(`/api/aerun/me/notifications/${notifId}/read`, {
-      method: 'PATCH'
-    });
-  } catch (err) {
-    console.warn('[markNotificationRead err]', err);
-  }
+  await sendApi(`/api/aerun/me/notifications/${notifId}/read`, {
+    method: 'PATCH'
+  });
 };
 
 /**
@@ -89,36 +99,37 @@ export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {
  */
 export const deleteNotification = async (_uid, notifId, _isAdmin = false) => {
   if (!notifId) return;
-  try {
-    await sendApi(`/api/aerun/me/notifications/${notifId}/archive`, {
-      method: 'PATCH'
-    });
-  } catch (err) {
-    console.warn('[deleteNotification err]', err);
-  }
+  await sendApi(`/api/aerun/me/notifications/${notifId}/archive`, {
+    method: 'PATCH'
+  });
 };
 
 /**
  * Marks all notifications as read.
+ *
+ * Rethrown for the same reason as markNotificationRead: a swallowed rejection
+ * here makes "mark all read" report success for a request that never landed.
  */
 export const markAllNotificationsRead = async (_uid, _notifs = []) => {
-  try {
-    await sendApi('/api/aerun/me/notifications/read-all', {
-      method: 'POST'
-    });
-  } catch (err) {
-    console.warn('[markAllNotificationsRead err]', err);
-  }
+  await sendApi('/api/aerun/me/notifications/read-all', {
+    method: 'POST'
+  });
 };
 
 export const markAllAdminNotificationsRead = async (adminNotifs = []) => {
   return await markAllNotificationsRead(null, adminNotifs);
 };
 
-export const deleteAllUserNotifications = async (uid) => {
-  return await markAllNotificationsRead(uid);
+// These archive rather than mark read.
+//
+// They used to call markAllNotificationsRead, i.e. POST /me/notifications/
+// read-all: nothing was removed and every row came back as READ, while the
+// button said "clear all" and the toast said "all cleared". Clearing an inbox
+// and silencing it are different acts; this one now does what it is labelled.
+export const deleteAllUserNotifications = async (_uid) => {
+  await sendApi('/api/aerun/me/notifications/archive-all', { method: 'POST' });
 };
 
 export const deleteAllAdminNotifications = async () => {
-  return await markAllNotificationsRead(null);
+  await sendApi('/api/aerun/me/notifications/archive-all', { method: 'POST' });
 };

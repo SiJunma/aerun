@@ -383,6 +383,7 @@ func createDMHandler(e *core.RequestEvent) error {
 				"conversation_id": conv.Id,
 				"message_id":      msg.Id,
 				"sequence":        1,
+				"sender_uid":      e.Auth.Id,
 				"sender_nickname": senderNick,
 				"preview":         cleanText,
 			})
@@ -451,6 +452,32 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("conversation not found")
 		}
 
+		// Nobody may message a suspended account, and createDMHandler already
+		// says so — but only for conversations opened AFTER the ban. A thread
+		// started while everybody was still active kept accepting messages
+		// forever, which is how a ban quietly stops applying to the one channel
+		// people actually talk in.
+		//
+		// Every OTHER participant is checked, not just the counterpart: group
+		// conversations exist, so one suspended member is enough to make the
+		// whole thread unwritable.
+		others, err := txApp.FindAllRecords(dmMembersCollectionName,
+			dbx.HashExp{"conversation_id": convID})
+		if err != nil {
+			return 0, nil, internalError("failed to read conversation members", err)
+		}
+		for _, member := range others {
+			if member.GetString("user_id") == e.Auth.Id {
+				continue
+			}
+			other, err := txApp.FindRecordById(usersCollectionName, member.GetString("user_id"))
+			if err != nil || other == nil {
+				continue
+			}
+			if other.GetString("status") == string(auth.StatusBanned) {
+				return 0, nil, forbiddenError("cannot send message to a banned user")
+			}
+		}
 		// Monotonic sequence assignment within the conversation transaction
 		nextSeq := conv.GetInt("messages_count") + 1
 		nowISO := types.NowDateTime().String()
@@ -502,6 +529,7 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 					"conversation_id": conv.Id,
 					"message_id":      msg.Id,
 					"sequence":        nextSeq,
+					"sender_uid":      e.Auth.Id,
 					"sender_nickname": senderNick,
 					"preview":         cleanText,
 				})

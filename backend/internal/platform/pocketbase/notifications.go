@@ -212,6 +212,33 @@ func archiveNotificationHandler(e *core.RequestEvent) error {
 	})
 }
 
+// archiveAllNotificationsHandler archives every notification the caller owns.
+//
+// This exists because the client used to implement "clear all" by calling the
+// read-all route: the rows were marked read and NOTHING was removed, while the
+// toast announced they had been cleared. Marking read and removing are
+// different acts, and a button labelled "delete" that only marks read is a lie
+// about the state of the member's inbox.
+func archiveAllNotificationsHandler(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return forbiddenError("authentication required")
+	}
+
+	_, err := e.App.DB().Update(
+		notificationsCollectionName,
+		dbx.Params{"archived": true},
+		dbx.HashExp{"recipient_id": e.Auth.Id, "archived": false},
+	).Execute()
+	if err != nil {
+		return internalError("failed to archive all notifications", err)
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"archived_all": true,
+		"request_id":   requestIDFrom(e),
+	})
+}
+
 // getUnreadCountsHandler returns aggregated unread counters (DMs and notifications).
 // Replaces the legacy RTDB unread badges.
 func getUnreadCountsHandler(e *core.RequestEvent) error {

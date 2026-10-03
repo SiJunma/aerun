@@ -68,10 +68,14 @@ export const transferRoot = async ({ successorId, password, confirmPhrase }) => 
 };
 
 // --- User Management ---
+// Approving clears the STATUS only. The account was already created with the
+// player role (register.go), so naming a role here would also overwrite it —
+// which is invisible in the common case and destructive for an admin who
+// happens to approve an account that was manually re-roled meanwhile.
 export const approveUser = async (uid, performerId) => {
   await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
-    body: { role: 'player', status: 'active' }
+    body: { status: 'active' }
   });
   await logAdminAction('user_approved', performerId, { targetId: uid });
 };
@@ -87,72 +91,116 @@ export const rejectUser = async (uid, performerId) => {
   await deleteUser(uid, performerId);
 };
 
+// `banned` and `pending` are ACCOUNT STATUSES, not roles (see the Role/Status
+// split in internal/auth: the legacy pseudo-roles are deliberately absent from
+// the role vocabulary). Sending role:'banned' made every ban fail with 400
+// "invalid role value", because the role column validates against the roles
+// registry, where no such row exists.
+//
+// The role is left untouched. NarrowForStatus strips EVERY permission for a
+// banned account, so the role never decides what a ban grants; keeping it is
+// what lets Unban restore the account to where it actually was instead of
+// flattening everyone to Player.
 export const banUser = async (uid, performerId) => {
   await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
-    body: { role: 'banned', status: 'banned' }
+    body: { status: 'banned' }
   });
   await logAdminAction('user_banned', performerId, { targetId: uid });
 };
 
 export const unbanUser = async (uid, performerId) => {
+  // status only, for the same reason: the role was never changed by the ban.
   await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
-    body: { role: 'player', status: 'active' }
+    body: { status: 'active' }
   });
   await logAdminAction('user_unbanned', performerId, { targetId: uid });
 };
 
+// The role and the status are separate axes. Only a change to the ROLE implies
+// a status flip; assigning a real role never implies banning anyone.
 export const updateUserRole = async (uid, roleId, performerId) => {
-  const status = roleId === 'banned' ? 'banned' : (roleId === 'pending' ? 'pending' : 'active');
   await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
-    body: { role: roleId, status }
+    body: { role: roleId }
   });
   await logAdminAction('user_role_updated', performerId, { targetId: uid, roleId });
 };
 
 let _rolesCache = null;
 
-export const invalidateRolesCache = () => {
+// The role registry is mutable, so this is not a load-once subscription: the
+// admin panel creates, edits and deletes roles, and AuthProvider holds the
+// single copy every consumer renders from. Keeping the fetch fire-and-forget
+// meant a mutation cleared _rolesCache and nothing re-read it, so the table
+// kept painting the pre-mutation list until a full page reload.
+//
+// Subscribers are kept in a set rather than in per-subscription closures so
+// refreshRoles() can push to all of them. Without that, each caller would need
+// its own timer and they would drift.
+const _roleSubscribers = new Set();
+
+const normalizeRole = d => ({
+  id: d.role_id || d.id,
+  name: d.name,
+  color: d.color,
+  rank: d.rank,
+  is_system: d.is_system,
+  // The base role is what the admin panel pre-fills a derived role from and
+  // what the delete-revert falls back to. Dropping it here made both read
+  // undefined for every role that had one.
+  base_role_id: d.base_role_id || '',
+  max_characters_limit: d.max_characters_limit,
+  permissions: d.permissions || []
+});
+
+const fetchRoles = async () => {
+  try {
+    const res = await sendApi('/api/aerun/roles');
+    const records = res?.items || [];
+    // An empty registry is a real state (every role deleted is impossible —
+    // system roles cannot be deleted — but a failed read is not), so the
+    // fallback only guards the error path and a genuinely empty response.
+    _rolesCache = records.length > 0 ? records.map(normalizeRole) : DEFAULT_ROLES;
+  } catch {
+    _rolesCache = DEFAULT_ROLES;
+  }
+  // One call per subscriber with the whole list, matching what
+  // subscribeToRoles delivers on first paint. Iterating the roles instead would
+  // fire N callbacks each carrying the full array, so a five-role registry
+  // would re-render AuthProvider five times per mutation.
+  const snapshot = _rolesCache;
+  _roleSubscribers.forEach(cb => cb(snapshot));
+  return snapshot;
+};
+
+// Forces a re-read and notifies every subscriber. Called after each mutation so
+// the panel reflects the change without a reload.
+export const refreshRoles = async () => {
   _rolesCache = null;
+  return fetchRoles();
 };
 
 export const subscribeToRoles = (callback) => {
-  let isSubscribed = true;
+  _roleSubscribers.add(callback);
 
-  const fetchRoles = async () => {
-    if (_rolesCache) {
-      if (isSubscribed) callback(_rolesCache);
-      return;
-    }
-
-    try {
-      const res = await sendApi('/api/aerun/roles');
-      const records = res?.items || [];
-      const rolesData = records.map(d => ({
-        id: d.role_id || d.id,
-        name: d.name,
-        color: d.color,
-        rank: d.rank,
-        is_system: d.is_system,
-        permissions: d.permissions || []
-      }));
-      _rolesCache = rolesData.length > 0 ? rolesData : DEFAULT_ROLES;
-      if (isSubscribed) callback(_rolesCache);
-    } catch {
-      _rolesCache = DEFAULT_ROLES;
-      if (isSubscribed) callback(_rolesCache);
-    }
-  };
-
-  fetchRoles();
+  if (_rolesCache) {
+    callback(_rolesCache);
+  } else {
+    fetchRoles();
+  }
 
   return () => {
-    isSubscribed = false;
+    _roleSubscribers.delete(callback);
   };
 };
 
+// Each mutation re-reads the registry rather than just clearing the cache.
+// These functions used to swallow the error into console.warn and fall through,
+// which hid two failures at once: a rejected request still resolved, so the
+// caller showed a success toast, and nothing re-read the cache, so the table
+// kept the stale list. The error is re-thrown for the caller to surface.
 export const addRole = async (roleData, performerId) => {
   try {
     const res = await sendApi('/api/aerun/roles', {
@@ -162,11 +210,12 @@ export const addRole = async (roleData, performerId) => {
         role_id: roleData.name.toLowerCase().replace(/[^a-z0-9]/g, '_')
       }
     });
-    invalidateRolesCache();
     await logAdminAction('role_created', performerId, { targetId: res?.id, roleName: roleData.name });
+    await refreshRoles();
     return res?.id;
   } catch (err) {
     console.warn('[addRole err]', err);
+    throw err;
   }
 };
 
@@ -176,10 +225,11 @@ export const updateRole = async (id, roleData, performerId) => {
       method: 'PATCH',
       body: roleData
     });
-    invalidateRolesCache();
     await logAdminAction('role_updated', performerId, { targetId: id, roleName: roleData.name });
+    await refreshRoles();
   } catch (err) {
     console.warn('[updateRole err]', err);
+    throw err;
   }
 };
 
@@ -191,10 +241,14 @@ export const deleteRole = async (id, isSystem, performerId) => {
     await sendApi(`/api/aerun/roles/${id}`, {
       method: 'DELETE'
     });
-    invalidateRolesCache();
     await logAdminAction('role_deleted', performerId, { targetId: id });
+    await refreshRoles();
   } catch (err) {
     console.warn('[deleteRole err]', err);
+    // A refusal (a category still grants this role, or holders have no base
+    // to fall back to) is an expected outcome the admin needs to read, not a
+    // warning to swallow.
+    throw err;
   }
 };
 

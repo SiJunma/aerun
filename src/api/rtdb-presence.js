@@ -155,10 +155,48 @@ export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
   await sendHeartbeat(activeCharacter);
 };
 
-export const setRtdbOffline = async (_uid, _isLogout = false) => {
+/**
+ * Stops the heartbeat, and on an explicit logout LEAVES.
+ *
+ * The two arguments were both ignored (`_uid`, `_isLogout`), which is why the
+ * legacy contract "the last action is what counts" only appeared to hold: the
+ * final beat happened to be close enough to the sign-out click that the durable
+ * `last_seen` was roughly right. It was right by luck, not by design.
+ *
+ * It used to send a final HEARTBEAT, which is exactly backwards. The heartbeat
+ * handler writes `onlineMembers[e.Auth.Id]` with LastSeen=now, so signing out
+ * re-REGISTERED the account as online: it stayed in "Online now" for the whole
+ * presenceTTL (75s), and every other browser polling /status counted a
+ * signed-OUT member as present, because the server genuinely still listed them.
+ * Guests never had this bug — they leave through /presence/guest/leave, which
+ * removes the row instead of refreshing it. Members needed the same call, so
+ * they have one now: /presence/leave deletes the presence row AND writes the
+ * durable users.last_seen, in one request, while the token is still valid.
+ *
+ * `isLogout` distinguishes the two callers on purpose. Idle timeout is not a
+ * departure: the user is still there, just inactive, and the next interaction
+ * re-establishes presence through `recordActivity`. Announcing a departure there
+ * would drop a member who is merely thinking out of the online list, and would
+ * stamp their durable `last_seen` at a moment they are demonstrably still here.
+ */
+export const setRtdbOffline = async (uid, isLogout = false) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+  }
+
+  // Deliberately BEFORE the authStore is cleared by the caller: this is the only
+  // moment the request is still authenticated, so a leave sent later would 401.
+  // A failure here must not block the sign-out itself, so it is swallowed —
+  // the cost of skipping it is a presence row that ages out on its own in 75s,
+  // not a stuck session.
+  if (isLogout && uid) {
+    try {
+      await sendApi('/api/aerun/presence/leave', { method: 'POST', body: {} });
+    } catch {
+      // Best-effort, like every other presence write: the cost of skipping
+      // it is a presence row that ages out on its own, never a stuck session.
+    }
   }
 };
 
@@ -209,9 +247,22 @@ export const subscribeToRtdbStatuses = (callback) =>
     callback(map);
   });
 
-export const subscribeToDailyActiveUsers = (callback) => {
-  return subscribeToOnlineUsers(callback);
-};
+/**
+ * "Visited today" is NOT this subscription.
+ *
+ * This used to exist as `subscribeToDailyActiveUsers`, a one-line alias of
+ * subscribeToOnlineUsers, and the stats panel called it for the "Visited today"
+ * row. That made the panel print the connected-now members twice under two
+ * different labels, and it made the number change meaning with the label: the
+ * "today" row could never show anybody who had already left, which is most of
+ * the people a day is made of.
+ *
+ * The daily list is a different clock with a different source — the durable
+ * users.last_seen column over a 24h window — so it is served by
+ * GET /api/aerun/forum-stats as stats.dailyActiveUsers and read through the
+ * forum state, not through live presence. Presence cannot answer it at all:
+ * this map is windowed to presenceTTL and is empty after a restart.
+ */
 
 // Guest presence (anonymous visitors).
 //

@@ -27,12 +27,15 @@ package pocketbase
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
 	"github.com/pocketbase/pocketbase/tools/security"
+
+	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
 const (
@@ -307,6 +310,21 @@ func createCategoryHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// A category with no group is INVISIBLE, not merely unstyled.
+		//
+		// The forum index renders categories strictly inside their group
+		// (`groups.filter(g => cats.some(c => c.group_id === g.id))`), so a
+		// group_id of "" matches no group and the row is never drawn. The
+		// empty-state check counts categories, not rendered rows, so when EVERY
+		// category is ungrouped the index shows neither the list nor the "no
+		// categories" message — a blank page and no clue why.
+		//
+		// Creating one is therefore refused outright. The admin must create a
+		// group first, then place the category inside it.
+		if groupID == "" {
+			return 0, nil, validationError("category must belong to a category group: create a group first, then pick it for this category")
+		}
+
 		rec := core.NewRecord(col)
 		// The record id is assigned here rather than by PocketBase so the slug
 		// can fall back to it for a name that has no latin equivalent at all
@@ -490,6 +508,11 @@ func deleteCategoryHandler(e *core.RequestEvent) error {
 // removes duplicates. An unknown id is a 400 naming the offenders rather than a
 // silently ignored entry: a category that quietly loses one role is a visibility
 // bug nobody can see from the UI.
+// The inherit marker is exempt from the registry check — it is not a role, it
+// is a control value, and canViewCategory resolves it before any lookup. It
+// must be the ONLY entry: a marker alongside real ids would mean "inherit AND
+// restrict", which the reader cannot honour without silently dropping one of
+// the two, so it is rejected as a 400 rather than resolved by guessing.
 func validateAllowedRoles(app core.App, input []string) ([]string, error) {
 	seen := make(map[string]bool, len(input))
 	cleaned := make([]string, 0, len(input))
@@ -503,6 +526,15 @@ func validateAllowedRoles(app core.App, input []string) ([]string, error) {
 	}
 	if len(cleaned) == 0 {
 		return []string{}, nil
+	}
+
+	if slices.Contains(cleaned, auth.CategoryInheritMarker) {
+		if len(cleaned) > 1 {
+			return nil, validationError(
+				"the inherit marker cannot be combined with explicit roles: a category either follows the global role settings or names the roles that may read it",
+			)
+		}
+		return cleaned, nil
 	}
 
 	records, err := app.FindAllRecords(rolesCollectionName, nil)

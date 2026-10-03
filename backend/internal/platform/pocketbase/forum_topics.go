@@ -25,6 +25,13 @@ type createTopicForm struct {
 	CategoryID string `json:"category_id"`
 	Title      string `json:"title"`
 	Content    string `json:"content"`
+	// CharacterID is the mask the author picked. Empty means "use the one stored
+	// on my profile" — resolveAuthorCharacter decides what is actually written.
+	CharacterID string `json:"character_id"`
+	// PinFirstPost is the "Pin first post on all pages" checkbox. It applies to
+	// the OPENING post only; there is no other post in this transaction that
+	// could carry it.
+	PinFirstPost bool `json:"pin_first_post"`
 }
 
 type updateTopicForm struct {
@@ -37,8 +44,14 @@ type moveTopicForm struct {
 	CategoryID string `json:"category_id"`
 }
 
+// topicPayload is the topic read model WITHOUT author display fields.
+//
+// Author decoration is a separate pass (decorateTopicAuthors) because it costs
+// a users lookup, and several callers — the create/update/move responses —
+// already have the transaction's app and want it, while the pure record shape
+// is what the fixtures and tests assert on.
 func topicPayload(record *core.Record) map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		"id":                  record.Id,
 		"category_id":         record.GetString("category_id"),
 		"author_id":           record.GetString("author_id"),
@@ -52,6 +65,25 @@ func topicPayload(record *core.Record) map[string]any {
 		"created":             record.GetDateTime("created").String(),
 		"updated":             record.GetDateTime("updated").String(),
 	}
+	// Both mask references are emitted RAW; decorateTopicAuthor resolves and
+	// ownership-checks them. They are omitted when empty so a topic written
+	// without a mask is indistinguishable from one that never had the option.
+	if characterID := record.GetString("author_character_id"); characterID != "" {
+		payload["author_character_id"] = characterID
+	}
+	if characterID := record.GetString("last_post_author_character_id"); characterID != "" {
+		payload["last_post_author_character_id"] = characterID
+	}
+	// TopicPage gates its pinned-post banner on `topic.first_post_pinned &&
+	// currentPage > 1`. The flag is derived from the OPENING post's own row rather
+	// than stored on the topic, because a second copy would be free to disagree
+	// with the post it describes.
+	// TopicPage gates its pinned-post banner on `topic.first_post_pinned &&
+	// currentPage > 1`, and the topic editor round-trips the same field, so the
+	// flag is a first-class part of the topic read model — not something the
+	// client should have to infer from whichever posts it happens to have loaded.
+	payload["first_post_pinned"] = record.GetBool("first_post_pinned")
+	return payload
 }
 
 // createTopicHandler creates a new topic along with its initial post in one transaction.
@@ -111,6 +143,14 @@ func createTopicHandler(e *core.RequestEvent) error {
 		topic.Set("locked", false)
 		topic.Set("pinned", false)
 
+		// Resolved before the first Save so a forbidden mask aborts the whole
+		// command rather than leaving a half-written topic behind.
+		characterID, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
+		if err != nil {
+			return 0, nil, err
+		}
+		topic.Set("author_character_id", characterID)
+
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to create topic", err)
 		}
@@ -121,19 +161,35 @@ func createTopicHandler(e *core.RequestEvent) error {
 		post.Set("topic_id", topic.Id)
 		post.Set("author_id", e.Auth.Id)
 		post.Set("content", content)
+		// The topic and its opening message are always the same voice, so the
+		// mask is resolved ONCE and written to both rows.
+		post.Set("author_character_id", characterID)
 
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to create initial post", err)
 		}
 
+		// "Pin first post on all pages" lives on the TOPIC (legacy schema,
+		// PROJECT_SPEC.md:107), and "the pinned post" is therefore a rule — the
+		// earliest post — rather than a flag on some arbitrary message. Storing
+		// it per-post would have silently lost the pin on every imported legacy
+		// topic and broken the topic editor's round-trip.
+		topic.Set("first_post_pinned", form.PinFirstPost)
+
 		// 3. Update topic's last_post projection
 		topic.Set("last_post_id", post.Id)
 		topic.Set("last_post_created", post.GetDateTime("created"))
 		topic.Set("last_post_author_id", post.GetString("author_id"))
+		topic.Set("last_post_author_character_id", characterID)
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
 		}
+
+		// The opening post is a post like any other, so it notifies like any
+		// other: subscribers of a brand-new topic (only the author, who is
+		// skipped), quoted authors, mentions.
+		dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
 
 		// 4. The author gains one topic AND its opening post. Both counters move
 		// here, in the same transaction as the rows that justify them.
@@ -144,9 +200,26 @@ func createTopicHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// The author display fields are resolved BEFORE the transaction commits,
+		// so the very first render of a brand-new topic already shows a name
+		// instead of a placeholder that only fills in on the next poll. The
+		// counters written above are part of the same transaction, so this read
+		// cannot observe a half-written author.
+		topicOut := topicPayload(topic)
+		postOut := postPayload(post)
+		decorateTopicAuthors(txApp, []map[string]any{topicOut})
+		decoratePostAuthors(txApp, []map[string]any{postOut})
+
 		resp := map[string]any{
-			"topic":      topicPayload(topic),
-			"first_post": postPayload(post),
+			"topic":      topicOut,
+			"first_post": postOut,
+			// `post` mirrors `first_post`. The create response had two names for
+			// one object and each caller picked a different one, so the topic
+			// form read `topicId` (never sent) and the reply path read `postId`
+			// (never sent). One canonical name, mirrored for the callers that
+			// already speak it.
+			"post":       postOut,
+			"topic_id":   topic.Id,
 			"request_id": requestIDFrom(e),
 		}
 		return http.StatusCreated, resp, nil
@@ -155,16 +228,34 @@ func createTopicHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// listTopicsHandler lists non-deleted topics with keyset pagination.
+// listTopicsHandler lists topics with keyset pagination.
+//
+// It filters nothing: since 1767700000 a deleted topic is a GONE row, so
+// there is no flag left to filter on and no "non-deleted" qualifier to apply.
 func listTopicsHandler(e *core.RequestEvent) error {
 	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), forum.DefaultPageLimit), forum.DefaultPageLimit)
 	categoryID := strings.TrimSpace(e.Request.URL.Query().Get("category_id"))
 	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
+	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
+	if page < 1 {
+		page = 1
+	}
 
-	query := e.App.RecordQuery(topicsCollectionName).
-		AndWhere(dbx.HashExp{"deleted": false})
+	// No `deleted` filter here.
+	//
+	// Migration 1767700000 dropped that column when deletion became HARD: a
+	// deleted topic is removed, not flagged. The filter outlived the column, so
+	// SQLite rejected the whole statement ("no such column: deleted") and the
+	// handler answered 500 — for EVERY category, whether or not it had topics,
+	// because the query never got far enough to look at the data.
+	//
+	// Nothing caught it because no test exercised this route: the topic suite
+	// only ever POSTed. See TestListTopicsRunsAgainstLiveSchema.
+	query := e.App.RecordQuery(topicsCollectionName)
 
+	var where []dbx.Expression
 	if categoryID != "" {
+		where = append(where, dbx.HashExp{"category_id": categoryID})
 		query = query.AndWhere(dbx.HashExp{"category_id": categoryID})
 	}
 
@@ -191,6 +282,18 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	query = query.OrderBy("pinned DESC", "last_post_created DESC", "id DESC").
 		Limit(int64(limit + 1))
 
+	// Page pagination, offset-based, for the CATEGORY VIEW. It applies only when
+	// no cursor was supplied: a keyset cursor already encodes the position, and
+	// adding an offset on top of it would skip rows the cursor did not name.
+	//
+	// The category page paginates by number ("page 2 of 5"), which is what the
+	// legacy Firestore query did with .startAfter(lastDoc) fed by a running
+	// offset — so without this the view could only ever show page 1 no matter
+	// which page the member asked for.
+	if cursor == "" && page > 1 {
+		query = query.Offset(int64((page - 1) * limit))
+	}
+
 	var records []*core.Record
 	if err := query.All(&records); err != nil {
 		return internalError("failed to list topics", err)
@@ -211,9 +314,21 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	for i, r := range records {
 		items[i] = topicPayload(r)
 	}
+	decorateTopicAuthors(e.App, items)
+
+	// `total` is what the client paginates against. It is counted over the same
+	// filter as the page, so a category with 45 topics reports 45 on every page
+	// rather than the 20 that happen to be in this response.
+	total, err := e.App.CountRecords(topicsCollectionName, where...)
+	if err != nil {
+		return internalError("failed to count topics", err)
+	}
 
 	return e.JSON(http.StatusOK, map[string]any{
 		"items":       items,
+		"total":       int(total),
+		"page":        page,
+		"per_page":    limit,
 		"next_cursor": nextCursor,
 		"request_id":  requestIDFrom(e),
 	})
@@ -227,8 +342,11 @@ func getTopicHandler(e *core.RequestEvent) error {
 		return notFoundError("topic not found")
 	}
 
+	payload := topicPayload(topic)
+	decorateTopicAuthors(e.App, []map[string]any{payload})
+
 	return e.JSON(http.StatusOK, map[string]any{
-		"topic":      topicPayload(topic),
+		"topic":      payload,
 		"request_id": requestIDFrom(e),
 	})
 }
@@ -252,6 +370,9 @@ func updateTopicHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
+	if err := requireNotBanned(acc, "edit a topic"); err != nil {
+		return err
+	}
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, id)
@@ -412,6 +533,9 @@ func deleteTopicHandler(e *core.RequestEvent) error {
 
 	id := e.Request.PathValue("id")
 	acc := AccessFrom(e)
+	if err := requireNotBanned(acc, "delete a topic"); err != nil {
+		return err
+	}
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, id)

@@ -31,7 +31,7 @@ import (
 // draftPayload renders a draft row for the drafts page. Topic fields are
 // attached by the caller when the topic is alive.
 func draftPayload(r *core.Record) map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		"id":       r.Id,
 		"topic_id": r.GetString("topic_id"),
 		"content":  r.GetString("content"),
@@ -39,6 +39,13 @@ func draftPayload(r *core.Record) map[string]any {
 		"created":  r.GetDateTime("created").String(),
 		"updated":  r.GetDateTime("updated").String(),
 	}
+	// The mask the draft is filed under, so a client can render the draft card
+	// with the identity the text was written in. It travels raw exactly like it
+	// does on postPayload: the owner check already happened in the command.
+	if characterID := r.GetString("author_character_id"); characterID != "" {
+		payload["author_character_id"] = characterID
+	}
+	return payload
 }
 
 // validateDraftContent validates draft text. A draft may be empty (the user
@@ -66,6 +73,11 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 	}
 	var form struct {
 		Content string `json:"content"`
+		// CharacterID is the mask the reply was picked in. It is stored ON THE
+		// DRAFT, not reconstructed at publish time: publishing has to reproduce
+		// the identity the text was written under, and by then the author may
+		// have switched masks in the composer.
+		CharacterID string `json:"character_id"`
 	}
 	if err := json.Unmarshal(raw, &form); err != nil {
 		return validationError("invalid JSON body")
@@ -101,6 +113,17 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 		}
 		post.Set("is_draft", true)
 		post.Set("content", content)
+		// The same server-owned resolution createPostHandler uses, for the same
+		// reason: the client names the mask it wants and the server answers with
+		// the one it will accept, so a draft can never be filed under somebody
+		// else's mask. Persisting it HERE is what makes publish reproduce the
+		// identity — a draft published without this column came out under the
+		// account name and the mask was silently lost.
+		characterID, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
+		if err != nil {
+			return 0, nil, err
+		}
+		post.Set("author_character_id", characterID)
 
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to save draft", err)
@@ -305,6 +328,12 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		}
 
 		post.Set("is_draft", false)
+		// The mask lives on the draft row, so publishing keeps the identity the
+		// text was written under. It is NOT re-read from the profile here: the
+		// author may have switched masks since saving, and a post that silently
+		// changed its author identity on publication is exactly the bug that made
+		// "publish my draft" drop the mask.
+		characterID := post.GetString("author_character_id")
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to publish draft", err)
 		}
@@ -313,9 +342,17 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		topic.Set("last_post_id", post.Id)
 		topic.Set("last_post_created", post.GetDateTime("created"))
 		topic.Set("last_post_author_id", post.GetString("author_id"))
+		// Same denormalisation createPostHandler writes: a topic list row renders
+		// "who spoke last" without loading the post, so leaving this out made the
+		// published mask show in the topic but not in the list.
+		topic.Set("last_post_author_character_id", characterID)
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
 		}
+
+		// A published draft IS a post, so it notifies like one. Omitting this would
+		// make the drafts feature a way to post without anybody being told.
+		dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
 
 		// Publishing turns a draft into a real post, so the author's post count
 		// moves now — the draft was deliberately not counted before this.
@@ -323,8 +360,17 @@ func publishDraftHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// The published post rides back DECORATED, exactly like a createPost
+		// answer. The raw payload carries no author_name/is_character — the read
+		// model resolves those — so an undecorated response made the client
+		// re-render the fresh post with the account name and the mask appeared to
+		// vanish the moment the draft was published.
+		postOut := postPayload(post)
+		decoratePostAuthors(txApp, []map[string]any{postOut})
+
 		return http.StatusOK, map[string]any{
-			"post":       postPayload(post),
+			"post":       postOut,
+			"post_id":    post.Id,
 			"request_id": requestIDFrom(e),
 		}, nil
 	})

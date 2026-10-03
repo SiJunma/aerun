@@ -86,11 +86,20 @@ func TestIdentityRbacMigration(t *testing.T) {
 		}
 	}
 
-	if users.ListRule == nil || *users.ListRule != publicProfileRule {
-		t.Fatalf("users list rule must be the public profile rule, got %v", users.ListRule)
+	// The read rules are open to everyone (1768100000): a ban limits what the
+	// account may DO, not what other people may read about it. The write rules
+	// below are the part that must NOT move with them — a wider view rule must
+	// never become a wider write rule.
+	if users.ListRule == nil || *users.ListRule != openReadRule {
+		t.Fatalf("users list rule must not depend on status, got %v", users.ListRule)
 	}
-	if users.ViewRule == nil || *users.ViewRule != publicProfileRule {
-		t.Fatalf("users view rule must be the public profile rule, got %v", users.ViewRule)
+	if users.ViewRule == nil || *users.ViewRule != openReadRule {
+		t.Fatalf("users view rule must not depend on status, got %v", users.ViewRule)
+	}
+	for _, rule := range []*string{users.ViewRule, users.ListRule} {
+		if strings.Contains(*rule, "status") {
+			t.Fatalf("no read rule may branch on status, got %q", *rule)
+		}
 	}
 	for name, rule := range map[string]*string{
 		"create": users.CreateRule,

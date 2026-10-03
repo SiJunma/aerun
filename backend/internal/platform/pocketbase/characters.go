@@ -19,10 +19,9 @@ package pocketbase
 // the key until the next profile save overwrites the object), so a stale copy
 // there is inert rather than authoritative.
 //
-// Visibility mirrors the users profile ViewRule (`status = "active" || id =
-// @request.auth.id`, 1766000000): an active owner's characters are public, and a
-// pending or banned owner answers 404 — not 403, because "you may not see this"
-// and "this does not exist" must look the same to a caller probing ids.
+// Visibility does not depend on the account status: an owner's characters are
+// readable by anybody, suspended owner included. A ban limits what the banned
+// account may DO; it does not unpublish what it wrote. See canReadCharactersOf.
 
 import (
 	"encoding/json"
@@ -133,19 +132,25 @@ func getCharacterHandler(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, characterPayload(rec))
 }
 
-// canReadCharactersOf applies the owner visibility rule: an active account's
-// characters are public, everyone else's are visible only to the owner itself.
+// canReadCharactersOf reports whether the caller may read this owner's
+// characters.
+//
+// Visibility does NOT depend on the account status. A suspension limits what the
+// suspended account may DO; it does not make the account disappear from the
+// forum. The previous rule here mirrored the users ViewRule
+// (`status = "active" || id = @request.auth.id`), which meant that banning
+// somebody also unpublished their profile: the admin screen came back 404, the
+// Characters tab read "none yet", and every reader lost the record of what the
+// account had written. Nothing about the product wants that — an operator bans
+// an account precisely so they can go on reading it.
+//
+// So the only question left is whether the owner exists.
 func canReadCharactersOf(e *core.RequestEvent, ownerID string) (bool, error) {
 	owner, err := e.App.FindRecordById(usersCollectionName, ownerID)
 	if err != nil || owner == nil {
 		return false, nil
 	}
-	if owner.GetString("status") == string(auth.StatusActive) {
-		return true, nil
-	}
-	// The same escape the users ViewRule grants: an account always reads its
-	// own record, so a pending user can still manage its own masks.
-	return e.Auth != nil && e.Auth.Id == ownerID, nil
+	return true, nil
 }
 
 // ---------------------------------------------------------------------------

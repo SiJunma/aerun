@@ -40,6 +40,116 @@ func newTestCategory(t testing.TB, app *tests.TestApp, slug string, roles []stri
 	return rec
 }
 
+// TestNewRoleAfterCategorySaved reproduces the "a role created later" question.
+//
+// The override panel offers an OFF state that means "this category follows the
+// global role settings". The answer to whether a role created AFTER that
+// category was saved is admitted automatically is YES — but only because the
+// stored list is the inherit marker rather than a snapshot of the registry.
+//
+// The snapshot is what this replaced: naming every role that had view_forum at
+// save time froze the registry, so a role created the next day was absent from
+// the array and its members were refused a public category until an admin
+// re-saved every category by hand. These cases pin the live behaviour so the
+// snapshot cannot be reintroduced by "simplifying" the marker away.
+func TestNewRoleAfterCategorySaved(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// OFF: the inherit marker, exactly what the client sends.
+	inheritCat := newTestCategory(t, app, "inherit", []string{auth.CategoryInheritMarker})
+
+	// A role that did not exist when inheritCat was saved. It is granted
+	// view_forum by the admin afterwards.
+	newRole := "veteran"
+	perms := []auth.Permission{auth.PermViewForum, auth.PermPostReply}
+	mustCreateRole(t, app, newRole, perms)
+	// A category that names OTHER roles explicitly. The new role is not among
+	// them, which is what makes the contrast meaningful.
+	restrictedCat := newTestCategory(t, app, "staff-only", []string{"admin", "moderator"})
+
+	veteranAcc := AccessContext{
+		Role:        auth.Role(newRole),
+		Status:      auth.StatusActive,
+		Permissions: perms,
+	}
+
+	// The new role reads the inherited category with no re-save. This is the
+	// answer to the question, asserted rather than assumed.
+	got, err := canViewCategory(app, veteranAcc, inheritCat.Id)
+	if err != nil {
+		t.Fatalf("inherit view: %v", err)
+	}
+	if !got {
+		t.Fatalf("a role holding view_forum must read an inheriting category even if it " +
+			"was created after the category was saved — the marker is what makes this work")
+	}
+
+	// It still cannot read a category that names roles explicitly and does not
+	// name it: the marker delegates, it does not widen.
+	got, err = canViewCategory(app, veteranAcc, restrictedCat.Id)
+	if err != nil {
+		t.Fatalf("explicit view: %v", err)
+	}
+	if got {
+		t.Fatalf("inherit must not leak into an explicitly restricted category")
+	}
+
+	// A role WITHOUT view_forum is refused the inheriting category, even though
+	// the marker is present. Inherit is not "public" — it is "whatever the
+	// global settings say", and a role with no view_forum says no.
+	noView := auth.Role("silent")
+	noViewAcc := AccessContext{Role: noView, Status: auth.StatusActive}
+	got, err = canViewCategory(app, noViewAcc, inheritCat.Id)
+	if err != nil {
+		t.Fatalf("no-view role: %v", err)
+	}
+	if got {
+		t.Fatalf("inherit must consult the caller's own view_forum, not grant access outright")
+	}
+}
+
+// TestInheritMarkerMixedWithRoles is refused by the command layer, so a stored
+// list can never mean two contradictory things at once.
+func TestInheritMarkerMixedWithRoles(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	_, err := validateAllowedRoles(app, []string{auth.CategoryInheritMarker, "player"})
+	if err == nil {
+		t.Fatalf("expected the inherit marker combined with real roles to be rejected")
+	}
+
+	// Alone it is accepted, and so is a normal list: the guard must not have
+	// narrowed either case.
+	got, err := validateAllowedRoles(app, []string{auth.CategoryInheritMarker})
+	if err != nil {
+		t.Fatalf("the marker alone must be accepted: %v", err)
+	}
+	if len(got) != 1 || got[0] != auth.CategoryInheritMarker {
+		t.Fatalf("marker round trip = %#v", got)
+	}
+}
+
+// mustCreateRole adds a row to the roles registry so the precondition above is
+// stated against real registry data.
+func mustCreateRole(t testing.TB, app *tests.TestApp, roleID string, perms []auth.Permission) {
+	t.Helper()
+	col, err := app.FindCollectionByNameOrId(rolesCollectionName)
+	if err != nil {
+		t.Fatalf("roles collection: %v", err)
+	}
+	rec := core.NewRecord(col)
+	rec.Set("role_id", roleID)
+	rec.Set("name", roleID)
+	rec.Set("rank", 10)
+	rec.Set("is_system", false)
+	rec.Set("permissions", auth.PermissionValues(perms))
+	if err := app.Save(rec); err != nil {
+		t.Fatalf("create role %s: %v", roleID, err)
+	}
+}
+
 func TestCanViewCategoryMatrix(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()

@@ -1,0 +1,366 @@
+// Client half of the forum read contract.
+//
+// The Go side is pinned by forum_read_contract_test.go: it asserts the keys the
+// server sends. This asserts the keys the browser READS, because the bug that
+// emptied the forum was never in the server — it answered correctly and was
+// read incorrectly:
+//
+//   fetchSecuredTopics read `res.topics` / `res.pinned` while the route answers
+//     `items`, so every category rendered as empty;
+//   fetchSecuredPosts read `res.posts` while the route answers `items`, so an
+//     existing topic rendered with no messages;
+//   createTopic returned `id` while the form read `topicId`, so the member was
+//     navigated to /topic/undefined and told the topic they had just created did
+//     not exist;
+//   createPost returned a post object while the reply path read `postId`, which
+//     no route has ever sent, so a posted reply was never scrolled to.
+//
+// Optional chaining is what let all four survive review: `res?.posts || []` on
+// an absent key is an empty list, not a crash. So these are literal-source
+// assertions, not runtime ones — the shape has to stay visible in review.
+//
+// Run: node scripts/check-forum-read-contract.mjs
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
+
+const forum = read('../src/api/forum.js');
+const resources = read('../src/api/auth-resources.js');
+const categories = read('../src/api/categories.js');
+const reputation = read('../src/api/reputation.js');
+const adminPage = read('../src/pages/AdminPage.jsx');
+
+// The `forbid` gates below match executable source, so the COMMENTS that explain
+// each past bug must be stripped first. The old `pb.collection('reputation_votes')`
+// call is quoted verbatim in the comment above its replacement — a gate that
+// failed on its own documentation would be deleted rather than obeyed, which is
+// exactly what happened the first time this was written.
+const stripComments = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments (JSDoc)
+    .replace(/(^|[^:])\/\/.*$/gm, '$1'); // line comments, but not the `//` in 'https://'
+
+const forumCode = stripComments(forum);
+const reputationCode = stripComments(reputation);
+const topicForm = read('../src/pages/TopicFormPage.jsx');
+const topicPage = read('../src/pages/TopicPage.jsx');
+
+const failures = [];
+const forbid = (source, label, pattern) => {
+  if (pattern.test(source)) failures.push(`${label} must not match ${pattern}`);
+};
+
+// ── The list routes answer `items` ───────────────────────────────────────────
+// Each of these reads a topic list. `topics` and `pinned` are the retired
+// Firestore callable's keys; they are absent from every response, and reading
+// them yields an empty page rather than an error.
+forbid(forum, 'forum.js subscribeToTopics', /res\?\.pinned\s*\|\|/);
+forbid(forum, 'forum.js subscribeToTopics', /res\?\.topics\s*\|\|/);
+forbid(forum, 'forum.js fetchSecuredTopics', /res\?\.pinned\s*\|\|\s*\[\]\)\.map/);
+forbid(forum, 'forum.js fetchSecuredTopics', /pinned:\s*\(res\?\.topics/);
+forbid(resources, 'auth-resources.js fetchLatestTopics', /return\s+res\?\.topics\s*\|\|\s*\[\]/);
+forbid(resources, 'auth-resources.js subscribeToTopTopics', /callback\(res\?\.topics\s*\|\|\s*\[\]\)/);
+
+// The post list answers `items` too (forum_posts.go listPostsHandler).
+forbid(forum, 'forum.js subscribeToPosts', /callback\(\(res\?\.posts\s*\|\|\s*\[\]\)/);
+forbid(forum, 'forum.js fetchSecuredPosts', /posts:\s*\(res\?\.posts\s*\|\|\s*\[\]\)/);
+
+// ── The create responses carry the ids the pages navigate with ───────────────
+// The topic form navigates to `/topic/${id}`. Reading a key the response never
+// sends produces the literal URL /topic/undefined.
+//
+// The pattern is pinned to the ASSIGNMENT (`= newTopic.topicId`), not the bare
+// member expression: the explanation of this very bug lives in a comment right
+// above the fixed line, and a gate that failed on its own documentation would
+// be deleted rather than obeyed.
+forbid(topicForm, 'TopicFormPage.jsx', /=\s*newTopic(\?)?\.topicId/);
+assert.match(
+  topicForm,
+  /const newTopicId = newTopic\.id/,
+  'TopicFormPage must navigate with the id createTopic actually returns (`id`)'
+);
+
+// The reply path scrolls to the post it just wrote.
+forbid(topicPage, 'TopicPage.jsx', /res\?\.postId/);
+assert.match(
+  forum,
+  /postId: res\?\.post_id/,
+  'createPost must expose `post_id` under the name the reply path reads'
+);
+
+// ── The category index reads counters that are now served ────────────────────
+assert.match(
+  forum,
+  /total: res\?\.total \?\? items\.length/,
+  'fetchSecuredTopics must report the server-side `total`, which the pager divides by'
+);
+assert.match(
+  forum,
+  /limit: res\?\.per_page/,
+  'The server names the page size `per_page`; reading `limit` always fell back to the default'
+);
+
+// ── The category index reads counters that are now served ───────────────────
+//
+// The backend computed topics_count / posts_count / last_post_* correctly all
+// along (categoryForumProjections). toCategory DROPPED them, so MainPage read
+// `cat.topics_count || 0` on an object that no longer had the key and rendered
+// 0/0 with "No posts yet" on a forum with a topic in it. The server was right
+// and the page was empty, which is why this reads as a data bug and is not one.
+assert.match(
+  categories,
+  /topics_count:\s*d\.topics_count/,
+  'toCategory must carry topics_count through — MainPage renders `cat.topics_count`'
+);
+assert.match(
+  categories,
+  /posts_count:\s*d\.posts_count/,
+  'toCategory must carry posts_count through — MainPage renders `cat.posts_count`'
+);
+for (const key of ['last_post_topic_id', 'last_post_topic_title', 'last_post_at', 'last_post_author']) {
+  assert.match(
+    categories,
+    new RegExp(`${key}: d\\.${key}`),
+    `toCategory must carry ${key} through — the index renders the last-post column from it`
+  );
+}
+
+// ── The main-page payload actually seeds the shell ──────────────────────────
+//
+// AuthProvider assigns categories / latestTopics / stats from this return value,
+// each behind an `if (data?.x)` guard, so a missing key is indistinguishable
+// from "the server had none". The function used to return categories alone:
+// latestTopics stayed [] forever (so /new-replies was permanently empty) and
+// forumStats stayed null (so the stats panel fell back to summing counters that
+// were themselves being dropped).
+for (const key of ['latestTopics', 'stats']) {
+  assert.match(
+    categories,
+    new RegExp(`\\n\\s*${key}[,:]`),
+    `fetchSecuredMainPageData must return ${key} — AuthProvider only assigns what it returns`
+  );
+}
+assert.match(
+  categories,
+  /fetchForumStats/,
+  'fetchForumStats must exist: nothing else serves forumStats, and ForumStats.jsx reads it'
+);
+
+// ── Topic lists normalise before rendering ──────────────────────────────────
+//
+// /active-topics rendered a literal "—" in its last-post column with no link,
+// because subscribeToTopTopics handed raw `res.items` to TopicRow, which reads
+// the normalised names (last_post_at, is_pinned, created_at). The row looked
+// empty rather than wrong, so nothing failed.
+assert.match(
+  resources,
+  /return \(res\?\.items \|\| \[\]\)\.map\(normalizeTopic\)/,
+  'fetchLatestTopics must map through normalizeTopic — TopicRow reads the normalised field names'
+);
+assert.match(
+  resources,
+  /const topics = await fetchLatestTopics\(limitCount\)/,
+  'subscribeToTopTopics must reuse fetchLatestTopics so the two lists cannot drift'
+);
+assert.doesNotMatch(
+  resources,
+  /callback\(res\?\.items \|\| \[\]\)/,
+  'subscribeToTopTopics must not pass raw items to a renderer'
+);
+
+// ── reputation_votes is server-only ─────────────────────────────────────────
+//
+// The browser read it directly through the PocketBase SDK and got
+// "403 Only superusers can perform this action" on every topic open. The catch
+// block swallowed it, so the visible damage was a console full of errors and
+// every upvote arrow rendering as un-voted.
+assert.doesNotMatch(
+  reputationCode,
+  /pb\.collection\(['"]reputation_votes['"]\)/,
+  'reputation_votes has nil browser rules — reads must go through /api/aerun/me/votes'
+);
+assert.match(
+  reputation,
+  /\/api\/aerun\/me\/votes/,
+  'getVotesInTopic must read the caller\'s own votes from the server'
+);
+assert.doesNotMatch(
+  reputation,
+  /^import \{[^}]*\bpb\b[^}]*\} from '\.\/pocketbase'/m,
+  'reputation.js must not import the PocketBase SDK — every route in it is server-only'
+);
+
+// ── The topic form sends the mask and the pin ───────────────────────────────
+//
+// Both lived in component state and were never transmitted, so every message
+// came out under the account's name and the "Pin first post" checkbox was
+// decorative. The form still assembles author_* for the optimistic first
+// render, so the check is on the keys the request actually carries.
+assert.match(
+  forum,
+  /character_id: topicData\.character_id/,
+  'createTopic must send character_id — without it the mask cannot be stored'
+);
+assert.match(
+  forum,
+  /pin_first_post: !!topicData\.pin_first_post/,
+  'createTopic must send pin_first_post — without it the checkbox is decorative'
+);
+assert.match(
+  topicForm,
+  /character_id: selectedCharacterId \|\| ''/,
+  'TopicFormPage must pass the picked mask as character_id'
+);
+assert.match(
+  topicForm,
+  /pin_first_post: pinFirstPost/,
+  'TopicFormPage must pass the pin checkbox state as pin_first_post'
+);
+
+// The reply composer has the same picker and the same obligation. buildPostData
+// is what the submit path sends (TopicPage.jsx: `const postData = buildPostData()`
+// → `createPost(postData, ...)`), so this is the key that reaches the wire.
+assert.match(
+  topicPage,
+  /character_id: selectedCharacterId \|\| ''/,
+  'TopicPage.buildPostData must pass the picked mask as character_id — a reply cannot be written under a mask otherwise'
+);
+assert.match(
+  forum,
+  /character_id: postData\.character_id/,
+  'createPost must send character_id so a reply can be written under a mask'
+);
+
+// ── A category's visibility rule is always sent ─────────────────────────────
+//
+// `allowed_roles` is the ONLY input canViewCategory reads, and an empty list
+// denies (ADR-1). "Override off" therefore cannot be expressed as "omit the
+// key": on CREATE that stored [] and produced a category only the root admin
+// could open, and on PATCH it kept whatever list was already there, so
+// switching the override off silently did nothing.
+//
+// OFF is stored as the inherit MARKER, not as the list of roles that happen to
+// hold view_forum right now. Naming them was tried first and is a snapshot: a
+// role created tomorrow is absent from the array, so its members are refused a
+// public category until every category is re-saved by hand. The marker is what
+// makes "follow the global role settings" live.
+const MARKER = '__aerun_inherit_roles__';
+assert.match(
+  categories,
+  new RegExp(`const INHERIT_ROLES = '${MARKER}'`),
+  'the client must send the same marker text the server resolves (auth.CategoryInheritMarker) — a mismatch silently restores the snapshot'
+);
+forbid(
+  categories,
+  'categories.js toCategoryPayload',
+  /if \(Array\.isArray\(roles\)\) \{\s*body\.allowed_roles/
+);
+assert.match(
+  categories,
+  /body\.allowed_roles = Array\.isArray\(override\)\s*\?\s*\[\.\.\.new Set\(override\)\]\s*:\s*\[INHERIT_ROLES\]/,
+  'toCategoryPayload must always send allowed_roles — an omitted key is root-only on create and a no-op on update'
+);
+forbid(
+  categories,
+  'categories.js toCategoryPayload',
+  /defaultViewRoles/,
+);
+assert.match(
+  categories,
+  /allowedRoles\.includes\(INHERIT_ROLES\) \? null : allowedRoles/,
+  'toCategory must read the marker back as "override off", or a category inheriting the global settings opens with the switch on and the marker listed as if it were a role'
+);
+
+// A new category must start with NO override. Seeding view_forum with the
+// standard list made the form claim an override that is not one, and the badge
+// counted it; an empty ARRAY would instead be root-only, which is the exact
+// bug this section exists to prevent.
+forbid(
+  adminPage,
+  'AdminPage new-category form',
+  /permissions: \{\s*\[PERMISSIONS\.VIEW_FORUM\]: defaultViewRoles\s*\}/
+);
+assert.match(
+  adminPage,
+  /permissions: \{\}\s*\}\);/,
+  'a new category must start with no overrides (permissions: {})'
+);
+
+// The three states are a DECISION, not just a shape, so they are executed rather
+// than pattern-matched: extract the real function and call it. A regex cannot
+// tell "override on with nobody ticked" apart from "override off" — both are
+// absent-or-array, and only the emitted list distinguishes them.
+const payloadSource = categories.match(
+  /const toCategoryPayload = [\s\S]*?\n};/
+);
+assert.ok(payloadSource, 'toCategoryPayload must be extractable for the behavioural check');
+
+const pickTitle = (value) => (typeof value === 'string' ? value.trim() : '');
+const toCategoryPayload = new Function(
+  'pickTitle',
+  'normalizeOrder',
+  'VIEW_FORUM',
+  'INHERIT_ROLES',
+  `${payloadSource[0]}; return toCategoryPayload;`
+)(
+  pickTitle,
+  (order) => {
+    const value = Number.parseInt(order, 10);
+    return Number.isFinite(value) ? value : null;
+  },
+  'view_forum',
+  MARKER
+);
+
+const form = (permissions) => ({ title: 'X', description: '', order: 1, group_id: 'g', permissions });
+
+// OFF: the admin disabled the override. The category must follow the global
+// role settings LIVE. The marker is what does that — sending the list of roles
+// that hold view_forum today would be a snapshot, and a role created tomorrow
+// would be refused this category.
+assert.deepEqual(
+  toCategoryPayload(form({ view_forum: null })).allowed_roles,
+  [MARKER],
+  'override OFF must send the inherit marker, so a role created later is admitted without re-saving'
+);
+
+// OFF is also reached with the key absent entirely, which is what a new
+// category starts from. It must not be mistaken for "restrict to nobody".
+assert.deepEqual(
+  toCategoryPayload(form({})).allowed_roles,
+  [MARKER],
+  'a category with no override configured must send the marker, not an empty list'
+);
+
+// ON with nobody ticked: a deliberate "nobody but root may read this". ADR-1
+// reads an empty list as exactly that, so it must survive the round trip and
+// must NOT be confused with OFF.
+assert.deepEqual(
+  toCategoryPayload(form({ view_forum: [] })).allowed_roles,
+  [],
+  'override ON with no roles ticked must stay an empty list (root-only)'
+);
+
+// ON with a subset: exactly what was ticked, de-duplicated.
+assert.deepEqual(
+  toCategoryPayload(form({ view_forum: ['player', 'player', 'guest'] })).allowed_roles,
+  ['player', 'guest'],
+  'an explicit override must be sent verbatim, de-duplicated'
+);
+
+if (failures.length > 0) {
+  for (const failure of failures) console.error(`FAIL: ${failure}`);
+  process.exit(1);
+}
+
+console.log('OK  forum read contract: every topic/post list is read under `items`');
+console.log('OK  forum read contract: the topic form and reply path navigate with real ids');
+console.log('OK  forum read contract: category paging reads `total`/`per_page`');
+console.log('OK  forum read contract: category counters and last-post fields survive toCategory');
+console.log('OK  forum read contract: the main page seeds latestTopics and stats');
+console.log('OK  forum read contract: every topic list normalises before rendering');
+console.log('OK  forum read contract: reputation_votes is read server-side, never from the browser');
+console.log('OK  forum read contract: the topic form transmits the mask and the pin');
+console.log('OK  forum read contract: "override off" is stored as the live inherit marker, not a snapshot');

@@ -11,7 +11,13 @@ const ConfirmModal = ({
   message,
   confirmText,
   cancelText,
-  variant = 'danger'
+  variant = 'danger',
+  // `children` renders below the message for confirmations that must enumerate
+  // what is in the way, and `hideConfirm` turns the dialog into a pure warning
+  // with no destructive button at all — used when the server would refuse the
+  // operation anyway, so offering it would only produce a failed request.
+  children,
+  hideConfirm = false
 }) => {
   const { t } = useI18n();
 
@@ -24,16 +30,18 @@ const ConfirmModal = ({
       >
         {cancelText || t('common.cancel') || 'Cancel'}
       </Button>
-      <Button
-        variant={variant}
-        className="px-4 fw-bold shadow-sm"
-        onClick={() => {
-          onConfirm();
-          onHide();
-        }}
-      >
-        {confirmText || t('common.confirm') || 'Confirm'}
-      </Button>
+      {!hideConfirm && (
+        <Button
+          variant={variant}
+          className="px-4 fw-bold shadow-sm"
+          onClick={() => {
+            onConfirm();
+            onHide();
+          }}
+        >
+          {confirmText || t('common.confirm') || 'Confirm'}
+        </Button>
+      )}
     </>
   );
 
@@ -48,6 +56,7 @@ const ConfirmModal = ({
       <p className="mb-0 text-muted">
         {message || t('common.confirm_message') || 'Are you sure you want to proceed?'}
       </p>
+      {children}
     </ForumModal>
   );
 };

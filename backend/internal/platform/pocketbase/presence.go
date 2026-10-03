@@ -134,7 +134,18 @@ func touchMemberLastSeen(app core.App, authRecord *core.Record, now time.Time) {
 	if !stored.IsZero() && now.Sub(stored.Time()) < memberLastSeenWriteInterval {
 		return
 	}
+	writeMemberLastSeen(app, authRecord, now)
+}
 
+// writeMemberLastSeen persists users.last_seen with no throttle at all.
+//
+// The throttle exists to damp a signal that arrives 120 times per member per
+// hour. An explicit departure arrives ONCE per session, and it is the one write
+// whose exact moment the column is read against: the members table shows "last
+// seen" for somebody who just signed out, and a value throttled up to five
+// minutes stale is the difference between "left a moment ago" and "left five
+// minutes ago" on the row everybody looks at after a member goes.
+func writeMemberLastSeen(app core.App, authRecord *core.Record, now time.Time) {
 	record, err := app.FindRecordById(usersCollectionName, authRecord.Id)
 	if err != nil {
 		app.Logger().Warn("member last seen could not be read", "user", authRecord.Id, "error", err)
@@ -345,6 +356,64 @@ func guestLeaveHandler(e *core.RequestEvent) error {
 		"ok":         true,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// memberLeaveHandler removes a SIGNED-IN member from the online list.
+//
+// This route is the member counterpart of guestLeaveHandler, and it exists
+// because guests were the only identity that could ever leave on purpose.
+// A member had no such call: the heartbeat simply stopped, and the account
+// stayed in the in-process map until presenceTTL (75s) pruned it. For a guest
+// that window is invisible — they are anonymous. For a member it is a wrong
+// answer with a name on it: the stats panel kept counting a signed-OUT person
+// as "Online now", and every other browser polling /status agreed, because the
+// panel was faithfully reporting what the server believed.
+//
+// So the fix is not a bigger client-side cache clear. It is the missing half of
+// the contract: the browser must be able to say "I am leaving", exactly as it
+// already does for guests on pagehide.
+//
+// The durable half rides along. users.last_seen is the persistent "last visit"
+// clock and the heartbeat that maintains it stops the moment this returns, so
+// without this write the column would be frozen wherever the previous 30s tick
+// happened to land. It is written UNTHROTTLED (writeMemberLastSeen, not
+// touchMemberLastSeen): a departure happens once per session, and it is exactly
+// the value the members table is read at.
+//
+// Signing out is not the only way to arrive here — an idle timeout and a tab
+// close also stop the beat — but it is the only one where the client knows, at
+// this instant, that the account is gone. Idling stays a non-event (see
+// setRtdbOffline on the client), and a tab that is merely closed still ages out
+// through the TTL, which is the correct outcome for a tab nobody can ask.
+func memberLeaveHandler(e *core.RequestEvent) error {
+	// Presence identity comes from the resolved auth record, never from the
+	// body: a forged call can only ever remove the CALLER, so it cannot be used
+	// to drop an arbitrary member out of the online list.
+	if e.Auth == nil {
+		return forbiddenError("authentication is required to leave presence")
+	}
+
+	now := time.Now()
+
+	presenceMu.Lock()
+	delete(onlineMembers, e.Auth.Id)
+	presenceMu.Unlock()
+
+	writeMemberLastSeen(e.App, e.Auth, now)
+
+	// The snapshot comes back with the response for the same reason the
+	// heartbeat returns one: the caller just changed the presence view, and
+	// handing back the corrected view means every panel in this tab agrees
+	// immediately instead of at the next 20s poll.
+	snapshot, _ := buildStatusSnapshot(e.App, now)
+	resp := map[string]any{
+		"ok":         true,
+		"request_id": requestIDFrom(e),
+	}
+	if snapshot != nil {
+		resp["presence"] = snapshot["presence"]
+	}
+	return e.JSON(http.StatusOK, resp)
 }
 
 // listGuestsHandler reports the visitors seen inside the online window.

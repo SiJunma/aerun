@@ -37,6 +37,24 @@ func RequirePermission(permission auth.Permission) func(e *core.RequestEvent) er
 	}
 }
 
+// requireNotBanned refuses a mutation from an account the staff suspended.
+//
+// Ownership does not survive a ban. The topic and post handlers read
+// `isAuthor || permission`, so the author branch grants the action with NO
+// permission consulted at all — an account narrowed to nothing could keep
+// rewriting and deleting its own content, which is exactly the material a
+// moderator is looking at when they ban somebody. The status is checked here
+// instead of at every call site so the rule has one name.
+//
+// The message names the action: a bare "forbidden" left the admin wondering
+// whether the post was theirs.
+func requireNotBanned(acc AccessContext, action string) error {
+	if acc.Status == auth.StatusBanned {
+		return forbiddenError("banned accounts cannot " + action)
+	}
+	return nil
+}
+
 // profilePayload builds the public profile DTO for GET /api/aerun/me. It is
 // assembled field by field on purpose: email and legacy_firebase_uid can
 // never leak into the response because they are not part of the map.

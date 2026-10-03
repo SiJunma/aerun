@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 
@@ -48,10 +49,20 @@ type transferRootForm struct {
 	Password string `json:"password"`
 	// ConfirmPhrase must equal the constant below, so a client that never
 	// asked the operator to type anything cannot drive this. It is a second
-	// factor on intent, not a security boundary — the password is that — but
-	// it makes an accidental POST impossible.
+	// factor on intent, not a security boundary — the confirmation below is
+	// that — but it makes an accidental POST impossible.
 	ConfirmPhrase string `json:"confirm_phrase"`
 }
+
+// reauthWindow bounds how recently the caller must have signed in through an
+// identity provider.
+//
+// It is the clock on the alternative proof, and it is what stops that
+// alternative from collapsing into "any session token ever". Five minutes is
+// long enough to finish a Google consent screen and submit the form, and short
+// enough that a token captured from a log, a shared machine or a proxy cache is
+// worthless by the time anybody tries to replay it.
+const reauthWindow = 5 * time.Minute
 
 // transferRootConfirmPhrase is the literal the operator must send.
 const transferRootConfirmPhrase = "TRANSFER ROOT"
@@ -60,6 +71,50 @@ const transferRootConfirmPhrase = "TRANSFER ROOT"
 // outgoing root keeps every staff power except the ability to hand the role on,
 // which would otherwise let a transfer be silently undone from the other side.
 const transferRootAfterRole = auth.RoleAdmin
+
+// confirmTransferIdentity proves the caller is the human holding this session,
+// rather than merely a token that says they were once.
+//
+// Two accepted proofs, in this order:
+//
+//  1. The account password, re-typed. Unchanged behaviour for every account that
+//     has a password its owner knows.
+//  2. An identity-provider sign-in completed moments ago. Observed by the
+//     SERVER, in registerOAuthSignInHook — not asserted by the client, and not
+//     inferred from the token.
+//
+// The second path exists because "enter your password" is not available to
+// every account on this forum. One that has only ever signed in through Google
+// has no password at all, and one imported from the legacy backend was given a
+// GENERATED password that was never shown to its owner. For those accounts the
+// field is not a hurdle but a wall, and since the handover is irreversible
+// there is no "cancel and try later" — the root role would simply be stuck
+// behind a credential the human never had.
+//
+// It is not a weaker check. The password proves knowledge of a secret; this
+// proves the provider returned this account's identity just now, which is
+// something only the person who can complete that flow can arrange. Crucially
+// the proof is NOT the bearer token: a stolen session token is exactly what
+// this whole confirmation exists to defeat, so accepting one would be circular.
+// The evidence is the server-side timestamp from the OAuth hook.
+//
+// The errors are deliberately uniform and reveal nothing: a caller must not be
+// able to learn whether the account has a password at all, which is exactly the
+// question a prober would ask first.
+func confirmTransferIdentity(giver *core.Record, password string) error {
+	if password != "" {
+		if !giver.ValidatePassword(password) {
+			// Deliberately vague: this endpoint should not confirm anything
+			// about the account to a caller who failed the password.
+			return forbiddenError("re-enter your password to confirm the transfer")
+		}
+		return nil
+	}
+	if recentlySignedInWithOAuth(giver.Id) {
+		return nil
+	}
+	return forbiddenError("confirm the transfer with your password, or sign in with Google again to prove it is you")
+}
 
 func transferRootHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
@@ -103,10 +158,8 @@ func transferRootHandler(e *core.RequestEvent) error {
 		if giver.GetString("role") != string(auth.RoleRoot) {
 			return 0, nil, forbiddenError("only the chief admin may transfer this role")
 		}
-		if !giver.ValidatePassword(form.Password) {
-			// Deliberately vague: this endpoint should not confirm anything
-			// about the account to a caller who failed the password.
-			return 0, nil, forbiddenError("re-enter your password to confirm the transfer")
+		if err := confirmTransferIdentity(giver, form.Password); err != nil {
+			return 0, nil, err
 		}
 		if form.SuccessorID == giver.Id {
 			return 0, nil, validationError("the successor must be a different account")

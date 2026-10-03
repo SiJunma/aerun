@@ -69,6 +69,24 @@
   white-space: nowrap;
 }
 
+/* Instruction shown while manage mode is on and nothing is ticked yet.
+   It sits at the end of the action bar, so the bar itself now explains what to
+   do instead of leaving the page silent after "Manage" was pressed. */
+.management-toolbar-hint {
+  opacity: 0.85;
+  font-style: italic;
+  white-space: normal;
+  max-width: 22rem;
+  line-height: 1.25;
+}
+
+@media (max-width: 768px) {
+  .management-toolbar-hint {
+    max-width: 100%;
+    text-align: center;
+  }
+}
+
 [data-theme='light'] .management-toolbar {
   background: rgba(255, 255, 255, 0.95);
   border-color: rgba(0, 0, 0, 0.15);

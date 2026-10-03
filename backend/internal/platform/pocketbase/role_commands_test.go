@@ -25,7 +25,12 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
-func TestSystemRoleIsNotEditable(t *testing.T) {
+// A system role is EDITABLE. It is the template a custom role is derived from,
+// so freezing it would freeze every role built on it. The fields that make it a
+// system role in the first place stay locked: role_id (the key users.role and
+// categories.allowed_roles point at) and is_system (what makes it deletable or
+// not). Neither is writable through the payload.
+func TestSystemRoleIsEditableButKeepsItsIdentity(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
@@ -37,25 +42,23 @@ func TestSystemRoleIsNotEditable(t *testing.T) {
 	if err != nil || role == nil {
 		t.Fatalf("the seeded moderator role is missing: %v", err)
 	}
-	before := role.GetString("name")
 
-	cases := []struct {
+	edits := []struct {
 		name string
 		body string
 	}{
 		{name: "rename", body: `{"name":"Renamed Moderator"}`},
 		{name: "recolour", body: `{"color":"danger"}`},
-		{name: "change rank", body: `{"rank":1}`},
+		{name: "change rank", body: `{"rank":601}`},
 		{name: "change permissions", body: `{"permissions":["view_forum"]}`},
 	}
-
-	for i, tc := range cases {
+	for i, tc := range edits {
 		t.Run(tc.name, func(t *testing.T) {
 			status, payload, _ := categoryCall(t, http.MethodPatch,
 				ts.URL+"/api/aerun/roles/"+role.Id, tc.body,
-				tokens["root"], "test-idem-sysrole-"+string(rune('a'+i)))
-			if status != http.StatusForbidden {
-				t.Fatalf("expected 403 on a system role, got %d: %s", status, payload)
+				tokens["root"], "test-idem-sysrole-edit-"+string(rune('a'+i)))
+			if status != http.StatusOK {
+				t.Fatalf("a system role must be editable, got %d: %s", status, payload)
 			}
 		})
 	}
@@ -64,9 +67,61 @@ func TestSystemRoleIsNotEditable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.GetString("name") != before {
-		t.Fatalf("a refused PATCH must not change the row, got %q", reloaded.GetString("name"))
+	if got := reloaded.GetString("name"); got != "Renamed Moderator" {
+		t.Fatalf("the rename did not persist, got %q", got)
 	}
+	if !reloaded.GetBool("is_system") {
+		t.Fatal("is_system must not be writable — it is what makes the row deletable or not")
+	}
+
+	// A system role is a template, not a derivative: giving it a base would
+	// leave the delete-revert path with no defined target for it.
+	status, payload, _ := categoryCall(t, http.MethodPatch,
+		ts.URL+"/api/aerun/roles/"+role.Id, `{"base_role_id":"player"}`,
+		tokens["root"], "test-idem-sysrole-base")
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected 400 when a system role is given a base, got %d: %s", status, payload)
+	}
+
+	// role_id is the join key for users.role; renaming it would orphan them.
+	status, payload, _ = categoryCall(t, http.MethodPatch,
+		ts.URL+"/api/aerun/roles/"+role.Id, `{"role_id":"shadow","is_system":false}`,
+		tokens["root"], "test-idem-sysrole-identity")
+	if status != http.StatusOK {
+		t.Fatalf("identity fields are ignored rather than rejected, got %d: %s", status, payload)
+	}
+	final, err := app.FindRecordById(rolesCollectionName, role.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := final.GetString("role_id"); got != "moderator" {
+		t.Fatalf("role_id must not be rewritable, got %q", got)
+	}
+	if !final.GetBool("is_system") {
+		t.Fatal("is_system must survive a payload that tries to clear it")
+	}
+
+	// The role panel keys its permission cap on base_role_id, falling back to
+	// the role's OWN id when the column is empty — which is every system role.
+	// That fallback value must never reach the server: it is a self-reference,
+	// and the admin got "a system role cannot have a base role" on a plain save
+	// with nothing changed. The panel therefore omits the key, and the handler
+	// leaves the column alone when it is absent.
+	t.Run("saving a system role with no base key succeeds", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPatch,
+			ts.URL+"/api/aerun/roles/"+role.Id, `{"name":"Guest Mode"}`,
+			tokens["root"], "test-idem-sysrole-nobase")
+		if status != http.StatusOK {
+			t.Fatalf("an omitted base_role_id must leave the row alone, got %d: %s", status, payload)
+		}
+		reloaded, err := app.FindRecordById(rolesCollectionName, role.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := reloaded.GetString("base_role_id"); got != "" {
+			t.Fatalf("a system role must stay base-less, got %q", got)
+		}
+	})
 }
 
 func TestReservedRoleIDIsRejected(t *testing.T) {
@@ -111,7 +166,13 @@ func TestRoleRankBounds(t *testing.T) {
 		want int
 	}{
 		{name: "negative is rejected", rank: -1, want: http.StatusBadRequest},
-		{name: "zero is rejected", rank: 0, want: http.StatusBadRequest},
+		// Zero is no longer a rejection: it means "rank omitted", and the
+		// command derives one from the base role. The role form sends no rank
+		// at all, so rejecting 0 made creating a custom role impossible — the
+		// reported "Rank must be between 1 and 10000" on a plain
+		// "create a role based on Player". validateRoleRank still guards the
+		// range for a rank that WAS sent.
+		{name: "zero means derive a rank", rank: 0, want: http.StatusCreated},
 		{name: "above the ceiling is rejected", rank: 10001, want: http.StatusBadRequest},
 		{name: "the ceiling itself is allowed", rank: 10000, want: http.StatusCreated},
 		{name: "the lowest useful rank is allowed", rank: 1, want: http.StatusCreated},
@@ -127,6 +188,42 @@ func TestRoleRankBounds(t *testing.T) {
 				t.Fatalf("expected %d for rank %d, got %d: %s", tc.want, tc.rank, status, payload)
 			}
 		})
+	}
+}
+
+// TestOmittedRoleRankLandsAboveItsBase is the create-without-rank contract.
+//
+// The admin role form has no rank input, so the payload carries none. The role
+// must still be created, and it must sort where the base-role picker implies it
+// belongs: one step above Player, i.e. between Player and Moderator.
+func TestOmittedRoleRankLandsAboveItsBase(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, payload, _ := categoryCall(t, http.MethodPost, ts.URL+"/api/aerun/roles",
+		`{"role_id":"vanguard","name":"Vanguard","base_role_id":"player","permissions":["view_forum"]}`,
+		tokens["root"], "test-idem-omitted-rank")
+	if status != http.StatusCreated {
+		t.Fatalf("creating a role without a rank: got %d, want 201 (%s)", status, payload)
+	}
+
+	rec, err := app.FindFirstRecordByFilter(rolesCollectionName, "role_id = 'vanguard'", dbx.Params{})
+	if err != nil || rec == nil {
+		t.Fatalf("stored role not found: %v", err)
+	}
+	playerSpec, ok := auth.SpecFor(auth.RolePlayer)
+	if !ok {
+		t.Fatal("player spec missing from the compiled matrix")
+	}
+	if got, want := rec.GetInt("rank"), playerSpec.Rank+1; got != want {
+		t.Errorf("stored rank = %d, want %d — the role must sort just above its base", got, want)
+	}
+	if err := validateRoleRank(rec.GetInt("rank")); err != nil {
+		t.Errorf("the derived rank is out of bounds: %v", err)
 	}
 }
 
@@ -192,43 +289,31 @@ func TestDeleteRoleRefusesWhileReferenced(t *testing.T) {
 		t.Fatalf("failed to assign the role: %d %s", status, payload)
 	}
 
-	t.Run("a role held by an account cannot be deleted", func(t *testing.T) {
+	// The holder is REVERTED to the base role rather than blocking the delete.
+	// A role derived from Player was a Player with differences; deleting it
+	// must leave its members on Player, not on nothing (users.role is plain
+	// text, so a dangling id fails silently at the deny path).
+	t.Run("deleting a held role reverts its holders to the base", func(t *testing.T) {
 		status, payload, _ := categoryCall(t, http.MethodDelete,
 			ts.URL+"/api/aerun/roles/"+held.ID, "", tokens["root"], "test-idem-role-del-held")
-		if status != http.StatusConflict {
-			t.Fatalf("expected 409 while an account holds the role, got %d: %s", status, payload)
-		}
-		if !bytes.Contains(payload, []byte("account")) {
-			t.Fatalf("the message must say who holds it: %s", payload)
-		}
-	})
-
-	t.Run("a role granted to a category cannot be deleted", func(t *testing.T) {
-		// Same role, now also referenced by a category: moving the account away
-		// must be necessary but not sufficient.
-		status, payload, _ := categoryCall(t, http.MethodPost,
-			ts.URL+"/api/aerun/categories",
-			`{"name":"Held Room","allowed_roles":["held"]}`,
-			tokens["root"], "test-idem-cat-held")
-		if status != http.StatusCreated {
-			t.Fatalf("failed to create the category: %d %s", status, payload)
-		}
-
-		status, payload, _ = categoryCall(t, http.MethodPatch,
-			ts.URL+"/api/aerun/admin/users/"+fixModeratorID,
-			`{"role":"moderator","status":"active"}`,
-			tokens["root"], "test-idem-user-unheld")
 		if status != http.StatusOK {
-			t.Fatalf("failed to move the account away: %d %s", status, payload)
+			t.Fatalf("expected 200, the holders fall back to the base, got %d: %s", status, payload)
+		}
+		if !bytes.Contains(payload, []byte("reassigned_to")) {
+			t.Fatalf("the response must report where the holders went: %s", payload)
 		}
 
-		status, payload, _ = categoryCall(t, http.MethodDelete,
-			ts.URL+"/api/aerun/roles/"+held.ID, "", tokens["root"], "test-idem-role-del-cat")
-		if status != http.StatusConflict {
-			t.Fatalf("expected 409 while a category grants the role, got %d: %s", status, payload)
+		user, err := app.FindRecordById(usersCollectionName, fixModeratorID)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if !bytes.Contains(payload, []byte("held-room")) {
-			t.Fatalf("the message must name the category slug: %s", payload)
+		if got := user.GetString("role"); got != "player" {
+			t.Fatalf("the holder must fall back to the base role, got %q", got)
+		}
+		// Stale custom_role_id would keep the staff check resolving against
+		// the role that was just deleted.
+		if got := user.GetString("custom_role_id"); got != "" {
+			t.Fatalf("custom_role_id must be cleared on revert, got %q", got)
 		}
 	})
 
@@ -239,6 +324,58 @@ func TestDeleteRoleRefusesWhileReferenced(t *testing.T) {
 			t.Fatalf("expected 403 for a system role, got %d: %s", status, payload)
 		}
 	})
+}
+
+// A role held by an account but carrying NO base has nowhere to send that
+// account, so the delete is refused. Silently clearing users.role would leave
+// them on the deny path with no error anywhere.
+func TestDeleteRoleWithoutBaseIsRefusedWhileHeld(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, payload, _ := categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/roles",
+		`{"role_id":"baseless","name":"Baseless","rank":250,"permissions":["view_forum"]}`,
+		tokens["root"], "test-idem-role-baseless")
+	if status != http.StatusCreated {
+		t.Fatalf("failed to create the role: %d %s", status, payload)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(payload, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	status, payload, _ = categoryCall(t, http.MethodPatch,
+		ts.URL+"/api/aerun/admin/users/"+fixModeratorID,
+		`{"role":"baseless","status":"active"}`,
+		tokens["root"], "test-idem-user-baseless")
+	if status != http.StatusOK {
+		t.Fatalf("failed to assign the role: %d %s", status, payload)
+	}
+
+	status, payload, _ = categoryCall(t, http.MethodDelete,
+		ts.URL+"/api/aerun/roles/"+created.ID, "", tokens["root"], "test-idem-role-del-baseless")
+	if status != http.StatusConflict {
+		t.Fatalf("expected 409 with no base to fall back to, got %d: %s", status, payload)
+	}
+	if !bytes.Contains(payload, []byte("base role")) {
+		t.Fatalf("the message must name the missing base: %s", payload)
+	}
+
+	// The holder must be untouched by the refusal.
+	user, err := app.FindRecordById(usersCollectionName, fixModeratorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := user.GetString("role"); got != "baseless" {
+		t.Fatalf("a refused delete must not move the holder, got %q", got)
+	}
 }
 
 // Part 2: the rank matrix for handing roles out.

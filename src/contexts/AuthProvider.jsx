@@ -73,15 +73,24 @@ export const AuthProvider = ({ children }) => {
   // getOrCreateGuestId returns the opaque per-browser visitor id used for
   // anonymous presence. It is generated once (the legacy generator: a random
   // base36 part plus a timestamp) and lives in localStorage; the backend only
-  // ever sees this id and a timestamp. Logging in clears it (see below), so a
-  // new guest session starts fresh after a logout.
+  // ever sees this id and a timestamp.
+  //
+  // "Once" is the load-bearing word, and localStorage cannot enforce it. Two
+  // tabs of the same browser share one storage area but run independent
+  // JavaScript, so a get-then-set here is a race: both tabs can read `null`,
+  // both mint an id, and the second write overwrites the first. Each tab then
+  // beats with the id IT generated, and the forum counts one person as two
+  // guests — which is exactly what a two-tab logout used to produce.
+  //
+  // Re-reading after the write makes both tabs converge on whichever value
+  // ended up stored, instead of each keeping its own.
   const getOrCreateGuestId = useCallback(() => {
-    let gid = localStorage.getItem('guest_id');
-    if (!gid) {
-      gid = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      localStorage.setItem('guest_id', gid);
-    }
-    return gid;
+    const stored = localStorage.getItem('guest_id');
+    if (stored) return stored;
+
+    const candidate = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    localStorage.setItem('guest_id', candidate);
+    return localStorage.getItem('guest_id') || candidate;
   }, []);
 
   // Initialize Auth State from PocketBase authStore
@@ -154,16 +163,25 @@ export const AuthProvider = ({ children }) => {
     return initRtdbGuestPresence(getOrCreateGuestId());
   }, [user?.uid, profile, getOrCreateGuestId]);
 
-  // Logging in ends the guest session: the guest_presence row and the stored id
-  // both go, so a visitor who registers or signs in is never counted as a guest
-  // (the heartbeat switches to the member path) and a later logout starts a new
-  // guest identity instead of resurrecting the old one.
+  // Logging in ends the guest session: the guest_presence row goes, so a visitor
+  // who registers or signs in is never counted as a guest (the heartbeat
+  // switches to the member path).
+  //
+  // The STORED ID STAYS. Deleting it here was what made the second symptom: the
+  // id is per-browser, but each tab called getOrCreateGuestId on its own logout,
+  // so after a sign-out every open tab found `null` and minted a fresh identity.
+  // Two tabs meant two guests for one person — and worse, the ids drifted apart,
+  // so logging back in removed ONE row while the other tab's row survived and the
+  // counter still read two.
+  //
+  // Keeping the id makes the row, not the key, the unit of a guest session: a
+  // sign-in deletes the row and a later sign-out recreates the same one. That is
+  // the same shape the member path uses after /presence/leave.
   useEffect(() => {
     if (!user?.uid) return;
     const guestId = localStorage.getItem('guest_id');
     if (!guestId) return;
     removeRtdbGuestPresence(guestId);
-    localStorage.removeItem('guest_id');
   }, [user?.uid]);
 
   useEffect(() => {
@@ -278,17 +296,30 @@ export const AuthProvider = ({ children }) => {
     syncUserFromAuthStore();
   }, [user?.uid, syncUserFromAuthStore]);
 
+  // updateSettings saves `users.settings`, and returns the object the SERVER
+  // ended up storing.
+  //
+  // The command is a wholesale replace (PUT /me/settings — deliberate, so a
+  // partial body yields a partial state rather than an invisible merge). That
+  // contract only holds if the client sends the WHOLE object, and the account
+  // form does not: it enumerates theme, language, signature, notifications…
+  // and knows nothing about the rest. So the body is merged over the settings
+  // this profile actually holds, and the authoritative result is returned
+  // rather than discarded — see updateProfile, where it used to be overwritten
+  // again by the same partial object the form started from.
   const updateSettings = async (newSettings) => {
-    if (!user) return;
+    if (!user) return null;
     const updated = { ...(profile?.settings || {}), ...newSettings };
     const res = await sendApi('/api/aerun/me/settings', {
       method: 'PUT',
       body: updated
     });
+    const stored = res?.settings || updated;
     setProfile(prev => ({
       ...prev,
-      settings: res?.settings || updated
+      settings: stored
     }));
+    return stored;
   };
 
   // updateProfile saves the profile form.
@@ -317,6 +348,9 @@ export const AuthProvider = ({ children }) => {
 
     const { nickname, ...rest } = newData;
     const body = {};
+    // Holds the settings object the server stored, so the optimistic merge below
+    // can adopt it instead of the form's partial one.
+    let savedSettings = null;
     for (const key of ['status_line', 'bio', 'location', 'birthday', 'occupation', 'interests', 'contacts']) {
       if (rest[key] !== undefined) body[key] = rest[key];
     }
@@ -336,13 +370,27 @@ export const AuthProvider = ({ children }) => {
     }
 
     if (newData.settings && isOwn) {
-      await updateSettings(newData.settings);
+      savedSettings = await updateSettings(newData.settings);
     }
 
     // Only AFTER the server confirmed, so a rejected save cannot leave the UI
     // showing a nickname the database does not hold.
     if (isOwn) {
-      setProfile(prev => ({ ...prev, ...newData }));
+      // `settings` is deliberately EXCLUDED from the optimistic merge below.
+      // `newData.settings` is the account FORM's object — an enumeration of the
+      // fields that form happens to know — and spreading it over `prev` threw
+      // away the complete settings the server had just returned. Every key the
+      // form does not mention (member_view_style, show_footer, …) vanished from
+      // local state, so the NEXT save sent a body missing them, and because
+      // PUT /me/settings replaces wholesale, the second save destroyed them on
+      // the server too. That is the reported loss of account data.
+      const { settings: _formSettings, ...rest } = newData;
+      void _formSettings;
+      setProfile(prev => ({
+        ...prev,
+        ...rest,
+        ...(savedSettings ? { settings: savedSettings } : {}),
+      }));
     }
   };
 
@@ -369,9 +417,49 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  // Re-read the forum whenever WHO is asking changes.
+  //
+  // This was a mount-only effect, so the forum state was frozen at whatever
+  // identity happened to be signed in when the provider mounted. The symptoms
+  // were all one bug with different faces: after logging out the stats panel
+  // still named the members who had been online, and a category the previous
+  // account could see stayed on the index — because /api/aerun/categories is
+  // filtered by canViewCategory on the SERVER, and the guest was being handed
+  // the admin's list.
+  //
+  // `force` is mandatory here rather than left to the cooldown: a role change or
+  // a sign-out is precisely the moment a stale answer is wrong, and the cooldown
+  // exists only to damp bursts of ordinary polling.
+  //
+  // Role is part of the key, not just the uid, because a role change alters the
+  // answer without changing who is asking. The status is included for the same
+  // reason: `pending` and `banned` narrow what the server will return, and
+  // moderation can change either while the tab sits open.
+  //
+  // `updated` is deliberately NOT a dependency. It changes on every profile
+  // keystroke-driven save, and re-reading the forum because a status line was
+  // edited would be a request per save for a list that did not change.
+  const identityKey = `${user?.uid || ''}|${profile?.role_id || ''}|${profile?.status || ''}`;
+
   useEffect(() => {
     refreshForumState(true);
-  }, [refreshForumState]);
+  }, [identityKey, refreshForumState]);
+
+  // Members leaving the online list are the OTHER half of the sign-out symptom,
+  // and they arrive through a different channel: `activeUsers` is fed by the
+  // presence snapshot, not by fetchSecuredMainPageData. Refreshing the forum
+  // state does not touch it.
+  //
+  // The heartbeat stops the moment the session ends, so the previous account
+  // stays in the panel for the presence TTL (~75s) — which is why the sign-out
+  // screenshot still shows a signed-in member online. Dropping the cached list
+  // immediately makes the panel agree with the navbar, which already shows the
+  // guest state; the next snapshot repopulates it with whoever is actually
+  // online, and by then the departed account is gone from that too.
+  useEffect(() => {
+    if (user?.uid) return;
+    setActiveUsers([]);
+  }, [user?.uid]);
 
   const scheduleForumStateRefresh = useCallback((delayMs = 1500) => {
     const timer = setTimeout(() => {

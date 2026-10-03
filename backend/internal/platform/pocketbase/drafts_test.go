@@ -194,3 +194,111 @@ func TestDraftsUpsertFeedPublishDelete(t *testing.T) {
 		t.Fatal("orphan draft still exists after delete")
 	}
 }
+
+// TestDraftKeepsItsMaskThroughPublish is the regression for "I published my
+// draft and the mask was gone".
+//
+// The draft command stored only the text, so author_character_id stayed empty
+// on the row; publish then promoted that row verbatim and the post came out
+// under the account name. Nothing failed — the publish returned 200 and the
+// post was real — so the only thing that catches it is asserting the identity
+// at every hop: the draft row, the publish answer, the published row, and the
+// topic's last-post projection.
+func TestDraftKeepsItsMaskThroughPublish(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	topicID := seedDraftTopic(t, app, fixPlayerID, "Masked draft topic")
+	seedRuntimeCharacter(t, app, "chardftmask0001", fixPlayerID, "Rough")
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	// 1. The mask must reach the draft ROW, not just the response.
+	status, payload := doJSON(t, server.URL, http.MethodPut, "/api/aerun/topics/"+topicID+"/draft",
+		tokens["player"], "draft-mask-1", `{"content":"masked reply","character_id":"chardftmask0001"}`)
+	if status != http.StatusOK {
+		t.Fatalf("upsert draft: %d %v", status, payload)
+	}
+	draft, _ := payload["draft"].(map[string]any)
+	if draft == nil {
+		t.Fatalf("no draft in response: %v", payload)
+	}
+	if got, _ := draft["author_character_id"].(string); got != "chardftmask0001" {
+		t.Errorf("draft.author_character_id = %q, want %q — the mask never reached the client",
+			got, "chardftmask0001")
+	}
+	draftID, _ := draft["id"].(string)
+	storedDraft, err := app.FindRecordById(postsCollectionName, draftID)
+	if err != nil || storedDraft == nil {
+		t.Fatalf("stored draft %s not found: %v", draftID, err)
+	}
+	if got := storedDraft.GetString("author_character_id"); got != "chardftmask0001" {
+		t.Fatalf("posts.author_character_id on the draft = %q, want %q — publishing this row "+
+			"would drop the mask", got, "chardftmask0001")
+	}
+
+	// 2. The publish answer must be DECORATED. A raw payload carries no
+	// author_name/is_character, and the client renders the new card from it.
+	status, payload = doJSON(t, server.URL, http.MethodPost, "/api/aerun/drafts/"+draftID+"/publish",
+		tokens["player"], "draft-mask-publish", "")
+	if status != http.StatusOK {
+		t.Fatalf("publish: %d %v", status, payload)
+	}
+	published, _ := payload["post"].(map[string]any)
+	if published == nil {
+		t.Fatalf("publish carries no post: %v", payload)
+	}
+	if got, _ := published["author_name"].(string); got != "Rough" {
+		t.Errorf("published author_name = %q, want %q — the answer was not decorated, so the "+
+			"fresh post renders under the account", got, "Rough")
+	}
+	if isChar, _ := published["is_character"].(bool); !isChar {
+		t.Errorf("published is_character = %v, want true", isChar)
+	}
+	if got, _ := published["author_id"].(string); got != fixPlayerID {
+		t.Errorf("published author_id = %q, want %q — a mask must not change ownership",
+			got, fixPlayerID)
+	}
+	if got, _ := payload["post_id"].(string); got != draftID {
+		t.Errorf("publish post_id = %q, want %q — the page navigates by it", got, draftID)
+	}
+
+	// 3. The published ROW and the topic projection must both name the mask, or
+	// a reload / a topic list row disagrees with the page that published it.
+	if got := storedDraft.GetString("author_character_id"); got != "chardftmask0001" {
+		t.Errorf("published post author_character_id = %q, want %q", got, "chardftmask0001")
+	}
+	topic, err := app.FindRecordById(topicsCollectionName, topicID)
+	if err != nil || topic == nil {
+		t.Fatalf("topic not found: %v", err)
+	}
+	if got := topic.GetString("last_post_author_character_id"); got != "chardftmask0001" {
+		t.Errorf("topics.last_post_author_character_id = %q, want %q — the topic list would "+
+			"show the account as the last speaker", got, "chardftmask0001")
+	}
+}
+
+// TestDraftMaskCannotBeBorrowed is the security half: the draft command resolves
+// the mask through the same server-owned helper createPostHandler uses, so a
+// hand-crafted request cannot file a draft under another member's mask and have
+// it publish that way.
+func TestDraftMaskCannotBeBorrowed(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	topicID := seedDraftTopic(t, app, fixModeratorID, "Borrowed mask topic")
+	seedRuntimeCharacter(t, app, "charborrowmask1", fixPlayerID, "Rough")
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	status, payload := doJSON(t, server.URL, http.MethodPut, "/api/aerun/topics/"+topicID+"/draft",
+		tokens["moderator"], "draft-mask-borrow",
+		`{"content":"not mine","character_id":"charborrowmask1"}`)
+	if status != http.StatusForbidden {
+		t.Fatalf("filing a draft as another member's mask: got %d, want 403 (%v)", status, payload)
+	}
+}

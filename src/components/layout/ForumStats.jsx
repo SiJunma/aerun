@@ -4,7 +4,7 @@ import { Card } from 'react-bootstrap';
 import { Users, FileText, MessageSquare, TrendingUp, History } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
-import { subscribeToDailyActiveUsers, subscribeToActiveGuestsRtdb } from '../../api/rtdb-presence';
+import { subscribeToActiveGuestsRtdb } from '../../api/rtdb-presence';
 import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
@@ -13,11 +13,9 @@ const ForumStats = () => {
 
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [dailyFromRtdb, setDailyFromRtdb] = useState([]);
   
   useEffect(() => {
     const unsubGuests = subscribeToActiveGuestsRtdb(setActiveGuestsRaw);
-    const unsubDaily = subscribeToDailyActiveUsers(setDailyFromRtdb);
 
     // Таймер для скользящего окна отсечения гостей (раз в 30 секунд)
     const timer = setInterval(() => {
@@ -26,7 +24,6 @@ const ForumStats = () => {
 
     return () => {
       unsubGuests();
-      unsubDaily();
       clearInterval(timer);
     };
   }, []);
@@ -52,9 +49,20 @@ const ForumStats = () => {
     };
   }, [activeUsers, activeGuestsRaw, currentTime, user]);
 
-  // Prefer snapshot-sourced online users (heartbeat/status presence), fall back
-  // to the context value loaded with the main-page data.
-  const dailyActiveUsers = dailyFromRtdb.length > 0 ? dailyFromRtdb : (contextDailyUsers || []);
+  // "Visited today" is a DIFFERENT clock from the list above it, and it used to
+  // be the same array: subscribeToDailyActiveUsers was a one-line alias of the
+  // online subscription, so the panel printed the connected-now members twice
+  // under two labels, and anyone who had visited earlier and left read as
+  // "not active today".
+  //
+  // Both halves now come from the server: the NAMES from
+  // stats.dailyActiveUsers (users.last_seen inside a 24h window, the durable
+  // column) and the COUNT from stats.dailyActiveUserCount, which stays exact
+  // even when the name list is capped for rendering. A member who signed out a
+  // minute ago belongs here and no longer belongs above — that difference is
+  // the whole reason the row exists.
+  const dailyActiveUsers = forumStats?.dailyActiveUsers || contextDailyUsers || [];
+  const dailyActiveCount = forumStats?.dailyActiveUserCount ?? dailyActiveUsers.length;
   const totalTopics = forumStats?.totalTopics ?? categories.reduce((sum, cat) => sum + (cat.topics_count || 0), 0);
   const totalPosts = forumStats?.totalPosts ?? categories.reduce((sum, cat) => sum + (cat.posts_count || 0), 0);
   const totalUsers = forumStats?.totalUsers ?? 0;
@@ -142,7 +150,7 @@ const ForumStats = () => {
           <div className="online-users-panel p-2 px-3" style={{ borderTop: '1px solid rgba(128,128,128,0.15)' }}>
             <div className="d-flex flex-wrap align-items-center online-list" style={{ gap: '0 4px' }}>
               <span className="text-muted small fw-semibold flex-shrink-0 me-1">
-                {t('stats.visited_today')} ({dailyActiveUsers.length}):
+                {t('stats.visited_today')} ({dailyActiveCount}):
               </span>
               {dailyActiveUsers.length === 0 ? (
                 <span className="text-muted small italic opacity-75">{t('stats.silence')}</span>

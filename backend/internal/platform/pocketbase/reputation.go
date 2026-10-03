@@ -8,6 +8,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 	"github.com/SiJunma/aerun/backend/internal/forum"
@@ -252,6 +253,20 @@ func voteUserHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("target user not found")
 		}
 
+		// Reputation is a judgement about an account, and a suspended account's
+		// reputation must stop moving: voting for it would still shift the score
+		// moderators read when deciding whether to lift the suspension.
+		// createDMHandler already refuses a suspended counterpart, so this makes
+		// the two agree — a ban takes the account out of circulation as an OBJECT
+		// of member actions, not only as an actor.
+		//
+		// The target's post visibility is not consulted here: the author of a post
+		// stays readable through their profile (1768100000), so hiding the vote
+		// while showing the post would be incoherent.
+		if targetUser.GetString("status") == string(auth.StatusBanned) {
+			return 0, nil, forbiddenError("cannot vote for a banned user")
+		}
+
 		existingVote, err := txApp.FindFirstRecordByFilter(
 			reputationVotesCollectionName,
 			"voter_id = {:voter} && target_id = {:target} && post_id = ''",
@@ -477,6 +492,69 @@ func getPostVotersHandler(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]any{
 		"voters":     items,
 		"total":      len(items),
+		"request_id": requestIDFrom(e),
+	})
+}
+
+// listMyVotesHandler answers GET /api/aerun/me/votes.
+//
+// This endpoint exists because the browser used to read `reputation_votes`
+// DIRECTLY through the PocketBase SDK (`pb.collection('reputation_votes')`).
+// That collection is server-only — migration 1766300000 gives it nil browser
+// rules — so every call returned `403 Only superusers can perform this action`.
+// The failures were swallowed by a `catch { return {} }` and surfaced as three
+// things a member could actually see:
+//
+//   - a console full of 403s and aborted ClientResponseErrors on every topic open,
+//   - every upvote arrow rendered as un-voted, so the member's own votes looked
+//     like they had been lost, and
+//   - a re-vote, which the server treats as an UPDATE of the existing vote,
+//     silently rewriting the vote the member thought they were merely re-reading.
+//
+// It returns ONLY the caller's own votes. A vote is a private act until its
+// voter chooses to expose it (getPostVotersHandler serves that list and honours
+// rep_show_history), so this route must never grow a way to read other people's
+// ballots: there is deliberately no voter_id parameter to widen it with.
+//
+// `topic_id` is optional. With it the answer is the caller's votes in that one
+// topic, which is what the topic page needs to paint its arrows; without it the
+// answer is every vote the caller has cast.
+func listMyVotesHandler(e *core.RequestEvent) error {
+	if e.Auth == nil || e.Auth.Collection().Name != usersCollectionName {
+		return router.NewUnauthorizedError("authentication is required for this action", nil)
+	}
+	if AccessFrom(e).Status == auth.StatusBanned {
+		return forbiddenError("banned accounts cannot read votes")
+	}
+
+	query := e.App.RecordQuery(reputationVotesCollectionName).
+		AndWhere(dbx.HashExp{"voter_id": e.Auth.Id})
+	if topicID := strings.TrimSpace(e.Request.URL.Query().Get("topic_id")); topicID != "" {
+		query = query.AndWhere(dbx.HashExp{"topic_id": topicID})
+	}
+
+	var records []*core.Record
+	// The cap guards against a pathological account; it is not a pagination
+	// contract. The client consumes the whole list to paint its own arrows, so a
+	// truncated answer would silently show old votes as un-voted.
+	if err := query.OrderBy("created DESC", "id DESC").Limit(1000).All(&records); err != nil {
+		return internalError("failed to read your votes", err)
+	}
+
+	items := make([]map[string]any, 0, len(records))
+	for _, rec := range records {
+		items = append(items, map[string]any{
+			"id":        rec.Id,
+			"post_id":   rec.GetString("post_id"),
+			"topic_id":  rec.GetString("topic_id"),
+			"target_id": rec.GetString("target_id"),
+			"value":     rec.GetInt("value"),
+			"comment":   rec.GetString("comment"),
+		})
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      items,
 		"request_id": requestIDFrom(e),
 	})
 }

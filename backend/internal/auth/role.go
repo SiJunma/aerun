@@ -19,6 +19,34 @@ const (
 	RoleGuest     Role = "guest"
 )
 
+// CategoryInheritMarker is the sentinel stored in `categories.allowed_roles`
+// that means "visibility follows the global role settings".
+//
+// WHY A MARKER EXISTS. `allowed_roles` is the ONLY input canViewCategory reads
+// (ADR-1), and an empty list means root-only. Without a marker, a category
+// that "follows the global settings" can only be stored as a SNAPSHOT of the
+// role registry taken when the admin last saved — and a role created after
+// that save is silently absent from the array, so its members are denied a
+// public category until every category is re-saved by hand. The marker turns
+// that snapshot into a live rule.
+//
+// WHY THIS PARTICULAR TEXT. It must be impossible to enter as a role name by
+// accident, and it must survive a round trip through a JSON array of ids:
+//
+//   - it is not a plausible role id (the legacy ids are lowercase words; this
+//     is not one, and no UI suggests it);
+//   - it can never become a REAL role, because validateAllowedRoles rejects any
+//     id absent from the roles registry, and the registry is the only writer —
+//     so the marker cannot be shadowed by a role that happens to share the
+//     name;
+//   - the leading non-alphabetic character cannot start a human-chosen slug, so
+//     even a future id-validation relaxation would not collide with it.
+//
+// The alternative — treating an EMPTY list as "inherit" — is exactly the
+// reading ADR-1 removed, and reintroducing it would republish every restricted
+// category whose list ever arrived empty. Empty stays root-only.
+const CategoryInheritMarker = "__aerun_inherit_roles__"
+
 // RoleSpec is the canonical definition of a system role: display name,
 // authority rank, UI color and the default permission set.
 //

@@ -18,10 +18,22 @@ const maxPostContentBodyBytes = 128 * 1024
 
 type createPostForm struct {
 	Content string `json:"content"`
+	// CharacterID is the mask the author picked in the reply composer. Empty
+	// means "use the one stored on my profile" — see resolveAuthorCharacter,
+	// which is what actually decides the value that gets written.
+	CharacterID string `json:"character_id"`
 }
 
 type editPostForm struct {
 	Content string `json:"content"`
+	// CharacterID re-files the post under a different mask.
+	//
+	// A POINTER, not a string: the edit form sends this key only when the author
+	// actually changed the picker, and an absent key must mean "leave the stored
+	// mask alone". A plain string cannot tell "no change" from "post as my
+	// account", so every edit would silently strip the mask — the same class of
+	// defect as a draft published without its mask.
+	CharacterID *string `json:"character_id"`
 }
 
 type movePostsForm struct {
@@ -36,6 +48,14 @@ func postPayload(record *core.Record) map[string]any {
 		"author_id": record.GetString("author_id"),
 		"created":   record.GetDateTime("created").String(),
 		"updated":   record.GetDateTime("updated").String(),
+	}
+
+	// `author_character_id` travels RAW and unresolved on purpose. The read
+	// model resolves the display through decoratePostAuthor, which is also where
+	// ownership is checked — a payload must never hand the browser a mask name
+	// the server has not confirmed belongs to this author.
+	if characterID := record.GetString("author_character_id"); characterID != "" {
+		payload["author_character_id"] = characterID
 	}
 
 	// No `deleted` key: a deleted post is gone from the database, so the payload
@@ -81,7 +101,12 @@ func createPostHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
-		if err != nil || topic == nil || topic.GetBool("deleted") {
+		// `topic == nil` is the whole "not there" test. There is no `deleted`
+		// flag to check: migration 1767700000 made deletion hard, so a deleted
+		// topic is a missing row. The check that used to sit here silently read
+		// false forever — PocketBase returns the zero value for an unknown
+		// field — which is the exact illusion .agents/AGENTS.md warns about.
+		if err != nil || topic == nil {
 			return 0, nil, notFoundError("topic not found")
 		}
 
@@ -117,6 +142,17 @@ func createPostHandler(e *core.RequestEvent) error {
 		post.Set("author_id", e.Auth.Id)
 		post.Set("content", content)
 
+		// The mask is resolved HERE, inside the transaction, so the post and the
+		// profile it was chosen from cannot disagree. A reply never carries a
+		// pinned flag: pinning is a property of a topic's opening message, and
+		// letting it ride on an arbitrary reply would produce a second banner
+		// that the unique index then rejects as a 500.
+		characterID, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
+		if err != nil {
+			return 0, nil, err
+		}
+		post.Set("author_character_id", characterID)
+
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to save post", err)
 		}
@@ -126,6 +162,11 @@ func createPostHandler(e *core.RequestEvent) error {
 		topic.Set("last_post_id", post.Id)
 		topic.Set("last_post_created", post.GetDateTime("created"))
 		topic.Set("last_post_author_id", post.GetString("author_id"))
+		// The topic's last-post projection carries the mask too, so a topic LIST
+		// row can render "Rough" in the last-post column without loading the
+		// post. This is the denormalisation the column exists for: it is written
+		// in the same transaction as the reply it describes.
+		topic.Set("last_post_author_character_id", characterID)
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
@@ -137,8 +178,27 @@ func createPostHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// Notifications are a CONSEQUENCE of the post, written in the same
+		// transaction: topic subscribers, quoted authors and mentions. A
+		// notification that cannot be delivered must not cost somebody their
+		// reply, so the dispatcher reports nothing and the post stands.
+		dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
+
+		// The author's display fields ride along with the reply itself. The
+		// caller's post count was written just above in this same transaction,
+		// so the value sent back is the post's own new count — the reply renders
+		// with its author's real name and score instead of a placeholder that
+		// only fills in on the next poll.
+		postOut := postPayload(post)
+		decoratePostAuthors(txApp, []map[string]any{postOut})
+
 		resp := map[string]any{
-			"post":       postPayload(post),
+			"post": postOut,
+			// `post_id` is the bare id under its own name. The reply path asked
+			// for `postId`, which no route has ever sent, so the page navigated
+			// without a target and the reader never saw their own reply.
+			"post_id":    post.Id,
+			"topic_id":   topicID,
 			"request_id": requestIDFrom(e),
 		}
 		return http.StatusCreated, resp, nil
@@ -192,15 +252,75 @@ func listPostsHandler(e *core.RequestEvent) error {
 	for i, r := range records {
 		items[i] = postPayload(r)
 	}
+	decoratePostAuthors(e.App, items)
 
-	return e.JSON(http.StatusOK, map[string]any{
+	// The pinned first post rides ALONGSIDE the page rather than inside it. It is
+	// the topic's EARLIEST post, so on page 1 it is already in `items` and
+	// echoing it here would render it twice; from page 2 on it is the only way
+	// the reader can see it, which is the entire point of the checkbox.
+	//
+	// Gated on the topic's own `first_post_pinned` flag, matching the retired
+	// callable (`topicData.first_post_pinned && resolvedPage > 1`). Only page
+	// >= 2 queries it, so the common case costs nothing extra.
+	var pinnedPost map[string]any
+	if page > 1 && topic.GetBool("first_post_pinned") {
+		pinnedPost = loadTopicFirstPost(e.App, topicID)
+	}
+
+	resp := map[string]any{
 		"items":       items,
 		"topic_id":    topicID,
 		"posts_count": topic.GetInt("posts_count"),
 		"page":        page,
 		"per_page":    limit,
 		"request_id":  requestIDFrom(e),
-	})
+	}
+	// `pinned_post` is ADDED ONLY when there is one, rather than set to null.
+	//
+	// This matters because TopicPage destructures it: `const { posts, pinnedPost,
+	// lastPost } = await fetchSecuredPosts(...)` and then
+	// `topic.first_post_pinned && currentPage > 1 && pinnedFirstPost`. A JSON
+	// `null` arrives as a present-but-null value, which is a third state nobody
+	// branches on. Emitting the key only when it carries a post keeps the
+	// contract "absent means no pinned post" true on the wire, not just in Go.
+	if pinnedPost != nil {
+		resp["pinned_post"] = pinnedPost
+	}
+	return e.JSON(http.StatusOK, resp)
+}
+
+// loadTopicFirstPost returns the topic's earliest post, or nil.
+//
+// "The pinned post" is a RULE, not a per-post flag (migration 1768000000): the
+// flag lives on the topic and this picks the post it refers to. `created ASC`
+// with `id ASC` as the tie-breaker mirrors the list ordering exactly, so two
+// posts written in the same millisecond cannot make the banner jump between
+// page loads.
+//
+// Drafts are excluded for the same reason listPostsHandler excludes them: a
+// draft is private to its author and must never surface in the public feed.
+//
+// The predicate is built with dbx rather than a FindRecordsByFilter string on
+// purpose. The string form would need `is_draft = false || is_draft IS NULL`,
+// which mixes the PocketBase filter language with raw SQL in one expression;
+// PocketBase has no `IS NULL` in that language, so the filter matches nothing
+// and the banner silently never appears. dbx emits plain SQL and says exactly
+// what it means — `IS NULL` included, which is the case that actually occurs
+// for every post written before the draft column existed.
+func loadTopicFirstPost(app core.App, topicID string) map[string]any {
+	var records []*core.Record
+	err := app.RecordQuery(postsCollectionName).
+		AndWhere(dbx.NewExp("topic_id = {:topic}", dbx.Params{"topic": topicID})).
+		AndWhere(dbx.NewExp("(is_draft = {:no} OR is_draft IS NULL)", dbx.Params{"no": false})).
+		OrderBy("created ASC", "id ASC").
+		Limit(1).
+		All(&records)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	payload := postPayload(records[0])
+	decoratePostAuthors(app, []map[string]any{payload})
+	return payload
 }
 
 // getPostHandler returns a single post by its record id.
@@ -250,6 +370,9 @@ func editPostHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
+	if err := requireNotBanned(acc, "edit a post"); err != nil {
+		return err
+	}
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		post, err := txApp.FindRecordById(postsCollectionName, postID)
@@ -274,7 +397,8 @@ func editPostHandler(e *core.RequestEvent) error {
 		}
 
 		topic, err := txApp.FindRecordById(topicsCollectionName, post.GetString("topic_id"))
-		if err != nil || topic == nil || topic.GetBool("deleted") {
+		// As above: a deleted topic is a missing row, so the flag test is gone.
+		if err != nil || topic == nil {
 			return 0, nil, notFoundError("parent topic not found")
 		}
 
@@ -286,6 +410,43 @@ func editPostHandler(e *core.RequestEvent) error {
 		post.Set("edited", types.NowDateTime())
 		if isModerated {
 			post.Set("editor_id", e.Auth.Id)
+		}
+
+		// A mask change is the AUTHOR's decision, and only when the request
+		// actually carries one. `edit_others_posts` widens who may rewrite the
+		// text; it must never let a moderator re-file somebody else's post under
+		// a mask, so the branch is gated on isAuthor rather than on canEdit.
+		if form.CharacterID != nil && isAuthor {
+			// Same server-owned resolution as create: the client names a mask and
+			// the server answers with the one it accepts (403 on a borrowed one).
+			//
+			// An EXPLICIT empty string means "post as my account", not "whatever is
+			// stored": resolveAuthorCharacter treats empty as "fall back to
+			// last_selected_character_id", which is right for a fresh reply (the
+			// composer clears that key when the author picks their own account) but
+			// wrong here, because the edit form never touches the profile. Reading
+			// the stored mask back would silently ignore the author's own choice.
+			var characterID string
+			if strings.TrimSpace(*form.CharacterID) == "" {
+				characterID = ""
+			} else {
+				resolved, err := resolveAuthorCharacter(txApp, e.Auth.Id, *form.CharacterID)
+				if err != nil {
+					return 0, nil, err
+				}
+				characterID = resolved
+			}
+			post.Set("author_character_id", characterID)
+
+			// The post may also be the topic's last post, and that row is
+			// denormalised. Leaving it stale is what makes a topic list disagree
+			// with the topic page about who spoke last.
+			if topic.GetString("last_post_id") == postID {
+				topic.Set("last_post_author_character_id", characterID)
+				if err := txApp.Save(topic); err != nil {
+					return 0, nil, internalError("failed to update topic projection", err)
+				}
+			}
 		}
 
 		if err := txApp.Save(post); err != nil {
@@ -302,8 +463,16 @@ func editPostHandler(e *core.RequestEvent) error {
 			}
 		}
 
+		// Decorated for the same reason publishDraftHandler's is: TopicPage renders
+		// the edited card from this answer, and a raw payload has no
+		// author_name/is_character, so a mask change would appear to do nothing
+		// until a reload.
+		postOut := postPayload(post)
+		decoratePostAuthors(txApp, []map[string]any{postOut})
+
 		return http.StatusOK, map[string]any{
-			"post":       postPayload(post),
+			"post":       postOut,
+			"post_id":    post.Id,
 			"request_id": requestIDFrom(e),
 		}, nil
 	})
@@ -333,6 +502,9 @@ func deletePostHandler(e *core.RequestEvent) error {
 
 	postID := e.Request.PathValue("id")
 	acc := AccessFrom(e)
+	if err := requireNotBanned(acc, "delete a post"); err != nil {
+		return err
+	}
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		post, err := txApp.FindRecordById(postsCollectionName, postID)

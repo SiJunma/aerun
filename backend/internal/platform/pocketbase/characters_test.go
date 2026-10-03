@@ -63,19 +63,22 @@ func TestCharacterReadsFollowProfileVisibility(t *testing.T) {
 		}
 	})
 
-	t.Run("a pending owner's characters are not public", func(t *testing.T) {
+	t.Run("a pending owner's characters are public too", func(t *testing.T) {
+		// Status does NOT narrow visibility. A pending account is awaiting
+		// approval, not erased: it holds a nickname and a post history, and the
+		// approval queue is read by looking at the profile. This subtest used to
+		// demand a 404, which encoded the opposite rule — a restriction on the
+		// account was being enforced as a restriction on its readers.
 		status, body := getAerun(t, ts.URL+"/api/aerun/users/"+fixPendingID+"/characters")
-		if status != http.StatusNotFound {
-			t.Fatalf("expected 404 for a pending owner, got %d: %s", status, body)
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 for a pending owner, got %d: %s", status, body)
 		}
-		if bytes.Contains(body, []byte("Pending Mask")) {
-			t.Fatalf("a pending owner's characters must not leak: %s", body)
+		if !bytes.Contains(body, []byte("Pending Mask")) {
+			t.Fatalf("a pending owner's characters must stay readable: %s", body)
 		}
 	})
 
 	t.Run("a pending owner still reads their own", func(t *testing.T) {
-		// Same escape the users ViewRule grants: an account always reads itself,
-		// so the owner can still manage the masks they present with.
 		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/users/"+fixPendingID+"/characters", tokens["pending"])
 		if status != http.StatusOK {
 			t.Fatalf("expected 200 for the owner, got %d: %s", status, body)
@@ -85,7 +88,7 @@ func TestCharacterReadsFollowProfileVisibility(t *testing.T) {
 		}
 	})
 
-	t.Run("a single character respects the same rule", func(t *testing.T) {
+	t.Run("a single character follows the same rule", func(t *testing.T) {
 		status, body := getAerun(t, ts.URL+"/api/aerun/characters/charplayer00001")
 		if status != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", status, body)
@@ -94,9 +97,14 @@ func TestCharacterReadsFollowProfileVisibility(t *testing.T) {
 			t.Fatalf("payload must name the owner: %s", body)
 		}
 
+		// A banned owner's mask is readable like anybody else's: the ban stops
+		// the account acting, it does not unpublish what it wrote.
 		status, body = getAerun(t, ts.URL+"/api/aerun/characters/charbanned00001")
-		if status != http.StatusNotFound {
-			t.Fatalf("expected 404 for a banned owner's character, got %d: %s", status, body)
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 for a banned owner's character, got %d: %s", status, body)
+		}
+		if !bytes.Contains(body, []byte("Banned Mask")) {
+			t.Fatalf("a banned owner's character must stay readable: %s", body)
 		}
 	})
 }

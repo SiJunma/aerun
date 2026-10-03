@@ -6,14 +6,15 @@ import { useAuth } from '../contexts/AuthProvider';
 import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
   updateUser, updateTopic,
-  deleteTopics, moveTopics, movePosts, createDraftPost, updateDraftPost, publishDraft,
-  subscribeToTopicDraft, deleteDraftPost, locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
+  deleteTopics, moveTopics, movePosts, getTopicDraft, saveTopicDraft,
+  deleteDraft, publishDraft,
+  locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
 
 import { pb } from '../api/pocketbase';
 import { processDiceRolls } from '../utils/dice';
 import { createInFlight, newIdempotencyKey } from '../utils/inflight';
-import { subscribeToCharacters } from '../api/character';
+import { subscribeToCharacters, fetchCharacter } from '../api/character';
 
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -27,7 +28,7 @@ import {
   Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
   Dices, User, FilePen, MessageSquareOff, Keyboard, Eye
 } from 'lucide-react';
-import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNotifications } from '../api/notifications';
+import { subscribeToUserNotifications, markNotificationRead } from '../api/notifications';
 import { voteOnPost, getVotesInTopic, updateReputationComment } from '../api/reputation';
 import PostVotersModal from '../components/common/PostVotersModal';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
@@ -529,11 +530,54 @@ const TopicPage = () => {
     }
   }, [posts.length, id, user?.uid, markTopicRead, currentPage, profile?.role_id, ITEMS_PER_PAGE]);
 
-  // Subscribe to draft
+  // decorateDraft adapts a server draft to the shape the draft card renders.
+  //
+  // The server deliberately stores only the AUTHORED part of a draft — its text
+  // and ownership. Everything the card displays about the author is derived
+  // here from the live profile instead of being snapshotted into storage, so a
+  // draft can never render a stale name or avatar, and can never render the
+  // "Guest" fallback the old localStorage version did after its first edit.
+  const decorateDraft = (draft, charId = '') => {
+    if (!draft) return null;
+    // The server stores the mask on the draft row and echoes it back, so that
+    // value wins: it is what publish will actually promote. `charId` is only
+    // the local fallback for a response that predates the column.
+    const maskId = draft.author_character_id || charId || '';
+    const char = characters.find(c => c.id === maskId);
+    return {
+      ...draft,
+      is_draft: true,
+      author_id: user?.uid || null,
+      author_name: char ? char.name : (profile?.nickname || user?.displayName || 'Guest'),
+      author_avatar: char ? char.avatar_url : (profile?.avatar_url || ''),
+      author_role_id: profile?.role_id || 'spectator',
+      author_status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
+      author_signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
+      is_character: !!char,
+      author_character_id: char ? char.id : null,
+    };
+  };
+
+  // Load this topic's draft for the signed-in member.
+  //
+  // This reads the SERVER, not a browser key. The previous localStorage
+  // subscription fired exactly once on mount and never again, which is why a
+  // freshly saved draft stayed invisible until a manual reload; here every
+  // write goes through saveTopicDraft and the handler updates state itself, so
+  // the load only has to establish the starting point.
   useEffect(() => {
     if (!user?.uid || !id) return;
-    const unsub = subscribeToTopicDraft(id, user.uid, setMyDraft);
-    return () => unsub();
+    let cancelled = false;
+    (async () => {
+      try {
+        const draft = await getTopicDraft(id);
+        if (!cancelled && isMountedRef.current) setMyDraft(decorateDraft(draft));
+      } catch {
+        // A draft read that fails is a missing draft, not a broken page: the
+        // reply box is still usable and saving will recreate the row.
+      }
+    })();
+    return () => { cancelled = true; };
   }, [user?.uid, id]);
 
   // Track unread quote and mention notifications and clear them via IntersectionObserver
@@ -631,12 +675,24 @@ const TopicPage = () => {
   // authorStats are populated from getSecuredPosts server hydration (author_posts_count, author_reputation)
   // No extra Firestore reads needed per author
 
-  // Fetch character masks with deduplication
+  // Resolve OTHER people's masks for their live status line and signature.
+  //
+  // This used to read `pb.collection('users').getOne(uid)` and then look inside
+  // `u.settings.characters` — the pre-migration fold ADR-5 retracted, which no
+  // longer holds anything, so every lookup resolved to null and the card fell
+  // back to whatever the server had sent. Worse, the pb SDK auto-cancels a
+  // duplicate in-flight request, and this effect re-runs on every `posts` /
+  // `maskStats` change, so each pass aborted the previous one and the console
+  // filled with "The request was aborted" for every mask on the page.
+  //
+  // The `characters` collection is the authoritative store (src/api/character.js),
+  // and `fetchCharacter` is its single-row endpoint. Own masks never come here —
+  // getLiveAuthorStatus/getLiveAuthorSignature read those from the `characters`
+  // subscription.
   useEffect(() => {
     if (posts.length === 0) return;
-    const characterMasks = posts.filter(p => p.is_character && p.author_character_id);
     const uniqueChars = new Map();
-    characterMasks.forEach(p => {
+    posts.forEach(p => {
       if (p.author_id && p.author_character_id && maskStats[p.author_character_id] === undefined) {
         uniqueChars.set(p.author_character_id, p.author_id);
       }
@@ -644,19 +700,32 @@ const TopicPage = () => {
 
     if (uniqueChars.size === 0) return;
 
-    uniqueChars.forEach(async (uid, charId) => {
-      try {
-        const u = await pb.collection('users').getOne(uid);
-        const characters = u?.settings?.characters || [];
-        const char = characters.find(c => c.id === charId || c._id === charId);
-        setMaskStats(prev => ({
-          ...prev,
-          [charId]: char || null
-        }));
-      } catch (err) {
-        console.error('[fetchCharacter error]', err);
-      }
-    });
+    // Snapshot the ids so the effect body does not depend on `maskStats`: the
+    // old dependency list made every resolved mask re-trigger the whole effect.
+    const pending = Array.from(uniqueChars.keys());
+    let cancelled = false;
+
+    (async () => {
+      const entries = await Promise.all(pending.map(async (charId) => {
+        try {
+          const char = await fetchCharacter(charId);
+          return [charId, char || null];
+        } catch {
+          // A mask the server will not serve (deleted, or its owner is pending)
+          // resolves to null, which the render helpers already treat as "no mask
+          // data" and fall back to the payload for.
+          return [charId, null];
+        }
+      }));
+      if (cancelled || !isMountedRef.current) return;
+      setMaskStats(prev => {
+        const next = { ...prev };
+        for (const [charId, char] of entries) next[charId] = char;
+        return next;
+      });
+    })();
+
+    return () => { cancelled = true; };
   }, [posts, maskStats]);
 
   // Fallback hydration for missing author signatures or status lines
@@ -821,9 +890,6 @@ const TopicPage = () => {
             }
           } else {
             locatingPostIdRef.current = null;
-            if (user?.uid) {
-              clearOrphanedPostNotifications(user.uid, queryPostId).catch(err => console.error('[Cleanup Orphaned Notification error]', err));
-            }
             setIsPageLoading(false);
             setAlreadyJumped(true);
 
@@ -1525,6 +1591,12 @@ const TopicPage = () => {
       category_id: topic?.category_id,
       content: replyContent.trim(),
       author_id: user?.uid || null,
+      // `character_id` is the key createPost actually transmits. Everything below
+      // it is a local echo for the optimistic render only: the server re-derives
+      // the display from the stored rows and ownership-checks the mask, so
+      // `author_character_id` alone never reached the database and the reply
+      // came out under the account's name.
+      character_id: selectedCharacterId || '',
       author_name: selectedChar ? selectedChar.name : (profile?.nickname || guestNickname.trim() || user?.displayName || profile?.email?.split('@')[0] || 'Guest'),
       author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
       author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
@@ -1540,8 +1612,14 @@ const TopicPage = () => {
     if (!replyContent.trim() || hasDraft || draftSaving) return;
     setDraftSaving(true);
     try {
-      await createDraftPost(buildPostData());
-      if (isMountedRef.current) setReplyContent('');
+      const saved = await saveTopicDraft(id, replyContent.trim(), selectedCharacterId);
+      // The card is rendered from this state, so leaving it untouched is the
+      // whole bug: the draft was on the server and the page said it did not
+      // exist. The returned row is the one to show, not a guess at it.
+      if (isMountedRef.current) {
+        setMyDraft(decorateDraft(saved, selectedCharacterId));
+        setReplyContent('');
+      }
       showToast(t('forum.draft_saved'));
       // Navigate to last page so draft is visible
       const lastPage = Math.max(1, totalPages);
@@ -1562,18 +1640,16 @@ const TopicPage = () => {
     }
     setDraftSaving(true);
     try {
-      const selectedChar = characters.find(c => c.id === editCharacterId);
-      const metadata = {
-        author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
-        author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
-        author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
-        is_character: !!selectedChar,
-        author_character_id: editCharacterId || null
-      };
-
-      await updateDraftPost(user.uid, id, editContent.trim(), metadata);
+      // Addressed by the TOPIC, not by the draft row: the command is
+      // (author, topic) unique, so the topic id is what identifies the draft
+      // the editor is currently showing.
+      const saved = await saveTopicDraft(id, editContent.trim(), editCharacterId);
+      // Re-render from the server's answer. Previously this wrote a different
+      // object shape into localStorage and never touched `myDraft`, so the card
+      // kept displaying the text from before the edit — the second reported
+      // symptom, and the one that also dropped every author_* field.
       if (isMountedRef.current) {
+        setMyDraft(decorateDraft(saved, editCharacterId));
         setEditingPostId(null);
         setEditContent('');
         setEditCharacterId('');
@@ -1705,19 +1781,24 @@ const TopicPage = () => {
     }
 
     try {
-      const pubResult = await publishDraft(user.uid, id);
-      const newPostId = pubResult?.postId;
+      const pubResult = await publishDraft(publishedDraft.id);
+      const newPostId = pubResult?.postId || pubResult?.id;
       navigateToCreatedPost(tempId, newPostId);
 
+      // The server's decorated post is the authority on WHO spoke. The draft
+      // card only knows what the client believed when the optimistic render was
+      // built, and the published row is what the read endpoints will serve from
+      // now on — so the list projection and the reconciled card both take their
+      // author fields from the answer, never from the pre-publish guess.
       if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
           id: newPostId,
-          author_id: user?.uid || null,
-          author_name: publishedDraft?.author_name || profile?.nickname || 'User',
-          author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
-          author_role_id: profile?.role_id || 'player',
-          is_character: !!publishedDraft?.is_character,
-          author_character_id: publishedDraft?.author_character_id || null,
+          author_id: pubResult?.author_id || user?.uid || null,
+          author_name: pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
+          author_avatar: pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
+          author_role_id: pubResult?.author_role_id || profile?.role_id || 'player',
+          is_character: pubResult?.is_character ?? !!publishedDraft?.is_character,
+          author_character_id: pubResult?.author_character_id || publishedDraft?.author_character_id || null,
           created_at: new Date().toISOString()
         }, newTotalPosts, 1);
       }
@@ -1736,7 +1817,16 @@ const TopicPage = () => {
                 return {
                   ...p,
                   id: newPostId,
-                  _isOptimistic: false
+                  _isOptimistic: false,
+                  // Roll the card forward onto the server's identity. Keeping
+                  // the optimistic author_* here is what made the mask look like
+                  // it had been dropped the instant the draft was published.
+                  ...(pubResult?.author_name ? { author_name: pubResult.author_name } : {}),
+                  ...(pubResult?.author_avatar !== undefined ? { author_avatar: pubResult.author_avatar } : {}),
+                  ...(pubResult?.author_status_line !== undefined ? { author_status_line: pubResult.author_status_line } : {}),
+                  ...(pubResult?.author_signature !== undefined ? { author_signature: pubResult.author_signature } : {}),
+                  ...(pubResult?.is_character !== undefined ? { is_character: pubResult.is_character } : {}),
+                  ...(pubResult?.author_character_id !== undefined ? { author_character_id: pubResult.author_character_id } : {}),
                 };
               }
               return p;
@@ -1909,7 +1999,14 @@ const TopicPage = () => {
 
     try {
       if (deletingPost.is_draft) {
-        await deleteDraftPost(user.uid, id);
+        // By the draft's OWN id. The old call was deleteDraftPost(uid, id)
+        // with `id` being the TOPIC, which built a localStorage key rather than
+        // deleting anything — and because buildPostData never set `is_draft`,
+        // this branch was not even reached and the request went to the real
+        // deletePost path with an id that was never a post. That is the error
+        // reported when Delete was pressed on a draft.
+        await deleteDraft(deletingPost.id);
+        if (isMountedRef.current) setMyDraft(null);
       } else {
         // Only the topic's real first post may delete the topic. Using
         // posts[0].id here made every first post of *any* page delete the whole
@@ -2160,7 +2257,6 @@ const TopicPage = () => {
       return (
         <Container className="py-5">
           <ErrorCard
-            isNetworkError={true}
             title={lang === 'ru' ? 'Не удалось загрузить тему' : 'Failed to load topic'}
             error={accessError}
             onRetry={() => window.location.reload()}
@@ -2527,7 +2623,6 @@ const TopicPage = () => {
         <div className="posts-container">
           {postsLoadError && currentPosts.length === 0 ? (
             <ErrorCard
-              isNetworkError={true}
               title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load posts'}
               error={postsLoadError}
               onRetry={() => loadPosts(currentPage)}

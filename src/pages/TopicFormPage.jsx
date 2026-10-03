@@ -18,7 +18,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, applyForumState, hasPermission, PERMISSIONS, settings, categories } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, hasPermission, PERMISSIONS, settings, categories } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
 
@@ -132,6 +132,18 @@ const TopicFormPage = () => {
         category_id: categoryId,
         title,
         description,
+        // The two keys the server actually reads. The block below this used to
+        // assemble a full optimistic author projection (`author_name`,
+        // `author_avatar`, `is_character`, `author_character_id`,
+        // `first_post_pinned`, ...) and then throw it away, because createTopic
+        // sends only category_id/title/content/character_id/pin_first_post. The
+        // mask and the pin lived in that discarded object and nowhere else,
+        // which is precisely why neither took effect.
+        character_id: selectedCharacterId || '',
+        pin_first_post: pinFirstPost,
+        // Local echo for the optimistic first render only. The server
+        // re-derives every one of these from the stored rows (decoratePostAuthor
+        // / decorateTopicAuthor), so nothing here is trusted for persistence.
         author_id: user.uid,
         author_name: authorName,
         author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
@@ -157,14 +169,19 @@ const TopicFormPage = () => {
       };
 
       const newTopic = await createTopic(topicData, firstPostData);
-      const newTopicId = newTopic?.topicId;
-      // The createTopic callable returned the converged main-page projection -
-      // apply it directly instead of firing background refresh calls.
-      if (newTopic?.forum) {
-        applyForumState(newTopic.forum);
-      } else {
-        scheduleForumStateRefresh();
+      // createTopic THROWS rather than returning an id-less object, so a
+      // successful return means there is a real id to navigate to. This used to
+      // read `newTopic.topicId`, which the helper never set: the member was
+      // sent to /topic/undefined and told the topic did not exist, seconds
+      // after creating it.
+      const newTopicId = newTopic.id;
+      if (!newTopicId) {
+        throw new Error('The topic was created but the server did not return its id.');
       }
+      // The command layer returns no converged main-page projection, so the
+      // category counters have to be re-read; they are now computed server-side
+      // from the topics themselves and cannot drift.
+      scheduleForumStateRefresh(0);
       localStorage.removeItem(DRAFT_KEY);
       // Mark as read immediately (server-side, all roles)
       await markTopicRead(newTopicId);
@@ -172,7 +189,20 @@ const TopicFormPage = () => {
 
     } catch (err) {
       console.error(err);
-      alert('Error creating topic');
+      // A failed create leaves the draft in place on purpose: the member keeps
+      // their text and can try again instead of retyping it. A create that
+      // succeeded but lost its id is the exception — retrying would duplicate
+      // the topic, so that case says so instead of inviting another attempt.
+      if (err?.code === 'missing_topic_id') {
+        showToast(
+          lang === 'ru'
+            ? 'Тема создана, но открыть её не удалось. Найдите её в списке раздела.'
+            : 'The topic was created but could not be opened. Find it in the category list.',
+          'warning'
+        );
+        return;
+      }
+      showToast(err?.message || (lang === 'ru' ? 'Ошибка создания темы' : 'Error creating topic'), 'danger');
     } finally {
       setSubmitting(false);
     }

@@ -314,6 +314,12 @@ func TestMeRejectsSuperusers(t *testing.T) {
 
 // TestSecureReadRules verifies the public profile read contract of the users
 // collection directly against the PocketBase record APIs.
+//
+// Profiles are public regardless of account status — 1768100000 removed the
+// `status = "active"` branch that used to hide pending and banned accounts, and
+// canReadCharactersOf follows the same rule. The properties still pinned here
+// are the ones that must survive that: email addresses and the legacy firebase
+// uid never reach another account.
 func TestSecureReadRules(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -326,23 +332,29 @@ func TestSecureReadRules(t *testing.T) {
 		notExpect []string
 	}{
 		{
-			name:   "guest lists only active users",
+			// Status is not a visibility switch. A suspended or unapproved
+			// account stays as readable as an active one: a restriction applies to
+			// the ACCOUNT, not to what other people may see of it. What still must
+			// not leak is the identity plumbing — email and the legacy uid.
+			name:   "guest lists every profile regardless of status",
 			method: http.MethodGet,
 			url:    "/api/collections/users/records",
 			status: http.StatusOK,
 			expect: []string{
 				`"PlayerOne"`,
+				`"PendingOne"`,
+				`"BannedOne"`,
 				`"emailVisibility":false`,
 			},
 			notExpect: []string{
-				`"PendingOne"`,
-				`"BannedOne"`,
 				`player@example.com`,
+				`banned@example.com`,
+				`pending@example.com`,
 				`legacy_firebase_uid`,
 			},
 		},
 		{
-			name:   "pending user lists active users and itself",
+			name:   "pending user lists every profile",
 			method: http.MethodGet,
 			url:    "/api/collections/users/records",
 			actor:  "pending",
@@ -350,22 +362,24 @@ func TestSecureReadRules(t *testing.T) {
 			expect: []string{
 				`"PlayerOne"`,
 				`"PendingOne"`,
+				`"BannedOne"`,
 			},
 			notExpect: []string{
-				`"BannedOne"`,
 				// Listing never leaks email addresses of other accounts.
 				`player@example.com`,
 				`mod@example.com`,
 				`root@example.com`,
+				`banned@example.com`,
+				`legacy_firebase_uid`,
 			},
 		},
 		{
-			name:      "guest cannot view a pending profile by id",
+			name:      "guest views a pending profile by id",
 			method:    http.MethodGet,
 			url:       "/api/collections/users/records/" + fixPendingID,
-			status:    http.StatusNotFound,
-			expect:    []string{`"status":404`},
-			notExpect: []string{`"PendingOne"`},
+			status:    http.StatusOK,
+			expect:    []string{`"PendingOne"`, `"status":"pending"`},
+			notExpect: []string{`pending@example.com`, `legacy_firebase_uid`},
 		},
 		{
 			name:   "pending user views its own record",

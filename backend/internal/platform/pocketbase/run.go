@@ -73,6 +73,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 			return err
 		}
 		registerRoutes(se, cfg)
+		// Records every completed identity-provider sign-in, so the chief-admin
+		// handover can accept "sign in with Google again" as proof of identity
+		// for an account that has no usable password. See oauth_signin_recent.go.
+		registerOAuthSignInHook(se.App)
 		return se.Next()
 	})
 
@@ -240,6 +244,9 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Categories
 	group.GET("/categories", listCategoriesHandler)
+	// Forum-wide totals for the stats panel. Counted on read rather than cached —
+	// see listForumStatsHandler.
+	group.GET("/forum-stats", listForumStatsHandler)
 	group.POST("/categories", createCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 	group.PATCH("/categories/{id}", updateCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 	group.DELETE("/categories/{id}", deleteCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
@@ -261,6 +268,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// can only POST) and read the public counter through GET /presence/guests.
 	group.POST("/presence/heartbeat", heartbeatHandler)
 	group.POST("/presence/guest/leave", guestLeaveHandler)
+	// The member counterpart of the guest leave. Without it a signed-in account
+	// can only stop beating, which leaves it in the online list for the whole
+	// presenceTTL — see memberLeaveHandler.
+	group.POST("/presence/leave", memberLeaveHandler)
 	group.GET("/presence/guests", listGuestsHandler)
 	group.GET("/presence/online-users", listOnlineUsersHandler)
 
@@ -280,11 +291,22 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.POST("/topics/{id}/posts/move", movePostsHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)
 
 	// Draft posts (drafts page + in-topic editing).
+	//
+	// The WRITE routes carry PermPostReply, the same key POST /topics/{id}/posts
+	// demands. A draft is a reply that has not been sent yet, so gating it on
+	// anything weaker means the reply gate is bypassable: these routes used to
+	// be bound with enforceIdempotency alone, which consults neither the role nor
+	// the status, and an account narrowed to nothing — banned, or pending — could
+	// draft and then publish straight into the live forum.
 	group.GET("/me/drafts", listMyDraftsHandler)
 	group.GET("/topics/{id}/draft", getDraftHandler)
-	group.PUT("/topics/{id}/draft", upsertDraftHandler).BindFunc(enforceIdempotency)
+	group.PUT("/topics/{id}/draft", upsertDraftHandler).
+		BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
+	// Deleting one's own draft grants nothing, so it stays ungated: a banned
+	// account tidying up its unsent text is harmless.
 	group.DELETE("/drafts/{id}", deleteDraftHandler).BindFunc(enforceIdempotency)
-	group.POST("/drafts/{id}/publish", publishDraftHandler).BindFunc(enforceIdempotency)
+	group.POST("/drafts/{id}/publish", publishDraftHandler).
+		BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
 
 	// Sprint 4 reputation, subscriptions and audit routes.
 	group.GET("/admin/audit-logs", adminListAuditLogsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
@@ -302,6 +324,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.DELETE("/reputation/{id}", deleteReputationHandler).BindFunc(RequirePermission(auth.PermDeleteReputation)).BindFunc(enforceIdempotency)
 	group.GET("/posts/{id}/voters", getPostVotersHandler)
 	group.GET("/users/{id}/reputation", getUserReputationLogsHandler)
+	// The caller's OWN votes. The browser used to read `reputation_votes`
+	// directly over the PocketBase SDK, which that collection's nil browser
+	// rules (migration 1766300000) refuse with 403 — see listMyVotesHandler.
+	group.GET("/me/votes", listMyVotesHandler)
 
 	// Sprint 5 direct messages, notifications and outbox routes.
 	group.POST("/dms", createDMHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages)).BindFunc(enforceIdempotency)
@@ -319,6 +345,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/me/notifications", listUserNotificationsHandler)
 	group.PATCH("/me/notifications/{id}/read", markNotificationReadHandler)
 	group.POST("/me/notifications/read-all", markAllNotificationsReadHandler)
+	group.POST("/me/notifications/archive-all", archiveAllNotificationsHandler)
 	group.PATCH("/me/notifications/{id}/archive", archiveNotificationHandler)
 	group.GET("/me/unread-counts", getUnreadCountsHandler)
 

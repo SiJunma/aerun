@@ -259,7 +259,6 @@ const CategoryPage = () => {
         ) : loadError ? (
           <div className="p-3">
             <ErrorCard
-              isNetworkError={true}
               title={lang === 'ru' ? 'Не удалось загрузить темы' : 'Failed to load topics'}
               error={loadError}
               onRetry={() => loadTopics(true)}
@@ -330,30 +329,50 @@ const CategoryPage = () => {
       </Card>
 
       {/* Management Toolbar */}
-      {isManaging && selectedTopicIds.length > 0 && (
+      {/* The toolbar is shown for the WHOLE manage mode, not only once topics
+          are ticked. It used to be gated on `selectedTopicIds.length > 0`, so
+          pressing "Manage" changed only the button label to "Done" and left the
+          page silent about the next step — the action bar is fixed to the BOTTOM
+          of the viewport, far from the header button that was just pressed, so
+          there was nothing on screen hinting that topics had to be selected
+          first. The bar now states the instruction itself, and its buttons are
+          disabled until there is something to act on. */}
+      {isManaging && (
         <div className="management-toolbar user-select-none">
           <div className="me-2 small fw-bold">
-            {lang === 'ru' ? `Выбрано: ${selectedTopicIds.length}` : `Selected: ${selectedTopicIds.length}`}
+            {lang === 'ru'
+              ? `Выбрано: ${selectedTopicIds.length}`
+              : `Selected: ${selectedTopicIds.length}`}
           </div>
           <div className="vr d-none d-md-block mx-2"></div>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(true)}>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(true)} disabled={selectedTopicIds.length === 0}>
             <Pin size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрепить' : 'Pin'}</span>
           </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(false)}>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(false)} disabled={selectedTopicIds.length === 0}>
             <PinOff size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открепить' : 'Unpin'}</span>
           </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(true)}>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(true)} disabled={selectedTopicIds.length === 0}>
             <Lock size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрыть' : 'Lock'}</span>
           </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(false)}>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(false)} disabled={selectedTopicIds.length === 0}>
             <Unlock size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открыть' : 'Unlock'}</span>
           </Button>
-          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowMoveModal(true)}>
+          <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowMoveModal(true)} disabled={selectedTopicIds.length === 0}>
             <Move size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Перенести' : 'Move'}</span>
           </Button>
-          <Button variant="danger" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowDeleteModal(true)}>
+          <Button variant="danger" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowDeleteModal(true)} disabled={selectedTopicIds.length === 0}>
             <Trash2 size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Удалить' : 'Delete'}</span>
           </Button>
+          {/* The instruction itself. It replaces the toolbar's role as the only
+              thing on screen, and it disappears the moment the first topic is
+              ticked, so the two states are never both talking at once. */}
+          {selectedTopicIds.length === 0 && (
+            <div className="small management-toolbar-hint">
+              {lang === 'ru'
+                ? 'Отметьте темы галочками слева, чтобы применить действия'
+                : 'Tick the topics on the left to apply actions'}
+            </div>
+          )}
         </div>
       )}
 

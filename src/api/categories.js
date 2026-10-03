@@ -1,4 +1,6 @@
 import { sendApi } from './pocketbase';
+import { fetchLatestTopics } from './auth-resources';
+import { subscribeToRefetch } from './connection';
 
 // Category and category-group access.
 //
@@ -23,40 +25,50 @@ const CAT_GROUPS_TTL_MS = 60 * 60 * 1000; // 1 час
 // working against a plain string without a page-wide rewrite.
 const toTitleMap = (title) => ({ en: title || '', ru: title || '' });
 
-export const subscribeToCategoryGroups = (callback) => {
-  let isSubscribed = true;
-
-  const fetchGroups = async () => {
-    // 1. Try localStorage
+// fetchSecuredCategoryGroups reads the group list and owns the localStorage
+// cache. `useCache: false` forces the network, which is what a caller needs after
+// a mutation: the mutation helpers already clear the cache key, but a page that
+// only fetched on mount would keep rendering the pre-mutation list until the
+// next full reload.
+export const fetchSecuredCategoryGroups = async ({ useCache = true } = {}) => {
+  if (useCache) {
     try {
       const raw = localStorage.getItem(CAT_GROUPS_CACHE_KEY);
       if (raw) {
         const { data, ts } = JSON.parse(raw);
-        if (Date.now() - ts < CAT_GROUPS_TTL_MS) {
-          if (isSubscribed) callback(data);
-          return;
-        }
+        if (Date.now() - ts < CAT_GROUPS_TTL_MS) return data;
       }
     } catch { /* Cache corrupted */ }
+  }
 
-    // 2. Fetch from Aerun backend or local fallback
-    try {
-      const res = await sendApi('/api/aerun/category-groups');
-      if (!isSubscribed) return;
-      const data = (res?.items || []).map(g => ({
-        id: g.id,
-        title: toTitleMap(g.title),
-        order: g.sort_order ?? 0
-      }));
-      localStorage.setItem(CAT_GROUPS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
-      callback(data);
-    } catch {
-      if (isSubscribed) callback([]);
-    }
+  const res = await sendApi('/api/aerun/category-groups');
+  const data = (res?.items || []).map(g => ({
+    id: g.id,
+    title: toTitleMap(g.title),
+    order: g.sort_order ?? 0
+  }));
+  localStorage.setItem(CAT_GROUPS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  return data;
+};
+
+export const subscribeToCategoryGroups = (callback) => {
+  let isSubscribed = true;
+
+  const load = () => fetchSecuredCategoryGroups()
+    .then(data => { if (isSubscribed) callback(data); })
+    .catch(() => { if (isSubscribed) callback([]); });
+
+  load();
+
+  // A read that failed while the backend was down settles as an EMPTY list, which
+  // is indistinguishable from "there really are no groups". Re-read on recovery so
+  // the board does not sit on that empty answer until a manual reload.
+  const offRestored = subscribeToRefetch(load);
+
+  return () => {
+    isSubscribed = false;
+    offRestored();
   };
-
-  fetchGroups();
-  return () => { isSubscribed = false; };
 };
 
 export const addCategoryGroup = async (groupData) => {
@@ -118,6 +130,26 @@ const normalizeOrder = (order) => {
 // `permissions.view_forum` for the role picker. Keeping the mapping here means
 // the contract change (single strings + allowed_roles) touches one file instead
 // of every render site.
+//
+// THE COUNTERS AND last_post_* KEYS ARE CARRIED, AND THAT IS THE WHOLE POINT.
+// They used to be dropped here, even though listCategoriesHandler computes them
+// correctly from the topics table (categoryForumProjections). MainPage then read
+// `cat.topics_count || 0` on an object that no longer had the key and rendered
+// 0/0 for every category, with "No posts yet" beside it — on a forum with a
+// topic in it. Dropping a key is not a normalisation; it is a silent data loss
+// that `|| 0` then hides behind a plausible number.
+// toViewOverride maps the stored allowed_roles onto the admin form's tri-state:
+// an array means "override on, these roles", null means "override off".
+//
+// The inherit marker reads as null — it is the server's way of saying "no
+// override configured", so rendering it as a role would put a non-role in the
+// role picker and invite an admin to delete it by hand. An absent list (an older
+// backend) stays an empty array, which is ADR-1's root-only.
+const toViewOverride = (allowedRoles) => {
+  if (!Array.isArray(allowedRoles)) return [];
+  return allowedRoles.includes(INHERIT_ROLES) ? null : allowedRoles;
+};
+
 const toCategory = (d) => ({
   id: d.id,
   slug: d.slug,
@@ -125,13 +157,36 @@ const toCategory = (d) => ({
   description: toTitleMap(d.description),
   group_id: d.group_id || '',
   order: d.sort_order ?? 0,
-  permissions: { [VIEW_FORUM]: Array.isArray(d.allowed_roles) ? d.allowed_roles : [] }
+  permissions: { [VIEW_FORUM]: toViewOverride(d.allowed_roles) },
+  // Counters are already numbers server-side; `?? 0` covers only a category the
+  // server sent without them (an older backend), never a real 0.
+  topics_count: d.topics_count ?? 0,
+  posts_count: d.posts_count ?? 0,
+  // last_post_* are OMITTED when absent on purpose: the server sends them only
+  // for a category that has posts, and the index distinguishes "never had a
+  // post" (render the empty state) from "has a post with a blank author".
+  ...(d.last_post_topic_id ? {
+    last_post_topic_id: d.last_post_topic_id,
+    last_post_topic_title: d.last_post_topic_title,
+    last_post_at: d.last_post_at,
+    last_post_author_id: d.last_post_author_id,
+    last_post_author: d.last_post_author,
+    last_post_author_avatar: d.last_post_author_avatar,
+    last_post_topic_posts_count: d.last_post_topic_posts_count,
+  } : {})
 });
 
 // VIEW_FORUM is the permission key the admin board's role picker is keyed by.
 // Hardcoded rather than imported so this module keeps its single dependency on
 // the transport; the constant has been stable across the migration.
 const VIEW_FORUM = 'view_forum';
+
+// The sentinel the server stores for "this category follows the global role
+// settings". It must stay byte-identical to auth.CategoryInheritMarker in Go —
+// one side writing a value the other cannot recognise would silently restore
+// the snapshot behaviour this replaced, and the mismatch is invisible in review
+// because both sides look like plain strings.
+const INHERIT_ROLES = '__aerun_inherit_roles__';
 
 export const fetchSecuredCategories = async () => {
   try {
@@ -144,16 +199,49 @@ export const fetchSecuredCategories = async () => {
   }
 };
 
+// fetchSecuredMainPageData is the one call that seeds the whole forum shell:
+// AuthProvider feeds its `categories`, `latestTopics` and `forumStats` context
+// state straight from this return value.
+//
+// `latestTopics` AND `stats` ARE NOT OPTIONAL HERE, and their absence was the
+// bug this function had. It returned only `categories`, and because AuthProvider
+// guards each assignment with `if (data?.latestTopics)`, the missing keys were
+// indistinguishable from "the server had none":
+//
+//   - `latestTopics` stayed `[]` forever, so /new-replies and the navbar's
+//     unread badge rendered empty for every member, and
+//   - `forumStats` stayed null, so ForumStats fell back to summing category
+//     counters that were themselves being dropped.
+//
+// All three promises are independent: one failing endpoint degrades only its own
+// slice, and the forum index still renders. That is deliberate — an unreadable
+// stats endpoint must not blank the category list a member came to see.
 export const fetchSecuredMainPageData = async () => {
+  const [cats, topics, stats] = await Promise.all([
+    fetchSecuredCategories(),
+    fetchLatestTopics(50),
+    fetchForumStats(),
+  ]);
+  return {
+    categories: cats,
+    categoryGroups: [],
+    latestTopics: topics,
+    stats,
+  };
+};
+
+// fetchForumStats reads the forum-wide totals the stats panel renders.
+//
+// A failure degrades to null rather than zeros: `null` makes ForumStats fall back
+// to its category-derived numbers, whereas a fabricated `{totalTopics: 0}` would
+// be indistinguishable from a genuinely empty forum and would be trusted.
+const fetchForumStats = async () => {
   try {
-    const cats = await fetchSecuredCategories();
-    return {
-      categories: cats,
-      categoryGroups: []
-    };
+    const res = await sendApi('/api/aerun/forum-stats');
+    return res?.stats || null;
   } catch (err) {
-    console.error('[fetchSecuredMainPageData]', err);
-    return { categories: [], categoryGroups: [] };
+    console.warn('[fetchForumStats]', err);
+    return null;
   }
 };
 
@@ -171,11 +259,25 @@ export const subscribeToCategories = (callback) => {
 
 export const subscribeToAllCategories = (callback) => {
   let isSubscribed = true;
-  fetchSecuredCategories().then(cats => {
-    if (isSubscribed) callback(cats);
-  });
+
+  // fetchSecuredCategories returns a PROMISE. It must be awaited before it
+  // reaches the callback: handing the promise itself to a consumer that calls
+  // `.filter` on it renders the admin board blank with
+  // "categories.filter is not a function".
+  const load = () => fetchSecuredCategories()
+    .then(cats => { if (isSubscribed) callback(cats); })
+    .catch(() => { if (isSubscribed) callback([]); });
+
+  load();
+
+  // A read that failed while the backend was down settles as an EMPTY list, which
+  // is indistinguishable from an empty board. Re-read on recovery — otherwise the
+  // forum keeps claiming it has no categories.
+  const offRestored = subscribeToRefetch(load);
+
   return () => {
     isSubscribed = false;
+    offRestored();
   };
 };
 
@@ -185,9 +287,27 @@ export const subscribeToAllCategories = (callback) => {
 //   - the slug is NOT sent: the server derives it from the name and owns the
 //     UNIQUE key, so a client slug would only create a second answer to the
 //     same question;
-//   - allowed_roles always goes, including as `[]`. An empty list is the
-//     root-only instruction (ADR-1), so omitting it would silently keep the
-//     previous list instead of applying the admin's choice;
+//   - allowed_roles ALWAYS goes, and it carries one of three different
+//     instructions:
+//
+//       OVERRIDE OFF → [INHERIT_ROLES], the server-side marker meaning
+//                     "resolve visibility from each caller's global
+//                     view_forum". This is the whole point of the marker: the
+//                     alternative — naming every role that currently has
+//                     view_forum — freezes the registry as of this save, so a
+//                     role created tomorrow is missing from the array and its
+//                     members are refused a public category until an admin
+//                     re-saves every category by hand.
+//       OVERRIDE ON, roles ticked → exactly those roles.
+//       OVERRIDE ON, nothing ticked → []. An empty list is a real instruction,
+//                     not "unset": it means root-only (ADR-1), i.e. "nobody
+//                     except the root admin may read this category".
+//
+//     Omitting the key did none of these. On CREATE it left AllowedRoles nil,
+//     which became [], so a brand new category was visible to the root admin
+//     and to nobody else — the exact opposite of what "off" says. On PATCH a
+//     nil key means "leave the current list alone", so switching an override
+//     OFF kept the restriction it was supposed to remove, without a word.
 //   - group_id goes even when empty, because that is how a category leaves a
 //     group. The server maps "" and the "unassigned" sentinel to "no group".
 const toCategoryPayload = (catData) => {
@@ -198,10 +318,10 @@ const toCategoryPayload = (catData) => {
     group_id: catData?.group_id || ''
   };
 
-  const roles = catData?.permissions?.[VIEW_FORUM];
-  if (Array.isArray(roles)) {
-    body.allowed_roles = [...new Set(roles)];
-  }
+  const override = catData?.permissions?.[VIEW_FORUM];
+  body.allowed_roles = Array.isArray(override)
+    ? [...new Set(override)]
+    : [INHERIT_ROLES];
   return body;
 };
 

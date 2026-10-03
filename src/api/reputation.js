@@ -1,4 +1,10 @@
-import { sendApi, pb } from './pocketbase';
+// Every read and write here goes through the command layer.
+//
+// `pb` is deliberately NOT imported: the last thing this module did with it was
+// read `reputation_votes` directly from the browser, which that collection's nil
+// browser rules refuse with 403. A file that still reached for the SDK would be
+// an invitation to do it again.
+import { sendApi } from './pocketbase';
 
 /**
  * voteOnPost
@@ -20,15 +26,22 @@ export const voteOnPost = async (voterUid, targetUid, postId, topicId, value, co
 /**
  * getVotesInTopic
  * Fetches all votes cast by a specific user in a specific topic.
+ *
+ * This used to call `pb.collection('reputation_votes').getFullList(...)` from
+ * the BROWSER. `reputation_votes` is server-only — migration 1766300000 gives it
+ * nil browser rules — so every call returned `403 Only superusers can perform
+ * this action`. The catch block swallowed it and returned `{}`, which is why the
+ * only visible symptom was a console full of errors and every upvote arrow
+ * rendering as un-voted even after the member had voted. Reading your own votes
+ * through /me/votes (listMyVotesHandler) cannot 403, because the server looks
+ * them up for the authenticated caller.
  */
 export const getVotesInTopic = async (voterUid, topicId) => {
   if (!voterUid || !topicId) return {};
   try {
-    const records = await pb.collection('reputation_votes').getFullList({
-      filter: `voter_id = "${voterUid}" && topic_id = "${topicId}"`
-    });
+    const res = await sendApi(`/api/aerun/me/votes?topic_id=${encodeURIComponent(topicId)}`);
     const votes = {};
-    records.forEach(r => {
+    (res?.items || []).forEach(r => {
       if (r.post_id) {
         votes[r.post_id] = {
           id: r.id,
@@ -62,12 +75,18 @@ export const voteOnProfile = async (voterUid, targetUid, value, comment, _voterN
 /**
  * getProfileVote
  * Checks if a user has already voted for a specific profile.
+ *
+ * Server-side for the same reason as getVotesInTopic: `reputation_votes` has nil
+ * browser rules, so the old `pb.collection('reputation_votes').getFirstListItem`
+ * could only ever 403. /me/votes returns the caller's own ballots, and a profile
+ * vote is the one with an empty post_id.
  */
 export const getProfileVote = async (voterUid, targetUid) => {
   if (!voterUid || !targetUid) return null;
   try {
-    const record = await pb.collection('reputation_votes').getFirstListItem(
-      `voter_id = "${voterUid}" && target_id = "${targetUid}" && post_id = ""`
+    const res = await sendApi('/api/aerun/me/votes');
+    const record = (res?.items || []).find(
+      r => !r.post_id && r.target_id === targetUid
     );
     return record ? { id: record.id, ...record } : null;
   } catch {
@@ -157,14 +176,17 @@ export const fetchPostVoters = async (postId, limit = 50) => {
 /**
  * checkPostVote
  * Quick check if user already voted on a post.
+ *
+ * Server-side for the same reason as getVotesInTopic — the old
+ * `pb.collection('reputation_votes')` read could only ever 403. One
+ * `getVotesInTopic` answers this for a whole topic, so a caller that already
+ * holds those votes does not pay for a second request.
  */
 export const checkPostVote = async (voterUid, postId) => {
   if (!voterUid || !postId) return false;
   try {
-    const record = await pb.collection('reputation_votes').getFirstListItem(
-      `voter_id = "${voterUid}" && post_id = "${postId}"`
-    );
-    return !!record;
+    const res = await sendApi('/api/aerun/me/votes');
+    return (res?.items || []).some(r => r.post_id === postId);
   } catch {
     return false;
   }

@@ -882,7 +882,7 @@ const ProfilePage = () => {
                               className={searchParams.get('log') === log.id ? 'highlight-rep-row' : ''}
                             >
                               <td className="px-4 py-3 small text-muted">
-                                {log.created_at ? <Timestamp date={log.created_at?.toDate ? log.created_at.toDate() : new Date(log.created_at)} /> : '...'}
+                                {log.created_at ? <Timestamp date={log.created_at} /> : '...'}
                               </td>
                               <td className="py-3 text-center">
                                 <OverlayTrigger
@@ -1196,7 +1196,7 @@ const ProfilePage = () => {
                                           </Badge>
                                         )}
                                         <span className="text-muted small">
-                                          {post.created_at ? <Timestamp date={post.created_at.toDate()} /> : '...'}
+                                          {post.created_at ? <Timestamp date={post.created_at} /> : '...'}
                                         </span>
                                       </div>
                                     </div>

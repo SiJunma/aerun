@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, Row, Col } from 'react-bootstrap';
-import { Bell, BellOff, CheckCheck, UserCheck, Clock, Trash2, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, UserCheck, Clock, Trash2, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign, Mail } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -47,6 +47,11 @@ const TYPE_META = {
     icon: <AtSign size={18} />,
     labelKey: 'notifications.types.post_mentioned',
     color: 'secondary'
+  },
+  dm: {
+    icon: <Mail size={18} />,
+    labelKey: 'notifications.types.dm',
+    color: 'dark'
   },
   POST_MENTIONED: {
     icon: <AtSign size={18} />,
@@ -128,10 +133,20 @@ const NotificationsPage = () => {
     if (e) e.stopPropagation();
     recordActivity();
     const isAdminNotif = adminActive.some(n => n.id === id);
+
+    // Update the list the admin is looking at first. The subscription polls on a
+    // 15s timer, so without this the row stays bold until the next tick — the
+    // click looks like it did nothing. The server response still decides the
+    // truth: on failure we reload, which puts the row back to unread.
+    setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
+    setAdminActive(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
+
     markNotificationRead(id, profile?.uid, isAdminNotif)
       .catch(err => {
         console.error('[markNotificationRead]', err);
         showToast(err.message, 'danger');
+        setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: false } : n)));
+        setAdminActive(prev => prev.map(n => (n.id === id ? { ...n, read: false } : n)));
       });
   };
 
@@ -147,6 +162,12 @@ const NotificationsPage = () => {
     setTimeout(() => {
       deleteNotification(id, profile?.uid, isAdminNotif)
         .then(() => {
+          // Drop the row locally as well. The list reloads on the 15s poll, so
+          // without this an archived notification keeps occupying its slot —
+          // and `archived:true` rows are filtered out of the next fetch, so it
+          // would disappear on its own seconds later, looking like a glitch.
+          setUserActive(prev => prev.filter(n => n.id !== id));
+          setAdminActive(prev => prev.filter(n => n.id !== id));
           showToast(t('notifications.deleted_toast', 'Уведомление удалено'));
           setDeletingId(null);
         })
@@ -160,6 +181,13 @@ const NotificationsPage = () => {
 
   const handleMarkAllRead = async () => {
     recordActivity();
+
+    // Optimistic: clear the unread marks immediately, then let the server's
+    // answer stand. If a request fails the toast says so AND the marks come
+    // back, because the marks are not a lie we are allowed to keep.
+    setUserActive(prev => prev.map(n => ({ ...n, read: true })));
+    setAdminActive(prev => prev.map(n => ({ ...n, read: true })));
+
     try {
       if (profile?.uid && userActive.length > 0) {
         await markAllNotificationsRead(profile.uid, userActive);
@@ -171,6 +199,9 @@ const NotificationsPage = () => {
     } catch (err) {
       console.error('[handleMarkAllRead]', err);
       showToast(err.message, 'danger');
+      // Roll the marks back so the page matches the server.
+      setUserActive(prev => prev.map(n => ({ ...n, read: false })));
+      setAdminActive(prev => prev.map(n => ({ ...n, read: false })));
     }
   };
 
@@ -183,6 +214,10 @@ const NotificationsPage = () => {
       if (profile?.uid) {
         await deleteAllUserNotifications(profile.uid);
       }
+      // Clear locally too. Archived rows are filtered out of the next poll, so
+      // leaving them rendered until then shows the list contradicting itself.
+      setUserActive([]);
+      setAdminActive([]);
       showToast(t('notifications.all_deleted_toast', 'Все уведомления очищены'));
     } catch (err) {
       console.error('[deleteAllNotifications]', err);
@@ -286,6 +321,46 @@ const NotificationsPage = () => {
                             >
                               {payload.topic_title}
                             </Link>
+                          </>
+                        );
+                      })()
+                    ) : n.type === 'dm' ? (
+                      (() => {
+                        // Deep link to the conversation with the sender. The DM
+                        // routes address a USER, not a conversation, so the
+                        // sender_uid in the payload is what makes this a real jump
+                        // rather than a link that lands on the message list.
+                        //
+                        // Comments in this position must live INSIDE the IIFE: a
+                        // bare // placed directly in JSX children is not a comment
+                        // at all, it becomes literal text in the rendered row.
+                        //
+                        // The phrase comes from the dictionary, not a hardcoded
+                        // ternary, so a third locale needs no change here.
+                        const typeLabel = meta?.labelKey
+                          ? t(meta.labelKey, 'Direct message')
+                          : (lang === 'ru' ? 'Личное сообщение' : 'Direct message');
+                        const preview = (payload?.preview || '').trim();
+                        return (
+                          <>
+                            {typeLabel}{' '}
+                            {payload?.sender_uid ? (
+                              <Link
+                                to={`/messages/${payload.sender_uid}`}
+                                className="text-decoration-none hover-underline"
+                                style={{ color: 'var(--content-link-color)', textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
+                                onClick={() => !n.read && handleMarkRead(null, n.id)}
+                              >
+                                {payload?.sender_nickname || payload.sender_uid}
+                              </Link>
+                            ) : (
+                              <span>{payload?.sender_nickname || typeLabel}</span>
+                            )}
+                            {preview && (
+                              <span className="text-muted" style={{ marginLeft: '0.35rem' }}>
+                                «{preview.length > 60 ? `${preview.slice(0, 60)}…` : preview}»
+                              </span>
+                            )}
                           </>
                         );
                       })()

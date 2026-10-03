@@ -5,6 +5,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { Folder, MessageSquare, FileText } from 'lucide-react';
 import { subscribeToCategoryGroups } from '../api/categories';
+import { subscribeToRefetch } from '../api/connection';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
@@ -31,6 +32,13 @@ const MainPage = () => {
       unsubGroups();
     };
   }, []);
+
+  // This page's categories live in AuthProvider, not in a local list, so the
+  // reconnect refetch that the category subscribers handle does not cover them.
+  // Without this the index keeps rendering "no categories": refreshForumState
+  // failed while the backend was down and answered with an empty list, which is
+  // exactly what an empty forum looks like.
+  useEffect(() => subscribeToRefetch(() => refreshForumState?.(true)), [refreshForumState]);
 
 
   // While a logged-in user's profile is still loading from Firestore, treat as loading
@@ -112,6 +120,31 @@ const MainPage = () => {
         const visibleCats = categories;
         const groupsWithCats = groups.filter(g => visibleCats.some(c => c.group_id === g.id));
 
+        // Categories that belong to no group are rendered NOWHERE by the loop
+        // below: it walks GROUPS and keeps the categories matching each one, so
+        // `cat.group_id === g.id` never matches "". Such a category is invisible
+        // on the forum index while existing perfectly well in the database.
+        //
+        // The empty-state guard counts `categories`, not rendered rows, so when
+        // every category is ungrouped the index showed neither the list nor the
+        // "no categories" message — a blank area with no way to diagnose it.
+        //
+        // They get their own section here so the row stays reachable and the
+        // misconfiguration is legible instead of silent.
+        const UNGROUPED_KEY = '__ungrouped__';
+        const ungroupedCats = visibleCats.filter(
+          c => !c.group_id || !groups.some(g => g.id === c.group_id)
+        );
+        const renderGroups = ungroupedCats.length
+          ? [...groupsWithCats, { id: UNGROUPED_KEY, __isUngrouped: true }]
+          : groupsWithCats;
+
+        // One accessor for both kinds of group, so the table markup below stays
+        // a single branch instead of a duplicated row.
+        const catsForGroup = (group) => (group.__isUngrouped
+          ? ungroupedCats
+          : visibleCats.filter(cat => cat.group_id === group.id));
+
         if (visibleCats.length === 0) {
           return (
             <Card className="shadow-sm border-0">
@@ -126,11 +159,13 @@ const MainPage = () => {
           );
         }
 
-        return groupsWithCats.map(group => (
+        return renderGroups.map(group => (
           <Card key={group.id} className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
             <div className="d-flex align-items-center forum-group-header">
               <h4 className="mb-0">
-                {resolveField(group.title, lang)}
+                {group.__isUngrouped
+                  ? (lang === 'ru' ? 'Без группы' : 'Unassigned')
+                  : resolveField(group.title, lang)}
               </h4>
             </div>
             <Table hover responsive className="mb-0 forum-table forum-table-sub">
@@ -143,9 +178,7 @@ const MainPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {visibleCats
-                  .filter(cat => cat.group_id === group.id)
-                  .map(cat => (
+                {catsForGroup(group).map(cat => (
                     <tr key={cat.id}>
                       <td data-label={t('forum.category')}>
                         <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1 cat-link">

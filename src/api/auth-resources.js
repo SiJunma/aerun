@@ -1,4 +1,8 @@
 import { sendApi, pb } from './pocketbase';
+// normalizeTopic is imported, not re-implemented: the topic lists here must
+// render the same rows as the category page, and a second copy of this mapping
+// is exactly how the two drifted apart in the first place.
+import { normalizeTopic } from './forum';
 
 // ── Read Map (local / server-side "last visit" tracking) ─────────────────────────────
 
@@ -52,10 +56,26 @@ export const markAllTopicsRead = async (uid, topicIds) => {
 
 // ── Latest Content ─────────────────────────────────────────────────────────
 
+// Both of these read the topic list, which the command layer serves under
+// `items`. The `topics` key belongs to the retired Firestore callable and is
+// never present, so "Most Active Topics" and the new-replies feed rendered
+// empty for every member.
+//
+// `order_by` is gone from the URL too: listTopicsHandler orders by
+// `pinned DESC, last_post_created DESC, id DESC` unconditionally, so the
+// parameter never did anything except look like it did.
+//
+// NORMALISE BEFORE HANDING A ROW TO A RENDERER. This used to pass the raw
+// `items` through, and normalizeTopic is what maps the server's own field names
+// onto the ones TopicRow reads (`last_post_created` → `last_post_at`,
+// `pinned` → `is_pinned`, `created` → `created_at`). Skipping it left every one
+// of those undefined, so /active-topics rendered a literal "—" in the last-post
+// column with no link at all — the row looked empty rather than wrong, which is
+// why it survived review.
 export const fetchLatestTopics = async (limitCount = 50) => {
   try {
-    const res = await sendApi(`/api/aerun/topics?order_by=last_post_at&limit=${limitCount}`);
-    return res?.topics || [];
+    const res = await sendApi(`/api/aerun/topics?limit=${limitCount}`);
+    return (res?.items || []).map(normalizeTopic);
   } catch (err) {
     console.error('[fetchLatestTopics]', err);
     return [];
@@ -88,13 +108,20 @@ export const deleteGuestActivity = async (_guestId) => {};
 
 // ── Statistics & Global Content ─────────────────────────────────────────────
 
+// subscribeToTopTopics backs the /active-topics list.
+//
+// It maps through `fetchLatestTopics`, not through its own request, so this page
+// cannot drift from the new-replies feed: both render the SAME normalised rows,
+// and a fix to one is a fix to both. The previous version issued its own
+// `sendApi` and passed `res.items` through raw, which is how that page ended up
+// showing "—" where every other topic list showed a timestamp and a link.
 export const subscribeToTopTopics = (callback, limitCount = 50) => {
   let isSubscribed = true;
 
   const load = async () => {
     try {
-      const res = await sendApi(`/api/aerun/topics?order_by=posts_count&limit=${limitCount}`);
-      if (isSubscribed) callback(res?.topics || []);
+      const topics = await fetchLatestTopics(limitCount);
+      if (isSubscribed) callback(topics);
     } catch (err) {
       console.error('[subscribeToTopTopics]', err);
       if (isSubscribed) callback([]);

@@ -593,7 +593,6 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             <PrivacyNotice />
             {chatError ? (
               <ErrorCard
-                isNetworkError={true}
                 title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load messages'}
                 error={chatError}
                 onRetry={() => {
@@ -886,7 +885,6 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
         {inboxError ? (
           <ErrorCard
-            isNetworkError={true}
             title={lang === 'ru' ? 'Не удалось загрузить диалоги' : 'Failed to load conversations'}
             error={inboxError}
             onRetry={() => {

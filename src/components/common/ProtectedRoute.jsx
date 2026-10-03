@@ -21,7 +21,13 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
 
   // Shadow logout for banned users: treat them as guests immediately in terms of routing.
   // This avoids the jump to /banned before AuthProvider triggers the real logout().
-  const isBanned = profile?.role_id === 'banned';
+  //
+  // Read from `status`, not from role_id. The account state was split out of the
+  // role (internal/auth/status.go), and the legacy app encoded a ban as
+  // role_id "banned" — so keying this off the role meant a banned account was
+  // still routed as a full member on the client even though the server had
+  // already stripped every permission from it.
+  const isBanned = profile?.status === 'banned';
   const user = isBanned ? null : firebaseUser;
 
   // Not logged in at all → /login (unless allowGuest is true and whitelistMode is OFF)
@@ -78,7 +84,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   // Pending status handling
   // When whitelistMode is OFF, pending users browse like spectators (read-only).
   // They are only blocked from routes that require posting or admin access.
-  if (profile?.role_id === 'pending') {
+  if (profile?.status === 'pending') {
     const isWhitelistOff = !settings.whitelistMode;
     const treatedAsSpectator = isWhitelistOff && !requireAdmin && !requirePosting;
     if (requireActive && !treatedAsSpectator && location.pathname !== '/pending') {

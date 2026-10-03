@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import React, { useEffect, useRef } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import Layout from './components/layout/Layout';
 import LoginPage from './pages/LoginPage';
@@ -38,7 +38,52 @@ const ActivityTracker = () => {
 };
 
 /**
- * ScrollToTop — resets scroll to top on every route change (simulating page navigation).
+ * IdentityRedirect — sends the visitor home when WHO they are changes.
+ *
+ * ProtectedRoute already bounces people off routes they may not enter, but it
+ * answers only the routes it wraps. A topic page renders as a guest when the
+ * session ends underneath it: the post list request is then refused by the
+ * server (canViewTopic), and the member is left staring at whatever the page
+ * managed to render before the refusal — an empty shell that looks like a
+ * broken topic rather than a finished session.
+ *
+ * The rule is deliberately blunt — ANY change of identity lands on "/":
+ *
+ *   - signing out, anywhere, including from inside a topic that is now closed;
+ *   - a role or status change applied by a moderator while the tab is open,
+ *     which can revoke access to the very page being read;
+ *   - signing in, so a guest deep in a thread lands on the index rather than
+ *     staying on a URL whose content is about to change shape.
+ *
+ * It runs on identity, not on pathname, so it never fights the router: the
+ * first render of a fresh page load has no previous identity to compare
+ * against and is left alone, which is what keeps a direct link to a topic
+ * working normally.
+ */
+const IdentityRedirect = () => {
+  const { user, profile } = useAuth();
+  const navigate = useNavigate();
+  const identity = `${user?.uid || ''}|${profile?.role_id || ''}|${profile?.status || ''}`;
+  const previousIdentityRef = useRef(identity);
+
+  useEffect(() => {
+    const previous = previousIdentityRef.current;
+    previousIdentityRef.current = identity;
+
+    // No change, or the very first run: not a transition.
+    if (previous === identity) return;
+    // Only redirect away from somewhere; "/" is where they belong now.
+    if (window.location.pathname === '/') return;
+
+    navigate('/', { replace: true });
+  }, [identity, navigate]);
+
+  return null;
+};
+
+/**
+ * ScrollToTop — resets scroll to top on every route change (simulating page
+ * navigation).
  * Does not trigger on search param changes (like pagination).
  */
 const ScrollToTop = () => {
@@ -54,6 +99,7 @@ const App = () => {
     <>
       <ActivityTracker />
       <ScrollToTop />
+      <IdentityRedirect />
       <GlobalModals />
       <Routes>
         {/* Public Routes */}
