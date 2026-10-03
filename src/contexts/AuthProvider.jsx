@@ -372,6 +372,18 @@ export const AuthProvider = ({ children }) => {
 
     // Only AFTER the server confirmed, so a rejected save cannot leave the UI
     // showing a nickname the database does not hold.
+    //
+    // THE NICKNAME IS PART OF THIS MERGE, and its absence was the reported bug.
+    // It is destructured out above only to route it to its own audited command;
+    // nobody put it back, so every save left `profile.nickname` at its old value
+    // while the database moved on. ProfilePage seeds its form from `profile`, so
+    // re-opening your own Settings tab showed the nickname you had just replaced.
+    // `displayName` travels with it because normalizeUserProfile publishes both and
+    // the form reads `nickname || displayName`.
+    //
+    // The merged object is RETURNED so the caller can re-seed its form from what
+    // the server confirmed rather than from what was typed — the two differ
+    // whenever the server normalises a value, and the form must show the former.
     if (isOwn) {
       // `settings` is deliberately EXCLUDED from the optimistic merge below.
       // `newData.settings` is the account FORM's object — an enumeration of the
@@ -383,12 +395,18 @@ export const AuthProvider = ({ children }) => {
       // the server too. That is the reported loss of account data.
       const { settings: _formSettings, ...rest } = newData;
       void _formSettings;
-      setProfile(prev => ({
-        ...prev,
+      const merged = {
+        ...profile,
         ...rest,
+        ...(nickname ? { nickname, displayName: nickname } : {}),
         ...(savedSettings ? { settings: savedSettings } : {}),
-      }));
+      };
+      setProfile(merged);
+      return merged;
     }
+    // Somebody else's account: the caller's form is re-seeded from `viewedProfile`,
+    // which subscribeToUser refreshes, so there is nothing to hand back here.
+    return null;
   };
 
   // setLastSelectedMask records which mask the author is posting as.
