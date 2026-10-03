@@ -5,7 +5,7 @@ import { User } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCharacters } from '../api/character';
-import { createTopic, updateUser } from '../api/forum';
+import { createTopic } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { resolveField } from '../utils/text';
@@ -18,7 +18,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, hasPermission, PERMISSIONS, settings, categories } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, hasPermission, PERMISSIONS, settings, categories, setLastSelectedMask } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
 
@@ -43,6 +43,19 @@ const TopicFormPage = () => {
   }
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [pinFirstPost, setPinFirstPost] = useState(false);
+
+  // Start on the mask the author last posted as, like the reply form does.
+  //
+  // It did not at all: this picker opened on "post as account" every time,
+  // while the reply picker remembered — so an author who had settled on one
+  // mask had to pick it again every time they opened a NEW topic. Same stored
+  // field, two different answers.
+  useEffect(() => {
+    if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
+      setSelectedCharacterId(profile.last_selected_character_id || '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.last_selected_character_id]);
 
   const DRAFT_KEY = `topic_draft_${categoryId}`;
 
@@ -303,7 +316,7 @@ const TopicFormPage = () => {
                       active={selectedCharacterId === ''}
                       onClick={() => {
                         setSelectedCharacterId('');
-                        if (user) updateUser(user.uid, { last_selected_character_id: '' });
+                        if (user) setLastSelectedMask('');
                       }}
                     >
                       User: {profile?.nickname || profile?.email?.split('@')[0]}
@@ -315,7 +328,7 @@ const TopicFormPage = () => {
                         active={selectedCharacterId === char.id}
                         onClick={() => {
                           setSelectedCharacterId(char.id);
-                          if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                          if (user) setLastSelectedMask(char.id);
                         }}
                       >
                         {lang === 'ru' ? 'Персонаж' : 'Character'}: {char.name}

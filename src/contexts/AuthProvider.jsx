@@ -391,6 +391,42 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // setLastSelectedMask records which mask the author is posting as.
+  //
+  // WHY THIS EXISTS SEPARATELY. The picker used to call
+  // `updateUser(uid, { last_selected_character_id })` from api/forum.js, which
+  // PATCHes /me/profile correctly — and then nothing else. The value the picker
+  // READS back is `profile.last_selected_character_id`, and `profile` is built
+  // from `pb.authStore.record`, which that raw fetch never touches. So the write
+  // landed in the database while the read kept answering with whatever was in
+  // the auth store at SIGN-IN time: the picker offered a mask the author had not
+  // chosen in weeks, and a full page reload did not help, because PocketBase
+  // restores the auth store from localStorage and nothing had ever refreshed it.
+  //
+  // The optimistic merge alone would only paper over the current tab; writing
+  // the record back through authStore.save() is what makes it survive a reload,
+  // and it fires the store's change callbacks, so `profile` is rebuilt from the
+  // record that was actually just written.
+  //
+  // The server response is authoritative: on a successful save the picker
+  // re-renders from the profile the server holds, so a rejected write cannot
+  // leave the toggle naming a mask the database never accepted.
+  const setLastSelectedMask = useCallback(async (characterId) => {
+    if (!user?.uid) return;
+    const id = characterId || '';
+    await sendApi('/api/aerun/me/profile', {
+      method: 'PATCH',
+      body: { last_selected_character_id: id }
+    });
+    // Saved only AFTER the server confirmed, for the same reason updateProfile
+    // merges late: a refused write must not leave the picker showing a mask the
+    // database does not hold.
+    const record = pb.authStore.record;
+    if (record && record.last_selected_character_id !== id) {
+      pb.authStore.save(pb.authStore.token, { ...record, last_selected_character_id: id });
+    }
+  }, [user?.uid]);
+
   const refreshForumState = useCallback(async (force = false) => {
     const now = Date.now();
     if (!force && now - lastForumRefreshTimeRef.current < FORUM_REFRESH_COOLDOWN_MS) {
@@ -557,6 +593,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     updateSettings,
     updateProfile,
+    setLastSelectedMask,
     recordActivity,
     refreshForumState,
     scheduleForumStateRefresh,
@@ -577,7 +614,7 @@ export const AuthProvider = ({ children }) => {
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
-    updateSettings, updateProfile, recordActivity, refreshForumState, scheduleForumStateRefresh, applyForumState, forumStats,
+    updateSettings, updateProfile, setLastSelectedMask, recordActivity, refreshForumState, scheduleForumStateRefresh, applyForumState, forumStats,
     dailyActiveUsers, updateLocalTopicLastPost, updateLocalTopicPostsCount, hasPermission, roles, activeUsers,
     activeUserIds, isUserOnline, latestTopics
   ]);

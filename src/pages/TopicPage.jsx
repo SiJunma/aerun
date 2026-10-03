@@ -5,7 +5,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
-  updateUser, updateTopic,
+  updateTopic,
   deleteTopics, moveTopics, movePosts, getTopicDraft, saveTopicDraft,
   deleteDraft, publishDraft,
   locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
@@ -81,7 +81,7 @@ const TopicPage = () => {
   locationRef.current = location;
   const pendingCreatedPostIdRef = useRef(null);
   const { t, lang } = useI18n();
-  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, scheduleForumStateRefresh, applyForumState, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, scheduleForumStateRefresh, applyForumState, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline, setLastSelectedMask } = useAuth();
   const { showToast } = useToast();
 
   // A mutation callable returns a converged main-page projection. Apply it
@@ -639,7 +639,13 @@ const TopicPage = () => {
     return () => unsub();
   }, [user?.uid, id, profile?.role_id]);
 
-  // Set initial selectedCharacterId from profile
+  // Set initial selectedCharacterId from profile.
+  //
+  // The `selectedCharacterId === ''` guard is what makes this an INITIAL value
+  // rather than an override: without it the effect would fight the picker on
+  // every profile change, because picking a mask writes that same field back.
+  // It is safe because the state starts empty and only the user moves it off
+  // empty afterwards.
   useEffect(() => {
     if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
       setSelectedCharacterId(profile.last_selected_character_id || '');
@@ -3558,7 +3564,11 @@ const TopicPage = () => {
                               active={selectedCharacterId === ''}
                               onClick={() => {
                                 setSelectedCharacterId('');
-                                if (user) updateUser(user.uid, { last_selected_character_id: '' });
+                                // setLastSelectedMask writes through the auth
+                                // store, so the value the picker reads back on
+                                // the NEXT topic is the one just chosen —
+                                // updateUser's PATCH left the client stale.
+                                if (user) setLastSelectedMask('');
                               }}
                             >
                               {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
@@ -3570,7 +3580,7 @@ const TopicPage = () => {
                                 active={selectedCharacterId === char.id}
                                 onClick={() => {
                                   setSelectedCharacterId(char.id);
-                                  if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                                  if (user) setLastSelectedMask(char.id);
                                 }}
                               >
                                 {t('forum.post_as_character')}: {char.name}
