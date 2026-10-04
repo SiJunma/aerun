@@ -106,6 +106,67 @@ func TestRolePayloadIsSplitByAudience(t *testing.T) {
 	})
 }
 
+// ── The staff member DTO is a whitelist, and it is COMPLETE ──────────────────
+//
+// Two separate defects met on this one response, and they pull in opposite
+// directions, so both halves are asserted here:
+//
+//	MISSING. The payload had no `status_line`. MembersPage renders the one-line
+//	status under every nickname, so the admin table rendered that cell empty for
+//	every account while the PUBLIC read supplied a real value — the same row
+//	looking different depending on which endpoint answered. That asymmetry is
+//	the tell: a mapper gap, not a data gap.
+//
+//	EXTRA. The payload is a whitelist rather than a serialised record, and the
+//	whitelist is the security property. `users` is an auth collection, so a
+//	record carries `settings` — every member's private preferences, including
+//	sound volume and which notification types they muted — and `email`. Neither
+//	may ride along here. They did not, and this is what stops them starting.
+func TestStaffUserPayloadIsAWhitelistAndCarriesTheStatusLine(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	t.Run("the moderation fields are present", func(t *testing.T) {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/admin/users", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", status, body)
+		}
+
+		for _, field := range []string{
+			`"status_line"`, `"status"`, `"verified"`, `"last_seen"`,
+			`"post_count"`, `"topics_count"`, `"reputation"`,
+		} {
+			if !bytes.Contains(body, []byte(field)) {
+				t.Fatalf("the staff member table needs %s and must get it: %s", field, body)
+			}
+		}
+	})
+
+	t.Run("no auth credentials or private preferences ride along", func(t *testing.T) {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/admin/users", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", status, body)
+		}
+
+		// `settings` is the one that matters: it holds every member's sound
+		// volume, in-app notification mutes and mail preferences. `email` is the
+		// authentication credential — the password-reset target and the OAuth2
+		// subject. Neither belongs in an operator read.
+		for _, field := range []string{
+			`"settings"`, `"email"`, `"password"`, `"tokenKey"`,
+			`"legacy_firebase_uid"`, `"emailVisibility"`, `"contacts"`,
+		} {
+			if bytes.Contains(body, []byte(field)) {
+				t.Fatalf("the staff member list must not serve %s: %s", field, body)
+			}
+		}
+	})
+}
+
 // A system role is EDITABLE. It is the template a custom role is derived from,
 // so freezing it would freeze every role built on it. The fields that make it a
 // system role in the first place stay locked: role_id (the key users.role and

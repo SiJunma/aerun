@@ -65,7 +65,25 @@ while ((r = re2.exec(runSrc)) !== null) {
 
 const missing = [];
 for (const [key, where] of [...calls].sort()) {
-  if (!routes.has(key)) missing.push({ key, where });
+  // A concrete segment MAY satisfy a `{param}` placeholder, because the
+  // backend registers the pattern and the client spells one instance of it.
+  // `/me/auth/google` is served by `/me/auth/{provider}`.
+  //
+  // Without this the audit reports a permanent false positive, and a signal that
+  // is always wrong is a signal people stop reading — which is how a REAL
+  // missing route (a Go route added while the server ran an older binary, 404 in
+  // the browser) hides in the same report as this one.
+  const segs = key.split(' ');
+  const path = segs[1].split('/');
+  const [method] = segs;
+  const matches = [...routes].some((r) => {
+    const [rm, rp] = r.split(' ');
+    if (rm !== method) return false;
+    const rs = rp.split('/');
+    if (rs.length !== path.length) return false;
+    return rs.every((s, i) => s === ':p' || s === path[i]);
+  });
+  if (!matches) missing.push({ key, where });
 }
 
 console.log(`frontend call shapes: ${calls.size}`);

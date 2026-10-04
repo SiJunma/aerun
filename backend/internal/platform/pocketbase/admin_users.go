@@ -90,8 +90,14 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 			"status":     record.GetString("status"),
 			"verified":   record.GetBool("verified"),
 			"avatar_url": record.GetString("avatar_url"),
-			"created":    record.GetDateTime("created"),
-			"updated":    record.GetDateTime("updated"),
+			// The one-line status MembersPage renders under the nickname. It was
+			// missing here, so the admin table received `undefined` for it from
+			// this route while the public read supplied a real value — the same
+			// row rendering differently depending on which endpoint answered,
+			// which is the signature of a mapper gap rather than a data gap.
+			"status_line": record.GetString("status_line"),
+			"created":     record.GetDateTime("created"),
+			"updated":     record.GetDateTime("updated"),
 			// The durable last-visit clock (migration 1767300000), which is
 			// what the members table renders once a member is no longer in the
 			// live presence map.

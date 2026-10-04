@@ -13,6 +13,32 @@ one.
 Status: **audited, three changes landed, one decision left for the owner.** The
 endpoints that turned out NOT to be problems are recorded too — an audit that only
 lists what it changed teaches nothing about the rest.
+## Operational note: a new Go route needs a backend restart
+
+`go test` builds and runs the handlers in-process, and `npm test` reads the
+frontend's source — **neither exercises the binary you are actually talking to.**
+A route added in Go compiles and passes its tests while a running server that
+predates the edit answers `404 The requested resource wasn't found`, which reads
+exactly like a broken route rather than a stale process.
+
+It cost one confused round-trip here: `GET /api/aerun/users?page=1` returned 404
+from a correct registration, and the only fact that settled it was comparing
+timestamps:
+
+```powershell
+(Get-Item backend/internal/platform/pocketbase/run.go).LastWriteTime
+(Get-Process -Name aerun).StartTime
+```
+
+The route needs the backend restarted from the `backend` directory:
+
+```powershell
+Stop-Process -Name aerun,go -Force
+cd backend; go run ./cmd/aerun
+```
+
+When a new endpoint answers 404 in a browser, check the process start time before
+re-reading the route table.
 
 ## Landed
 

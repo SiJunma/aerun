@@ -98,8 +98,31 @@ const normalizeUserProfile = new Function(
     /normalizeUserProfile\(\{ \.\.\.rec \}\)/,
     'AuthProvider must build the profile through normalizeUserProfile'
   );
+  // ONE normaliser call site in auth-resources, because there is now ONE read.
+  //
+  // This used to be `length === 2` — the initial read plus the realtime event.
+  // The realtime subscription is gone: `RealtimeRule` is unset on every
+  // collection, so it completed the SSE handshake and delivered nothing while an
+  // event would have carried the whole auth record. Counting two call sites was
+  // therefore asserting that a dead channel stayed dead-but-present.
   const subs = api.match(/normalizeUserProfile\(\{ \.\.\.(record|e\.record) \}\)/g) || [];
-  assert.equal(subs.length, 2, 'both the initial read and the realtime event must normalise');
+  assert.equal(
+    subs.length,
+    1,
+    'auth-resources must normalise exactly once — a second call site means a reader ' +
+      'was added that does not go through the public profile DTO'
+  );
+  // Matched against CODE, not source. auth-resources.js explains at length why
+  // the collection read is gone, and it names the call verbatim while doing so —
+  // a gate that fires on its own documentation gets deleted rather than obeyed.
+  const withoutComments = api
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  assert.doesNotMatch(
+    withoutComments,
+    /pb\.collection\(['"]users['"]\)/,
+    'accounts must come from /api/aerun/users/{id}, never from the collection'
+  );
 }
 
 // ── 3. The list APIs and the page must agree on the total's name ─────────────

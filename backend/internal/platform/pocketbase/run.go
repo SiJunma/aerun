@@ -275,6 +275,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.PATCH("/categories/{id}", updateCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 	group.DELETE("/categories/{id}", deleteCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 
+	// The public profile DTO and the public member board. The browser used to
+	// read the `users` table through the SDK, which handed a signed-out visitor
+	// the whole auth record — private `settings` included. See user_profile.go.
+	group.GET("/users", listUsersHandler)
+	group.GET("/users/search", searchUsersHandler)
+	group.GET("/nicknames/check", checkNicknameHandler)
+	group.GET("/users/{id}", getUserProfileHandler)
 	// Characters (masks). Reads follow the users profile visibility rule;
 	// writes are owner-only and self-service (ADR-5).
 	group.GET("/users/{id}/characters", listUserCharactersHandler)
