@@ -76,10 +76,10 @@ const fetchTopicById = async (topicId) => {
   return normalizeTopic(t?.topic);
 };
 
-export const fetchUserSubscribedTopics = async (userId) => {
-  if (!userId) return [];
+export const fetchUserSubscribedTopics = async (userId, page = 1, pageSize = 20) => {
+  if (!userId) return { topics: [], total: 0 };
   try {
-    const res = await sendApi('/api/aerun/me/subscriptions?limit=100');
+    const res = await sendApi(`/api/aerun/me/subscriptions?page=${page}&limit=${pageSize}`);
     const items = res?.items || [];
 
     // NORMALISE BEFORE HANDING A ROW TO A RENDERER — same rule as every other
@@ -110,7 +110,14 @@ export const fetchUserSubscribedTopics = async (userId) => {
     // an undefined field.
     validTopics.sort((a, b) => (b.last_post_at_ms || 0) - (a.last_post_at_ms || 0));
 
-    return validTopics;
+    // `total` is the server's count over the WHOLE list, not this page — it is
+    // what the pager divides by, exactly as on a category page.
+    //
+    // It CAN exceed this page's row count even here: the server counts
+    // subscriptions, while rows whose topic is deleted or no longer readable are
+    // dropped below. Reporting the dropped count instead would make the pager
+    // disagree with itself — pages that exist but render empty.
+    return { topics: validTopics, total: res?.total ?? validTopics.length };
   } catch (err) {
     console.warn('[fetchUserSubscribedTopics]', err);
     // Rethrown, not swallowed into an empty list. This function used to answer

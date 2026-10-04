@@ -168,9 +168,27 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 
 	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), forum.DefaultPageLimit), forum.DefaultPageLimit)
 	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
+	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
 
 	query := e.App.RecordQuery(topicSubscriptionsCollectionName).
 		AndWhere(dbx.HashExp{"user_id": e.Auth.Id})
+
+	// Counted BEFORE the cursor narrows the window, and only when the caller
+	// asked for a numbered page.
+	//
+	// Counting after would report the rows left BELOW the cursor, which is not
+	// what a numbered pager divides by. Counting always would tax every cursor
+	// consumer — and any future infinite-scroll caller — with a full COUNT for a
+	// number it never reads.
+	var total int
+	if cursor == "" {
+		count, err := e.App.CountRecords(topicSubscriptionsCollectionName,
+			dbx.HashExp{"user_id": e.Auth.Id})
+		if err != nil {
+			return internalError("failed to count subscriptions", err)
+		}
+		total = int(count)
+	}
 
 	if cursor != "" {
 		parts := strings.Split(cursor, "|")
@@ -184,6 +202,12 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 					"id":      id,
 				},
 			))
+		}
+	} else {
+		// Offset only on the numbered path: layering an offset on top of a
+		// cursor skips rows the cursor did not name.
+		if page > 1 {
+			query = query.Offset(int64((page - 1) * limit))
 		}
 	}
 
@@ -223,6 +247,8 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 
 	return e.JSON(http.StatusOK, map[string]any{
 		"items":       items,
+		"total":       total,
+		"page":        page,
 		"next_cursor": nextCursor,
 		"request_id":  requestIDFrom(e),
 	})
