@@ -325,8 +325,9 @@ export const AuthProvider = ({ children }) => {
     return subscribeToOnlineUsers(setActiveUsers);
   }, []);
 
-  // ONE counters subscription feeds three pieces of state: the DM totals, the
-  // per-conversation detail TitleProvider also wants, and the unread-topic badge.
+    // ONE counters subscription feeds four pieces of state: the DM totals, the
+    // per-conversation detail TitleProvider also wants, the unread-topic badge, and
+    // the unread-notification badge.
   //
   // They arrive together because they are ONE request (`/me/unread-counts`), and
   // splitting them would mean either a second request for state the first response
@@ -334,7 +335,7 @@ export const AuthProvider = ({ children }) => {
   // duplicate this module was built to make impossible.
   useEffect(() => {
     if (!user?.uid) {
-      setDmUnread({ total: 0, conversations: {}, topics: 0 });
+      setDmUnread({ total: 0, conversations: {}, topics: 0, notifications: 0 });
       setUnreadTopicsCount(0);
       return;
     }

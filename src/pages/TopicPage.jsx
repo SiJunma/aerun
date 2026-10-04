@@ -11,10 +11,11 @@ import {
   locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
 
-import { pb } from '../api/pocketbase';
 import { processDiceRolls } from '../utils/dice';
 import { createInFlight, newIdempotencyKey } from '../utils/inflight';
+import { toMillis, unreadFloor } from '../utils/dates';
 import { subscribeToCharacters, fetchCharacter } from '../api/character';
+import { fetchUserProfile } from '../api/auth-resources';
 
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -300,10 +301,9 @@ const TopicPage = () => {
     if (overridePage === undefined && isGoLast && !hasPageParam) {
       pageToFetch = 'last';
       const lastVisitRaw = initialVisitRef.current[id] ?? readMapRef.current[id];
-      const regMs = profileRef.current?.created_at?.toMillis?.() || 0;
       const lastVisitVal = lastVisitRaw?.timestamp || lastVisitRaw;
-      const rawMs = lastVisitVal?.toMillis ? lastVisitVal.toMillis() : (typeof lastVisitVal === 'number' ? lastVisitVal : 0);
-      lastVisitMs = Math.max(rawMs, regMs) || null;
+      const floored = unreadFloor(lastVisitVal, profileRef.current?.created_at);
+      lastVisitMs = floored || null;
     }
 
     // Идентификатор текущего запроса для предотвращения гонки состояний
@@ -355,7 +355,7 @@ const TopicPage = () => {
           return [...data, ...optimisticPosts];
         });
         if (data.length > 0) {
-          latestPostTimestampRef.current = Math.max(...data.map(p => p.created_at?.toMillis?.() || 0));
+          latestPostTimestampRef.current = Math.max(...data.map(p => toMillis(p.created_at)));
         } else {
           latestPostTimestampRef.current = Date.now();
         }
@@ -604,8 +604,13 @@ const TopicPage = () => {
           const matchingNotifs = unreadQuotes.filter(n => n.payload?.post_id === postId);
 
           if (matchingNotifs.length > 0) {
-            // Передаем ID уведомления 1-м параметром, user.uid — 2-м параметром
-            matchingNotifs.forEach(n => markNotificationRead(n.id, user?.uid));
+            // ONE argument, the notification id. This used to pass
+            // `markNotificationRead(n.id, user?.uid)` — id first, uid second —
+            // against a signature of `(uid, notifId)`, so the PATCH addressed
+            // `me/notifications/<accountId>/read` and 404'd: scrolling a quoted
+            // post into view marked nothing while the row below it stopped
+            // rendering as unread.
+            matchingNotifs.forEach(n => markNotificationRead(n.id));
             setUnreadQuotes(prev => prev.filter(p => !matchingNotifs.some(m => m.id === p.id)));
           }
         }
@@ -734,7 +739,11 @@ const TopicPage = () => {
     return () => { cancelled = true; };
   }, [posts, maskStats]);
 
-  // Fallback hydration for missing author signatures or status lines
+  // Fallback hydration for missing author signatures or status lines.
+  //
+  // Only authors whose post carries NO denormalised signature need a read, and
+  // only their unique ids are fetched, so a thread of distinct posters issues
+  // one request per author at most, once per page load (hydratedAuthorsRef).
   const hydratedAuthorsRef = useRef(new Set());
   useEffect(() => {
     if (posts.length === 0) return;
@@ -755,12 +764,18 @@ const TopicPage = () => {
 
     if (missingUids.size === 0) return;
 
+    // THE READ MOVED TO /api/aerun/users/{id}. This was `pb.collection('users')
+    // .getOne(uid)`, which handed every one of these N authors their ENTIRE auth
+    // record to the browser — private `settings`, email scaffolding and all —
+    // purely to render a signature under a post. The command layer now sends a
+    // whitelist whose `settings` holds just the public keys, signature among
+    // them, so this hydration gets what it needs and nothing else.
     missingUids.forEach(async (uid) => {
       hydratedAuthorsRef.current.add(uid);
       try {
-        const uData = await pb.collection('users').getOne(uid);
+        const uData = await fetchUserProfile(uid);
         if (uData) {
-          const sig = uData.settings?.signature || uData.signature || '';
+          const sig = uData.settings?.signature || '';
           if (sig || uData.status_line) {
             setAuthorStats(prev => ({
               ...prev,
@@ -956,17 +971,13 @@ const TopicPage = () => {
     else if (goLast && !alreadyJumpedRef.current) {
       if (user && (initialVisitRef.current[id] !== undefined || readMap[id] !== undefined)) {
         const lastVisitRaw = initialVisitRef.current[id] ?? readMap[id];
-        const registrationMs = profile?.created_at?.toMillis?.() || 0;
         const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-        const lastVisit = Math.max(
-          lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0),
-          registrationMs
-        );
+        const lastVisit = unreadFloor(lastVisitValue, profile?.created_at);
 
         // Server posts carry created_at as an ISO string; optimistic/RTDB posts
         // carry Timestamp-like objects. Support both when locating the first
         // unread post on the resolved page.
-        const toPostMs = (p) => p.created_at?.toMillis?.() ?? (p.created_at ? new Date(p.created_at).getTime() : 0);
+        const toPostMs = (p) => toMillis(p.created_at);
         const unreadIndex = posts.findIndex(p => toPostMs(p) > lastVisit);
 
         if (unreadIndex !== -1) {

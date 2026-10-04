@@ -1,4 +1,4 @@
-﻿import { sendApi, pb } from './pocketbase';
+﻿import { sendApi } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
 
@@ -577,17 +577,29 @@ export const nicknameKey = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+// A yes/no question, answered by a boolean.
+//
+// THIS USED TO BE `pb.collection('users').getList(1, 1, { filter: … })`, which
+// answered it with a WHOLE auth record: a guest typing a nickname into the
+// registration form received a stranger's `settings` and email as the price of a
+// boolean. The server now normalises the name itself — see
+// GET /api/aerun/nicknames/check — which also removes the client/server
+// normaliser skew described above `nicknameKey`, since the check and the UNIQUE
+// index now use one implementation.
+//
+// The pre-check is still only a convenience: the index remains the enforcement,
+// so a race between the check and the rename still ends in a server refusal.
 export const checkNicknameExists = async (nickname, excludeUid = null) => {
   if (!nickname) return false;
   try {
-    const key = nicknameKey(nickname);
-    const records = await pb.collection('users').getList(1, 1, {
-      filter: `nickname_normalized = "${key.replace(/"/g, '\\"')}"`
-    });
-    if (records.items.length === 0) return false;
-    if (excludeUid && records.items[0].id === excludeUid) return false;
-    return true;
+    const query = new URLSearchParams({ nickname });
+    if (excludeUid) query.set('exclude', excludeUid);
+    const res = await sendApi(`/api/aerun/nicknames/check?${query.toString()}`);
+    return res?.available === false;
   } catch {
+    // Unreachable answers "free", which is what the pre-check is for: the
+    // server refuses the duplicate anyway. Failing closed here would block a
+    // perfectly legal name whenever the route is unreachable.
     return false;
   }
 };

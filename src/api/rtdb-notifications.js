@@ -57,13 +57,35 @@ export const subscribeToUserNotifications = (uid, callback) => {
 /**
  * Marks a notification as read.
  *
+ * ONE argument, and that is the notification id.
+ *
+ * The failure it removes: the signature used to be `(uid, notifId, isAdmin)` —
+ * the two legacy parameters are ignored (`_uid`, `_isAdmin`) because
+ * `/me/notifications/:id/read` is caller-scoped server-side — but two of the
+ * three call sites passed the arguments the OTHER way round, following the
+ * comment "notification id first, user.uid second":
+ *
+ *     markNotificationRead(id, profile?.uid)   // NotificationsPage
+ *     markNotificationRead(n.id, user?.uid)    // TopicPage quote highlighting
+ *
+ * so `notifId` received the ACCOUNT id and the request went to
+ * `PATCH /me/notifications/<accountId>/read`, which is a 404. Clicking a
+ * notification therefore marked nothing, and scrolling a quoted post into view
+ * marked nothing, while the UI updated the row optimistically — the member saw
+ * a read receipt the server never issued, and the unread count stayed put until
+ * some later read repainted it. The badge and the "mark all read" button then
+ * disagreed with the row they sit next to.
+ *
+ * The uid cannot be part of the contract any more, so it is not a parameter:
+ * one argument means the only thing a caller can pass IS the id.
+ *
  * The failure is RETHROWN, not swallowed. These used to `console.warn` and
  * resolve normally, so the caller's `await` never rejected and the success toast
  * fired even when the server returned 403/500 — telling the member their
  * notification was read when it was not. Polling would eventually reconcile it,
  * but a lie that self-corrects in 15 seconds is still a lie.
  */
-export const markNotificationRead = async (_uid, notifId, _isAdmin = false) => {
+export const markNotificationRead = async (notifId) => {
   if (!notifId) return;
   await sendApi(`/api/aerun/me/notifications/${notifId}/read`, {
     method: 'PATCH'
@@ -77,7 +99,7 @@ export const markTopicNotificationsRead = async (uid, topicId, notifs = []) => {
   if (!topicId) return;
   const targetNotifs = notifs.filter(n => n.payload?.topic_id === topicId && !n.read);
   for (const n of targetNotifs) {
-    await markNotificationRead(uid, n.id);
+    await markNotificationRead(n.id);
   }
 };
 

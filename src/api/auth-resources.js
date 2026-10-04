@@ -1,4 +1,10 @@
-import { sendApi, pb } from './pocketbase';
+// The PocketBase SDK is deliberately NOT imported here any more. Every read in
+// this module went through it at some point, and each removal took a server
+// route with it: accounts now come from `/api/aerun/users`, which narrows
+// `settings` server-side, where the collection read could not. Re-adding the
+// import is how that regression comes back, so its absence is asserted by
+// scripts/check-forum-read-contract.mjs.
+import { sendApi } from './pocketbase';
 // normalizeTopic is imported, not re-implemented: the topic lists here must
 // render the same rows as the category page, and a second copy of this mapping
 // is exactly how the two drifted apart in the first place.
@@ -253,7 +259,7 @@ export const isAbortedRequest = (err) =>
     err.originalError?.name === 'AbortError'
   );
 
-// One read of a user row, for every caller that needs one.
+// ONE read of a user row, for every caller that needs one.
 //
 // It exists because two callers used to spell this out separately and read from
 // DIFFERENT sources: `subscribeToUser` read the collection, while AuthProvider
@@ -264,6 +270,16 @@ export const isAbortedRequest = (err) =>
 // the profile card came to show the new nickname while the Settings inputs,
 // seeded from the snapshot, showed the old one.
 //
+// THIS USED TO READ `pb.collection('users').getOne(uid)`, and that was the last
+// place the browser read a table directly. It handed a signed-OUT visitor the
+// whole auth record: `settings` — every member's sound volume, muted
+// notification types, mail preferences, theme and language — plus `email`
+// scaffolding, `collectionId`, `nickname_normalized` and the rest. It is served
+// by `GET /api/aerun/users/{id}` now, which assembles a whitelist server-side
+// and sends the owner their full settings while a stranger gets only the two
+// reputation-visibility flags the profile page actually reads off another
+// account. Same pattern `/users/{id}/posts` and `/admin/users` already use.
+//
 // A cancelled duplicate answers null rather than throwing: the request that
 // cancelled this one is the answer the caller wants. Every OTHER failure still
 // throws, because `subscribeToUser` renders nothing at all for a caller it could
@@ -271,7 +287,7 @@ export const isAbortedRequest = (err) =>
 export const fetchUserProfile = async (uid) => {
   if (!uid) return null;
   try {
-    const record = await pb.collection('users').getOne(uid);
+    const record = await sendApi(`/api/aerun/users/${uid}`);
     return normalizeUserProfile({ ...record });
   } catch (err) {
     if (isAbortedRequest(err)) return null;
@@ -279,6 +295,25 @@ export const fetchUserProfile = async (uid) => {
   }
 };
 
+// A single read of one account, delivered once.
+//
+// THE REALTIME HOOK THAT WAS HERE IS GONE, and it was not a working refresh:
+// `RealtimeRule` is unset on every collection (see REALTIME_HYBRID_PLAN.md and
+// backend/README.md), so `pb.collection('users').subscribe(uid, …)` completed the
+// SSE handshake and then never delivered an event. The two `realtime` entries in
+// a profile page's network log were exactly that: open connections carrying
+// nothing. `shared-poll` refuses such a hook with a thrown error for the same
+// reason, and this one was the exception that escaped it.
+//
+// It was also a SECOND DOOR onto the payload this change exists to close: an
+// event delivers the whole auth record, so `e.record` would have pushed every
+// member's private `settings` straight back into page state even after the read
+// above was narrowed.
+//
+// Nothing is lost by removing it, because nothing ever arrived: the page has
+// always rendered from this one read. When a scoped `RealtimeRule` exists, this
+// is the place the subscription comes back — carrying the same DTO as the read,
+// never the record.
 export const subscribeToUser = (uid, callback) => {
   if (!uid) {
     callback(null);
@@ -294,21 +329,8 @@ export const subscribeToUser = (uid, callback) => {
     if (isSubscribed) callback(null);
   });
 
-  let unsub = () => {};
-  try {
-    pb.collection('users').subscribe(uid, (e) => {
-      if (isSubscribed) {
-        callback(e.record ? normalizeUserProfile({ ...e.record }) : null);
-      }
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {
-    // Best-effort realtime: the caller polls on its own interval, so a
-    // failed subscription degrades to polling rather than breaking the view.
-  }
-
   return () => {
     isSubscribed = false;
-    unsub();
   };
 };
 
@@ -360,7 +382,36 @@ export const subscribeToEffectivePermissions = (uid, callback) => {
 // Presence subscriptions (active users / guest ids / daily actives) moved to
 // ./rtdb-presence, which reads the consolidated heartbeat/status snapshots.
 
-export const subscribeToAllUsers = (callback) => {
+/**
+ * Reads the member list for a screen that renders it.
+ *
+ * `staff` selects the source, and the default is the PUBLIC one because the
+ * members page is a public page.
+ *
+ * THE FAILURE THIS REMOVES. This used to try `GET /api/aerun/admin/users` FIRST
+ * and fall back to a direct `pb.collection('users').getFullList()` when it threw.
+ * `/admin/users` is gated by `admin_access` (run.go binds it to
+ * `RequirePermission(auth.PermAdminAccess)`), so for a signed-out visitor — and
+ * for every ordinary member, since `admin_access` is root+admin only — that first
+ * call could not succeed under any circumstances. Opening /members as a guest
+ * logged a guaranteed `401 Authentication is required for this action` in the
+ * network tab and the console on every visit, and the list still rendered from
+ * the fallback. A request whose failure is decided before it is sent is not a
+ * retry: it is a request that should not exist.
+ *
+ * The fallback was never a degradation, either. It is the ONLY path a guest has,
+ * because there is no public `/api/aerun/users` list — the members page is
+ * served by the open `users.ListRule` that migration 1768100000 introduced.
+ * So the ordering made the public path pay for the staff path on every visit,
+ * and the console error was the visible half of a design that reaches around the
+ * command layer for this screen entirely.
+ *
+ * `{ staff: true }` is passed only by AdminPage, which is itself behind the admin
+ * gate and genuinely needs the staff DTO (status and verified are on that route
+ * and nowhere else). Its fallback to the SDK read is kept: an admin whose
+ * `/admin/users` call fails for a transport reason should still see a table.
+ */
+export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   let isSubscribed = true;
 
   // The pages still speak the legacy vocabulary: MembersPage renders its
@@ -415,6 +466,13 @@ export const subscribeToAllUsers = (callback) => {
     avatar_url: u.avatar_url,
     role_id: u.role_id ?? u.role,
     status: u.status,
+    // The one-line status under the nickname. MembersPage renders it
+    // (`u.status_line && <small>…`), and this mapper did not carry it, so the
+    // column was permanently empty for every member on a public page — the
+    // server sent the value and the client threw it away one line above where it
+    // is read. It is a public profile field (it is already denormalised onto
+    // every post as `author_status_line`), so serving it here exposes nothing new.
+    status_line: u.status_line,
     post_count: u.post_count ?? u.posts_count ?? 0,
     topics_count: u.topics_count ?? 0,
     reputation: u.reputation ?? 0,
@@ -423,7 +481,64 @@ export const subscribeToAllUsers = (callback) => {
     last_seen: u.last_seen
   });
 
+  // THE PUBLIC READ, AND WHY THE SERVER OWNS THE WHITELIST.
+  //
+  // This used to be `getFullList({ sort: 'nickname', fields: [...] })`. Naming
+  // the columns stopped the leak but left the browser reading the `users` TABLE
+  // directly, which is the thing this whole layer exists to end: a whitelist
+  // written in JavaScript is a whitelist nobody can audit against the server,
+  // and PocketBase's `fields` cannot narrow a JSON column — so `settings` could
+  // only ever be dropped by dropping the entire object.
+  //
+  // `/api/aerun/users` assembles the list server-side and sends no `settings` at
+  // all, which is correct here: `toMembersRow` reads none of it.
+  //
+  // The staff path is untouched: it goes through `/admin/users`, which assembles
+  // its own whitelist and additionally serves the moderation columns. Both
+  // routes answer with the same envelope, so ONE loop walks both — two paginators
+  // would be two things to keep in step.
+  //
+  // `fetchPage` is a CALLBACK rather than a path string, and that is not
+  // stylistic. scripts/audit-endpoints.mjs resolves routes by reading the string
+  // literal inside each sendApi call, so passing the path in as an argument
+  // reduced both routes to an opaque placeholder and the audit reported them as
+  // calls with no backend route — exactly the signal it exists to raise. The URLs
+  // therefore stay literal at their call sites below.
+  const collectEveryPage = async (fetchPage) => {
+    const rows = [];
+    let page = 1;
+    for (;;) {
+      const res = await fetchPage(page);
+      if (!isSubscribed) return null;
+      const items = res?.items || [];
+      rows.push(...items.map(toMembersRow));
+      const totalPages = res?.totalPages ?? 1;
+      if (page >= totalPages || items.length === 0) break;
+      page += 1;
+    }
+    return rows.map(withLegacyDates);
+  };
+
+  const readPublicMembers = async () => {
+    const rows = await collectEveryPage(
+      (page) => sendApi(`/api/aerun/users?page=${page}`)
+    );
+    if (rows !== null && isSubscribed) callback(rows);
+  };
+
   const load = async () => {
+    // A guest, and every member without `admin_access`, must not issue the staff
+    // call at all: it is refused before it is sent, so trying it only to catch
+    // the rejection is a guaranteed red entry in the network tab.
+    if (!staff) {
+      try {
+        await readPublicMembers();
+      } catch {
+        if (isSubscribed) callback([]);
+      }
+      return;
+    }
+
     try {
       // The staff endpoint caps a page at 30 (server-side: perPage above the
       // cap is clamped, not honoured). The members table sorts and filters the
@@ -434,35 +549,20 @@ export const subscribeToAllUsers = (callback) => {
       //
       // A null result means the subscription was cancelled mid-walk, not a
       // failure: only a real request error reaches the fallback below.
-      const users = await fetchAllAdminUsers();
+      const users = await collectEveryPage(
+        (page) => sendApi(`/api/aerun/admin/users?page=${page}`)
+      );
       if (users === null) return;
       callback(users);
     } catch {
+      // Staff only, and a genuine transport failure: an admin whose staff call
+      // fails should still see a populated table rather than an empty one.
       try {
-        const list = await pb.collection('users').getFullList({ sort: 'nickname' });
-        if (isSubscribed) callback(list.map(u => withLegacyDates(toMembersRow(u))));
+        await readPublicMembers();
       } catch {
         if (isSubscribed) callback([]);
       }
     }
-  };
-
-  // fetchAllAdminUsers walks every page of the staff endpoint and returns the
-  // rows already mapped to the members-table shape, or null when the caller
-  // unsubscribed part-way through (nothing should be delivered after that).
-  const fetchAllAdminUsers = async () => {
-    const rows = [];
-    let page = 1;
-    for (;;) {
-      const res = await sendApi(`/api/aerun/admin/users?page=${page}`);
-      if (!isSubscribed) return null;
-      const items = res?.items || [];
-      rows.push(...items.map(toMembersRow));
-      const totalPages = res?.totalPages ?? 1;
-      if (page >= totalPages || items.length === 0) break;
-      page += 1;
-    }
-    return rows.map(withLegacyDates);
   };
 
   load();

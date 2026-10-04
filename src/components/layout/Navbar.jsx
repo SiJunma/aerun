@@ -7,18 +7,16 @@ import { useTheme } from '../../contexts/ThemeProvider';
 import { resolveAvatarUrl } from '../../api/avatars';
 import { useDesign } from '../../contexts/DesignProvider';
 import { Bell, User, LogOut, MessageCircle, Palette, Check, FilePen } from 'lucide-react';
-import { subscribeToUserNotifications } from '../../api/rtdb-notifications';
 import { subscribeToDmUnread } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
 
 const Navigation = () => {
-  const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, activeDmConvId } = useAuth();
+  const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, activeDmConvId, dmUnread: unreadCounts } = useAuth();
   const { t, lang } = useI18n();
   const { theme, changeGuestTheme } = useTheme();
   const { activeDesign } = useDesign();
   const navigate = useNavigate();
-  const [userUnread, setUserUnread] = React.useState(0);
   const [dmUnread, setDmUnread] = React.useState(0);
   const [expanded, setExpanded] = React.useState(false);
   const [showAuthModal, setShowAuthModal] = React.useState(false);
@@ -26,21 +24,24 @@ const Navigation = () => {
 
   const isAdmin = (profile?.role_id === 'admin' || profile?.role_id === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
-  // Subscribe to this member's notifications. There is no separate admin feed:
-  // `GET /me/notifications` is already scoped to the caller on the server
-  // (notifications.go filters `recipient_id = e.Auth.Id`), so an "admin" read was
-  // the same request with the same account id — a second identical poll whose
-  // rows were then ADDED to the member's own list, rendering every notification
-  // in the badge twice and twice over in the Notifications page.
-  React.useEffect(() => {
-    if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') return;
-
-    const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
-      setUserUnread(notifs.filter(n => !n.read).length);
-    });
-
-    return () => unsub();
-  }, [user?.uid, profile?.role_id]);
+  // The unread-notification badge is the SERVER's count, not a list counted here.
+  //
+  // This used to subscribe to `subscribeToUserNotifications` and render
+  // `notifs.filter(n => !n.read).length` — so the bell cost every member a
+  // `GET /me/notifications?limit=100` on every page of the forum, a hundred whole
+  // notification records fetched to derive one integer, and a number that could not
+  // exceed the page size however many unread rows actually existed.
+  //
+  // `unreadCounts` is AuthProvider's `/me/unread-counts` subscription, which
+  // already carries `unread_notifications` on the request it was making anyway, so
+  // this reads state that costs nothing extra. The bell is a number; the LIST is
+  // now fetched only where rows are rendered — the Notifications page and
+  // TopicPage's quote highlighting.
+  //
+  // Derived, not stored: nothing ever assigns this, and a `useState` fed by an
+  // effect would re-render the whole navbar a second time on every poll for a
+  // number the render can read directly.
+  const userUnread = unreadCounts?.notifications || 0;
 
   // Subscribe to DM unread count via RTDB (0 Firestore reads)
   const [dmUnreadData, setDmUnreadData] = React.useState({ total: 0, conversations: {} });

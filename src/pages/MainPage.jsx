@@ -10,6 +10,7 @@ import Skeleton from '../components/common/Skeleton';
 import ErrorCard from '../components/common/ErrorCard';
 import ForumEmptyState from '../components/common/ForumEmptyState';
 import { resolveField } from '../utils/text';
+import { toMillis, unreadFloor } from '../utils/dates';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
@@ -211,12 +212,8 @@ const MainPage = () => {
                               const lastVisitRaw = readMap[cat.last_post_topic_id];
                               const lastReadOffset = lastVisitRaw?.offset ?? null;
                               const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-                              const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
-                              const registrationMs = profile?.created_at?.toMillis?.() || 0;
-                              const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-                              const lastPostMs = cat.last_post_at 
-                                ? (cat.last_post_at.toMillis ? cat.last_post_at.toMillis() : new Date(cat.last_post_at).getTime())
-                                : 0;
+                              const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
+                              const lastPostMs = toMillis(cat.last_post_at);
                               const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
                               return (

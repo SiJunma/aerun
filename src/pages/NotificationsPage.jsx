@@ -126,7 +126,7 @@ const NotificationsPage = () => {
     // which puts the row back to unread.
     setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
 
-    markNotificationRead(id, profile?.uid)
+    markNotificationRead(id)
       .catch(err => {
         console.error('[markNotificationRead]', err);
         showToast(err.message, 'danger');

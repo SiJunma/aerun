@@ -1,5 +1,6 @@
 import { sendApi, pb } from './pocketbase';
 import { createSharedPoll } from './shared-poll';
+import { toMillis } from '../utils/dates';
 
 let heartbeatTimer = null;
 let currentActiveCharacter = null;
@@ -25,10 +26,16 @@ const notifyGuestSubscribers = (guests) => {
 // parseLastSeen normalises the server's date string into milliseconds. The stats
 // panel drops guests outside its own window, so a value it cannot parse must
 // never look like "seen just now".
-const parseLastSeen = (value) => {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+//
+// It is `toMillis`, not a second implementation of it. This one existed on its
+// own and fed `Date.parse` the PocketBase space form RAW — "2026-10-04 16:50:00Z"
+// with a space where ISO 8601 requires "T". That format is not one the spec makes
+// a parser accept: an engine that ignores the trailing Z reads it as LOCAL time
+// and shifts the instant by the whole UTC offset, which for a live heartbeat
+// (~now) lands the value in the FUTURE — the online list claiming somebody was
+// last seen ahead of the clock. V8 happens to honour the Z, so this hides in
+// Chrome and bites elsewhere, which is the worst shape a date bug can have.
+const parseLastSeen = (value) => toMillis(value);
 
 const handlePresenceSnapshot = (presence) => {
   if (!presence) return;

@@ -2,8 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import { useI18n } from './I18nProvider';
 import { useDesign } from './DesignProvider';
-import { subscribeToUserNotifications } from '../api/rtdb-notifications';
-import { subscribeToDmUnread } from '../api/dms';
+import { subscribeToUnreadCounts } from '../api/dms';
 
 const TitleContext = createContext();
 
@@ -45,6 +44,14 @@ export const TitleProvider = ({ children }) => {
     }
   }, [activeDmConvId]);
 
+  // The tab title's notification term is the SERVER's count.
+  //
+  // It used to come from `subscribeToUserNotifications` — a
+  // `GET /me/notifications?limit=100` whose hundred rows were counted in the
+  // browser for one integer, on every page of the forum. `/me/unread-counts`
+  // already returns `unread_notifications`, and this provider was already
+  // subscribing to that resource for the DM term, so the two badges were reading
+  // two endpoints to render one number that one of them already carried.
   useEffect(() => {
     if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') {
       setUserCount(0);
@@ -52,15 +59,12 @@ export const TitleProvider = ({ children }) => {
       return;
     }
 
-    const unsubUser = subscribeToUserNotifications(user.uid, (notifs) => {
-      setUserCount(notifs.filter(n => !n.read).length);
-    });
-
     let unsubDm = () => {};
     if (hasPermission && hasPermission(PERMISSIONS?.USE_DIRECT_MESSAGES)) {
-      unsubDm = subscribeToDmUnread(user.uid, (data) => {
+      unsubDm = subscribeToUnreadCounts(user.uid, (data) => {
         const raw = data || { total: 0, conversations: {} };
         dmUnreadDataRef.current = raw;
+        setUserCount(raw.notifications || 0);
         const total = raw.total || 0;
         const conversations = raw.conversations || {};
         const openConvId = dmUnreadDataRef._activeDmConvId; // will be set via ref sync
@@ -71,10 +75,16 @@ export const TitleProvider = ({ children }) => {
           setDmCount(total);
         }
       });
+    } else {
+      // No DM permission still leaves the notification badge real: the counters
+      // response carries it, and gating the whole subscription on DMs would blank
+      // the title number for a member who is allowed notifications but not DMs.
+      unsubDm = subscribeToUnreadCounts(user.uid, (data) => {
+        setUserCount((data || {}).notifications || 0);
+      });
     }
 
     return () => {
-      unsubUser();
       unsubDm();
     };
   }, [user?.uid, profile?.role_id, hasPermission, PERMISSIONS?.USE_DIRECT_MESSAGES]);

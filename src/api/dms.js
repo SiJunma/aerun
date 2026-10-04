@@ -98,7 +98,7 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
 // reading the SAME resource and the second subscriber costs nothing.
 export const subscribeToUnreadCounts = (uid, callback) => {
   if (!uid) {
-    callback({ total: 0, conversations: {}, topics: 0 });
+    callback({ total: 0, conversations: {}, topics: 0, notifications: 0 });
     return () => {};
   }
   const poll = sharedPoll(`dm-unread:${uid}`, {
@@ -109,11 +109,24 @@ export const subscribeToUnreadCounts = (uid, callback) => {
         conversations: {},
         // A missing key reads as 0 rather than NaN: an older backend that predates
         // the field should show no badge, not break the navbar's arithmetic.
-        topics: Number(res?.unread_topics) || 0
+        topics: Number(res?.unread_topics) || 0,
+        // The UNREAD NOTIFICATION COUNT, which this response already carried and
+        // this mapping used to drop on the floor.
+        //
+        // Both badges that show it — the navbar bell and the tab title — used to
+        // answer it by fetching `GET /me/notifications?limit=100` and counting
+        // `!n.read` in the browser, on every page of the forum. That is a row list
+        // carried for a number, the same defect `latestTopics` was on the
+        // main-page projection, and it was capped while it was at it: a member with
+        // 150 unread notifications was told 100, because the badge could only see
+        // the newest hundred rows. The server counts every unread, unread-not-
+        // archived row, so the badge reads the count and the LIST is fetched only
+        // where rows are actually rendered.
+        notifications: Number(res?.unread_notifications) || 0
       };
     },
     intervalMs: 15000,
-    initialValue: { total: 0, conversations: {}, topics: 0 },
+    initialValue: { total: 0, conversations: {}, topics: 0, notifications: 0 },
   });
 
   // No realtime channel here: the counters are derived state that changes only

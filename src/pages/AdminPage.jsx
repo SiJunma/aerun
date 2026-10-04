@@ -353,7 +353,12 @@ const AdminPage = () => {
     });
     const unsubCats = subscribeToAllCategories(setCategories);
     const unsubGroups = subscribeToCategoryGroups(setGroups);
-    const unsubUsers = subscribeToAllUsers(setUsers);
+    // `{ staff: true }` because this screen needs the staff DTO — `status` and
+    // `verified` are served by `GET /api/aerun/admin/users` and by nothing else,
+    // and this is the one caller allowed to ask for it. Without the flag the
+    // public member read would be used here too, and the moderation columns
+    // would render empty.
+    const unsubUsers = subscribeToAllUsers(setUsers, { staff: true });
     const unsubDesigns = subscribeToDesigns(setDesigns);
 
     return () => {

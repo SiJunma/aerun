@@ -6,6 +6,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToLatestTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
+import { toMillis, unreadFloor } from '../utils/dates';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumTabs from '../components/common/ForumTabs';
@@ -87,24 +88,17 @@ const NewRepliesPage = () => {
   const unreadTopics = useMemo(() => {
     if (!user) return [];
 
-    const registrationMs = profile?.created_at?.toMillis?.()
-      || (profile?.created_at ? new Date(profile.created_at).getTime() : 0);
+    const registrationMs = toMillis(profile?.created_at);
 
     return filteredTopics.filter(topic => {
       if (topic.last_post_author_id === user.uid) return false;
 
       const entry = readMap[topic.id];
       const lastVisitValue = entry?.timestamp || entry;
-      const lastVisitMs = lastVisitValue?.toMillis
-        ? lastVisitValue.toMillis()
-        : (typeof lastVisitValue === 'number' ? lastVisitValue : (lastVisitValue ? new Date(lastVisitValue).getTime() : 0));
 
-      const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
+      const effectiveLastVisitMs = unreadFloor(lastVisitValue, registrationMs);
 
-      const lastPostMs = topic.last_post_at?.toMillis?.()
-        ?? (typeof topic.last_post_at === 'string'
-          ? new Date(topic.last_post_at).getTime()
-          : (typeof topic.last_post_at === 'number' ? topic.last_post_at : 0));
+      const lastPostMs = toMillis(topic.last_post_at);
 
       return lastPostMs > effectiveLastVisitMs;
     });

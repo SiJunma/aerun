@@ -50,9 +50,58 @@ const topicForm = read('../src/pages/TopicFormPage.jsx');
 const topicPage = read('../src/pages/TopicPage.jsx');
 
 const failures = [];
-const forbid = (source, label, pattern) => {
-  if (pattern.test(source)) failures.push(`${label} must not match ${pattern}`);
+// `why` is what the failure MEANS. A bare "must not match /…/" sends the next
+// reader to the regex instead of the decision, and these gates exist precisely
+// because the change they forbid looks harmless in review.
+const forbid = (source, label, pattern, why = '') => {
+  if (pattern.test(source)) {
+    failures.push(`${label} must not match ${pattern}${why ? ` — ${why}` : ''}`);
+  }
 };
+
+// ── The members page must not ask a route that refuses it ────────────────────
+//
+// THE FAILURE. `subscribeToAllUsers` tried `GET /api/aerun/admin/users` first and
+// fell back to a direct collection read when it threw. That route is bound to
+// `RequirePermission(auth.PermAdminAccess)` (run.go), so for a guest — and for
+// every member without admin_access, which is every ordinary member — the call
+// could never succeed under any circumstances. Opening /members as a guest logged
+// a guaranteed 401 and then rendered the list from the fallback anyway.
+//
+// What made this survive review is that the fallback is perfectly correct code
+// and the page renders: the 401 is one red line in a network tab nobody reads.
+// Only a gate keeps it fixed.
+//
+// MembersPage is public and takes the public read. AdminPage is the single caller
+// entitled to the staff DTO (`status` and `verified` are served there and nowhere
+// else), and it must say so EXPLICITLY: a silent default would quietly empty the
+// moderation columns the first time somebody tidied this signature.
+assert.match(
+  stripComments(resources),
+  /export const subscribeToAllUsers = \(callback, \{ staff = false \} = \{\}\)/,
+  'subscribeToAllUsers must default to the PUBLIC read — the members page is a public page, and the staff route refuses every caller who is not staff'
+);
+assert.match(
+  stripComments(resources),
+  /if \(!staff\) \{/,
+  'the non-staff branch must return BEFORE the staff call is issued; catching a 401 that was decided before the request was sent is not a fallback'
+);
+assert.match(
+  stripComments(read('../src/pages/MembersPage.jsx')),
+  /subscribeToAllUsers\(setUsers\)/,
+  'MembersPage must take the public member read — it is reachable by guests, who cannot use the staff route'
+);
+forbid(
+  stripComments(read('../src/pages/MembersPage.jsx')),
+  'MembersPage.jsx',
+  /staff:\s*true/,
+  'only AdminPage is entitled to the staff DTO; asking for it from the public members page reintroduces the guaranteed 401'
+);
+assert.match(
+  stripComments(adminPage),
+  /subscribeToAllUsers\(setUsers, \{ staff: true \}\)/,
+  'AdminPage must request the staff read explicitly — status and verified are served by /admin/users and by no other route, so a silent default would empty those columns'
+);
 
 // ── The list routes answer `items` ───────────────────────────────────────────
 // Each of these reads a topic list. `topics` and `pinned` are the retired
@@ -181,6 +230,102 @@ assert.match(
   /setUnreadTopicsCount\(counts\.topics \|\| 0\)/,
   'the badge must come from the unread-counters response, so it agrees across devices and is not capped by a page size'
 );
+
+// ── The notification LIST is not a counter ────────────────────────────────────
+//
+// THE DEFECT. The navbar bell and the tab title both showed the unread
+// NOTIFICATION count by subscribing to `subscribeToUserNotifications` and
+// rendering `notifs.filter(n => !n.read).length`. That made every member pay
+// `GET /me/notifications?limit=100` — a hundred whole notification records — on
+// every page of the forum, to derive one integer, while
+// `GET /me/unread-counts` returned that integer as `unread_notifications` on a
+// request AuthProvider was already making. Two endpoints, one number.
+//
+// It was also wrong, not merely expensive: a member with 150 unread was told
+// 100, because the badge could only see the newest hundred rows. The cap is the
+// exact failure `latestTopics` had on the main-page projection.
+//
+// These assert the badge reads the SERVER COUNT. Restoring the list subscription
+// would look harmless — it is a correct read of a real endpoint — which is why
+// it has to be gated rather than left to review.
+const navbar = read('../src/components/layout/Navbar.jsx');
+const titleProvider = read('../src/contexts/TitleProvider.jsx');
+const notificationsApi = read('../src/api/rtdb-notifications.js');
+
+forbid(
+  stripComments(navbar),
+  'Navbar.jsx',
+  /subscribeToUserNotifications/,
+  'the bell is a number, and /me/unread-counts already returns it; reading the list here costs every page a capped hundred rows'
+);
+forbid(
+  stripComments(titleProvider),
+  'TitleProvider.jsx',
+  /subscribeToUserNotifications/,
+  'the tab title is a number, and this provider already reads the counters resource that carries it'
+);
+
+assert.match(
+  stripComments(navbar),
+  /const userUnread = unreadCounts\?\.notifications \|\| 0/,
+  'the navbar bell must render the server-side notification count — counting a capped list is what made 150 unread report as 100'
+);
+assert.match(
+  stripComments(titleProvider),
+  /raw\.notifications \|\| 0/,
+  'the tab title must render the server-side notification count for the same reason'
+);
+
+// The count has to actually be carried, or the badge above reads `undefined`
+// and renders nothing — and it must survive a backend that predates the field.
+assert.match(
+  stripComments(read('../src/api/dms.js')),
+  /notifications: Number\(res\?\.unread_notifications\) \|\| 0/,
+  'subscribeToUnreadCounts must map unread_notifications — the badge reads this field'
+);
+
+// The LIST still has two legitimate consumers: the Notifications page and
+// TopicPage's quote highlighting, both of which render rows. Pinning that keeps
+// this fix honest — deleting the list read outright would break both screens.
+for (const [label, src] of [
+  ['NotificationsPage.jsx', read('../src/pages/NotificationsPage.jsx')],
+  ['TopicPage.jsx', topicPage],
+]) {
+  assert.match(
+    stripComments(src),
+    /subscribeToUserNotifications/,
+    `${label} renders notification ROWS, so it must keep reading the list — the counts endpoint cannot replace it`
+  );
+}
+
+// ── `markNotificationRead` takes the id, and only the id ──────────────────────
+//
+// The signature was `(uid, notifId, isAdmin)` with the first and third ignored
+// (`/me/notifications/:id/read` is caller-scoped server-side), but NotificationsPage
+// and TopicPage called it `(notifId, uid)` — following a comment that said "id
+// first". So `notifId` received the ACCOUNT id and the PATCH addressed
+// `me/notifications/<accountId>/read`, a 404: clicking a notification and
+// scrolling a quoted post into view both marked nothing, while the UI updated
+// the row optimistically. The member saw a read receipt the server never issued.
+//
+// One argument makes the swap unrepresentable, which is why the uid was removed
+// rather than merely reordered at the call sites.
+assert.match(
+  stripComments(notificationsApi),
+  /export const markNotificationRead = async \(notifId\)/,
+  'markNotificationRead must take the notification id ALONE — a leading uid parameter is what two call sites passed in the wrong order, 404ing the read'
+);
+for (const [label, src] of [
+  ['NotificationsPage.jsx', read('../src/pages/NotificationsPage.jsx')],
+  ['TopicPage.jsx', topicPage],
+]) {
+  forbid(
+    stripComments(src),
+    `${label} markNotificationRead call`,
+    /markNotificationRead\([^)]*,/,
+    'markNotificationRead takes one argument; a second one is the account id landing in the notification slot'
+  );
+}
 
 // ── The forum index is read ONCE, by the provider ─────────────────────────────
 //
@@ -366,6 +511,110 @@ assert.doesNotMatch(
   'reputation.js must not import the PocketBase SDK — every route in it is server-only'
 );
 
+// ── users is read through the profile DTO, never from the collection ──────────
+//
+// The browser read `users` straight off the collection in two places. Both are
+// gone, and the gate is here because the replacement looks like a downgrade in
+// review: `pb.collection('users').getOne(uid)` is one short line that WORKS,
+// while `/api/aerun/users/${uid}` is a round trip to a server route.
+//
+// What that short line actually shipped: the whole auth record. `settings` —
+// every member's sound volume, muted notification types, mail preferences, theme
+// and language — plus `email` and the PocketBase record scaffolding. Opening
+// somebody else's profile as a signed-OUT VISITOR was enough to receive it.
+//
+// The author hydration in TopicPage is the N+1 this also removes: one full auth
+// record per distinct poster in a thread, fetched only to draw a signature under
+// a post that usually already carries one.
+//
+// Both are asserted against CODE, not source comments — the replacement is
+// discussed at length in the comments above it, and a gate that matched its own
+// documentation would be deleted rather than obeyed (see the note above
+// stripComments).
+const resourcesCode = stripComments(resources);
+const topicPageCode = stripComments(topicPage);
+const richEditorCode = stripComments(read('../src/components/common/RichEditor.jsx'));
+
+// The FOUR reads that shipped auth records to the browser. They are grouped
+// because they are one bug wearing four costumes: every one of them asked the
+// collection for rows it did not need in full, and every one now asks the
+// command layer for exactly the keys it renders.
+for (const [source, label] of [
+  [resourcesCode, 'auth-resources.js'],
+  [topicPageCode, 'TopicPage.jsx'],
+  [forumCode, 'forum.js'],
+  [richEditorCode, 'RichEditor.jsx'],
+]) {
+  assert.doesNotMatch(
+    source,
+    /pb\.collection\(['"]users['"]\)\.(getOne|subscribe|getFullList|getList)/,
+    `${label} must read accounts through /api/aerun/users — the collection hands out the ` +
+      'entire auth record, private settings included'
+  );
+}
+
+// …and the four routes they now call, so the gate cannot be satisfied by a file
+// that merely stopped reading profiles.
+for (const [source, route, label] of [
+  [resourcesCode, '/api/aerun/users/${uid}', 'the profile DTO'],
+  [resourcesCode, '/api/aerun/users?page=', 'the public member board'],
+  [resourcesCode, '/api/aerun/admin/users?page=', 'the staff member board'],
+  [forumCode, '/api/aerun/nicknames/check', 'the nickname availability check'],
+  [richEditorCode, '/api/aerun/users/search', 'the mention picker'],
+]) {
+  assert.ok(source.includes(route), `${label} must be served by ${route}`);
+}
+
+// The two paginated boards share ONE loop, reached through a callback rather
+// than a path argument. That indirection is what let scripts/audit-endpoints.mjs
+// stop resolving the routes — it reads the literal inside each sendApi call — so
+// the shape is asserted: exactly two call sites (the definition binds with `=`,
+// so only invocations match), each with a literal URL checked above. A third
+// call site means one of the boards grew a loop of its own.
+assert.equal(
+  (resourcesCode.match(/collectEveryPage\(/g) || []).length,
+  2,
+  'exactly two paginated boards share the walker; a third loop means one of them drifted'
+);
+
+// `users.ListRule` is still open, because /members and /profile have to keep
+// working for signed-out visitors. Until it is closed, this gate is the only
+// thing standing between that rule and the auth records it would expose — which
+// is why it is enforced against every module rather than the two that first
+// showed the symptom.
+assert.doesNotMatch(
+  richEditorCode,
+  /nickname\s*~/,
+  'the mention picker must not build its own filter — the search is a server route now'
+);
+
+// The DTO must actually be the thing being called, or the gate above would pass
+// on a file that simply stopped reading profiles.
+assert.match(
+  resourcesCode,
+  /sendApi\(`\/api\/aerun\/users\/\$\{uid\}`\)/,
+  'fetchUserProfile must read the public profile DTO'
+);
+
+// The realtime hook is gone for a reason that is easy to undo by accident:
+// `RealtimeRule` is unset on every collection, so the subscription completed its
+// SSE handshake and never delivered an event — the dead `realtime` rows in a
+// profile page's network log. Worse, an event delivers the WHOLE record, which
+// would re-open this leak the moment a rule is added carelessly.
+assert.doesNotMatch(
+  resourcesCode,
+  /collection\(['"]users['"]\)\.subscribe/,
+  'the users realtime hook delivered nothing (no RealtimeRule) and would push whole auth records'
+);
+
+// The topic author hydration must go through the shared normaliser, so a profile
+// read there is narrowed by the same server-side whitelist as the profile page's.
+assert.match(
+  topicPageCode,
+  /await fetchUserProfile\(uid\)/,
+  'the author hydration must hydrate through the profile DTO'
+);
+
 // ── The topic form sends the mask and the pin ───────────────────────────────
 //
 // Both lived in component state and were never transmitted, so every message
@@ -537,5 +786,6 @@ console.log('OK  forum read contract: the main page seeds categories, groups and
 console.log('OK  forum read contract: every topic list normalises before rendering');
 console.log('OK  forum read contract: the subscriptions list normalises too — it renders TopicRow');
 console.log('OK  forum read contract: reputation_votes is read server-side, never from the browser');
+console.log('OK  forum read contract: accounts are read through /api/aerun/users/{id}, never the collection');
 console.log('OK  forum read contract: the topic form transmits the mask and the pin');
 console.log('OK  forum read contract: "override off" is stored as the live inherit marker, not a snapshot');

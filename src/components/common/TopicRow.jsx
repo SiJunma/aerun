@@ -7,6 +7,7 @@ import LastPostInfo from './LastPostInfo';
 import AuthorMeta from './AuthorMeta';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { toMillis, unreadFloor } from '../../utils/dates';
 
 const TopicRow = ({ 
   topic, 
@@ -25,12 +26,13 @@ const TopicRow = ({
   const lastReadOffset = lastVisitRaw?.offset ?? null;
   // Handle both Firestore Timestamp (from server) and plain number (optimistic local update)
   const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-  const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
-  const registrationMs = profile?.created_at?.toMillis?.() || 0;
-  const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-  const lastPostMs = topic.last_post_at 
-    ? (topic.last_post_at.toMillis ? topic.last_post_at.toMillis() : new Date(topic.last_post_at).getTime()) 
-    : 0;
+  // `created_at` arrives as a plain "YYYY-MM-DD" day string from the profile DTO,
+  // while the read map holds a Firestore Timestamp or an optimistic number, so
+  // both terms go through the shared normaliser. Reading the day with
+  // `?.toMillis?.()` as this line once did yields undefined, which floors the whole
+  // unread count at the epoch instead of failing loudly.
+  const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
+  const lastPostMs = toMillis(topic.last_post_at);
   const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
   const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
