@@ -220,6 +220,12 @@ func createPostHandler(e *core.RequestEvent) error {
 		// reply, so the dispatcher reports nothing and the post stands.
 		dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
 
+		// The nudge for the topic itself, in the same transaction as the reply.
+		// PublishTopicSignal decides the audience against the GUEST baseline,
+		// so a reply in a restricted category announces nothing to the forum
+		// and its readers simply keep polling.
+		publishTopicSignal(txApp, topic)
+
 		// The author's display fields ride along with the reply itself. The
 		// caller's post count was written just above in this same transaction,
 		// so the value sent back is the post's own new count — the reply renders

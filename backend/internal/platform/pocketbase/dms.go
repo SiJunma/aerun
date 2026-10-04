@@ -412,6 +412,16 @@ func createDMHandler(e *core.RequestEvent) error {
 				"preview":         cleanText,
 			})
 
+			// The DM list is a SEPARATE resource from the notification list, and
+			// the notification signal fired above — so without this nudge the
+			// conversation preview waits for a poll while the badge updates
+			// instantly.
+			//
+			// Addressed to each recipient individually rather than to the
+			// conversation: a conversation id is not something a non-member may
+			// learn from the stream.
+			publishSignal(txApp, realtimeSignalDMPost, msg.Id, rUser.Id)
+
 			// Outbox email event with deduplication key: dm:first-unread:{conv}:{recipient}
 			dedupeKey := messaging.MakeDMUnreadDedupeKey(conv.Id, rUser.Id)
 			_ = enqueueOutboxEvent(txApp, dedupeKey, "email:dm_unread", MailPayload{
@@ -560,6 +570,16 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 					"sender_nickname": senderNick,
 					"preview":         cleanText,
 				})
+
+				// The DM list is a SEPARATE resource from the notification list,
+				// and the notification signal fired above — so without this nudge
+				// the conversation preview waits for a poll while the badge updates
+				// instantly.
+				//
+				// Addressed to each recipient individually rather than to the
+				// conversation: a conversation id is not something a non-member
+				// may learn from the stream.
+				publishSignal(txApp, realtimeSignalDMPost, msg.Id, rID)
 
 				// Deduplicated email outbox event
 				dedupeKey := messaging.MakeDMUnreadDedupeKey(conv.Id, rID)

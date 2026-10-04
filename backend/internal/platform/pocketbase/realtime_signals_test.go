@@ -27,6 +27,8 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/subscriptions"
+
+	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
 // subscribeAsSignalClient registers a realtime client that will receive
@@ -380,5 +382,179 @@ func TestRealtimeSignalRowCarriesNoForumContent(t *testing.T) {
 	}
 	if rows[0].AudienceID != fixPlayerID {
 		t.Errorf("unexpected audience %q", rows[0].AudienceID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DM signals
+// ---------------------------------------------------------------------------
+
+// TestDMPostSignalReachesOnlyItsRecipient pins the DM list nudge.
+//
+// The notification signal already fired for the same event — so this test is not
+// checking "does a DM produce a signal", it is checking that the SECOND, separate
+// resource got its own nudge AND that addressing it to one member did not widen
+// the stream. A `dm.post` rule that merely said "any signed-in member" would
+// pass a connection test while telling the whole forum that conversations exist.
+func TestDMPostSignalReachesOnlyItsRecipient(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	player := subscribeAsSignalClient(t, app, authRecordFor(t, app, fixPlayerID))
+	moderator := subscribeAsSignalClient(t, app, authRecordFor(t, app, fixModeratorID))
+
+	// The production call: addressed to one conversation member.
+	publishSignal(app, realtimeSignalDMPost, fixSignalEntityID, fixPlayerID)
+
+	msg, ok := awaitSignal(t, player, 3*time.Second)
+	if !ok {
+		t.Fatal("no realtime event was delivered to the DM recipient")
+	}
+	body := signalBody(t, msg)
+	if !strings.Contains(body, realtimeSignalDMPost) {
+		t.Errorf("the delivered event must name the DM signal: %s", body)
+	}
+
+	// The moderator is a signed-in member with a live stream; the only thing
+	// keeping this quiet is the audience check.
+	if extra, ok := awaitSignal(t, moderator, 500*time.Millisecond); ok {
+		t.Fatalf("a member outside the conversation received a DM signal: %s", signalBody(t, extra))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Public topic signals, and the category gate that bounds them
+// ---------------------------------------------------------------------------
+
+// newSignalTopic creates a topic row in `categoryID`, enough for
+// publishTopicSignal to read its category.
+func newSignalTopic(t testing.TB, app *tests.TestApp, title, categoryID string) *core.Record {
+	t.Helper()
+	col, err := app.FindCollectionByNameOrId(topicsCollectionName)
+	if err != nil {
+		t.Fatalf("topics collection missing: %v", err)
+	}
+	rec := core.NewRecord(col)
+	rec.Set("title", title)
+	rec.Set("category_id", categoryID)
+	rec.Set("category_id", categoryID)
+	rec.Set("author_id", fixPlayerID)
+	if err := app.Save(rec); err != nil {
+		t.Fatalf("failed to create topic %s: %v", title, err)
+	}
+	return rec
+}
+
+// A topic in a category a GUEST may read is already public, so broadcasting it
+// reveals nothing the forum page does not already show.
+func TestTopicPostSignalReachesSignedInMembersInAGuestReadableCategory(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// The inherit marker means "fall back to the caller's view_forum", which the
+	// compiled guest baseline carries. This is the ordinary public category.
+	category := newTestCategory(t, app, "open-boards", []string{auth.CategoryInheritMarker})
+	topic := newSignalTopic(t, app, "Public topic", category.Id)
+
+	member := subscribeAsSignalClient(t, app, authRecordFor(t, app, fixPlayerID))
+	guest := subscribeAsSignalClient(t, app, nil)
+
+	publishTopicSignal(app, topic)
+
+	msg, ok := awaitSignal(t, member, 3*time.Second)
+	if !ok {
+		t.Fatal("no realtime event was delivered for a public topic post")
+	}
+	body := signalBody(t, msg)
+	if !strings.Contains(body, realtimeSignalTopicPost) {
+		t.Errorf("the delivered event must name the topic signal: %s", body)
+	}
+	// Even a PUBLIC signal carries no forum text — the client re-reads through
+	// /api/aerun, which applies visibility.
+	if strings.Contains(body, "Public topic") {
+		t.Errorf("the topic signal must not carry the topic title: %s", body)
+	}
+
+	// Guests stay off the stream entirely and keep polling.
+	if extra, ok := awaitSignal(t, guest, 500*time.Millisecond); ok {
+		t.Fatalf("a signed-out visitor received a topic signal: %s", signalBody(t, extra))
+	}
+}
+
+// THE TEST THAT MAKES THE CATEGORY GATE WORTH HAVING.
+//
+// A topic in a category a guest may NOT read must not be announced to the forum
+// at all. No content rides along — the signal is an id — but the existence of
+// activity in a private board is itself information, and a wildcard broadcast
+// would hand every member that for free.
+//
+// The author is the subscriber here, and the author is CERTAINLY allowed to read
+// their own topic: a naive gate written against the AUTHOR's access would pass
+// every ordinary test and still leak. Only a guest-baseline gate is silent.
+func TestTopicPostSignalIsSilentForARestrictedCategory(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// An explicit role list with no inherit marker: the guest baseline cannot read
+	// this board. The player is the topic's author and still must not cause a
+	// forum-wide announcement.
+	category := newTestCategory(t, app, "closed-boards", []string{"moderator"})
+	topic := newSignalTopic(t, app, "Private topic", category.Id)
+
+	author := subscribeAsSignalClient(t, app, authRecordFor(t, app, fixPlayerID))
+	moderator := subscribeAsSignalClient(t, app, authRecordFor(t, app, fixModeratorID))
+
+	publishTopicSignal(app, topic)
+
+	if msg, ok := awaitSignal(t, author, 700*time.Millisecond); ok {
+		t.Fatalf("a restricted topic was announced publicly: %s", signalBody(t, msg))
+	}
+	if msg, ok := awaitSignal(t, moderator, 700*time.Millisecond); ok {
+		t.Fatalf("a restricted topic was announced to another member: %s", signalBody(t, msg))
+	}
+}
+
+// WHY publishTopicSignal GUARDS AN EMPTY CATEGORY — AND WHY THAT GUARD IS NEVER
+// REACHED IN PRODUCTION.
+//
+// The obvious test for "a topic with no category must not be announced" turns out
+// to be untestable, and the reason is the real finding: the schema REFUSES such a
+// topic. `topics.category_id` is required, so there is no row to publish from.
+//
+// That is worth pinning, because it upgrades the guard in publishTopicSignal from
+// a hypothetical into defence-in-depth: the empty-category branch exists for a
+// state the database will not hold. If a future migration ever relaxes that
+// column, this test is what turns red — and the fail-closed guard is already in
+// place to catch it.
+func TestTopicWithNoCategoryCannotBeCreated(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+
+	col, err := app.FindCollectionByNameOrId(topicsCollectionName)
+	if err != nil {
+		t.Fatalf("topics collection missing: %v", err)
+	}
+	rec := core.NewRecord(col)
+	rec.Set("title", "Orphan topic")
+	rec.Set("category_id", "")
+	rec.Set("author_id", fixPlayerID)
+
+	if err := app.Save(rec); err == nil {
+		t.Fatal("a topic with no category was accepted; publishTopicSignal's empty-category " +
+			"branch is now reachable, and it must stay fail-closed")
 	}
 }

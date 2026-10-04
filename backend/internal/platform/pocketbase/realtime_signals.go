@@ -47,6 +47,44 @@ const (
 	realtimeSignalTopicPost       = "topic.post"
 )
 
+// publishTopicSignal announces that a topic changed, to exactly the audience the
+// topic is already visible to.
+//
+// THE AUDIENCE IS DECIDED AGAINST THE GUEST BASELINE, not against the author.
+// That is the careful part, and it is why this is a function rather than a
+// one-liner at the call site:
+//
+//   - In a category a GUEST may read, the topic is already public to every
+//     signed-out visitor, so broadcasting its existence to every member reveals
+//     nothing that the forum page itself does not show.
+//   - In a category a guest may NOT read, a public signal would announce
+//     "something happened" to the entire forum about a thread nobody else is
+//     allowed to know exists. No content rides along — the signal is an id —
+//     but the EXISTENCE of activity is itself information, and a private
+//     category is the one place this design must not leak even that.
+//
+// A narrower audience than "everyone who could read it" is not attempted. The
+// signal carries no content, so the only thing a member who cannot read the
+// topic learns is that a topic id moved — and the client re-reads through
+// /api/aerun, which returns them nothing.
+//
+// A RESTRICTED topic therefore simply gets no public signal, and its readers
+// keep polling. That is the correct degradation: slower, never wrong.
+func publishTopicSignal(app core.App, topic *core.Record) {
+	categoryID := topic.GetString("category_id")
+	if categoryID == "" {
+		// A topic with no category has no visibility rule to check against, and
+		// guessing "public" for it would be exactly the fail-open this exists to
+		// avoid.
+		return
+	}
+	allowed, err := canViewCategory(app, guestAccess(), categoryID)
+	if err != nil || !allowed {
+		return
+	}
+	publishSignal(app, realtimeSignalTopicPost, topic.Id, realtimeSignalAudienceAll)
+}
+
 // publishSignal tells one member — or every member — that something changed, so a
 // client can re-read it through the command layer.
 //
