@@ -7,7 +7,7 @@ import { useTheme } from '../../contexts/ThemeProvider';
 import { resolveAvatarUrl } from '../../api/avatars';
 import { useDesign } from '../../contexts/DesignProvider';
 import { Bell, User, LogOut, MessageCircle, Palette, Check, FilePen } from 'lucide-react';
-import { subscribeToAdminNotifications, subscribeToUserNotifications } from '../../api/rtdb-notifications';
+import { subscribeToUserNotifications } from '../../api/rtdb-notifications';
 import { subscribeToDmUnread } from '../../api/dms';
 import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
@@ -18,7 +18,6 @@ const Navigation = () => {
   const { theme, changeGuestTheme } = useTheme();
   const { activeDesign } = useDesign();
   const navigate = useNavigate();
-  const [adminUnread, setAdminUnread] = React.useState(0);
   const [userUnread, setUserUnread] = React.useState(0);
   const [dmUnread, setDmUnread] = React.useState(0);
   const [expanded, setExpanded] = React.useState(false);
@@ -27,30 +26,21 @@ const Navigation = () => {
 
   const isAdmin = (profile?.role_id === 'admin' || profile?.role_id === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
-  // Subscribe to notifications via RTDB (0 Firestore reads)
+  // Subscribe to this member's notifications. There is no separate admin feed:
+  // `GET /me/notifications` is already scoped to the caller on the server
+  // (notifications.go filters `recipient_id = e.Auth.Id`), so an "admin" read was
+  // the same request with the same account id — a second identical poll whose
+  // rows were then ADDED to the member's own list, rendering every notification
+  // in the badge twice and twice over in the Notifications page.
   React.useEffect(() => {
     if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') return;
 
-    // User notifications
-    const unsubUser = subscribeToUserNotifications(user.uid, (notifs) => {
+    const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
       setUserUnread(notifs.filter(n => !n.read).length);
     });
 
-    // Admin notifications
-    let unsubAdmin = () => {};
-    if (isAdmin) {
-      unsubAdmin = subscribeToAdminNotifications((notifs) => {
-        setAdminUnread(notifs.filter(n => !n.read).length);
-      });
-    } else {
-      setAdminUnread(0);
-    }
-
-    return () => {
-      unsubUser();
-      unsubAdmin();
-    };
-  }, [isAdmin, user?.uid, profile?.role_id]);
+    return () => unsub();
+  }, [user?.uid, profile?.role_id]);
 
   // Subscribe to DM unread count via RTDB (0 Firestore reads)
   const [dmUnreadData, setDmUnreadData] = React.useState({ total: 0, conversations: {} });
@@ -77,7 +67,7 @@ const Navigation = () => {
     }
   }, [dmUnreadData, activeDmConvId]);
 
-  const totalUnread = adminUnread + userUnread;
+  const totalUnread = userUnread;
   const totalBadge = totalUnread + dmUnread;
 
   // ── Play sound when new notification or DM arrives ───────────────

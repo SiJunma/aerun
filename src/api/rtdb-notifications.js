@@ -1,70 +1,60 @@
 import { sendApi, pb } from './pocketbase';
-import { subscribeToRefetch } from './connection';
+import { sharedPoll, bestEffortRealtime } from './shared-poll';
+
+// The unread badge in the tab title, the Notifications page and the quote
+// highlighting inside TopicPage all wanted "this member's notifications". They
+// each ran their OWN 15-second interval AND their own realtime channel, so one
+// open topic page issued three identical `GET /me/notifications?limit=100` calls
+// every fifteen seconds — four for an admin, because subscribeToAdminNotifications
+// below was the same read under a different name.
+//
+// ONE resource answers all of them now, and a fourth caller costs zero requests.
+// The realtime channel is a refresh TRIGGER rather than a second reader, so five
+// events arriving together collapse into one debounced read.
+const toNotification = (n) => ({
+  id: n.id,
+  recipient_uid: n.recipient_id,
+  type: n.type,
+  read: !!n.read,
+  archived: !!n.archived,
+  created_at: n.created,
+  payload: n.payload || {},
+  title: n.title
+});
 
 /**
- * Subscribes to real-time notifications for a user via PocketBase API.
+ * Subscribes to this member's notifications.
+ *
+ * The callback receives `(items)`, and an empty list only when nothing is known
+ * yet — deliberately NOT when a read fails, so a page that was rendering rows
+ * keeps them instead of flashing empty on one slow response.
+ *
+ * The name carries the account id, and that is a CORRECTNESS requirement, not
+ * tidiness. These resources cache the last value and hand it to the next
+ * subscriber. Without the uid in the name, signing out and signing in as
+ * somebody else on a shared machine would paint the previous member's inbox, DM
+ * list and unread counts for one tick — data belonging to a session that no
+ * longer exists. Keying by account also means each account's loop is its own,
+ * so a stale one cannot keep running after the switch.
  */
 export const subscribeToUserNotifications = (uid, callback) => {
   if (!uid) {
     callback([]);
     return () => {};
   }
-
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  const poll = sharedPoll(`notifications:${uid}`, {
+    realtime: (reload) => bestEffortRealtime((setUnsub) =>
+      pb.collection('notifications').subscribe('*', reload).then(setUnsub)
+    ),
+    fetch: async () => {
       const res = await sendApi('/api/aerun/me/notifications?limit=100');
-      if (!isSubscribed) return;
-      const items = (res?.items || []).map(n => ({
-        id: n.id,
-        recipient_uid: n.recipient_id,
-        type: n.type,
-        read: !!n.read,
-        archived: !!n.archived,
-        created_at: n.created,
-        payload: n.payload || {},
-        title: n.title
-      }));
-      callback(items);
-    } catch (err) {
-      console.warn('[subscribeToUserNotifications error]', err);
-      if (isSubscribed) callback([]);
-    }
-  };
-
-  load();
-  const interval = setInterval(load, 15000);
-
-  // The first read after a cold load during an outage resolves to [] and the poll
-  // would fix it within 15s — but only if the component is still mounted and the
-  // user has not navigated. Re-read immediately on recovery so the inbox is right
-  // the moment the banner disappears.
-  const offRestored = subscribeToRefetch(load);
-
-  let unsub = () => {};
-  try {
-    pb.collection('notifications').subscribe('*', () => {
-      load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {
-    // Best-effort realtime: the interval above already polls, so a failed
-    // subscription costs freshness, not correctness.
-  }
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    offRestored();
-    unsub();
-  };
-};
-
-/**
- * Subscribes to real-time admin notifications.
- */
-export const subscribeToAdminNotifications = (callback) => {
-  return subscribeToUserNotifications(pb.authStore.record?.id, callback);
+      return (res?.items || []).map(toNotification);
+    },
+    intervalMs: 15000,
+    initialValue: [],
+    onError: (err) => console.warn('[subscribeToUserNotifications error]', err),
+  });
+  return poll.subscribe((items) => callback(items));
 };
 
 /**
@@ -116,20 +106,16 @@ export const markAllNotificationsRead = async (_uid, _notifs = []) => {
   });
 };
 
-export const markAllAdminNotificationsRead = async (adminNotifs = []) => {
-  return await markAllNotificationsRead(null, adminNotifs);
-};
-
-// These archive rather than mark read.
+// This archives rather than marks read.
 //
-// They used to call markAllNotificationsRead, i.e. POST /me/notifications/
+// It used to call markAllNotificationsRead, i.e. POST /me/notifications/
 // read-all: nothing was removed and every row came back as READ, while the
 // button said "clear all" and the toast said "all cleared". Clearing an inbox
 // and silencing it are different acts; this one now does what it is labelled.
+//
+// There was also an `deleteAllAdminNotifications` beside it issuing the very
+// same POST under an admin name. `/me/...` routes are caller-scoped server-side,
+// so it archived the identical inbox twice.
 export const deleteAllUserNotifications = async (_uid) => {
-  await sendApi('/api/aerun/me/notifications/archive-all', { method: 'POST' });
-};
-
-export const deleteAllAdminNotifications = async () => {
   await sendApi('/api/aerun/me/notifications/archive-all', { method: 'POST' });
 };

@@ -1,4 +1,5 @@
 import { sendApi, pb } from './pocketbase';
+import { createSharedPoll } from './shared-poll';
 
 let heartbeatTimer = null;
 let currentActiveCharacter = null;
@@ -60,39 +61,43 @@ const handlePresenceSnapshot = (presence) => {
   }
 };
 
-// Snapshot seeding: the first subscriber starts one shared GET /api/aerun/status
-// poll; heartbeat responses feed the same caches, so the poll only covers the
-// gaps between beats and there is never more than one fetch in flight.
-const STATUS_POLL_MS = 20000;
-let statusPollTimer = null;
-let statusFetchInFlight = false;
-
-const fetchStatusSnapshot = async () => {
-  if (statusFetchInFlight) return;
-  statusFetchInFlight = true;
-  try {
+// Snapshot seeding: ONE shared GET /api/aerun/status loop serves every presence
+// consumer, and heartbeat responses feed the same caches, so the poll only covers
+// the gaps between beats and there is never more than one fetch in flight.
+//
+// The banner used to run a SECOND, independent 25-second loop against this same
+// endpoint to decide whether to show its "connection lost" strip. Two clocks, one
+// endpoint, for one piece of information — so the status snapshot is a shared
+// resource now, and the banner is simply another subscriber. Its failure signal
+// is delivered alongside the value, which is what lets it keep working.
+const statusPoll = createSharedPoll({
+  name: 'status',
+  fetch: async () => {
     const res = await sendApi('/api/aerun/status');
     if (res?.presence) handlePresenceSnapshot(res.presence);
-  } catch {
-    // Non-fatal: the next beat or poll tick retries.
-  } finally {
-    statusFetchInFlight = false;
-  }
-};
+    return res;
+  },
+  intervalMs: 20000,
+  initialValue: null,
+});
 
-const startStatusPolling = () => {
-  if (statusPollTimer) return;
-  fetchStatusSnapshot();
-  statusPollTimer = setInterval(fetchStatusSnapshot, STATUS_POLL_MS);
-};
+// The loop is reference-counted by the shared resource itself: the first
+// subscriber starts it, the last one to leave stops it.
+const startStatusPolling = () => statusPoll.subscribe(() => {});
 
 const stopStatusPollingIfIdle = () => {
   if (onlineSubscribers.size > 0 || guestSubscribers.size > 0) return;
-  if (statusPollTimer) {
-    clearInterval(statusPollTimer);
-    statusPollTimer = null;
-  }
+  // Nothing is watching the status loop any more.
+  statusPoll.stopIfIdle();
 };
+
+// Lets the connection banner ride the presence snapshot instead of polling
+// `/api/aerun/status` a second time. `onStatus` receives (snapshot, error).
+export const subscribeToStatus = (onStatus) => statusPoll.subscribe(onStatus);
+
+// An out-of-band read of the same resource, for the browser's `online` event —
+// "the network just came back" is worth a read now rather than at the next tick.
+export const probeStatus = () => statusPoll.refresh();
 
 const sendHeartbeat = async (character = null) => {
   if (!pb.authStore.isValid) return;

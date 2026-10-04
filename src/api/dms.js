@@ -1,5 +1,6 @@
 import { sendApi, pb } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
+import { sharedPoll, bestEffortRealtime } from './shared-poll';
 
 /**
  * Returns a deterministic conversation ID for two users.
@@ -43,84 +44,71 @@ export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirP
   return res?.conversation?.id || res?.id || res?.conversation_id;
 };
 
-/**
- * Subscribe to all conversations for a given user.
- */
+// ── DM list ──────────────────────────────────────────────────────────────────
+//
+// ONE list read for the whole app. The Navbar badge and the messages page both
+// wanted it, each with its own 10s interval and its own realtime channel, so an
+// open DM page issued the same `GET /api/aerun/dms` twice on two clocks.
+//
+// Keyed by account: the cached list must never be handed to a different member
+// after a sign-out, and a stale account's loop must not survive the switch.
 export const subscribeToDmList = (uid, callback, errorCallback) => {
   if (!uid) {
     callback([]);
     return () => {};
   }
-
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  const poll = sharedPoll(`dm-list:${uid}`, {
+    realtime: (reload) => bestEffortRealtime((setUnsub) =>
+      pb.collection('dm_conversations').subscribe('*', reload).then(setUnsub)
+    ),
+    fetch: async () => {
       const res = await sendApi('/api/aerun/dms');
-      if (!isSubscribed) return;
-      const items = (res?.items || []).map(conv => ({
+      return (res?.items || []).map(conv => ({
         id: conv.id,
         ...conv,
         lastTimestamp: conv.last_message_at,
         lastMessage: conv.last_message
       }));
-      callback(items);
-    } catch (err) {
-      console.warn('[subscribeToDmList err]', err);
-      if (errorCallback) errorCallback(err);
-    }
-  };
+    },
+    intervalMs: 10000,
+    initialValue: [],
+    onError: (err) => console.warn('[subscribeToDmList err]', err),
+  });
 
-  load();
-  const interval = setInterval(load, 10000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('dm_conversations').subscribe('*', () => {
-      load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {
-    // Best-effort realtime: the interval above already polls, so a failed
-    // subscription costs freshness, not correctness.
-  }
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  // The error travels WITH the last good list rather than replacing it, so a
+  // failed refresh leaves the conversation list on screen.
+  return poll.subscribe((items, err) => {
+    if (err && errorCallback) errorCallback(err);
+    callback(items);
+  });
 };
 
-/**
- * Subscribe to real-time unread DM counts.
- */
+// ── Unread counters ──────────────────────────────────────────────────────────
+//
+// ONE counters read. AuthProvider wanted `dmUnread` and TitleProvider wanted the
+// same numbers for the tab title; each ran its own 15s loop against the same
+// `/me/unread-counts`, which is why the network log showed that call in pairs.
 export const subscribeToDmUnread = (uid, callback) => {
   if (!uid) {
     callback({ total: 0, conversations: {} });
     return () => {};
   }
-
-  let isSubscribed = true;
-  const load = async () => {
-    try {
+  const poll = sharedPoll(`dm-unread:${uid}`, {
+    fetch: async () => {
       const res = await sendApi('/api/aerun/me/unread-counts');
-      if (!isSubscribed) return;
-      callback({
+      return {
         total: res?.total_unread_messages || res?.unread_conversations || 0,
         conversations: {}
-      });
-    } catch {
-      if (isSubscribed) callback({ total: 0, conversations: {} });
-    }
-  };
+      };
+    },
+    intervalMs: 15000,
+    initialValue: { total: 0, conversations: {} },
+  });
 
-  load();
-  const interval = setInterval(load, 15000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
+  // No realtime channel here: the counters are derived state that changes only
+  // as a side effect of a message, and that message already wakes the DM list
+  // poll and the notification poll in this same tab.
+  return poll.subscribe((counts) => callback(counts));
 };
 
 /**
@@ -144,6 +132,11 @@ export const fetchOlderDmMessages = async (conversationId, oldestTimestamp, batc
 
 /**
  * Subscribe to messages in a conversation.
+ *
+ * The 5-second poll is deliberate here and unique: this is the one view a member
+ * is watching while somebody else types, and there is no server push scoped to a
+ * conversation id this client can trust. It is also the ONLY resource that still
+ * polls this fast, and it stops while the tab is hidden.
  */
 export const subscribeToDmMessages = (conversationId, limitCount, callback, errorCallback) => {
   if (!conversationId) {
@@ -151,45 +144,32 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
     return () => {};
   }
 
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // Keyed per conversation so opening a second thread does not inherit the first
+  // one's messages, and so a closed thread releases its own loop.
+  const poll = sharedPoll(`dm-messages:${conversationId}:${limitCount}`, {
+    realtime: (reload) => bestEffortRealtime((setUnsub) =>
+      pb.collection('dm_messages').subscribe('*', (e) => {
+        if (e.record?.conversation_id === conversationId) reload();
+      }).then(setUnsub)
+    ),
+    fetch: async () => {
       const res = await sendApi(`/api/aerun/dms/${conversationId}/messages?limit=${limitCount}`);
-      if (!isSubscribed) return;
-      const items = (res?.items || []).map(m => ({
+      return (res?.items || []).map(m => ({
         id: m.id,
         ...m,
         sender_uid: m.sender_id,
         timestamp: m.created
       }));
-      callback(items);
-    } catch (err) {
-      console.error('[subscribeToDmMessages err]', err);
-      if (errorCallback) errorCallback(err);
-    }
-  };
+    },
+    intervalMs: 5000,
+    initialValue: [],
+    onError: (err) => console.error('[subscribeToDmMessages err]', err),
+  });
 
-  load();
-  const interval = setInterval(load, 5000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('dm_messages').subscribe('*', (e) => {
-      if (e.record?.conversation_id === conversationId) {
-        load();
-      }
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {
-    // Best-effort realtime: the interval above already polls, so a failed
-    // subscription costs freshness, not correctness.
-  }
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  return poll.subscribe((items, err) => {
+    if (err && errorCallback) errorCallback(err);
+    callback(items);
+  });
 };
 
 /**

@@ -4,6 +4,7 @@ import { sendApi, pb } from './pocketbase';
 // is exactly how the two drifted apart in the first place.
 import { normalizeTopic } from './forum';
 import { recordAvatarUrl, resolveAvatarUrl } from './avatars';
+import { sharedPoll } from './shared-poll';
 
 // ── User profile normalisation ──────────────────────────────────────────────
 
@@ -140,21 +141,18 @@ export const fetchLatestTopics = async (limitCount = 50) => {
 };
 
 export const subscribeToLatestTopics = (callback, limitCount = 50) => {
-  let isSubscribed = true;
+  // The new-replies feed and the "most active" list read the SAME endpoint with
+  // the same limit. They had separate loops (20s and 30s) over one resource, so a
+  // member with both mounted issued two identical `GET /topics?limit=50` reads
+  // on two unrelated clocks. Keyed by limit, the two now share one loop.
+  const poll = sharedPoll(`latest-topics:${limitCount}`, {
+    fetch: () => fetchLatestTopics(limitCount),
+    intervalMs: 20000,
+    initialValue: [],
+    onError: (err) => console.error('[subscribeToTopTopics]', err),
+  });
 
-  const load = () => {
-    fetchLatestTopics(limitCount).then(topics => {
-      if (isSubscribed) callback(topics);
-    });
-  };
-
-  load();
-  const interval = setInterval(load, 20000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
+  return poll.subscribe((topics) => callback(topics));
 };
 
 // ── Guest Activity ──────────────────────────────────────────────────────────
@@ -173,25 +171,25 @@ export const deleteGuestActivity = async (_guestId) => {};
 // `sendApi` and passed `res.items` through raw, which is how that page ended up
 // showing "—" where every other topic list showed a timestamp and a link.
 export const subscribeToTopTopics = (callback, limitCount = 50) => {
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // It maps through `fetchLatestTopics` rather than issuing its own request, so
+  // this page cannot drift from the new-replies feed: both render the SAME
+  // normalised rows, and a fix to one is a fix to both.
+  //
+  // Sharing the resource NAME is the other half of that. It reads exactly what
+  // subscribeToLatestTopics reads, so two loops over one endpoint were the same
+  // bug as everywhere else in this file — and /active-topics is reachable from
+  // the index that also mounts the new-replies feed.
+  const poll = sharedPoll(`latest-topics:${limitCount}`, {
+    fetch: async () => {
       const topics = await fetchLatestTopics(limitCount);
-      if (isSubscribed) callback(topics);
-    } catch (err) {
-      console.error('[subscribeToTopTopics]', err);
-      if (isSubscribed) callback([]);
-    }
-  };
+      return topics;
+    },
+    intervalMs: 30000,
+    initialValue: [],
+    onError: (err) => console.error('[subscribeToTopTopics]', err),
+  });
 
-  load();
-  const interval = setInterval(load, 30000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
+  return poll.subscribe((topics) => callback(topics));
 };
 
 // isAbortedRequest recognises the PocketBase SDK's auto-cancellation.

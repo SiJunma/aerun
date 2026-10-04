@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Alert, Button, Container } from 'react-bootstrap';
 import { WifiOff, AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
-import { sendApi } from '../../api/pocketbase';
+import { subscribeToStatus, probeStatus } from '../../api/rtdb-presence';
 import { notifyConnectionRestored } from '../../api/connection';
 
 /**
@@ -26,18 +26,26 @@ const ConnectionStatusBanner = () => {
       setIsDisconnected(true);
     };
     const handleBrowserOnline = () => {
-      checkHealth();
+      // Coming back is the moment a stale "disconnected" verdict is most
+      // likely, so probe immediately rather than waiting for the next tick.
+      probeStatus();
     };
 
     window.addEventListener('offline', handleBrowserOffline);
     window.addEventListener('online', handleBrowserOnline);
 
-    // 2. Periodic backend health check probe (consolidated via /status)
+    // 2. Backend health, from the SHARED /api/aerun/status snapshot.
+    //
+    // This banner used to run its own 25-second interval against that endpoint
+    // while the presence module ran a 20-second one — two loops, one endpoint,
+    // and the second one existed only to decide whether to show a red strip.
+    // Subscribing to the same resource removes the duplicate entirely, and
+    // brings the two clocks into agreement: the banner can no longer disagree
+    // with the online list it sits above.
     let isMounted = true;
-    const checkHealth = async () => {
-      try {
-        await sendApi('/api/aerun/status');
-        if (!isMounted) return;
+    const onStatus = (_snapshot, error) => {
+      if (!isMounted) return;
+      if (!error) {
         if (disconnectTimerRef.current) {
           clearTimeout(disconnectTimerRef.current);
           disconnectTimerRef.current = null;
@@ -45,34 +53,36 @@ const ConnectionStatusBanner = () => {
         setIsDisconnected(false);
         setDismissed(false);
 
-        // Only on a real offline→online transition. This probe succeeds most of
-        // the time, so announcing unconditionally would refetch the whole app
-        // every 25 seconds.
+        // Only on a real offline→online transition. This succeeds most of the
+        // time, so announcing unconditionally would refetch the whole app every
+        // twenty seconds.
         if (wasDisconnectedRef.current) {
           wasDisconnectedRef.current = false;
           notifyConnectionRestored();
         }
-      } catch {
-        if (!isMounted) return;
-        if (!disconnectTimerRef.current) {
-          disconnectTimerRef.current = setTimeout(() => {
-            if (isMounted) {
-              setIsDisconnected(true);
-              wasDisconnectedRef.current = true;
-            }
-          }, 4000);
-        }
+        return;
+      }
+      // A single failed probe is not a disconnection — a member on a flaky
+      // mobile connection should not be shown a red banner for one dropped
+      // request. Four seconds of continuous failure is the same threshold this
+      // component always used.
+      if (!disconnectTimerRef.current) {
+        disconnectTimerRef.current = setTimeout(() => {
+          if (isMounted) {
+            setIsDisconnected(true);
+            wasDisconnectedRef.current = true;
+          }
+        }, 4000);
       }
     };
 
-    checkHealth();
-    const interval = setInterval(checkHealth, 25000);
+    const unsubscribe = subscribeToStatus(onStatus);
 
     return () => {
       isMounted = false;
       window.removeEventListener('offline', handleBrowserOffline);
       window.removeEventListener('online', handleBrowserOnline);
-      clearInterval(interval);
+      unsubscribe();
       if (disconnectTimerRef.current) {
         clearTimeout(disconnectTimerRef.current);
       }

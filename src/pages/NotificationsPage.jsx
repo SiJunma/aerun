@@ -6,13 +6,10 @@ import { useI18n } from '../contexts/I18nProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import {
-  subscribeToAdminNotifications,
   subscribeToUserNotifications,
   markNotificationRead,
   markAllNotificationsRead,
-  markAllAdminNotificationsRead,
   deleteNotification,
-  deleteAllAdminNotifications,
   deleteAllUserNotifications
 } from '../api/notifications';
 import { Link } from 'react-router-dom';
@@ -62,22 +59,16 @@ const TYPE_META = {
 };
 
 const NotificationsPage = () => {
-  const { profile, recordActivity, hasPermission, PERMISSIONS, isRootAdmin } = useAuth();
+  const { profile, recordActivity, isRootAdmin } = useAuth();
   const { t, lang } = useI18n();
   const { showToast } = useToast();
   const [deletingId, setDeletingId] = useState(null);
 
-  const [adminActive, setAdminActive] = useState([]);
   const [userActive, setUserActive] = useState([]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
-
-  // Only users who can actually act on registrations should see these notifications
-  const canManageUsers = hasPermission(PERMISSIONS.APPROVE_USERS)
-    || hasPermission(PERMISSIONS.BAN_USERS)
-    || hasPermission(PERMISSIONS.DELETE_USERS);
 
   const { setPageTitle } = usePageTitle();
 
@@ -87,25 +78,17 @@ const NotificationsPage = () => {
 
   useEffect(() => {
     if (!profile?.uid) return;
-    
-    let unsubAdminActive = () => {};
-    let unsubUserActive = () => {};
-
-    // Personal Notifications (limit 100 newest)
-    unsubUserActive = subscribeToUserNotifications(profile.uid, (notifs) => {
+    // Personal notifications (limit 100 newest).
+    //
+    // There is no second "admin broadcast" subscription. It called the same
+    // caller-scoped endpoint with the same account id, so the page was polling
+    // the identical resource twice and then rendering the union below — every
+    // notification appeared two rows deep for anyone who could moderate.
+    const unsub = subscribeToUserNotifications(profile.uid, (notifs) => {
       setUserActive(notifs);
     });
-
-    // Admin broadcast notifications (backward-compat: legacy recipient_uid=null docs)
-    if ((profile?.role_id === 'admin' || profile?.role_id === 'root') && canManageUsers) {
-      unsubAdminActive = subscribeToAdminNotifications(setAdminActive);
-    }
-
-    return () => {
-      unsubUserActive();
-      unsubAdminActive();
-    };
-  }, [canManageUsers, profile?.uid]);
+    return () => unsub();
+  }, [profile?.uid]);
 
   // Client-side filter: respect user's in_app notification preferences
   const notifSettings = profile?.settings?.notifications;
@@ -126,28 +109,28 @@ const NotificationsPage = () => {
     return 0;
   };
 
-  const activeNotifs = [...adminActive, ...userActive]
+  // One list: the admin broadcast rows were the caller's own notifications
+  // fetched a second time under the same endpoint and account, so the union
+  // below rendered every notification twice.
+  const activeNotifs = [...userActive]
     .filter(filterByPrefs)
     .sort((a, b) => getNotifTs(b) - getNotifTs(a));
 
   const handleMarkRead = (e, id) => {
     if (e) e.stopPropagation();
     recordActivity();
-    const isAdminNotif = adminActive.some(n => n.id === id);
 
-    // Update the list the admin is looking at first. The subscription polls on a
-    // 15s timer, so without this the row stays bold until the next tick — the
-    // click looks like it did nothing. The server response still decides the
-    // truth: on failure we reload, which puts the row back to unread.
+    // Update the list the member is looking at first. Without this the row stays
+    // bold until the next tick — the click looks like it did nothing. The server
+    // response still decides the truth: on failure the mark is rolled back,
+    // which puts the row back to unread.
     setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
-    setAdminActive(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
 
-    markNotificationRead(id, profile?.uid, isAdminNotif)
+    markNotificationRead(id, profile?.uid)
       .catch(err => {
         console.error('[markNotificationRead]', err);
         showToast(err.message, 'danger');
         setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: false } : n)));
-        setAdminActive(prev => prev.map(n => (n.id === id ? { ...n, read: false } : n)));
       });
   };
 
@@ -157,18 +140,16 @@ const NotificationsPage = () => {
     
     // Trigger animation first
     setDeletingId(id);
-    const isAdminNotif = adminActive.some(n => n.id === id);
-    
+
     // Wait for animation to finish before calling API
     setTimeout(() => {
-      deleteNotification(id, profile?.uid, isAdminNotif)
+      deleteNotification(id, profile?.uid)
         .then(() => {
-          // Drop the row locally as well. The list reloads on the 15s poll, so
-          // without this an archived notification keeps occupying its slot —
-          // and `archived:true` rows are filtered out of the next fetch, so it
-          // would disappear on its own seconds later, looking like a glitch.
+          // Drop the row locally as well. `archived:true` rows are filtered out
+          // of the next read, so without this an archived notification keeps
+          // occupying its slot — and would disappear on its own seconds later,
+          // looking like a glitch.
           setUserActive(prev => prev.filter(n => n.id !== id));
-          setAdminActive(prev => prev.filter(n => n.id !== id));
           showToast(t('notifications.deleted_toast', 'Уведомление удалено'));
           setDeletingId(null);
         })
@@ -187,14 +168,10 @@ const NotificationsPage = () => {
     // answer stand. If a request fails the toast says so AND the marks come
     // back, because the marks are not a lie we are allowed to keep.
     setUserActive(prev => prev.map(n => ({ ...n, read: true })));
-    setAdminActive(prev => prev.map(n => ({ ...n, read: true })));
 
     try {
       if (profile?.uid && userActive.length > 0) {
         await markAllNotificationsRead(profile.uid, userActive);
-      }
-      if (canManageUsers && adminActive.length > 0) {
-        await markAllAdminNotificationsRead(adminActive);
       }
       showToast(t('notifications.all_read_toast', 'Все уведомления прочитаны'));
     } catch (err) {
@@ -202,23 +179,18 @@ const NotificationsPage = () => {
       showToast(err.message, 'danger');
       // Roll the marks back so the page matches the server.
       setUserActive(prev => prev.map(n => ({ ...n, read: false })));
-      setAdminActive(prev => prev.map(n => ({ ...n, read: false })));
     }
   };
 
   const handleDeleteAll = async () => {
     recordActivity();
     try {
-      if (canManageUsers) {
-        await deleteAllAdminNotifications();
-      }
       if (profile?.uid) {
         await deleteAllUserNotifications(profile.uid);
       }
-      // Clear locally too. Archived rows are filtered out of the next poll, so
+      // Clear locally too. Archived rows are filtered out of the next read, so
       // leaving them rendered until then shows the list contradicting itself.
       setUserActive([]);
-      setAdminActive([]);
       showToast(t('notifications.all_deleted_toast', 'Все уведомления очищены'));
     } catch (err) {
       console.error('[deleteAllNotifications]', err);

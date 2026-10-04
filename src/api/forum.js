@@ -1,5 +1,6 @@
 ﻿import { sendApi, pb } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
+import { sharedPoll, bestEffortRealtime } from './shared-poll';
 
 // normalizeTopic maps a server topic row onto the field names the renderers
 // read. EXPORTED because three different topic lists exist (the category page,
@@ -52,41 +53,26 @@ export const subscribeToTopics = (categoryId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // Keyed per category: the index and the category page both read this, and a
+  // member bouncing between them was paying for two loops over one endpoint.
+  const poll = sharedPoll(`topics:${categoryId}`, {
+    realtime: (reload) => bestEffortRealtime((setUnsub) =>
+      pb.collection('topics').subscribe('*', reload).then(setUnsub)
+    ),
+    fetch: async () => {
       const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&limit=100`);
-      if (!isSubscribed) return;
       // The command layer answers `items` (forum_topics.go listTopicsHandler).
       // Reading `topics`/`pinned` — the retired Firestore callable's shape —
       // always yielded undefined, so this subscription reported "no topics"
       // for every category no matter what was stored.
-      callback((res?.items || []).map(normalizeTopic));
-    } catch (err) {
-      console.warn('[subscribeToTopics err]', err);
-      if (isSubscribed) callback([]);
-    }
-  };
+      return (res?.items || []).map(normalizeTopic);
+    },
+    intervalMs: 15000,
+    initialValue: [],
+    onError: (err) => console.warn('[subscribeToTopics err]', err),
+  });
 
-  load();
-  const interval = setInterval(load, 15000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('topics').subscribe('*', () => {
-      load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {
-    // Best-effort realtime: the interval above already polls, so a failed
-    // subscription costs freshness, not correctness.
-  }
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  return poll.subscribe((topics) => callback(topics));
 };
 
 export const subscribeToTopic = (topicId, callback) => {
@@ -95,40 +81,27 @@ export const subscribeToTopic = (topicId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
+  const poll = sharedPoll(`topic:${topicId}`, {
+    realtime: (reload) => bestEffortRealtime((setUnsub) =>
+      pb.collection('topics').subscribe(topicId, reload).then(setUnsub)
+    ),
+    fetch: async () => normalizeTopic((await sendApi(`/api/aerun/topics/${topicId}`))?.topic),
+    intervalMs: 15000,
+    initialValue: null,
+  });
 
-  const load = async () => {
-    try {
-      const res = await sendApi(`/api/aerun/topics/${topicId}`);
-      if (!isSubscribed) return;
-      callback(normalizeTopic(res?.topic), null);
-    } catch (err) {
-      if (err?.status === 404 || err?.status === 403) {
-        if (isSubscribed) callback(null, null);
-      } else {
-        if (isSubscribed) callback(null, err);
-      }
+  // The (data, err) SHAPE is TopicPage's access contract and is preserved exactly:
+  // a 404/403 means "not visible to you" and renders the not-found card, while any
+  // other failure is a real error. Only the TIMER changed.
+  return poll.subscribe((topic, err) => {
+    if (!err) {
+      callback(topic, null);
+    } else if (err?.status === 404 || err?.status === 403) {
+      callback(null, null);
+    } else {
+      callback(null, err);
     }
-  };
-
-  load();
-  const interval = setInterval(load, 15000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('topics').subscribe(topicId, () => {
-      load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {
-    // Best-effort realtime: the interval above already polls, so a failed
-    // subscription costs freshness, not correctness.
-  }
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  });
 };
 
 // fetchSecuredTopics reads one page of a category's topics.
@@ -162,26 +135,18 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // This exists only to keep the category card's last-post cell fresh, which is
+  // the slowest-changing fact on the page — hence the long interval.
+  const poll = sharedPoll(`last-topic:${categoryId}`, {
+    fetch: async () => {
       const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&limit=1`);
-      if (!isSubscribed) return;
-      const topic = res?.items?.[0] || null;
-      callback(normalizeTopic(topic));
-    } catch {
-      if (isSubscribed) callback(null);
-    }
-  };
+      return normalizeTopic(res?.items?.[0] || null);
+    },
+    intervalMs: 25000,
+    initialValue: null,
+  });
 
-  load();
-  const interval = setInterval(load, 25000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
+  return poll.subscribe((topic) => callback(topic));
 };
 
 // createTopic posts a new topic together with its opening message.
@@ -243,38 +208,25 @@ export const subscribeToPosts = (topicId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // Keyed per topic, so leaving a thread releases its loop immediately instead of
+  // leaving a 10-second timer reading a topic nobody is looking at.
+  const poll = sharedPoll(`posts:${topicId}`, {
+    realtime: (reload) => bestEffortRealtime((setUnsub) =>
+      pb.collection('posts').subscribe('*', (e) => {
+        if (e.record?.topic_id === topicId) reload();
+      }).then(setUnsub)
+    ),
+    fetch: async () => {
       const res = await sendApi(`/api/aerun/topics/${topicId}/posts?limit=100`);
-      if (!isSubscribed) return;
       // `items`, per forum_posts.go listPostsHandler — the same key the topic
       // list uses. `posts` was the retired callable's name and is always absent.
-      callback((res?.items || []).map(normalizePost));
-    } catch {
-      if (isSubscribed) callback([]);
-    }
-  };
+      return (res?.items || []).map(normalizePost);
+    },
+    intervalMs: 10000,
+    initialValue: [],
+  });
 
-  load();
-  const interval = setInterval(load, 10000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('posts').subscribe('*', (e) => {
-      if (e.record?.topic_id === topicId) load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {
-    // Best-effort realtime: the interval above already polls, so a failed
-    // subscription costs freshness, not correctness.
-  }
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  return poll.subscribe((posts) => callback(posts));
 };
 
 // RTDB realtime subscriptions are gone: every mutation now goes through the

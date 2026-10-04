@@ -59,28 +59,52 @@ export const getTopicSubscribers = async (topicId) => {
   }
 };
 
+// ONE request for the whole page.
+//
+// This was the heaviest read in the app: the handler answered with bare
+// `topic_id`s, and this function then issued one `GET /api/aerun/topics/:id` per
+// subscription in a fan-out. Thirty subscriptions meant thirty-one requests to
+// draw one screen, on every visit.
+//
+// The handler now embeds each topic in the subscription row it already returns,
+// so the normal path is a single round trip. The per-id read remains as a
+// FALLBACK, not the default: it is what keeps this page working against a server
+// that has not shipped the embedded payload yet, which is the only situation in
+// which paying for it is justified.
+const fetchTopicById = async (topicId) => {
+  const t = await sendApi(`/api/aerun/topics/${topicId}`);
+  return normalizeTopic(t?.topic);
+};
+
 export const fetchUserSubscribedTopics = async (userId) => {
   if (!userId) return [];
   try {
     const res = await sendApi('/api/aerun/me/subscriptions?limit=100');
     const items = res?.items || [];
-    const topicIds = items.map(item => item.topic_id).filter(Boolean);
-    if (topicIds.length === 0) return [];
 
-    const topics = await Promise.all(
-      topicIds.map(async (id) => {
+    // NORMALISE BEFORE HANDING A ROW TO A RENDERER — same rule as every other
+    // topic list, and the reason this page rendered "—".
+    const embedded = items.filter((item) => item?.topic).map((item) => normalizeTopic(item.topic));
+
+    // Only the rows the server did not embed pay for a request. A subscription
+    // whose topic was deleted or has become unreadable arrives WITHOUT a topic
+    // and is dropped here rather than costing a 404 to discover.
+    const embeddedIds = new Set(embedded.map((topic) => topic.id));
+    const missingIds = items
+      .map((item) => item?.topic_id)
+      .filter((id) => id && !embeddedIds.has(id));
+
+    const fetched = missingIds.length > 0
+      ? await Promise.all(missingIds.map(async (id) => {
         try {
-          const t = await sendApi(`/api/aerun/topics/${id}`);
-          // NORMALISE BEFORE HANDING A ROW TO A RENDERER — same rule as every
-          // other topic list, and the reason this page rendered "—".
-          return normalizeTopic(t?.topic);
+          return await fetchTopicById(id);
         } catch {
           return null;
         }
-      })
-    );
+      }))
+      : [];
 
-    const validTopics = topics.filter(Boolean);
+    const validTopics = [...embedded, ...fetched].filter(Boolean);
     // `last_post_at_ms` is what normalizeTopic derived, so a topic whose last
     // post is the opening one still sorts by its real activity instead of by
     // an undefined field.
@@ -89,6 +113,11 @@ export const fetchUserSubscribedTopics = async (userId) => {
     return validTopics;
   } catch (err) {
     console.warn('[fetchUserSubscribedTopics]', err);
-    return [];
+    // Rethrown, not swallowed into an empty list. This function used to answer
+    // [] for a failed read, which is indistinguishable from "you subscribe to
+    // nothing" — so a dropped connection rendered an empty page and a member
+    // concluded their subscriptions were gone. The page catches this and shows
+    // its own error state.
+    throw err;
   }
 };

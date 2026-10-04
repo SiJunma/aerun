@@ -1,4 +1,5 @@
 import { sendApi } from './pocketbase';
+import { sharedPoll } from './shared-poll';
 
 /**
  * Logs an administrative or moderative action.
@@ -41,26 +42,19 @@ const normalizeAuditLog = (item) => ({
  * Subscribes to the latest audit logs.
  */
 export const subscribeToAuditLogs = (limitCount = 50, callback) => {
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // Staff-only and single-consumer today, but keyed like everything else so
+  // opening the audit tab from two places cannot double the read.
+  const poll = sharedPoll(`audit-logs:${limitCount}`, {
+    fetch: async () => {
       const res = await sendApi(`/api/aerun/admin/audit-logs?limit=${limitCount}`);
-      if (!isSubscribed) return;
-      callback((res?.items || []).map(normalizeAuditLog));
-    } catch (err) {
-      console.warn('[subscribeToAuditLogs err]', err);
-      if (isSubscribed) callback([]);
-    }
-  };
+      return (res?.items || []).map(normalizeAuditLog);
+    },
+    intervalMs: 15000,
+    initialValue: [],
+    onError: (err) => console.warn('[subscribeToAuditLogs err]', err),
+  });
 
-  load();
-  const interval = setInterval(load, 15000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
+  return poll.subscribe((logs) => callback(logs));
 };
 
 /**

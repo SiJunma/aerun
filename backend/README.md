@@ -210,7 +210,7 @@ All errors return the machine-readable error contract:
 - `POST /api/aerun/topics/:id/subscribe` — subscribe to topic updates. Strictly idempotent: duplicate requests cannot create duplicate subscription records.
 - `POST /api/aerun/topics/:id/unsubscribe` & `DELETE /api/aerun/topics/:id/subscription` — unsubscribe from topic updates. Idempotent no-op if not subscribed.
 - `GET /api/aerun/topics/:id/subscription` — check caller's subscription status for a topic.
-- `GET /api/aerun/me/subscriptions` — list topics the caller is subscribed to with keyset pagination.
+- `GET /api/aerun/me/subscriptions` — list topics the caller is subscribed to with keyset pagination. Each item embeds the subscribed `topic` payload, so the browser renders the page from ONE request instead of one `GET /topics/:id` per subscription. The `topic` key is OMITTED when the topic is deleted or its category is no longer readable by the caller — the subscription row is still the caller's, but there is nothing there to read.
 - `GET /api/aerun/admin/audit-logs` — keyset-paginated audit trail for administrative actions (`view_audit_log` permission: root/admin). Supports filtering by `action_type` and `performer_id`.
 
 ### Direct Messages, Notifications and Outbox (Sprint 5)

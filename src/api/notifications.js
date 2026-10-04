@@ -1,26 +1,22 @@
 import {
   subscribeToUserNotifications,
-  subscribeToAdminNotifications,
   markNotificationRead,
-  markTopicNotificationsRead,
-  deleteNotification,
   markAllNotificationsRead,
-  markAllAdminNotificationsRead,
-  deleteAllAdminNotifications,
+  deleteNotification,
   deleteAllUserNotifications
 } from './rtdb-notifications';
 
 export {
   subscribeToUserNotifications,
-  subscribeToAdminNotifications,
   markNotificationRead,
-  markTopicNotificationsRead,
   deleteNotification,
   markAllNotificationsRead,
-  markAllAdminNotificationsRead,
-  deleteAllAdminNotifications,
   deleteAllUserNotifications
 };
+
+// TopicPage marks quotes read as they scroll into view, which is per-notification
+// and therefore has no bulk form.
+export { markTopicNotificationsRead } from './rtdb-notifications';
 
 export const archiveNotification = deleteNotification;
 

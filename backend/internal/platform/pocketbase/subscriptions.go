@@ -147,7 +147,20 @@ func getTopicSubscriptionStatusHandler(e *core.RequestEvent) error {
 	})
 }
 
-// listUserSubscriptionsHandler returns keyset-paginated subscriptions for the caller.
+// listUserSubscriptionsHandler returns keyset-paginated subscriptions for the
+// caller.
+//
+// It also EMBEDS each subscribed topic, and this is the point of the handler as
+// it stands: the browser used to receive bare `topic_id`s and then issue one
+// `GET /api/aerun/topics/:id` PER SUBSCRIPTION to render the list. A member with
+// 30 subscriptions spent 31 requests to draw one page, which is why opening
+// /subscriptions was the single heaviest read in the app.
+//
+// The topics are fetched in ONE query and filtered by the caller's own access,
+// which canViewCategory decides per topic's category. A subscription the caller
+// may no longer see is returned WITHOUT a topic rather than with it: the row is
+// still theirs (a stale subscription outliving a permission change is not an
+// error), but the topic it points at is not theirs to read.
 func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 	if e.Auth == nil {
 		return forbiddenError("authentication is required to view subscriptions")
@@ -189,13 +202,23 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 		nextCursor = fmt.Sprintf("%s|%s", lastRec.GetDateTime("created").String(), lastRec.Id)
 	}
 
+	acc := AccessFrom(e)
+	topics := loadVisibleTopics(e.App, acc, subscriptionTopicIDs(records))
+
 	items := make([]map[string]any, len(records))
 	for i, r := range records {
-		items[i] = map[string]any{
+		topicID := r.GetString("topic_id")
+		item := map[string]any{
 			"id":       r.Id,
-			"topic_id": r.GetString("topic_id"),
+			"topic_id": topicID,
 			"created":  r.GetDateTime("created").String(),
 		}
+		// Absent, not null, when the topic is gone or out of reach — the client
+		// drops the row either way and must not render a stub.
+		if topic, ok := topics[topicID]; ok {
+			item["topic"] = topic
+		}
+		items[i] = item
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
@@ -203,4 +226,71 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 		"next_cursor": nextCursor,
 		"request_id":  requestIDFrom(e),
 	})
+}
+
+// subscriptionTopicIDs extracts the distinct topic ids from subscription rows.
+func subscriptionTopicIDs(records []*core.Record) []string {
+	ids := make([]string, 0, len(records))
+	seen := make(map[string]bool, len(records))
+	for _, r := range records {
+		id := r.GetString("topic_id")
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// loadVisibleTopics reads the requested topics in ONE query and keeps only the
+// ones this caller may see, returning their normal payloads.
+//
+// The access check is per topic's CATEGORY, and it is applied AFTER the batch
+// read on purpose: one query plus N cheap in-memory checks replaces N separate
+// `GET /topics/:id` round trips. A category that cannot be viewed simply
+// contributes no topics here.
+//
+// A missing topic (deleted) and an unreadable one (permission revoked) are both
+// absent from the map. They are the same thing to the caller: there is nothing
+// there to render.
+func loadVisibleTopics(app core.App, acc AccessContext, topicIDs []string) map[string]map[string]any {
+	out := make(map[string]map[string]any, len(topicIDs))
+	if len(topicIDs) == 0 {
+		return out
+	}
+
+	// dbx.In takes []any: a []string is a compile error rather than a silent
+	// empty IN (), which would make every lookup "find nothing".
+	inArgs := make([]any, len(topicIDs))
+	for i, id := range topicIDs {
+		inArgs[i] = id
+	}
+
+	var records []*core.Record
+	if err := app.RecordQuery(topicsCollectionName).
+		AndWhere(dbx.In("id", inArgs...)).
+		All(&records); err != nil {
+		// A failed batch degrades the page to id-only, exactly as it behaved
+		// before this existed — never to an error.
+		return out
+	}
+
+	payloads := make([]map[string]any, 0, len(records))
+	visible := make([]*core.Record, 0, len(records))
+	for _, rec := range records {
+		allowed, err := canViewCategory(app, acc, rec.GetString("category_id"))
+		if err != nil || !allowed {
+			continue
+		}
+		payloads = append(payloads, topicPayload(rec))
+		visible = append(visible, rec)
+	}
+	// One decoration pass for the whole page rather than one per topic.
+	decorateTopicAuthors(app, payloads)
+
+	for i, payload := range payloads {
+		out[visible[i].Id] = payload
+	}
+	return out
 }
