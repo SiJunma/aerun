@@ -1,5 +1,23 @@
 # Realtime: hybrid transport plan
 
+> **CORRECTION (2026-10-04) — the premise below is wrong.**
+>
+> "RealtimeRule is a separate field from ListRule" is **not true for
+> PocketBase v0.40.4**. The field does not exist: `core.Collection` has no such
+> member, and `grep -r RealtimeRule` over the module returns zero hits. Realtime
+> is authorized through the *same* `ListRule`/`ViewRule` as REST —
+> `apis/realtime.go:605-614` maps `collection/<id>` to `ViewRule` and
+> `collection/*` to `ListRule`.
+>
+> So work item 1 ("decide the rule shape per collection") cannot be answered the
+> way this document assumes, and options 1 and 2 below are not expressible.
+> Enabling realtime for a collection's content *is* enabling REST reads on that
+> content.
+>
+> The replacement design, with the verified inventory, is in
+> **`REALTIME_TRANSPORT_DESIGN.md`**. This document is left unedited below so the
+> original reasoning — and its error — stays on the record.
+
 Status: **plan only, not started.** Written 2026-10-03 before implementation, so
 the reasoning survives the session.
 
