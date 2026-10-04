@@ -47,22 +47,34 @@ export const ToastProvider = ({ children }) => {
               borderLeft: `4px solid var(--bs-${toast.variant})`
             }}
           >
-            <Toast.Header 
-              closeButton 
-              className="border-bottom-0 bg-transparent py-2 px-3"
+            {/* THE MESSAGE LIVES IN THE HEADER, NOT IN A BODY.
+
+                It used to sit in an empty <Toast.Body> while the header held an
+                empty <strong> — so every toast rendered the icon on row one and
+                the text on row two, with the close button floating above both.
+                The comment in the old header said as much ("just leave it empty"),
+                so this was not a regression from the members refresh; that button
+                is simply where it became visible.
+
+                Icon and text share one line now: `flex-shrink-0` keeps the icon
+                whole when a message is long enough to wrap, and `me-auto` on the
+                text pushes the close button to the far edge as before. */}
+            <Toast.Header
+              closeButton
+              className="border-bottom-0 bg-transparent py-2 px-3 d-flex align-items-center"
             >
-              <div 
-                className={`text-${toast.variant} me-2 d-flex align-items-center`}
+              <div
+                className={`text-${toast.variant} me-2 d-flex align-items-center flex-shrink-0`}
               >
                 {getIcon(toast.variant)}
               </div>
-              <strong className="me-auto text-body fw-bold" style={{ fontSize: '0.9rem' }}>
-                {/* We don't necessarily need a title, but can provide one based on variant, or just leave it empty. Let's just put the message itself inside the body. */}
+              <strong
+                className="me-auto text-body fw-bold"
+                style={{ fontSize: '0.9rem', lineHeight: 1.35 }}
+              >
+                {toast.message}
               </strong>
             </Toast.Header>
-            <Toast.Body className="pt-0 pb-3 px-3 fw-medium" style={{ fontSize: '0.95rem' }}>
-              {toast.message}
-            </Toast.Body>
           </Toast>
         ))}
       </ToastContainer>
