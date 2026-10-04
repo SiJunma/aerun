@@ -206,6 +206,19 @@ func createNotification(txApp core.App, recipientID, senderID, notifType, title 
 		return nil, internalError("failed to save notification", err)
 	}
 
+	// The nudge, inside the same transaction as the notification it announces.
+	//
+	// Publishing from here rather than from each caller is what keeps the signal
+	// and the notification from disagreeing: there is exactly one place a
+	// notification is born, so there is exactly one place its signal is written,
+	// and a new notification type cannot forget to signal.
+	//
+	// It goes through txApp, not the outer app, so a subscriber can never be told
+	// about a notification that the surrounding transaction then rolls back.
+	// A member who somehow sees the signal for a rolled-back row re-reads
+	// /api/aerun and gets nothing, which is the correct answer, not a phantom.
+	publishSignal(txApp, realtimeSignalNotificationNew, record.Id, recipientID)
+
 	return record, nil
 }
 
