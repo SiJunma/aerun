@@ -194,6 +194,51 @@ export const subscribeToTopTopics = (callback, limitCount = 50) => {
   };
 };
 
+// isAbortedRequest recognises the PocketBase SDK's auto-cancellation.
+//
+// Client.send keeps ONE in-flight request per request key (GET + url) and aborts
+// the previous one, then rejects the loser with a ClientResponseError whose
+// `isAbort` is set. That is the SDK working as designed, not a failed read: the
+// caller has a newer request in flight, or has already applied a newer value.
+// Reporting it as a failure is what filled the console with "The request was
+// aborted" while the profile on screen was perfectly correct.
+//
+// Exported so a test can execute it: reading `err.name` alone misses the SDK's
+// wrapper, and a swallowed request is indistinguishable from a real failure
+// unless the predicate itself is run against the shape the SDK actually throws.
+export const isAbortedRequest = (err) =>
+  !!err && (
+    err.isAbort === true ||
+    err.name === 'AbortError' ||
+    err.originalError?.name === 'AbortError'
+  );
+
+// One read of a user row, for every caller that needs one.
+//
+// It exists because two callers used to spell this out separately and read from
+// DIFFERENT sources: `subscribeToUser` read the collection, while AuthProvider
+// rebuilt the caller's profile from `pb.authStore.record` — a snapshot PocketBase
+// restores from localStorage and never refreshes, because every profile command
+// writes through /api/aerun rather than through PocketBase. A snapshot read and a
+// server read disagree exactly when a profile has just been saved, which is how
+// the profile card came to show the new nickname while the Settings inputs,
+// seeded from the snapshot, showed the old one.
+//
+// A cancelled duplicate answers null rather than throwing: the request that
+// cancelled this one is the answer the caller wants. Every OTHER failure still
+// throws, because `subscribeToUser` renders nothing at all for a caller it could
+// not answer.
+export const fetchUserProfile = async (uid) => {
+  if (!uid) return null;
+  try {
+    const record = await pb.collection('users').getOne(uid);
+    return normalizeUserProfile({ ...record });
+  } catch (err) {
+    if (isAbortedRequest(err)) return null;
+    throw err;
+  }
+};
+
 export const subscribeToUser = (uid, callback) => {
   if (!uid) {
     callback(null);
@@ -201,9 +246,9 @@ export const subscribeToUser = (uid, callback) => {
   }
 
   let isSubscribed = true;
-  pb.collection('users').getOne(uid).then(record => {
+  fetchUserProfile(uid).then(record => {
     if (isSubscribed) {
-      callback(normalizeUserProfile({ ...record }));
+      callback(record);
     }
   }).catch(() => {
     if (isSubscribed) callback(null);

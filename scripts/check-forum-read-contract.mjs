@@ -30,6 +30,7 @@ const forum = read('../src/api/forum.js');
 const resources = read('../src/api/auth-resources.js');
 const categories = read('../src/api/categories.js');
 const reputation = read('../src/api/reputation.js');
+const subscriptions = read('../src/api/subscriptions.js');
 const adminPage = read('../src/pages/AdminPage.jsx');
 
 // The `forbid` gates below match executable source, so the COMMENTS that explain
@@ -168,6 +169,74 @@ assert.doesNotMatch(
   resources,
   /callback\(res\?\.items \|\| \[\]\)/,
   'subscribeToTopTopics must not pass raw items to a renderer'
+);
+
+// The subscriptions list is the THIRD topic list, and it is the one that reads
+// `GET /topics/:id` per subscription. It handed `t?.topic` — the server's own
+// payload — straight to TopicRow, so every row of /subscriptions rendered a
+// literal "—" for the byline timestamp AND for the last-post column, and lost
+// its pin icon, while the identical topic under /category/<id> rendered fine.
+// Again the damage looked EMPTY rather than wrong.
+assert.match(
+  subscriptions,
+  /normalizeTopic\(t\?\.topic\)/,
+  'fetchUserSubscribedTopics must map through normalizeTopic — TopicRow reads the normalised field names'
+);
+assert.doesNotMatch(
+  subscriptions,
+  /return\s+t\?\.topic\b/,
+  'fetchUserSubscribedTopics must not pass the raw server topic to a renderer'
+);
+assert.match(
+  subscriptions,
+  /import \{ normalizeTopic \} from '\.\/forum'/,
+  'the subscriptions list must reuse the one mapping — a second copy is how these lists drifted apart'
+);
+
+// A bare normalizeTopic in the source says nothing about whether it produces
+// the fields TopicRow reads, so the mapping is EXECUTED on the keys
+// topicPayload (forum_topics.go) actually emits.
+//
+// The match starts at `const`, never at `export const`: `new Function` compiles
+// a function BODY, not a module, and `export` in one is a SyntaxError pointing
+// at the arrow function inside it. Same reason the toCategoryPayload extraction
+// below starts at `const`.
+const normalizeTopicSource = forum.match(/const normalizeTopic = [\s\S]*?\n};/);
+assert.ok(normalizeTopicSource, 'normalizeTopic must be extractable for the behavioural check');
+const normalizeTopic = new Function(`${normalizeTopicSource[0]}; return normalizeTopic;`)();
+
+const rawTopic = {
+  id: 'topic1',
+  category_id: 'cat1',
+  title: 'Тема',
+  posts_count: 4,
+  locked: false,
+  pinned: true,
+  last_post_created: '2026-03-02 10:00:00 +0000 UTC',
+  created: '2026-02-01 09:00:00 +0000 UTC'
+};
+const row = normalizeTopic(rawTopic);
+assert.equal(row.created_at, rawTopic.created, 'the byline timestamp must survive normalisation');
+assert.equal(row.last_post_at, rawTopic.last_post_created, 'the last-post timestamp must survive normalisation');
+assert.equal(row.is_pinned, true, 'a pinned topic must keep its pin icon');
+assert.equal(row.posts_count, 4, 'the reply counter must read posts_count');
+assert.ok(
+  Number.isFinite(row.last_post_at_ms) && row.last_post_at_ms > 0,
+  'the subscriptions sort key (last_post_at_ms) must be a number, not undefined'
+);
+
+// A topic whose last-post projection is empty must fall back to its own
+// creation instead of rendering "—" — which is what a brand-new topic depends
+// on, since its opening post IS its last post.
+assert.equal(
+  normalizeTopic({ ...rawTopic, last_post_created: '' }).last_post_at,
+  rawTopic.created,
+  'a topic with no last-post projection must fall back to its creation time'
+);
+assert.equal(
+  normalizeTopic(null),
+  null,
+  'a subscription whose topic 404s must be dropped by the caller, not crash the list'
 );
 
 // ── reputation_votes is server-only ─────────────────────────────────────────
@@ -361,6 +430,7 @@ console.log('OK  forum read contract: category paging reads `total`/`per_page`')
 console.log('OK  forum read contract: category counters and last-post fields survive toCategory');
 console.log('OK  forum read contract: the main page seeds latestTopics and stats');
 console.log('OK  forum read contract: every topic list normalises before rendering');
+console.log('OK  forum read contract: the subscriptions list normalises too — it renders TopicRow');
 console.log('OK  forum read contract: reputation_votes is read server-side, never from the browser');
 console.log('OK  forum read contract: the topic form transmits the mask and the pin');
 console.log('OK  forum read contract: "override off" is stored as the live inherit marker, not a snapshot');

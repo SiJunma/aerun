@@ -48,12 +48,39 @@ assert.match(
 
 // Order matters: writing the store before the server confirmed would leave the
 // picker naming a mask the database rejected.
-const patchAt = provider.indexOf("await sendApi('/api/aerun/me/profile'");
-const saveAt = provider.indexOf('pb.authStore.save(');
-assert.ok(
-  patchAt !== -1 && saveAt !== -1 && saveAt > patchAt,
-  'the auth store must be updated only AFTER the server confirms the write'
-);
+//
+// SCOPED TO THE FUNCTION, not to the file. This used to take the FIRST
+// `pb.authStore.save(` in the provider, which was correct while the mask was the
+// only writer — and silently retargeted the moment updateProfile started
+// persisting its own confirmed values, so the check began failing on a file
+// that broke nothing. "Written back after the server confirmed" is a property OF
+// A WRITE, so it has to be asked of each writer. updateProfile writes the store
+// too, and it is held to the same rule below.
+const orderedWrites = [
+  {
+    label: 'setLastSelectedMask',
+    source: provider.match(
+      /const setLastSelectedMask = useCallback\(async \(characterId\) => \{[\s\S]*?\n  \}, \[user\?\.uid\]\);/
+    ),
+    patch: "await sendApi('/api/aerun/me/profile'"
+  },
+  {
+    label: 'updateProfile',
+    source: provider.match(/const updateProfile = async \(newData, targetUid = null\) => \{[\s\S]*?\n  \};/),
+    patch: "/api/aerun/me/profile"
+  }
+];
+
+for (const { label, source, patch } of orderedWrites) {
+  assert.ok(source, `${label} must be extractable so its write ordering can be checked in place`);
+  const patchAt = source[0].indexOf(patch);
+  const saveAt = source[0].indexOf('pb.authStore.save(');
+  assert.ok(
+    patchAt !== -1 && saveAt !== -1 && saveAt > patchAt,
+    `${label} must update the auth store only AFTER the server confirms the write — a store ` +
+      'saved first resurrects a value the database rejected on the next reload'
+  );
+}
 
 // ── Neither picker may go back to the dead-end route ────────────────────────
 for (const [name, src] of [['TopicPage', topic], ['TopicFormPage', topicForm]]) {

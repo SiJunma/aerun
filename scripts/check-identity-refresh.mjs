@@ -22,6 +22,8 @@ import { fileURLToPath } from 'node:url';
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
 
 const authProvider = read('../src/contexts/AuthProvider.jsx');
+const authResources = read('../src/api/auth-resources.js');
+const profilePage = read('../src/pages/ProfilePage.jsx');
 const app = read('../src/App.jsx');
 const presence = read('../src/api/rtdb-presence.js');
 const presenceGo = read('../backend/internal/platform/pocketbase/presence.go');
@@ -272,6 +274,263 @@ check(
     'session token ever"'
 );
 
+// ── The caller's own profile is re-read, not replayed from the auth snapshot ──
+//
+// `profile` was rebuilt from `pb.authStore.record`. That record is a SNAPSHOT
+// PocketBase restores from localStorage on every boot, and nothing ever refreshed
+// it, because every profile command writes through /api/aerun rather than
+// through PocketBase. So the app answered with the row as it stood at SIGN-IN.
+//
+// The reported symptom is exactly what two disagreeing sources look like: rename
+// yourself, save, reload — the profile card shows the new name (it reads the row
+// live through subscribeToUser) while the Settings inputs show the old one (they
+// are seeded from `profile`). Both halves were correct about different data.
+//
+// Two things are load-bearing, and neither is visible in a screenshot:
+//   1. the session publishes a profile read from the SERVER, so a rename made
+//      anywhere — another device, an admin — converges as well;
+//   2. a confirmed save writes back through authStore.save(), because merging
+//      into React state only fixes the tab that did the saving.
+check(
+  /const refreshOwnProfile = useCallback\(async \(uid\)/.test(authProvider) &&
+    /await fetchUserProfile\(uid\)/.test(authProvider),
+  'AuthProvider must re-read the caller\'s own row from the server — pb.authStore.record is a ' +
+    'localStorage snapshot, so profile answers with whatever the row held at sign-in'
+);
+check(
+  /pb\.authStore\.save\(pb\.authStore\.token, nextRecord\)/.test(authProvider),
+  'updateProfile must write the confirmed values back through authStore.save() — merging into ' +
+    'React state fixes the tab that saved, and every reload after it replays the old snapshot'
+);
+
+// The write-back is EXECUTED, not pattern-matched: a regex can see that a field
+// name appears somewhere in the file, but only running it shows which fields a
+// reload will actually replay — and the two ways to get this wrong (a missing
+// field, a field the server never confirmed) look identical in review.
+const patchSource = authProvider.match(/const confirmedProfilePatch = \([\s\S]*?\n};/);
+assert.ok(patchSource, 'confirmedProfilePatch must be extractable for the behavioural check');
+const confirmedProfilePatch = new Function(`${patchSource[0]}; return confirmedProfilePatch;`)();
+
+// What /me/profile accepted on a save that renamed the member and moved their
+// status line and signature.
+const CONFIRMED_BODY = {
+  status_line: 'Пледик',
+  bio: 'Пустыня',
+  location: '',
+  birthday: '',
+  occupation: '',
+  interests: '',
+  contacts: ''
+};
+const CONFIRMED_SETTINGS = { theme: 'dark', signature: 'Мы в пустыне.' };
+
+const patch = confirmedProfilePatch({
+  body: CONFIRMED_BODY,
+  nickname: 'Arinr',
+  savedSettings: CONFIRMED_SETTINGS
+});
+
+for (const [key, value] of Object.entries(CONFIRMED_BODY)) {
+  assert.equal(patch[key], value, `${key} must be written back — the reload replays the snapshot`);
+}
+assert.equal(
+  patch.nickname,
+  'Arinr',
+  'the renamed nickname must be written back — its absence is the reported revert'
+);
+assert.deepEqual(
+  patch.settings,
+  CONFIRMED_SETTINGS,
+  'the signature lives in settings, so the object the server returned is the only thing carrying it'
+);
+
+// The account form also carries avatar_url, and the profile command does NOT
+// accept it — the avatar has its own upload endpoint. Persisting it would write
+// a resolved URL over the stored file path, so it must never appear here.
+assert.equal(
+  patch.avatar_url,
+  undefined,
+  'avatar_url is not a profile column — writing it back would persist a resolved URL as stored state'
+);
+
+// …and a save the server confirmed nothing for must not touch the snapshot.
+assert.deepEqual(
+  confirmedProfilePatch({ body: {}, nickname: '', savedSettings: null }),
+  {},
+  'a save with nothing confirmed must leave the snapshot alone'
+);
+
+// ── The Settings form follows the profile instead of freezing at first sight ───
+// The seed guard compared uids alone, so the form was written once — from
+// whatever the app knew first — and every later correction was discarded. That
+// is what let the card and the inputs disagree indefinitely, and it is why the
+// reload reproduced the bug instead of healing it.
+check(
+  /const buildAccountForm = \(source\) => \(\{/.test(profilePage) &&
+    /JSON\.stringify\(next\)/.test(profilePage),
+  'ProfilePage must re-seed the account form when the server-side values change — seeding once ' +
+    'per uid freezes the inputs at whatever the snapshot held'
+);
+check(
+  !/source\.uid !== lastInitUidRef\.current/.test(profilePage),
+  'the uid-only seed guard must not come back: it discarded every correction, which is how the ' +
+    'card and the inputs ended up reading two different sources'
+);
+check(
+  /const lastInitRef = useRef\(null\)/.test(profilePage),
+  'the seed guard must be tracked by profile uid AND seeded values, so a background write that ' +
+    'touches nothing in the form still cannot wipe in-progress edits'
+);
+
+// ── A cancelled read is not a failed read ─────────────────────────────────────
+//
+// The refresh above fires on every auth-store change, and the PocketBase SDK
+// keeps ONE in-flight request per request key: a second `getOne` for the same
+// record aborts the first. Asking on every change therefore made each ask cancel
+// the previous one, and every cancellation was reported as
+// "own profile refresh failed" — a red console error for a profile that was
+// rendered correctly the whole time.
+//
+// Two halves, and the second is the one that actually stops the noise: the read
+// must be deduplicated, AND a cancellation must not be raised as a failure.
+check(
+  /const ownProfileRefreshRef = useRef\(\{ uid: null, promise: null \}\)/.test(authProvider) &&
+    /if \(pending\.promise && pending\.uid === uid\) return pending\.promise;/.test(authProvider),
+  'AuthProvider must join the refresh already in flight for the same account — the SDK aborts ' +
+    'the previous identical request, so asking twice per boot cancels the first and fails it'
+);
+
+// …and the join is EXECUTED, because "there is one request" is not a thing a
+// regex can see: the dedup lives in a promise the caller never inspects, and a
+// version that starts a second request looks identical in the source.
+//
+// The closing brace of the arrow body is INSIDE the capture — leaving it in the
+// pattern hands `new Function` a body that never closes.
+const refreshSource = authProvider.match(
+  /const refreshOwnProfile = useCallback\(([\s\S]*?\n  \}), \[toOwnProfile\]\);/
+);
+assert.ok(refreshSource, 'refreshOwnProfile must be extractable for the behavioural check');
+
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  return { promise, resolve };
+};
+
+const runRefreshWith = async ({ record, fetchImpl }) => {
+  const refreshRef = { current: { uid: null, promise: null } };
+  const calls = { fetch: 0, setProfile: [], setUser: 0, warn: 0 };
+  const refreshOwnProfile = new Function(
+    'useCallback', 'ownProfileRefreshRef', 'pb', 'fetchUserProfile', 'toOwnProfile',
+    'setUser', 'setProfile', 'console',
+    `return useCallback(${refreshSource[1]});`
+  )(
+    fn => fn,
+    refreshRef,
+    { authStore: { record } },
+    async uid => { calls.fetch += 1; return fetchImpl(uid); },
+    rec => ({ ...rec, nickname: rec.nickname }),
+    () => { calls.setUser += 1; },
+    p => { calls.setProfile.push(p); },
+    { warn: () => { calls.warn += 1; } }
+  );
+  return { refreshOwnProfile, calls, refreshRef };
+};
+
+{
+  // Two callers in the same tick — the auth store fires onChange more than once
+  // at boot, and that is exactly the pair that used to abort itself.
+  const gate = deferred();
+  const { refreshOwnProfile, calls } = await runRefreshWith({
+    record: { id: 'u1' },
+    fetchImpl: () => gate.promise
+  });
+
+  const first = refreshOwnProfile('u1');
+  const second = refreshOwnProfile('u1');
+  gate.resolve({ id: 'u1', nickname: 'Arinr' });
+  await Promise.all([first, second]);
+
+  assert.equal(calls.fetch, 1, 'two refreshes for the same account must share ONE request');
+  assert.equal(calls.setProfile.length, 1, 'the joined caller must apply the answer once, not twice');
+}
+
+{
+  // A DIFFERENT account is a different record and a different request: joining
+  // those would publish the previous member's profile.
+  const firstGate = deferred();
+  const secondGate = deferred();
+  const { refreshOwnProfile, calls } = await runRefreshWith({
+    record: { id: 'u2' },
+    fetchImpl: uid => (uid === 'u1' ? firstGate.promise : secondGate.promise)
+  });
+
+  const first = refreshOwnProfile('u1');
+  const second = refreshOwnProfile('u2');
+  assert.equal(calls.fetch, 2, 'a refresh for another account must not join the current one');
+
+  firstGate.resolve({ id: 'u1', nickname: 'Arinr' });
+  await first;
+  assert.equal(calls.setProfile.length, 0, 'an answer for a session that already ended must be dropped');
+  secondGate.resolve({ id: 'u2', nickname: 'Other' });
+  await second;
+  assert.equal(calls.setProfile.length, 1, 'the current session\'s answer is applied');
+  assert.equal(calls.setProfile[0].nickname, 'Other', 'the applied profile must be the one the session owns');
+}
+
+{
+  // A cancellation arrives as null (fetchUserProfile swallows it), and a real
+  // failure throws. Neither may publish a profile, and only the second is worth
+  // a diagnostic.
+  const cancelled = await runRefreshWith({ record: { id: 'u1' }, fetchImpl: async () => null });
+  await cancelled.refreshOwnProfile('u1');
+  assert.equal(cancelled.calls.setProfile.length, 0, 'a cancelled read must not publish a profile');
+  assert.equal(cancelled.calls.warn, 0, 'a cancellation is not a failure and must not be reported as one');
+
+  const failed = await runRefreshWith({
+    record: { id: 'u1' },
+    fetchImpl: async () => { throw new Error('offline'); }
+  });
+  await failed.refreshOwnProfile('u1');
+  assert.equal(failed.calls.setProfile.length, 0, 'a failed read must not publish a profile');
+  assert.equal(failed.calls.warn, 1, 'a real failure must still leave a diagnostic');
+}
+const fetchProfileBody = authResources.match(
+  /export const fetchUserProfile = async \(uid\) => \{[\s\S]*?\n\};/
+);
+assert.ok(fetchProfileBody, 'fetchUserProfile must be extractable for the wiring check');
+check(
+  /if \(isAbortedRequest\(err\)\) return null;/.test(fetchProfileBody[0]),
+  'fetchUserProfile must answer null for a cancelled request instead of throwing — otherwise the ' +
+    'cancellation is reported to the member as a failed profile load'
+);
+check(
+  /if \(isAbortedRequest\(err\)\) return null;\s*throw err;/.test(fetchProfileBody[0]),
+  'every OTHER failure must still throw — swallowing them would render an empty profile with no ' +
+    'diagnostic at all, which is the opposite bug'
+);
+
+// …executed against the shapes the SDK actually throws, because `err.name` alone
+// misses the wrapper and a swallowed real failure is the opposite bug.
+const abortSource = authResources.match(/const isAbortedRequest = \(err\) =>[\s\S]*?\n  \);/);
+assert.ok(abortSource, 'isAbortedRequest must be extractable for the behavioural check');
+const abortFn = abortSource[0]
+  .replace(/^const isAbortedRequest = /, '')
+  .replace(/;\s*$/, '');
+const isAbortedRequest = new Function(`return (${abortFn});`)();
+
+// Client.send rejects the loser with `new ClientResponseError(e)`, whose isAbort
+// is derived from the AbortError it wraps.
+assert.equal(
+  isAbortedRequest({ name: 'ClientResponseError', isAbort: true, originalError: { name: 'AbortError' } }),
+  true,
+  'the SDK wrapper around an abort must be recognised'
+);
+assert.equal(isAbortedRequest({ name: 'AbortError' }), true, 'a bare AbortError must be recognised');
+assert.equal(isAbortedRequest({ name: 'ClientResponseError', status: 404 }), false, 'a 404 is a real failure');
+assert.equal(isAbortedRequest(null), false, 'a missing error is not an abort');
+assert.equal(isAbortedRequest(undefined), false, 'a missing error is not an abort');
+
 if (failures.length > 0) {
   console.error(`identity-refresh regressions (${failures.length}):\n`);
   for (const f of failures) console.error(`  - ${f}`);
@@ -284,5 +543,8 @@ console.log('OK  identity refresh: a closed page lands on / with replace');
 console.log('OK  identity refresh: logout records a departure, idling does not');
 console.log('OK  identity refresh: one guest per browser, not one per tab');
 console.log('OK  identity refresh: "Visited today" is a 24h window, not the online list');
+console.log('OK  identity refresh: the caller\'s own profile is read from the server, not replayed');
+console.log('OK  identity refresh: a confirmed save writes the auth store snapshot back');
+console.log('OK  identity refresh: a cancelled profile read is deduplicated, not reported as a failure');
 console.log('OK  identity refresh: every rendered icon is imported');
 console.log('OK  identity refresh: the root handover excludes you, and works without a password');

@@ -6,7 +6,8 @@ import {
   markAllTopicsRead,
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
-  normalizeUserProfile
+  normalizeUserProfile,
+  fetchUserProfile
 } from '../api/auth-resources';
 import {
   initRtdbPresence,
@@ -28,6 +29,27 @@ const FORUM_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
 export const useAuth = () => useContext(AuthContext);
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+// confirmedProfilePatch is what a CONFIRMED profile save writes back into the
+// auth store snapshot, and nothing else.
+//
+// WHY IT IS A FUNCTION AND WHY IT IS NARROW. The snapshot is what a reload
+// replays, so a confirmed field missing here is a field that silently reverts;
+// but a field present here that the server never confirmed is a field persisted
+// as if it were stored state. `avatar_url` is exactly that case: the account form
+// carries it, while the profile command does not accept it — the avatar has its
+// own upload endpoint — so building the patch from the form would write a
+// resolved URL over the stored file path.
+//
+// It is exported so a test can execute it: a regex can tell that a field name is
+// mentioned, but only running it can tell that the confirmed fields are present
+// AND the unconfirmed ones are absent.
+export const confirmedProfilePatch = ({ body, nickname, savedSettings }) => {
+  const patch = { ...(body || {}) };
+  if (nickname) patch.nickname = nickname;
+  if (savedSettings) patch.settings = savedSettings;
+  return patch;
+};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -94,6 +116,78 @@ export const AuthProvider = ({ children }) => {
     return localStorage.getItem('guest_id') || candidate;
   }, []);
 
+  // The caller's OWN profile: the shared normalizer plus the mailbox fallback.
+  //
+  // It is one function because two sources feed it — the auth store snapshot and
+  // the row read from the server — and they must produce the same shape. A
+  // profile that differed only by the fallback would re-seed the Settings form
+  // on every single boot.
+  const toOwnProfile = useCallback((rec) => ({
+    ...normalizeUserProfile({ ...rec }),
+    // Only the caller's OWN record falls back to the mailbox name and then to
+    // a literal — the normalizer stays neutral about nicknames so a public
+    // profile never renders one derived from an email address.
+    nickname: rec.nickname || rec.email?.split('@')[0] || 'User'
+  }), []);
+
+  // Re-read the caller's row from the server, because the auth store is a
+  // SNAPSHOT: PocketBase restores it from localStorage on every boot and nothing
+  // refreshes it, while every profile command writes through /api/aerun. So the
+  // app answered with whatever the row held at sign-in — rename yourself,
+  // reload, and the Settings inputs are back to the old name.
+  //
+  // The snapshot still renders immediately (on a cold paint it is all there is);
+  // this corrects it a moment later, and it is also what converges a profile
+  // renamed somewhere else — another device, or an admin.
+  // One refresh per account at a time.
+  //
+  // The auth store fires onChange more than once at boot (and again on the
+  // write-back below), and the PocketBase SDK keeps a single in-flight request
+  // per request key — a second `getOne` for the same record ABORTS the first.
+  // Asking on every change therefore meant each ask cancelled the one before it,
+  // and every cancellation surfaced as "own profile refresh failed" in the
+  // console while the profile on screen was correct. A second caller now joins
+  // the request already in flight instead of starting a rival one.
+  const ownProfileRefreshRef = useRef({ uid: null, promise: null });
+
+  const refreshOwnProfile = useCallback(async (uid) => {
+    if (!uid) return;
+    const pending = ownProfileRefreshRef.current;
+    if (pending.promise && pending.uid === uid) return pending.promise;
+
+    const promise = (async () => {
+      try {
+        const fresh = await fetchUserProfile(uid);
+        // Signing out, or switching accounts, while this is in flight must not hand
+        // the answer to a session that no longer exists. A cancelled duplicate
+        // also lands here as null — that is the SDK working, not a failed read.
+        if (!fresh || pb.authStore.record?.id !== uid) return;
+        setUser(prev => (prev && prev.uid === uid
+          ? {
+              ...prev,
+              displayName: fresh.nickname || prev.displayName,
+              photoURL: fresh.avatar_url || prev.photoURL
+            }
+          : prev));
+        setProfile(toOwnProfile(fresh));
+      } catch (err) {
+        // Everything that reaches here is a real failure: fetchUserProfile already
+        // answers null for a cancellation. The snapshot is on screen regardless, so
+        // this degrades to the older name and never to a blank header or a
+        // signed-out member — but the diagnostic stays, because this is the only
+        // place the app can learn that its own profile is drifting from the server.
+        console.warn('[AuthProvider] own profile refresh failed:', err);
+      }
+    })().finally(() => {
+      if (ownProfileRefreshRef.current.promise === promise) {
+        ownProfileRefreshRef.current = { uid: null, promise: null };
+      }
+    });
+
+    ownProfileRefreshRef.current = { uid, promise };
+    return promise;
+  }, [toOwnProfile]);
+
   // Initialize Auth State from PocketBase authStore
   const syncUserFromAuthStore = useCallback(() => {
     if (pb.authStore.isValid && pb.authStore.record) {
@@ -106,22 +200,18 @@ export const AuthProvider = ({ children }) => {
         photoURL: rec.avatar_url || '',
         providerData: [{ providerId: 'password' }]
       };
-      const p = {
-        ...normalizeUserProfile({ ...rec }),
-        // Only the caller's OWN record falls back to the mailbox name and then to
-        // a literal — the normalizer stays neutral about nicknames so a public
-        // profile never renders one derived from an email address.
-        nickname: rec.nickname || rec.email?.split('@')[0] || 'User'
-      };
       setUser(u);
-      setProfile(p);
+      setProfile(toOwnProfile(rec));
       setEmailUnverified(rec.verified === false);
+      // …and the snapshot is corrected against the server, so nothing here is
+      // read-only for the rest of the session.
+      refreshOwnProfile(rec.id);
     } else {
       setUser(null);
       setProfile(null);
       setEmailUnverified(false);
     }
-  }, []);
+  }, [toOwnProfile, refreshOwnProfile]);
 
   useEffect(() => {
     syncUserFromAuthStore();
@@ -401,6 +491,31 @@ export const AuthProvider = ({ children }) => {
         ...(nickname ? { nickname, displayName: nickname } : {}),
         ...(savedSettings ? { settings: savedSettings } : {}),
       };
+
+      // Merge into React state fixes THIS TAB. The auth store is what a reload
+      // replays — PocketBase restores it from localStorage, and no profile
+      // command writes through PocketBase — so a merged-but-unpersisted profile
+      // comes back old on the next F5. That was the reported "saved, reloaded,
+      // the inputs are the previous values" bug: the card reads the row live
+      // through subscribeToUser and showed the new name, the form is seeded from
+      // `profile` and showed the old one.
+      //
+      // setLastSelectedMask already writes back for exactly this reason; a saved
+      // profile has to do the same, and with the same discipline — only what the
+      // server CONFIRMED, which is why the patch is built from `body`, the
+      // nickname and the returned settings rather than from the form object.
+      const record = pb.authStore.record;
+      if (record) {
+        const nextRecord = { ...record, ...confirmedProfilePatch({ body, nickname, savedSettings }) };
+        const changed = Object.keys(nextRecord)
+          .some(key => JSON.stringify(nextRecord[key]) !== JSON.stringify(record[key]));
+        if (changed) {
+          // Also fires the store's change callbacks, so `profile` is rebuilt from
+          // the record that was actually just written.
+          pb.authStore.save(pb.authStore.token, nextRecord);
+        }
+      }
+
       setProfile(merged);
       return merged;
     }

@@ -136,8 +136,11 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
     signature: ''
   });
   
-  // Track which profile UID is currently loaded into the form to prevent overwriting local edits on background syncs (like last_seen updates)
-  const lastInitUidRef = useRef(null);
+  // Tracks what the account form was last seeded from — the profile uid AND the
+  // seeded values — so background syncs that do not touch the form (a last_seen
+  // write, a presence heartbeat) cannot overwrite in-progress edits, while a
+  // genuine change from the server does reach the inputs.
+  const lastInitRef = useRef(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
@@ -263,43 +266,63 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
   // two callers that must agree: the sync effect below, and the re-seed after a
   // save. Duplicating this list is how the two drifted — a field added to one and
   // not the other renders as an input that quietly empties itself.
-  const seedAccountForm = (source) => {
-    setAccountFormData({
-      nickname: source.nickname || source.displayName || '',
-      status_line: source.status_line || '',
-      avatar_url: source.avatar_url || '',
-      theme: source.settings?.theme || 'dark',
-      language: source.settings?.language || 'en',
-      signature: source.settings?.signature || '',
-      rep_show_history: source.settings?.rep_show_history !== false,
-      rep_show_comments: source.settings?.rep_show_comments !== false,
-      bio: source.bio || '',
-      location: source.location || '',
-      birthday: source.birthday || '',
-      occupation: source.occupation || '',
-      interests: source.interests || '',
-      contacts: source.contacts || '',
-      notif_topic_reply: source.settings?.notifications?.topic_reply?.in_app !== false,
-      notif_post_quoted: source.settings?.notifications?.post_quoted?.in_app !== false,
-      notif_reputation:  source.settings?.notifications?.reputation_change?.in_app !== false,
-      notif_new_registration: source.settings?.notifications?.new_registration?.in_app !== false,
-      email_notif_dms: source.settings?.email_notifications?.dms !== false,
-      email_notif_topic_replies: source.settings?.email_notifications?.topic_replies !== false,
-      soundEnabled: source.settings?.sound?.enabled ?? false,
-      soundVolume:  source.settings?.sound?.volume  ?? 40
-    });
-  };
+  //
+  // It RETURNS the state rather than setting it, because the effect below has to
+  // know whether the server actually said anything new before it overwrites what
+  // the reader is typing — and that comparison is only possible if both sides
+  // come out of this one function.
+  const buildAccountForm = (source) => ({
+    nickname: source.nickname || source.displayName || '',
+    status_line: source.status_line || '',
+    avatar_url: source.avatar_url || '',
+    theme: source.settings?.theme || 'dark',
+    language: source.settings?.language || 'en',
+    signature: source.settings?.signature || '',
+    rep_show_history: source.settings?.rep_show_history !== false,
+    rep_show_comments: source.settings?.rep_show_comments !== false,
+    bio: source.bio || '',
+    location: source.location || '',
+    birthday: source.birthday || '',
+    occupation: source.occupation || '',
+    interests: source.interests || '',
+    contacts: source.contacts || '',
+    notif_topic_reply: source.settings?.notifications?.topic_reply?.in_app !== false,
+    notif_post_quoted: source.settings?.notifications?.post_quoted?.in_app !== false,
+    notif_reputation:  source.settings?.notifications?.reputation_change?.in_app !== false,
+    notif_new_registration: source.settings?.notifications?.new_registration?.in_app !== false,
+    email_notif_dms: source.settings?.email_notifications?.dms !== false,
+    email_notif_topic_replies: source.settings?.email_notifications?.topic_replies !== false,
+    soundEnabled: source.settings?.sound?.enabled ?? false,
+    soundVolume:  source.settings?.sound?.volume  ?? 40
+  });
+
+  const seedAccountForm = (source) => setAccountFormData(buildAccountForm(source));
 
   // Sync form data with profile (own or if admin/mod is editing)
+  //
+  // Re-seed when the profile says something NEW, not once per profile. The guard
+  // used to compare uids alone, which meant the form was seeded from whatever the
+  // app happened to know FIRST and then frozen: `profile` is rebuilt from the
+  // auth store snapshot, so Settings opened with the previous nickname, and the
+  // card — fed by a live read of the row — showed the new one. Every reload
+  // reproduced it.
+  //
+  // Comparing the seeded VALUES keeps the property the uid guard existed for: a
+  // background write that does not touch the form (last_seen, a presence
+  // heartbeat) cannot wipe edits the reader has started. The trade-off is the
+  // other way round — when the server genuinely changes a field this form edits,
+  // the form follows it, which is the correct answer.
   useEffect(() => {
     const source = (profile?.uid === uid) ? profile : (canEditAnyAccount ? viewedProfile : null);
+    if (!source) return;
 
-    // Only initialize/reset the form if we are looking at a different user's profile
-    // This prevents background updates to the profile (like last_seen) from wiping unsaved local edits
-    if (source && source.uid !== lastInitUidRef.current) {
-      seedAccountForm(source);
-      lastInitUidRef.current = source.uid;
-    }
+    const next = buildAccountForm(source);
+    const key = JSON.stringify(next);
+    const last = lastInitRef.current;
+    if (last && last.uid === source.uid && last.key === key) return;
+
+    lastInitRef.current = { uid: source.uid, key };
+    setAccountFormData(next);
   }, [profile, viewedProfile, uid, canEditAnyAccount]);
 
   const handleOpenModal = (char = null) => {
@@ -406,9 +429,9 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
       // form is a snapshot, and the snapshot has to be refreshed from the profile
       // the save just updated.
       //
-      // `lastInitUidRef` is deliberately NOT cleared. Clearing it would let the next
-      // background event (a last_seen write, say) re-seed the form and wipe edits
-      // the reader has started since — the exact thing the guard exists to prevent.
+      // `lastInitRef` is deliberately NOT cleared here. Clearing it would make the
+      // very next background event (a last_seen write, say) look like a change
+      // and re-seed the form, wiping edits the reader has started since.
       if (savedProfile) {
         seedAccountForm(savedProfile);
       }
