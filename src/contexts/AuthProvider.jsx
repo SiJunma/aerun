@@ -736,10 +736,41 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user?.uid, isMarkingAllRead]);
 
-  // Permission checks
+  // Permission checks.
+  //
+  // THE ANSWER COMES FROM /me, NOT FROM THE ROLE REGISTRY.
+  //
+  // It used to resolve the caller's role in `roles` and read that role's
+  // permission list — which is why GET /roles had to publish the full matrix to
+  // everyone, guest included. Two consequences, both bad: the browser had a
+  // second, independent copy of an authorization decision the server had already
+  // made, and any drift between the two showed up as a button the server would
+  // have refused anyway. Worse, the local copy is derived from the ROLE column
+  // rather than from the effective set, so it ignored exactly the narrowing the
+  // server applies for account status — a pending or banned account rendered
+  // with the full chrome of its role.
+  //
+  // `/me` answers the same question with the answer the server would act on:
+  // `profilePayload` sends `permissions: auth.PermissionValues(acc.Permissions)`,
+  // where `acc` is already narrowed by role AND status. So this gate is now the
+  // same fact the command layer enforces, not a re-derivation of it.
+  //
+  // WHAT THIS DOES NOT CHANGE: a client-side gate is still only what to RENDER.
+  // Hiding a control is not refusing an action, and every write goes through a
+  // command that re-checks. The difference is that the two can no longer
+  // disagree.
+  //
+  // The fallback exists only for the window before `/me` lands. It is the
+  // compiled matrix, which is why a first paint can show one thing and the next
+  // render another; the alternative — failing closed — would blank the forum for
+  // every signed-out visitor on every load.
   const hasPermission = useCallback((perm) => {
+    const effective = profile?.permissions;
+    if (Array.isArray(effective) && effective.length > 0) {
+      return effective.includes(perm);
+    }
+
     if (!user) {
-      // Guest
       const guestRole = roles.find(r => r.id === 'spectator') || DEFAULT_ROLES.find(r => r.id === 'spectator');
       return !!normalizePermissions(guestRole?.permissions).includes(perm);
     }
