@@ -30,6 +30,10 @@ const forumSettingsID = "forumsettings01"
 type forumSettings struct {
 	MaxPostsPerTopic int
 	PostsPerPage     int
+	// TopicsPerPage governs every LIST OF TOPICS. Separate from PostsPerPage
+	// because a topic row and a post row are not the same height, and one shared
+	// number would have to be wrong for one of them.
+	TopicsPerPage int
 }
 
 // loadForumSettings reads the singleton row and clamps it.
@@ -44,6 +48,7 @@ func loadForumSettings(app core.App) forumSettings {
 	settings := forumSettings{
 		MaxPostsPerTopic: auth.DefaultMaxPostsPerTopic,
 		PostsPerPage:     auth.DefaultPostsPerPage,
+		TopicsPerPage:    auth.DefaultTopicsPerPage,
 	}
 
 	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
@@ -52,6 +57,10 @@ func loadForumSettings(app core.App) forumSettings {
 	}
 	settings.MaxPostsPerTopic = auth.ClampMaxPostsPerTopic(record.GetInt("max_posts_per_topic"))
 	settings.PostsPerPage = auth.ClampPostsPerPage(record.GetInt("posts_per_page"))
+	// GetInt returns 0 for a row written before this field existed, and
+	// ClampTopicsPerPage reads 0 as "unset" — so a pre-migration database picks
+	// up the default here rather than clamping to a floor of 1.
+	settings.TopicsPerPage = auth.ClampTopicsPerPage(record.GetInt("topics_per_page"))
 	return settings
 }
 

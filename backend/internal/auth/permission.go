@@ -228,6 +228,22 @@ const (
 	MinPostsPerPage = 1
 	// DefaultPostsPerPage matches the legacy default and the UI default.
 	DefaultPostsPerPage = 20
+
+	// Topics-per-page is the same idea for LISTS OF TOPICS, and it is a separate
+	// setting because the two are tuned for different rows: a topic row carries a
+	// category, an author and four timestamps, so the same number of rows is
+	// visibly more page than a list of posts.
+	//
+	// The ceiling is HALF the posts ceiling on purpose. 100 topic rows is a wall of
+	// near-identical rows where no reply is in context — the reader cannot tell
+	// them apart, so paging is not a limitation there, it is the interface. Posts
+	// are the opposite: a long topic is one column of prose you scroll, and
+	// shrinking it to 20 would make a 500-post topic tedious to read.
+	//
+	// Default is 20, matching the legacy feed size the two feeds were built at.
+	HardMaxTopicsPerPage = 50
+	MinTopicsPerPage     = 1
+	DefaultTopicsPerPage = 20
 )
 
 // ClampMaxPostsPerTopic bounds a configured value into the permitted range.
@@ -258,6 +274,21 @@ func ClampPostsPerPage(configured int) int {
 	}
 	if configured > HardMaxPostsPerPage {
 		return HardMaxPostsPerPage
+	}
+	return configured
+}
+
+// ClampTopicsPerPage bounds a configured topic page size, with the same "unset
+// means default" rule as ClampPostsPerPage.
+func ClampTopicsPerPage(configured int) int {
+	if configured <= 0 {
+		return DefaultTopicsPerPage
+	}
+	if configured < MinTopicsPerPage {
+		return MinTopicsPerPage
+	}
+	if configured > HardMaxTopicsPerPage {
+		return HardMaxTopicsPerPage
 	}
 	return configured
 }

@@ -178,29 +178,77 @@ export const apiRecordAllTopicVisits = (uid, topicIds) => {
 // of those undefined, so /active-topics rendered a literal "—" in the last-post
 // column with no link at all — the row looked empty rather than wrong, which is
 // why it survived review.
-export const fetchLatestTopics = async (limitCount = 50) => {
+export const fetchLatestTopics = async (page = 1, pageSize = 20) => {
   try {
-    const res = await sendApi(`/api/aerun/topics?limit=${limitCount}`);
-    return (res?.items || []).map(normalizeTopic);
+    const res = await sendApi(`/api/aerun/topics?page=${page}&limit=${pageSize}`);
+    return {
+      topics: (res?.items || []).map(normalizeTopic),
+      // The server's count over the WHOLE list, not this page — it is what the
+      // pager divides by. Falling back to this page's length would make the pager
+      // claim one page whenever the first page happened to be full, which is how a
+      // truncated list ends up looking complete.
+      total: res?.total ?? 0,
+      perPage: res?.per_page || pageSize,
+    };
   } catch (err) {
     console.error('[fetchLatestTopics]', err);
-    return [];
+    return { topics: [], total: 0, perPage: pageSize };
   }
 };
 
-export const subscribeToLatestTopics = (callback, limitCount = 50) => {
-  // The new-replies feed and the "most active" list read the SAME endpoint with
-  // the same limit. They had separate loops (20s and 30s) over one resource, so a
-  // member with both mounted issued two identical `GET /topics?limit=50` reads
-  // on two unrelated clocks. Keyed by limit, the two now share one loop.
-  const poll = sharedPoll(`latest-topics:${limitCount}`, {
-    fetch: () => fetchLatestTopics(limitCount),
+// The unread feed, paged on the server.
+//
+// It is a separate read rather than a client-side filter of the general feed,
+// because a client filter can only see what it fetched. Filtering fifty topics
+// locally meant any topic with unread replies beyond that window was invisible —
+// the member saw "no new replies" while the tab title counted them. The server
+// owns that set because it owns the read states.
+export const fetchUnreadTopics = async (page = 1, pageSize = 20) => {
+  try {
+    const res = await sendApi(`/api/aerun/topics?unread=1&page=${page}&limit=${pageSize}`);
+    return {
+      topics: (res?.items || []).map(normalizeTopic),
+      total: res?.total ?? 0,
+      perPage: res?.per_page || pageSize,
+    };
+  } catch (err) {
+    console.error('[fetchUnreadTopics]', err);
+    return { topics: [], total: 0, perPage: pageSize };
+  }
+};
+
+// Polls one page of the UNREAD feed, on the same shape as the general feed.
+//
+// It exists because dropping the poll from /new-replies would have silently made
+// the screen stop updating: it used to re-read every 20s, and a member watching
+// for replies would simply have seen a frozen list. Paging does not justify
+// losing that.
+export const subscribeToUnreadTopics = (callback, page = 1, pageSize = 20) => {
+  const poll = sharedPoll(`unread-topics:${page}:${pageSize}`, {
+    fetch: () => fetchUnreadTopics(page, pageSize),
     intervalMs: 20000,
-    initialValue: [],
-    onError: (err) => console.error('[subscribeToTopTopics]', err),
+    initialValue: { topics: [], total: 0, perPage: pageSize },
+    onError: (err) => console.error('[subscribeToUnreadTopics]', err),
   });
 
-  return poll.subscribe((topics) => callback(topics));
+  return poll.subscribe((data) => callback(data));
+};
+
+// Polls one page of the general topic feed.
+//
+// The PAGE IS PART OF THE POLL KEY. Pages are different resources — page 2 is
+// not a fresher page 1 — so keying them together would make a member on page 2
+// receive page 1's rows, and the two pages' data would overwrite each other in
+// one shared slot.
+export const subscribeToLatestTopics = (callback, page = 1, pageSize = 20) => {
+  const poll = sharedPoll(`latest-topics:${page}:${pageSize}`, {
+    fetch: () => fetchLatestTopics(page, pageSize),
+    intervalMs: 20000,
+    initialValue: { topics: [], total: 0, perPage: pageSize },
+    onError: (err) => console.error('[subscribeToLatestTopics]', err),
+  });
+
+  return poll.subscribe((data) => callback(data));
 };
 
 // ── Guest Activity ──────────────────────────────────────────────────────────
@@ -218,26 +266,14 @@ export const deleteGuestActivity = async (_guestId) => {};
 // and a fix to one is a fix to both. The previous version issued its own
 // `sendApi` and passed `res.items` through raw, which is how that page ended up
 // showing "—" where every other topic list showed a timestamp and a link.
-export const subscribeToTopTopics = (callback, limitCount = 50) => {
-  // It maps through `fetchLatestTopics` rather than issuing its own request, so
-  // this page cannot drift from the new-replies feed: both render the SAME
-  // normalised rows, and a fix to one is a fix to both.
+export const subscribeToTopTopics = (callback, page = 1, pageSize = 20) => {
+  // It IS subscribeToLatestTopics, not a second poll with a different interval.
   //
-  // Sharing the resource NAME is the other half of that. It reads exactly what
-  // subscribeToLatestTopics reads, so two loops over one endpoint were the same
-  // bug as everywhere else in this file — and /active-topics is reachable from
-  // the index that also mounts the new-replies feed.
-  const poll = sharedPoll(`latest-topics:${limitCount}`, {
-    fetch: async () => {
-      const topics = await fetchLatestTopics(limitCount);
-      return topics;
-    },
-    intervalMs: 30000,
-    initialValue: [],
-    onError: (err) => console.error('[subscribeToTopTopics]', err),
-  });
-
-  return poll.subscribe((topics) => callback(topics));
+  // Both pages read the same page of the same endpoint, and both used to build
+  // their own loop over it under the same poll key — which meant whichever
+  // mounted first decided the interval for both, and the "30s" and "20s" in the
+  // two definitions described nothing. One resource, one loop, one interval.
+  return subscribeToLatestTopics(callback, page, pageSize);
 };
 
 // isAbortedRequest recognises the PocketBase SDK's auto-cancellation.

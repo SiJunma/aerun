@@ -405,15 +405,30 @@ assert.match(
 // because subscribeToTopTopics handed raw `res.items` to TopicRow, which reads
 // the normalised names (last_post_at, is_pinned, created_at). The row looked
 // empty rather than wrong, so nothing failed.
+// The shape changed — fetchLatestTopics now answers { topics, total, perPage }
+// because the pager needs the server's count, not this page's length — but the
+// obligation did not: rows still leave this function normalised. So the assertion
+// targets the mapping, not the `return` keyword's position in it.
 assert.match(
   resources,
-  /return \(res\?\.items \|\| \[\]\)\.map\(normalizeTopic\)/,
+  /\(res\?\.items \|\| \[\]\)\.map\(normalizeTopic\)/,
   'fetchLatestTopics must map through normalizeTopic — TopicRow reads the normalised field names'
 );
 assert.match(
   resources,
-  /const topics = await fetchLatestTopics\(limitCount\)/,
-  'subscribeToTopTopics must reuse fetchLatestTopics so the two lists cannot drift'
+  /topics:\s*\(res\?\.items \|\| \[\]\)\.map\(normalizeTopic\)/,
+  'fetchLatestTopics must carry the normalised rows as `topics`'
+);
+assert.match(
+  resources,
+  /total:\s*res\?\.total/,
+  'fetchLatestTopics must return the server total — the pager divides by it, and ' +
+  'falling back to this page length makes a truncated list look complete'
+);
+assert.match(
+  resources,
+  /subscribeToTopTopics[\s\S]{0,900}return subscribeToLatestTopics\(/,
+  'subscribeToTopTopics must reuse the latest-topics feed so the two lists cannot drift'
 );
 assert.doesNotMatch(
   resources,

@@ -1,38 +1,59 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
 import { MessageSquare } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToTopTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
+import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumEmptyState from '../components/common/ForumEmptyState';
 import { resolveField } from '../utils/text';
 
 import { usePageTitle } from '../contexts/TitleProvider';
 
+const ITEMS_PER_PAGE = 20;
+
+// THE PAGER IS ALWAYS RENDERED, and this is the floor.
+//
+// The list previously had no pagination at all: it drew whatever fifty rows came
+// back and reported "everything" — so past that point the forums simply stopped
+// being listed, with nothing on screen to say so. A pager that appears only once
+// there is more than one page cannot solve that, because the member who is
+// already missing pages never sees the control that would reveal it.
+//
+// So the control is always present, with at least three pages of addressable
+// space. Empty pages beyond the data are honest — they say the list is shorter
+// than the pager — while a missing pager says nothing at all.
+const MIN_PAGES = 3;
+
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
   const { user, hasPermission, PERMISSIONS, categories } = useAuth();
   const { setPageTitle } = usePageTitle();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [topics, setTopics] = useState([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   useEffect(() => {
     setPageTitle(t('nav.active_topics', 'Активные темы'));
   }, [setPageTitle, t, lang]);
 
   useEffect(() => {
-    const unsubTopics = subscribeToTopTopics((data) => {
-      setTopics(data);
+    setLoading(true);
+    const unsubscribe = subscribeToTopTopics((data) => {
+      setTopics(data?.topics || []);
+      setTotal(data?.total ?? 0);
       setLoading(false);
-    }, 50); // Show top 50 topics
+    }, currentPage, ITEMS_PER_PAGE);
 
     return () => {
-      unsubTopics();
+      unsubscribe();
     };
-  }, []);
+  }, [currentPage]);
 
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);
@@ -44,6 +65,14 @@ const ActiveTopicsPage = () => {
     const cat = categories.find(c => c.id === topic.category_id);
     return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
   });
+
+  const realPages = Math.ceil(total / ITEMS_PER_PAGE);
+  const totalPages = Math.max(MIN_PAGES, realPages);
+
+  const handlePageChange = (page) => {
+    setSearchParams({ page });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
     <Container className="py-4">
@@ -98,6 +127,18 @@ const ActiveTopicsPage = () => {
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {/* Unconditional: the control must be visible even when the list is short,
+          which is the entire point of MIN_PAGES. */}
+      {!loading && (
+        <div className="mt-4">
+          <ForumPagination
+            currentPage={Math.min(currentPage, totalPages)}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
+        </div>
       )}
 
       <div className="mt-4">

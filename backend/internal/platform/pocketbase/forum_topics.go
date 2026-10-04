@@ -243,13 +243,19 @@ func createTopicHandler(e *core.RequestEvent) error {
 // It filters nothing: since 1767700000 a deleted topic is a GONE row, so
 // there is no flag left to filter on and no "non-deleted" qualifier to apply.
 func listTopicsHandler(e *core.RequestEvent) error {
-	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), forum.DefaultPageLimit), forum.DefaultPageLimit)
+	settings := loadForumSettings(e.App)
+	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.TopicsPerPage), settings.TopicsPerPage)
 	categoryID := strings.TrimSpace(e.Request.URL.Query().Get("category_id"))
 	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
 	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
 	if page < 1 {
 		page = 1
 	}
+	// `unread=1` narrows the list to the caller's topics with replies they have
+	// not seen. It is a FILTER, not a different endpoint: the same ordering, the
+	// same paging and the same `total` apply, which is why the client can page an
+	// unread feed without a second code path.
+	unreadOnly := parseIntParam(e.Request.URL.Query().Get("unread"), 0) == 1
 
 	// No `deleted` filter here.
 	//
@@ -267,6 +273,41 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	if categoryID != "" {
 		where = append(where, dbx.HashExp{"category_id": categoryID})
 		query = query.AndWhere(dbx.HashExp{"category_id": categoryID})
+	}
+
+	// The unread filter resolves the caller's unread topic ids first and pins the
+	// main query to them.
+	//
+	// Pinning by id rather than re-expressing the join is deliberate: the
+	// predicate lives in ONE place (`unreadTopicsPredicate`) and is shared with the
+	// unread badge counter, so the feed and the number in the tab title cannot drift
+	// apart. Two copies of "what counts as unread" is how a member ends up with a
+	// badge reading 40 and a feed that can only ever show 20.
+	if unreadOnly {
+		ids, err := unreadTopicIDs(e)
+		if err != nil {
+			return internalError("failed to resolve unread topics", err)
+		}
+		if len(ids) == 0 {
+			// Nothing unread. Answered as an empty page rather than as a filter that
+			// matched nothing, because `dbx.In` with an empty slice produces invalid
+			// SQL — and an unread feed is a legitimate empty state, not a reason to
+			// 500 the tab the member just clicked.
+			return e.JSON(http.StatusOK, map[string]any{
+				"items":       []map[string]any{},
+				"total":       0,
+				"page":        page,
+				"per_page":    limit,
+				"next_cursor": "",
+				"request_id":  requestIDFrom(e),
+			})
+		}
+		inArgs := make([]any, len(ids))
+		for i, id := range ids {
+			inArgs[i] = id
+		}
+		where = append(where, dbx.In("id", inArgs...))
+		query = query.AndWhere(dbx.In("id", inArgs...))
 	}
 
 	// Keyset pagination cursor: pinned DESC, last_post_created DESC, id DESC

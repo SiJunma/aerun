@@ -505,25 +505,92 @@ func getUnreadCountsHandler(e *core.RequestEvent) error {
 // Their floor is their registration instead: nothing posted before they joined
 // can be something they have not seen.
 func countUnreadTopics(e *core.RequestEvent) (int, error) {
+	where, params, err := unreadTopicsPredicate(e)
+	if err != nil || where == "" {
+		return 0, err
+	}
+
+	var counter struct {
+		Count int `db:"count"`
+	}
+	err = e.App.DB().NewQuery(`
+		SELECT COUNT(*) AS count
+		FROM ` + topicsCollectionName + ` t
+		LEFT JOIN ` + topicReadStatesCollectionName + ` r
+			ON r.topic_id = t.id AND r.user_id = {:user}
+		WHERE ` + where).
+		Bind(params).
+		One(&counter)
+	if err != nil {
+		return 0, err
+	}
+	return counter.Count, nil
+}
+
+// unreadTopicIDs returns EVERY topic the caller has unread replies in, as ids.
+//
+// It exists because a count is not a list. The "new replies" feed has to page
+// over unread topics, and the client cannot supply that set: its read map covers
+// only the fifty topics it happened to fetch, so any unread topic past that
+// window was not merely unsorted — it was absent, and the feed reported the
+// member as having fewer new replies than they had.
+//
+// The predicate is shared with countUnreadTopics on purpose. A list and a count
+// that disagreed would produce a pager whose last page is empty while the tab
+// badge claims more unread topics than the feed can ever show — which is the
+// "lost messages" this is meant to prevent.
+func unreadTopicIDs(e *core.RequestEvent) ([]string, error) {
+	where, params, err := unreadTopicsPredicate(e)
+	if err != nil || where == "" {
+		return nil, err
+	}
+
+	var rows []struct {
+		ID string `db:"id"`
+	}
+	err = e.App.DB().NewQuery(`
+		SELECT t.id AS id
+		FROM ` + topicsCollectionName + ` t
+		LEFT JOIN ` + topicReadStatesCollectionName + ` r
+			ON r.topic_id = t.id AND r.user_id = {:user}
+		WHERE ` + where).
+		Bind(params).
+		All(&rows)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	return ids, nil
+}
+
+// unreadTopicsPredicate builds the shared WHERE fragment and its parameters.
+//
+// An empty fragment means "the caller can read nothing", which callers treat as
+// zero rather than as an error: no readable categories is a real state for a
+// brand-new member with no categories granted, not a failure.
+func unreadTopicsPredicate(e *core.RequestEvent) (string, dbx.Params, error) {
 	acc := AccessFrom(e)
 
 	cats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
 	if err != nil {
-		return 0, err
+		return "", nil, err
 	}
 
 	readable := make([]string, 0, len(cats))
 	for _, c := range cats {
 		allowed, err := canViewCategory(e.App, acc, c.Id)
 		if err != nil {
-			return 0, err
+			return "", nil, err
 		}
 		if allowed {
 			readable = append(readable, c.Id)
 		}
 	}
 	if len(readable) == 0 {
-		return 0, nil
+		return "", nil, nil
 	}
 
 	var registered struct {
@@ -552,25 +619,12 @@ func countUnreadTopics(e *core.RequestEvent) (int, error) {
 		params[key] = id
 	}
 
-	var counter struct {
-		Count int `db:"count"`
-	}
-	err = e.App.DB().NewQuery(`
-		SELECT COUNT(*) AS count
-		FROM ` + topicsCollectionName + ` t
-		LEFT JOIN ` + topicReadStatesCollectionName + ` r
-			ON r.topic_id = t.id AND r.user_id = {:user}
-		WHERE t.category_id IN (` + strings.Join(placeholders, ", ") + `)
-			AND COALESCE(t.last_post_author_id, '') != {:user}
-			AND t.last_post_created > COALESCE(
-				r.last_read_at,
-				CASE WHEN {:registered} = '' THEN t.last_post_created ELSE {:registered} END
-			)
-	`).
-		Bind(params).
-		One(&counter)
-	if err != nil {
-		return 0, err
-	}
-	return counter.Count, nil
+	where := `
+		t.category_id IN (` + strings.Join(placeholders, ", ") + `)
+		AND COALESCE(t.last_post_author_id, '') != {:user}
+		AND t.last_post_created > COALESCE(
+			r.last_read_at,
+			CASE WHEN {:registered} = '' THEN t.last_post_created ELSE {:registered} END
+		)`
+	return where, params, nil
 }
