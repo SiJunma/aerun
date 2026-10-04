@@ -789,3 +789,82 @@ console.log('OK  forum read contract: reputation_votes is read server-side, neve
 console.log('OK  forum read contract: accounts are read through /api/aerun/users/{id}, never the collection');
 console.log('OK  forum read contract: the topic form transmits the mask and the pin');
 console.log('OK  forum read contract: "override off" is stored as the live inherit marker, not a snapshot');
+// ── The members board must be refreshable ─────────────────────────────────────
+//
+// WHY THIS GATE. The board is polled on purpose (REALTIME_TRANSPORT_DESIGN.md:
+// a realtime subscription over every account would stream the membership to
+// every visitor), so the page cannot answer "is this list current?" by itself.
+// The member's only options were reloading the tab or navigating away and back —
+// which is why this was worth building at all.
+//
+// The wiring is four pieces that each look fine alone and are useless apart: the
+// subscription must HAND OVER its loader, the page must HOLD it, the handler
+// must CALL it, and a control must be bound to that handler. Delete any one and
+// the button still renders, still takes the click, and does nothing — which
+// looks exactly like "the list did not change".
+{
+  const membersPage = read('../src/pages/MembersPage.jsx');
+  const membersApi = stripComments(resources);
+  const membersUi = stripComments(membersPage);
+
+  // 1. The subscription exposes a refresh. On the unsubscribe function rather
+  //    than as a separate export, because `load` owns the staff flag and the
+  //    pagination walk; a second entry point would have to duplicate them.
+  assert.match(
+    membersApi,
+    /unsubscribe\.refresh\s*=\s*\(\)\s*=>\s*\{\s*load\(\)/,
+    'subscribeToAllUsers must expose .refresh() that re-runs load(), or the button has nothing to call'
+  );
+
+  // 2. The page holds it.
+  assert.match(
+    membersUi,
+    /refreshMembersRef\.current\s*=\s*unsubUsers\.refresh/,
+    'MembersPage must keep the loader handed over by subscribeToAllUsers'
+  );
+
+  // 3. The handler calls it.
+  assert.match(
+    membersUi,
+    /refreshMembersRef\.current\?\.\(\)/,
+    'the refresh handler must actually invoke the held loader'
+  );
+
+  // 4. A control is bound to that handler.
+  assert.match(
+    membersUi,
+    /onClick=\{handleRefresh\}/,
+    'MembersPage must bind a control to handleRefresh — otherwise the loader is held and never called'
+  );
+
+  // A ref held past unmount would let a click re-render a dead component.
+  assert.match(
+    membersUi,
+    /refreshMembersRef\.current\s*=\s*null/,
+    'the ref must be cleared on unmount, or a click after unmount calls a dead loader'
+  );
+
+  // The refresh must REPORT. A spinner that stops proves the request returned,
+  // not that it worked, and this list fails silently: a failed read arrives as
+  // `callback([])`, so a network blip empties the board with nothing to see.
+  assert.match(
+    membersUi,
+    /showToast\(/,
+    'the refresh must report its outcome — a bare spinner is indistinguishable from a no-op'
+  );
+  assert.match(
+    membersUi,
+    /useToast/,
+    'MembersPage must use the shared toast provider rather than inventing a second notification path'
+  );
+
+  // The count is read through a ref, not closed over. The toast fires on a
+  // timer, where a captured `users` is the array as it was at click time — so a
+  // refresh that genuinely changed the count would still report the old one.
+  assert.match(
+    membersUi,
+    /usersRef\.current\.length/,
+    'the toast must read the post-refresh count through a ref, not a stale closure'
+  );
+}
+console.log('OK  forum read contract: the members board refreshes and says so');

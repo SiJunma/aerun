@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Container, Table, Form, InputGroup, Image, Badge, Row, Col, Card } from 'react-bootstrap';
-import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Container, Table, Form, InputGroup, Image, Badge, Row, Col, Card, Button } from 'react-bootstrap';
+import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -11,6 +11,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import Timestamp from '../components/common/Timestamp';
+import { toMillis as sharedToMillis } from '../utils/dates';
 
 // The two legacy pseudo-roles. They cannot reach the role sort as role ids any
 // more -- users.role is validated against the roles registry and the
@@ -25,11 +26,13 @@ const LEGACY_PSEUDO_ROLE_LABELS = {
 };
 
 import { usePageTitle } from '../contexts/TitleProvider';
+import { useToast } from '../contexts/ToastProvider';
 
 const MembersPage = () => {
   const { t, lang } = useI18n();
   const { profile, updateSettings, settings, roles } = useAuth();
   const { setPageTitle } = usePageTitle();
+  const { showToast } = useToast();
   const [users, setUsers] = useState([]);
   const [rtdbStatuses, setRtdbStatuses] = useState({});
   const [search, setSearch] = useState('');
@@ -39,6 +42,67 @@ const MembersPage = () => {
   // the control still shows the active state on first paint.
   const [sortField, setSortField] = useState('last_seen');
   const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
+
+  // The board is a directory, and it is polled — deliberately, per
+  // REALTIME_TRANSPORT_DESIGN.md: a realtime subscription over every account
+  // would stream the whole membership to every visitor. So "is this list
+  // current?" is a question the page cannot answer by itself, and the member
+  // needs a way to ask it that is not "reload the tab" or "walk to another page
+  // and back" — the two workarounds this button replaces.
+  //
+  // The ref, not state: `refresh` is a function handed over by the subscription
+  // in an effect, and putting it in state would re-render the whole board the
+  // moment it is assigned.
+  const refreshMembersRef = useRef(null);
+  // Mirrors `users` for reads that happen OUTSIDE a render — the toast callback
+  // runs on a timer, and closing over `users` there would read the array as it
+  // was when the button was clicked, so a refresh that actually changed the
+  // count would still report the old one.
+  const usersRef = useRef(users);
+  useEffect(() => { usersRef.current = users; }, [users]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+
+    // The toast carries the ANSWER, not the click. A spinner that stops proves
+    // the request returned, not that it succeeded — and this list fails quietly:
+    // `subscribeToAllUsers` swallows a failed read into `callback([])`, so a
+    // network blip empties the board with no error anywhere. Saying "the list is
+    // up to date" unconditionally would therefore be a lie exactly when it
+    // matters most.
+    //
+    // So the count before and after is the evidence: if it changed, the board
+    // really was stale and the refresh did something.
+    const before = users.length;
+    try {
+      refreshMembersRef.current?.();
+      setTimeout(() => {
+        setIsRefreshing(false);
+        const after = usersRef.current.length;
+        if (after === 0 && before > 0) {
+          showToast(
+            lang === 'ru' ? 'Не удалось загрузить список участников' : 'Could not load the members list',
+            'danger'
+          );
+          return;
+        }
+        showToast(
+          lang === 'ru'
+            ? `Список обновлён · участников: ${after}`
+            : `List refreshed · ${after} members`,
+          'success'
+        );
+      }, 600);
+    } catch {
+      setIsRefreshing(false);
+      showToast(
+        lang === 'ru' ? 'Не удалось обновить список' : 'Could not refresh the list',
+        'danger'
+      );
+    }
+  };
 
   useEffect(() => {
     setPageTitle(t('nav.members', 'Участники'));
@@ -64,10 +128,14 @@ const MembersPage = () => {
 
   useEffect(() => {
     const unsubUsers = subscribeToAllUsers(setUsers);
+    // Held, not called here: the button reads it later, and calling it on mount
+    // would double the very first load this effect already performs.
+    refreshMembersRef.current = unsubUsers.refresh;
     const unsubStatuses = subscribeToRtdbStatuses(setRtdbStatuses);
     return () => {
       unsubUsers();
       unsubStatuses();
+      refreshMembersRef.current = null;
     };
   }, []);
 
@@ -85,14 +153,13 @@ const MembersPage = () => {
   // no usable value. `last_seen` arrives as an ISO string from the staff DTO
   // and as epoch ms from the live presence cache, so both spellings have to be
   // accepted in one place rather than at each call site.
-  const toMillis = (value) => {
-    if (!value) return 0;
-    if (typeof value === 'number') return value;
-    const parsed = value.toMillis
-      ? value.toMillis()
-      : (typeof value.toDate === 'function' ? value.toDate().getTime() : Date.parse(value));
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
+  //
+  // It is the shared `toMillis`, not a third local copy: the local version fed
+  // `Date.parse` PocketBase's space-instead-of-"T" form raw, and an engine that
+  // reads that as local time shifts the instant by the whole UTC offset — which
+  // is how a member who is online right now gets a LAST SEEN reading in the
+  // future.
+  const toMillis = (value) => sharedToMillis(value);
 
   // getUserLastSeen resolves the LAST SEEN column through three sources, most
   // precise first.
@@ -322,6 +389,20 @@ const MembersPage = () => {
                   <option value="created_at-asc">{lang === 'ru' ? 'Сначала старые' : 'Oldest First'}</option>
                 </Form.Select>
               </div>
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                title={lang === 'ru' ? 'Обновить список' : 'Refresh list'}
+                aria-label={lang === 'ru' ? 'Обновить список участников' : 'Refresh members list'}
+                className="d-inline-flex align-items-center gap-2"
+              >
+                <RefreshCw size={14} className={isRefreshing ? 'spin' : ''} />
+                <span className="d-none d-xl-inline">
+                  {lang === 'ru' ? 'Обновить' : 'Refresh'}
+                </span>
+              </Button>
             </Col>
           </Row>
         </Card.Body>

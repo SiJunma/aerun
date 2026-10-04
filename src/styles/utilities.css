@@ -126,3 +126,23 @@
   background-color: currentColor;
   opacity: 0.25;
 }
+
+/* The refresh affordance on the members board.
+   A spinner that tells the member their click landed. `.spin` is on the ICON
+   rather than the button so the whole control does not tilt while it turns, and
+   `prefers-reduced-motion` is honoured because a spinning icon is exactly the
+   kind of repeated motion that setting exists to suppress. */
+@keyframes aerun-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: aerun-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation-duration: 3s;
+  }
+}

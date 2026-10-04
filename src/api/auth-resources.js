@@ -566,5 +566,16 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   };
 
   load();
-  return () => { isSubscribed = false; };
+
+  // `.refresh` rides on the unsubscribe function rather than on a second
+  // exported symbol, because there is exactly ONE way to re-read this resource —
+  // through the `load` closure that owns `staff`, the pagination walk and the
+  // public/staff fallback. A standalone `refreshAllUsers()` would have to either
+  // duplicate that logic or guess which of the two branches is in play, and
+  // MembersPage asks for a refresh exactly when a member wonders whether the
+  // board is current: a refresh that silently lost the staff flag would answer
+  // the admin's question with the public list.
+  const unsubscribe = () => { isSubscribed = false; };
+  unsubscribe.refresh = () => { load(); };
+  return unsubscribe;
 };
