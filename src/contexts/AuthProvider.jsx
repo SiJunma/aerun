@@ -621,25 +621,59 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user?.uid]);
 
+  // ONE refresh in flight at a time, with at most ONE queued behind it.
+  //
+  // There was no guard here at all, so two callers could read the forum at once
+  // and whichever RESPONDED LAST won — not whichever asked first. That is a
+  // correctness bug, not a cost one: a mutation's refresh (scheduled 1.5s after a
+  // post) racing an identity-change refresh, with the slower response carrying
+  // counters computed before the post, would repaint the index with the older
+  // numbers after the newer ones had already landed.
+  //
+  // Joining the in-flight read instead of starting a second would be wrong for the
+  // mutation case — it would return the answer fetched BEFORE the write, which is
+  // precisely the stale answer above. So a request arriving mid-flight QUEUES, and
+  // runs once the current read settles. Two callers still cost two reads, but they
+  // cost two SEQUENTIAL reads, and the last one is the one that sticks.
+  //
+  // This is the same shape shared-poll already uses for the same reason, and it is
+  // also why the dev network log shows these requests twice: React StrictMode
+  // double-invokes mount effects, and this effect has no cleanup, so it fires
+  // twice on load. That doubling is a development artifact, not a second
+  // independent source — do not "fix" it by removing the effect.
+  const forumRefreshInFlightRef = useRef(false);
+  const forumRefreshQueuedRef = useRef(false);
+
   const refreshForumState = useCallback(async (force = false) => {
     const now = Date.now();
     if (!force && now - lastForumRefreshTimeRef.current < FORUM_REFRESH_COOLDOWN_MS) {
       return;
     }
     lastForumRefreshTimeRef.current = now;
+
+    if (forumRefreshInFlightRef.current) {
+      forumRefreshQueuedRef.current = true;
+      return;
+    }
+    forumRefreshInFlightRef.current = true;
+
     setForumStateLoading(true);
     setForumStateError(null);
 
     try {
-      const data = await fetchSecuredMainPageData();
-      if (data?.categories) setCategories(data.categories);
-      if (data?.categoryGroups) setCategoryGroups(data.categoryGroups);
-      if (data?.stats) setForumStats(data.stats);
-      if (data?.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
+      do {
+        forumRefreshQueuedRef.current = false;
+        const data = await fetchSecuredMainPageData();
+        if (data?.categories) setCategories(data.categories);
+        if (data?.categoryGroups) setCategoryGroups(data.categoryGroups);
+        if (data?.stats) setForumStats(data.stats);
+        if (data?.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
+      } while (forumRefreshQueuedRef.current);
     } catch (err) {
       console.warn('[refreshForumState err]', err);
       setForumStateError(err);
     } finally {
+      forumRefreshInFlightRef.current = false;
       setForumStateLoading(false);
     }
   }, []);

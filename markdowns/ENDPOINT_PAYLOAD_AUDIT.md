@@ -105,13 +105,75 @@ could disagree with the server rather than pretending to remove a public constan
 
 Neither is a badge field, and both now travel only with `manage_roles`.
 
-### 3. The audit has not covered the admin routes field-by-field
+### 3. Admin routes, field by field — DONE, one decision left
 
-`/admin/*` payloads were checked for GATE PRESENCE, not field-by-field: each is
-behind a permission, and an admin who can change a role does not need the
-permission hidden from them. If the same field-level treatment should be applied to
-the admin surface — separating "renders a form" from "edits a form" — that is the
-same shape of work as the category cut.
+The owner asked for the same treatment on `/admin/*`. The principle differs from
+the public side: an admin who can change a role does not need the permission
+hidden from them, so the question is not "may they know" but "is this field doing
+a job".
+
+- **`GET /admin/users`** — `id`, `nickname`, `role`, `status`, `verified`,
+  `avatar_url`, `created`, `updated`, `last_seen`, and the three counters the
+  members table sorts on. Every field is rendered. Correctly omits `email`.
+- **`GET /admin/roles`, `GET /admin/categories`** — already split above.
+- **`GET /admin/audit-logs`** — the record of what staff did. Nothing to trim.
+- **`GET /admin/outbox-events`** — the ONE finding, below.
+
+#### The outbox publishes every member's email address, and no UI renders it
+
+`outboxEventPayload` echoes the stored row verbatim, and `MailPayload` carries
+`to_email` and `body_text`. That row exists because the WORKER needs the address to
+dispatch — so the field is correct in storage and wrong in an operator read.
+
+The shape of the problem: `/me` is pinned by test not to leak an email,
+`/admin/users` omits one by hand, and the outbox hands an admin the full mailing
+address of every member who has ever been mailed, plus the rendered body of each
+message. It is the only place an admin can read member emails at all, and it is
+there as a byproduct of echoing the dispatch payload rather than as a decision.
+
+Mitigating, and why it is a decision rather than a fix: `view_audit_log` is
+**root/admin only** — `moderator` does not hold it (see the imported role matrix),
+so this is not a broad disclosure. And the operator view has a real use that
+argues for keeping it: "which address bounced, and what did we actually try to
+send" is the whole point of an outbox screen, and trimming the payload would make
+the view unable to diagnose the failure it exists for.
+
+So the finding is recorded rather than acted on. The options, if you want it
+changed: drop `to_email` and let staff resolve the address through `recipient_id`,
+which costs the bounce diagnosis; or keep it and say so out loud, which costs the
+inconsistency.
+
+Worth noting separately: **no client code calls `/admin/outbox-events`.** It is an
+API surface exercised only by tests. Confirm that is intended rather than a UI
+that was planned and not built.
+
+### 4. The duplicated requests in the network log — most are NOT bugs
+
+The screenshot showed `forum-stats` ×2, `forum-index` ×2, `designs` ×2,
+`notifications?limit=100` ×2 and `heartbeat` ×4 on a single page view. That reads
+like the same class of duplicate that was fixed for notifications and
+`unread-counts`. It is not, and "fixing" it would have been wasted work.
+
+`src/main.jsx` wraps the app in `<StrictMode>`. React double-invokes mount
+effects — setup, cleanup, setup — so every mount effect in the tree fires its
+request twice in development. The uniformity is the tell: five different
+resources, all doubled, all from mount effects, and `/status` and `/roles` NOT
+doubled (they are shared polls with reference counting and a subscriber that
+mounts once). In production there is no double-invoke and each fires once.
+
+So: recorded, not changed. The reason it is written down at all is that a
+developer looking at that log will otherwise spend an afternoon deduplicating
+endpoints that are not duplicated.
+
+**One real bug was hiding underneath it.** `refreshForumState` had no in-flight
+guard, so two callers could read the forum concurrently and whichever RESPONSE
+arrived last won — not whichever asked first. A mutation's refresh (scheduled
+1.5s after a post) racing an identity-change refresh, with the slower response
+carrying counters computed before the post, would repaint the index with the
+older numbers after the newer ones had landed. Now single-flight with at most
+one queued read behind it, which is the same shape `shared-poll` already uses:
+joining the in-flight read would be wrong here, because that is precisely the
+stale answer.
 
 **`GET /me` does not leak email.** Pinned by `http_test.go` (`notExpect:
 player@example.com`), and the guest branch is pinned to contain no `email` key.
