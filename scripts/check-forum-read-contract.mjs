@@ -858,13 +858,36 @@ console.log('OK  forum read contract: "override off" is stored as the live inher
     'MembersPage must use the shared toast provider rather than inventing a second notification path'
   );
 
-  // The count is read through a ref, not closed over. The toast fires on a
-  // timer, where a captured `users` is the array as it was at click time — so a
-  // refresh that genuinely changed the count would still report the old one.
-  assert.match(
+  // …and it must be LOCALISED. An inline language ternary is the pattern
+  // this replaced: it hardcodes two languages, so every other one the
+  // forum ships renders English, and adding a language means hunting
+  // through JSX. The strings belong in the dictionary.
+  const dict = read('../src/i18n/dictionary.js');
+  const REFRESH_KEYS = ['refresh_members', 'members_refreshed', 'members_refresh_failed'];
+
+  for (const key of REFRESH_KEYS) {
+    assert.match(
+      membersUi,
+      new RegExp("t\\('forum\\." + key + "'\\)"),
+      'the refresh must render "forum.' + key + '" through t(), not an inline ternary'
+    );
+
+    // Both shipped languages. A key present in only one renders the other
+    // by fallback, which a member reads as untranslated rather than as a bug.
+    const occurrences = dict.split(new RegExp("\\b" + key + ":")).length - 1;
+    assert.ok(
+      occurrences >= 2,
+      'dictionary.js must define "' + key + '" for BOTH en and ru (found ' + occurrences + ')'
+    );
+  }
+
+  // The board is server-paginated, so no single count means "how current
+  // is this". The toast used to report one, implying a certainty the page
+  // does not have.
+  assert.doesNotMatch(
     membersUi,
-    /usersRef\.current\.length/,
-    'the toast must read the post-refresh count through a ref, not a stale closure'
+    /members_refreshed[^)]*\bcount\b/i,
+    'the refreshed toast must not report a member count — the board is paginated'
   );
 }
-console.log('OK  forum read contract: the members board refreshes and says so');
+console.log('OK  forum read contract: the members board refreshes, says so, and is localised');

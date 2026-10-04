@@ -43,64 +43,41 @@ const MembersPage = () => {
   const [sortField, setSortField] = useState('last_seen');
   const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
 
-  // The board is a directory, and it is polled — deliberately, per
-  // REALTIME_TRANSPORT_DESIGN.md: a realtime subscription over every account
-  // would stream the whole membership to every visitor. So "is this list
-  // current?" is a question the page cannot answer by itself, and the member
-  // needs a way to ask it that is not "reload the tab" or "walk to another page
-  // and back" — the two workarounds this button replaces.
+  // The board is polled on purpose: a realtime subscription over every
+  // account would stream the whole membership to every visitor, so
+  // "is this list current?" is a question the page cannot answer by
+  // itself. This button is how the member asks it, in place of the two
+  // workarounds it replaces — reloading the tab, or walking to another
+  // page and back.
   //
-  // The ref, not state: `refresh` is a function handed over by the subscription
-  // in an effect, and putting it in state would re-render the whole board the
-  // moment it is assigned.
+  // The loader lives in a ref, not in state: `refresh` is handed over by
+  // the subscription inside an effect, and putting it in state would
+  // re-render the whole board the moment it is assigned.
   const refreshMembersRef = useRef(null);
-  // Mirrors `users` for reads that happen OUTSIDE a render — the toast callback
-  // runs on a timer, and closing over `users` there would read the array as it
-  // was when the button was clicked, so a refresh that actually changed the
-  // count would still report the old one.
-  const usersRef = useRef(users);
-  useEffect(() => { usersRef.current = users; }, [users]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleRefresh = async () => {
+  const handleRefresh = () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-
-    // The toast carries the ANSWER, not the click. A spinner that stops proves
-    // the request returned, not that it succeeded — and this list fails quietly:
-    // `subscribeToAllUsers` swallows a failed read into `callback([])`, so a
-    // network blip empties the board with no error anywhere. Saying "the list is
-    // up to date" unconditionally would therefore be a lie exactly when it
-    // matters most.
-    //
-    // So the count before and after is the evidence: if it changed, the board
-    // really was stale and the refresh did something.
-    const before = users.length;
     try {
       refreshMembersRef.current?.();
+      // The toast confirms the ACTION, not the outcome. The board is
+      // server-paginated and the walk is bounded by the server's own
+      // totalPages, so there is no single number here that means "how
+      // current is this" — reporting a count would imply a certainty the
+      // page does not have.
+      //
+      // The load is fire-and-forget (`subscribeToAllUsers` reports no
+      // completion), so the spinner is released on a short timer: a
+      // spinner that never stops is worse than one that ends a moment
+      // early.
       setTimeout(() => {
         setIsRefreshing(false);
-        const after = usersRef.current.length;
-        if (after === 0 && before > 0) {
-          showToast(
-            lang === 'ru' ? 'Не удалось загрузить список участников' : 'Could not load the members list',
-            'danger'
-          );
-          return;
-        }
-        showToast(
-          lang === 'ru'
-            ? `Список обновлён · участников: ${after}`
-            : `List refreshed · ${after} members`,
-          'success'
-        );
+        showToast(t('forum.members_refreshed'), 'success');
       }, 600);
     } catch {
       setIsRefreshing(false);
-      showToast(
-        lang === 'ru' ? 'Не удалось обновить список' : 'Could not refresh the list',
-        'danger'
-      );
+      showToast(t('forum.members_refresh_failed'), 'danger');
     }
   };
 
@@ -394,13 +371,13 @@ const MembersPage = () => {
                 size="sm"
                 onClick={handleRefresh}
                 disabled={isRefreshing}
-                title={lang === 'ru' ? 'Обновить список' : 'Refresh list'}
-                aria-label={lang === 'ru' ? 'Обновить список участников' : 'Refresh members list'}
+                title={t('forum.refresh_members')}
+                aria-label={t('forum.refresh_members')}
                 className="d-inline-flex align-items-center gap-2"
               >
                 <RefreshCw size={14} className={isRefreshing ? 'spin' : ''} />
                 <span className="d-none d-xl-inline">
-                  {lang === 'ru' ? 'Обновить' : 'Refresh'}
+                  {t('forum.refresh_members')}
                 </span>
               </Button>
             </Col>
