@@ -82,12 +82,23 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
 
 // ── Unread counters ──────────────────────────────────────────────────────────
 //
-// ONE counters read. AuthProvider wanted `dmUnread` and TitleProvider wanted the
-// same numbers for the tab title; each ran its own 15s loop against the same
-// `/me/unread-counts`, which is why the network log showed that call in pairs.
-export const subscribeToDmUnread = (uid, callback) => {
+// ONE counters read, and it now carries the topic badge too.
+//
+// `unread_topics` used to be computed in the browser from a `topics?limit=50`
+// list that the main-page projection carried for exactly this purpose: fifty whole
+// topic records to render one integer, capped so that a member with 60 unread was
+// told 50, and derived from a localStorage read map so the desktop and the phone
+// disagreed about the same account. The server already counts notifications and
+// DMs here, so the topic count belongs here too — the badge costs no request it
+// was not already making, and it is the only number of the three that can no
+// longer be capped by a page size.
+//
+// The shared resource name is unchanged, and it is scoped by account: the counters
+// are caller-scoped, so AuthProvider (dmUnread) and TitleProvider (tab title) are
+// reading the SAME resource and the second subscriber costs nothing.
+export const subscribeToUnreadCounts = (uid, callback) => {
   if (!uid) {
-    callback({ total: 0, conversations: {} });
+    callback({ total: 0, conversations: {}, topics: 0 });
     return () => {};
   }
   const poll = sharedPoll(`dm-unread:${uid}`, {
@@ -95,18 +106,26 @@ export const subscribeToDmUnread = (uid, callback) => {
       const res = await sendApi('/api/aerun/me/unread-counts');
       return {
         total: res?.total_unread_messages || res?.unread_conversations || 0,
-        conversations: {}
+        conversations: {},
+        // A missing key reads as 0 rather than NaN: an older backend that predates
+        // the field should show no badge, not break the navbar's arithmetic.
+        topics: Number(res?.unread_topics) || 0
       };
     },
     intervalMs: 15000,
-    initialValue: { total: 0, conversations: {} },
+    initialValue: { total: 0, conversations: {}, topics: 0 },
   });
 
   // No realtime channel here: the counters are derived state that changes only
   // as a side effect of a message, and that message already wakes the DM list
-  // poll and the notification poll in this same tab.
+  // poll and the notification poll in this same tab. See
+  // markdowns/REALTIME_HYBRID_PLAN.md — this resource is a candidate for the
+  // realtime rollout, but it must not be a special case in the meantime.
   return poll.subscribe((counts) => callback(counts));
 };
+
+// subscribeToDmUnread keeps its name at the call sites that only read DMs.
+export const subscribeToDmUnread = subscribeToUnreadCounts;
 
 /**
  * Fetches older messages in a conversation for pagination.

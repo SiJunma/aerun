@@ -339,6 +339,11 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.DELETE("/topics/{id}/subscription", unsubscribeTopicHandler).BindFunc(enforceIdempotency)
 	group.GET("/topics/{id}/subscription", getTopicSubscriptionStatusHandler)
 	group.GET("/me/subscriptions", listUserSubscriptionsHandler)
+	// Read state. These carry no enforceIdempotency: they write exactly one row
+	// keyed (user, topic) and repeat to the same value, so an idempotency key
+	// would only add a way for "I opened a topic" to fail.
+	group.POST("/topics/{id}/read", markTopicReadHandler)
+	group.POST("/me/topics/read-all", markAllTopicsReadHandler)
 
 	group.POST("/posts/{id}/vote", votePostHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.DELETE("/posts/{id}/vote", deletePostVoteHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)

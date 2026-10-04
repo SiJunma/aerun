@@ -62,12 +62,32 @@ export const normalizeUserProfile = (rec) => {
   };
 };
 
-// ── Read Map (local / server-side "last visit" tracking) ─────────────────────────────
+// ── Read Map ───────────────────────────────────────────────────────────────────
+//
+// The local map is now a RENDERING CACHE, not the source of truth: the unread
+// count is server state (`unread_topics` on /me/unread-counts), because it has to
+// agree across devices and cannot be capped by a page size — a browser map
+// derived from a 50-row list can be neither. What survives locally is the
+// per-row highlight on /new-replies, which must respond the instant the member
+// clicks, and the scroll offset they left a topic at.
+//
+// Keeping both is deliberate rather than redundant: the local map answers "what
+// has THIS screen marked, right now", the server answers "what has this ACCOUNT
+// read". Collapsing them into one would put a network round trip in front of a
+// button that must feel instant, or keep the count wrong on the second device.
 
 const getReadMapKey = (uid) => `aerun_readmap_${uid}`;
 
 export const recordTopicVisit = async (uid, topicId, offset = null) => {
   if (!uid || !topicId) return;
+  try {
+    // Server first: this is the write that makes the badge correct elsewhere. It is
+    // awaited but not allowed to block the caller — a failed read-state write must
+    // never stop a member from opening a topic.
+    await sendApi(`/api/aerun/topics/${topicId}/read`, { method: 'POST', body: {} });
+  } catch (err) {
+    console.warn('[recordTopicVisit] server read state failed', err);
+  }
   try {
     const key = getReadMapKey(uid);
     const raw = localStorage.getItem(key);
@@ -96,19 +116,41 @@ export const subscribeToReadMap = (uid, callback) => {
   return () => {};
 };
 
-export const markAllTopicsRead = async (uid, topicIds) => {
+// apiMarkAllTopicsRead moves the caller's read position server-side.
+//
+// The id list is the caller's, not a page size: the server can only mark what it
+// is told, and it refuses an id in a category this member may not read rather than
+// skipping it — a 200 that quietly left another category's state alone would let
+// the button claim "read everything" having not looked at all.
+export const apiMarkAllTopicsRead = async (uid, topicIds) => {
+  if (!uid || !topicIds?.length) return;
+  try {
+    await sendApi('/api/aerun/me/topics/read-all', {
+      method: 'POST',
+      body: { topic_ids: topicIds },
+    });
+  } catch (err) {
+    // Reported, not swallowed: the badge will keep showing the old number and the
+    // member deserves to know why rather than watching a button that appears to do
+    // nothing.
+    console.warn('[markAllTopicsRead] server read state failed', err);
+    throw err;
+  }
+};
+
+// apiRecordAllTopicVisits mirrors the bulk write into the local rendering cache.
+// Best effort by design — see the note on recordTopicVisit above.
+export const apiRecordAllTopicVisits = (uid, topicIds) => {
   if (!uid || !topicIds?.length) return;
   try {
     const key = getReadMapKey(uid);
     const raw = localStorage.getItem(key);
     const map = raw ? JSON.parse(raw) : {};
     const now = Date.now();
-    topicIds.forEach(id => {
-      map[id] = now;
-    });
+    topicIds.forEach(id => { map[id] = now; });
     localStorage.setItem(key, JSON.stringify(map));
   } catch (err) {
-    console.warn('[markAllTopicsRead err]', err);
+    console.warn('[apiRecordAllTopicVisits err]', err);
   }
 };
 

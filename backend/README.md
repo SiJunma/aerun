@@ -224,7 +224,7 @@ restricted or root-only.
 - `GET /api/aerun/category-groups` — group headings alone. Kept for the admin
   board's group CRUD, which edits groups independently of categories.
 
-#### Realtime is not available on these collections
+#### Realtime: blocked on rules, not on the client
 
 Every forum collection is locked with `lockBrowserRules` (migrations 1766100000
 and 1766400000): `ListRule` and `ViewRule` are `nil`, which PocketBase answers
@@ -232,12 +232,20 @@ with "superusers only" (`core/record_query.go`: `if accessRule == nil { return
 false }`). A wildcard realtime subscription resolves its rule through that same
 `ListRule`, so a member's `pb.collection('topics').subscribe('*')` completes the
 SSE handshake — the network tab shows `PB_CONNECT` — and the server then never
-delivers an event.
+delivers an event. `RealtimeRule` is a separate field and is currently unset
+everywhere.
 
-This is why the client treats freshness as interval-driven: `src/api/shared-poll.js`
-REFUSES a realtime hook with a thrown error rather than opening a connection that
-cannot deliver. Enabling realtime means opening a scoped `RealtimeRule` per
-collection first, and only then removing the guard.
+Realtime is the REASON this stack is Go + PocketBase, so it is coming back as the
+primary transport rather than being written off in favour of intervals. Until a
+scoped `RealtimeRule` exists per collection, `src/api/shared-poll.js` REFUSES a
+realtime hook with a thrown error rather than opening a connection that cannot
+deliver — the failure this guards against is a dead channel that looks configured.
+
+The plan, including the authorization decision that has to come first and the
+unsubscribe rules that keep a long session from accumulating SSE connections, is
+in `markdowns/REALTIME_HYBRID_PLAN.md`. Note for tests written against it: assert
+on DELIVERY, not on connection — a connection-only test passes against the dead
+channel that exists today.
 
 ### Reputation, Subscriptions and Audit (Sprint 4)
  
@@ -266,7 +274,30 @@ collection first, and only then removing the guard.
 - `PATCH /api/aerun/me/notifications/:id/read` — mark single notification as read.
 - `POST /api/aerun/me/notifications/read-all` — mark all caller's notifications as read.
 - `PATCH /api/aerun/me/notifications/:id/archive` — archive notification.
-- `GET /api/aerun/me/unread-counts` — aggregated unread counters (`unread_notifications`, `unread_conversations`, `total_unread_messages`), replacing RTDB unread badges.
+- `GET /api/aerun/me/unread-counts` — aggregated unread counters (`unread_notifications`,
+  `unread_conversations`, `total_unread_messages`, `unread_topics`), replacing the
+  RTDB unread badges. All four belong on one endpoint because they are one
+  question — "what does this member not know about yet" — and the client already
+  polls it on a single shared loop, so the topic count costs no request it was not
+  already making.
+- `unread_topics` is the one number that cannot be derived on the client. It was
+  previously computed in the browser from a `topics?limit=50` list, which made it
+  capped (a member with 60 unread was told 50) and per-device (the read map lived
+  in localStorage, so the desktop and the phone disagreed about the same account).
+  The predicate is `last_post_created > max(last_read_at, users.created)`, filtered
+  by `canViewCategory` so the count never exceeds the list it summarises, and
+  excluding topics whose last post is the caller's own.
+- `POST /api/aerun/topics/:id/read` — move the caller's read position for one
+  topic. Upsert, so revisiting advances the position. A GET is deliberately not a
+  read: the topic is fetched constantly, and marking on every fetch would clear the
+  badge as soon as the member looked at their own inbox.
+- `POST /api/aerun/me/topics/read-all` — the same for a list of ids, behind the
+  "mark all read" button. An id in a category the caller may not read is REFUSED
+  (403) rather than skipped: skipping would return 200 while leaving that
+  category's read state alone, and the button would claim to have read everything
+  having not looked at all. Neither read route takes an idempotency key — they
+  write exactly one row keyed (user, topic) and repeat to the same value, so a key
+  would only add a way for "I opened a topic" to fail.
 - `GET /api/aerun/admin/outbox-events` — keyset-paginated outbox events for staff visibility (`view_audit_log` permission: root/admin).
 - `POST /api/aerun/admin/outbox-events/:id/retry` — reset failed outbox event to pending (`view_audit_log` permission).
 

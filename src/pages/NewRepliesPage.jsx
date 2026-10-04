@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
 import { MessageSquare, Bell } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
+import { subscribeToLatestTopics } from '../api/auth-resources';
 import TopicRow from '../components/common/TopicRow';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -18,12 +19,41 @@ const NewRepliesPage = () => {
   const { t, lang } = useI18n();
   const {
     user, profile,
-    latestTopics,
     markAllRead, isMarkingAllRead, unreadTopicsCount,
-    hasPermission, PERMISSIONS, categories, readMap,
+    categories, readMap,
   } = useAuth();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // The list is read HERE, not from the main-page projection.
+  //
+  // It used to arrive in AuthProvider's `latestTopics`, which the main page fetched
+  // on every identity change — so every member, on every page, paid for fifty
+  // topic records to render a navbar integer, and this screen paginated a fixed
+  // fifty in memory instead of asking for a page. The only screen that renders
+  // topic rows now reads them, and only while it is mounted.
+  const [topics, setTopics] = useState([]);
+  const [topicsLoading, setTopicsLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setTopicsLoading(true);
+    const unsubscribe = subscribeToLatestTopics((rows) => {
+      if (!active) return;
+      setTopics(rows);
+      setTopicsLoading(false);
+    });
+
+    // Unsubscribing matters here for the first time: this list used to be owned by
+    // AuthProvider, which is mounted for the whole session, so its poll outlived
+    // every reader of it. Mounted here, the loop starts when the page opens and
+    // stops when it closes — and the poll is shared by name, so /active-topics
+    // still reads the same resource with no second request.
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const activeTab = searchParams.get('tab') === TABS.NEW ? TABS.NEW : TABS.ALL;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
@@ -38,13 +68,22 @@ const NewRepliesPage = () => {
     return typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title;
   };
 
-  // All topics accessible to user — client-side filter from shared latestTopics
-  const filteredTopics = useMemo(() => latestTopics.filter(topic => {
-    const cat = categories.find(c => c.id === topic.category_id);
-    return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
-  }), [latestTopics, categories, hasPermission]);
+  // The list is ALREADY filtered by the server.
+  //
+  // It used to be re-filtered here with `hasPermission(VIEW_FORUM)` against whatever
+  // categories the main page had happened to load. That was a second, weaker copy of
+  // an authorization decision the command layer already made on the server — and a
+  // weaker one is worse than none: a category that had not loaded yet read as "not
+  // permitted", so rows silently vanished, and a member whose local role state was
+  // stale saw a different list than the server had approved. The read map below is
+  // still local, because "which of THESE rows have I read" is a rendering question;
+  // "which rows exist for me" is not.
+  const filteredTopics = topics;
 
-  // Unread topics — same algorithm as AuthProvider unreadTopicsCount
+  // Unread rows — the per-row highlight. The NUMBER in the navbar and tab title is
+  // server state (`unread_topics`), because it has to agree across devices and
+  // cannot be capped by a page size; this list is scoped to the page it is on, which
+  // is a different question and can answer it from what is on screen.
   const unreadTopics = useMemo(() => {
     if (!user) return [];
 
@@ -86,7 +125,12 @@ const NewRepliesPage = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const loading = latestTopics.length === 0 && categories.length === 0;
+  // This screen's own loading state, not the main page's. It used to be derived
+  // from `latestTopics.length === 0 && categories.length === 0`, which reported
+  // "loading" forever on a genuinely empty forum — the two states are
+  // indistinguishable from an empty array, which is the same class of bug as the
+  // optional-chaining ones in check-forum-read-contract.
+  const loading = topicsLoading;
 
   return (
     <Container className="py-4">
@@ -101,8 +145,18 @@ const NewRepliesPage = () => {
         {activeTab === TABS.NEW && user && (
           <button
             className="btn btn-outline-primary btn-sm rounded-pill px-3 d-flex align-items-center gap-2"
-            onClick={() => markAllRead()}
-            disabled={unreadTopics.length === 0 || unreadTopicsCount === 0 || isMarkingAllRead}
+            // The ids of the rows the member can actually SEE, not a page size and
+            // not "whatever was last fetched". The server marks what it is given and
+            // refuses anything in a category this member may not read, so handing it
+            // a list that includes hidden rows would make the whole call fail — and
+            // skipping them silently is the behaviour this replaced.
+            onClick={() => markAllRead(unreadTopics.map(t => t.id))}
+            // Gated on the rows on screen, not on the badge number. The badge counts
+            // the WHOLE board while this list is one page of it, so requiring both to
+            // be non-zero is what made this button permanently disabled whenever the
+            // two disagreed — which they always did, since the badge counts topics
+            // this member cannot see on this page.
+            disabled={unreadTopics.length === 0 || isMarkingAllRead}
           >
             {isMarkingAllRead && (
               <div className="spinner-border spinner-border-sm" role="status">

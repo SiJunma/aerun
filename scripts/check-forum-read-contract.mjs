@@ -29,6 +29,7 @@ const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.m
 const forum = read('../src/api/forum.js');
 const resources = read('../src/api/auth-resources.js');
 const categories = read('../src/api/categories.js');
+const authProvider = read('../src/contexts/AuthProvider.jsx');
 const reputation = read('../src/api/reputation.js');
 const subscriptions = read('../src/api/subscriptions.js');
 const adminPage = read('../src/pages/AdminPage.jsx');
@@ -130,23 +131,55 @@ for (const key of ['last_post_topic_id', 'last_post_topic_title', 'last_post_at'
 
 // ── The main-page payload actually seeds the shell ──────────────────────────
 //
-// AuthProvider assigns categories / latestTopics / stats from this return value,
-// each behind an `if (data?.x)` guard, so a missing key is indistinguishable
-// from "the server had none". The function used to return categories alone:
-// latestTopics stayed [] forever (so /new-replies was permanently empty) and
-// forumStats stayed null (so the stats panel fell back to summing counters that
-// were themselves being dropped).
-for (const key of ['latestTopics', 'stats']) {
-  assert.match(
-    categories,
-    new RegExp(`\\n\\s*${key}[,:]`),
-    `fetchSecuredMainPageData must return ${key} — AuthProvider only assigns what it returns`
-  );
-}
+// AuthProvider assigns categories / categoryGroups / stats from this return value,
+// each behind an `if (data?.x)` guard, so a missing key is indistinguishable from
+// "the server had none". The function used to return categories alone, and the
+// stats panel fell back to summing counters that were themselves being dropped.
+assert.match(
+  categories,
+  /\n\s*stats[,:]/,
+  'fetchSecuredMainPageData must return stats — AuthProvider only assigns what it returns'
+);
 assert.match(
   categories,
   /fetchForumStats/,
   'fetchForumStats must exist: nothing else serves forumStats, and ForumStats.jsx reads it'
+);
+
+// latestTopics IS NOT IN THAT LIST ANY MORE, and this is the assertion that keeps
+// it out. It used to be fetched here — fifty whole topic records — so every member
+// on every page paid for them to render the navbar's unread badge, and the badge
+// itself was computed from that capped list against a per-browser localStorage read
+// map. The count is server state now (`unread_topics` on /me/unread-counts) and the
+// list belongs to /new-replies.
+//
+// Forbidding it here matters because putting it back would LOOK like a fix: it is
+// the obvious place to restore a broken /new-replies, and it would silently bring
+// back a fifty-row payload on every page plus a count that cannot exceed the cap.
+assert.doesNotMatch(
+  stripComments(categories),
+  /fetchLatestTopics/,
+  'the main-page projection must not fetch a topic list — the unread badge is a count on /me/unread-counts, and /new-replies reads the rows itself'
+);
+assert.doesNotMatch(
+  stripComments(categories),
+  /\n\s*latestTopics[,:]/,
+  'fetchSecuredMainPageData must not return latestTopics — AuthProvider used to hold it, and a topic list there costs every page a payload only /new-replies renders'
+);
+
+// The badge must be fed by the SERVER count, not derived from the local read map.
+// `const [unreadTopicsCount] = useState(0)` — destructured with no setter — was
+// permanently 0, which is why the navbar badge, the tab title and the "mark all
+// read" button were all silently inert rather than broken.
+assert.match(
+  authProvider,
+  /const \[unreadTopicsCount, setUnreadTopicsCount\] = useState/,
+  'unreadTopicsCount needs a setter — without one the badge, the tab title and mark-all-read were permanently 0'
+);
+assert.match(
+  authProvider,
+  /setUnreadTopicsCount\(counts\.topics \|\| 0\)/,
+  'the badge must come from the unread-counters response, so it agrees across devices and is not capped by a page size'
 );
 
 // ── The forum index is read ONCE, by the provider ─────────────────────────────
@@ -184,6 +217,41 @@ assert.match(
   mainPage,
   /categories,\s*categoryGroups/,
   'MainPage must take both lists from useAuth — the provider already re-reads them when the identity changes'
+);
+
+// ── Mark-all-read sends the ids it can see ────────────────────────────────────
+//
+// It used to mark `latestTopicsRef` — the top fifty topics — written straight to
+// localStorage. Two things were wrong and neither was visible: "read everything"
+// meant "read the fifty newest", and the badge it was supposed to clear was
+// counted on the server against a different set, so the number came straight back.
+//
+// The list is the caller's to pass because the server refuses an id in a category
+// the caller may not read. Silently skipping such an id would let the button report
+// success while leaving another category's state alone.
+const newReplies = read('../src/pages/NewRepliesPage.jsx');
+assert.match(
+  newReplies,
+  /markAllRead\(unreadTopics\.map/,
+  'mark-all-read must send the ids actually on screen — the server cannot mark a page size it was never told about'
+);
+assert.doesNotMatch(
+  newReplies,
+  /disabled=\{[^}]*unreadTopicsCount === 0/,
+  'mark-all-read must not be gated on the badge number: the badge counts the whole board while this list is one page of it, so requiring both made the button permanently disabled'
+);
+
+// The list must be read where it is rendered. It used to live in AuthProvider,
+// which is mounted for the whole session, so the poll outlived every reader of it.
+assert.match(
+  newReplies,
+  /subscribeToLatestTopics\(/,
+  '/new-replies must read the topic list itself — it is the only screen that renders topic rows'
+);
+assert.match(
+  newReplies,
+  /unsubscribe\(\)/,
+  '/new-replies must unsubscribe on unmount — the poll used to be owned by AuthProvider and outlived every reader'
 );
 
 // ── Topic lists normalise before rendering ──────────────────────────────────
@@ -465,7 +533,7 @@ console.log('OK  forum read contract: every topic/post list is read under `items
 console.log('OK  forum read contract: the topic form and reply path navigate with real ids');
 console.log('OK  forum read contract: category paging reads `total`/`per_page`');
 console.log('OK  forum read contract: category counters and last-post fields survive toCategory');
-console.log('OK  forum read contract: the main page seeds latestTopics and stats');
+console.log('OK  forum read contract: the main page seeds categories, groups and stats — and no topic list');
 console.log('OK  forum read contract: every topic list normalises before rendering');
 console.log('OK  forum read contract: the subscriptions list normalises too — it renders TopicRow');
 console.log('OK  forum read contract: reputation_votes is read server-side, never from the browser');

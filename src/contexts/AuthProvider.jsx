@@ -3,7 +3,8 @@ import React, { createContext, useContext, useEffect, useState, useRef, useCallb
 import { pb, sendApi } from '../api/pocketbase';
 import LoadingPreloader from '../components/common/LoadingPreloader';
 import {
-  markAllTopicsRead,
+  apiMarkAllTopicsRead,
+  apiRecordAllTopicVisits,
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
   normalizeUserProfile,
@@ -17,7 +18,7 @@ import {
   initRtdbGuestPresence,
   removeRtdbGuestPresence
 } from '../api/rtdb-presence';
-import { subscribeToDmUnread } from '../api/dms';
+import { subscribeToUnreadCounts } from '../api/dms';
 import { clearAllDmCache } from '../api/dm-cache';
 import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
@@ -67,7 +68,6 @@ export const AuthProvider = ({ children }) => {
   const [emailUnverified, setEmailUnverified] = useState(false);
   const [readMap, setReadMap] = useState({});
   const [readMapReady] = useState(true);
-  const [latestTopics, setLatestTopics] = useState([]);
   const [categories, setCategories] = useState([]);
   // The folders the index renders categories inside. They come from the SAME read
   // as the categories (forum-index), so the two can never disagree about which
@@ -77,8 +77,16 @@ export const AuthProvider = ({ children }) => {
   const [forumStateError, setForumStateError] = useState(null);
   const [forumStats, setForumStats] = useState(null);
   const [dailyActiveUsers, setDailyActiveUsers] = useState([]);
-  const [unreadTopicsCount] = useState(0);
-  const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {} });
+  // SERVER STATE, fed by the unread-counters subscription below.
+  //
+  // This was `const [unreadTopicsCount] = useState(0)` — destructured with no
+  // setter, so it was permanently 0. Every consumer rendered accordingly and none
+  // of them looked wrong: the navbar badge was absent, the tab title showed no
+  // number, and the "mark all read" button on /new-replies was disabled forever
+  // because its guard was `unreadTopicsCount === 0`. Three screens, one missing
+  // setter, nothing red anywhere.
+  const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
+  const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {}, topics: 0 });
   const [activeDmConvId, setActiveDmConvId] = useState(null);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [roles, setRoles] = useState(DEFAULT_ROLES);
@@ -92,8 +100,6 @@ export const AuthProvider = ({ children }) => {
   const lastOptimisticForumUpdateRef = useRef(0);
   const forumRefreshTimersRef = useRef(new Set());
   const lastForumRefreshTimeRef = useRef(0);
-  const latestTopicsRef = useRef([]);
-  latestTopicsRef.current = latestTopics;
   const readMapRef = useRef({});
   readMapRef.current = readMap;
 
@@ -268,8 +274,27 @@ export const AuthProvider = ({ children }) => {
   // Keeping the id makes the row, not the key, the unit of a guest session: a
   // sign-in deletes the row and a later sign-out recreates the same one. That is
   // the same shape the member path uses after /presence/leave.
+  //
+  // ONLY ON THE TRANSITION, which is what this used to get wrong. Keyed on
+  // `user?.uid` alone, the effect fires on the FIRST page load of an already
+  // signed-in member too — authStore is restored synchronously on mount, so
+  // `user.uid` is populated before the first effect run and there is no
+  // guest→member transition to react to. That sent `POST /presence/guest/leave`
+  // on every ordinary page view of the forum: a request announcing a departure
+  // that never happened, which also stops the guest heartbeat that would have
+  // kept a second tab of the same browser counted. The guard is the PREVIOUS
+  // uid, so the effect runs only where the identity actually changed.
+  const previousUidRef = useRef(undefined);
   useEffect(() => {
-    if (!user?.uid) return;
+    const uid = user?.uid;
+    const previousUid = previousUidRef.current;
+    previousUidRef.current = uid;
+
+    // First observation is a mount, not a transition: whatever the identity is,
+    // it did not change under us.
+    if (previousUid === undefined) return;
+
+    if (!uid || uid === previousUid) return;
     const guestId = localStorage.getItem('guest_id');
     if (!guestId) return;
     removeRtdbGuestPresence(guestId);
@@ -279,12 +304,23 @@ export const AuthProvider = ({ children }) => {
     return subscribeToOnlineUsers(setActiveUsers);
   }, []);
 
+  // ONE counters subscription feeds three pieces of state: the DM totals, the
+  // per-conversation detail TitleProvider also wants, and the unread-topic badge.
+  //
+  // They arrive together because they are ONE request (`/me/unread-counts`), and
+  // splitting them would mean either a second request for state the first response
+  // already carried, or two subscribers to one resource — which is the same
+  // duplicate this module was built to make impossible.
   useEffect(() => {
-    if (user?.uid) {
-      return subscribeToDmUnread(user.uid, setDmUnread);
-    } else {
-      setDmUnread({ total: 0, conversations: {} });
+    if (!user?.uid) {
+      setDmUnread({ total: 0, conversations: {}, topics: 0 });
+      setUnreadTopicsCount(0);
+      return;
     }
+    return subscribeToUnreadCounts(user.uid, (counts) => {
+      setDmUnread(counts);
+      setUnreadTopicsCount(counts.topics || 0);
+    });
   }, [user?.uid]);
 
   // Readmap subscription
@@ -577,7 +613,6 @@ export const AuthProvider = ({ children }) => {
       const data = await fetchSecuredMainPageData();
       if (data?.categories) setCategories(data.categories);
       if (data?.categoryGroups) setCategoryGroups(data.categoryGroups);
-      if (data?.latestTopics) setLatestTopics(data.latestTopics);
       if (data?.stats) setForumStats(data.stats);
       if (data?.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
     } catch (err) {
@@ -644,7 +679,6 @@ export const AuthProvider = ({ children }) => {
     if (!data) return;
     if (Array.isArray(data.categories)) setCategories(data.categories);
     if (Array.isArray(data.categoryGroups)) setCategoryGroups(data.categoryGroups);
-    if (Array.isArray(data.latestTopics)) setLatestTopics(data.latestTopics);
     if (data.stats) setForumStats(data.stats);
   }, []);
 
@@ -667,12 +701,36 @@ export const AuthProvider = ({ children }) => {
     await apiRecordTopicVisit(user.uid, topicId, offset);
   }, [user?.uid]);
 
-  const markAllRead = useCallback(async () => {
-    if (!user?.uid || latestTopicsRef.current.length === 0 || isMarkingAllRead) return;
+  // markAllRead sends the ids to the server, which owns the read state now.
+  //
+  // It used to write the localStorage map over `latestTopicsRef` — the top fifty
+  // topics, regardless of whether this member could read them — so "mark
+  // everything read" silently meant "mark the fifty newest read", and the badge,
+  // which counted a different set, came straight back on the next poll.
+  //
+  // The caller passes the ids it is actually showing, which is why the signature
+  // takes a list: the server can only mark what it is told, and refusing an id in
+  // a category the caller may not read is a deliberate 403 there rather than a
+  // quiet skip.
+  const markAllRead = useCallback(async (topicIds = []) => {
+    if (!user?.uid || isMarkingAllRead) return;
+    const ids = (topicIds || []).filter(Boolean);
+    if (ids.length === 0) return;
+
     setIsMarkingAllRead(true);
     try {
-      const topicIds = latestTopicsRef.current.map(t => t.id);
-      await markAllTopicsRead(user.uid, topicIds);
+      await apiMarkAllTopicsRead(user.uid, ids);
+
+      // The local map still drives the page's own "unread" rendering, so it has to
+      // move too — a server-only write would leave the rows the member just marked
+      // still highlighted until the next full reload.
+      const now = Date.now();
+      setReadMap(prev => {
+        const next = { ...prev };
+        ids.forEach(id => { next[id] = now; });
+        return next;
+      });
+      apiRecordAllTopicVisits(user.uid, ids);
     } finally {
       setIsMarkingAllRead(false);
     }
@@ -710,7 +768,6 @@ export const AuthProvider = ({ children }) => {
     loading,
     readMap,
     readMapReady,
-    latestTopics,
     categories,
     categoryGroups,
     forumStateLoading,
@@ -756,7 +813,7 @@ export const AuthProvider = ({ children }) => {
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
     updateSettings, updateProfile, setLastSelectedMask, recordActivity, refreshForumState, scheduleForumStateRefresh, applyForumState, forumStats,
     dailyActiveUsers, updateLocalTopicLastPost, updateLocalTopicPostsCount, hasPermission, roles, activeUsers,
-    activeUserIds, isUserOnline, latestTopics
+    activeUserIds, isUserOnline
   ]);
 
   return (

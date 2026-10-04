@@ -1,5 +1,4 @@
 import { sendApi } from './pocketbase';
-import { fetchLatestTopics } from './auth-resources';
 import { subscribeToRefetch } from './connection';
 
 // Category and category-group access.
@@ -266,19 +265,39 @@ export const fetchAdminCategories = async () => {
 // outright rather than deduplicating it, and leaves `/categories` to the callers
 // that genuinely want categories without the grouping.
 //
-// The two remaining promises are independent: one failing endpoint degrades only
-// its own slice, and the forum index still renders. That is deliberate — an
-// unreadable stats endpoint must not blank the category list a member came to see.
+// NEITHER latestTopics NOR stats IS OPTIONAL HERE, and their absence was the bug
+// this function had. It returned only `categories`, and because AuthProvider
+// guards each assignment with `if (data?.x)`, the missing keys were
+// indistinguishable from "the server had none":
+//
+//   - `latestTopics` stayed `[]` forever, so /new-replies was permanently empty,
+//   - `forumStats` stayed null, so ForumStats fell back to summing category
+//     counters that were themselves being dropped.
+//
+// latestTopics IS GONE NOW, and that is a fix rather than a regression. It existed
+// here for ONE consumer: the navbar's unread-topic badge. Fifty whole topic
+// records were fetched on every identity change to render a single integer — and
+// that integer was wrong anyway, because it was computed in the browser from a
+// capped list (60 unread topics reported as 50) against a per-browser localStorage
+// read map, so the same member saw a different count on the phone than on the
+// desktop. The count is server state now: `unread_topics` on /me/unread-counts,
+// next to the notification and DM counters that were already there and already
+// polled on one shared loop. The badge costs no request it was not already making.
+//
+// The list itself is no longer fetched here. /new-replies reads it, paginated,
+// because that is the only screen that renders topic rows — the main page renders
+// categories.
+//
+// The stats read is independent: an unreadable stats endpoint must not blank the
+// category list a member came to see.
 export const fetchSecuredMainPageData = async () => {
-  const [index, topics, stats] = await Promise.all([
+  const [index, stats] = await Promise.all([
     fetchForumIndex().catch(() => ({ categories: [], groups: [] })),
-    fetchLatestTopics(50),
     fetchForumStats(),
   ]);
   return {
     categories: index.categories,
     categoryGroups: index.groups,
-    latestTopics: topics,
     stats,
   };
 };
