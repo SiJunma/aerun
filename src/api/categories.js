@@ -199,9 +199,54 @@ export const fetchSecuredCategories = async () => {
   }
 };
 
+// fetchAdminCategories is the editor's list, and the ONLY read that carries
+// `allowed_roles`.
+//
+// The public `toCategory` maps that list into `permissions`, so feeding it to
+// the admin board would report every category as "inherits the global settings"
+// — an override that is switched OFF — and saving the form would then transmit
+// the inherit marker over a category that had an explicit role list. That is a
+// silent permission change caused by a read, which is why the two shapes are
+// separate functions rather than one parameterised one.
+// fetchForumIndex reads the categories AND the groups they are filed under in
+// ONE request, because the index renders a category inside its group's folder
+// and cannot paint anything without both.
+//
+// It used to issue `GET /categories` (through AuthProvider) and
+// `GET /category-groups` (from this page) as two independent reads. They raced:
+// a category whose `group_id` named a group the second call had not returned yet
+// rendered in the wrong section, or in none at all, until something else forced a
+// re-read.
+export const fetchForumIndex = async () => {
+  const res = await sendApi('/api/aerun/forum-index');
+  const cats = (res?.items || []).map(toCategory).sort((a, b) => (a.order || 0) - (b.order || 0));
+  return {
+    categories: cats,
+    groups: (res?.groups || []).map(g => ({
+      id: g.id,
+      title: toTitleMap(g.title),
+      order: g.sort_order ?? 0
+    })),
+    // The server reports whether the collection exists at all (a database older
+    // than migration 1767500000), which is what the index renders as "ungrouped".
+    available: res?.available !== false,
+  };
+};
+
+export const fetchAdminCategories = async () => {
+  try {
+    const data = await sendApi('/api/aerun/admin/categories');
+    const cats = (data.items || []).map(toCategory);
+    return cats.sort((a, b) => (a.order || 0) - (b.order || 0));
+  } catch (err) {
+    console.error('[fetchAdminCategories]', err);
+    return [];
+  }
+};
+
 // fetchSecuredMainPageData is the one call that seeds the whole forum shell:
-// AuthProvider feeds its `categories`, `latestTopics` and `forumStats` context
-// state straight from this return value.
+// AuthProvider feeds its `categories`, `categoryGroups`, `latestTopics` and
+// `forumStats` context state straight from this return value.
 //
 // `latestTopics` AND `stats` ARE NOT OPTIONAL HERE, and their absence was the
 // bug this function had. It returned only `categories`, and because AuthProvider
@@ -213,18 +258,26 @@ export const fetchSecuredCategories = async () => {
 //   - `forumStats` stayed null, so ForumStats fell back to summing category
 //     counters that were themselves being dropped.
 //
-// All three promises are independent: one failing endpoint degrades only its own
-// slice, and the forum index still renders. That is deliberate — an unreadable
-// stats endpoint must not blank the category list a member came to see.
+// The category read is `fetchForumIndex`, NOT `fetchSecuredCategories`. MainPage
+// used to call `subscribeToForumIndex` alongside this one, so opening the forum
+// cost two reads of the same rows on two different clocks, and whichever landed
+// second won — a category list from `AuthProvider` rendered against the groups of
+// a later read. Routing the index through this single call deletes that request
+// outright rather than deduplicating it, and leaves `/categories` to the callers
+// that genuinely want categories without the grouping.
+//
+// The two remaining promises are independent: one failing endpoint degrades only
+// its own slice, and the forum index still renders. That is deliberate — an
+// unreadable stats endpoint must not blank the category list a member came to see.
 export const fetchSecuredMainPageData = async () => {
-  const [cats, topics, stats] = await Promise.all([
-    fetchSecuredCategories(),
+  const [index, topics, stats] = await Promise.all([
+    fetchForumIndex().catch(() => ({ categories: [], groups: [] })),
     fetchLatestTopics(50),
     fetchForumStats(),
   ]);
   return {
-    categories: cats,
-    categoryGroups: [],
+    categories: index.categories,
+    categoryGroups: index.groups,
     latestTopics: topics,
     stats,
   };
@@ -260,11 +313,12 @@ export const subscribeToCategories = (callback) => {
 export const subscribeToAllCategories = (callback) => {
   let isSubscribed = true;
 
-  // fetchSecuredCategories returns a PROMISE. It must be awaited before it
-  // reaches the callback: handing the promise itself to a consumer that calls
-  // `.filter` on it renders the admin board blank with
-  // "categories.filter is not a function".
-  const load = () => fetchSecuredCategories()
+  // fetchAdminCategories, not fetchSecuredCategories: the public list no longer
+  // carries `allowed_roles`, so `toCategory` would map every row to the INHERIT
+  // marker and the role picker would show "override off" for a category that has
+  // an explicit list — and saving would then overwrite that list with the
+  // marker. A read would silently change who can see a category.
+  const load = () => fetchAdminCategories()
     .then(cats => { if (isSubscribed) callback(cats); })
     .catch(() => { if (isSubscribed) callback([]); });
 
@@ -273,6 +327,30 @@ export const subscribeToAllCategories = (callback) => {
   // A read that failed while the backend was down settles as an EMPTY list, which
   // is indistinguishable from an empty board. Re-read on recovery — otherwise the
   // forum keeps claiming it has no categories.
+  const offRestored = subscribeToRefetch(load);
+
+  return () => {
+    isSubscribed = false;
+    offRestored();
+  };
+};
+
+export const subscribeToForumIndex = (callback) => {
+  let isSubscribed = true;
+
+  const load = () => fetchForumIndex()
+    .then(data => { if (isSubscribed) callback(data); })
+    // A read that failed while the backend was down settles as EMPTY, which is
+    // what an empty forum looks like. The caller keeps its own last good render
+    // until the recovery signal arrives below.
+    .catch(err => {
+      console.error('[subscribeToForumIndex]', err);
+      if (isSubscribed) callback({ categories: [], groups: [], available: false });
+    });
+
+  load();
+
+  // Re-read on recovery so the board does not sit on that empty answer.
   const offRestored = subscribeToRefetch(load);
 
   return () => {

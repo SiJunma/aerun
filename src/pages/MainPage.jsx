@@ -4,8 +4,6 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { Folder, MessageSquare, FileText } from 'lucide-react';
-import { subscribeToCategoryGroups } from '../api/categories';
-import { subscribeToRefetch } from '../api/connection';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
@@ -16,31 +14,28 @@ import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, profile, readMap, categories, forumStateLoading, forumStateError, refreshForumState } = useAuth();
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Categories AND groups come from ONE read, which AuthProvider already makes
+  // (forum-index) and re-makes whenever the identity changes.
+  //
+  // This page used to ALSO call subscribeToForumIndex, which meant opening the
+  // forum issued two reads of the same category rows on two unrelated clocks,
+  // and the index rendered whichever pairing of (categories, groups) happened to
+  // be on screen — a category filed under a group the other read had not returned
+  // yet landed in no section at all, silently.
+  //
+  // The index cannot paint from half of that pair, so it is now delivered half
+  // as often: once, by the provider that already has to re-read it on sign-in,
+  // sign-out and role change. `categories` is filtered by canViewCategory on the
+  // SERVER, so there is no client-side role check to repeat here.
+  const { user, profile, categories, categoryGroups, readMap, forumStateLoading, forumStateError, refreshForumState } = useAuth();
   const [timeoutExpired, setTimeoutExpired] = useState(false);
   const { setPageTitle } = usePageTitle();
 
+  const groups = categoryGroups;
+
   useEffect(() => {
     setPageTitle('');
-    const unsubGroups = subscribeToCategoryGroups((data) => {
-      setGroups(data);
-      setLoading(false);
-    });
-
-    return () => {
-      unsubGroups();
-    };
   }, []);
-
-  // This page's categories live in AuthProvider, not in a local list, so the
-  // reconnect refetch that the category subscribers handle does not cover them.
-  // Without this the index keeps rendering "no categories": refreshForumState
-  // failed while the backend was down and answered with an empty list, which is
-  // exactly what an empty forum looks like.
-  useEffect(() => subscribeToRefetch(() => refreshForumState?.(true)), [refreshForumState]);
-
 
   // While a logged-in user's profile is still loading from Firestore, treat as loading
   // to prevent a flash of content with wrong permissions (profile=null → role='player', then
@@ -51,18 +46,18 @@ const MainPage = () => {
   const catsLoading = forumStateLoading;
 
   useEffect(() => {
-    if (loading || profileLoading || catsLoading) {
+    if (catsLoading || profileLoading) {
       const timer = setTimeout(() => {
         setTimeoutExpired(true);
       }, 7000);
       return () => clearTimeout(timer);
     }
-  }, [loading, profileLoading, catsLoading]);
+  }, [catsLoading, profileLoading]);
 
   return (
     <div className="pt-5 pb-4">
 
-      {(loading || profileLoading || catsLoading) ? (
+      {(catsLoading || profileLoading) ? (
         timeoutExpired ? (
           <ErrorCard
             isNetworkError={true}

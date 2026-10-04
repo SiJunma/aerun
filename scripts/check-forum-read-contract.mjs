@@ -149,6 +149,43 @@ assert.match(
   'fetchForumStats must exist: nothing else serves forumStats, and ForumStats.jsx reads it'
 );
 
+// ── The forum index is read ONCE, by the provider ─────────────────────────────
+//
+// MainPage used to mount subscribeToForumIndex while AuthProvider independently
+// read the same category rows for its `categories` state. Two reads of one
+// resource on two unrelated clocks, for a screen that renders the pairing of the
+// two — so a category filed under a group the other read had not yet returned
+// rendered in no section, silently. The index cannot paint from half of that
+// pair, so the second request had to go rather than be deduplicated.
+//
+// This asserts the ABSENCE of the page-level read, because the failure mode is
+// re-introducing it: the duplicate is invisible in review (both calls are
+// correct in isolation) and only costs a request per forum visit.
+assert.match(
+  categories,
+  /fetchForumIndex\(\)/,
+  'fetchSecuredMainPageData must read the index through fetchForumIndex — it is the one read that carries groups with their categories'
+);
+assert.match(
+  categories,
+  /\n\s*categoryGroups:\s*index\.groups/,
+  'fetchSecuredMainPageData must return the groups — the index renders a category inside its folder and cannot paint from categories alone'
+);
+
+// Stripped, because the comment above records the call by name — a gate that
+// failed on its own explanation would be deleted rather than obeyed.
+const mainPage = read('../src/pages/MainPage.jsx');
+forbid(
+  stripComments(mainPage),
+  'MainPage',
+  /subscribeToForumIndex/
+);
+assert.match(
+  mainPage,
+  /categories,\s*categoryGroups/,
+  'MainPage must take both lists from useAuth — the provider already re-reads them when the identity changes'
+);
+
 // ── Topic lists normalise before rendering ──────────────────────────────────
 //
 // /active-topics rendered a literal "—" in its last-post column with no link,

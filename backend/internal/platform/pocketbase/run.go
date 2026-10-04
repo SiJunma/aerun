@@ -256,6 +256,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Categories
 	group.GET("/categories", listCategoriesHandler)
+	// The editor's view of the same rows, and the only response that carries
+	// `allowed_roles`. Gated on the permission to change a category, because
+	// that list is the permission model of the board.
+	group.GET("/admin/categories", listAdminCategoriesHandler).BindFunc(RequirePermission(auth.PermManageCategories))
+	// The forum index: categories AND the groups they are filed under, in one
+	// response, because the screen cannot render without both.
+	group.GET("/forum-index", listForumIndexHandler)
 	// Forum-wide totals for the stats panel. Counted on read rather than cached —
 	// see listForumStatsHandler.
 	group.GET("/forum-stats", listForumStatsHandler)

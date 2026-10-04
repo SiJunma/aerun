@@ -1,5 +1,5 @@
-import { sendApi, pb } from './pocketbase';
-import { sharedPoll, bestEffortRealtime } from './shared-poll';
+import { sendApi } from './pocketbase';
+import { sharedPoll } from './shared-poll';
 
 // The unread badge in the tab title, the Notifications page and the quote
 // highlighting inside TopicPage all wanted "this member's notifications". They
@@ -43,9 +43,6 @@ export const subscribeToUserNotifications = (uid, callback) => {
     return () => {};
   }
   const poll = sharedPoll(`notifications:${uid}`, {
-    realtime: (reload) => bestEffortRealtime((setUnsub) =>
-      pb.collection('notifications').subscribe('*', reload).then(setUnsub)
-    ),
     fetch: async () => {
       const res = await sendApi('/api/aerun/me/notifications?limit=100');
       return (res?.items || []).map(toNotification);

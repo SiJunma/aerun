@@ -1,9 +1,12 @@
 package pocketbase
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -423,11 +426,19 @@ func listForumStatsHandler(e *core.RequestEvent) error {
 // listCategoriesHandler returns all categories that the caller is permitted to
 // view.
 //
-// group_id and allowed_roles ride along because the admin board has to render and
-// re-submit them: without them, opening a category for editing would show an
-// empty permission list and saving would silently wipe the real one. Both are
-// served only to callers who can already see the category, and neither is
-// sensitive (a list of role ids), so this is not a widening of visibility.
+// `allowed_roles` is NOT in this payload, and that is a deliberate cut rather
+// than an oversight. Its only consumer is the admin board's role picker: every
+// other reader renders a category by its name, counters and last post, and none
+// of them has a use for "which role ids may see this".
+//
+// Sending it anyway told every member — including a signed-out guest — the exact
+// access rule of every category in the board: which roles exist, which are
+// admitted, and by omission which are restricted or root-only. That is the
+// permission model of the whole forum handed to whoever asks, on a list endpoint
+// that has nothing to do with editing. The board needs it to re-submit a category
+// unchanged, so it moved to the admin route (GET /admin/categories), which is
+// already gated on PermManageCategories — the caller has to be able to EDIT a
+// category to learn how it is gated.
 func listCategoriesHandler(e *core.RequestEvent) error {
 	acc := AccessFrom(e)
 	cats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
@@ -446,6 +457,139 @@ func listCategoriesHandler(e *core.RequestEvent) error {
 		if err != nil || !allowed {
 			continue
 		}
+		item := map[string]any{
+			"id":          c.Id,
+			"name":        c.GetString("name"),
+			"slug":        c.GetString("slug"),
+			"description": c.GetString("description"),
+			"group_id":    c.GetString("group_id"),
+			"sort_order":  c.GetInt("sort_order"),
+		}
+		// Counters default to zero so a category that never held a topic still
+		// renders "0" rather than a blank cell, while the last_post_* keys stay
+		// absent — the index distinguishes them.
+		for key, value := range projections[c.Id] {
+			item[key] = value
+		}
+		if _, ok := item["topics_count"]; !ok {
+			item["topics_count"] = 0
+			item["posts_count"] = 0
+		}
+		items = append(items, item)
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      items,
+		"request_id": requestIDFrom(e),
+	})
+}
+
+// listForumIndexHandler serves the forum index as ONE payload.
+//
+// The index renders categories grouped by their group, so it needs both lists to
+// paint anything at all — and it fetched them separately (GET /categories and
+// GET /category-groups) on every mount. Two round trips for one screen, raced
+// against each other, for data that cannot disagree: a category whose group_id
+// names a group the other call has not returned yet is a category rendered in
+// the wrong section or in none.
+//
+// Groups are NOT access-filtered, and deliberately so: they are the folder
+// headings of the board, the same for everyone, and a group with no visible
+// category inside it simply renders no rows. Filtering them would make the
+// heading list depend on the caller, which is a different feature and not one
+// this endpoint was asked to be.
+func listForumIndexHandler(e *core.RequestEvent) error {
+	acc := AccessFrom(e)
+	cats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
+	if err != nil {
+		return internalError("failed to query categories", err)
+	}
+
+	projections, err := categoryForumProjections(e.App)
+	if err != nil {
+		return internalError("failed to compute category counters", err)
+	}
+
+	items := make([]map[string]any, 0, len(cats))
+	for _, c := range cats {
+		allowed, err := canViewCategory(e.App, acc, c.Id)
+		if err != nil || !allowed {
+			continue
+		}
+		item := map[string]any{
+			"id":          c.Id,
+			"name":        c.GetString("name"),
+			"slug":        c.GetString("slug"),
+			"description": c.GetString("description"),
+			"group_id":    c.GetString("group_id"),
+			"sort_order":  c.GetInt("sort_order"),
+		}
+		// Counters default to zero so a category that never held a topic still
+		// renders "0" rather than a blank cell, while the last_post_* keys stay
+		// absent — the index distinguishes them.
+		for key, value := range projections[c.Id] {
+			item[key] = value
+		}
+		if _, ok := item["topics_count"]; !ok {
+			item["topics_count"] = 0
+			item["posts_count"] = 0
+		}
+		items = append(items, item)
+	}
+
+	// A missing collection is the honest-degradation case the standalone route
+	// already handles: an empty group list renders the board ungrouped.
+	groups := make([]map[string]any, 0)
+	available := true
+	col, colErr := e.App.FindCachedCollectionByNameOrId(categoryGroupsCollectionName)
+	if colErr != nil {
+		if errors.Is(colErr, sql.ErrNoRows) || strings.Contains(colErr.Error(), "missing") {
+			available = false
+		} else {
+			return internalError("category_groups lookup failed", colErr)
+		}
+	} else {
+		records, err := e.App.FindRecordsByFilter(col, "", "sort_order", 0, 0)
+		if err != nil {
+			return internalError("failed to query category_groups", err)
+		}
+		for _, r := range records {
+			groups = append(groups, categoryGroupPayload(r))
+		}
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      items,
+		"groups":     groups,
+		"available":  available,
+		"request_id": requestIDFrom(e),
+	})
+}
+
+// listAdminCategoriesHandler is the category list the admin board edits from, and
+// the ONLY place `allowed_roles` is served.
+//
+// It is a separate route rather than a flag on the public one because the two
+// have genuinely different contracts: the public list answers "what may this
+// caller see", the admin list answers "what is stored, so I can change it". A
+// caller who cannot edit a category has no business being told how it is gated,
+// and a single endpoint with an opt-in query parameter is one forgotten flag away
+// from leaking the whole permission model to every member again.
+func listAdminCategoriesHandler(e *core.RequestEvent) error {
+	cats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
+	if err != nil {
+		return internalError("failed to query categories", err)
+	}
+
+	// The board lists every row, including ones the editor cannot preview: hiding
+	// a category from its own editor would make it unfixable.
+	projections, err := categoryForumProjections(e.App)
+	if err != nil {
+		return internalError("failed to compute category counters", err)
+	}
+
+	items := make([]map[string]any, 0, len(cats))
+	for _, c := range cats {
 		roles := decodeRoleIDList(c.Get("allowed_roles"))
 		if roles == nil {
 			roles = []string{}
@@ -461,15 +605,8 @@ func listCategoriesHandler(e *core.RequestEvent) error {
 			"created":       c.GetDateTime("created").String(),
 			"updated":       c.GetDateTime("updated").String(),
 		}
-		// Counters default to zero so a category that never held a topic still
-		// renders "0" rather than a blank cell, while the last_post_* keys stay
-		// absent — the index distinguishes them.
 		for key, value := range projections[c.Id] {
 			item[key] = value
-		}
-		if _, ok := item["topics_count"]; !ok {
-			item["topics_count"] = 0
-			item["posts_count"] = 0
 		}
 		items = append(items, item)
 	}

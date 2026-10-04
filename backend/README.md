@@ -198,6 +198,47 @@ All errors return the machine-readable error contract:
 - `DELETE /api/aerun/posts/:id` — soft delete post, updates visible post count and topic `last_post_*` fallback.
 - `POST /api/aerun/topics/:id/posts/move` — move posts between topics, resequencing in target topic and updating projections for both topics in one transaction.
  
+### Board Structure (read model)
+
+These three are separated by what the CALLER may know, not by what the screen
+renders. The public list deliberately omits `allowed_roles`: it answered "what
+may this caller see", and shipping the access rule of every category on it told
+every member (including a signed-out guest) the whole permission model of the
+board — which roles exist, which are admitted, and by omission which are
+restricted or root-only.
+
+- `GET /api/aerun/forum-index` — the forum index in ONE response: `items` (the
+  categories this caller may see, with counters and last-post projection) plus
+  `groups` (the folder headings) and `available`. The index cannot paint from half
+  of that pair, so it must not fetch half of it either — a category whose
+  `group_id` named a group the other call had not returned yet rendered in the
+  wrong section. `available` is `false` on a database older than migration
+  1767500000, which is what renders the board ungrouped.
+- `GET /api/aerun/categories` — the same category rows on their own, for callers
+  that need categories without the grouping (moderation pickers). No
+  `allowed_roles`.
+- `GET /api/aerun/admin/categories` — the editor's view: every row, including
+  ones the editor cannot preview (hiding a category from its own editor makes it
+  unfixable), and the ONLY response carrying `allowed_roles`. Requires
+  `manage_categories`.
+- `GET /api/aerun/category-groups` — group headings alone. Kept for the admin
+  board's group CRUD, which edits groups independently of categories.
+
+#### Realtime is not available on these collections
+
+Every forum collection is locked with `lockBrowserRules` (migrations 1766100000
+and 1766400000): `ListRule` and `ViewRule` are `nil`, which PocketBase answers
+with "superusers only" (`core/record_query.go`: `if accessRule == nil { return
+false }`). A wildcard realtime subscription resolves its rule through that same
+`ListRule`, so a member's `pb.collection('topics').subscribe('*')` completes the
+SSE handshake — the network tab shows `PB_CONNECT` — and the server then never
+delivers an event.
+
+This is why the client treats freshness as interval-driven: `src/api/shared-poll.js`
+REFUSES a realtime hook with a thrown error rather than opening a connection that
+cannot deliver. Enabling realtime means opening a scoped `RealtimeRule` per
+collection first, and only then removing the guard.
+
 ### Reputation, Subscriptions and Audit (Sprint 4)
  
 - `POST /api/aerun/posts/:id/vote` — cast or update vote on a post (`value`: `1` or `-1`, `comment` up to 1024 chars). Atomically updates post score and author profile reputation. Requires `use_reputation` permission.

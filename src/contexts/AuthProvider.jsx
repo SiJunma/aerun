@@ -69,6 +69,10 @@ export const AuthProvider = ({ children }) => {
   const [readMapReady] = useState(true);
   const [latestTopics, setLatestTopics] = useState([]);
   const [categories, setCategories] = useState([]);
+  // The folders the index renders categories inside. They come from the SAME read
+  // as the categories (forum-index), so the two can never disagree about which
+  // group a category belongs to.
+  const [categoryGroups, setCategoryGroups] = useState([]);
   const [forumStateLoading, setForumStateLoading] = useState(true);
   const [forumStateError, setForumStateError] = useState(null);
   const [forumStats, setForumStats] = useState(null);
@@ -572,6 +576,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const data = await fetchSecuredMainPageData();
       if (data?.categories) setCategories(data.categories);
+      if (data?.categoryGroups) setCategoryGroups(data.categoryGroups);
       if (data?.latestTopics) setLatestTopics(data.latestTopics);
       if (data?.stats) setForumStats(data.stats);
       if (data?.dailyActiveUsers) setDailyActiveUsers(data.dailyActiveUsers);
@@ -638,6 +643,7 @@ export const AuthProvider = ({ children }) => {
   const applyForumState = useCallback((data) => {
     if (!data) return;
     if (Array.isArray(data.categories)) setCategories(data.categories);
+    if (Array.isArray(data.categoryGroups)) setCategoryGroups(data.categoryGroups);
     if (Array.isArray(data.latestTopics)) setLatestTopics(data.latestTopics);
     if (data.stats) setForumStats(data.stats);
   }, []);
@@ -706,6 +712,7 @@ export const AuthProvider = ({ children }) => {
     readMapReady,
     latestTopics,
     categories,
+    categoryGroups,
     forumStateLoading,
     forumStateError,
     unreadTopicsCount,
@@ -743,7 +750,7 @@ export const AuthProvider = ({ children }) => {
     PERMISSIONS,
     DEFAULT_ROLES
   }), [
-    user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, forumStateLoading, forumStateError,
+    user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, categoryGroups, forumStateLoading, forumStateError,
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,

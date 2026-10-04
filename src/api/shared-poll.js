@@ -49,25 +49,37 @@ const tabIsHidden = () =>
   typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 /**
- * Wraps a PocketBase realtime subscription so it can never take the poll down.
+ * Realtime hooks are currently ABSENT on purpose.
  *
- * Realtime is a freshness shortcut here, never the only path: every resource
- * below also polls. So a failed or refused subscription costs freshness, not
- * correctness, and the returned unsubscribe is always safe to call — including
- * before the subscription promise settled, which is the window in which a React
- * effect cleanup unmounts a component that has not finished subscribing.
+ * `lockBrowserRules` (migration 1766100000, and the DM/notification migration
+ * 1766400000) sets ListRule and ViewRule to nil on every collection the forum
+ * reads, and PocketBase answers a nil access rule with "only superusers"
+ * (core/record_query.go: `if accessRule == nil { return false }`). A wildcard
+ * realtime topic resolves through that same ListRule, so a member's
+ * `pb.collection('topics').subscribe('*')` opens the SSE stream, the network tab
+ * shows PB_CONNECT, and the server then never delivers a single event.
+ *
+ * That is what "the realtime stream is dead" means: it was never alive. Each
+ * hook was an open connection carrying nothing, and the freshness everybody
+ * actually sees has always come from the interval below.
+ *
+ * The `realtime` OPTION is kept so re-enabling this is a one-line change per
+ * resource rather than a rewrite — but it is only honoured if a caller passes
+ * it, and no caller does today.
+ *
+ * The unsubscribe a hook returns is always safe to call, including before the
+ * subscription promise settled: that is the window in which a React effect
+ * cleanup unmounts a component that has not finished subscribing.
  */
-export const bestEffortRealtime = (start) => {
-  let unsub = () => {};
-  try {
-    const pending = start((fn) => { unsub = fn; });
-    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-  } catch {
-    // The interval is the contract; realtime is the bonus.
+const assertNoRealtimeHook = (hook) => {
+  if (typeof hook === 'function') {
+    throw new Error(
+      'shared-poll: realtime is refused by the collection rules (ListRule is nil), ' +
+      'so a subscription would connect and never deliver. Remove the hook, or open ' +
+      'a scoped realtime rule for the collection first.'
+    );
   }
-  return () => {
-    try { unsub(); } catch { /* a tab that is going away has nobody to tell */ }
-  };
+  return () => {};
 };
 
 // __APPEND_IMPL__
@@ -168,7 +180,10 @@ export const createSharedPoll = ({
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
-    if (realtime) stopRealtime = realtime(requestRefresh);
+    // A hook is refused loudly rather than silently ignored: a connected-but-
+    // silent SSE stream is indistinguishable from a broken one in the network
+    // tab, and that ambiguity is what hid this in the first place.
+    if (realtime) stopRealtime = assertNoRealtimeHook(realtime);
     read();
   };
 

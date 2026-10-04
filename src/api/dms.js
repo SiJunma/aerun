@@ -1,6 +1,6 @@
 import { sendApi, pb } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
-import { sharedPoll, bestEffortRealtime } from './shared-poll';
+import { sharedPoll } from './shared-poll';
 
 /**
  * Returns a deterministic conversation ID for two users.
@@ -58,9 +58,6 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
     return () => {};
   }
   const poll = sharedPoll(`dm-list:${uid}`, {
-    realtime: (reload) => bestEffortRealtime((setUnsub) =>
-      pb.collection('dm_conversations').subscribe('*', reload).then(setUnsub)
-    ),
     fetch: async () => {
       const res = await sendApi('/api/aerun/dms');
       return (res?.items || []).map(conv => ({
@@ -147,11 +144,6 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
   // Keyed per conversation so opening a second thread does not inherit the first
   // one's messages, and so a closed thread releases its own loop.
   const poll = sharedPoll(`dm-messages:${conversationId}:${limitCount}`, {
-    realtime: (reload) => bestEffortRealtime((setUnsub) =>
-      pb.collection('dm_messages').subscribe('*', (e) => {
-        if (e.record?.conversation_id === conversationId) reload();
-      }).then(setUnsub)
-    ),
     fetch: async () => {
       const res = await sendApi(`/api/aerun/dms/${conversationId}/messages?limit=${limitCount}`);
       return (res?.items || []).map(m => ({

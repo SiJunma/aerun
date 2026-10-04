@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 // The module reads `document` for tab visibility; each test installs its own.
-const { createSharedPoll, sharedPoll, __resetSharedPolls, bestEffortRealtime } =
+const { createSharedPoll, sharedPoll, __resetSharedPolls } =
   await import('../src/api/shared-poll.js');
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -136,31 +136,26 @@ test('a slow read is never stacked: one request per trigger burst', async () => 
   }
 });
 
-test('many realtime events coalesce into ONE read', async () => {
-  // This is the shape of the original bug: PocketBase delivers one event per row
-  // written, and the old code called load() directly on each one.
-  let calls = 0;
-  let fireRealtime;
+test('a realtime hook is REFUSED loudly, because it could never deliver', async () => {
+  // The collections this app reads are locked (ListRule = nil), which PocketBase
+  // answers with "only superusers" — so a subscription connects and then never
+  // fires. The network tab shows PB_CONNECT and nothing else, which is
+  // indistinguishable from a broken stream, and that is exactly how the dead
+  // realtime sat unnoticed. Failing loudly is the point: the next person to add a
+  // hook learns why it cannot work instead of shipping another silent one.
+  const calls = [];
   const poll = createSharedPoll({
-    name: 'coalesce',
+    name: 'no-realtime',
     intervalMs: 0,
-    realtime: (reload) => { fireRealtime = reload; return () => {}; },
-    fetch: async () => { calls += 1; return calls; },
+    fetch: async () => { calls.push(1); return calls.length; },
+    realtime: () => () => {},
   });
 
-  const stop = poll.subscribe(() => {});
-  try {
-    await tick();
-    assert.equal(calls, 1);
-
-    for (let i = 0; i < 5; i += 1) fireRealtime();
-    await settle();
-    await tick();
-
-    assert.equal(calls, 2, 'five events in a burst must cost one read, not five');
-  } finally {
-    stop();
-  }
+  assert.throws(
+    () => poll.subscribe(() => {}),
+    /realtime is refused by the collection rules/,
+    'a realtime hook must not start a loop that can never receive an event'
+  );
 });
 
 test('a hidden tab is not polled, and is read once on return', async () => {
@@ -317,23 +312,21 @@ test('different names are different resources', () => {
   assert.notEqual(first, second, 'two accounts must not share a cached value');
 });
 
-test('bestEffortRealtime survives a refused subscription and an early cleanup', () => {
-  // Realtime is a freshness shortcut; the interval is the contract. A failed or
-  // missing subscription must cost freshness, never correctness — and the
-  // returned unsubscribe must be safe to call before the promise settled, which
-  // is the window in which a React effect cleanup runs.
-  const refused = bestEffortRealtime(() => Promise.reject(new Error('forbidden')));
-  assert.doesNotThrow(() => refused());
-
-  const throwing = bestEffortRealtime(() => { throw new Error('no transport'); });
-  assert.doesNotThrow(() => throwing());
-
-  let captured;
-  const unsubscribed = bestEffortRealtime((setUnsub) => { captured = setUnsub; });
-  assert.doesNotThrow(() => unsubscribed(), 'cleanup before subscribe resolved');
-
-  let ran = false;
-  captured(() => { ran = true; });
-  assert.equal(ran, false, 'cleanup must not invoke the handler it never received');
-  unsubscribed();
+test('the poll still starts when no realtime hook is passed', async () => {
+  // The guard above must refuse ONLY a hook. A resource without one is the normal
+  // case today and has to keep working, or the guard would take the whole app
+  // down instead of one dead optimisation.
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'no-hook',
+    intervalMs: 0,
+    fetch: async () => { calls += 1; return calls; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1);
+  } finally {
+    stop();
+  }
 });

@@ -1,6 +1,6 @@
 ﻿import { sendApi, pb } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
-import { sharedPoll, bestEffortRealtime } from './shared-poll';
+import { sharedPoll } from './shared-poll';
 
 // normalizeTopic maps a server topic row onto the field names the renderers
 // read. EXPORTED because three different topic lists exist (the category page,
@@ -56,9 +56,6 @@ export const subscribeToTopics = (categoryId, callback) => {
   // Keyed per category: the index and the category page both read this, and a
   // member bouncing between them was paying for two loops over one endpoint.
   const poll = sharedPoll(`topics:${categoryId}`, {
-    realtime: (reload) => bestEffortRealtime((setUnsub) =>
-      pb.collection('topics').subscribe('*', reload).then(setUnsub)
-    ),
     fetch: async () => {
       const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&limit=100`);
       // The command layer answers `items` (forum_topics.go listTopicsHandler).
@@ -82,9 +79,6 @@ export const subscribeToTopic = (topicId, callback) => {
   }
 
   const poll = sharedPoll(`topic:${topicId}`, {
-    realtime: (reload) => bestEffortRealtime((setUnsub) =>
-      pb.collection('topics').subscribe(topicId, reload).then(setUnsub)
-    ),
     fetch: async () => normalizeTopic((await sendApi(`/api/aerun/topics/${topicId}`))?.topic),
     intervalMs: 15000,
     initialValue: null,
@@ -211,11 +205,6 @@ export const subscribeToPosts = (topicId, callback) => {
   // Keyed per topic, so leaving a thread releases its loop immediately instead of
   // leaving a 10-second timer reading a topic nobody is looking at.
   const poll = sharedPoll(`posts:${topicId}`, {
-    realtime: (reload) => bestEffortRealtime((setUnsub) =>
-      pb.collection('posts').subscribe('*', (e) => {
-        if (e.record?.topic_id === topicId) reload();
-      }).then(setUnsub)
-    ),
     fetch: async () => {
       const res = await sendApi(`/api/aerun/topics/${topicId}/posts?limit=100`);
       // `items`, per forum_posts.go listPostsHandler — the same key the topic
