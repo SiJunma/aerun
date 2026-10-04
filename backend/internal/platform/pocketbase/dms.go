@@ -322,7 +322,19 @@ func createDMHandler(e *core.RequestEvent) error {
 	}
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
-		// Verify recipients exist and are active
+		// Verify recipients exist, are active, and may actually be messaged.
+		//
+		// THE RECIPIENT'S RIGHT IS CHECKED, NOT ONLY THE SENDER'S. The route already
+		// gates the caller on `use_direct_messages`, which is why hiding the button
+		// looked sufficient. It is not: any member who holds the key could POST a
+		// recipient id directly and open a conversation with an account whose role
+		// deliberately does not permit DMs — a spectator, a pending account, a custom
+		// role with the key removed. The stored role row is the authority, so the
+		// recipient's own effective permissions decide, narrowed by the same status
+		// rules that would authenticate them.
+		//
+		// A rejected recipient names the ROLE, not the account, so the sender learns
+		// that the capability is switched off without learning who holds what.
 		recipientUsers := make([]*core.Record, len(recipients))
 		for i, rID := range recipients {
 			u, err := txApp.FindRecordById(usersCollectionName, rID)
@@ -331,6 +343,11 @@ func createDMHandler(e *core.RequestEvent) error {
 			}
 			if u.GetString("status") == string(auth.StatusBanned) {
 				return 0, nil, forbiddenError("cannot send message to a banned user")
+			}
+			recipientAcc := accessForUser(txApp, u)
+			if !auth.Has(recipientAcc.Permissions, auth.PermUseDirectMessages) {
+				return 0, nil, forbiddenError(
+					"this account cannot receive direct messages (role " + string(recipientAcc.Role) + ")")
 			}
 			recipientUsers[i] = u
 		}
@@ -549,7 +566,15 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to update sender read sequence", err)
 		}
 
-		// 4. Find other members to notify
+		// 4. Find other members to notify, and check each may still receive DMs.
+		//
+		// The recipient's permission is re-checked HERE, not only when the
+		// conversation was opened. A conversation created while the recipient
+		// held `use_direct_messages` outlives the role change that removed it —
+		// demote a member afterwards and the send path would keep working
+		// forever, because the gate at conversation creation already passed.
+		// Re-checking on every send is what makes a permission take effect on the
+		// member it was actually changed for.
 		otherMembers, err := txApp.FindRecordsByFilter(
 			dmMembersCollectionName,
 			"conversation_id = {:conv} && user_id != {:user}",
@@ -558,6 +583,19 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			0,
 			dbx.Params{"conv": convID, "user": e.Auth.Id},
 		)
+		if err != nil {
+			return 0, nil, internalError("failed to load conversation members", err)
+		}
+		for _, m := range otherMembers {
+			recipient, rErr := txApp.FindRecordById(usersCollectionName, m.GetString("user_id"))
+			if rErr != nil || recipient == nil {
+				return 0, nil, internalError("failed to load conversation member", rErr)
+			}
+			if !auth.Has(accessForUser(txApp, recipient).Permissions, auth.PermUseDirectMessages) {
+				return 0, nil, forbiddenError("a participant can no longer receive direct messages")
+			}
+		}
+
 		if err == nil {
 			senderNick := e.Auth.GetString("nickname")
 			for _, m := range otherMembers {

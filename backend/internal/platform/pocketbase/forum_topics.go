@@ -395,7 +395,13 @@ func updateTopicHandler(e *core.RequestEvent) error {
 		// the delete key deliberately does not imply the edit key. `hasMod` is
 		// kept for the three unrelated settings below (lock/pin/move) that are
 		// gated by their own dedicated keys OR the legacy umbrella.
-		canEdit := isAuthor || auth.Has(acc.Permissions, auth.PermEditOthersTopics)
+		//
+		// `edit_self_topic` is enforced here for the first time — authorship alone
+		// used to be sufficient, so the key was granted by the matrix, shown in
+		// the admin panel, and read by nothing.
+		canEditOthers := !isAuthor && auth.Has(acc.Permissions, auth.PermEditOthersTopics)
+		canEdit := canEditOthers ||
+			(isAuthor && auth.Has(acc.Permissions, auth.PermEditSelfTopic))
 		hasMod := canEdit || auth.Has(acc.Permissions, auth.PermDeleteOthersTopics)
 
 		if form.Title != nil {

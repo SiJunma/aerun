@@ -440,14 +440,24 @@ func editPostHandler(e *core.RequestEvent) error {
 		isAuthor := e.Auth != nil && post.GetString("author_id") == e.Auth.Id
 		// Split permission, not an umbrella: editing and deleting a stranger's
 		// post are separately assignable, so a role can be given one without
-		// the other. The authorship check above is mandatory either way —
-		// `edit_others_posts` widens WHO may act, it never substitutes for the
-		// author comparison. `delete_others_posts` is deliberately NOT accepted
-		// here: the right to remove a post is not the right to rewrite it.
-		canEdit := isAuthor || auth.Has(acc.Permissions, auth.PermEditOthersPosts)
+		// the other.
+		//
+		// THE AUTHOR'S OWN KEY IS NOW ENFORCED, and that is the change. This used
+		// to read `isAuthor || Has(edit_others_posts)` — authorship alone was
+		// sufficient, which made `edit_self_post` and `delete_self_post` dead
+		// strings: granted by the matrix, backfilled by migration, offered in the
+		// admin panel, and read by nothing. A role could not be denied the right
+		// to edit its own posts, because no check consulted the key.
+		//
+		// Both arms now consult a permission. `_others_` never substitutes for
+		// the author comparison — it widens WHO may act on a row that is not
+		// yours — and `_self_` is the separate grant for your own row.
+		canEditOthers := !isAuthor && auth.Has(acc.Permissions, auth.PermEditOthersPosts)
+		canEdit := canEditOthers ||
+			(isAuthor && auth.Has(acc.Permissions, auth.PermEditSelfPost))
 		// A moderator editing a stranger's post is staff activity and is
 		// audited; the author editing their own post is not.
-		isModerated := !isAuthor && auth.Has(acc.Permissions, auth.PermEditOthersPosts)
+		isModerated := canEditOthers
 
 		if !canEdit {
 			return 0, nil, forbiddenError("you cannot edit this post")
@@ -588,9 +598,13 @@ func deletePostHandler(e *core.RequestEvent) error {
 		isAuthor := e.Auth != nil && post.GetString("author_id") == e.Auth.Id
 		// Same split as editing, and the same asymmetry kept on purpose: the
 		// right to delete a stranger's post does not imply the right to edit it.
+		//
+		// `delete_self_post` is enforced here for the first time — authorship
+		// alone used to be enough, so the key was decorative.
 		byModeration := !isAuthor && auth.Has(acc.Permissions, auth.PermDeleteOthersPosts)
+		byAuthorship := isAuthor && auth.Has(acc.Permissions, auth.PermDeleteSelfPost)
 
-		if !isAuthor && !byModeration {
+		if !byModeration && !byAuthorship {
 			return 0, nil, forbiddenError("you cannot delete this post")
 		}
 

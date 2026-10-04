@@ -291,7 +291,7 @@ func TestEveryDeleteIsAuditedWithItsText(t *testing.T) {
 	// AutodateField.
 	post := core.NewRecord(mustCol(t, app, postsCollectionName))
 	post.Set("topic_id", topicID)
-	post.Set("author_id", fixPendingID)
+	post.Set("author_id", fixPlayerID)
 	post.Set("content", secret)
 	post.Set("is_draft", false)
 	post.SetRaw("created", types.NowDateTime().Add(48*time.Hour))
@@ -304,7 +304,7 @@ func TestEveryDeleteIsAuditedWithItsText(t *testing.T) {
 
 	// Deleted as its OWN author: the path that used to write no audit row at all.
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/posts/%s", server.URL, post.Id), nil)
-	req.Header.Set("Authorization", tokens["pending"])
+	req.Header.Set("Authorization", tokens["player"])
 	req.Header.Set("Idempotency-Key", "audit-author-delete")
 	res, err := server.Client().Do(req)
 	if err != nil {

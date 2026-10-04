@@ -2184,6 +2184,12 @@ const TopicPage = () => {
   // An `_others_` key only ever widens WHO may act on a post that is not
   // theirs. The author comparison is still what proves ownership — a
   // permission never substitutes for it.
+  //
+  // The `_self_` keys are consulted too, because the SERVER now does. Both
+  // sides have to ask the same question or the UI offers a button that answers
+  // 403: these previously read `author_id === user.uid || …`, which meant an
+  // author always saw Edit/Delete regardless of what their role granted, and a
+  // role could not take the right away from its own members.
   const canActOnPost = (post) => {
     if (!user || profile?.role_id === 'pending') return false;
     if (post?._isOptimistic || (typeof post?.id === 'string' && post.id.startsWith('temp_'))) return false;
@@ -2192,14 +2198,18 @@ const TopicPage = () => {
 
   const canEditPost = (post) => {
     if (!canActOnPost(post)) return false;
-    return post.author_id === user.uid ||
-      hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS);
+    if (post.author_id === user.uid) {
+      return hasPermission(PERMISSIONS.EDIT_SELF_POST);
+    }
+    return hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS);
   };
 
   const canDeletePost = (post) => {
     if (!canActOnPost(post)) return false;
-    return post.author_id === user.uid ||
-      hasPermission(PERMISSIONS.DELETE_OTHERS_POSTS);
+    if (post.author_id === user.uid) {
+      return hasPermission(PERMISSIONS.DELETE_SELF_POST);
+    }
+    return hasPermission(PERMISSIONS.DELETE_OTHERS_POSTS);
   };
 
   const getRoleBadge = (post, extraClass = 'mb-2') => {
@@ -3148,7 +3158,14 @@ const TopicPage = () => {
                                   <Link to={`/profile/${post.author_id}`} className="author-res-footer-link">
                                     {t('profile.view_profile')}
                                   </Link>
-                                  {user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
+                                  {user && profile?.role_id !== 'pending' && authorData.role_id !== 'banned' && post.author_id !== user?.uid &&
+                                    // The permission, not a role list. The sibling
+                                    // footer above already gates on it, and a hardcoded
+                                    // role list silently denies a custom role that HOLDS
+                                    // the key while granting it to one that does not —
+                                    // the admin panel's whole point is that roles are
+                                    // editable and the code keeps up.
+                                    hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && (
                                     <Link to={`/messages/${post.author_id}`} className="author-res-footer-link">
                                       {t('profile.pm')}
                                     </Link>
