@@ -200,7 +200,7 @@ All errors return the machine-readable error contract:
  
 ### Board Structure (read model)
 
-These three are separated by what the CALLER may know, not by what the screen
+These are separated by what the CALLER may know, not by what the screen
 renders. The public list deliberately omits `allowed_roles`: it answered "what
 may this caller see", and shipping the access rule of every category on it told
 every member (including a signed-out guest) the whole permission model of the
@@ -223,6 +223,34 @@ restricted or root-only.
   `manage_categories`.
 - `GET /api/aerun/category-groups` — group headings alone. Kept for the admin
   board's group CRUD, which edits groups independently of categories.
+
+#### Roles: the same split, for the same reason
+
+`GET /api/aerun/roles` is ungated on purpose — `account_isolation_test.go` pins
+that a signed-OUT visitor must still render role badges, and the theme must load
+before a session exists — so the fields were gated instead of the route. It used to
+serve `permissions`, `is_system`, `base_role_id` and `max_characters_limit` for
+every role, which made the route a complete map of the board's security model
+readable by anyone: which roles exist, exactly what each may do, and which are
+privileged.
+
+- `GET /api/aerun/roles` — `role_id`, `name`, `rank`, `color`. What a badge paints,
+  and all four already public through role badges on posts.
+- `GET /api/aerun/admin/roles` — the same rows plus `permissions`, `is_system`,
+  `base_role_id`, `max_characters_limit` and the record `id` the editor form
+  submits back. Requires `manage_roles`, and returns EVERY row: hiding a role from
+  the editor that manages roles would make it unfixable.
+
+What made this safe to do is that the client no longer needs the matrix to decide
+anything. `hasPermission` reads the caller's effective permission set from
+`GET /api/aerun/me` (`profilePayload`, narrowed by role AND by account status),
+which the guest branch answers too — so a signed-out visitor is not left reaching
+into the registry for an answer it is no longer given.
+
+The permission NAMES remain public in `src/constants/permissions.js`, compiled into
+the bundle. That is a vocabulary, not an assignment; what the split protects is
+which account may do what, and it removes the second authority that could disagree
+with the server.
 
 #### Realtime: blocked on rules, not on the client
 

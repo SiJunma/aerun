@@ -14,18 +14,44 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
-func roleRecordPayload(r *core.Record) map[string]any {
+// roleBadgePayload is what a BADGE renders, and it is the whole public answer.
+//
+// Everything else about a role — its permission list, whether it is a system role,
+// which system role a custom one derives from, how many masks its members may
+// hold — is configuration for the editor, and it used to ship to everyone on an
+// ungated route. That made GET /roles a complete map of the board's security
+// model, readable by a signed-out guest: every role that exists, exactly what each
+// may do, and by omission which are privileged. It is the most useful thing to
+// read before choosing an account to target.
+//
+// `role_id`, `name`, `rank` and `color` are what ForumAuthorName and the role
+// badges paint, and they are published by design — a role badge on a post already
+// reveals the role to anyone who can read the post.
+//
+// The editable half lives in roleEditorPayload, behind `manage_roles`.
+func roleBadgePayload(r *core.Record) map[string]any {
 	return map[string]any{
-		"id":                   r.Id,
-		"role_id":              r.GetString("role_id"),
-		"name":                 r.GetString("name"),
-		"rank":                 r.GetInt("rank"),
-		"color":                r.GetString("color"),
-		"is_system":            r.GetBool("is_system"),
-		"base_role_id":         r.GetString("base_role_id"),
-		"max_characters_limit": r.GetInt("max_characters_limit"),
-		"permissions":          r.GetStringSlice("permissions"),
+		"role_id": r.GetString("role_id"),
+		"name":    r.GetString("name"),
+		"rank":    r.GetInt("rank"),
+		"color":   r.GetString("color"),
 	}
+}
+
+// roleEditorPayload is the admin view: the badge fields plus what the role editor
+// form submits back.
+//
+// `id` is the record id, which the badge payload does not need — a badge resolves a
+// role by `role_id`, and publishing record ids to every visitor buys an attacker a
+// second identifier for the same row and the editor nothing it cannot already get.
+func roleEditorPayload(r *core.Record) map[string]any {
+	payload := roleBadgePayload(r)
+	payload["id"] = r.Id
+	payload["is_system"] = r.GetBool("is_system")
+	payload["base_role_id"] = r.GetString("base_role_id")
+	payload["max_characters_limit"] = r.GetInt("max_characters_limit")
+	payload["permissions"] = r.GetStringSlice("permissions")
+	return payload
 }
 
 func listRolesHandler(e *core.RequestEvent) error {
@@ -41,7 +67,38 @@ func listRolesHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, 0, len(records))
 	for _, r := range records {
-		items = append(items, roleRecordPayload(r))
+		items = append(items, roleBadgePayload(r))
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      items,
+		"request_id": requestIDFrom(e),
+	})
+}
+
+// listAdminRolesHandler serves GET /api/aerun/admin/roles — the role editor's
+// list, with the configuration the public route no longer carries.
+//
+// It returns EVERY row, not only the ones the caller may edit, on purpose: hiding
+// a role from the editor that manages roles would make it unfixable, which is the
+// same reasoning that put `allowed_roles` on /admin/categories rather than on the
+// public list. `manage_roles` is the gate that matters; narrowing the rows by what
+// this particular admin may edit would only reintroduce the "why can't I see the
+// role I need to fix" class of bug.
+func listAdminRolesHandler(e *core.RequestEvent) error {
+	col, err := e.App.FindCachedCollectionByNameOrId(rolesCollectionName)
+	if err != nil {
+		return internalError("roles collection unavailable", err)
+	}
+
+	records, err := e.App.FindRecordsByFilter(col, "", "rank", 0, 0)
+	if err != nil {
+		return internalError("failed to query roles", err)
+	}
+
+	items := make([]map[string]any, 0, len(records))
+	for _, r := range records {
+		items = append(items, roleEditorPayload(r))
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
@@ -197,7 +254,7 @@ func createRoleHandler(e *core.RequestEvent) error {
 			"name":      form.Name,
 		})
 
-		return http.StatusCreated, roleRecordPayload(rec), nil
+		return http.StatusCreated, roleEditorPayload(rec), nil
 	})
 	return writeCommandResult(e, outcome, err)
 }
@@ -340,7 +397,7 @@ func updateRoleHandler(e *core.RequestEvent) error {
 			"name":      rec.GetString("name"),
 		})
 
-		return http.StatusOK, roleRecordPayload(rec), nil
+		return http.StatusOK, roleEditorPayload(rec), nil
 	})
 	return writeCommandResult(e, outcome, err)
 }

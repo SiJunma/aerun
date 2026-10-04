@@ -25,6 +25,87 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
+// ── The role payload is split by what the CALLER may know ──────────────────────
+//
+// GET /roles is ungated on purpose — a role badge must render for a signed-out
+// visitor, and account_isolation_test.go pins that. What it must NOT answer is
+// "what may this caller do", which is a different question with a different
+// audience, and it used to answer it for everyone.
+//
+// The damage was not hypothetical disclosure of one field: the whole matrix. A
+// guest could read every role, its full permission list, whether it is a system
+// role, which system role a custom one derives from and its mask limit — a
+// complete map of the board's security model, and the most useful thing to read
+// before choosing an account to target.
+//
+// Both halves are asserted. A gate that only checks the public route would pass
+// while the matrix quietly rode along on another key, and a gate that only checks
+// the admin route would pass while the editor silently lost the fields its form
+// submits back — which is the failure that makes roles UNFIXABLE, the same way
+// hiding a category from its own editor does.
+func TestRolePayloadIsSplitByAudience(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	t.Run("the public list carries badge fields only", func(t *testing.T) {
+		for _, who := range []string{"", "player", "root"} {
+			status, body := getAerunAuthed(t, ts.URL+"/api/aerun/roles", tokens[who])
+			if status != http.StatusOK {
+				t.Fatalf("%q: expected 200, got %d: %s", who, status, body)
+			}
+
+			// Published on purpose: a badge paints all four, and a role badge on a
+			// post already reveals the role to anyone who can read the post.
+			for _, field := range []string{`"role_id"`, `"name"`, `"rank"`, `"color"`} {
+				if !bytes.Contains(body, []byte(field)) {
+					t.Fatalf("%q: badge payload must carry %s: %s", who, field, body)
+				}
+			}
+
+			// The security model, on an ungated route, to anyone.
+			for _, field := range []string{
+				`"permissions"`, `"is_system"`, `"base_role_id"`, `"max_characters_limit"`,
+			} {
+				if bytes.Contains(body, []byte(field)) {
+					t.Fatalf("%q: public role list leaked %s: %s", who, field, body)
+				}
+			}
+		}
+	})
+
+	t.Run("the editor's list is refused without manage_roles", func(t *testing.T) {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/admin/roles", tokens["player"])
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403 for a member, got %d: %s", status, body)
+		}
+		// A refusal must carry nothing at all — a 403 body that still leaked the
+		// matrix would be the same defect wearing a different status code.
+		for _, field := range []string{`"permissions"`, `"base_role_id"`} {
+			if bytes.Contains(body, []byte(field)) {
+				t.Fatalf("a refused caller must receive nothing, got %s: %s", field, body)
+			}
+		}
+	})
+
+	t.Run("the editor's list carries the configuration back", func(t *testing.T) {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/admin/roles", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", status, body)
+		}
+		for _, field := range []string{
+			`"permissions"`, `"is_system"`, `"base_role_id"`, `"max_characters_limit"`, `"id"`,
+		} {
+			if !bytes.Contains(body, []byte(field)) {
+				t.Fatalf("the role editor needs %s and must get it: %s", field, body)
+			}
+		}
+	})
+}
+
 // A system role is EDITABLE. It is the template a custom role is derived from,
 // so freezing it would freeze every role built on it. The fields that make it a
 // system role in the first place stay locked: role_id (the key users.role and

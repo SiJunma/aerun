@@ -4,7 +4,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole
+  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchSecuredCategories, fetchSecuredCategoryGroups } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
@@ -54,6 +54,14 @@ const AdminPage = () => {
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
+  // The role EDITOR's rows, from GET /admin/roles.
+  //
+  // `roles` from useAuth is the PUBLIC badge registry — role_id, name, rank,
+  // color — because that route is ungated so a signed-out visitor can still render
+  // badges. The editor additionally needs permissions, is_system, base_role_id,
+  // max_characters_limit and the record id, and those are deliberately not
+  // published to everyone. Loaded here, only when this account may manage roles.
+  const [adminRoles, setAdminRoles] = useState([]);
   // Root handover. Only the account that IS the chief admin sees the button,
   // and the candidates exclude yourself — the server refuses you as your own
   // successor, so offering the choice would be a dialog that cannot succeed.
@@ -356,6 +364,41 @@ const AdminPage = () => {
       unsubDesigns();
     };
   }, []);
+
+  // The editor's role rows, loaded only when this account may manage roles.
+  //
+  // Refetched whenever the permission flips rather than once on mount: the public
+  // registry is enough to render badges, so a moderator who gains or loses
+  // `manage_roles` would otherwise see an editor whose rows never arrived, or one
+  // still showing rows the server now refuses.
+  const canManageRoles = hasPermission(PERMISSIONS.MANAGE_ROLES);
+  useEffect(() => {
+    if (!canManageRoles) {
+      setAdminRoles([]);
+      return;
+    }
+    let active = true;
+    fetchAdminRoles()
+      .then(rows => { if (active) setAdminRoles(rows); })
+      .catch(err => {
+        // Reported, not swallowed: an empty role editor looks like "no roles
+        // exist", which is a very different fact from "you may not read them".
+        if (active) console.warn('[AdminPage] admin roles failed to load:', err);
+      });
+    return () => { active = false; };
+  }, [canManageRoles]);
+
+  // After a create/update/delete the editor list is re-read from the admin route.
+  // refreshRoles() only refreshes the PUBLIC registry, which no longer carries the
+  // fields this table renders — so without this the row would visibly not change.
+  const reloadAdminRoles = useCallback(async () => {
+    if (!hasPermission(PERMISSIONS.MANAGE_ROLES)) return;
+    try {
+      setAdminRoles(await fetchAdminRoles());
+    } catch (err) {
+      console.warn('[AdminPage] admin roles reload failed:', err);
+    }
+  }, [hasPermission]);
 
   useEffect(() => {
     if (activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) {
@@ -939,8 +982,11 @@ const handleDeleteGroup = (id) => {
       } else {
         await addRole(roleForm, user.uid);
       }
-      // The api layer re-reads the registry and pushes it into AuthProvider, so
-      // the table repaints from the same state every other role consumer reads.
+      // The api layer re-reads the PUBLIC registry and pushes it into AuthProvider,
+      // so every badge repaints. This table reads the admin route, which carries
+      // the permission list and base role the public one no longer publishes, so
+      // it has to be re-read separately or the row would visibly not change.
+      await reloadAdminRoles();
       showToast(t('admin.roles.toast_saved'), 'success');
       setShowRoleModal(false);
     } catch (err) {
@@ -963,6 +1009,9 @@ const handleDeleteGroup = (id) => {
       onConfirm: async () => {
         try {
           await deleteRole(id, isSystem, user.uid);
+          // Same as the save path: the public registry no longer carries the fields
+          // this table renders, so the admin list is what has to be re-read.
+          await reloadAdminRoles();
           showToast(t('admin.roles.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -1506,7 +1555,10 @@ const handleDeleteGroup = (id) => {
           <tbody>
             {(() => {
               const ROLE_ORDER = { admin: 1, moderator: 2, player: 3, spectator: 4 };
-              const sortedRoles = [...roles]
+              // adminRoles, not the public `roles`: the sort keys off
+              // `base_role_id` and the system/custom distinction, and neither is
+              // published on the ungated registry any more.
+              const sortedRoles = [...adminRoles]
                 .filter(r => r.id !== 'root')
                 .sort((a, b) => {
                   const rankA = ROLE_ORDER[a.base_role_id || a.id] || 99;

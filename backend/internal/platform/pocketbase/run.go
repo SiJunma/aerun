@@ -239,6 +239,11 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Catalog & metadata commands (public read + permissioned CRUD)
 	group.GET("/roles", listRolesHandler)
+	// The role EDITOR's list. Same rows, plus the configuration the public route no
+	// longer carries — the permission matrix, system/custom, base role, mask limit.
+	// Public /roles stays ungated on purpose (badges must render before sign-in),
+	// so this is where the security model lives now.
+	group.GET("/admin/roles", listAdminRolesHandler).BindFunc(RequirePermission(auth.PermManageRoles))
 	group.POST("/roles", createRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
 	group.PATCH("/roles/{id}", updateRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
 	group.DELETE("/roles/{id}", deleteRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)

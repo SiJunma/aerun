@@ -10,9 +10,9 @@ without it". A field nobody reads is cost on every page load and a liability in
 every future screenshot; a field a screen needs is not waste even if it feels like
 one.
 
-Status: **audited, two changes landed, one real defect found, three decisions for
-the owner.** The endpoints that turned out NOT to be problems are recorded too — an
-audit that only lists what it changed teaches nothing about the rest.
+Status: **audited, three changes landed, one decision left for the owner.** The
+endpoints that turned out NOT to be problems are recorded too — an audit that only
+lists what it changed teaches nothing about the rest.
 
 ## Landed
 
@@ -26,33 +26,41 @@ Now served only by `GET /admin/categories`, behind `manage_categories`.
 ### `latestTopics` off the main-page projection — `GET /api/aerun/forum-index`
 
 Landed in `4dc5c6e`. Fifty whole topic records on every page load to render one
+navbar integer, which was itself capped at the page size and computed against a
+per-browser localStorage map. The count is now `unread_topics` on
+`/me/unread-counts`, where the notification and DM counters already lived.
 
-## Open defect: `GET /roles` publishes the permission matrix of every role
+### `GET /roles` reduced to badge fields — the defect below, now closed
 
-**This is the same defect as `allowed_roles`, one level up, and it is still open.**
+`GET /roles` is ungated on purpose (`account_isolation_test.go` pins that a
+signed-out visitor must still render role badges), so the fix was to gate the
+FIELDS, not the route.
 
-`roleRecordPayload` returns `permissions`, `max_characters_limit`, `base_role_id`
-and `is_system` for every role, on a route with **no permission gate** — anyone,
-including a signed-out guest, can read the complete authorisation model of the
-board: which roles exist, what each may do, which system role a custom one derives
-from, and how many masks its members may hold. That is a map of the entire
-security model, and it is the single most useful thing to read before choosing an
-account to target.
+The client's gate is what made that necessary, so the halves had to land together:
 
-The route is public for a real reason — `account_isolation_test.go` records that
-`AuthProvider` subscribes to roles unconditionally, because a signed-OUT visitor
-must still render role badges and the theme must load before a session exists. So
-the fix is to gate the FIELDS, not the route:
+1. **The gate reads the answer instead of re-deriving it.** `hasPermission`
+   resolved the caller's role in the registry and read that role's permission list
+   — a second copy of a decision the command layer had already made, derived from
+   the ROLE column and therefore blind to the status narrowing the server applies.
+   It now reads `/me`'s effective `permissions`, the same fact the command layer
+   enforces. That is what stops the matrix from being load-bearing.
+2. **Guests get an answer too.** `fetchUserProfile` needs a uid, so a signed-out
+   visitor never fetched `/me` and had no server answer to fall back on.
+   `subscribeToEffectivePermissions` reads `/me` for both identities — the guest
+   branch of `profilePayload` returns the guest identity with its real permission
+   set — keyed by uid (or `guest`), so signing in or out is a different resource
+   rather than a stale answer from the previous identity.
 
-- Public needs `id`, `name`, `color`, `rank` — what a badge renders.
-- Admin needs `permissions`, `is_system`, `base_role_id`, `max_characters_limit` —
-  the editable form.
+`GET /roles` now answers `role_id`, `name`, `rank`, `color` — what a badge paints,
+and all four already public through badges on posts. `GET /admin/roles`, behind
+`manage_roles`, carries `permissions`, `is_system`, `base_role_id`,
+`max_characters_limit` and the record `id` the editor form submits back. The role
+table and its save/delete reloads read the admin route.
 
-Same split as categories, same reason: two different questions answered by one
-payload. `GET /admin/roles` behind `manage_roles` is the natural home for the
-second set. **Deliberately not done here** — see decision 1, because `hasPermission`
-evaluates the CLIENT'S copy of the permission list, and moving the fields changes
-what the client can decide on its own.
+Pinned by `TestRolePayloadIsSplitByAudience`, asserting BOTH halves: a gate
+checking only the public route would pass while the matrix rode along on another
+key; one checking only the admin route would pass while the editor silently lost
+the fields it needs — the failure that makes roles unfixable.
 
 ## Reviewed and deliberately left alone
 
@@ -66,50 +74,36 @@ was never looked at.
 can read a design's `js`, so designs must never hold secrets; that is a constraint
 on the collection, not a defect in the read.
 
-**`GET /presence/guests` publishes guest ids and `last_seen` to everyone.** The
-handler argues it deliberately: the sibling `/presence/online-users` already
-publishes member ids and nicknames, so hiding opaque visitor ids while publishing
-member identities would be incoherent. Accepted — the rows carry no PII (an id and
-two timestamps), which is what makes it defensible.
-
-**`GET /presence/online-users` publishes member id, nickname, avatar and role** to
-everyone. Same reasoning: the online list is a public feature, and a role badge on a
-post already reveals the role.
-
+**`GET /presence/guests` and `GET /presence/online-users` are DEAD ROUTES.** An
+earlier draft of this audit recorded them as "deliberately public" — that was wrong,
+and the distinction matters. They are not public *by decision*; they are leftovers
+from before `GET /api/aerun/status`, which already answers both questions in one
+snapshot (`presence.users`, `presence.guests`, `presence.guests_count`) and is what
+the client actually polls, through a single shared `statusPoll` in
+`rtdb-presence.js` that also feeds AuthProvider, ForumStats and the connection
+banner. No client code calls either route; they survive only in Go tests and docs.
+They are candidates for deletion rather than for an access-control decision.
 
 ## Decisions for the owner
 
 These are not silent edits. Each changes what the client can decide on its own,
 which is a product call rather than a cleanup.
 
-### 1. Client-side `hasPermission()` vs. server-only permissions
+### 1. ~~Client-side `hasPermission()` vs. server-only permissions~~ — DECIDED, DONE
 
-`AuthProvider.hasPermission` reads `roles[].permissions` to decide what UI to
-render. If the permission lists move behind `manage_roles`, that check has nothing
-to read and every client-side gate breaks.
+The owner chose (b). `hasPermission` now reads the effective permission set from
+`/me` instead of re-deriving it from the role registry, guests included, and
+`GET /roles` is reduced to badge fields. See the Landed section.
 
-- **(a) Keep the matrix public.** The permission NAMES are already public — they
-  are compiled into `src/constants/permissions.js` and shipped in the JS bundle,
-  including every key and which system role maps to which. Moving the server
-  payload would change nothing an attacker cannot already read from static assets,
-  and would add a second source of truth to keep in sync. The honest framing:
-  **the permission vocabulary is public by design and the server treats it as
-  such.** What should be gated is the per-role ASSIGNMENT.
-- **(b) Gate on the server's own answer.** `/me` already returns the caller's
-  effective `permissions` via `profilePayload` — that is what client gates should
-  read. Then `/roles` public needs only badge fields, and the matrix in
-  `DEFAULT_ROLES` stops being load-bearing.
+Recorded here because the rejected option is worth keeping: the permission NAMES
+are compiled into `src/constants/permissions.js` and shipped in the JS bundle, so
+the vocabulary was never secret. What (b) actually protects is the per-role
+ASSIGNMENT — which account may do what — and it removes the second authority that
+could disagree with the server rather than pretending to remove a public constant.
 
-**(b) is the correct end state**: one authority for "what may this caller do",
-already present, currently duplicated. It is a real refactor of gating across the
-app, so recommend scheduling it rather than rushing it. Until then (a) is the
-status quo and this audit records that it is a decision, not an oversight.
+### 2. ~~`max_characters_limit` and `base_role_id`~~ — moved to `/admin/roles`
 
-### 2. `max_characters_limit` and `base_role_id` are pure configuration
-
-Neither is a badge field. Under (a) they stay public as part of the already-public
-matrix; under (b) they move to `/admin/roles`. Low stakes either way — recorded so
-the choice is deliberate rather than accidental.
+Neither is a badge field, and both now travel only with `manage_roles`.
 
 ### 3. The audit has not covered the admin routes field-by-field
 

@@ -312,6 +312,51 @@ export const subscribeToUser = (uid, callback) => {
   };
 };
 
+// ── Effective permissions ─────────────────────────────────────────────────────
+//
+// WHAT THE CALLER MAY DO, asked of the server rather than re-derived here.
+//
+// `GET /api/aerun/me` answers it with `permissions: PermissionValues(acc.Permissions)`,
+// where acc is already narrowed by role AND by account status. It is the only
+// read of that question, and it answers it for a guest too — the guest branch of
+// profilePayload returns the guest identity with its real permission set, which is
+// what `fetchUserProfile` cannot do (it needs a uid, and a signed-out visitor has
+// none).
+//
+// This is what lets the permission MATRIX stop being public. The gate previously
+// resolved the caller's role in the registry and read that role's list, so every
+// caller had to be told every role's permissions to render one screen's worth of
+// controls. Reading the answer instead means `GET /roles` only has to serve what a
+// badge actually paints — id, name, color, rank.
+//
+// Keyed by uid (and the literal `guest`), so switching accounts or signing out is a
+// different resource with its own value rather than a stale answer from the
+// previous one — permissions change on exactly those transitions, and with them the
+// whole UI.
+//
+// It is polled rather than subscribed because /me is a projection: it changes when
+// the role registry or the account's status changes, which is a moderator's action
+// in another session, not a row write this tab can observe.
+export const subscribeToEffectivePermissions = (uid, callback) => {
+  const key = uid || 'guest';
+  const poll = sharedPoll(`effective-permissions:${key}`, {
+    fetch: async () => {
+      const me = await sendApi('/api/aerun/me');
+      return Array.isArray(me?.permissions) ? me.permissions : [];
+    },
+    // Slow on purpose: this is a moderator's action in another browser, and a
+    // 30s stale window is invisible next to a 20s presence poll.
+    intervalMs: 30000,
+    // An empty list is NOT the same as "no permissions", and the two must not look
+    // alike: it is the honest "we have not asked yet" value, and hasPermission
+    // falls back to the compiled matrix rather than locking every control.
+    initialValue: [],
+    onError: (err) => console.warn('[effective permissions]', err),
+  });
+
+  return poll.subscribe((perms) => callback(perms));
+};
+
 // Presence subscriptions (active users / guest ids / daily actives) moved to
 // ./rtdb-presence, which reads the consolidated heartbeat/status snapshots.
 

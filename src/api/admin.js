@@ -155,6 +155,25 @@ const normalizeRole = d => ({
   permissions: d.permissions || []
 });
 
+// The role EDITOR's list: GET /admin/roles, behind `manage_roles`.
+//
+// The public `/roles` route now serves badge fields only (role_id, name, rank,
+// color) because it is ungated — a badge must render for a signed-out visitor.
+// Everything the editor needs beyond that (permissions, is_system, base_role_id,
+// max_characters_limit, and the record `id` the mutation routes address) lives
+// here.
+//
+// It is a separate read rather than a wider public one because those fields ARE
+// the security model: publishing them to everyone let a guest read exactly what
+// each role may do and which roles are privileged, before choosing an account to
+// target. A member's own effective permission set comes from `/me` instead, which
+// is the answer to a different question — see subscribeToEffectivePermissions.
+export const fetchAdminRoles = async () => {
+  const res = await sendApi('/api/aerun/admin/roles');
+  const records = res?.items || [];
+  return records.map(normalizeRole);
+};
+
 const fetchRoles = async () => {
   try {
     const res = await sendApi('/api/aerun/roles');

@@ -5,6 +5,7 @@ import LoadingPreloader from '../components/common/LoadingPreloader';
 import {
   apiMarkAllTopicsRead,
   apiRecordAllTopicVisits,
+  subscribeToEffectivePermissions,
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
   normalizeUserProfile,
@@ -86,6 +87,13 @@ export const AuthProvider = ({ children }) => {
   // because its guard was `unreadTopicsCount === 0`. Three screens, one missing
   // setter, nothing red anywhere.
   const [unreadTopicsCount, setUnreadTopicsCount] = useState(0);
+  // What the SERVER says this caller may do, straight from /me.
+  //
+  // It is deliberately NOT read out of `profile`. The profile is the caller's own
+  // row, which carries the role; the effective permission set is that role narrowed
+  // by account status, and only the command layer knows the narrowing. Keeping them
+  // in one place is what lets `GET /roles` stop publishing the matrix.
+  const [effectivePermissions, setEffectivePermissions] = useState([]);
   const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {}, topics: 0 });
   const [activeDmConvId, setActiveDmConvId] = useState(null);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -250,6 +258,19 @@ export const AuthProvider = ({ children }) => {
       clearTimeout(timer);
     };
   }, [syncUserFromAuthStore]);
+
+  // Effective permissions, for every visitor INCLUDING a signed-out one.
+  //
+  // The guest case is the point, not an afterthought: it is the half that let the
+  // permission matrix stay public. `fetchUserProfile` needs a uid, so a guest never
+  // had an answer of its own and the gate had to reach into the role registry for
+  // one — which meant every caller, guest included, had to be told every role's
+  // permissions. `/me` answers it for a guest too, so this subscription is what
+  // makes the fallback in hasPermission unreachable in normal operation.
+  useEffect(() => {
+    const unsubscribe = subscribeToEffectivePermissions(user?.uid, setEffectivePermissions);
+    return unsubscribe;
+  }, [user?.uid]);
 
   // Presence and DM subscriptions. A signed-in visitor beats as a member; an
   // anonymous one beats as a guest so the stats panel can count them.
@@ -760,14 +781,14 @@ export const AuthProvider = ({ children }) => {
   // command that re-checks. The difference is that the two can no longer
   // disagree.
   //
-  // The fallback exists only for the window before `/me` lands. It is the
-  // compiled matrix, which is why a first paint can show one thing and the next
-  // render another; the alternative — failing closed — would blank the forum for
-  // every signed-out visitor on every load.
+  // The registry fallback is kept deliberately, for the window before the first
+  // `/me` answer lands — failing closed would blank the forum for every signed-out
+  // visitor on every load. With subscribeToEffectivePermissions mounted it is a
+  // genuine edge case rather than the normal path, which is what makes it safe to
+  // trim the matrix out of GET /roles.
   const hasPermission = useCallback((perm) => {
-    const effective = profile?.permissions;
-    if (Array.isArray(effective) && effective.length > 0) {
-      return effective.includes(perm);
+    if (effectivePermissions.length > 0) {
+      return effectivePermissions.includes(perm);
     }
 
     if (!user) {
@@ -780,7 +801,7 @@ export const AuthProvider = ({ children }) => {
 
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
-  }, [user, profile, roles]);
+  }, [user, profile, roles, effectivePermissions]);
 
   const isUserOnline = useCallback((uid) => {
     if (!uid) return false;
