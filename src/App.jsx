@@ -22,6 +22,7 @@ import DraftsPage from './pages/DraftsPage';
 import MessagesPage from './pages/MessagesPage';
 import { useAuth } from './contexts/AuthProvider';
 import GlobalModals from './components/common/GlobalModals';
+import RealtimeStatusBanner from './components/common/RealtimeStatusBanner';
 
 /**
  * ActivityTracker — records every route change as user activity.
@@ -96,6 +97,11 @@ const ScrollToTop = () => {
 };
 
 const App = () => {
+  // Only the id, and only for the banner: the resource it watches is keyed by
+  // account, and a null uid is the honest "signed out" answer the banner already
+  // handles by rendering nothing.
+  const { user } = useAuth();
+
   return (
     <>
       <ActivityTracker />
@@ -133,6 +139,13 @@ const App = () => {
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      {/* Mounted OUTSIDE the router, on purpose. A degraded transport is not a
+          property of a page: a member reading a topic never opens Notifications,
+          but the notification badge in the nav is still quietly ageing on the
+          poll. Putting the banner inside a route would have made the warning
+          visible only to the members already looking at the affected thing. */}
+      <RealtimeStatusBanner uid={user?.uid} />
     </>
   );
 };

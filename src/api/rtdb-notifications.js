@@ -1,5 +1,6 @@
 import { sendApi } from './pocketbase';
 import { sharedPoll } from './shared-poll';
+import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
 
 // The unread badge in the tab title, the Notifications page and the quote
 // highlighting inside TopicPage all wanted "this member's notifications". They
@@ -37,12 +38,8 @@ const toNotification = (n) => ({
  * longer exists. Keying by account also means each account's loop is its own,
  * so a stale one cannot keep running after the switch.
  */
-export const subscribeToUserNotifications = (uid, callback) => {
-  if (!uid) {
-    callback([]);
-    return () => {};
-  }
-  const poll = sharedPoll(`notifications:${uid}`, {
+export const notificationsResource = (uid) =>
+  sharedPoll(`notifications:${uid}`, {
     fetch: async () => {
       const res = await sendApi('/api/aerun/me/notifications?limit=100');
       return (res?.items || []).map(toNotification);
@@ -50,8 +47,36 @@ export const subscribeToUserNotifications = (uid, callback) => {
     intervalMs: 15000,
     initialValue: [],
     onError: (err) => console.warn('[subscribeToUserNotifications error]', err),
+    // THE FIRST RESOURCE TO RIDE REALTIME, and the reason it is this one.
+    //
+    // Notifications are owner-scoped and the blast radius of getting it wrong is
+    // the smallest of anything we stream: the signal table carries an id, and the
+    // re-read is `/me/notifications`, which is already caller-scoped. Topics and
+    // posts come next, and they are a different risk.
+    //
+    // The interval stays configured. That is deliberate: it is the FALLBACK, and
+    // shared-poll removes it the moment a signal actually arrives. A member whose
+    // stream is healthy costs no polling; a member whose stream is silent gets
+    // exactly the behaviour they had before this feature existed.
+    realtime: canReceiveSignals()
+      ? (onDelivered, onDead) => subscribeToRealtimeSignals(
+        // Every signal re-reads the list; the topic is not filtered here on
+        // purpose. Distinguishing "this signal is mine" from "that one is" in
+        // the browser would mean trusting the payload, and the payload is an id
+        // precisely because it is not to be trusted. One re-read per coalesced
+        // burst is cheap, and the server decides what the member may see.
+        () => onDelivered(),
+        () => onDead(),
+      )
+      : null,
   });
-  return poll.subscribe((items) => callback(items));
+
+export const subscribeToUserNotifications = (uid, callback) => {
+  if (!uid) {
+    callback([]);
+    return () => {};
+  }
+  return notificationsResource(uid).subscribe((items) => callback(items));
 };
 
 /**

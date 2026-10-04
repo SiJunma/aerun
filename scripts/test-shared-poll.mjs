@@ -21,9 +21,16 @@ import test from 'node:test';
 // The module reads `document` for tab visibility; each test installs its own.
 const { createSharedPoll, sharedPoll, __resetSharedPolls } =
   await import('../src/api/shared-poll.js');
+const { REALTIME_GRACE_MS, REFRESH_COALESCE_MS } =
+  await import('../src/api/shared-poll.js');
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+// wait lets a REAL timer expire. The transport windows are 250ms and 10s, and the
+// point of these tests is the shipped durations, so they are waited out rather
+// than faked — a stubbed clock would pass regardless of what the constants say.
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // A DOM stand-in whose visibility the test controls, since polling suppression
 // and the visibility-triggered catch-up read are both part of the contract.
@@ -136,26 +143,96 @@ test('a slow read is never stacked: one request per trigger burst', async () => 
   }
 });
 
-test('a realtime hook is REFUSED loudly, because it could never deliver', async () => {
-  // The collections this app reads are locked (ListRule = nil), which PocketBase
-  // answers with "only superusers" — so a subscription connects and then never
-  // fires. The network tab shows PB_CONNECT and nothing else, which is
-  // indistinguishable from a broken stream, and that is exactly how the dead
-  // realtime sat unnoticed. Failing loudly is the point: the next person to add a
-  // hook learns why it cannot work instead of shipping another silent one.
+test('a realtime hook is ACCEPTED, and its events drive the reads', async () => {
+  // This test used to assert the opposite — that a hook must THROW — because
+  // every collection was locked and a subscription could connect but never
+  // deliver. The rules were not opened to fix that (see
+  // markdowns/REALTIME_TRANSPORT_DESIGN.md); the browser now subscribes to a
+  // signals table that carries no forum content and re-reads through
+  // /api/aerun. So the refusal is gone and this asserts the new contract
+  // instead, including the part that matters: an event causes a READ, never a
+  // blind re-render of whatever the event happened to contain.
   const calls = [];
+  let emit = () => {};
   const poll = createSharedPoll({
-    name: 'no-realtime',
+    name: 'realtime-ok',
     intervalMs: 0,
-    fetch: async () => { calls.push(1); return calls.length; },
-    realtime: () => () => {},
+    fetch: async () => { calls.push(calls.length + 1); return calls.length; },
+    realtime: (onEvent) => {
+      emit = onEvent;
+      return () => { emit = () => {}; };
+    },
   });
 
-  assert.throws(
-    () => poll.subscribe(() => {}),
-    /realtime is refused by the collection rules/,
-    'a realtime hook must not start a loop that can never receive an event'
-  );
+  const stop = poll.subscribe(() => {});
+  try {
+    assert.equal(calls.length, 1, 'the first read is unconditional');
+
+    emit();
+    await wait(REFRESH_COALESCE_MS + 60);
+    assert.equal(calls.length, 2, 'an event must cause a read');
+    assert.equal(poll.getTransport(), 'realtime',
+      'a delivered event is the only thing that marks the stream healthy — connecting is not');
+  } finally {
+    stop();
+  }
+});
+
+test('a connected-but-silent stream falls back to polling on the grace window', async () => {
+  // The failure this module spent years refusing to start. A hook that opens and
+  // says nothing must cost the SAME as a dead one: the interval takes over after
+  // the grace window. Asserting on a shortened window by faking timers would test
+  // the fake; this asserts the observable contract instead.
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'silent-stream',
+    intervalMs: 10,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: () => () => {},        // opens, never delivers
+  });
+
+  const stop = poll.subscribe(() => {});
+  try {
+    assert.equal(poll.getTransport(), 'connecting', 'before any event, nothing is proven');
+    await wait(REALTIME_GRACE_MS + 80);
+    assert.equal(poll.getTransport(), 'polling',
+      'a stream that never delivered must be reported as polling, not as realtime');
+    const afterGrace = calls;
+    await wait(50);
+    assert.ok(calls > afterGrace, 'the interval must actually be running after the fallback');
+  } finally {
+    stop();
+  }
+});
+
+test('the transport is observable, and unsubscribing closes the stream', async () => {
+  const seen = [];
+  let closed = false;
+  const poll = createSharedPoll({
+    name: 'transport-visible',
+    intervalMs: 0,
+    fetch: async () => 'v',
+    realtime: (onEvent) => { onEvent(); return () => { closed = true; }; },
+  });
+
+  const stopWatch = poll.onTransportChange((t) => seen.push(t));
+  // A listener mounted later is handed the current value rather than waiting for
+  // the next transition — a banner must not need a change to know where it is.
+  assert.ok(seen.includes('idle'), 'onTransportChange must report the current transport on attach');
+
+  const stop = poll.subscribe(() => {});
+  await wait(REFRESH_COALESCE_MS + 40);
+  assert.ok(seen.includes('realtime'), `transport changes must be observable, saw ${seen.join(',')}`);
+
+  stop();
+  assert.equal(closed, true, 'the last subscriber leaving must close the stream');
+  assert.equal(poll.getTransport(), 'idle', 'a stopped resource is idle, not silently polling');
+
+  stopWatch();
+  const countAfterUnsubscribe = seen.length;
+  await wait(20);
+  assert.equal(seen.length, countAfterUnsubscribe,
+    'a removed listener must stop receiving, or a long session accumulates them');
 });
 
 test('a hidden tab is not polled, and is read once on return', async () => {

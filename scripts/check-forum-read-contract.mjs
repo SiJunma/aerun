@@ -891,3 +891,93 @@ console.log('OK  forum read contract: "override off" is stored as the live inher
   );
 }
 console.log('OK  forum read contract: the members board refreshes, says so, and is localised');
+// ── The realtime client must stay a nudge reader, not a content reader ──────
+//
+// The entire safety argument for realtime on this backend is that the browser
+// receives an ID and then re-reads through /api/aerun, where authorization
+// already lives. That argument is one plausible-looking line away from being
+// undone: rendering from the signal payload, or trusting it to decide whether an
+// update is relevant.
+//
+// Nothing here may read a signal's record as data. Literal-source assertions on
+// purpose — the failure mode is a reasonable line, not a typo.
+{
+  const signals = read('../src/api/realtime-signals.js');
+  const notifications = read('../src/api/rtdb-notifications.js');
+  const banner = read('../src/components/common/RealtimeStatusBanner.jsx');
+
+  // The subscription hands over a topic and an id — two strings. Not the record:
+  // a caller that had it would eventually use it.
+  //
+  // Written as "the BARE record", because `onEvent?.(record?.topic, …)` is the
+  // intended call and an assertion written as "any mention of record" fires on
+  // the correct code. Precision matters here: a gate that flags the right thing
+  // gets deleted rather than obeyed.
+  assert.doesNotMatch(
+    signals,
+    /onEvent\??\.\(\s*record\s*[,)]/,
+    'the signal callback must not receive the raw record — an id is the whole contract, and a ' +
+      'record in hand becomes content on screen'
+  );
+  // …and it may only lift SCALARS off it. A signal row is four fields; anything
+  // beyond that is the leak returning through the front door.
+  for (const field of ['title', 'payload', 'content', 'body', 'nickname', 'email', 'settings']) {
+    assert.doesNotMatch(
+      signals,
+      new RegExp('record\\??\\.' + field),
+      `the client must not read "${field}" off a signal — the stream carries ids, not content`
+    );
+  }
+
+  // …and it subscribes to the signals table, never to forum content.
+  //
+  // Matched on the COLLECTION, not on the topic argument: the call reads
+  // `collection('realtime_signals').subscribe('*', …)`, so looking for the name
+  // inside the subscribe arguments would never match anything.
+  assert.match(
+    signals,
+    /collection\('realtime_signals'\)\s*\n?\s*\.?subscribe\(/,
+    "the client must subscribe to 'realtime_signals' — subscribing to topics/posts would " +
+      'require opening their REST rules, which is the leak the design exists to prevent'
+  );
+  assert.doesNotMatch(
+    signals,
+    /collection\('(topics|posts|notifications|dm_messages|dm_conversations)'\)/,
+    'no forum-content collection may be subscribed directly from the browser'
+  );
+
+  // The notification hook IGNORES the payload: an event means "re-read", and the
+  // server decides what the member may see.
+  assert.doesNotMatch(
+    notifications,
+    /record\?\.(title|payload|content|body)\b|event\.record\.(title|payload|content)\b/,
+    'notifications must not read content out of a realtime event — the re-read through ' +
+      '/me/notifications is what enforces access'
+  );
+
+  // Guests must not open the stream at all. The rule would refuse every event,
+  // and the connection would sit there looking healthy — the exact ambiguity this
+  // work set out to remove.
+  assert.match(
+    notifications,
+    /realtime:\s*canReceiveSignals\(\)/,
+    'the realtime hook must be gated on canReceiveSignals(), or every guest opens a stream that ' +
+      'can never deliver'
+  );
+
+  // The fallback interval stays configured. shared-poll removes it when a signal
+  // arrives, so a healthy member pays nothing and a degraded one is unchanged.
+  assert.match(
+    notifications,
+    /intervalMs:\s*15000/,
+    'the poll interval must remain as the fallback — removing it would break the degraded case'
+  );
+
+  // The banner renders only on an OBSERVED fallback, never on connection.
+  assert.match(
+    banner,
+    /transport === 'polling'/,
+    'the banner must key off the measured transport, not off "we opened a stream"'
+  );
+}
+console.log('OK  realtime client: signals are nudges, and the fallback is observable');

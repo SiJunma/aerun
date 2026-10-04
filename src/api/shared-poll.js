@@ -43,6 +43,11 @@
  */
 const REFRESH_COALESCE_MS = 250;
 
+// Exported for the transport tests, which assert against the REAL windows rather
+// than a shortened stand-in. Asserting on a faked timer would only prove the fake
+// behaves; asserting on the shipped value proves the shipped value.
+export { REFRESH_COALESCE_MS };
+
 // A background tab is invisible, not gone: nothing is rendered from these values
 // until the tab comes back, and the read on return is unconditional.
 const tabIsHidden = () =>
@@ -71,18 +76,86 @@ const tabIsHidden = () =>
  * subscription promise settled: that is the window in which a React effect
  * cleanup unmounts a component that has not finished subscribing.
  */
-const assertNoRealtimeHook = (hook) => {
-  if (typeof hook === 'function') {
-    throw new Error(
-      'shared-poll: realtime is refused by the collection rules (ListRule is nil), ' +
-      'so a subscription would connect and never deliver. Remove the hook, or open ' +
-      'a scoped realtime rule for the collection first.'
-    );
-  }
-  return () => {};
-};
+// Realtime transport.
+//
+// THE REFUSAL IS GONE, and the reason it existed is worth keeping on the record.
+// Every collection the forum reads had ListRule nil, which PocketBase answers
+// with "only superusers" — so a subscription completed the SSE handshake, the
+// network tab showed PB_CONNECT, and not one event ever arrived. A hook that
+// could never deliver was refused loudly so the next person adding one would
+// learn why instead of shipping another silent stream.
+//
+// That is no longer true, and the fix was NOT to open the collections. See
+// markdowns/REALTIME_TRANSPORT_DESIGN.md: realtime is authorized by the very
+// same ListRule/ViewRule as REST, so streaming forum content would mean
+// re-opening REST reads on it. Instead the browser subscribes to
+// `realtime_signals`, a table that carries only {topic, entity_id,
+// audience_id, at} — an id and nothing else — and re-reads the real thing
+// through /api/aerun, where authorization already lives.
+//
+// The contract this module now implements:
+//   realtime established  → no interval at all
+//   not established within the grace window → the interval starts
+//   dropped after being healthy → the interval resumes, and closes again if
+//     realtime returns
+//
+// "Healthy" means DELIVERED, never connected. A stream that opens and stays
+// silent is the failure this whole file used to guard against, so the grace
+// window is a timeout on the FIRST EVENT, and a connected-but-silent stream
+// degrades to polling exactly like a dead one.
 
-// __APPEND_IMPL__
+// REALTIME_GRACE_MS is how long a hook has to produce its FIRST event before
+// the interval takes over.
+//
+// Long enough that a healthy stream on a slow phone connection is not declared
+// dead and made to poll as well, short enough that a member is not waiting
+// 30 seconds to find out the stream is not coming.
+const REALTIME_GRACE_MS = 10000;
+
+// Exported for the same reason as REFRESH_COALESCE_MS: the fallback test asserts
+// on the shipped window, because the whole point of the test is that the member
+// waits this long and not some other amount.
+export { REALTIME_GRACE_MS };
+
+/**
+ * Wraps a realtime hook so the resource learns whether the stream is actually
+ * carrying anything, and can be told when it stops.
+ *
+ * The hook is called with two callbacks rather than returning a transport
+ * object, because the two sides of the contract are asymmetric: the consumer
+ * answers "here is an event", and the wrapper answers "here is your stream, and
+ * report its death". Returning the unsubscribe from the hook keeps the caller
+ * from having to hold on to the stream itself.
+ *
+ * `onDead` is called at most once per established stream, so a reconnect
+ * storm cannot turn into a storm of interval restarts.
+ */
+const bindRealtimeHook = (hook, { onDelivered, onDead }) => {
+  let delivered = false;
+  let stopped = false;
+
+  const unsubscribe = hook(() => {
+    delivered = true;
+    onDelivered();
+  }, () => {
+    if (stopped || delivered) return;
+    stopped = true;
+    onDead();
+  });
+
+  return {
+    unsubscribe: () => {
+      stopped = true;
+      // Safe before the subscription promise settles, and safe twice: React
+      // StrictMode mounts effects twice in dev, and an unsubscribe that throws
+      // on a second call is a dev-only crash that hides real ones.
+      if (typeof unsubscribe === 'function') {
+        try { unsubscribe(); } catch { /* already gone */ }
+      }
+    },
+    isHealthy: () => delivered,
+  };
+};
 /**
  * Builds a shared, visibility-aware, single-flight polling resource.
  *
@@ -113,7 +186,15 @@ export const createSharedPoll = ({
   let queued = false;
   let coalesceTimer = null;
   let running = false;
-  let stopRealtime = null;
+  // `transport` is the observable answer to "is this resource actually live, or
+  // is it polling because the stream never showed up". It starts as 'idle'
+  // rather than 'realtime' on purpose: a resource that has not started yet has
+  // proved nothing, and defaulting to the optimistic value is how a broken
+  // stream gets reported as working.
+  let transport = 'idle';
+  let realtimeBinding = null;
+  let graceTimer = null;
+  const transportListeners = new Set();
 
   const deliver = () => {
     // The resource is stopped while its last read is still in the air — every
@@ -169,33 +250,104 @@ export const createSharedPoll = ({
     if (document.visibilityState === 'visible') read();
   };
 
+  const startTimer = () => {
+    if (timer || intervalMs <= 0 || !running) return;
+    timer = setInterval(() => {
+      if (!tabIsHidden()) read();
+    }, intervalMs);
+  };
+
+  const stopTimer = () => {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+  };
+
+  // The transport is OBSERVABLE, not inferred. The failure this whole mechanism
+  // exists to avoid is a stream that looks configured and delivers nothing, so
+  // "realtime is enabled" and "realtime is carrying" must never be the same
+  // sentence in the code — or in the UI.
+  const setTransport = (next) => {
+    if (transport === next) return;
+    transport = next;
+    transportListeners.forEach((cb) => {
+      try { cb(transport); } catch (err) {
+        console.warn(`[shared-poll:${name}] transport listener threw`, err);
+      }
+    });
+  };
+
   const start = () => {
     if (running) return;
     running = true;
-    if (intervalMs > 0) {
-      timer = setInterval(() => {
-        if (!tabIsHidden()) read();
-      }, intervalMs);
-    }
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
-    // A hook is refused loudly rather than silently ignored: a connected-but-
-    // silent SSE stream is indistinguishable from a broken one in the network
-    // tab, and that ambiguity is what hid this in the first place.
-    if (realtime) stopRealtime = assertNoRealtimeHook(realtime);
+
+    if (realtime) {
+      setTransport('connecting');
+      realtimeBinding = bindRealtimeHook(realtime, {
+        name,
+        onDelivered: () => {
+          // First event: the stream is real. The interval is not merely paused,
+          // it is REMOVED — running both is how a "realtime" feature ends up
+          // costing exactly what it was supposed to save.
+          stopTimer();
+          setTransport('realtime');
+          // …and this is the half that makes the signal worth having: the event
+          // carries an id and no content, so the ONLY way to turn it into
+          // anything is to go and re-read through /api/aerun. Without this call
+          // the stream is healthy, the timer is gone, and the list silently
+          // stops updating — a worse failure than polling, because it looks
+          // configured.
+          requestRefresh();
+        },
+        onDead: () => {
+          // Dropped before it ever carried anything, i.e. the silent stream this
+          // module spent years refusing to start.
+          stopTimer();
+          setTransport('polling');
+          startTimer();
+          // Catch up NOW rather than at the next tick. Whatever changed while
+          // the stream was believed to be healthy was never fetched, and a
+          // member who has just lost realtime is exactly the member who cannot
+          // afford to wait for a poll to notice.
+          requestRefresh();
+        },
+      });
+      // The grace window is a timeout on the FIRST EVENT, not on the connection.
+      // A stream that opens and stays silent is exactly the failure being
+      // designed out, so it must fall back on exactly the same terms as a dead
+      // one.
+      graceTimer = setTimeout(() => {
+        graceTimer = null;
+        if (running && transport === 'connecting') {
+          setTransport('polling');
+          startTimer();
+        }
+      }, REALTIME_GRACE_MS);
+    } else {
+      setTransport('polling');
+      startTimer();
+    }
+
     read();
   };
 
   const stop = () => {
     if (!running) return;
     running = false;
-    if (timer) { clearInterval(timer); timer = null; }
+    stopTimer();
+    if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
     if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', onVisibilityChange);
     }
-    if (stopRealtime) { stopRealtime(); stopRealtime = null; }
+    if (realtimeBinding) {
+      realtimeBinding.unsubscribe();
+      realtimeBinding = null;
+    }
+    setTransport('idle');
   };
 
   const subscribe = (cb) => {
@@ -221,6 +373,23 @@ export const createSharedPoll = ({
     refresh: requestRefresh,
     getValue: () => value,
     isLoading: () => !loaded,
+    // Which transport is actually carrying this resource right now:
+    // 'idle' | 'connecting' | 'realtime' | 'polling'.
+    //
+    // Exposed because "realtime is configured" and "realtime is delivering" are
+    // different claims, and only this one is measured. The first is what a
+    // feature flag tells you; the second is what a member experiences.
+    getTransport: () => transport,
+    // Watch the transport change. Returns an unsubscribe, because a listener
+    // that cannot be removed is how a long session accumulates callbacks on a
+    // resource it stopped caring about.
+    onTransportChange: (cb) => {
+      transportListeners.add(cb);
+      // Hand over the current value, so a banner mounted after the fact does
+      // not have to wait for the next transition to find out where it stands.
+      try { cb(transport); } catch { /* a bad listener must not break subscribe */ }
+      return () => transportListeners.delete(cb);
+    },
     // Releases the loop without touching the cached value, so a later subscriber
     // gets the last known answer immediately instead of an empty frame. Used by
     // resources whose subscribers are themselves reference-counted elsewhere (the

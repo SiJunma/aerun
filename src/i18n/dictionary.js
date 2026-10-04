@@ -413,6 +413,12 @@ export const translations = {
       today: "Today",
       yesterday: "Yesterday"
     },
+    realtime: {
+      // Shown only while the forum has fallen back to polling. Deliberately
+      // worded as what the member will notice ("updates may be delayed") rather
+      // than as the name of a transport they never asked about.
+      polling_notice: "Updates may arrive with a delay"
+    },
     admin: {
       title: "Admin Panel",
       dashboard: "Admin Dashboard",
@@ -1152,6 +1158,12 @@ export const translations = {
     time: {
       today: "Сегодня",
       yesterday: "Вчера"
+    },
+    realtime: {
+      // Показывается только когда форум откатился на опрос. Сформулировано как
+      // то, что участник заметит («обновления могут задерживаться»), а не как
+      // название транспорта, о котором его никто не спрашивал.
+      polling_notice: "Обновления могут приходить с задержкой"
     },
     admin: {
       title: "Панель управления",
