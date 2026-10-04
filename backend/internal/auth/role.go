@@ -139,8 +139,22 @@ var roleSpecs = []RoleSpec{
 			PermPinTopics,
 			PermPostReply,
 			PermUseDice,
+			// DMs are a baseline member capability, not a moderator perk: a
+			// moderator who cannot answer a player in private is worse than
+			// useless. It was missing from this row while the admin panel's
+			// ceiling listed it, so the checkbox rendered — unchecked, and
+			// honestly — for the one role that most needs it.
+			PermUseDirectMessages,
 			PermUseMasks,
 			PermUseReputation,
+			// Reputation the moderator may retract: their OWN entries by
+			// default, and anybody else's only because this is the staff role.
+			// Editing somebody else's entry stays OFF by default — rewriting a
+			// reputation comment after the fact is a rarer and more suspicious
+			// act than removing an abusive one, and it is one checkbox away.
+			PermEditSelfReputation,
+			PermDeleteSelfReputation,
+			PermDeleteOthersReputation,
 			PermViewAuditLog,
 			PermViewForum,
 			PermViewMasterDice,
@@ -170,8 +184,16 @@ var roleSpecs = []RoleSpec{
 			PermUseDirectMessages,
 			PermUseMasks,
 			PermUseReputation,
+			// A player may adjust and retract their OWN reputation entries.
+			// Before the split there was no route for either, so the only way to
+			// take back a "+1" was to ask a moderator.
+			PermEditSelfReputation,
+			PermDeleteSelfReputation,
 			PermViewForum,
-			PermViewMasterDice,
+			// NO view_master_dice. A master roll is the GM's private number;
+			// "everyone but guests" made the players the audience for it. It
+			// stays a moderator-and-above capability, and the key is still in
+			// the registry so a custom role can grant it deliberately.
 		},
 	},
 	{

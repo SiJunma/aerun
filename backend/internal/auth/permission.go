@@ -96,8 +96,30 @@ const (
 	PermPostReply   Permission = "post_reply"
 	PermCreateTopic Permission = "create_topic"
 
-	PermUseReputation     Permission = "use_reputation"
-	PermDeleteReputation  Permission = "delete_reputation"
+	PermUseReputation Permission = "use_reputation"
+
+	// Reputation entries are split by ACTION (edit vs delete) and by SUBJECT
+	// (your own entry on somebody else's profile vs an entry somebody else
+	// wrote).
+	//
+	// One `delete_reputation` key used to cover all four, which was a lie in
+	// both directions: a moderator deleting an abusive comment about a third
+	// party and a player retracting their own "+1" were the same checkbox, and
+	// the only one that existed. Worse, `delete_reputation` was enforced ONLY
+	// as a route gate — see reputation.go — so no ownership comparison existed
+	// anywhere, and there was no way at all for a player to edit or retract
+	// their own entry. Splitting the key is what makes the missing commands
+	// expressible.
+	//
+	// `_self_` is the subject of the ENTRY, not of the profile it sits on:
+	// editing "my reputation comment" means editing the comment I wrote on
+	// someone else's profile, which is the ordinary case and needs no
+	// permission to be confused with editing their reputation total.
+	PermEditSelfReputation     Permission = "edit_self_reputation"
+	PermDeleteSelfReputation   Permission = "delete_self_reputation"
+	PermEditOthersReputation   Permission = "edit_others_reputation"
+	PermDeleteOthersReputation Permission = "delete_others_reputation"
+
 	PermUseMasks          Permission = "use_masks"
 	PermCreateSelfMask    Permission = "create_self_mask"
 	PermDeleteSelfMask    Permission = "delete_self_mask"
@@ -124,11 +146,12 @@ var allPermissions = func() []Permission {
 		PermCreateTopic,
 		PermDeleteOthersMask,
 		PermDeleteOthersPosts,
+		PermDeleteOthersReputation,
 		PermDeleteOthersTopics,
 		PermDeleteOwnTopicWithReplies,
-		PermDeleteReputation,
 		PermDeleteSelfMask,
 		PermDeleteSelfPost,
+		PermDeleteSelfReputation,
 		PermDeleteSelfTopic,
 		PermDeleteUsers,
 		PermEditOthersAvatars,
@@ -136,6 +159,7 @@ var allPermissions = func() []Permission {
 		PermEditOthersNicknames,
 		PermEditOthersPosts,
 		PermEditOthersProfile,
+		PermEditOthersReputation,
 		PermEditOthersSignatures,
 		PermEditOthersStatuses,
 		PermEditOthersTopics,
@@ -143,6 +167,7 @@ var allPermissions = func() []Permission {
 		PermEditSelfNickname,
 		PermEditSelfPost,
 		PermEditSelfProfile,
+		PermEditSelfReputation,
 		PermEditSelfSignature,
 		PermEditSelfStatus,
 		PermEditSelfTopic,

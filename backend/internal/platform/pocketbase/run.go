@@ -361,7 +361,18 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.DELETE("/posts/{id}/vote", deletePostVoteHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.POST("/users/{id}/vote", voteUserHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.DELETE("/users/{id}/vote", deleteUserVoteHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
-	group.DELETE("/reputation/{id}", deleteReputationHandler).BindFunc(RequirePermission(auth.PermDeleteReputation)).BindFunc(enforceIdempotency)
+	// Reputation edit and delete are gated ONLY on use_reputation here, and the
+	// per-action decision is made inside the handlers.
+	//
+	// That is a deliberate inversion of the previous shape. The route used to
+	// require `delete_reputation`, a staff-only key, which meant a player could not
+	// retract their own entry even when that was the only entry they were entitled
+	// to touch. Ownership is a property of the RECORD, and the record is loaded
+	// inside the command — a route-level check would have to guess which of the
+	// four keys applies before it has read `voter_id`, and guessing there means
+	// either locking members out or letting them through.
+	group.PUT("/reputation/{id}", editReputationHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
+	group.DELETE("/reputation/{id}", deleteReputationHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.GET("/posts/{id}/voters", getPostVotersHandler)
 	group.GET("/users/{id}/reputation", getUserReputationLogsHandler)
 	// The caller's OWN votes. The browser used to read `reputation_votes`

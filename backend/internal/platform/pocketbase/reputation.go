@@ -362,8 +362,152 @@ func deleteUserVoteHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// deleteReputationHandler is an administrative command to delete any reputation vote.
-// Reverts post and profile reputation and appends an audit log.
+// repEditForm is the body of a reputation edit: the comment text and/or a new
+// value. Both are optional, but at least one must be present — an edit that
+// changes nothing is a wasted write and an audit entry with no meaning.
+type repEditForm struct {
+	Value   *int   `json:"value"`
+	Comment string `json:"comment"`
+}
+
+// editReputationHandler changes an existing reputation entry.
+//
+// This command did not exist before the permission split. It is here because
+// "a player may edit their own reputation comment" is only meaningful if there
+// is somewhere to type the edit, and an entry that could be created and
+// retracted but never corrected was a dead end.
+//
+// VALUE CHANGES RE-BALANCE BOTH TOTALS. Changing "+5" to "-1" has to move the
+// target's reputation and the post's by the DELTA, not by the new value, or the
+// second edit of the same entry would subtract six points. The delta is
+// computed before the record is written so a rejected edit changes nothing.
+func editReputationHandler(e *core.RequestEvent) error {
+	claim, err := claimFrom(e)
+	if err != nil {
+		return err
+	}
+
+	voteID := e.Request.PathValue("id")
+
+	var form repEditForm
+	raw, err := readBodyLimited(e, maxReputationBodyBytes)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, &form); err != nil {
+		return validationError("invalid JSON body")
+	}
+	if form.Value == nil && strings.TrimSpace(form.Comment) == "" {
+		return validationError("nothing to change")
+	}
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
+		vote, err := txApp.FindRecordById(reputationVotesCollectionName, voteID)
+		if err != nil || vote == nil {
+			return 0, nil, notFoundError("reputation vote not found")
+		}
+
+		// Same ownership rule as the delete, and for the same reason: the `_self_`
+		// key exists precisely so a member can correct their own words, and must
+		// not become a way to rewrite somebody else's.
+		acc := AccessFrom(e)
+		if vote.GetString("voter_id") != e.Auth.Id {
+			if !auth.Has(acc.Permissions, auth.PermEditOthersReputation) {
+				return 0, nil, forbiddenError("you may only edit your own reputation entries")
+			}
+		} else if !auth.Has(acc.Permissions, auth.PermEditSelfReputation) &&
+			!auth.Has(acc.Permissions, auth.PermEditOthersReputation) {
+			return 0, nil, forbiddenError("you may only edit your own reputation entries")
+		}
+
+		oldVal := vote.GetInt("value")
+		targetID := vote.GetString("target_id")
+		postID := vote.GetString("post_id")
+
+		// The SAME validator the create path uses, deliberately. A second hand
+		// written range check here is how an edit path ends up accepting a value
+		// the create path rejects; there is one contract and one place it lives.
+		newComment := vote.GetString("comment")
+		if form.Value != nil {
+			if _, _, err := forum.ValidateReputationVote(
+				vote.GetString("voter_id"), targetID, *form.Value, vote.GetString("comment")); err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+		}
+		if strings.TrimSpace(form.Comment) != "" {
+			if _, _, err := forum.ValidateReputationVote(
+				vote.GetString("voter_id"), targetID, oldVal, form.Comment); err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+			newComment = form.Comment
+		}
+
+		if form.Value != nil && *form.Value != oldVal {
+			delta := *form.Value - oldVal
+			if targetUser, err := txApp.FindRecordById(usersCollectionName, targetID); err == nil && targetUser != nil {
+				targetUser.Set("reputation", targetUser.GetInt("reputation")+delta)
+				if err := txApp.Save(targetUser); err != nil {
+					return 0, nil, internalError("failed to rebalance profile reputation", err)
+				}
+			}
+			if postID != "" {
+				if post, err := txApp.FindRecordById(postsCollectionName, postID); err == nil && post != nil {
+					post.Set("reputation", post.GetInt("reputation")+delta)
+					if err := txApp.Save(post); err != nil {
+						return 0, nil, internalError("failed to rebalance post reputation", err)
+					}
+				}
+			}
+			vote.Set("value", *form.Value)
+		}
+
+		if strings.TrimSpace(form.Comment) != "" {
+			vote.Set("comment", newComment)
+		}
+
+		if err := txApp.Save(vote); err != nil {
+			return 0, nil, internalError("failed to edit reputation entry", err)
+		}
+
+		// A moderator rewriting somebody else's entry is audited; a member
+		// fixing their own typo is not staff action and must not fill the log
+		// with self-corrections.
+		if vote.GetString("voter_id") != e.Auth.Id {
+			if err := recordAuditLog(txApp, "reputation_edited", e.Auth.Id, map[string]any{
+				"vote_id":   voteID,
+				"target_id": targetID,
+				"voter_id":  vote.GetString("voter_id"),
+				"post_id":   postID,
+				"old_value": oldVal,
+				"new_value": vote.GetInt("value"),
+			}); err != nil {
+				return 0, nil, err
+			}
+		}
+
+		return http.StatusOK, map[string]any{
+			"vote":       repVotePayload(vote),
+			"request_id": requestIDFrom(e),
+		}, nil
+	})
+
+	return writeCommandResult(e, outcome, err)
+}
+
+// deleteReputationHandler deletes a reputation vote.
+//
+// OWNERSHIP IS DECIDED HERE, NOT AT THE ROUTE. The route used to gate this on
+// `delete_reputation` alone, which made one key mean both "retract my own +1"
+// and "remove an abusive comment about a third party" — and because nothing
+// inside compared the voter to the caller, the only version that could be
+// expressed was the staff one. A member had no way to take back their own
+// entry at all.
+//
+// The comparison is `vote.voter_id == caller`, checked BEFORE any write, and a
+// caller acting on somebody else's entry needs the `_others_` key. An author
+// cannot delete a stranger's entry no matter which keys they hold — there is no
+// branch where `_others_` passes for your own row, and no branch where
+// `_self_` passes for someone else's.
 func deleteReputationHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -376,6 +520,20 @@ func deleteReputationHandler(e *core.RequestEvent) error {
 		vote, err := txApp.FindRecordById(reputationVotesCollectionName, voteID)
 		if err != nil || vote == nil {
 			return 0, nil, notFoundError("reputation vote not found")
+		}
+
+		// Authorization BEFORE the compensating writes below. Discovering the
+		// caller was not allowed only after the reputation totals had already
+		// been decremented would leave the forum with a vote deleted from one
+		// total and still present in the other.
+		acc := AccessFrom(e)
+		if vote.GetString("voter_id") != e.Auth.Id {
+			if !auth.Has(acc.Permissions, auth.PermDeleteOthersReputation) {
+				return 0, nil, forbiddenError("you may only retract your own reputation entries")
+			}
+		} else if !auth.Has(acc.Permissions, auth.PermDeleteSelfReputation) &&
+			!auth.Has(acc.Permissions, auth.PermDeleteOthersReputation) {
+			return 0, nil, forbiddenError("you may only retract your own reputation entries")
 		}
 
 		val := vote.GetInt("value")

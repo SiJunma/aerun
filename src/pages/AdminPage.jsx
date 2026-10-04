@@ -944,18 +944,27 @@ const handleDeleteGroup = (id) => {
         name: role.name,
         permissions: normalizePermissions(role.permissions || []),
         color: role.color || 'primary',
-        base_role_id: role.base_role_id || role.id
+        // `adminRoles`, never `role.id`. normalizeRole maps `id` to the ROLE id,
+        // so the old `role.base_role_id || role.id` fallback resolved to the
+        // role's OWN id and proposed it as its own base — the self-reference the
+        // server rejects, which is what left an imported role stuck and
+        // uneditable. A role with no base genuinely has none.
+        base_role_id: role.base_role_id || ''
       });
     } else {
       setEditingRole(null);
-      // Same rule as the base dropdown: start from what the server says the
-      // Player role currently holds, not from the bundled constant.
-      const defaultPlayerRole = roles.find(r => r.id === 'player');
+      // adminRoles, NOT `roles` from useAuth(). The public registry is
+      // roleBadgePayload — role_id/name/rank/color and nothing else — so
+      // `roles.find(...).permissions` was always undefined and the form opened
+      // with every checkbox empty instead of pre-filled from the base role. The
+      // same wrong source sat in the base-role dropdown below, so switching base
+      // blanked the list a second time.
+      const defaultPlayerRole = adminRoles.find(r => r.id === 'player');
       setRoleForm({
         name: '',
         permissions: defaultPlayerRole
           ? normalizePermissions(defaultPlayerRole.permissions || [])
-              .filter(p => p !== PERMISSIONS.VIEW_MASTER_DICE)
+              .filter(p => MAX_ROLE_PERMISSIONS.player?.includes(p))
           : [],
         color: 'primary',
         base_role_id: 'player'
@@ -2182,18 +2191,20 @@ const handleDeleteGroup = (id) => {
                           key={baseId}
                           active={roleForm.base_role_id === baseId}
                           onClick={() => {
-                            // The base role's CURRENT permissions come from the
-                            // server, not from the DEFAULT_ROLES constant. A
-                            // system role is editable now, so the constant
-                            // drifts from the row as soon as an admin touches
-                            // it — and a role created from a stale copy starts
-                            // from permissions nobody is looking at.
-                            const template = roles.find(r => r.id === baseId);
+                            // The base role's CURRENT permissions come from adminRoles, the one list that
+// actually carries them — see the note in handleOpenRoleModal. Reading the
+// public `roles` here blanked the form a second time on every base change.
+const template = adminRoles.find(r => r.id === baseId);
+                            const allowed = MAX_ROLE_PERMISSIONS[baseId];
                             setRoleForm({
                               ...roleForm,
                               base_role_id: baseId,
                               permissions: template
                                 ? normalizePermissions(template.permissions || [])
+                                    // Pre-fill exactly what this base may hold, so a
+                                    // role cannot start life carrying a key its own
+                                    // ceiling forbids — which the save would reject.
+                                    .filter(p => !allowed || allowed.includes(p))
                                 : roleForm.permissions
                             });
                           }}

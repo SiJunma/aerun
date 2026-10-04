@@ -149,8 +149,17 @@ func TestMasterDiceIsWithheldFromReadersWithoutThePermission(t *testing.T) {
 	if v := readRollValue(t, server, topicID, tokens["spectator"]); v != nil {
 		t.Errorf("a spectator received the master value %v — spectator carries only view_forum", v)
 	}
-	if v := readRollValue(t, server, topicID, tokens["player"]); v == nil || fmt.Sprint(v) != "87" {
-		t.Errorf("a player holds view_master_dice in the compiled matrix and must see the value, got %v", v)
+	// A PLAYER no longer sees it either. `view_master_dice` used to sit in the
+	// player row, which made a GM's private throw readable by every ordinary
+	// member — so the withholding this test exists to prove was not withholding
+	// from the people it mattered for. Player now joins spectator and guest as a
+	// reader who must not receive the value, and moderator becomes the boundary,
+	// so the assertion inverts.
+	if v := readRollValue(t, server, topicID, tokens["player"]); v != nil {
+		t.Errorf("a player received the master value %v — view_master_dice is moderator-and-above", v)
+	}
+	if v := readRollValue(t, server, topicID, tokens["moderator"]); v == nil || fmt.Sprint(v) != "87" {
+		t.Errorf("a moderator holds view_master_dice and must see the value, got %v", v)
 	}
 	if v := readRollValue(t, server, topicID, tokens["root"]); v == nil || fmt.Sprint(v) != "87" {
 		t.Errorf("root must see the master value, got %v", v)

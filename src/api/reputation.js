@@ -137,6 +137,31 @@ export const updateReputationComment = async (vote, newComment = '') => {
 };
 
 /**
+ * editReputationEntry
+ *
+ * Edits an existing entry through the dedicated command, NOT by re-casting the
+ * vote. updateReputationComment above re-posts the same value to the vote route,
+ * which is an upsert — it works, but it routes around the `edit_self_reputation`
+ * / `edit_others_reputation` split and expresses "correct my comment" as
+ * "cast the vote again". This one is gated on the same keys as the delete, and
+ * the server compares `voter_id` before it writes.
+ *
+ * `patch` takes whichever of `value` / `comment` is changing; an absent key is
+ * left alone, so a comment-only correction does not restate the value.
+ */
+export const editReputationEntry = async (voteId, patch = {}) => {
+  if (!voteId) return null;
+  const body = {};
+  if (patch.value !== undefined) body.value = patch.value;
+  if (patch.comment !== undefined) body.comment = patch.comment;
+
+  return await sendApi(`/api/aerun/reputation/${voteId}`, {
+    method: 'PUT',
+    body
+  });
+};
+
+/**
  * fetchReputationLogs
  * Fetches reputation changes for a user securely through backend API.
  */

@@ -873,7 +873,25 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                 <Card.Body className="p-0">
                   {(() => {
                     const isGuest = !profile?.uid;
-                    const canOverride = hasPermission(PERMISSIONS.DELETE_REPUTATION) || hasPermission(PERMISSIONS.ADMIN_ACCESS);
+                    // PER-ROW, not per-table. The old code asked one question — "may this
+                    // viewer delete reputation?" — and applied the answer to every row,
+                    // which could only ever be the staff answer, because the ownership
+                    // half of the question was never asked. The same reader can now
+                    // legitimately act on their own row and not on a stranger’s, so the
+                    // button has to decide per row.
+                    //
+                    // canOverride itself stays blanket on purpose: it governs SEEING
+                    // somebody’s hidden reputation history, not acting on a row.
+                    const canOverride = hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION) ||
+                      hasPermission(PERMISSIONS.ADMIN_ACCESS);
+                    const canDeleteRepLog = log => {
+                      if (!log) return false;
+                      if (log.voter_id === uid) {
+                        return hasPermission(PERMISSIONS.DELETE_SELF_REPUTATION) ||
+                          hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION);
+                      }
+                      return hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION);
+                    }; hasPermission(PERMISSIONS.ADMIN_ACCESS);
                     const historyHidden = viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && !canOverride;
                     const commentsHidden = isGuest || (viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && !canOverride);
                     const historyAdminBypass = !isGuest && viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && canOverride;
@@ -941,7 +959,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                             <th>{t('profile.rep_from')}</th>
                             <th className="text-center">{t('profile.rep_value')}</th>
                             <th>{t('profile.rep_comment')}</th>
-                            {hasPermission(PERMISSIONS.DELETE_REPUTATION) && <th></th>}
+                            {hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION) && <th></th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -1092,7 +1110,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                                   )
                                 )}
                               </td>
-                              {hasPermission(PERMISSIONS.DELETE_REPUTATION) && (
+                              {canDeleteRepLog(log) && (
                                 <td className="py-3 text-end pe-3">
                                   <Button
                                     size="sm"

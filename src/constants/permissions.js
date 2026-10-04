@@ -56,7 +56,14 @@ export const PERMISSIONS = {
   
   // Specific Features
   USE_REPUTATION: 'use_reputation',
-  DELETE_REPUTATION: 'delete_reputation',
+  // Reputation actions are split by action (edit/delete) and by subject (your
+  // own entry vs somebody else's). `_self_` is the AUTHOR of the entry, not the
+  // profile it sits on: "edit my own reputation comment" is the comment you
+  // wrote on somebody else's profile.
+  EDIT_SELF_REPUTATION: 'edit_self_reputation',
+  DELETE_SELF_REPUTATION: 'delete_self_reputation',
+  EDIT_OTHERS_REPUTATION: 'edit_others_reputation',
+  DELETE_OTHERS_REPUTATION: 'delete_others_reputation',
   USE_MASKS: 'use_masks',
   CREATE_SELF_MASK: 'create_self_mask',
   DELETE_SELF_MASK: 'delete_self_mask',
@@ -112,7 +119,22 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.POST_REPLY]: { en: 'Post Reply', ru: 'Отправка ответов' },
   [PERMISSIONS.CREATE_TOPIC]: { en: 'Create Topic', ru: 'Создание тем' },
   [PERMISSIONS.USE_REPUTATION]: { en: 'Use Reputation', ru: 'Использование репутации' },
-  [PERMISSIONS.DELETE_REPUTATION]: { en: 'Delete Reputation Entries', ru: 'Удаление выставленной репутации' },
+  [PERMISSIONS.EDIT_SELF_REPUTATION]: {
+    en: 'Edit Own Reputation Comments',
+    ru: 'Редактирование своих комментариев репутации',
+  },
+  [PERMISSIONS.DELETE_SELF_REPUTATION]: {
+    en: 'Delete Own Reputation Comments',
+    ru: 'Удаление своих комментариев репутации',
+  },
+  [PERMISSIONS.EDIT_OTHERS_REPUTATION]: {
+    en: "Edit Others' Reputation Comments",
+    ru: 'Редактирование чужих комментариев репутации',
+  },
+  [PERMISSIONS.DELETE_OTHERS_REPUTATION]: {
+    en: "Delete Others' Reputation Comments",
+    ru: 'Удаление чужих комментариев репутации',
+  },
   [PERMISSIONS.USE_MASKS]: { en: 'Use Masks (Characters)', ru: 'Использование масок (персонажей)' },
   [PERMISSIONS.CREATE_SELF_MASK]: { en: 'Create Own Masks', ru: 'Создание своих масок' },
   [PERMISSIONS.DELETE_SELF_MASK]: { en: 'Delete Own Masks', ru: 'Удаление своих масок' },
@@ -198,7 +220,13 @@ export const PERMISSION_GROUPS = [
     name: { en: 'Feature-Specific', ru: 'Специальные возможности' },
     permissions: [
       PERMISSIONS.USE_REPUTATION,
-      PERMISSIONS.DELETE_REPUTATION,
+      // Reputation actions in the order a reader meets them: my own entry
+      // first, then somebody else's. The `_self_` pair is what an ordinary
+      // member holds; the `_others_` pair is staff.
+      PERMISSIONS.EDIT_SELF_REPUTATION,
+      PERMISSIONS.DELETE_SELF_REPUTATION,
+      PERMISSIONS.EDIT_OTHERS_REPUTATION,
+      PERMISSIONS.DELETE_OTHERS_REPUTATION,
       PERMISSIONS.USE_MASKS,
       PERMISSIONS.CREATE_SELF_MASK,
       PERMISSIONS.DELETE_SELF_MASK,
@@ -260,7 +288,10 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.POST_REPLY,
       PERMISSIONS.CREATE_TOPIC,
       PERMISSIONS.USE_REPUTATION,
-      PERMISSIONS.DELETE_REPUTATION,
+      PERMISSIONS.EDIT_SELF_REPUTATION,
+      PERMISSIONS.DELETE_SELF_REPUTATION,
+      PERMISSIONS.EDIT_OTHERS_REPUTATION,
+      PERMISSIONS.DELETE_OTHERS_REPUTATION,
       PERMISSIONS.USE_MASKS,
       PERMISSIONS.CREATE_SELF_MASK,
       PERMISSIONS.DELETE_SELF_MASK,
@@ -284,10 +315,21 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.MOVE_TOPICS,
       PERMISSIONS.CLOSE_TOPICS,
       PERMISSIONS.PIN_TOPICS,
+      PERMISSIONS.EDIT_OTHERS_POSTS,
+      PERMISSIONS.DELETE_OTHERS_POSTS,
+      PERMISSIONS.EDIT_OTHERS_TOPICS,
+      PERMISSIONS.DELETE_OTHERS_TOPICS,
+      PERMISSIONS.EDIT_SELF_POST,
+      PERMISSIONS.DELETE_SELF_POST,
+      PERMISSIONS.EDIT_SELF_TOPIC,
+      PERMISSIONS.DELETE_SELF_TOPIC,
       PERMISSIONS.VIEW_FORUM,
       PERMISSIONS.POST_REPLY,
       PERMISSIONS.CREATE_TOPIC,
       PERMISSIONS.USE_REPUTATION,
+      PERMISSIONS.EDIT_SELF_REPUTATION,
+      PERMISSIONS.DELETE_SELF_REPUTATION,
+      PERMISSIONS.DELETE_OTHERS_REPUTATION,
       PERMISSIONS.USE_MASKS,
       PERMISSIONS.CREATE_SELF_MASK,
       PERMISSIONS.DELETE_SELF_MASK,
@@ -296,9 +338,11 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.DELETE_OTHERS_MASK,
       PERMISSIONS.USE_DICE,
       PERMISSIONS.VIEW_MASTER_DICE,
+      PERMISSIONS.USE_DIRECT_MESSAGES,
       PERMISSIONS.EDIT_SELF_NICKNAME,
       PERMISSIONS.EDIT_SELF_AVATAR,
       PERMISSIONS.EDIT_SELF_STATUS,
+      PERMISSIONS.EDIT_SELF_PROFILE,
       PERMISSIONS.EDIT_SELF_SIGNATURE,
       PERMISSIONS.BYPASS_HIDE_TAGS
     ]
@@ -312,16 +356,22 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.VIEW_FORUM,
       PERMISSIONS.POST_REPLY,
       PERMISSIONS.CREATE_TOPIC,
+      PERMISSIONS.EDIT_SELF_POST,
+      PERMISSIONS.DELETE_SELF_POST,
+      PERMISSIONS.EDIT_SELF_TOPIC,
+      PERMISSIONS.DELETE_SELF_TOPIC,
       PERMISSIONS.USE_REPUTATION,
+      PERMISSIONS.EDIT_SELF_REPUTATION,
+      PERMISSIONS.DELETE_SELF_REPUTATION,
       PERMISSIONS.USE_MASKS,
       PERMISSIONS.CREATE_SELF_MASK,
       PERMISSIONS.DELETE_SELF_MASK,
       PERMISSIONS.USE_DICE,
-      PERMISSIONS.VIEW_MASTER_DICE,
       PERMISSIONS.USE_DIRECT_MESSAGES,
       PERMISSIONS.EDIT_SELF_NICKNAME,
       PERMISSIONS.EDIT_SELF_AVATAR,
       PERMISSIONS.EDIT_SELF_STATUS,
+      PERMISSIONS.EDIT_SELF_PROFILE,
       PERMISSIONS.EDIT_SELF_SIGNATURE
     ]
   },
@@ -360,12 +410,16 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.EDIT_SELF_STATUS, // Optional but safe
     PERMISSIONS.EDIT_SELF_SIGNATURE
   ],
-  spectator: [
+  // A spectator is a viewer. `create_topic` and `post_reply` are gone so the
+// system role means exactly what its name says, and masks and dice went with
+// them: a role that can watch but not speak has no business carrying the
+// authoring features.
+//
+// `use_reputation` and `use_direct_messages` are deliberately LEFT in — they
+// are receiving capabilities, not authoring ones, and removing them was not
+// part of the ask. Say the word if a spectator should be fully inert.
+spectator: [
     PERMISSIONS.VIEW_FORUM,
-    PERMISSIONS.POST_REPLY,
-    PERMISSIONS.CREATE_TOPIC,
-    PERMISSIONS.USE_DICE,
-    PERMISSIONS.USE_MASKS,
     PERMISSIONS.USE_REPUTATION,
     PERMISSIONS.USE_DIRECT_MESSAGES,
     PERMISSIONS.EDIT_SELF_NICKNAME,
@@ -373,20 +427,38 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.EDIT_SELF_STATUS,
     PERMISSIONS.EDIT_SELF_SIGNATURE
   ],
+  // A master roll is the GM's private number. It is NOT offered to a player at
+  // all: a checkbox an ordinary member can tick is a checkbox an ordinary
+  // member will tick, and the withholding this key drives stops being a
+  // decision. Moderator and above keep it.
+  //
+  // The `_self_` content keys ARE offered — editing or deleting your own post
+  // or topic is ordinary authorship hygiene, and the server still compares the
+  // author on every one of them. `delete_own_topic_with_replies` is listed so
+  // an admin can grant it explicitly; it is not part of the player's own
+  // default set (see internal/auth/role.go), because it takes other people's
+  // replies with it.
   player: [
     PERMISSIONS.VIEW_FORUM,
     PERMISSIONS.POST_REPLY,
     PERMISSIONS.CREATE_TOPIC,
+    PERMISSIONS.EDIT_SELF_POST,
+    PERMISSIONS.DELETE_SELF_POST,
+    PERMISSIONS.EDIT_SELF_TOPIC,
+    PERMISSIONS.DELETE_SELF_TOPIC,
+    PERMISSIONS.DELETE_OWN_TOPIC_WITH_REPLIES,
     PERMISSIONS.USE_DICE,
-    PERMISSIONS.VIEW_MASTER_DICE,
     PERMISSIONS.USE_MASKS,
     PERMISSIONS.CREATE_SELF_MASK,
     PERMISSIONS.DELETE_SELF_MASK,
     PERMISSIONS.USE_REPUTATION,
+    PERMISSIONS.EDIT_SELF_REPUTATION,
+    PERMISSIONS.DELETE_SELF_REPUTATION,
     PERMISSIONS.USE_DIRECT_MESSAGES,
     PERMISSIONS.EDIT_SELF_NICKNAME,
     PERMISSIONS.EDIT_SELF_AVATAR,
     PERMISSIONS.EDIT_SELF_STATUS,
+    PERMISSIONS.EDIT_SELF_PROFILE,
     PERMISSIONS.EDIT_SELF_SIGNATURE
   ],
   moderator: [
@@ -402,23 +474,32 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.EDIT_OTHERS_AVATARS,
     PERMISSIONS.EDIT_OTHERS_STATUSES,
     PERMISSIONS.EDIT_OTHERS_SIGNATURES,
-    PERMISSIONS.DELETE_REPUTATION,
+    PERMISSIONS.DELETE_OTHERS_REPUTATION,
+    PERMISSIONS.EDIT_OTHERS_REPUTATION,
     PERMISSIONS.EDIT_OTHERS_MASK,
     PERMISSIONS.CREATE_OTHERS_MASK,
     PERMISSIONS.DELETE_OTHERS_MASK,
     PERMISSIONS.EDIT_SELF_NICKNAME,
     PERMISSIONS.EDIT_SELF_AVATAR,
     PERMISSIONS.EDIT_SELF_STATUS,
+    PERMISSIONS.EDIT_SELF_PROFILE,
     PERMISSIONS.EDIT_SELF_SIGNATURE,
     PERMISSIONS.VIEW_FORUM,
     PERMISSIONS.POST_REPLY,
     PERMISSIONS.CREATE_TOPIC,
+    PERMISSIONS.EDIT_SELF_POST,
+    PERMISSIONS.DELETE_SELF_POST,
+    PERMISSIONS.EDIT_SELF_TOPIC,
+    PERMISSIONS.DELETE_SELF_TOPIC,
+    PERMISSIONS.DELETE_OWN_TOPIC_WITH_REPLIES,
     PERMISSIONS.USE_DICE,
     PERMISSIONS.VIEW_MASTER_DICE,
     PERMISSIONS.USE_MASKS,
     PERMISSIONS.CREATE_SELF_MASK,
     PERMISSIONS.DELETE_SELF_MASK,
     PERMISSIONS.USE_REPUTATION,
+    PERMISSIONS.EDIT_SELF_REPUTATION,
+    PERMISSIONS.DELETE_SELF_REPUTATION,
     PERMISSIONS.USE_DIRECT_MESSAGES,
     PERMISSIONS.BYPASS_HIDE_TAGS
   ],
