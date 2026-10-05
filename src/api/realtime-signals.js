@@ -19,7 +19,38 @@ import { pb } from './pocketbase';
  * accident: a signed-out visitor's auth id is "", which matches neither a
  * specific audience nor the "*" wildcard. Polling keeps the page correct for
  * them, so there is nothing to gain by re-opening anonymous access.
+ *
+ * HEALTH IS CONNECTION, NOT DELIVERY — why `onStateChange` exists.
+ *
+ * The health check used to wait for a signal to ARRIVE before believing the
+ * stream, on the theory that a stream which opens and stays silent is dead. That
+ * was written when every forum collection had a nil ListRule, so a subscription
+ * completed the handshake and then had every event refused: silence really was a
+ * broken stream.
+ *
+ * It no longer describes this collection, whose rule is a working
+ * `@request.auth.id` audience check and whose delivery is pinned by
+ * TestDMPostSignalReachesOnlyItsRecipient against a real client. And it caused
+ * the reported failure, "realtime keeps dying": a DM thread nobody is typing in
+ * emits no signal for minutes, so every member with an idle conversation was
+ * declared broken after ten seconds and pushed onto the poll interval for good —
+ * with the stream open the entire time and fully able to deliver.
  */
+
+/**
+ * How often the stream's own connection state is re-read.
+ *
+ * The SDK reconnects on its own with backoff and emits NO disconnect event, so
+ * there is nothing to listen to when a connection dies. `pb.realtime.isConnected`
+ * is a plain getter over the EventSource and the negotiated client id, so
+ * sampling it is the only way to learn that a drop happened — and it costs
+ * nothing: no request, no event, just a boolean read on a timer.
+ *
+ * Five seconds is short enough that a member whose stream died mid-conversation
+ * gets polling back before they notice, and long enough that the sample is
+ * invisible next to any network cost.
+ */
+const CONNECTION_POLL_MS = 5000;
 
 /**
  * Subscribes to the signal stream.
@@ -28,20 +59,32 @@ import { pb } from './pocketbase';
  *   delivered signal. Receives the topic and id ONLY — never the record, because
  *   the record is an id and a timestamp and nothing else, and a caller that
  *   renders from it would be rendering from a nudge.
- * @param {() => void} onDead called once if the stream drops before it ever
- *   delivers, so the caller can fall back to polling.
+ * @param {() => void} onDead called when the stream is not carrying, so the
+ *   caller can fall back to polling.
+ * @param {(connected: boolean) => void} [onStateChange] called on every
+ *   connection TRANSITION — `true` when the stream is established, `false` when
+ *   it has dropped. This is what marks realtime healthy, and see the note on the
+ *   health contract below for why it is not "an event arrived".
  * @returns {() => void} unsubscribe. Idempotent, and safe to call before the
  *   subscription has settled — that window is exactly when a React effect
  *   cleanup runs, and an unsubscribe that throws there is a crash that only
  *   happens in development.
  */
-export const subscribeToRealtimeSignals = (onEvent, onDead) => {
+export const subscribeToRealtimeSignals = (onEvent, onDead, onStateChange) => {
   let cancelled = false;
   let delivered = false;
   let unsubscribe = null;
+  let watcher = null;
+  let lastConnected = null;
+
+  const report = (connected) => {
+    if (cancelled || connected === lastConnected) return;
+    lastConnected = connected;
+    onStateChange?.(connected);
+  };
 
   const reportDead = () => {
-    // Once per subscription. A reconnect loop that reported every drop would
+    // Once per transition. A reconnect loop that reported every drop would
     // restart the poll interval every time, which is a reconnect storm wearing
     // the costume of a fallback.
     if (cancelled || delivered) return;
@@ -59,6 +102,9 @@ export const subscribeToRealtimeSignals = (onEvent, onDead) => {
     // what makes a cancel that arrives first still work: without the holder,
     // "cancelled before the promise settled" would have no way to close the
     // connection it just opened.
+    // The promise resolving IS the connection being up: `subscribe` awaits
+    // `connect()`, which resolves its pending connects inside the PB_CONNECT
+    // handler, after the client id has been negotiated.
     const pending = pb.collection('realtime_signals').subscribe('*', (_event, record) => {
       if (cancelled) return;
       delivered = true;
@@ -70,7 +116,13 @@ export const subscribeToRealtimeSignals = (onEvent, onDead) => {
     Promise.resolve(pending)
       .then((unsub) => {
         unsubscribe = unsub;
-        if (cancelled) close();
+        if (cancelled) { close(); return; }
+        report(true);
+        // Watches for the drop the SDK does not announce, and for the reconnect
+        // it makes on its own.
+        watcher = setInterval(() => {
+          if (!cancelled) report(!!pb.realtime?.isConnected);
+        }, CONNECTION_POLL_MS);
       })
       .catch((err) => {
         // A subscription that cannot even be established is a dead stream, and
@@ -87,6 +139,7 @@ export const subscribeToRealtimeSignals = (onEvent, onDead) => {
   }
 
   function close() {
+    if (watcher) { clearInterval(watcher); watcher = null; }
     if (typeof unsubscribe === 'function') {
       try { unsubscribe(); } catch { /* already closed */ }
     }

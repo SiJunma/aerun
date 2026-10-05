@@ -178,28 +178,99 @@ test('a realtime hook is ACCEPTED, and its events drive the reads', async () => 
   }
 });
 
-test('a connected-but-silent stream falls back to polling on the grace window', async () => {
-  // The failure this module spent years refusing to start. A hook that opens and
-  // says nothing must cost the SAME as a dead one: the interval takes over after
-  // the grace window. Asserting on a shortened window by faking timers would test
-  // the fake; this asserts the observable contract instead.
+test('a stream that never CONNECTS falls back to polling on the grace window', async () => {
+  // A hook that never reports a connection must cost the SAME as a dead one:
+  // the interval takes over after the grace window. This is the real
+  // never-established case — a subscription whose rule refuses it — and it is
+  // what the grace window is actually for.
   let calls = 0;
   const poll = createSharedPoll({
     name: 'silent-stream',
     intervalMs: 10,
     fetch: async () => { calls += 1; return calls; },
-    realtime: () => () => {},        // opens, never delivers
+    realtime: () => () => {},        // never connects, never delivers
   });
 
   const stop = poll.subscribe(() => {});
   try {
-    assert.equal(poll.getTransport(), 'connecting', 'before any event, nothing is proven');
+    assert.equal(poll.getTransport(), 'connecting', 'before any connection, nothing is proven');
     await wait(REALTIME_GRACE_MS + 80);
     assert.equal(poll.getTransport(), 'polling',
-      'a stream that never delivered must be reported as polling, not as realtime');
+      'a stream that never connected must be reported as polling, not as realtime');
     const afterGrace = calls;
     await wait(50);
     assert.ok(calls > afterGrace, 'the interval must actually be running after the fallback');
+  } finally {
+    stop();
+  }
+});
+
+test('a CONNECTED but idle stream is NOT declared dead — this is the "realtime keeps dying" bug', async () => {
+  // REPORTED: realtime "keeps dying" on an open DM thread.
+  //
+  // The health check used to require a DELIVERED signal, so a conversation
+  // nobody was typing in — which emits nothing for minutes — was declared
+  // broken after the grace window and pushed onto the poll interval for good,
+  // with the stream open the whole time. This pins the fix: a connection that
+  // reports itself healthy is trusted, however long it stays silent.
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'idle-stream',
+    intervalMs: 10,
+    fetch: async () => { calls += 1; return calls; },
+    // Connected, and then deliberately silent for well past the grace window.
+    realtime: (onEvent, onDead, onStateChange) => {
+      setTimeout(() => onStateChange(true), 10);
+      return () => {};
+    },
+  });
+
+  const stop = poll.subscribe(() => {});
+  try {
+    await wait(REALTIME_GRACE_MS + 200);
+    assert.equal(poll.getTransport(), 'realtime',
+      'a connected stream must not degrade to polling just because nobody spoke');
+    const afterConnect = calls;
+    await wait(120);
+    assert.equal(calls, afterConnect,
+      'and it must cost NO requests while idle — that was the whole cost of the bug');
+  } finally {
+    stop();
+  }
+});
+
+test('a stream that drops after being healthy falls back, and recovers when it returns', async () => {
+  // The other half of the same contract, and the one that was impossible before:
+  // the old `delivered` flag meant a stream that HAD delivered could never be
+  // reported dead again, so a member whose connection died mid-conversation
+  // stayed on "realtime" and silently stopped updating.
+  let calls = 0;
+  let setState = () => {};
+  const poll = createSharedPoll({
+    name: 'drop-and-recover',
+    intervalMs: 10,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (onEvent, onDead, onStateChange) => {
+      setState = onStateChange;
+      return () => {};
+    },
+  });
+
+  const stop = poll.subscribe(() => {});
+  try {
+    setState(true);
+    await tick();
+    assert.equal(poll.getTransport(), 'realtime', 'a connection is healthy on arrival');
+
+    setState(false);
+    await tick();
+    assert.equal(poll.getTransport(), 'polling',
+      'a drop must bring the interval back, even after the stream was healthy');
+
+    setState(true);
+    await tick();
+    assert.equal(poll.getTransport(), 'realtime',
+      'and a reconnect must close it again — the SDK reconnects on its own');
   } finally {
     stop();
   }

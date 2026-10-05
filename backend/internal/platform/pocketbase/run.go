@@ -383,6 +383,14 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// Sprint 5 direct messages, notifications and outbox routes.
 	group.POST("/dms", createDMHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages)).BindFunc(enforceIdempotency)
 	group.GET("/dms", listConversationsHandler)
+	// Under its own resource root rather than /dms/peer/{peerId}: the router rejects
+	// that shape outright, because /dms/peer/{peerId} and /dms/{id}/messages both
+	// match /dms/peer/messages and neither is more specific.
+	group.GET("/conversations/peer/{peerId}", findConversationWithPeerHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages))
+	// The DM header's view of the correspondent: a nickname, an avatar and whether
+	// the account may still be written to. Deliberately NOT /users/{id}, which is
+	// the profile page and carries a member's `settings` — see getPeerCardHandler.
+	group.GET("/peers/{id}", getPeerCardHandler)
 	group.POST("/dms/{id}/messages", sendDMMessageHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages)).BindFunc(enforceIdempotency)
 	group.GET("/dms/{id}/messages", listDMMessagesHandler)
 	group.POST("/dms/{id}/read", markConversationReadHandler)

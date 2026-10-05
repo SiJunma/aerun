@@ -59,7 +59,7 @@ export const notificationsResource = (uid) =>
     // stream is healthy costs no polling; a member whose stream is silent gets
     // exactly the behaviour they had before this feature existed.
     realtime: canReceiveSignals()
-      ? (onDelivered, onDead) => subscribeToRealtimeSignals(
+      ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
         // Every signal re-reads the list; the topic is not filtered here on
         // purpose. Distinguishing "this signal is mine" from "that one is" in
         // the browser would mean trusting the payload, and the payload is an id
@@ -67,6 +67,9 @@ export const notificationsResource = (uid) =>
         // burst is cheap, and the server decides what the member may see.
         () => onDelivered(),
         () => onDead(),
+        // A quiet forum emits no signal for minutes, so the connection itself has
+        // to be what marks this stream healthy — see the note in realtime-signals.
+        onStateChange,
       )
       : null,
   });

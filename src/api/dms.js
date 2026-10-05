@@ -1,6 +1,7 @@
-import { sendApi, pb } from './pocketbase';
+import { sendApi } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
+import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
 
 /**
  * Returns a deterministic conversation ID for two users.
@@ -9,30 +10,48 @@ export const getConversationId = (uid1, uid2) =>
   [uid1, uid2].sort().join('_');
 
 /**
- * Get or create the conversation document between two users.
+ * Find the conversation with `theirUid`, or start one.
+ *
+ * The existing thread is found among `knownConversations` — the list the server
+ * already returns for the inbox, whose rows carry `participants`.
+ *
+ * The previous implementation read the `dm_members` collection straight from the
+ * browser to ask the same question. That collection is server-only (every rule is
+ * nil), so the read was refused with 403 on every attempt, and the error was
+ * swallowed by the surrounding catch. Control therefore always fell through to
+ * the create branch below, which meant opening a DM with somebody you had already
+ * written to started a brand-new "Conversation started" thread every single time.
+ * A 403 that silently becomes a duplicate row is worse than a visible failure,
+ * so the lookup now uses data the client is actually allowed to have.
  */
-export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirProfile) => {
+export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirProfile, knownConversations = []) => {
   if (!myUid || !theirUid) return null;
 
-  try {
-    const myMemberships = await pb.collection('dm_members').getFullList({
-      filter: `user_id = "${myUid}"`
-    });
-    for (const m of myMemberships) {
-      const other = await pb.collection('dm_members').getFirstListItem(
-        `conversation_id = "${m.conversation_id}" && user_id = "${theirUid}"`
-      ).catch(() => null);
-      if (other) {
-        return m.conversation_id;
-      }
-    }
-  } catch (err) {
-    console.warn('[getOrCreateConversation lookup]', err);
-  }
+  // The server resolves this rather than the browser.
+  //
+  // It used to be answered client-side by reading the `dm_members` collection
+  // directly. That collection is server-only (every rule is nil), so the read
+  // was refused with 403 on every attempt and the error was swallowed by the
+  // surrounding catch — control always fell through to the create branch below,
+  // so opening a DM with somebody you had already written to started a
+  // brand-new "Conversation started" thread every single time. A 403 that
+  // silently becomes a duplicate row is worse than a visible failure.
+  //
+  // The in-memory list is consulted first purely to avoid a round trip on the
+  // common case, never as the answer: the inbox listing is paginated, so it
+  // stops containing older correspondents once a member has more threads than
+  // one page holds, and that would start duplicating threads all over again.
+  const known = (knownConversations || []).find(
+    (conv) => Array.isArray(conv.participants) && conv.participants.includes(theirUid)
+  );
+  if (known) return known.id;
 
-  // If not found, create via domain API
+  const res = await sendApi(`/api/aerun/conversations/peer/${encodeURIComponent(theirUid)}`);
+  if (res?.conversation_id) return res.conversation_id;
+
+  // No thread with this person yet, so start one.
   const title = theirProfile?.nickname || 'Direct Message';
-  const res = await sendApi('/api/aerun/dms', {
+  const created = await sendApi('/api/aerun/dms', {
     method: 'POST',
     body: {
       recipient_ids: [theirUid],
@@ -41,7 +60,7 @@ export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirP
     }
   });
 
-  return res?.conversation?.id || res?.id || res?.conversation_id;
+  return created?.conversation?.id || created?.id || created?.conversation_id;
 };
 
 // ── DM list ──────────────────────────────────────────────────────────────────
@@ -67,9 +86,19 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
         lastMessage: conv.last_message
       }));
     },
+    // Same deal as the thread: realtime first, this interval only as the
+    // fallback. A new DM moves the conversation to the top and bumps its unread
+    // count, so this list is exactly the kind of state a `dm.post` signal is for.
     intervalMs: 10000,
     initialValue: [],
     onError: (err) => console.warn('[subscribeToDmList err]', err),
+    realtime: canReceiveSignals()
+      ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+        () => onDelivered(),
+        () => onDead(),
+          onStateChange,
+      )
+      : null,
   });
 
   // The error travels WITH the last good list rather than replacing it, so a
@@ -127,13 +156,28 @@ export const subscribeToUnreadCounts = (uid, callback) => {
     },
     intervalMs: 15000,
     initialValue: { total: 0, conversations: {}, topics: 0, notifications: 0 },
+    // The comment that used to stand here said this resource deliberately had no
+    // realtime channel, on the grounds that the counters only move as a side
+    // effect of a message and "that message already wakes the DM list poll and
+    // the notification poll". That stopped being true when those two moved onto
+    // signals: in a quiet forum none of them delivers, so all three quietly fell
+    // back to polling and this one — at 15s, forever — became the most
+    // persistent request in the app.
+    //
+    // The counters move on exactly the two topics that already publish signals
+    // (`dm.post` and `notification.new`), so this is the same re-read the other
+    // two do.
+    realtime: canReceiveSignals()
+      ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+        () => onDelivered(),
+        () => onDead(),
+        // Without this a quiet DM thread abandons a perfectly healthy stream
+        // after the grace window and polls for the rest of the session.
+        onStateChange,
+      )
+      : null,
   });
 
-  // No realtime channel here: the counters are derived state that changes only
-  // as a side effect of a message, and that message already wakes the DM list
-  // poll and the notification poll in this same tab. See
-  // markdowns/REALTIME_HYBRID_PLAN.md — this resource is a candidate for the
-  // realtime rollout, but it must not be a special case in the meantime.
   return poll.subscribe((counts) => callback(counts));
 };
 
@@ -141,18 +185,45 @@ export const subscribeToUnreadCounts = (uid, callback) => {
 export const subscribeToDmUnread = subscribeToUnreadCounts;
 
 /**
- * Fetches older messages in a conversation for pagination.
+ * One wire shape → one client shape, for EVERY DM message the app receives.
+ *
+ * The server speaks `sender_id` / `created`; the thread renders `sender_uid` /
+ * `timestamp` and decides "is this mine" and "when was this" off those names.
+ * That translation used to be written out inline at each read site, which is
+ * exactly how the mutation paths ended up returning something the thread could
+ * not drop into its state: editing and deleting gave back the raw payload with
+ * no `sender_uid` and no `timestamp`, so an applied row would have rendered as
+ * somebody else's message with no date.
+ *
+ * It is also what makes a tombstone apply cleanly. A deleted message comes back
+ * WITHOUT a `text` key at all, so a naive `{...msg}` would keep the old text —
+ * the merge has to be a REPLACE of the row, which is only safe because both
+ * sides went through this one function.
  */
-export const fetchOlderDmMessages = async (conversationId, oldestTimestamp, batchSize = 15) => {
-  if (!conversationId) return [];
+const normalizeDmMessage = (m) => ({
+  id: m.id,
+  ...m,
+  sender_uid: m.sender_id,
+  timestamp: m.created,
+});
+
+/**
+ * Fetches the page of messages immediately older than `beforeSequence`.
+ *
+ * This used to accept a timestamp, ignore it entirely, and re-issue the same
+ * unbounded `?limit=N` request the poll already made — so it returned the same
+ * page every time, the merge by id changed nothing, and the button appeared
+ * dead. Walking backwards needs a real cursor, and `sequence` is the stable one:
+ * it is dense per conversation and unaffected by two messages sharing a
+ * timestamp.
+ */
+export const fetchOlderDmMessages = async (conversationId, beforeSequence, batchSize = 15) => {
+  if (!conversationId || !beforeSequence) return [];
   try {
-    const res = await sendApi(`/api/aerun/dms/${conversationId}/messages?limit=${batchSize}`);
-    return (res?.items || []).map(m => ({
-      id: m.id,
-      ...m,
-      sender_uid: m.sender_id,
-      timestamp: m.created
-    }));
+    const res = await sendApi(
+      `/api/aerun/dms/${conversationId}/messages?limit=${batchSize}&before_sequence=${encodeURIComponent(beforeSequence)}`
+    );
+    return (res?.items || []).map(normalizeDmMessage);
   } catch (err) {
     console.error('[fetchOlderDmMessages err]', err);
     return [];
@@ -162,12 +233,38 @@ export const fetchOlderDmMessages = async (conversationId, oldestTimestamp, batc
 /**
  * Subscribe to messages in a conversation.
  *
- * The 5-second poll is deliberate here and unique: this is the one view a member
- * is watching while somebody else types, and there is no server push scoped to a
- * conversation id this client can trust. It is also the ONLY resource that still
- * polls this fast, and it stops while the tab is hidden.
+ * This was the LAST resource still polling on a 5-second timer, which made an
+ * open thread cost twelve list reads a minute — the most expensive screen on the
+ * forum to leave open, and the one whose whole purpose is showing that somebody
+ * else is typing.
+ *
+ * It now rides the signal transport, like notifications do. `dm.post` is already
+ * published on every send (dms.go, addressed to the recipient only), so the
+ * thread learns there is something new and re-reads through /api/aerun.
+ *
+ * The topic is deliberately NOT filtered in the browser. Telling "this signal is
+ * mine" from "that one is" on the client would mean trusting the payload, and the
+ * payload is an id precisely because it is not to be trusted; one coalesced
+ * re-read per burst is cheap, and the server decides what the member may see.
  */
-export const subscribeToDmMessages = (conversationId, limitCount, callback, errorCallback) => {
+// The live poll behind each open conversation, so a change made IN this thread
+// can force one immediate read instead of waiting for a background tick.
+//
+// This exists because the fallback interval is not a guarantee. shared-poll
+// REMOVES the timer the first time any realtime signal is delivered, and a
+// member's own edit and delete publish their signal to the other participant
+// only — so the author had no delivery path at all: no timer, no signal, and a
+// thread still showing the old words. The mutation response settles the bubble
+// (see editDmMessage/deleteDmMessage) and this makes the list, the counters and
+// anything the response does not carry converge now rather than eventually.
+const dmMessagePolls = new Map();
+
+export const refreshDmMessages = (conversationId) => {
+  if (!conversationId) return;
+  dmMessagePolls.get(conversationId)?.refresh();
+};
+
+export const subscribeToDmMessages = (conversationId, limitCount, callback, errorCallback, onHasMore) => {
   if (!conversationId) {
     callback([]);
     return () => {};
@@ -175,24 +272,55 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
 
   // Keyed per conversation so opening a second thread does not inherit the first
   // one's messages, and so a closed thread releases its own loop.
+  //
+  // The fetch returns `has_more` alongside the rows because the thread view needs
+  // it: without it the "load older messages" button is a guess, and a guessed
+  // button sits there doing nothing on a conversation that has no history left
+  // to load.
   const poll = sharedPoll(`dm-messages:${conversationId}:${limitCount}`, {
     fetch: async () => {
       const res = await sendApi(`/api/aerun/dms/${conversationId}/messages?limit=${limitCount}`);
-      return (res?.items || []).map(m => ({
-        id: m.id,
-        ...m,
-        sender_uid: m.sender_id,
-        timestamp: m.created
-      }));
+      return {
+        items: (res?.items || []).map(normalizeDmMessage),
+        // This flag describes the NEWEST page. It is the right answer for "is
+        // there anything older than what I am looking at" only while the client
+        // has not walked backwards yet; once it has, the client owns the flag.
+        hasMore: !!res?.has_more,
+      };
     },
-    intervalMs: 5000,
-    initialValue: [],
+    // Kept as the FALLBACK, not the primary path: shared-poll drops the timer the
+    // moment a signal actually arrives and restores it if the stream goes quiet.
+    //
+    // 30s, not the 5s this ran at before realtime existed. That 5s was chosen
+    // when a 5-second poll was the ONLY way to see a reply — which is not true
+    // any more, and shared-poll treats a stream that never delivers exactly like
+    // a broken one. So a CONVERSATION NOBODY IS TYPING IN, which is the normal
+    // state of a DM thread, fell back to reading the newest 15 messages twelve
+    // times a minute for nothing. 30s is the price of a stream that stays
+    // silent: cheap enough to be unnoticeable while typing (a real message
+    // arrives by signal, instantly), bounded enough not to hammer the server
+    // while the thread just sits there.
+    intervalMs: 30000,
+    initialValue: { items: [], hasMore: false },
     onError: (err) => console.error('[subscribeToDmMessages err]', err),
+    realtime: canReceiveSignals()
+      ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+        () => onDelivered(),
+        () => onDead(),
+        // Without this an open conversation nobody is typing in gives up on
+        // realtime after ten seconds of silence — the reported failure.
+        onStateChange,
+      )
+      : null,
   });
 
-  return poll.subscribe((items, err) => {
+  dmMessagePolls.set(conversationId, poll);
+
+  return poll.subscribe((payload, err) => {
     if (err && errorCallback) errorCallback(err);
-    callback(items);
+    const data = payload || { items: [], hasMore: false };
+    if (onHasMore) onHasMore(data.hasMore);
+    callback(data.items);
   });
 };
 
@@ -220,6 +348,67 @@ export const sendDmMessage = async (conversationId, _senderUid, text, _recipient
   });
 };
 
+// ── The correspondent ──────────────────────────────────────────────────────────
+//
+// The MINIMUM a conversation needs about the person on the other side: a
+// nickname, an avatar, and whether the account may still be written to.
+//
+// It used to be `subscribeToUser`, which is the profile PAGE — bio, birthday,
+// occupation, contacts, counters, and the member's `settings` object. Two
+// effects in DirectMessages called it (one for the header, one for the composer
+// lock), so opening a thread issued the same heavy read twice, and the payload
+// carried a stranger's private preferences to a component that renders neither.
+//
+// The endpoint behind it is /api/aerun/peers/{id}, which is that subset and
+// nothing more. Shared, like every other read here, so the header and the lock
+// cost ONE request between them instead of one each.
+//
+// It is a shared resource but NOT a realtime one, and the interval is long: a
+// nickname changes when somebody renames themselves, not on a 10-second clock,
+// and a conversation left open all evening must not cost a request every ten
+// seconds to re-read four fields. It re-reads when a DM signal arrives, because
+// a signal is proof something about this account moved.
+export const subscribeToPeerCard = (uid, callback, errorCallback) => {
+  if (!uid) {
+    callback(null);
+    return () => {};
+  }
+
+  const poll = sharedPoll(`dm-peer:${uid}`, {
+    fetch: async () => {
+      const res = await sendApi(`/api/aerun/peers/${encodeURIComponent(uid)}`);
+      return {
+        uid: res?.id || uid,
+        nickname: res?.nickname || '',
+        avatar: res?.avatar || '',
+        avatar_url: res?.avatar_url || '',
+        // The axis that decides the composer. `banned` is an ACCOUNT STATUS, not
+        // a role — normalizeUserProfile says so in as many words, and the old
+        // check here compared it against `role_id`, which is a different column
+        // and never holds that value. So the lock silently never engaged.
+        status: res?.status || 'active',
+      };
+    },
+    intervalMs: 120000,
+    initialValue: null,
+    onError: (err) => console.warn('[subscribeToPeerCard err]', err),
+    realtime: canReceiveSignals()
+      ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+          () => onDelivered(),
+          () => onDead(),
+          // Without this the peer card keeps the old "first event proves the
+          // stream" rule, and an idle conversation abandons a healthy stream.
+          onStateChange,
+        )
+      : null,
+  });
+
+  return poll.subscribe((card, err) => {
+    if (err && errorCallback) errorCallback(err);
+    callback(card);
+  });
+};
+
 /**
  * Edit a message you sent.
  *
@@ -227,14 +416,20 @@ export const sendDmMessage = async (conversationId, _senderUid, text, _recipient
  * wrote, and staff authority over the forum does not extend into private mail.
  * A tombstone answers 409 — there is no text left to correct, and accepting an
  * edit would quietly resurrect a message the sender took back.
+ *
+ * Returns the corrected row, ready to drop into thread state. The sender is not
+ * signalled about their own edit (the signal is addressed to the other side
+ * only), so this response is the ONLY thing that can repaint the bubble — the
+ * alternative was a success toast over unchanged text.
  */
 export const editDmMessage = async (messageId, text) => {
   if (!messageId || !text) return null;
   const { content: processedContent } = processDiceRolls(text);
-  return await sendApi(`/api/aerun/dm-messages/${messageId}`, {
+  const res = await sendApi(`/api/aerun/dm-messages/${messageId}`, {
     method: 'PATCH',
     body: { text: processedContent.trim() }
   });
+  return res?.message ? normalizeDmMessage(res.message) : null;
 };
 
 /**
@@ -243,12 +438,17 @@ export const editDmMessage = async (messageId, text) => {
  * The row survives and keeps its place in the thread, so the other participant
  * still sees that something was said and removed — the opposite of the forum,
  * where a deleted post is simply gone. `messages_count` does not move.
+ *
+ * Returns the tombstone row. Same reasoning as the edit: the author gets no
+ * realtime signal for a change they made themselves, so the response is the
+ * only thing that can replace the bubble on screen.
  */
 export const deleteDmMessage = async (messageId) => {
   if (!messageId) return null;
-  return await sendApi(`/api/aerun/dm-messages/${messageId}`, {
+  const res = await sendApi(`/api/aerun/dm-messages/${messageId}`, {
     method: 'DELETE'
   });
+  return res?.message ? normalizeDmMessage(res.message) : null;
 };
 
 /**

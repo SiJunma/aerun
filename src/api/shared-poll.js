@@ -94,17 +94,29 @@ const tabIsHidden = () =>
 // through /api/aerun, where authorization already lives.
 //
 // The contract this module now implements:
-//   realtime established  → no interval at all
-//   not established within the grace window → the interval starts
-//   dropped after being healthy → the interval resumes, and closes again if
-//     realtime returns
+//   realtime CONNECTED     → no interval at all
+//   connection not made in the grace window → the interval starts
+//   dropped after being connected → the interval resumes, and closes again if
+//     realtime comes back
 //
-// "Healthy" means DELIVERED, never connected. A stream that opens and stays
-// silent is the failure this whole file used to guard against, so the grace
-// window is a timeout on the FIRST EVENT, and a connected-but-silent stream
-// degrades to polling exactly like a dead one.
-
-// REALTIME_GRACE_MS is how long a hook has to produce its FIRST event before
+// "Healthy" means CONNECTED, not delivered. It used to mean delivered, on the
+// reasoning that a stream which opens and stays silent is the dead-stream failure
+// this file spent years guarding against — a real failure back when every
+// collection the forum read had a nil ListRule, so a subscription completed the
+// handshake and then had every event refused.
+//
+// That no longer describes the signal table, whose audience rule works and whose
+// delivery is covered by TestDMPostSignalReachesOnlyItsRecipient. Requiring an
+// event was what produced "realtime keeps dying": an idle DM thread emits nothing
+// for minutes, so a perfectly healthy stream was declared broken after ten
+// seconds and every member was pushed onto their poll interval permanently. The
+// stream stayed open the whole time. Nobody ever saw a benefit from it again.
+//
+// The delivery check is not deleted, it is demoted: an event still proves the
+// stream carries, which is what makes shared-poll drop the interval — it just no
+// longer has to arrive first.
+//
+// REALTIME_GRACE_MS is how long a hook has to establish its connection before
 // the interval takes over.
 //
 // Long enough that a healthy stream on a slow phone connection is not declared
@@ -119,18 +131,24 @@ export { REALTIME_GRACE_MS };
 
 /**
  * Wraps a realtime hook so the resource learns whether the stream is actually
- * carrying anything, and can be told when it stops.
+ * connected, and can be told when it stops.
  *
- * The hook is called with two callbacks rather than returning a transport
+ * The hook is called with three callbacks rather than returning a transport
  * object, because the two sides of the contract are asymmetric: the consumer
- * answers "here is an event", and the wrapper answers "here is your stream, and
- * report its death". Returning the unsubscribe from the hook keeps the caller
- * from having to hold on to the stream itself.
+ * answers "here is an event" and "here is the connection state", and the wrapper
+ * answers "here is your stream, and report its death". Returning the unsubscribe
+ * from the hook keeps the caller from having to hold on to the stream itself.
  *
- * `onDead` is called at most once per established stream, so a reconnect
- * storm cannot turn into a storm of interval restarts.
+ * `onDelivered` (an event arrived) and `onStateChange(true)` (the connection is
+ * up) are NOT the same signal and both are honoured: the connection is what
+ * marks the stream healthy, the event is what proves it carries. A hook written
+ * before `onStateChange` existed simply never calls it, and still works — it just
+ * keeps the stricter "first event" rule for its own resources.
+ *
+ * `onDead` is called at most once per established stream, so a reconnect storm
+ * cannot turn into a storm of interval restarts.
  */
-const bindRealtimeHook = (hook, { onDelivered, onDead }) => {
+const bindRealtimeHook = (hook, { onDelivered, onConnected, onDead }) => {
   let delivered = false;
   let stopped = false;
 
@@ -138,9 +156,26 @@ const bindRealtimeHook = (hook, { onDelivered, onDead }) => {
     delivered = true;
     onDelivered();
   }, () => {
+    // Only fires for a hook that never learned to report its connection state,
+    // where "dropped" can only mean "never arrived".
     if (stopped || delivered) return;
     stopped = true;
     onDead();
+  }, (connected) => {
+    // A drop must be reported even when events had already arrived, which is the
+    // whole point: the member's stream can die mid-conversation, and the fallback
+    // has to come back for that, not only for a stream that never worked. The SDK
+    // reconnects on its own, so `connected` arriving again after a drop has to
+    // lift the flag — gating this on "never delivered" is what pinned the
+    // resource to polling for the rest of the session.
+    //
+    // No dedupe guard here on purpose: `report()` in realtime-signals already
+    // emits only on TRANSITIONS, so the wrapper cannot be asked to ignore a
+    // reconnect. A guard written once ("don't repeat what I just said") is
+    // exactly what swallowed the reconnect.
+    stopped = !connected;
+    if (connected) onConnected();
+    else if (!delivered) onDead();
   });
 
   return {
@@ -288,10 +323,18 @@ export const createSharedPoll = ({
       setTransport('connecting');
       realtimeBinding = bindRealtimeHook(realtime, {
         name,
+        // Connected: the stream is up and able to deliver, so the interval is not
+        // merely paused but REMOVED — running both is how a "realtime" feature
+        // ends up costing exactly what it was supposed to save. No event has to
+        // have arrived for this to happen, which is the whole fix.
+        onConnected: () => {
+          stopTimer();
+          setTransport('realtime');
+          // Catch up now. Everything that changed while this resource believed it
+          // had no realtime was never fetched.
+          requestRefresh();
+        },
         onDelivered: () => {
-          // First event: the stream is real. The interval is not merely paused,
-          // it is REMOVED — running both is how a "realtime" feature ends up
-          // costing exactly what it was supposed to save.
           stopTimer();
           setTransport('realtime');
           // …and this is the half that makes the signal worth having: the event
@@ -303,22 +346,21 @@ export const createSharedPoll = ({
           requestRefresh();
         },
         onDead: () => {
-          // Dropped before it ever carried anything, i.e. the silent stream this
-          // module spent years refusing to start.
+          // Either a subscription that never connected, or one that dropped
+          // mid-session. Both cost the interval.
           stopTimer();
           setTransport('polling');
           startTimer();
           // Catch up NOW rather than at the next tick. Whatever changed while
-          // the stream was believed to be healthy was never fetched, and a
+          // the stream was believed to be connected was never fetched, and a
           // member who has just lost realtime is exactly the member who cannot
           // afford to wait for a poll to notice.
           requestRefresh();
         },
       });
-      // The grace window is a timeout on the FIRST EVENT, not on the connection.
-      // A stream that opens and stays silent is exactly the failure being
-      // designed out, so it must fall back on exactly the same terms as a dead
-      // one.
+      // The grace window is a timeout on the CONNECTION, not on the first event.
+      // A stream that never opens is exactly the failure being designed out, so
+      // it must fall back on exactly the same terms as a dead one.
       graceTimer = setTimeout(() => {
         graceTimer = null;
         if (running && transport === 'connecting') {

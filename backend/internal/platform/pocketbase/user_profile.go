@@ -113,6 +113,48 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 	})
 }
 
+// getPeerCardHandler serves GET /api/aerun/peers/{id}.
+//
+// THE MINIMUM A CONVERSATION NEEDS, and nothing else.
+//
+// The DM thread used to answer two questions about the person on the other side
+// — what to call them, and may I still write to them — by reading the FULL
+// profile DTO, twice, for the same account. That route is a profile PAGE: it
+// carries bio, birthday, occupation, interests, contacts, three counters, the
+// registration day and a `settings` object. A chat header renders a nickname and
+// an avatar. The composer renders one boolean.
+//
+// So every thread open pulled a member's private preferences — sound volume,
+// muted notification types, mail preferences, theme, language — into a component
+// that displays none of them. The DTO already narrows `settings` to three keys
+// for anyone but the owner, so this was never a stranger's settings on purpose.
+// But this is not a profile page at all, and asking it a question it does not
+// need is exactly how a payload grows a field nobody chose to send.
+//
+// Visibility matches getUserProfileHandler: the account must exist, and a ban
+// restricts what an account may DO, not what others may see of it. `status`
+// rides along precisely so the composer can disable itself.
+func getPeerCardHandler(e *core.RequestEvent) error {
+	id := strings.TrimSpace(e.Request.PathValue("id"))
+	if id == "" {
+		return validationError("peer identifier is required")
+	}
+
+	record, err := e.App.FindRecordById(usersCollectionName, id)
+	if err != nil || record == nil {
+		return notFoundError("user not found")
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"id":         record.Id,
+		"nickname":   record.GetString("nickname"),
+		"avatar":     record.GetString("avatar"),
+		"avatar_url": record.GetString("avatar_url"),
+		"status":     record.GetString("status"),
+		"request_id": requestIDFrom(e),
+	})
+}
+
 // registrationDay reduces an account's creation instant to a UTC calendar day.
 //
 // MIDNIGHT UTC IS DELIBERATE, and the direction is the point. Every consumer

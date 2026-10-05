@@ -8,7 +8,7 @@ import { playNotificationSound } from '../utils/notificationSound';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import ForumCharacterBadge from '../components/common/ForumCharacterBadge';
-import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
+import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter, uploadCharacterAvatar } from '../api/character';
 import { checkNicknameExists, fetchUserPosts } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -346,16 +346,50 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
     setShowModal(true);
   };
 
+  // A character avatar is addressed by character id, so an existing character
+  // uploads on the spot. A brand-new one has no id until Save creates it, so the
+  // bytes are parked and sent right after — picking a file while ADDING a
+  // character would otherwise look like it worked and change nothing.
+  const [pendingCharAvatar, setPendingCharAvatar] = useState(null);
+
+  const handleCharacterAvatarUpload = async (charId, blob, filename) => {
+    try {
+      if (!charId) {
+        // Park it; handleSaveCharacter flushes once the row exists. The preview
+        // is built here so the user sees their pick immediately, but it is a
+        // local object URL and is never written into formData.avatar_url — that
+        // column is a 512-char text field and a data URL could not be saved.
+        setPendingCharAvatar({ blob, filename });
+        return URL.createObjectURL(blob);
+      }
+      const url = await uploadCharacterAvatar(charId, blob);
+      setPendingCharAvatar(null);
+      return url;
+    } catch (err) {
+      console.error('[characterAvatar]', err);
+      showToast(lang === 'ru' ? 'Не удалось загрузить аватар' : 'Failed to upload avatar', 'danger');
+      throw err;
+    }
+  };
+
   const handleSaveCharacter = async () => {
     if (!formData.name) return;
     recordActivity();
     // Close modal first to avoid "stuck" transitions when subscription updates fire
     setShowModal(false);
     try {
+      let savedId = editingChar?.id;
       if (editingChar) {
         await updateCharacter(uid, editingChar.id, formData);
       } else {
-        await addCharacter(uid, formData);
+        savedId = await addCharacter(uid, formData);
+      }
+      // The file was chosen before this row had an id, so it goes now. Failing
+      // here is not a save failure: the character itself is already stored.
+      if (pendingCharAvatar) {
+        const { blob, filename } = pendingCharAvatar;
+        setPendingCharAvatar(null);
+        await uploadCharacterAvatar(savedId, filename ? new File([blob], filename, { type: blob.type }) : blob);
       }
       scheduleForumStateRefresh();
     } catch (err) {
@@ -1847,12 +1881,12 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
             value={formData.avatar_url}
             allowGifs={settings?.allowGifAvatars !== false}
             onChange={(url) => setFormData({ ...formData, avatar_url: url })}
-            // No onUpload: a character avatar has nowhere to be stored yet.
-            // The `characters` collection is server-only (all browser rules
-            // are nil) and has no command layer, so there is no endpoint to
-            // send bytes to — the control stays visible but refuses clearly
-            // instead of producing a data URL that could never be saved.
-            canUpload={false}
+            // PUT /characters/{id}/avatar is addressed by character id, so an
+            // existing character uploads straight away. A NEW one has no id
+            // until Save creates it, so the file is held here and flushed in
+            // handleSaveCharacter — otherwise picking an image while adding a
+            // character would silently do nothing.
+            onUpload={(blob, filename) => handleCharacterAvatarUpload(editingChar?.id, blob, filename)}
             storagePath={`users/${uid}/characters/avatar`}
             size={100}
           />

@@ -20,7 +20,6 @@ import {
   removeRtdbGuestPresence
 } from '../api/rtdb-presence';
 import { subscribeToUnreadCounts } from '../api/dms';
-import { clearAllDmCache } from '../api/dm-cache';
 import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -440,7 +439,9 @@ export const AuthProvider = ({ children }) => {
     if (uid && !skipPresenceCleanup) {
       await setRtdbOffline(uid, true);
     }
-    clearAllDmCache();
+    // No cache to wipe here any more. The DM local cache existed so one member's
+    // private messages could not be read by the next person to sign in on this
+    // browser; with it gone, sign-out leaves nothing of the conversation behind.
     pb.authStore.clear();
     syncUserFromAuthStore();
   }, [user?.uid, syncUserFromAuthStore]);
