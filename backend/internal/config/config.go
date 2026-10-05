@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/mail"
 	"net/url"
 	"strconv"
 	"strings"
@@ -20,6 +21,25 @@ type Config struct {
 	EncryptionKeySet bool
 	// MailMode defines email delivery mode: "disabled" (explicit no-SMTP) or "smtp".
 	MailMode string
+	// SMTPHost, SMTPPort, SMTPUsername, SMTPPassword and SMTPAuthMethod are the
+	// relay credentials. They are only read when MailMode is "smtp", and the
+	// password is never logged or returned by any accessor — like the Google
+	// secret it lives in the settings JSON inside pb_data (gitignored).
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	// SMTPAuthMethod is the SMTP AUTH mechanism: "PLAIN" (default) or "LOGIN".
+	// A few relays — Gmail among them — reject PLAIN and require LOGIN.
+	SMTPAuthMethod string
+	// SMTPTLS requests a TLS connection to the relay. Almost every provider
+	// needs it; disabling it sends credentials in the clear.
+	SMTPTLS bool
+	// MailSenderName and MailSenderAddress set the From header for every
+	// outgoing message. The address must be one the relay is allowed to send
+	// from, otherwise SPF/DKIM alignment fails and the mail is rejected.
+	MailSenderName    string
+	MailSenderAddress string
 	// GoogleClientID and GoogleClientSecret configure the optional Google login
 	// on the users collection (both or neither, enforced by Validate). The
 	// values are never logged; once the provider is enabled they end up in the
@@ -41,6 +61,16 @@ func Validate(cfg Config, get func(string) string) error {
 	mailMode := value("AERUN_MAIL_MODE", "disabled", get)
 	if mailMode != "disabled" && mailMode != "smtp" {
 		return fmt.Errorf("AERUN_MAIL_MODE must be \"disabled\" or \"smtp\"")
+	}
+	// With the mode switch alone, "smtp" would start a relay-less mailer: the
+	// process would report email as configured while every send failed, and the
+	// failure surfaces only as a bounced verification link. The relay identity is
+	// therefore mandatory in this mode — a half-configured relay is a startup
+	// error, not a degraded feature.
+	if mailMode == "smtp" {
+		if err := validateSMTP(cfg); err != nil {
+			return err
+		}
 	}
 	if (cfg.GoogleClientID == "") != (cfg.GoogleClientSecret == "") {
 		return fmt.Errorf("AERUN_GOOGLE_CLIENT_ID and AERUN_GOOGLE_CLIENT_SECRET must be provided together")
@@ -99,6 +129,27 @@ func Load(get func(string) string) (Config, error) {
 		PublicURL:   value("AERUN_PUBLIC_URL", "http://127.0.0.1:8090"),
 		MailMode:    value("AERUN_MAIL_MODE", "disabled"),
 	}
+	// SMTP relay settings. PLAIN is PocketBase's own default when the field is
+	// empty (core.SMTPConfig.Validate documents the fallback), so an unset
+	// AERUN_SMTP_AUTH_METHOD must still pass validateSMTP.
+	cfg.SMTPHost = strings.TrimSpace(get("AERUN_SMTP_HOST"))
+	cfg.SMTPAuthMethod = value("AERUN_SMTP_AUTH_METHOD", "PLAIN")
+	cfg.MailSenderAddress = strings.TrimSpace(get("AERUN_MAIL_SENDER_ADDRESS"))
+	cfg.MailSenderName = value("AERUN_MAIL_SENDER_NAME", "Aerun")
+	if portRaw := strings.TrimSpace(get("AERUN_SMTP_PORT")); portRaw != "" {
+		// A non-numeric port is a configuration error, not a default: silently
+		// falling back would leave the process talking to port 0.
+		p, convErr := strconv.Atoi(portRaw)
+		if convErr != nil {
+			return cfg, fmt.Errorf("AERUN_SMTP_PORT must be a number")
+		}
+		cfg.SMTPPort = p
+	}
+	if strings.EqualFold(strings.TrimSpace(get("AERUN_SMTP_TLS")), "true") {
+		cfg.SMTPTLS = true
+	}
+	cfg.SMTPUsername = strings.TrimSpace(get("AERUN_SMTP_USERNAME"))
+	cfg.SMTPPassword = get("AERUN_SMTP_PASSWORD")
 	// Optional Google login credentials: an empty pair keeps the provider off
 	// (password login unaffected); a half pair fails validation in Validate.
 	cfg.GoogleClientID = strings.TrimSpace(get("AERUN_GOOGLE_CLIENT_ID"))
@@ -121,6 +172,40 @@ func Load(get func(string) string) (Config, error) {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// validateSMTP checks the relay configuration for MailMode="smtp".
+//
+// Every field here is one PocketBase itself refuses to accept as SMTP.Enabled
+// (core.SMTPConfig.Validate) or one whose absence silently produces a broken
+// message: an unset Host or a zero Port fails settings validation at save time,
+// and a malformed sender address makes every message bounce. Checking them at
+// startup turns a runtime misconfiguration into a refusal to boot.
+func validateSMTP(cfg Config) error {
+	if cfg.SMTPHost == "" {
+		return fmt.Errorf("AERUN_SMTP_HOST is required when AERUN_MAIL_MODE=smtp")
+	}
+	if cfg.SMTPPort < 1 || cfg.SMTPPort > 65535 {
+		return fmt.Errorf("AERUN_SMTP_PORT must be a port from 1 to 65535")
+	}
+	// A relay that needs no auth is unusual but legitimate (a local relay on the
+	// same host, e.g. a smarthost on localhost), so only the half-pair is an
+	// error — that is always a truncated secret rather than a deliberate choice.
+	if (cfg.SMTPUsername == "") != (cfg.SMTPPassword == "") {
+		return fmt.Errorf("AERUN_SMTP_USERNAME and AERUN_SMTP_PASSWORD must be provided together")
+	}
+	switch strings.ToUpper(cfg.SMTPAuthMethod) {
+	case "PLAIN", "LOGIN":
+	default:
+		return fmt.Errorf("AERUN_SMTP_AUTH_METHOD must be \"PLAIN\" or \"LOGIN\"")
+	}
+	if cfg.MailSenderAddress == "" {
+		return fmt.Errorf("AERUN_MAIL_SENDER_ADDRESS is required when AERUN_MAIL_MODE=smtp")
+	}
+	if _, err := mail.ParseAddress(cfg.MailSenderAddress); err != nil {
+		return fmt.Errorf("AERUN_MAIL_SENDER_ADDRESS must be a valid email address")
+	}
+	return nil
 }
 
 func value(key, fallback string, get func(string) string) string {

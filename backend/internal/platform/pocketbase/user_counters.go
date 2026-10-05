@@ -326,10 +326,10 @@ func sumVotes(app core.App) (map[string]int, error) {
 	// The rows are kept, not deleted, so un-deleting the topic restores the
 	// reputation on the next recompute. See purgeTopicResidue for why.
 	if err := app.DB().NewQuery(
-		"SELECT target_id, SUM(value) AS total FROM "+reputationVotesCollectionName+
-			" WHERE post_id = '' OR post_id IN ("+
-			"SELECT id FROM posts WHERE deleted = false"+
-			" AND topic_id IN (SELECT id FROM topics WHERE deleted = false))"+
+		"SELECT target_id, SUM(value) AS total FROM " + reputationVotesCollectionName +
+			" WHERE post_id = '' OR post_id IN (" +
+			"SELECT id FROM posts WHERE deleted = false" +
+			" AND topic_id IN (SELECT id FROM topics WHERE deleted = false))" +
 			" GROUP BY target_id",
 	).All(&rows); err != nil {
 		return nil, err

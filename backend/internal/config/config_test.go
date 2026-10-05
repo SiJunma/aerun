@@ -48,9 +48,23 @@ func TestLoadMailModes(t *testing.T) {
 		t.Fatalf("expected disabled mail mode, got %q", cfgDisabled.MailMode)
 	}
 
-	cfgSMTP, err := Load(envGetter(map[string]string{"AERUN_MAIL_MODE": "smtp"}))
+	// "smtp" alone is NOT enough to boot any more: it used to load here, and the
+	// process then ignored the mode entirely, which is why no mail ever left the
+	// box. A relayless "smtp" is refused at startup now — see
+	// TestLoadSMTPModeRequiresARelay; the success case lives in
+	// TestLoadSMTPModeAcceptsACompleteRelay.
+	if _, err := Load(envGetter(map[string]string{"AERUN_MAIL_MODE": "smtp"})); err == nil {
+		t.Fatal("smtp mail mode without a relay must be rejected, got nil")
+	}
+
+	cfgSMTP, err := Load(envGetter(map[string]string{
+		"AERUN_MAIL_MODE":           "smtp",
+		"AERUN_SMTP_HOST":           "smtp-relay.example.com",
+		"AERUN_SMTP_PORT":           "587",
+		"AERUN_MAIL_SENDER_ADDRESS": "no-reply@aerun.example",
+	}))
 	if err != nil {
-		t.Fatalf("smtp mail mode must load: %v", err)
+		t.Fatalf("a complete smtp mail mode must load: %v", err)
 	}
 	if cfgSMTP.MailMode != "smtp" {
 		t.Fatalf("expected smtp mail mode, got %q", cfgSMTP.MailMode)

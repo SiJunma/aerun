@@ -72,27 +72,63 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := configureOAuth2(se.App, cfg); err != nil {
 			return err
 		}
+		// Same reasoning for mail: the relay is environment state, and this hook
+		// runs after apis.Serve applied RunAllMigrations, so a relay supplied or
+		// rotated after the first boot takes effect without a new migration. It
+		// must also run before registerRoutes' traffic reaches the auth handlers
+		// and before the outbox cron's first tick.
+		if err := configureSMTP(se.App, cfg); err != nil {
+			return err
+		}
+		// Same reasoning for the auth mail templates: they are deployment content
+		// on the users collection, not schema, so they reconcile on every boot
+		// rather than freezing at whatever a migration found.
+		if err := configureAuthTemplates(se.App, cfg); err != nil {
+			return err
+		}
 		registerRoutes(se, cfg)
 		return se.Next()
 	})
 
 	// Sprint 2 mail guardrail: intercept every outgoing email at the app
 	// hook level before an SMTP connection or sendmail exec can happen.
-	pb.OnMailerSend().BindFunc(MailHardDisableGuard())
+	//
+	// Bound ONLY in the disabled mode. It was unconditional until Sprint 8,
+	// which is why a configured relay could never deliver anything: the guard
+	// returned 503 for every message regardless of AERUN_MAIL_MODE, so
+	// switching the mode to "smtp" changed nothing. In smtp mode there is
+	// nothing to guard against — the operator opted in explicitly, and
+	// config.Validate has already refused to boot on an incomplete relay.
+	if cfg.MailMode != MailModeSMTP {
+		pb.OnMailerSend().BindFunc(MailHardDisableGuard())
+	}
 
 	pb.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
 		if err := e.Next(); err != nil {
 			return err
 		}
+		// The mail settings themselves are owned by configureSMTP in OnServe, which
+		// runs after migrations and therefore also fixes a relay that was rotated
+		// or first supplied after the initial boot. This hook keeps only the
+		// Meta defaults it always owned.
+		//
+		// It no longer forces SMTP.Enabled=false: with the mode in "smtp" that line
+		// silently undid the relay configuration on every restart, which is the
+		// second half of why email could never work. In "disabled" mode
+		// configureSMTP clears the flag anyway, and this hook still resets it
+		// before the first OnServe so nothing can send during startup.
 		settings := pb.Settings()
 		settings.Meta.AppName = "Aerun"
 		settings.Meta.AppURL = cfg.PublicURL
-		settings.Meta.SenderAddress = "no-reply@aerun.invalid"
-		settings.Meta.SenderName = "Aerun"
-		// Defense in depth for the mail hard-disable: even if SMTP settings
-		// were enabled in the dashboard, reset them on every startup. The
-		// OnMailerSend guard above still blocks any send attempt.
-		settings.SMTP.Enabled = false
+		if settings.Meta.SenderAddress == "" {
+			settings.Meta.SenderAddress = "no-reply@aerun.invalid"
+		}
+		if settings.Meta.SenderName == "" {
+			settings.Meta.SenderName = "Aerun"
+		}
+		if cfg.MailMode != MailModeSMTP {
+			settings.SMTP.Enabled = false
+		}
 		return pb.Save(settings)
 	})
 

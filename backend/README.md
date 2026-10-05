@@ -229,7 +229,60 @@ All errors return the machine-readable error contract:
 - `GET /api/aerun/admin/outbox-events` — keyset-paginated outbox events for staff visibility (`view_audit_log` permission: root/admin).
 - `POST /api/aerun/admin/outbox-events/:id/retry` — reset failed outbox event to pending (`view_audit_log` permission).
 
-`AERUN_MAIL_MODE`: supports `disabled` (explicit no-SMTP mode for local development and tests) and `smtp` (production relay). Disabling SMTP permits all forum and DM actions without interruption. Outbox worker processes events with exponential backoff and never re-dispatches already successful events.
+`AERUN_MAIL_MODE`: `disabled` (default; local development and tests) queues
+mail without sending it, and `smtp` enables real delivery. In `smtp` mode a
+complete relay is **mandatory** — the process refuses to start on a missing
+host/port/sender, because a mode that claims email is configured while every
+send fails would surface only as a permanently bounced verification link:
+
+| Variable | Required in `smtp` | Notes |
+|---|---|---|
+| `AERUN_SMTP_HOST` | yes | Relay hostname. |
+| `AERUN_SMTP_PORT` | yes | 1–65535; must parse as a number. |
+| `AERUN_SMTP_USERNAME` / `AERUN_SMTP_PASSWORD` | together | Both or neither — a half pair is a truncated secret, not a no-auth relay. |
+| `AERUN_SMTP_AUTH_METHOD` | no | `PLAIN` (default) or `LOGIN`; Gmail's relay requires `LOGIN`. |
+| `AERUN_SMTP_TLS` | no | `true` enables TLS. |
+| `AERUN_MAIL_SENDER_ADDRESS` | yes | The From address. Must be one the relay may send from or SPF/DKIM alignment fails. |
+| `AERUN_MAIL_SENDER_NAME` | no | Defaults to `Aerun`. |
+
+The relay, its credentials and the From identity are reconciled from the
+environment into PocketBase's settings on **every startup** (`configureSMTP` in
+`internal/platform/pocketbase/smtp.go`), not by a migration: credentials are
+environment state, and a rotation must not wait for the next schema change. In
+`disabled` mode the same reconcile clears the stored host, username and password,
+so rolling a deployment back does not leave a live relay secret in `pb_data`.
+
+This one switch covers every outgoing path, because all of them go through
+PocketBase's own mailer: verification and password-reset mails
+(`/api/collections/users/request-verification`, `.../request-password-reset`),
+the auth alerts, and the outbox worker that drains notification, DM and topic
+subscription mail once a minute with exponential backoff, never re-dispatching an
+already successful event.
+
+### Email templates
+
+The three auth mails PocketBase owns — **email verification**, **password
+reset** and **email-change confirmation** — are Aerun-branded, not PocketBase's
+English defaults. They are installed on the users collection by
+`configureAuthTemplates` (`internal/platform/pocketbase/mail_templates.go`) on
+every startup, alongside the SMTP reconcile and for the same reason: content is
+deployment state, not schema, so a wording fix must not require a migration and
+a moved domain is recovered by changing `AERUN_PUBLIC_URL` alone.
+
+The design is the one already shipped in `functions/email.js` (the Firebase
+era): the same slate palette, the same `.btn` and `.highlight-box` classes, so
+the mail a member receives does not change design when the backend moves. The
+bodies are HTML fragments rather than whole documents, because PocketBase wraps
+them in its own layout and sends `multipart/alternative` — a full
+`<html>` document here would nest inside that layout.
+
+The links point at PocketBase's own confirm routes (`{APP_URL}/_/#/auth/
+confirm-verification/{TOKEN}` and friends), built from the validated
+`AERUN_PUBLIC_URL` with any trailing slash stripped.
+
+Disabling SMTP permits all forum and DM actions without interruption: the outbox
+worker returns before it even looks at the queue, so events stay `pending` and
+untouched rather than being marked `failed`.
 
 
 ## Full migration runbook (Firebase -> PocketBase)
@@ -487,7 +540,14 @@ any bulk content import.
 
 ## Current limitations
 
-- Email delivery is deliberately disabled (`AERUN_MAIL_MODE=disabled`).
+- Outgoing email is off by default (`AERUN_MAIL_MODE=disabled`) and enabled by
+  configuring a relay; see the `AERUN_MAIL_MODE` section above. One caveat before
+  turning it on: the relay password is stored inside the settings JSON in
+  `pb_data`, so keep `pb_data` out of repositories and shared backups (same
+  caveat as the Google client secret). The auth templates are Aerun-branded, but
+  the **outbox** mails (DM, topic replies) are still the plain-text bodies the Go
+  command layer builds — porting the `functions/email.js` HTML wrappers to them
+  is separate work.
 - Command-line flags (`--http`, `--origins`, `--dir`) are intentionally
   rejected; all configuration comes from environment variables. The listener,
   migrations and CORS are wired programmatically through `apis.Serve` (verified

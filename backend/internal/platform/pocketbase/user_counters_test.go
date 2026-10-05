@@ -26,7 +26,7 @@ import (
 // seq must be unique per topic: the schema has a UNIQUE(topic_id, sequence)
 // backstop, and a fixture that collided with it would fail for a reason that
 // has nothing to do with counters.
-func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string, seq int, deleted, draft bool) {
+func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string, seq int, deleted, draft bool) *core.Record {
 	t.Helper()
 	col, err := app.FindCollectionByNameOrId(postsCollectionName)
 	if err != nil {
@@ -42,6 +42,7 @@ func seedCounterPost(t testing.TB, app *tests.TestApp, topicID, authorID string,
 	if err := app.Save(rec); err != nil {
 		t.Fatal(err)
 	}
+	return rec
 }
 
 // seedCounterTopic writes one topic row directly.
@@ -189,11 +190,18 @@ func TestRecomputeUserCountersSumsEveryVote(t *testing.T) {
 	// Three post votes for the moderator: the command layer would have added 3.
 	// If the recompute dropped post votes this would come out 0, which is the
 	// bug this test now exists to prevent.
+	//
+	// The votes point at REAL posts, not invented ids: sumVotes excludes a vote
+	// whose post is missing or soft-deleted, so a fabricated post_id would be
+	// filtered out and the test would pass for the wrong reason (it would be
+	// asserting 0 while reporting the failure as "post votes dropped").
+	votedTopic := seedCounterTopic(t, app, fixPlayerID, false)
 	for i, voter := range []string{fixPlayerID, fixModeratorID, fixRootID} {
+		post := seedCounterPost(t, app, votedTopic.Id, fixPlayerID, i+1, false, false)
 		vote := core.NewRecord(col)
 		vote.Set("voter_id", voter)
 		vote.Set("target_id", fixModeratorID)
-		vote.Set("post_id", "postmissing00"+string(rune('1'+i)))
+		vote.Set("post_id", post.Id)
 		vote.Set("value", 1)
 		if err := app.Save(vote); err != nil {
 			t.Fatal(err)
