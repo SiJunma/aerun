@@ -1,6 +1,10 @@
 # Local runtime/data/credentials; paths are relative to backend/.
 .local-run/
-pb_data/
+# `pb_data*/` rather than `pb_data/`, so dated snapshots and the pre-legacy copy
+# are covered too — see the same rule in the repository-root .gitignore. They are
+# the same member database, so "never commit one" has to mean never for all of
+# them.
+pb_data*/
 pb_public/
 .env
 *.exe
