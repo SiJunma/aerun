@@ -1,30 +1,34 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown, Modal } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole, invalidateRolesCache
+  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles
 } from '../api/admin';
-import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categories';
+import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchSecuredCategories, fetchSecuredCategoryGroups } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns } from '../api/designs';
-import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, DEFAULT_ROLES, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS } from '../constants/permissions';
+import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID } from '../constants/permissions';
+import TransferRootModal from '../components/modals/TransferRootModal';
+import { transferRoot } from '../api/admin';
 import Timestamp from '../components/common/Timestamp';
 import { InputGroup } from 'react-bootstrap';
 import ForumModal from '../components/common/ForumModal';
 import {
   UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2,
   Search, Award, Pin, Lock, Settings, MessageSquareOff,
-  Bell, BellOff, ArrowRightLeft, Send, FilePen, User, Palette, Copy, Eye, EyeOff
+  Bell, BellOff, ArrowRightLeft, Send, FilePen, User, Palette, Copy, Eye, EyeOff,
+  Layers, FolderTree, ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
+import { pb } from '../api/pocketbase';
 import DesignsTab from '../components/admin/DesignsTab';
 import { usePageTitle } from '../contexts/TitleProvider';
 
@@ -50,6 +54,20 @@ const AdminPage = () => {
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
+  // The role EDITOR's rows, from GET /admin/roles.
+  //
+  // `roles` from useAuth is the PUBLIC badge registry — role_id, name, rank,
+  // color — because that route is ungated so a signed-out visitor can still render
+  // badges. The editor additionally needs permissions, is_system, base_role_id,
+  // max_characters_limit and the record id, and those are deliberately not
+  // published to everyone. Loaded here, only when this account may manage roles.
+  const [adminRoles, setAdminRoles] = useState([]);
+  // Root handover. Only the account that IS the chief admin sees the button,
+  // and the candidates exclude yourself — the server refuses you as your own
+  // successor, so offering the choice would be a dialog that cannot succeed.
+  const [showTransferRoot, setShowTransferRoot] = useState(false);
+  const [transferring, setTransferring] = useState(false);
+  const isSelfRoot = isChiefAdmin(user?.email, user?.role_id);
   const [userSearch, setUserSearch] = useState('');
   const [designs, setDesigns] = useState([]);
 
@@ -76,6 +94,125 @@ const AdminPage = () => {
   const [editingRole, setEditingRole] = useState(null);
   const [roleForm, setRoleForm] = useState({ name: '', permissions: [], color: 'primary' });
 
+  // ── Form validity ────────────────────────────────────────────────────────
+  //
+  // Every save handler below opened with a bare guard:
+  //
+  //     if (!groupForm.title?.en && !groupForm.title?.ru) return;
+  //
+  // which returns WITHOUT a request and WITHOUT a toast, so clicking Save on an
+  // empty form did nothing at all. The guard was right; it just had no visible
+  // counterpart.
+  //
+  // `.trim()` matters: the old guards compared raw values, so a field holding a
+  // single space passed and became a request the server refused with 400
+  // ("title is required"). Whitespace is not a title.
+  const trimmed = (v) => (typeof v === 'string' ? v.trim() : '');
+
+  // ── Errors are shown only AFTER a submit attempt ─────────────────────────
+  //
+  // Marking a field invalid the moment the modal opens condemns a form nobody
+  // has touched yet: two red inputs and a red sentence greet an admin who was
+  // only going to type a title. Errors must answer "you tried and this was
+  // wrong", not "you have not started".
+  //
+  // This also resolves why Save must NOT be disabled from the start: a disabled
+  // button is unclickable, so it could never surface the errors it hides, and
+  // the original silent no-op would return wearing a disabled style. The button
+  // therefore stays live until the first attempt — clicking it IS the signal —
+  // and only then locks while the form is still invalid.
+  const [groupAttempted, setGroupAttempted] = useState(false);
+  const [catAttempted, setCatAttempted] = useState(false);
+  const [roleAttempted, setRoleAttempted] = useState(false);
+
+  // How many permissions this category currently overrides. Shown as a badge on
+  // the block heading so a category that is NOT inheriting everything says so
+  // at a glance.
+  const overrideCount = Object.values(catForm.permissions || {}).filter(
+    (v) => v !== undefined && v !== null
+  ).length;
+
+  // Refs to the first invalid control of each modal, so a rejected Save can
+  // scroll the offending field into view instead of only greying the button.
+  // The button greying is real feedback but a WEAK one: the admin is left
+  // looking at a footer that changed colour, with the actual cause somewhere
+  // above the fold.
+  const catTitleRef = useRef(null);
+  const catGroupRef = useRef(null);
+  const groupTitleRef = useRef(null);
+  const roleNameRef = useRef(null);
+
+  // The two language inputs are ALTERNATIVES, not a required pair:
+  // api/categories.js pickTitle() sends `ru || en`, so either one suffices.
+  const groupTitleFilled = Boolean(trimmed(groupForm.title?.en) || trimmed(groupForm.title?.ru));
+  const catTitleFilled = Boolean(trimmed(catForm.title?.en) || trimmed(catForm.title?.ru));
+  // The server rejects a category with no group (category_commands.go), and such
+  // a row would be invisible on the forum anyway.
+  const catGroupChosen = Boolean(catForm.group_id);
+  const catDescTooLong = (trimmed(catForm.description?.en).length + trimmed(catForm.description?.ru).length) > 1024;
+  const roleNameFilled = Boolean(trimmed(roleForm.name));
+
+  // One label function for the audit table, the badge, the filter dropdown, the
+  // search box and the details modal — all five read the same label, so they
+  // cannot drift apart.
+  //
+  // `t()` echoes the KEY PATH when a translation is missing (I18nProvider
+  // returns `path` as its last resort), so the `t(...) || action_type` fallback
+  // that used to sit at each call site could never fire: the path is a truthy
+  // string. An untranslated action therefore rendered as
+  // "admin.audit.actions.topic_delete" AND could not be found by the search box,
+  // which matched on that same raw string. Deriving a readable label from the
+  // raw type keeps the row usable the moment the backend adds an action, before
+  // anybody remembers the dictionary.
+  const auditActionLabel = (actionType) => {
+    if (!actionType) return '';
+    const key = `admin.audit.actions.${actionType}`;
+    const label = t(key);
+    return !label || label === key ? actionType.replace(/_/g, ' ') : label;
+  };
+
+  const groupFormValid = groupTitleFilled;
+  const catFormValid = catTitleFilled && catGroupChosen && !catDescTooLong;
+
+  // Visible invalidity — gated on the attempt. These drive isInvalid.
+  const showGroupError = groupAttempted && !groupFormValid;
+  const showCatTitleError = catAttempted && !catTitleFilled;
+  const showCatGroupError = catAttempted && !catGroupChosen;
+  const showCatDescError = catAttempted && catDescTooLong;
+  const showRoleNameError = roleAttempted && !roleNameFilled;
+
+  // The button locks only once the reasons are already on screen; before that it
+  // must stay clickable, or the errors would have no way to appear at all.
+  const groupSaveDisabled = saving || (groupAttempted && !groupFormValid);
+  const catSaveDisabled = saving || (catAttempted && !catFormValid);
+  const roleSaveDisabled = saving || (roleAttempted && !roleNameFilled);
+
+  /**
+   * Bring the first invalid control into view and focus it.
+   *
+   * `scrollIntoView` with `block: 'center'` is used instead of a bare
+   * `focus()`: focusing alone scrolls the modal body but can leave the field
+   * flush against the header, and in this modal the offending field is often
+   * above the fold while the Save button that revealed the problem sits at the
+   * bottom. The two are far apart, so the admin has to hunt for the cause.
+   *
+   * `requestAnimationFrame` defers the call by one frame because the attempt
+   * flag is set in the same click: the isInvalid styling and the feedback
+   * message are not in the DOM yet, and measuring mid-render would scroll to
+   * the wrong offset.
+   */
+  const revealFirstInvalid = (refs) => {
+    requestAnimationFrame(() => {
+      for (const ref of refs) {
+        const el = ref?.current;
+        if (!el) continue;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus({ preventScroll: true });
+        return;
+      }
+    });
+  };
+
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState({ role_id: '' });
@@ -87,6 +224,15 @@ const AdminPage = () => {
     title: '',
     message: ''
   });
+
+  // A delete the SERVER would refuse, caught before the request is made.
+  //
+  // Both rules are referential, not advisory: deleting a group that still holds
+  // categories would leave them pointing at a row that is gone, and the forum
+  // index draws categories only inside a group — so they would silently vanish.
+  // Firing the DELETE and showing the raw 409 body in a toast tells the admin
+  // what happened but not what to DO. This modal names the blockers instead.
+  const [blockedDelete, setBlockedDelete] = useState(null);
 
   // Audit Log State
   const [auditLogs, setAuditLogs] = useState([]);
@@ -114,6 +260,10 @@ const AdminPage = () => {
   }, [hasPermission]);
 
   const canEditRole = useCallback((targetRole) => {
+    // Every role is editable — a system role is the template custom roles are
+    // derived from, so freezing it would freeze everything built on it. The
+    // backend agrees (catalog_roles.go no longer 403s a system role); the two
+    // identity fields it keeps locked are not editable through the UI at all.
     if (isRootAdmin) return true;
     if (targetRole.id === user?.role_id) return false;
     if (!hasPermission(PERMISSIONS.MANAGE_ROLES)) return false;
@@ -203,7 +353,12 @@ const AdminPage = () => {
     });
     const unsubCats = subscribeToAllCategories(setCategories);
     const unsubGroups = subscribeToCategoryGroups(setGroups);
-    const unsubUsers = subscribeToAllUsers(setUsers);
+    // `{ staff: true }` because this screen needs the staff DTO — `status` and
+    // `verified` are served by `GET /api/aerun/admin/users` and by nothing else,
+    // and this is the one caller allowed to ask for it. Without the flag the
+    // public member read would be used here too, and the moderation columns
+    // would render empty.
+    const unsubUsers = subscribeToAllUsers(setUsers, { staff: true });
     const unsubDesigns = subscribeToDesigns(setDesigns);
 
     return () => {
@@ -214,6 +369,41 @@ const AdminPage = () => {
       unsubDesigns();
     };
   }, []);
+
+  // The editor's role rows, loaded only when this account may manage roles.
+  //
+  // Refetched whenever the permission flips rather than once on mount: the public
+  // registry is enough to render badges, so a moderator who gains or loses
+  // `manage_roles` would otherwise see an editor whose rows never arrived, or one
+  // still showing rows the server now refuses.
+  const canManageRoles = hasPermission(PERMISSIONS.MANAGE_ROLES);
+  useEffect(() => {
+    if (!canManageRoles) {
+      setAdminRoles([]);
+      return;
+    }
+    let active = true;
+    fetchAdminRoles()
+      .then(rows => { if (active) setAdminRoles(rows); })
+      .catch(err => {
+        // Reported, not swallowed: an empty role editor looks like "no roles
+        // exist", which is a very different fact from "you may not read them".
+        if (active) console.warn('[AdminPage] admin roles failed to load:', err);
+      });
+    return () => { active = false; };
+  }, [canManageRoles]);
+
+  // After a create/update/delete the editor list is re-read from the admin route.
+  // refreshRoles() only refreshes the PUBLIC registry, which no longer carries the
+  // fields this table renders — so without this the row would visibly not change.
+  const reloadAdminRoles = useCallback(async () => {
+    if (!hasPermission(PERMISSIONS.MANAGE_ROLES)) return;
+    try {
+      setAdminRoles(await fetchAdminRoles());
+    } catch (err) {
+      console.warn('[AdminPage] admin roles reload failed:', err);
+    }
+  }, [hasPermission]);
 
   useEffect(() => {
     if (activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) {
@@ -258,6 +448,20 @@ const AdminPage = () => {
   };
 
   const handleOpenCatModal = (cat = null, prefillGroupId = null) => {
+    // Every opening starts from "nothing attempted": a fresh form must not
+    // inherit the red fields of the last one the admin tried and abandoned.
+    setCatAttempted(false);
+
+    // What the form should show for a category that already exists.
+    //
+    // `toCategory` already reports the inherit marker as null, so this needs no
+    // special handling: a category that follows the global role settings arrives
+    // with the override off, and one with an explicit list arrives with it on.
+    // That round trip is exact, which the earlier snapshot could not manage —
+    // a stored list of "every role with view_forum" was indistinguishable from
+    // a deliberate pick of those same roles.
+    const initialPermissions = cat?.permissions || {};
+
     if (cat) {
       setEditingCat(cat.id);
       setCatForm({
@@ -265,19 +469,15 @@ const AdminPage = () => {
         description: typeof cat.description === 'object' ? { ...cat.description } : { en: cat.description, ru: cat.description },
         order: cat.order || 0,
         group_id: cat.group_id || '',
-        permissions: cat.permissions || {}
+        permissions: initialPermissions
       });
     } else {
       setEditingCat(null);
-      // Build a default VIEW_FORUM override that includes all roles with that permission
-      // plus 'guest' so new categories are visible to guests by default
-      const defaultViewRoles = [
-        ...roles
-          .filter(r => r.id !== 'root' && r.permissions?.includes(PERMISSIONS.VIEW_FORUM))
-          .map(r => r.id),
-        'guest'
-      ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
-
+      // A new category starts with the override OFF, so visibility follows the
+      // global role settings (stored as the inherit marker) rather than an
+      // admin's hand-picked list. Seeding it as an explicit override here would
+      // make the form claim the category overrides visibility when it does not,
+      // and the badge would count an override that is not one.
       let initialGroupId = groups[0]?.id || '';
       let initialOrder = categories.length + 1;
 
@@ -298,9 +498,11 @@ const AdminPage = () => {
         description: { en: '', ru: '' },
         order: initialOrder,
         group_id: initialGroupId,
-        permissions: {
-          [PERMISSIONS.VIEW_FORUM]: defaultViewRoles
-        }
+        // No keys at all, so every permission reads as "inherit". An empty
+        // object rather than an explicit empty array: `[]` would mean
+        // root-only (ADR-1) and would render as an override that is switched
+        // ON with no roles ticked — the exact state this bug produced.
+        permissions: {}
       });
     }
     setShowCatModal(true);
@@ -339,16 +541,70 @@ const AdminPage = () => {
     });
   };
 
+  // The admin board keeps its OWN `categories`/`groups` state, fed by one-shot
+  // fetches on mount. `refreshForumState` updates a DIFFERENT list — the one in
+  // AuthProvider that drives the public main page — so calling it after a
+  // mutation left this board rendering the pre-mutation rows until a manual
+  // reload. That is why deleting a category left it sitting there.
+  //
+  // These reload the board's own state from the server, so what the admin sees
+  // is what the server actually holds rather than an optimistic guess.
+  const reloadCategories = async () => {
+    try {
+      setCategories(await fetchSecuredCategories());
+    } catch (err) {
+      console.error('[reloadCategories]', err);
+    }
+  };
+
+  const reloadGroups = async () => {
+    try {
+      // useCache:false — the cache was written before the mutation, and reading
+      // it back would resurrect the deleted row.
+      setGroups(await fetchSecuredCategoryGroups({ useCache: false }));
+    } catch (err) {
+      console.error('[reloadGroups]', err);
+    }
+  };
+
   const handleSaveCategory = async () => {
-    if (!catForm.title?.en && !catForm.title?.ru) return;
+    setCatAttempted(true);
+
+    // Same trimmed guard as handleSaveGroup — see the note there.
+    if (!trimmed(catForm.title?.en) && !trimmed(catForm.title?.ru)) {
+      revealFirstInvalid([catTitleRef]);
+      return;
+    }
+
+    // A category outside every group is INVISIBLE on the forum index, not just
+    // unstyled: the index renders categories only inside a group. Refuse here
+    // rather than let the admin fill in a form that silently produces a category
+    // nobody can reach. The server enforces this too — this is the friendly
+    // version of the same rule.
+    if (!catForm.group_id) {
+      revealFirstInvalid([catGroupRef]);
+      showToast(
+        currentLang === 'ru'
+          ? 'Категория должна принадлежать группе. Сначала создайте группу.'
+          : 'The category must belong to a group. Create a group first.',
+        'danger'
+      );
+      return;
+    }
+
     setSaving(true);
     try {
+      // No role list is computed here any more. "Override off" is stored as the
+      // inherit marker (see INHERIT_ROLES in src/api/categories.js), so the
+      // server resolves visibility from each caller's own view_forum and a role
+      // created later is admitted without anyone re-saving this category.
       if (editingCat) {
-        await updateCategory(editingCat, catForm, user.uid);
+        await updateCategory(editingCat, catForm);
       } else {
-        await addCategory(catForm, user.uid);
+        await addCategory(catForm);
       }
       await refreshForumState?.(true);
+      await reloadCategories();
       showToast(t('admin.categories.toast_saved'), 'success');
       setShowCatModal(false);
     } catch (err) {
@@ -360,6 +616,24 @@ const AdminPage = () => {
   };
 
   const handleDeleteCategory = (id) => {
+    const cat = categories.find(c => c.id === id);
+    const topics = cat?.topics_count || 0;
+
+    // The server refuses while topics still reference the category (ADR-7).
+    // Topics are hard-deleted with their posts, so this is a real loss and the
+    // admin should meet it as a warning with the count, not as a 409 toast.
+    if (topics > 0) {
+      setBlockedDelete({
+        kind: 'category',
+        name: resolveTitle(cat?.title),
+        items: [],
+        summary: currentLang === 'ru'
+          ? `В этой категории ${topics} тем. Перенесите их в другую категорию или удалите — и только потом удаляйте категорию.`
+          : `This category holds ${topics} topics. Move them to another category or delete them first, then delete the category.`
+      });
+      return;
+    }
+
     setConfirmState({
       show: true,
       title: t('admin.categories.confirm_delete_title'),
@@ -368,9 +642,21 @@ const AdminPage = () => {
         try {
           await deleteCategory(id, user.uid);
           await refreshForumState?.(true);
+          await reloadCategories();
           showToast(t('admin.categories.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
+          if (conflictFrom(err)) {
+            setBlockedDelete({
+              kind: 'category',
+              name: resolveTitle(cat?.title),
+              items: [],
+              summary: currentLang === 'ru'
+                ? 'В этой категории появились темы. Перенесите или удалите их, затем удалите категорию.'
+                : 'Topics appeared in this category. Move or delete them, then delete the category.'
+            });
+            return;
+          }
           showToast(t('admin.categories.error_save'), 'danger');
         }
       }
@@ -378,6 +664,7 @@ const AdminPage = () => {
   };
 
   const handleOpenGroupModal = (group = null) => {
+    setGroupAttempted(false);
     if (group) {
       setEditingGroup(group.id);
       setGroupForm({
@@ -392,7 +679,18 @@ const AdminPage = () => {
   };
 
   const handleSaveGroup = async () => {
-    if (!groupForm.title?.en && !groupForm.title?.ru) return;
+    // The click IS the signal that this form should now be judged. After it the
+    // fields go red and the button locks, so the admin sees WHY rather than
+    // wondering whether the click registered at all.
+    setGroupAttempted(true);
+
+    // Defence in depth: the handler can only be reached while the title is
+    // filled (the button locks otherwise), but a stale closure or an Enter
+    // submit must not slip a blank title to the server.
+    if (!trimmed(groupForm.title?.en) && !trimmed(groupForm.title?.ru)) {
+      revealFirstInvalid([groupTitleRef]);
+      return;
+    }
     setSaving(true);
     try {
       if (editingGroup) {
@@ -401,6 +699,7 @@ const AdminPage = () => {
         await addCategoryGroup(groupForm, user.uid);
       }
       await refreshForumState?.(true);
+      await reloadGroups();
       showToast(t('admin.categories.toast_saved'), 'success');
       setShowGroupModal(false);
     } catch (err) {
@@ -411,7 +710,38 @@ const AdminPage = () => {
     }
   };
 
-  const handleDeleteGroup = (id) => {
+  // Titles are either a legacy {en, ru} map or a plain string depending on which
+// code path produced the record, so every render site handles both. The blocked
+// -delete modal needs the same rule and must not invent a third spelling.
+const resolveTitle = (title) => (typeof title === 'object' && title !== null
+  ? (title[currentLang] || title.en || title.ru || '')
+  : (title || ''));
+
+// A 409 means the server found a blocker our local copy did not know about —
+// this list went stale, or the row changed in another tab. Treat it as the same
+// blocked case rather than dumping the server's English sentence into a toast.
+const conflictFrom = (err) => /conflict/i.test(String(err?.status || err?.code || ''))
+  || /out of this (group|category)/i.test(String(err?.message || ''));
+
+const handleDeleteGroup = (id) => {
+    const group = groups.find(g => g.id === id);
+    const blocking = categories.filter(c => c.group_id === id);
+
+    if (blocking.length > 0) {
+      setBlockedDelete({
+        kind: 'group',
+        name: resolveTitle(group?.title),
+        items: blocking.map(c => ({
+          id: c.id,
+          label: resolveTitle(c.title),
+          meta: currentLang === 'ru'
+            ? `${c.topics_count || 0} тем · ${c.posts_count || 0} сообщ.`
+            : `${c.topics_count || 0} topics · ${c.posts_count || 0} posts`
+        }))
+      });
+      return;
+    }
+
     setConfirmState({
       show: true,
       title: t('common.confirm_title'),
@@ -420,9 +750,20 @@ const AdminPage = () => {
         try {
           await deleteCategoryGroup(id, user.uid);
           await refreshForumState?.(true);
+          await reloadGroups();
           showToast(t('admin.categories.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
+          if (conflictFrom(err)) {
+            setBlockedDelete({
+              kind: 'group',
+              name: resolveTitle(group?.title),
+              items: categories.filter(c => c.group_id === id).map(c => ({
+                id: c.id, label: resolveTitle(c.title), meta: ''
+              }))
+            });
+            return;
+          }
           showToast(t('admin.categories.error_delete'), 'danger');
         }
       }
@@ -448,13 +789,15 @@ const AdminPage = () => {
   };
 
   const handleApproveUser = async (uid) => {
+    const before = users;
+    setUsers(prev => prev.map(u => u.id === uid ? { ...u, status: 'active' } : u));
     try {
-      setUsers(prev => prev.map(u => u.id === uid ? { ...u, role_id: 'player', status: 'active' } : u));
       await approveUser(uid, user.uid);
       showToast(t('admin.users.toast_approved'), 'success');
     } catch (err) {
+      setUsers(before);
       console.error(err);
-      showToast(t('admin.users.error_approve'), 'danger');
+      showToast(err?.message || t('admin.users.error_approve'), 'danger');
     }
   };
 
@@ -464,26 +807,92 @@ const AdminPage = () => {
       title: t('admin.users.confirm_ban_title'),
       message: t('admin.users.confirm_ban_message'),
       onConfirm: async () => {
+        // Optimistic, then reverted if the write fails. Only `status` changes:
+        // the account keeps its role, which is what lets Unban restore it to
+        // where it actually was instead of flattening everyone to Player.
+        const before = users;
+        setUsers(prev => prev.map(u => u.id === uid ? { ...u, status: 'banned' } : u));
         try {
-          setUsers(prev => prev.map(u => u.id === uid ? { ...u, role_id: 'banned', status: 'banned' } : u));
           await banUser(uid, user.uid);
           showToast(t('admin.users.toast_banned'), 'success');
         } catch (err) {
+          setUsers(before);
           console.error(err);
-          showToast(t('admin.users.error_ban'), 'danger');
+          showToast(err?.message || t('admin.users.error_ban'), 'danger');
         }
       }
     });
   };
 
   const handleUnbanUser = async (uid) => {
+    const before = users;
+    setUsers(prev => prev.map(u => u.id === uid ? { ...u, status: 'active' } : u));
     try {
-      setUsers(prev => prev.map(u => u.id === uid ? { ...u, role_id: u.previous_role_id || 'player', status: 'active' } : u));
       await unbanUser(uid, user.uid);
       showToast(t('admin.users.toast_unbanned'), 'success');
     } catch (err) {
+      // Without the revert the row would stay banned in the table after a
+      // failed write, which reads as "the ban half worked".
+      setUsers(before);
       console.error(err);
-      showToast(t('admin.users.error_ban'), 'danger');
+      showToast(err?.message || t('admin.users.error_ban'), 'danger');
+    }
+  };
+
+  // handleReauthForTransfer completes a Google sign-in so the server can accept
+  // it as proof of identity for an account with no usable password.
+  //
+  // authWithOAuth2 REPLACES the session, which is normally what you want but is
+  // a hazard here: if the provider resolves to a DIFFERENT account, the tab
+  // would silently become somebody else — and this dialog is open because the
+  // current session is the chief admin. So the previous session is captured and
+  // restored when the id does not match, and the caller is told rather than
+  // left logged in as a stranger.
+  const handleReauthForTransfer = async () => {
+    const previousToken = pb.authStore.token;
+    const previousRecord = pb.authStore.record;
+    try {
+      const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
+      if (authData?.record?.id !== user?.uid) {
+        pb.authStore.save(previousToken, previousRecord);
+        throw new Error(
+          currentLang === 'ru'
+            ? 'Этот Google-аккаунт не тот, под которым вы вошли. Проверка отменена.'
+            : 'That Google account is not the one you are signed in as. Confirmation cancelled.'
+        );
+      }
+      return authData;
+    } catch (err) {
+      // A failed round trip must not leave a half-changed session behind
+      // either, so the restore runs for every failure, not just a mismatch.
+      if (pb.authStore.record?.id !== user?.uid) {
+        pb.authStore.save(previousToken, previousRecord);
+      }
+      throw err;
+    }
+  };
+
+  const handleTransferRoot = async ({ successorId, password, confirmPhrase }) => {
+    setTransferring(true);
+    try {
+      const res = await transferRoot({ successorId, password, confirmPhrase });
+      showToast(
+        currentLang === 'ru'
+          ? `Роль передана. Новый главный администратор: ${res?.new_root_nickname || ''}`
+          : `Role transferred. New chief admin: ${res?.new_root_nickname || ''}`,
+        'success'
+      );
+      setShowTransferRoot(false);
+      // The caller is now an admin and this page's role assignment is stale —
+      // reload so the badge and the button both change.
+      window.location.reload();
+    } catch (err) {
+      showToast(
+        err?.message || (currentLang === 'ru' ? 'Не удалось передать роль' : 'Failed to transfer the role'),
+        'danger'
+      );
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -528,21 +937,34 @@ const AdminPage = () => {
   };
 
   const handleOpenRoleModal = (role = null) => {
+    setRoleAttempted(false);
     if (role) {
       setEditingRole(role);
       setRoleForm({
         name: role.name,
         permissions: normalizePermissions(role.permissions || []),
         color: role.color || 'primary',
-        base_role_id: role.base_role_id || role.id
+        // `adminRoles`, never `role.id`. normalizeRole maps `id` to the ROLE id,
+        // so the old `role.base_role_id || role.id` fallback resolved to the
+        // role's OWN id and proposed it as its own base — the self-reference the
+        // server rejects, which is what left an imported role stuck and
+        // uneditable. A role with no base genuinely has none.
+        base_role_id: role.base_role_id || ''
       });
     } else {
       setEditingRole(null);
-      const defaultPlayerRole = DEFAULT_ROLES.find(r => r.id === 'player');
+      // adminRoles, NOT `roles` from useAuth(). The public registry is
+      // roleBadgePayload — role_id/name/rank/color and nothing else — so
+      // `roles.find(...).permissions` was always undefined and the form opened
+      // with every checkbox empty instead of pre-filled from the base role. The
+      // same wrong source sat in the base-role dropdown below, so switching base
+      // blanked the list a second time.
+      const defaultPlayerRole = adminRoles.find(r => r.id === 'player');
       setRoleForm({
         name: '',
         permissions: defaultPlayerRole
-          ? defaultPlayerRole.permissions.filter(p => p !== PERMISSIONS.VIEW_MASTER_DICE)
+          ? normalizePermissions(defaultPlayerRole.permissions || [])
+              .filter(p => MAX_ROLE_PERMISSIONS.player?.includes(p))
           : [],
         color: 'primary',
         base_role_id: 'player'
@@ -552,20 +974,42 @@ const AdminPage = () => {
   };
 
   const handleSaveRole = async () => {
-    if (!roleForm.name) return;
+    setRoleAttempted(true);
+    if (!trimmed(roleForm.name)) {
+      revealFirstInvalid([roleNameRef]);
+      return;
+    }
     setSaving(true);
     try {
       if (editingRole) {
-        await updateRole(editingRole.id, roleForm, user.uid);
+        // A system role has NO base by definition, but roleForm.base_role_id
+        // falls back to the role's own id — it has to, because that field also
+        // keys the permission cap below, and for a system role the cap is its
+        // own band. Sending that back would be a self-reference, which the
+        // server rejects with "a system role cannot have a base role".
+        //
+        // So the base is omitted from the payload rather than sent as '': the
+        // handler only touches the column when the key is present, and a
+        // system role must never acquire one however the form is filled in.
+        const { base_role_id: _formBase, ...payload } = roleForm;
+        await updateRole(editingRole.id, editingRole.is_system ? payload : roleForm, user.uid);
       } else {
         await addRole(roleForm, user.uid);
       }
-      invalidateRolesCache(); // Сбрасываем кэш, чтобы свежие роли загрузились при следующем визите
+      // The api layer re-reads the PUBLIC registry and pushes it into AuthProvider,
+      // so every badge repaints. This table reads the admin route, which carries
+      // the permission list and base role the public one no longer publishes, so
+      // it has to be re-read separately or the row would visibly not change.
+      await reloadAdminRoles();
       showToast(t('admin.roles.toast_saved'), 'success');
       setShowRoleModal(false);
     } catch (err) {
       console.error(err);
-      showToast('Error', 'danger');
+      // The server's message is the actionable one — "rank must be between 1 and
+      // 10000", "this role is assigned to 3 account(s) and has no base role to
+      // fall back to". The bare 'Error' this used to show told the admin
+      // nothing except that something had gone wrong.
+      showToast(err?.message || t('common.error'), 'danger');
     } finally {
       setSaving(false);
     }
@@ -579,11 +1023,17 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           await deleteRole(id, isSystem, user.uid);
-          invalidateRolesCache(); // Сбрасываем кэш после удаления
+          // Same as the save path: the public registry no longer carries the fields
+          // this table renders, so the admin list is what has to be re-read.
+          await reloadAdminRoles();
           showToast(t('admin.roles.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
-          showToast(t('admin.roles.error_delete'), 'danger');
+          // A deletion is refused for a reason the admin must act on — a
+          // category still grants the role, or its holders have no base role
+          // to fall back to. Showing the generic 'error_delete' hid which one,
+          // and deleteRole used to swallow the server's message entirely.
+          showToast(err?.message || t('admin.roles.error_delete'), 'danger');
         }
       }
     });
@@ -1026,14 +1476,18 @@ const AdminPage = () => {
                   </div>
                 </td>
                 <td>
-                  {u.role_id !== 'pending' && u.role_id !== 'banned' && <Badge bg="success">{t('admin.users.status_active')}</Badge>}
-                  {u.role_id === 'pending' && <Badge bg="warning" text="dark">{t('admin.users.status_pending')}</Badge>}
-                  {u.role_id === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
+                  {/* The account state lives in `status`, not in the role. The
+                      legacy app encoded it as role_id "banned"/"pending"; the
+                      target contract split them, and reading role_id here meant
+                      a freshly banned account still rendered as Active. */}
+                  {u.status !== 'pending' && u.status !== 'banned' && <Badge bg="success">{t('admin.users.status_active')}</Badge>}
+                  {u.status === 'pending' && <Badge bg="warning" text="dark">{t('admin.users.status_pending')}</Badge>}
+                  {u.status === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
                 </td>
                 <td className="text-end">
                   {!isChiefAdmin(u.email, u.role_id) && (
                     <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
-                      {u.role_id === 'pending' && (
+                      {u.status === 'pending' && (
                         <>
                           {hasPermission(PERMISSIONS.APPROVE_USERS) && (
                             <Button variant="success" size="sm" className="fw-bold text-white text-nowrap" onClick={() => handleApproveUser(u.id)}>
@@ -1047,7 +1501,7 @@ const AdminPage = () => {
                           )}
                         </>
                       )}
-                      {u.role_id !== 'banned' ? (
+                      {u.status !== 'banned' ? (
                         hasPermission(PERMISSIONS.BAN_USERS) && (
                           <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleBanUser(u.id)}>
                             <UserMinus size={14} className="me-1" /> {t('admin.users.ban')}
@@ -1068,7 +1522,23 @@ const AdminPage = () => {
                     </div>
                   )}
                   {isChiefAdmin(u.email, u.role_id) && (
-                    <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>
+                    /* The protected badge sits where the actions would be. For
+                       the CURRENT chief admin it also offers the handover — it is
+                       the one account that can act on it at all. */
+                    <div className="d-flex align-items-center gap-2 justify-content-end flex-wrap">
+                      <Badge bg="secondary" className="opacity-50">{t('admin.users.protected')}</Badge>
+                      {isSelfRoot && (
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          className="text-nowrap"
+                          onClick={() => setShowTransferRoot(true)}
+                        >
+                          <ShieldAlert size={14} className="me-1" />
+                          {currentLang === 'ru' ? 'Передать роль' : 'Transfer role'}
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </td>
               </tr>
@@ -1099,7 +1569,10 @@ const AdminPage = () => {
           <tbody>
             {(() => {
               const ROLE_ORDER = { admin: 1, moderator: 2, player: 3, spectator: 4 };
-              const sortedRoles = [...roles]
+              // adminRoles, not the public `roles`: the sort keys off
+              // `base_role_id` and the system/custom distinction, and neither is
+              // published on the ungated registry any more.
+              const sortedRoles = [...adminRoles]
                 .filter(r => r.id !== 'root')
                 .sort((a, b) => {
                   const rankA = ROLE_ORDER[a.base_role_id || a.id] || 99;
@@ -1147,10 +1620,18 @@ const AdminPage = () => {
                   <td className="text-end">
                     {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
                       <>
-                        <Button variant="link" size="sm" disabled={!canEditRole(role)} onClick={() => handleOpenRoleModal(role)}>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          disabled={!canEditRole(role)}
+                          onClick={() => handleOpenRoleModal(role)}
+                        >
                           {t('admin.roles.edit')}
                         </Button>
-                        {!(role.is_system || ['admin', 'moderator', 'player', 'spectator'].includes(role.id)) && (
+                        {/* System roles are editable but not deletable: they are
+                            the templates, and deleting one would leave every
+                            custom role derived from it pointing at nothing. */}
+                        {!role.is_system && (
                           <Button variant="link" size="sm" disabled={!canEditRole(role)} className={`text-danger ${!canEditRole(role) ? 'opacity-50' : ''}`} onClick={() => handleDeleteRole(role.id, role.is_system)}>
                             {t('admin.roles.delete')}
                           </Button>
@@ -1167,7 +1648,35 @@ const AdminPage = () => {
     </Card>
   );
 
-  const renderCategories = () => (
+  const renderCategories = () => {
+    // A category row is only ever drawn UNDER its group (the loop below walks
+    // groups and filters by group_id), so with zero groups AND zero categories
+    // the table had no rows to show at all — yet it still painted its dark
+    // header, and the "unassigned" block below it invented a "General"
+    // pseudo-group. Both are replaced by one empty state.
+    const showEmptyState = groups.length === 0 && categories.length === 0;
+
+    // Categories whose group_id matches no loaded group. Legacy rows can exist
+    // (the server refuses to CREATE one, but imported data may carry them) and
+    // the forum index hides them, so the admin board needs a section for them.
+    const unassignedCats = categories
+      .filter(c => !groups.find(g => g.id === c.group_id))
+      .sort((a, b) => a.order - b.order);
+    // Drawn ONLY when such rows exist. It used to render whenever there were no
+    // groups at all, which put a "General" heading over an empty table — a
+    // category that does not exist, invented by the UI.
+    const showUnassignedSection = !showEmptyState && unassignedCats.length > 0;
+
+    // Groups exist, but not one category does yet.
+    //
+    // The categories table's header (Order / Title / Stats / Actions) describes
+    // CATEGORY columns, and the only rows it would hold are group separators —
+    // so the header labels nothing and the table looks like a populated list
+    // whose data failed to load. Groups are listed as blocks instead, each with
+    // its own "add a category" call to action.
+    const showGroupScaffold = groups.length > 0 && categories.length === 0;
+
+    return (
     <>
       <Card className="shadow-sm border-0 mb-4">
         <Card.Body className="p-4">
@@ -1179,33 +1688,49 @@ const AdminPage = () => {
               </Button>
             )}
           </div>
-          <Table hover responsive>
-            <thead>
-              <tr>
-                <th style={{ width: '80px' }}>{t('admin.categories.group_order')}</th>
-                <th>{t('admin.categories.group_title_en')}</th>
-                <th>{t('admin.categories.group_title_ru')}</th>
-                <th className="text-end">{t('admin.categories.group_actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map(group => (
-                <tr key={group.id} className="align-middle">
-                  <td>{group.order}</td>
-                  <td>{group.title?.en}</td>
-                  <td>{group.title?.ru}</td>
-                  <td className="text-end">
-                    {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                      <>
-                        <Button variant="link" size="sm" onClick={() => handleOpenGroupModal(group)}>{t('common.edit')}</Button>
-                        <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteGroup(group.id)}>{t('common.delete')}</Button>
-                      </>
-                    )}
-                  </td>
+          {/* An empty <Table> still paints its header row, so a groups table
+              with nothing in it read as a populated table whose content failed
+              to load. Swapping the table for a block removes that. */}
+          {groups.length === 0 ? (
+            <div className="admin-empty-state">
+              <Layers size={40} strokeWidth={1} className="admin-empty-state__icon" />
+              <div className="admin-empty-state__title">{t('admin.categories.groups_empty')}</div>
+              <div className="admin-empty-state__desc">{t('admin.categories.groups_empty_desc')}</div>
+              {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                <Button variant="primary" size="sm" className="mt-2" onClick={() => handleOpenGroupModal()}>
+                  <PlusCircle size={14} className="me-1" /> {t('admin.categories.add_group')}
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Table hover responsive>
+              <thead>
+                <tr>
+                  <th style={{ width: '80px' }}>{t('admin.categories.group_order')}</th>
+                  <th>{t('admin.categories.group_title_en')}</th>
+                  <th>{t('admin.categories.group_title_ru')}</th>
+                  <th className="text-end">{t('admin.categories.group_actions')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {groups.map(group => (
+                  <tr key={group.id} className="align-middle">
+                    <td>{group.order}</td>
+                    <td>{group.title?.en}</td>
+                    <td>{group.title?.ru}</td>
+                    <td className="text-end">
+                      {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                        <>
+                          <Button variant="link" size="sm" onClick={() => handleOpenGroupModal(group)}>{t('common.edit')}</Button>
+                          <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteGroup(group.id)}>{t('common.delete')}</Button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
         </Card.Body>
       </Card>
 
@@ -1214,6 +1739,39 @@ const AdminPage = () => {
           <div className="d-flex justify-content-between mb-4">
             <h5 className="mb-0">{t('admin.categories.title')}</h5>
           </div>
+          {showEmptyState ? (
+            <div className="admin-empty-state">
+              <FolderTree size={40} strokeWidth={1} className="admin-empty-state__icon" />
+              <div className="admin-empty-state__title">{t('admin.categories.empty')}</div>
+              <div className="admin-empty-state__desc">{t('admin.categories.need_group_first')}</div>
+            </div>
+          ) : showGroupScaffold ? (
+            /* No categories yet, so no table: its header names columns that
+               would hold no rows. Each group gets its own block, which keeps the
+               "add a category" action that the table row used to carry. */
+            <div className="admin-group-scaffold">
+              {groups.map(group => (
+                <div key={group.id} className="admin-group-scaffold__row">
+                  <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                    <Badge bg="secondary" className="admin-group-badge">
+                      {t('admin.categories.group_row_label')}
+                    </Badge>
+                    <span className="fw-bold">
+                      {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
+                    </span>
+                  </div>
+                  <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+                    <span className="small text-muted">{t('admin.categories.scaffold_hint')}</span>
+                    {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                      <Button variant="outline-primary" size="sm" className="d-inline-flex align-items-center flex-shrink-0" onClick={() => handleOpenCatModal(null, group.id)}>
+                        <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
           <Table hover responsive>
             <thead>
               <tr>
@@ -1229,8 +1787,19 @@ const AdminPage = () => {
                 return (
                   <React.Fragment key={group.id}>
                     <tr className="table-active">
-                      <td colSpan="3" className="fw-bold align-middle">
-                        {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
+                      {/* The badge is what stops this row from reading as a
+                          category: its name sits in the Title column, bold, in
+                          the same place a category title does — which looked
+                          like the group had been duplicated into a category. */}
+                      <td colSpan="3" className="align-middle">
+                        <div className="d-flex align-items-center gap-2 flex-wrap">
+                          <Badge bg="secondary" className="admin-group-badge">
+                            {t('admin.categories.group_row_label')}
+                          </Badge>
+                          <span className="fw-bold">
+                            {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
+                          </span>
+                        </div>
                       </td>
                       <td className="text-end">
                         {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
@@ -1243,7 +1812,7 @@ const AdminPage = () => {
                     {groupCats.length === 0 ? (
                       <tr>
                         <td colSpan="4" className="text-center text-muted py-3 small">
-                          {currentLang === 'ru' ? 'Нет форумов в этой категории' : 'No forums in this category'}
+                          {t('admin.categories.group_no_forums')}
                         </td>
                       </tr>
                     ) : groupCats.map(cat => (
@@ -1271,30 +1840,38 @@ const AdminPage = () => {
                   </React.Fragment>
                 );
               })}
-              {(() => {
-                const unassignedCats = categories.filter(c => !groups.find(g => g.id === c.group_id)).sort((a, b) => a.order - b.order);
-                if (unassignedCats.length === 0 && groups.length > 0) return null;
-                return (
+              {/* Drawn ONLY when such rows exist. This used to render whenever there were
+                  no groups at all, which put a "General" heading over an empty
+                  table — a category that does not exist, invented by the UI. */}
+              {showUnassignedSection && (
                   <React.Fragment>
                     <tr className="table-active">
                       <td colSpan="3" className="fw-bold text-muted align-middle">
                         {t('admin.categories.group_unassigned')}
                       </td>
                       <td className="text-end">
-                        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                          <Button variant="outline-secondary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, 'unassigned')}>
-                            <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
-                          </Button>
-                        )}
+                        {/* The create button here prefills NO group, and a category with
+                            no group is rejected and would be invisible on the forum. So
+                            it is offered only once a group exists to place the category
+                            into — with zero groups the admin is told to make one instead.
+                            This MUST be a JSX comment: a bare // in JSX children is not a
+                            comment at all, it renders as literal text. Guarded by
+                            scripts/check-jsx-no-line-comments.mjs. */}
+                        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (groups.length > 0 ? (
+                  <Button variant="outline-secondary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, 'unassigned')}>
+                    <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
+                  </Button>
+                ) : (
+                  <span className="text-muted small">{t('admin.categories.need_group_first')}</span>
+                ))}
                       </td>
                     </tr>
-                    {unassignedCats.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="text-center text-muted py-3 small">
-                          {currentLang === 'ru' ? 'Нет нераспределенных форумов' : 'No unassigned forums'}
-                        </td>
-                      </tr>
-                    ) : unassignedCats.map(cat => (
+                    <tr>
+                      <td colSpan="4" className="small text-warning">
+                        {t('admin.categories.unassigned_warning')}
+                      </td>
+                    </tr>
+                    {unassignedCats.map(cat => (
                       <tr key={cat.id} className="align-middle">
                         <td>{cat.order}</td>
                         <td>
@@ -1317,14 +1894,15 @@ const AdminPage = () => {
                       </tr>
                     ))}
                   </React.Fragment>
-                );
-              })()}
+              )}
             </tbody>
           </Table>
+          )}
         </Card.Body>
       </Card>
     </>
-  );
+    );
+  };
 
   const renderAuditLog = () => {
     // Build helper lookup
@@ -1344,7 +1922,7 @@ const AdminPage = () => {
         if (!searchLower) return true;
         const performer = users?.find(u => u.id === log.performer_id);
         const performerName = (performer?.nickname || (isRootAdmin ? performer?.email : '***') || '').toLowerCase();
-        const actionLabel = t(`admin.audit.actions.${log.action_type}`).toLowerCase();
+        const actionLabel = auditActionLabel(log.action_type).toLowerCase();
         const detailValues = Object.values(log.details || {}).map(v => {
           if (typeof v === 'string') return (resolveId(v) || v).toLowerCase();
           return '';
@@ -1356,8 +1934,13 @@ const AdminPage = () => {
       })
       .slice()
       .sort((a, b) => {
-        const ta = a.created_at?.toMillis() ?? 0;
-        const tb = b.created_at?.toMillis() ?? 0;
+        // Numbers, not `a.created_at?.toMillis()`: the payload carries an ISO
+        // string (src/api/audit.js normalizes it), so the Firestore accessor
+        // threw "is not a function" and crashed the entire admin tab. The
+        // `?? 0` keeps an entry with no date sortable instead of NaN-poisoning
+        // the comparator.
+        const ta = a.created_at_ms ?? 0;
+        const tb = b.created_at_ms ?? 0;
         return auditSortDesc ? tb - ta : ta - tb;
       });
 
@@ -1388,7 +1971,7 @@ const AdminPage = () => {
             <Form.Select size="sm" style={{ width: 'auto' }} value={auditActionFilter} onChange={e => { setAuditActionFilter(e.target.value); setAuditPage(1); }}>
               <option value="all">{currentLang === 'ru' ? 'Все действия' : 'All actions'}</option>
               {allActions.map(a => (
-                <option key={a} value={a}>{t(`admin.audit.actions.${a}`) || a}</option>
+                <option key={a} value={a}>{auditActionLabel(a)}</option>
               ))}
             </Form.Select>
             <Button variant="outline-secondary" size="sm" onClick={() => { setAuditSortDesc(p => !p); setAuditPage(1); }} title={auditSortDesc ? 'Oldest first' : 'Newest first'}>
@@ -1414,13 +1997,13 @@ const AdminPage = () => {
                   return (
                     <tr key={log.id} className="align-middle">
                       <td className="text-muted small text-nowrap">
-                        {log.created_at ? <Timestamp date={log.created_at.toDate()} /> : '...'}
+                        {log.created_at ? <Timestamp date={log.created_at} /> : '...'}
                       </td>
                       <td>
                         <div className="fw-bold">{performerName}</div>
                       </td>
                       <td>
-                        <span className="audit-badge">{t(`admin.audit.actions.${log.action_type}`) || log.action_type}</span>
+                        <span className="audit-badge">{auditActionLabel(log.action_type)}</span>
                       </td>
                       <td className="small text-muted" style={{ wordBreak: 'break-word', minWidth: '200px' }}>
                         {log.details && Object.keys(log.details).length > 0 ? (
@@ -1564,7 +2147,7 @@ const AdminPage = () => {
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => setShowRoleModal(false)}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSaveRole} disabled={saving}>
+            <Button variant="primary" onClick={handleSaveRole} disabled={roleSaveDisabled}>
               {saving ? t('admin.settings.saving') : t('admin.roles.save_btn')}
             </Button>
           </>
@@ -1576,11 +2159,16 @@ const AdminPage = () => {
               <Form.Group className="mb-4">
                 <Form.Label className="fw-bold">{t('admin.roles.modal_name')}</Form.Label>
                 <Form.Control
+                  ref={roleNameRef}
                   type="text"
                   placeholder="e.g. Master Moderator"
                   value={roleForm.name}
                   onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
+                  isInvalid={showRoleNameError}
                 />
+                <Form.Control.Feedback type="invalid">
+                  {t('admin.roles.name_required_hint')}
+                </Form.Control.Feedback>
               </Form.Group>
             </Col>
             {!editingRole && (
@@ -1603,11 +2191,21 @@ const AdminPage = () => {
                           key={baseId}
                           active={roleForm.base_role_id === baseId}
                           onClick={() => {
-                            const template = DEFAULT_ROLES.find(r => r.id === baseId);
+                            // The base role's CURRENT permissions come from adminRoles, the one list that
+// actually carries them — see the note in handleOpenRoleModal. Reading the
+// public `roles` here blanked the form a second time on every base change.
+const template = adminRoles.find(r => r.id === baseId);
+                            const allowed = MAX_ROLE_PERMISSIONS[baseId];
                             setRoleForm({
                               ...roleForm,
                               base_role_id: baseId,
-                              permissions: template ? [...template.permissions] : roleForm.permissions
+                              permissions: template
+                                ? normalizePermissions(template.permissions || [])
+                                    // Pre-fill exactly what this base may hold, so a
+                                    // role cannot start life carrying a key its own
+                                    // ceiling forbids — which the save would reject.
+                                    .filter(p => !allowed || allowed.includes(p))
+                                : roleForm.permissions
                             });
                           }}
                         >
@@ -1666,7 +2264,7 @@ const AdminPage = () => {
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => setShowCatModal(false)}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSaveCategory} disabled={saving}>
+            <Button variant="primary" onClick={handleSaveCategory} disabled={catSaveDisabled}>
               {saving ? t('admin.settings.saving') : t('admin.categories.save_btn')}
             </Button>
           </>
@@ -1679,9 +2277,12 @@ const AdminPage = () => {
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">{t('admin.categories.modal_title')} (EN)</Form.Label>
                 <Form.Control
+                  ref={catTitleRef}
                   type="text"
                   value={catForm.title?.en || ''}
                   onChange={(e) => setCatForm({ ...catForm, title: { ...catForm.title, en: e.target.value } })}
+                  isInvalid={showCatTitleError}
+                  maxLength={128}
                 />
               </Form.Group>
             </Col>
@@ -1692,7 +2293,13 @@ const AdminPage = () => {
                   type="text"
                   value={catForm.title?.ru || ''}
                   onChange={(e) => setCatForm({ ...catForm, title: { ...catForm.title, ru: e.target.value } })}
+                  isInvalid={showCatTitleError}
+                  maxLength={128}
                 />
+                {/* See the group modal: either language alone is a valid title. */}
+                <Form.Control.Feedback type="invalid">
+                  {t('admin.categories.title_one_required')}
+                </Form.Control.Feedback>
               </Form.Group>
             </Col>
           </Row>
@@ -1706,7 +2313,11 @@ const AdminPage = () => {
                   rows={2}
                   value={catForm.description?.en || ''}
                   onChange={(e) => setCatForm({ ...catForm, description: { ...catForm.description, en: e.target.value } })}
+                  isInvalid={showCatDescError}
                 />
+                <Form.Control.Feedback type="invalid">
+                  {t('admin.categories.desc_too_long')}
+                </Form.Control.Feedback>
               </Form.Group>
             </Col>
             <Col md={6}>
@@ -1717,7 +2328,11 @@ const AdminPage = () => {
                   rows={2}
                   value={catForm.description?.ru || ''}
                   onChange={(e) => setCatForm({ ...catForm, description: { ...catForm.description, ru: e.target.value } })}
+                  isInvalid={showCatDescError}
                 />
+                <Form.Control.Feedback type="invalid">
+                  {t('admin.categories.desc_too_long')}
+                </Form.Control.Feedback>
               </Form.Group>
             </Col>
           </Row>
@@ -1736,9 +2351,10 @@ const AdminPage = () => {
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">{t('admin.categories.modal_group_select')}</Form.Label>
                 <Form.Select
+                  ref={catGroupRef}
                   value={catForm.group_id}
                   onChange={(e) => setCatForm({ ...catForm, group_id: e.target.value })}
-                  required
+                  isInvalid={showCatGroupError}
                 >
                   <option value="" disabled>{t('admin.categories.modal_group_select')}...</option>
                   {groups.map(g => (
@@ -1747,55 +2363,87 @@ const AdminPage = () => {
                     </option>
                   ))}
                 </Form.Select>
+                {/* The server refuses a category without a group, and the forum
+                    index would never render it — so this is a real requirement,
+                    stated on the field rather than only in a toast after a
+                    click. */}
+                <Form.Control.Feedback type="invalid">
+                  {t('admin.categories.group_required')}
+                </Form.Control.Feedback>
               </Form.Group>
             </Col>
           </Row>
 
           <hr className="my-3" />
-          <h6 className="fw-bold mb-1">{t('admin.categories.modal_perms_title')}</h6>
-          <p className="text-muted small mb-3">{t('admin.categories.modal_perms_hint')}</p>
-          {[
-            { permKey: PERMISSIONS.VIEW_FORUM, label: t('admin.categories.perm_view') },
-            { permKey: PERMISSIONS.CREATE_TOPIC, label: t('admin.categories.perm_create_topic') },
-            { permKey: PERMISSIONS.POST_REPLY, label: t('admin.categories.perm_post_reply') },
-            { permKey: PERMISSIONS.USE_MASKS, label: t('admin.categories.perm_use_masks') },
-            { permKey: PERMISSIONS.USE_DICE, label: t('admin.categories.perm_use_dice') },
-          ].map(({ permKey, label }) => {
-            const isOverridden = catForm.permissions[permKey] !== undefined && catForm.permissions[permKey] !== null;
-            const allowedRoles = isOverridden ? (catForm.permissions[permKey] || []) : [];
-            const displayRoles = roles.filter(r => r.id !== 'root');
-            return (
-              <div key={permKey} className="modal-section-themed p-3 rounded mb-2">
-                <Form.Check
-                  type="switch"
-                  id={`cat-perm-override-${permKey}`}
-                  label={<span className="fw-bold">{label}</span>}
-                  checked={isOverridden}
-                  onChange={() => toggleCatPermOverride(permKey)}
-                  className="mb-2"
-                />
-                {isOverridden && (
-                  <>
-                    <div className="text-muted small mb-2" style={{ marginLeft: '2rem' }}>
-                      {t('admin.categories.perm_allowed_roles')}
+
+          {/* Always visible, at the same level as the rest of the form.
+              This was a collapsible panel once, and hiding it was a mistake:
+              every toggle inside it defaults to OFF, so an admin who never
+              opened it saw a form with no way to tell that permission
+              overrides exist at all — and the collapsed control reported
+              nothing about the state of the category being edited.
+
+              The heading states what the block IS — an override of the global
+              role settings — because "Access Permissions" next to the form's
+              own title fields would otherwise read as if this were where access
+              is configured at all, rather than as the optional exception layer
+              it is. The hint below it repeats the rule in full for the same
+              reason. */}
+          <div className="admin-perm-overrides">
+            <div className="d-flex align-items-center justify-content-between mb-1">
+              <span className="fw-bold">{t('admin.categories.perms_override_toggle')}</span>
+              {overrideCount > 0 && (
+                <Badge bg="warning" text="dark" className="flex-shrink-0">
+                  {overrideCount}
+                </Badge>
+              )}
+            </div>
+            <p className="text-muted small mb-3">{t('admin.categories.modal_perms_hint')}</p>
+            <div id="cat-perm-overrides-panel" className="admin-perm-overrides__panel">
+              {[
+                  { permKey: PERMISSIONS.VIEW_FORUM, label: t('admin.categories.perm_view') },
+                  { permKey: PERMISSIONS.CREATE_TOPIC, label: t('admin.categories.perm_create_topic') },
+                  { permKey: PERMISSIONS.POST_REPLY, label: t('admin.categories.perm_post_reply') },
+                  { permKey: PERMISSIONS.USE_MASKS, label: t('admin.categories.perm_use_masks') },
+                  { permKey: PERMISSIONS.USE_DICE, label: t('admin.categories.perm_use_dice') },
+                ].map(({ permKey, label }) => {
+                  const isOverridden = catForm.permissions[permKey] !== undefined && catForm.permissions[permKey] !== null;
+                  const allowedRoles = isOverridden ? (catForm.permissions[permKey] || []) : [];
+                  const displayRoles = roles.filter(r => r.id !== 'root');
+                  return (
+                    <div key={permKey} className="modal-section-themed p-3 rounded mb-2">
+                      <Form.Check
+                        type="switch"
+                        id={`cat-perm-override-${permKey}`}
+                        label={<span className="fw-bold">{label}</span>}
+                        checked={isOverridden}
+                        onChange={() => toggleCatPermOverride(permKey)}
+                        className="mb-2"
+                      />
+                      {isOverridden && (
+                        <>
+                          <div className="text-muted small mb-2" style={{ marginLeft: '2rem' }}>
+                            {t('admin.categories.perm_allowed_roles')}
+                          </div>
+                          <div className="d-flex flex-column gap-2" style={{ marginLeft: '2rem' }}>
+                            {displayRoles.map(role => (
+                              <Form.Check
+                                key={role.id}
+                                type="checkbox"
+                                id={`cat-perm-${permKey}-${role.id}`}
+                                label={role.name}
+                                checked={allowedRoles.includes(role.id)}
+                                onChange={() => toggleCatPermRole(permKey, role.id)}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <div className="d-flex flex-column gap-2" style={{ marginLeft: '2rem' }}>
-                      {displayRoles.map(role => (
-                        <Form.Check
-                          key={role.id}
-                          type="checkbox"
-                          id={`cat-perm-${permKey}-${role.id}`}
-                          label={role.name}
-                          checked={allowedRoles.includes(role.id)}
-                          onChange={() => toggleCatPermRole(permKey, role.id)}
-                        />
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
+                  );
+                })}
+            </div>
+          </div>
         </Form>
       </ForumModal>
 
@@ -1888,6 +2536,40 @@ const AdminPage = () => {
         message={confirmState.message}
       />
 
+      {/* A delete the server would refuse. Rendered instead of firing a request
+          that can only fail, and it names the blockers so the admin knows what to
+          clear first. No confirm button: there is no valid action to take here. */}
+      <ConfirmModal
+        show={!!blockedDelete}
+        onHide={() => setBlockedDelete(null)}
+        onConfirm={() => {}}
+        hideConfirm
+        confirmText=""
+        cancelText={currentLang === 'ru' ? 'Понятно' : 'Got it'}
+        title={currentLang === 'ru' ? 'Удаление невозможно' : 'Cannot delete'}
+        message={blockedDelete?.summary || (
+          blockedDelete?.kind === 'group'
+            ? (currentLang === 'ru'
+              ? `В группе «${blockedDelete?.name}» ещё есть категории. Удалите их или перенесите в другую группу — после этого группу можно будет удалить.`
+              : `The group “${blockedDelete?.name}” still holds categories. Delete them or move them to another group, then the group can be removed.`)
+            : ''
+        )}
+      >
+        {blockedDelete?.items?.length > 0 && (
+          <ul className="list-unstyled mt-3 mb-0 small">
+            {blockedDelete.items.map(it => (
+              <li
+                key={it.id}
+                className="d-flex justify-content-between gap-3 py-2 border-top"
+              >
+                <span className="fw-semibold">{it.label}</span>
+                {it.meta && <span className="text-muted text-nowrap">{it.meta}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </ConfirmModal>
+
       {/* Audit Log Details Modal */}
       <Modal show={!!selectedAuditLog} onHide={() => setSelectedAuditLog(null)} centered>
         <Modal.Header closeButton>
@@ -1897,10 +2579,10 @@ const AdminPage = () => {
           {selectedAuditLog && (
             <div className="d-flex flex-column gap-3" style={{ wordBreak: 'break-word' }}>
               <div>
-                <strong>{t('admin.audit.table_action')}:</strong> <span className="audit-badge ms-1">{t(`admin.audit.actions.${selectedAuditLog.action_type}`) || selectedAuditLog.action_type}</span>
+                <strong>{t('admin.audit.table_action')}:</strong> <span className="audit-badge ms-1">{auditActionLabel(selectedAuditLog.action_type)}</span>
               </div>
               <div>
-                <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? <Timestamp date={selectedAuditLog.created_at.toDate()} /> : '...'}
+                <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? <Timestamp date={selectedAuditLog.created_at} /> : '...'}
               </div>
 
               <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
@@ -1981,7 +2663,7 @@ const AdminPage = () => {
         footer={
           <>
             <Button variant="outline-secondary" onClick={() => setShowGroupModal(false)}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSaveGroup} disabled={saving}>
+            <Button variant="primary" onClick={handleSaveGroup} disabled={groupSaveDisabled}>
               {saving ? t('admin.settings.saving') : t('common.save')}
             </Button>
           </>
@@ -1993,9 +2675,12 @@ const AdminPage = () => {
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">{t('admin.categories.group_title_en')}</Form.Label>
                 <Form.Control
+                  ref={groupTitleRef}
                   type="text"
                   value={groupForm.title?.en || ''}
                   onChange={(e) => setGroupForm({ ...groupForm, title: { ...groupForm.title, en: e.target.value } })}
+                  isInvalid={showGroupError}
+                  maxLength={128}
                 />
               </Form.Group>
             </Col>
@@ -2006,7 +2691,15 @@ const AdminPage = () => {
                   type="text"
                   value={groupForm.title?.ru || ''}
                   onChange={(e) => setGroupForm({ ...groupForm, title: { ...groupForm.title, ru: e.target.value } })}
+                  isInvalid={showGroupError}
+                  maxLength={128}
                 />
+                {/* Both fields are flagged while NEITHER is filled, because either
+                    one alone is valid. Marking only EN would be a lie about what
+                    the form accepts. */}
+                <Form.Control.Feedback type="invalid">
+                  {t('admin.categories.group_title_one_required')}
+                </Form.Control.Feedback>
               </Form.Group>
             </Col>
           </Row>
@@ -2020,6 +2713,20 @@ const AdminPage = () => {
           </Form.Group>
         </Form>
       </ForumModal>
+
+      {/* The root handover lives with the members table because that is where
+          the protected chief admin already shows up — the button appears on
+          that row, for that account only. */}
+      <TransferRootModal
+        show={showTransferRoot}
+        onHide={() => setShowTransferRoot(false)}
+        candidates={users}
+        onConfirm={handleTransferRoot}
+        busy={transferring}
+        currentNickname={user?.displayName || user?.name || ''}
+        currentUserId={user?.uid || ''}
+        onReauthWithGoogle={handleReauthForTransfer}
+      />
     </Container>
   );
 };

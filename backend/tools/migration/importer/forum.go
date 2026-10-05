@@ -47,7 +47,6 @@ type TopicRow struct {
 	Title      string
 	Locked     bool
 	Pinned     bool
-	Deleted    bool
 	// PostsCount is recomputed from the written posts, never copied.
 	PostsCount int
 	// LastPostID / LastPostCreated / LastPostAuthorID are rebuilt from the real
@@ -75,7 +74,6 @@ type PostRow struct {
 	Sequence int
 	IsDraft  bool
 	Content  string
-	Deleted  bool
 	// Reputation is recomputed from the votes, never copied.
 	Reputation      int
 	EditedAt        string
@@ -170,7 +168,6 @@ func BuildForumPlan(plan *ImportPlan, userExists, categoryExists func(string) bo
 			Title:    strings.TrimSpace(stringField(fields, "title")),
 			Locked:   legacyBoolField(fields, "is_locked"),
 			Pinned:   legacyBoolField(fields, "is_pinned"),
-			Deleted:  legacyBoolField(fields, "is_deleted"),
 			// topics has no `reputation` column at all (see 1766100000), so the
 			// legacy value has nowhere to go. It is not carried into
 			// TopicUpsert any more: the field was being written into a record
@@ -184,6 +181,17 @@ func BuildForumPlan(plan *ImportPlan, userExists, categoryExists func(string) bo
 			// topics.title is Required, so a titleless topic cannot be written.
 			fp.SkippedTopicIDs = append(fp.SkippedTopicIDs, id)
 			fp.note("topic_title_missing", id)
+			continue
+		}
+
+		// A legacy deleted TOPIC is not imported, and neither are its posts: the
+		// target has no tombstone state (1767700000 dropped the `deleted`
+		// column), so importing it would resurrect a thread the forum had already
+		// removed. Reported rather than silently dropped — on the 2026-09-18
+		// snapshot no topic carries is_deleted, so this is currently a no-op.
+		if legacyBoolField(fields, "is_deleted") {
+			fp.SkippedTopicIDs = append(fp.SkippedTopicIDs, id)
+			fp.note("topic_skipped_deleted", id)
 			continue
 		}
 
@@ -273,10 +281,34 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 	})
 
 	var newestVisible string
+	// written counts posts that actually get a row, and it is what `sequence`
+	// comes from. Using the loop index instead would leave a permanent hole for
+	// every post skipped below — a deleted one, or one whose author could not be
+	// resolved. The unresolved-author case deliberately DOES burn a number (the
+	// slot is preserved so a later import cannot renumber around it), which is
+	// why the counter is advanced explicitly in each branch rather than derived
+	// from the index.
+	written := 0
 	for i := range published {
 		p := &published[i]
-		sequence := i + 1
 
+		// A legacy deleted post is NOT imported. Deletion is a hard delete on
+		// this branch (1767700000 dropped the `deleted` column), so there is no
+		// tombstone row to carry over — the post does not exist in the target,
+		// and its number is NOT burned, because a permanent hole in the numbering
+		// would point at a post that is gone from the source too. On the
+		// 2026-09-18 snapshot no post carries is_deleted at all, so this branch is
+		// currently a no-op.
+		if p.deleted {
+			fp.SkippedPostIDs = append(fp.SkippedPostIDs, p.legacyID)
+			fp.note("post_skipped_deleted", p.legacyID)
+			continue
+		}
+
+		// A post whose author did not import keeps its slot: the row is not
+		// written, but the number is consumed so a re-import against a fresher
+		// export cannot renumber everything below it. The hole is REPORTED.
+		sequence := written + 1
 		authorRef := strings.TrimSpace(stringField(p.fields, "author_id"))
 		if authorRef == "" || !userExists(authorRef) {
 			// posts.author_id is Required. Skipping a post mid-sequence would
@@ -284,6 +316,7 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			// written — and the hole is reported rather than left as a mystery.
 			fp.SkippedPostIDs = append(fp.SkippedPostIDs, p.legacyID)
 			fp.note("post_author_unresolved", p.legacyID)
+			written++
 			continue
 		}
 
@@ -294,7 +327,6 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			AuthorID: DeriveID(SpaceUser, authorRef),
 			Sequence: sequence,
 			IsDraft:  false,
-			Deleted:  p.deleted,
 			// Deliberately NOT intField(p.fields, "reputation"). The comment on
 			// PostRow.Reputation says this is recomputed, and until now the code
 			// contradicted its own comment by copying the legacy cache.
@@ -302,6 +334,7 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			// reputation_votes rows this same import writes, so a stale cached
 			// score cannot survive next to the votes that produced it.
 			Reputation: 0,
+			Content:    stringField(p.fields, "content"),
 			EditedAt:   TimestampToISO(timeField(p.fields, "edited_at")),
 			CreatedAt:  TimestampToISO(p.created),
 			UpdatedAt:  TimestampToISO(p.created),
@@ -310,23 +343,16 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 		if ref := strings.TrimSpace(stringField(p.fields, "author_character_id")); ref != "" {
 			row.AuthorCharacter = DeriveID(SpaceCharacter, authorRef+"/characters/"+ref)
 		}
-		if p.deleted {
-			// A tombstone keeps its number and its author but loses its text,
-			// exactly like the runtime's soft delete.
-			row.Content = ""
-			row.Findings["content_dropped_deleted_post"] = "tombstone"
-		}
 
 		fp.PostRows = append(fp.PostRows, row)
 		fp.SequenceCount++
+		written++
 
-		if !p.deleted {
-			topic.PostsCount++
-			newestVisible = row.TargetID
-			topic.LastPostID = row.TargetID
-			topic.LastPostAuthorID = row.AuthorID
-			topic.LastPostCreated = row.CreatedAt
-		}
+		topic.PostsCount++
+		newestVisible = row.TargetID
+		topic.LastPostID = row.TargetID
+		topic.LastPostAuthorID = row.AuthorID
+		topic.LastPostCreated = row.CreatedAt
 	}
 
 	// Tombstone fallback: the keyset index must never meet a NULL, or the topic
@@ -434,8 +460,8 @@ func (fp *ForumPlan) SortedRowLines() []string {
 	}
 	for _, p := range fp.PostRows {
 		lines = append(lines, fmt.Sprintf(
-			"post %s -> %s topic=%s sequence=%d draft=%t deleted=%t author=%s",
-			p.LegacyID, p.TargetID, p.TopicID, p.Sequence, p.IsDraft, p.Deleted, p.AuthorID))
+			"post %s -> %s topic=%s sequence=%d draft=%t author=%s",
+			p.LegacyID, p.TargetID, p.TopicID, p.Sequence, p.IsDraft, p.AuthorID))
 	}
 	sort.Strings(lines)
 	return lines

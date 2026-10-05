@@ -199,40 +199,57 @@ func TestImportForumWritesDraftWithoutSequence(t *testing.T) {
 	}
 }
 
-// TestImportForumWritesTombstoneWithoutContent pins the soft-delete shape.
-func TestImportForumWritesTombstoneWithoutContent(t *testing.T) {
+// TestImportForumKeepsEveryPostsText pins that the import no longer produces a
+// tombstone. This test used to assert the opposite — that a Deleted post is
+// written with an empty body and keeps its sequence slot — which was the
+// soft-delete shape.
+//
+// Deletion is now a hard delete (1767700000 dropped the `deleted` column), so
+// there is no such state: the importer SKIPS a legacy deleted post entirely and
+// renumbers the survivors without leaving a hole. What this test now pins is
+// that Content is written verbatim, so a real post can never be imported empty
+// — the failure the tombstone path made indistinguishable from correct.
+func TestImportForumKeepsEveryPostsText(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 	_, categoryID := seedImportFixture(t, app)
 
-	_, err := ImportForum(app,
+	if _, err := ImportForum(app,
 		[]TopicUpsert{{
 			TargetID: "top000000000006", CategoryID: categoryID, AuthorID: fixPlayerID,
-			Title: "T", PostsCount: 1, LastPostCreated: "2026-01-01 00:00:00.000Z",
+			Title: "T", PostsCount: 2, LastPostCreated: "2026-01-01 00:00:00.000Z",
 			LastPostID: "pos000000000042",
 		}},
 		[]PostUpsert{
 			{TargetID: "pos000000000041", TopicID: "top000000000006", AuthorID: fixPlayerID,
-				Sequence: 1, Content: "gone", Deleted: true},
+				Sequence: 1, Content: "opening"},
 			{TargetID: "pos000000000042", TopicID: "top000000000006", AuthorID: fixPlayerID,
 				Sequence: 2, Content: "still here"},
-		})
-	if err != nil {
+		}); err != nil {
 		t.Fatal(err)
 	}
 
-	tombstone, err := app.FindRecordById(postsCollectionName, "pos000000000041")
-	if err != nil || tombstone == nil {
-		t.Fatalf("tombstone not written: %v", err)
+	for _, tc := range []struct{ id, want string }{
+		{"pos000000000041", "opening"},
+		{"pos000000000042", "still here"},
+	} {
+		post, err := app.FindRecordById(postsCollectionName, tc.id)
+		if err != nil || post == nil {
+			t.Fatalf("post %s missing: %v", tc.id, err)
+		}
+		if post.GetString("content") != tc.want {
+			t.Errorf("post %s content = %q, want %q", tc.id, post.GetString("content"), tc.want)
+		}
 	}
-	if !tombstone.GetBool("deleted") {
-		t.Fatal("the tombstone flag must be stored")
+
+	// The collection has no `deleted` column at all any more. Setting a field
+	// that does not exist is a silent no-op that reads as a successful import,
+	// so the assertion is that the SCHEMA lacks it.
+	postsCol, err := app.FindCollectionByNameOrId(postsCollectionName)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if tombstone.GetString("content") != "" {
-		t.Fatalf("a tombstone must carry no text, got %q", tombstone.GetString("content"))
-	}
-	// It keeps its slot, which is the whole point of the rule.
-	if tombstone.GetInt("sequence") != 1 {
-		t.Fatalf("a tombstone must keep its sequence, got %d", tombstone.GetInt("sequence"))
+	if postsCol.Fields.GetByName("deleted") != nil {
+		t.Error("posts must have no `deleted` column: deletion is a hard delete")
 	}
 }

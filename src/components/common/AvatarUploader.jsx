@@ -18,7 +18,7 @@ const isStorageEnabled = true;
  *   size         – preview circle size in px (default 80)
  *   label        – optional label text
  */
-const AvatarUploader = ({ value, onChange, onUpload, storagePath, size = 80, label, disabled = false, canUpload = true, allowGifs = true }) => {
+const AvatarUploader = ({ value, onChange, onUpload, _storagePath, size = 80, label, disabled = false, canUpload = true, allowGifs = true }) => {
   const fileInputRef = useRef(null);
   const { t } = useI18n();
   const [mode, setMode] = useState('preview'); // 'preview' | 'url'

@@ -8,6 +8,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 	"github.com/SiJunma/aerun/backend/internal/forum"
@@ -94,7 +95,7 @@ func votePostHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		post, err := txApp.FindRecordById(postsCollectionName, postID)
-		if err != nil || post == nil || post.GetBool("deleted") {
+		if err != nil || post == nil {
 			return 0, nil, notFoundError("post not found")
 		}
 
@@ -252,6 +253,20 @@ func voteUserHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("target user not found")
 		}
 
+		// Reputation is a judgement about an account, and a suspended account's
+		// reputation must stop moving: voting for it would still shift the score
+		// moderators read when deciding whether to lift the suspension.
+		// createDMHandler already refuses a suspended counterpart, so this makes
+		// the two agree — a ban takes the account out of circulation as an OBJECT
+		// of member actions, not only as an actor.
+		//
+		// The target's post visibility is not consulted here: the author of a post
+		// stays readable through their profile (1768100000), so hiding the vote
+		// while showing the post would be incoherent.
+		if targetUser.GetString("status") == string(auth.StatusBanned) {
+			return 0, nil, forbiddenError("cannot vote for a banned user")
+		}
+
 		existingVote, err := txApp.FindFirstRecordByFilter(
 			reputationVotesCollectionName,
 			"voter_id = {:voter} && target_id = {:target} && post_id = ''",
@@ -347,8 +362,152 @@ func deleteUserVoteHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// deleteReputationHandler is an administrative command to delete any reputation vote.
-// Reverts post and profile reputation and appends an audit log.
+// repEditForm is the body of a reputation edit: the comment text and/or a new
+// value. Both are optional, but at least one must be present — an edit that
+// changes nothing is a wasted write and an audit entry with no meaning.
+type repEditForm struct {
+	Value   *int   `json:"value"`
+	Comment string `json:"comment"`
+}
+
+// editReputationHandler changes an existing reputation entry.
+//
+// This command did not exist before the permission split. It is here because
+// "a player may edit their own reputation comment" is only meaningful if there
+// is somewhere to type the edit, and an entry that could be created and
+// retracted but never corrected was a dead end.
+//
+// VALUE CHANGES RE-BALANCE BOTH TOTALS. Changing "+5" to "-1" has to move the
+// target's reputation and the post's by the DELTA, not by the new value, or the
+// second edit of the same entry would subtract six points. The delta is
+// computed before the record is written so a rejected edit changes nothing.
+func editReputationHandler(e *core.RequestEvent) error {
+	claim, err := claimFrom(e)
+	if err != nil {
+		return err
+	}
+
+	voteID := e.Request.PathValue("id")
+
+	var form repEditForm
+	raw, err := readBodyLimited(e, maxReputationBodyBytes)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, &form); err != nil {
+		return validationError("invalid JSON body")
+	}
+	if form.Value == nil && strings.TrimSpace(form.Comment) == "" {
+		return validationError("nothing to change")
+	}
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
+		vote, err := txApp.FindRecordById(reputationVotesCollectionName, voteID)
+		if err != nil || vote == nil {
+			return 0, nil, notFoundError("reputation vote not found")
+		}
+
+		// Same ownership rule as the delete, and for the same reason: the `_self_`
+		// key exists precisely so a member can correct their own words, and must
+		// not become a way to rewrite somebody else's.
+		acc := AccessFrom(e)
+		if vote.GetString("voter_id") != e.Auth.Id {
+			if !auth.Has(acc.Permissions, auth.PermEditOthersReputation) {
+				return 0, nil, forbiddenError("you may only edit your own reputation entries")
+			}
+		} else if !auth.Has(acc.Permissions, auth.PermEditSelfReputation) &&
+			!auth.Has(acc.Permissions, auth.PermEditOthersReputation) {
+			return 0, nil, forbiddenError("you may only edit your own reputation entries")
+		}
+
+		oldVal := vote.GetInt("value")
+		targetID := vote.GetString("target_id")
+		postID := vote.GetString("post_id")
+
+		// The SAME validator the create path uses, deliberately. A second hand
+		// written range check here is how an edit path ends up accepting a value
+		// the create path rejects; there is one contract and one place it lives.
+		newComment := vote.GetString("comment")
+		if form.Value != nil {
+			if _, _, err := forum.ValidateReputationVote(
+				vote.GetString("voter_id"), targetID, *form.Value, vote.GetString("comment")); err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+		}
+		if strings.TrimSpace(form.Comment) != "" {
+			if _, _, err := forum.ValidateReputationVote(
+				vote.GetString("voter_id"), targetID, oldVal, form.Comment); err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+			newComment = form.Comment
+		}
+
+		if form.Value != nil && *form.Value != oldVal {
+			delta := *form.Value - oldVal
+			if targetUser, err := txApp.FindRecordById(usersCollectionName, targetID); err == nil && targetUser != nil {
+				targetUser.Set("reputation", targetUser.GetInt("reputation")+delta)
+				if err := txApp.Save(targetUser); err != nil {
+					return 0, nil, internalError("failed to rebalance profile reputation", err)
+				}
+			}
+			if postID != "" {
+				if post, err := txApp.FindRecordById(postsCollectionName, postID); err == nil && post != nil {
+					post.Set("reputation", post.GetInt("reputation")+delta)
+					if err := txApp.Save(post); err != nil {
+						return 0, nil, internalError("failed to rebalance post reputation", err)
+					}
+				}
+			}
+			vote.Set("value", *form.Value)
+		}
+
+		if strings.TrimSpace(form.Comment) != "" {
+			vote.Set("comment", newComment)
+		}
+
+		if err := txApp.Save(vote); err != nil {
+			return 0, nil, internalError("failed to edit reputation entry", err)
+		}
+
+		// A moderator rewriting somebody else's entry is audited; a member
+		// fixing their own typo is not staff action and must not fill the log
+		// with self-corrections.
+		if vote.GetString("voter_id") != e.Auth.Id {
+			if err := recordAuditLog(txApp, "reputation_edited", e.Auth.Id, map[string]any{
+				"vote_id":   voteID,
+				"target_id": targetID,
+				"voter_id":  vote.GetString("voter_id"),
+				"post_id":   postID,
+				"old_value": oldVal,
+				"new_value": vote.GetInt("value"),
+			}); err != nil {
+				return 0, nil, err
+			}
+		}
+
+		return http.StatusOK, map[string]any{
+			"vote":       repVotePayload(vote),
+			"request_id": requestIDFrom(e),
+		}, nil
+	})
+
+	return writeCommandResult(e, outcome, err)
+}
+
+// deleteReputationHandler deletes a reputation vote.
+//
+// OWNERSHIP IS DECIDED HERE, NOT AT THE ROUTE. The route used to gate this on
+// `delete_reputation` alone, which made one key mean both "retract my own +1"
+// and "remove an abusive comment about a third party" — and because nothing
+// inside compared the voter to the caller, the only version that could be
+// expressed was the staff one. A member had no way to take back their own
+// entry at all.
+//
+// The comparison is `vote.voter_id == caller`, checked BEFORE any write, and a
+// caller acting on somebody else's entry needs the `_others_` key. An author
+// cannot delete a stranger's entry no matter which keys they hold — there is no
+// branch where `_others_` passes for your own row, and no branch where
+// `_self_` passes for someone else's.
 func deleteReputationHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -361,6 +520,20 @@ func deleteReputationHandler(e *core.RequestEvent) error {
 		vote, err := txApp.FindRecordById(reputationVotesCollectionName, voteID)
 		if err != nil || vote == nil {
 			return 0, nil, notFoundError("reputation vote not found")
+		}
+
+		// Authorization BEFORE the compensating writes below. Discovering the
+		// caller was not allowed only after the reputation totals had already
+		// been decremented would leave the forum with a vote deleted from one
+		// total and still present in the other.
+		acc := AccessFrom(e)
+		if vote.GetString("voter_id") != e.Auth.Id {
+			if !auth.Has(acc.Permissions, auth.PermDeleteOthersReputation) {
+				return 0, nil, forbiddenError("you may only retract your own reputation entries")
+			}
+		} else if !auth.Has(acc.Permissions, auth.PermDeleteSelfReputation) &&
+			!auth.Has(acc.Permissions, auth.PermDeleteOthersReputation) {
+			return 0, nil, forbiddenError("you may only retract your own reputation entries")
 		}
 
 		val := vote.GetInt("value")
@@ -409,7 +582,7 @@ func deleteReputationHandler(e *core.RequestEvent) error {
 func getPostVotersHandler(e *core.RequestEvent) error {
 	postID := e.Request.PathValue("id")
 	post, err := e.App.FindRecordById(postsCollectionName, postID)
-	if err != nil || post == nil || post.GetBool("deleted") {
+	if err != nil || post == nil {
 		return notFoundError("post not found")
 	}
 
@@ -477,6 +650,69 @@ func getPostVotersHandler(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]any{
 		"voters":     items,
 		"total":      len(items),
+		"request_id": requestIDFrom(e),
+	})
+}
+
+// listMyVotesHandler answers GET /api/aerun/me/votes.
+//
+// This endpoint exists because the browser used to read `reputation_votes`
+// DIRECTLY through the PocketBase SDK (`pb.collection('reputation_votes')`).
+// That collection is server-only — migration 1766300000 gives it nil browser
+// rules — so every call returned `403 Only superusers can perform this action`.
+// The failures were swallowed by a `catch { return {} }` and surfaced as three
+// things a member could actually see:
+//
+//   - a console full of 403s and aborted ClientResponseErrors on every topic open,
+//   - every upvote arrow rendered as un-voted, so the member's own votes looked
+//     like they had been lost, and
+//   - a re-vote, which the server treats as an UPDATE of the existing vote,
+//     silently rewriting the vote the member thought they were merely re-reading.
+//
+// It returns ONLY the caller's own votes. A vote is a private act until its
+// voter chooses to expose it (getPostVotersHandler serves that list and honours
+// rep_show_history), so this route must never grow a way to read other people's
+// ballots: there is deliberately no voter_id parameter to widen it with.
+//
+// `topic_id` is optional. With it the answer is the caller's votes in that one
+// topic, which is what the topic page needs to paint its arrows; without it the
+// answer is every vote the caller has cast.
+func listMyVotesHandler(e *core.RequestEvent) error {
+	if e.Auth == nil || e.Auth.Collection().Name != usersCollectionName {
+		return router.NewUnauthorizedError("authentication is required for this action", nil)
+	}
+	if AccessFrom(e).Status == auth.StatusBanned {
+		return forbiddenError("banned accounts cannot read votes")
+	}
+
+	query := e.App.RecordQuery(reputationVotesCollectionName).
+		AndWhere(dbx.HashExp{"voter_id": e.Auth.Id})
+	if topicID := strings.TrimSpace(e.Request.URL.Query().Get("topic_id")); topicID != "" {
+		query = query.AndWhere(dbx.HashExp{"topic_id": topicID})
+	}
+
+	var records []*core.Record
+	// The cap guards against a pathological account; it is not a pagination
+	// contract. The client consumes the whole list to paint its own arrows, so a
+	// truncated answer would silently show old votes as un-voted.
+	if err := query.OrderBy("created DESC", "id DESC").Limit(1000).All(&records); err != nil {
+		return internalError("failed to read your votes", err)
+	}
+
+	items := make([]map[string]any, 0, len(records))
+	for _, rec := range records {
+		items = append(items, map[string]any{
+			"id":        rec.Id,
+			"post_id":   rec.GetString("post_id"),
+			"topic_id":  rec.GetString("topic_id"),
+			"target_id": rec.GetString("target_id"),
+			"value":     rec.GetInt("value"),
+			"comment":   rec.GetString("comment"),
+		})
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      items,
 		"request_id": requestIDFrom(e),
 	})
 }

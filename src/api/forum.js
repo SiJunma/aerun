@@ -1,8 +1,14 @@
-import { sendApi, pb } from './pocketbase';
-import { logAdminAction } from './audit';
+﻿import { sendApi } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
+import { sharedPoll } from './shared-poll';
 
-const normalizeTopic = (t) => {
+// normalizeTopic maps a server topic row onto the field names the renderers
+// read. EXPORTED because three different topic lists exist (the category page,
+// /active-topics and the new-replies feed) and each one used to hand its rows to
+// a renderer raw — `res.items.map(...)` in two places and no mapping at all in
+// the third. Any list that skips this renders `—` for its timestamp and loses
+// its pin icon, so the mapping lives here once and every list must go through it.
+export const normalizeTopic = (t) => {
   if (!t) return null;
   const createdDate = t.created || t.created_at;
   const lastPostDate = t.last_post_created || t.last_post_at || createdDate;
@@ -22,6 +28,9 @@ const normalizeTopic = (t) => {
   };
 };
 
+// No `sequence`: the per-post ordinal the backend used to invent is gone, and
+// the forum orders by `created` then id. Nothing client-side may depend on a
+// number that shifts whenever an earlier post is deleted.
 const normalizePost = (p) => {
   if (!p) return null;
   return {
@@ -30,7 +39,6 @@ const normalizePost = (p) => {
     topic_id: p.topic_id,
     author_id: p.author_id,
     content: p.content || '',
-    sequence: p.sequence || 1,
     created_at: p.created,
     updated_at: p.updated,
     created_at_ms: p.created ? new Date(p.created).getTime() : 0,
@@ -45,35 +53,23 @@ export const subscribeToTopics = (categoryId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // Keyed per category: the index and the category page both read this, and a
+  // member bouncing between them was paying for two loops over one endpoint.
+  const poll = sharedPoll(`topics:${categoryId}`, {
+    fetch: async () => {
       const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&limit=100`);
-      if (!isSubscribed) return;
-      const all = [...(res?.pinned || []), ...(res?.topics || [])].map(normalizeTopic);
-      callback(all);
-    } catch (err) {
-      console.warn('[subscribeToTopics err]', err);
-      if (isSubscribed) callback([]);
-    }
-  };
+      // The command layer answers `items` (forum_topics.go listTopicsHandler).
+      // Reading `topics`/`pinned` — the retired Firestore callable's shape —
+      // always yielded undefined, so this subscription reported "no topics"
+      // for every category no matter what was stored.
+      return (res?.items || []).map(normalizeTopic);
+    },
+    intervalMs: 15000,
+    initialValue: [],
+    onError: (err) => console.warn('[subscribeToTopics err]', err),
+  });
 
-  load();
-  const interval = setInterval(load, 15000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('topics').subscribe('*', () => {
-      load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  return poll.subscribe((topics) => callback(topics));
 };
 
 export const subscribeToTopic = (topicId, callback) => {
@@ -82,47 +78,48 @@ export const subscribeToTopic = (topicId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
+  const poll = sharedPoll(`topic:${topicId}`, {
+    fetch: async () => normalizeTopic((await sendApi(`/api/aerun/topics/${topicId}`))?.topic),
+    intervalMs: 15000,
+    initialValue: null,
+  });
 
-  const load = async () => {
-    try {
-      const res = await sendApi(`/api/aerun/topics/${topicId}`);
-      if (!isSubscribed) return;
-      callback(normalizeTopic(res?.topic), null);
-    } catch (err) {
-      if (err?.status === 404 || err?.status === 403) {
-        if (isSubscribed) callback(null, null);
-      } else {
-        if (isSubscribed) callback(null, err);
-      }
+  // The (data, err) SHAPE is TopicPage's access contract and is preserved exactly:
+  // a 404/403 means "not visible to you" and renders the not-found card, while any
+  // other failure is a real error. Only the TIMER changed.
+  return poll.subscribe((topic, err) => {
+    if (!err) {
+      callback(topic, null);
+    } else if (err?.status === 404 || err?.status === 403) {
+      callback(null, null);
+    } else {
+      callback(null, err);
     }
-  };
-
-  load();
-  const interval = setInterval(load, 15000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('topics').subscribe(topicId, () => {
-      load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  });
 };
 
+// fetchSecuredTopics reads one page of a category's topics.
+//
+// The server returns a single `items` list already ordered pinned-first
+// (listTopicsHandler: `pinned DESC, last_post_created DESC, id DESC`). Pinned
+// topics are therefore split out HERE rather than asked for separately: the
+// page component renders them in their own section, and the ordering guarantee
+// is the server's, so re-sorting on the client would only risk disagreeing
+// with it.
+//
+// `total` is the count over the whole filter, not this page — it is what the
+// pager divides by. Reading `res.topics` (the retired callable's key) made both
+// arrays empty and the total zero, so the category page rendered as empty and
+// the pager rendered as a single page.
 export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) => {
   const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&page=${page}&limit=${pageSize}`);
+  const items = (res?.items || []).map(normalizeTopic);
   return {
-    pinned: (res?.pinned || []).map(normalizeTopic),
-    topics: (res?.topics || []).map(normalizeTopic),
-    total: res?.total || 0,
+    pinned: items.filter(t => t.is_pinned),
+    topics: items.filter(t => !t.is_pinned),
+    total: res?.total ?? items.length,
     page: res?.page || page,
-    limit: res?.limit || pageSize
+    limit: res?.per_page || pageSize
   };
 };
 
@@ -132,44 +129,70 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
+  // This exists only to keep the category card's last-post cell fresh, which is
+  // the slowest-changing fact on the page — hence the long interval.
+  const poll = sharedPoll(`last-topic:${categoryId}`, {
+    fetch: async () => {
+      const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&limit=1`);
+      return normalizeTopic(res?.items?.[0] || null);
+    },
+    intervalMs: 25000,
+    initialValue: null,
+  });
 
-  const load = async () => {
-    try {
-      const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&limit=1&order_by=last_post_at`);
-      if (!isSubscribed) return;
-      const topic = res?.topics?.[0] || res?.pinned?.[0] || null;
-      callback(normalizeTopic(topic));
-    } catch {
-      if (isSubscribed) callback(null);
-    }
-  };
-
-  load();
-  const interval = setInterval(load, 25000);
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-  };
+  return poll.subscribe((topic) => callback(topic));
 };
 
+// createTopic posts a new topic together with its opening message.
+//
+// The command layer answers `{ topic, first_post, post, topic_id }`. This
+// function normalises that into the shape the form consumes and — importantly —
+// THROWS when the server did not return an id.
+//
+// It used to return `{ id, topic, post }` while the form read `topicId`, so
+// `navigate` received undefined and the member landed on /topic/undefined,
+// where the topic-not-found card greeted a topic that had in fact been created
+// successfully. A missing id is now an error the caller shows, not a URL.
 export const createTopic = async (topicData, firstPostData) => {
-  const { content: processedContent } = processDiceRolls(firstPostData.content);
+  // Same reason as createPost: the dice results are part of the opening message
+  // and were being dropped, so a throw in a new topic never resolved for anyone.
+  const { content: processedContent, rolls } = processDiceRolls(firstPostData.content);
 
   const res = await sendApi('/api/aerun/topics', {
     method: 'POST',
     body: {
       category_id: topicData.category_id,
       title: topicData.title,
-      content: processedContent.trim()
+      content: processedContent.trim(),
+      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
+      // Both of these used to be dropped on the floor. The form held
+      // `selectedCharacterId` and `pinFirstPost` in state and sent neither, so
+      // the server had nothing to record: every message came out under the
+      // account's own name no matter which mask the author had picked, and the
+      // "Pin first post" checkbox was decorative.
+      //
+      // `character_id` travels as the PICKED mask and the server decides what to
+      // honour (resolveAuthorCharacter), so the browser cannot post as somebody
+      // else's character by editing this request.
+      character_id: topicData.character_id || '',
+      pin_first_post: !!topicData.pin_first_post,
     }
   });
 
+  const id = res?.topic?.id || res?.topic_id || '';
+  if (!id) {
+    // The write already happened; only the response was unusable. Saying so
+    // matters: a plain "failed" would send the member off to retry and create
+    // the topic twice.
+    const err = new Error('The topic was created but the server did not return its id.');
+    err.code = 'missing_topic_id';
+    throw err;
+  }
+
   return {
-    id: res?.topic?.id || res?.id,
+    id,
     topic: normalizeTopic(res?.topic),
-    post: normalizePost(res?.post)
+    post: normalizePost(res?.first_post || res?.post)
   };
 };
 
@@ -179,66 +202,95 @@ export const subscribeToPosts = (topicId, callback) => {
     return () => {};
   }
 
-  let isSubscribed = true;
-
-  const load = async () => {
-    try {
+  // Keyed per topic, so leaving a thread releases its loop immediately instead of
+  // leaving a 10-second timer reading a topic nobody is looking at.
+  const poll = sharedPoll(`posts:${topicId}`, {
+    fetch: async () => {
       const res = await sendApi(`/api/aerun/topics/${topicId}/posts?limit=100`);
-      if (!isSubscribed) return;
-      callback((res?.posts || []).map(normalizePost));
-    } catch {
-      if (isSubscribed) callback([]);
-    }
-  };
+      // `items`, per forum_posts.go listPostsHandler — the same key the topic
+      // list uses. `posts` was the retired callable's name and is always absent.
+      return (res?.items || []).map(normalizePost);
+    },
+    intervalMs: 10000,
+    initialValue: [],
+  });
 
-  load();
-  const interval = setInterval(load, 10000);
-
-  let unsub = () => {};
-  try {
-    pb.collection('posts').subscribe('*', (e) => {
-      if (e.record?.topic_id === topicId) load();
-    }).then(fn => { unsub = fn; }).catch(() => {});
-  } catch {}
-
-  return () => {
-    isSubscribed = false;
-    clearInterval(interval);
-    unsub();
-  };
+  return poll.subscribe((posts) => callback(posts));
 };
 
-export const subscribeToNewPostsRtdb = (topicId, sinceTimestamp, callback) => {
+// RTDB realtime subscriptions are gone: every mutation now goes through the
+// Go backend, and the row writes that used to fire the realtime events are
+// gone with them. These signatures keep their parameters so existing call
+// sites do not have to change — they are documented above each function, and
+// the parameters are prefixed `_` to say "accepted, not read".
+export const subscribeToNewPostsRtdb = (_topicId, _sinceTimestamp, _callback) => {
   return () => {};
 };
 
-export const subscribeToPostRemovalsRtdb = (topicId, callback) => {
+export const subscribeToPostRemovalsRtdb = (_topicId, _callback) => {
   return () => {};
 };
 
-export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null) => {
+// fetchSecuredPosts reads one page of a topic's posts.
+//
+// `posts_count` (not `total`) is the server's own name for the window size, and
+// `per_page` for the page size. The old `res.posts` read is why an existing
+// topic rendered with no messages: the key is never present, so every page came
+// back as an empty array regardless of what the topic held.
+export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, _lastVisit = null) => {
   const res = await sendApi(`/api/aerun/topics/${topicId}/posts?page=${page}&limit=${pageSize}`);
+  const items = (res?.items || []).map(normalizePost);
   return {
-    posts: (res?.posts || []).map(normalizePost),
-    total: res?.total || 0,
+    posts: items,
+    total: res?.posts_count ?? items.length,
     page: res?.page || page,
-    limit: res?.limit || pageSize
+    limit: res?.per_page || pageSize
   };
 };
 
+// The Posts tab of a profile.
+//
+// It used to read the posts collection straight from the browser SDK. Migration
+// 1766100000 locked the forum collections to superusers (lockBrowserRules), so
+// that call failed with 403 "Only superusers can perform this action" for every
+// ordinary member AND every guest — and the catch below turned the failure into
+// an empty list, which the page renders as "this person has written nothing".
+// The 403 was in the console and the UI claimed the opposite.
+//
+// The read goes through the command layer like every other forum read now, which
+// is also why the previews resolve their dice: the endpoint returns the same
+// decorated post shape the topic feed serves, `rolls` included.
+// `postFilter` is 'all' (default), 'account' for posts written without a mask,
+// or 'char_<id>' for one mask — the dropdown's own keys.
+//
+// This used to be `_postFilter`: the parameter was named as deliberately unused
+// and the filter never left the browser, so picking a mask relabelled the same
+// list. It has to be a QUERY parameter, not a post-hoc filter of the returned
+// rows, because this endpoint is paginated: the server owns `total` and the page
+// numbering, so a client-side filter would page through already-filtered results
+// against an unfiltered total and silently skip posts.
 export const fetchUserPosts = async (targetUid, page = 1, pageSize = 20, postFilter = 'all') => {
+  if (!targetUid) {
+    return { posts: [], total: 0, page: 1, totalPages: 0 };
+  }
+  // A key the dropdown cannot produce would be a silent no-op again, so only the
+  // two non-default axes are sent; 'all' stays absent to keep the URL clean.
+  const filter = postFilter === 'account' || /^char_[A-Za-z0-9_-]+$/.test(postFilter)
+    ? `&filter=${encodeURIComponent(postFilter)}`
+    : '';
   try {
-    const list = await pb.collection('posts').getList(page, pageSize, {
-      filter: `author_id = "${targetUid}"`,
-      sort: '-created'
-    });
+    const res = await sendApi(`/api/aerun/users/${targetUid}/posts?page=${page}&limit=${pageSize}${filter}`);
+    const items = (res?.items || []).map(normalizePost);
     return {
-      posts: list.items.map(normalizePost),
-      total: list.totalItems,
-      page: list.page,
-      totalPages: list.totalPages
+      posts: items,
+      total: res?.total ?? items.length,
+      page: res?.page || page,
+      totalPages: res?.total_pages ?? 0
     };
   } catch (err) {
+    // The empty shape keeps the page renderable, but the message must survive:
+    // a swallowed 403 is exactly what made this look like "no posts" instead of
+    // "the request was refused", which is the harder bug to notice.
     console.warn('[fetchUserPosts err]', err);
     return { posts: [], total: 0, page: 1, totalPages: 0 };
   }
@@ -256,107 +308,214 @@ export const subscribeToUserPosts = (uid, limitCount, callback) => {
   return () => { isSubscribed = false; };
 };
 
-export const createPost = async (postData) => {
-  const { content: processedContent } = processDiceRolls(postData.content);
+// `idempotencyKey` is OPTIONAL but should be supplied by the caller for anything
+// a person can double-click. Without it sendApi mints a fresh random key per
+// request, so a duplicate that slips past a client-side guard is treated by the
+// server as a genuinely new command — and the member gets two posts. Passing
+// the SAME key for every request of one logical submit makes the server replay
+// the first response instead. See utils/inflight.js.
+export const createPost = async (postData, idempotencyKey) => {
+  // The throws MUST travel with the text. `rolls` used to be destructured away
+  // here — `const { content } = processDiceRolls(...)` — so the roll was rendered
+  // in the optimistic card and then dropped on the floor: the `[roll=<id>]` tag
+  // reached the server with nothing pointing at it, and every reader after a
+  // reload saw the raw tag. The tag is a pointer; this map is the payload.
+  const { content: processedContent, rolls } = processDiceRolls(postData.content);
 
   const res = await sendApi(`/api/aerun/topics/${postData.topic_id}/posts`, {
     method: 'POST',
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
-      content: processedContent.trim()
+      content: processedContent.trim(),
+      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
+      // The reply composer's mask picker, sent for the same reason the topic
+      // form's is. Empty falls back to the mask stored on the profile, which is
+      // what the picker writes when the author selects one.
+      character_id: postData.character_id || '',
     }
   });
 
-  return normalizePost(res?.post || res);
+  // The reply path navigates to the new post by id, and it used to read
+  // `postId` — a camelCase key no route has ever sent. The reply therefore
+  // created correctly and the page then refused to scroll to it, because the
+  // target it remembered was undefined. The server sends the id twice, as
+  // `post_id` and inside the post object; accept either.
+  const post = normalizePost(res?.post);
+  return { ...post, postId: res?.post_id || post?.id || '' };
 };
 
-// ── Draft Posts (Local Storage) ──────────────────────────────────────────────
+// ── Draft Posts ─────────────────────────────────────────────────────────────
+//
+// These used to be localStorage under `aerun_draft_${topicId}_${uid}`, a
+// leftover from before the drafts migration. Three defects came from that, all
+// reported together:
+//
+//   - createDraftPost wrote the key and notified nobody, while
+//     subscribeToTopicDraft read it ONCE on mount, so a draft saved from the
+//     page never appeared until a reload, and an edit never appeared at all;
+//   - updateDraftPost stored a COMPLETELY different shape ({uid, topicId,
+//     content, metadata}) than createDraftPost had stored, so the first edit
+//     discarded every author_* field. The card then rendered its fallback
+//     author: "Guest", no avatar, 0 posts.
+//   - buildPostData never set `is_draft`, so `deletingPost.is_draft` was falsy
+//     and Delete took the real-post branch, calling deletePost on an id that
+//     was never a post.
+//
+// None of that is fixable by patching the localStorage helpers. The server
+// already owns drafts — one per author per topic, enforced by a unique index —
+// and nothing in the browser ever called it.
 
-const getDraftKey = (uid, topicId) => `aerun_draft_${topicId}_${uid}`;
-
-export const createDraftPost = async (postData) => {
-  const key = getDraftKey(postData.author_id, postData.topic_id);
-  localStorage.setItem(key, JSON.stringify(postData));
+// getTopicDraft reads the caller's draft in a topic, or null.
+export const getTopicDraft = async (topicId) => {
+  if (!topicId) return null;
+  const res = await sendApi(`/api/aerun/topics/${topicId}/draft`);
+  return res?.draft || null;
 };
 
-export const subscribeToTopicDraft = (topicId, uid, callback) => {
-  if (!topicId || !uid) {
-    callback(null);
-    return () => {};
-  }
-  try {
-    const key = getDraftKey(uid, topicId);
-    const raw = localStorage.getItem(key);
-    callback(raw ? JSON.parse(raw) : null);
-  } catch {
-    callback(null);
-  }
-  return () => {};
-};
-
-export const updateDraftPost = async (uid, topicId, content, metadata = {}) => {
-  const key = getDraftKey(uid, topicId);
-  const data = { uid, topicId, content, metadata, updated_at: Date.now() };
-  localStorage.setItem(key, JSON.stringify(data));
-};
-
-export const deleteDraftPost = async (uid, topicId) => {
-  const key = getDraftKey(uid, topicId);
-  localStorage.removeItem(key);
-};
-
-export const publishDraft = async (uid, topicId) => {
-  const key = getDraftKey(uid, topicId);
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  const draft = JSON.parse(raw);
-  const post = await createPost({
-    topic_id: topicId,
-    content: draft.content,
-    author_id: uid
+// saveTopicDraft creates or replaces the caller's draft in a topic.
+//
+// `characterId` is the picked mask and is NOT optional in spirit: the server
+// stores it on the draft row (ownership-checked there) and publish promotes the
+// row verbatim. Sending the text alone filed every draft under the account, so
+// publishing it produced a post with no mask — the reported "маска слетела".
+export const saveTopicDraft = async (topicId, content, characterId = '', rolls = null) => {
+  const res = await sendApi(`/api/aerun/topics/${topicId}/draft`, {
+    method: 'PUT',
+    body: {
+      content: (content || '').trim(),
+      character_id: characterId || '',
+      // Publishing promotes the draft row verbatim, so the throws have to be on
+      // it — a draft saved with dice and published without them produced a post
+      // carrying `[roll=…]` tags nobody could resolve.
+      ...(rolls && Object.keys(rolls).length > 0 ? { rolls } : {})
+    },
   });
-  localStorage.removeItem(key);
-  return post;
+  return res?.draft || null;
+};
+
+export const deleteDraft = async (draftId) => {
+  if (!draftId) return;
+  await sendApi(`/api/aerun/drafts/${draftId}`, { method: 'DELETE' });
+};
+
+// publishDraft promotes a draft to a real post. The server owns the whole
+// transition — sequence, counters, projections, notifications — so this must
+// not be faked by calling createPost and dropping the row: that would publish
+// under whatever identity the client sent and leave the topic counters to be
+// corrected by hand afterwards.
+export const publishDraft = async (draftId) => {
+  if (!draftId) return null;
+  const res = await sendApi(`/api/aerun/drafts/${draftId}/publish`, { method: 'POST' });
+  // Same contract as createPost: the decorated post under `post`, the bare id
+  // under both `post_id` and `postId`. The page calls navigateToCreatedPost
+  // with whatever it finds, and the decorated fields are what the fresh post
+  // renders from — reading a raw payload here is what made the published draft
+  // come out under the account name instead of the mask.
+  const post = normalizePost(res?.post);
+  return { ...post, postId: res?.post_id || post?.id || '' };
 };
 
 // ── Navigation & Post Locating ───────────────────────────────────────────────
 
-export const locatePost = async (postId, itemsPerPage = 20) => {
+// locatePost finds which page holds a post, so a deep link can open the exact
+// topic, page and post.
+//
+// It CANNOT be an arithmetic lookup any more. The old version read the post's
+// `sequence` and divided it by the page size, which was only correct while
+// every post had a stable ordinal — and a hard delete destroys that property:
+// removing one post shifts every later ordinal, so a link built before a delete
+// would open the wrong page afterwards.
+//
+// So the page is DISCOVERED by walking the topic's pages and looking for the
+// id. `startPage` is the page the reader is already on, and it is searched
+// first: the common case is a link to a post in the thread being read, and
+// starting there makes it one request instead of a walk from page 1.
+//
+// The walk is bounded by `maxPages` so a stale link to a deleted post cannot
+// page through an entire 5000-post topic before giving up.
+export const locatePost = async (postId, itemsPerPage = 20, startPage = 1, maxPages = 40) => {
   try {
-    const postRecord = await pb.collection('posts').getOne(postId);
+    // Resolving the post to its topic used to be `pb.collection('posts').getOne`,
+    // which lockBrowserRules answers with 403 for every non-superuser — so the
+    // deep link this function exists to serve could never resolve a topic at all
+    // and the walk below never ran. GET /api/aerun/posts/{id} is the public
+    // single-post read the command layer already owns, and it answers `post`.
+    const res = await sendApi(`/api/aerun/posts/${postId}`);
+    const postRecord = res?.post;
     if (!postRecord) return null;
 
     const topicId = postRecord.topic_id;
-    const seq = postRecord.sequence || 1;
-    const page = Math.ceil(seq / itemsPerPage);
+    if (!topicId) return null;
 
-    return {
-      topicId,
-      page,
-      postId
-    };
+    const first = Math.max(1, startPage || 1);
+    for (let page = first; page < first + maxPages; page += 1) {
+      const res = await sendApi(
+        `/api/aerun/topics/${topicId}/posts?limit=${itemsPerPage}&page=${page}`
+      );
+      // The Go command layer answers with `items` (forum_posts.go
+      // listPostsHandler). Read that, not the PocketBase SDK shape.
+      const items = res?.items || [];
+      if (items.length === 0) break;
+      if (items.some((p) => p && p.id === postId)) {
+        return { topicId, page, postId };
+      }
+    }
+    return null;
   } catch (err) {
     console.error('[locatePost error]', err);
     return null;
   }
 };
 
-export const locateUnreadPost = async (topicId, lastVisitMs, itemsPerPage = 20) => {
+export const locateUnreadPost = async (_topicId, _lastVisitMs, _itemsPerPage = 20) => {
   return 1;
 };
 
 // ── Mutations ────────────────────────────────────────────────────────────────
 
-export const updatePost = async (postId, content, metadata = {}, performerId, authorId, topicUpdates = null) => {
-  const { content: processedContent } = processDiceRolls(content);
-  return await sendApi(`/api/aerun/posts/${postId}`, {
+// `performerId` / `authorId` / `topicUpdates` are no longer read: the Go
+// backend derives the actor from the auth token and writes the audit row
+// inside the same transaction (see forum_posts.go / forum_topics.go). The
+// parameters stay so call sites do not change.
+export const updatePost = async (postId, content, metadata = {}, _performerId, _authorId, _topicUpdates = null) => {
+  const { content: processedContent, rolls: freshRolls } = processDiceRolls(content);
+  const body = { content: processedContent.trim() };
+
+  // Editing a post is the one write where the throws need MERGING rather than
+  // replacing. The text being edited already carries the post's existing
+  // `[roll=<id>]` references, so processDiceRolls finds no `[dice=…]` and returns
+  // nothing — sending that alone would leave the stored results untouched, and a
+  // throw typed fresh into the edit would be lost. Merging with what the post
+  // already has covers both.
+  //
+  // Deleting a throw needs no special case: the server only keeps rolls the new
+  // body still references, so entries the edit removed are dropped server-side.
+  const existingRolls = metadata?.rolls || {};
+  const mergedRolls = { ...existingRolls, ...(freshRolls || {}) };
+  if (Object.keys(mergedRolls).length > 0) {
+    body.rolls = mergedRolls;
+  }
+
+  // The edit form's mask picker used to be dropped here: `metadata` was named
+  // `_metadata` and never read, so the server received only `content` and the
+  // picker repainted the card optimistically and then reverted on the next
+  // reload. `character_id` is sent ONLY when the metadata actually carries a
+  // changed mask — an always-present key would ask the server to re-file every
+  // edited post, including edits that never touched the picker.
+  if (metadata && Object.prototype.hasOwnProperty.call(metadata, 'author_character_id')) {
+    body.character_id = metadata.author_character_id || '';
+  }
+
+  const res = await sendApi(`/api/aerun/posts/${postId}`, {
     method: 'PATCH',
-    body: {
-      content: processedContent.trim()
-    }
+    body
   });
+  // Decorated post + bare id, matching createPost/publishDraft.
+  const post = normalizePost(res?.post);
+  return { ...post, postId: res?.post_id || post?.id || postId };
 };
 
-export const updateTopic = async (topicId, data, performerId, authorId) => {
+export const updateTopic = async (topicId, data, _performerId, _authorId) => {
   const body = {};
   if (data.title !== undefined) body.title = data.title;
   if (data.is_locked !== undefined) body.locked = data.is_locked;
@@ -368,35 +527,84 @@ export const updateTopic = async (topicId, data, performerId, authorId) => {
   });
 };
 
-export const deletePost = async (post, performerId) => {
+export const deletePost = async (post, _performerId) => {
   return await sendApi(`/api/aerun/posts/${post.id}`, {
     method: 'DELETE'
   });
 };
 
-export const updateUser = async (uid, userData, performerId) => {
+export const updateUser = async (uid, userData, _performerId) => {
+  // `last_selected_character_id` used to be saved HERE, and that was the wrong
+  // route: this targets PATCH /admin/users/{id}, which requires admin_access and
+  // carries only role and status. Picking a character to post as answered 403
+  // for every ordinary member — and it sits in the reply and topic forms, so it
+  // was broken in the core posting flow, not an edge case.
+  //
+  // Choosing a mask is the author's own business, so it goes to /me/profile,
+  // which accepts it on the self path only.
+  if (userData && Object.keys(userData).length === 1 && 'last_selected_character_id' in userData) {
+    return await sendApi(`/api/aerun/me/profile`, {
+      method: 'PATCH',
+      body: { last_selected_character_id: userData.last_selected_character_id }
+    });
+  }
+
   return await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
     body: userData
   });
 };
 
+// The uniqueness key must be the SAME one the server stores.
+//
+// The server derives `users.nickname_normalized` with Unicode NFKC, lowercasing
+// and whitespace COLLAPSING (internal/auth/nickname.go, NormalizeNickname).
+// This used to use `.trim().toLowerCase()`, which disagrees in two ways that
+// matter:
+//
+//   - NFKC folds presentation variants, so a fullwidth "Ａ" collides with "a"
+//     server-side but not here.
+//   - The server COLLAPSES runs of whitespace and the client did not, so
+//     "Player  One" was free to the client and taken by the server.
+//
+// The pre-check is only a convenience — the UNIQUE index stays the real
+// enforcement — so a mismatch showed up as a nickname passing this check and
+// then being refused by the server, which reads as the form lying to the user.
+export const nicknameKey = (value) =>
+  (value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// A yes/no question, answered by a boolean.
+//
+// THIS USED TO BE `pb.collection('users').getList(1, 1, { filter: … })`, which
+// answered it with a WHOLE auth record: a guest typing a nickname into the
+// registration form received a stranger's `settings` and email as the price of a
+// boolean. The server now normalises the name itself — see
+// GET /api/aerun/nicknames/check — which also removes the client/server
+// normaliser skew described above `nicknameKey`, since the check and the UNIQUE
+// index now use one implementation.
+//
+// The pre-check is still only a convenience: the index remains the enforcement,
+// so a race between the check and the rename still ends in a server refusal.
 export const checkNicknameExists = async (nickname, excludeUid = null) => {
   if (!nickname) return false;
   try {
-    const cleanNick = nickname.trim().toLowerCase();
-    const records = await pb.collection('users').getList(1, 1, {
-      filter: `nickname_normalized = "${cleanNick}"`
-    });
-    if (records.items.length === 0) return false;
-    if (excludeUid && records.items[0].id === excludeUid) return false;
-    return true;
+    const query = new URLSearchParams({ nickname });
+    if (excludeUid) query.set('exclude', excludeUid);
+    const res = await sendApi(`/api/aerun/nicknames/check?${query.toString()}`);
+    return res?.available === false;
   } catch {
+    // Unreachable answers "free", which is what the pre-check is for: the
+    // server refuses the duplicate anyway. Failing closed here would block a
+    // perfectly legal name whenever the route is unreachable.
     return false;
   }
 };
 
-export const deleteTopics = async (topicIds, performerId) => {
+export const deleteTopics = async (topicIds, _performerId) => {
   for (const id of topicIds) {
     await sendApi(`/api/aerun/topics/${id}`, {
       method: 'DELETE'
@@ -404,7 +612,7 @@ export const deleteTopics = async (topicIds, performerId) => {
   }
 };
 
-export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
+export const moveTopics = async (topicIds, targetCategoryId, _performerId) => {
   for (const id of topicIds) {
     await sendApi(`/api/aerun/topics/${id}/move`, {
       method: 'POST',
@@ -415,7 +623,7 @@ export const moveTopics = async (topicIds, targetCategoryId, performerId) => {
   }
 };
 
-export const movePosts = async (postIds, targetTopicId, performerId) => {
+export const movePosts = async (postIds, targetTopicId, _performerId) => {
   return await sendApi(`/api/aerun/topics/${targetTopicId}/posts/move`, {
     method: 'POST',
     body: {
@@ -444,4 +652,18 @@ export const batchUpdateTopics = async (topicIds, data, performerId) => {
   for (const id of topicIds) {
     await updateTopic(id, data, performerId);
   }
+};
+
+// ── The drafts feed ──────────────────────────────────────────────────────────
+//
+// listMyDrafts is the drafts page's own read: this caller's drafts, orphans
+// first.
+//
+// The server already partitions them — an `orphan` flag per item, orphans sorted
+// ahead of the live ones — so this normalises rather than re-derives. A second
+// sort here would be a second ordering rule to keep in step with the server's,
+// and the two would disagree the first time either changed.
+export const listMyDrafts = async () => {
+  const res = await sendApi('/api/aerun/me/drafts');
+  return (res?.items || []).map(normalizePost);
 };

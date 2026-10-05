@@ -14,7 +14,11 @@ const getLocalDesigns = () => {
 const setLocalDesigns = (designs) => {
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(designs));
-  } catch {}
+  } catch (err) {
+    // Quota or private-mode failure: there is no second place to keep the
+    // local fallback, so the design simply does not persist locally.
+    console.warn('[designs] could not persist local designs', err);
+  }
 };
 
 export const subscribeToDesigns = (callback) => {
@@ -44,7 +48,9 @@ export const getDesign = async (id) => {
     if (record) {
       return { id: record.id, ...record };
     }
-  } catch {}
+  } catch {
+    // Not on the server (or no designs collection): fall back to the local copy.
+  }
   return getLocalDesigns().find(d => d.id === id) || null;
 };
 
@@ -57,7 +63,9 @@ export const createDesign = async (designData) => {
     if (record?.id) {
       return record.id;
     }
-  } catch {}
+  } catch {
+    // Server has no designs collection yet: keep it locally until it does.
+  }
   const id = `design_${Date.now()}`;
   const list = getLocalDesigns();
   list.push({ id, ...designData, createdAt: new Date().toISOString() });
@@ -72,7 +80,9 @@ export const updateDesign = async (id, designData) => {
       body: designData
     });
     return;
-  } catch {}
+  } catch {
+    // Server has no designs collection yet: apply the edit to the local copy.
+  }
   const list = getLocalDesigns().map(d => d.id === id ? { ...d, ...designData, updatedAt: new Date().toISOString() } : d);
   setLocalDesigns(list);
 };
@@ -83,7 +93,9 @@ export const deleteDesign = async (id) => {
       method: 'DELETE'
     });
     return;
-  } catch {}
+  } catch {
+    // Server has no designs collection yet: remove it from the local copy.
+  }
   const list = getLocalDesigns().filter(d => d.id !== id);
   setLocalDesigns(list);
 };

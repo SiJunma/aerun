@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Container, Table, Form, InputGroup, Image, Badge, Row, Col, Card } from 'react-bootstrap';
-import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Container, Table, Form, InputGroup, Image, Badge, Row, Col, Card, Button } from 'react-bootstrap';
+import { Search, ArrowUpDown, User, Calendar, MessageSquare, Award, Clock, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -11,6 +11,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
 import Timestamp from '../components/common/Timestamp';
+import { toMillis as sharedToMillis } from '../utils/dates';
 
 // The two legacy pseudo-roles. They cannot reach the role sort as role ids any
 // more -- users.role is validated against the roles registry and the
@@ -25,11 +26,13 @@ const LEGACY_PSEUDO_ROLE_LABELS = {
 };
 
 import { usePageTitle } from '../contexts/TitleProvider';
+import { useToast } from '../contexts/ToastProvider';
 
 const MembersPage = () => {
   const { t, lang } = useI18n();
   const { profile, updateSettings, settings, roles } = useAuth();
   const { setPageTitle } = usePageTitle();
+  const { showToast } = useToast();
   const [users, setUsers] = useState([]);
   const [rtdbStatuses, setRtdbStatuses] = useState({});
   const [search, setSearch] = useState('');
@@ -39,6 +42,44 @@ const MembersPage = () => {
   // the control still shows the active state on first paint.
   const [sortField, setSortField] = useState('last_seen');
   const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
+
+  // The board is polled on purpose: a realtime subscription over every
+  // account would stream the whole membership to every visitor, so
+  // "is this list current?" is a question the page cannot answer by
+  // itself. This button is how the member asks it, in place of the two
+  // workarounds it replaces — reloading the tab, or walking to another
+  // page and back.
+  //
+  // The loader lives in a ref, not in state: `refresh` is handed over by
+  // the subscription inside an effect, and putting it in state would
+  // re-render the whole board the moment it is assigned.
+  const refreshMembersRef = useRef(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      refreshMembersRef.current?.();
+      // The toast confirms the ACTION, not the outcome. The board is
+      // server-paginated and the walk is bounded by the server's own
+      // totalPages, so there is no single number here that means "how
+      // current is this" — reporting a count would imply a certainty the
+      // page does not have.
+      //
+      // The load is fire-and-forget (`subscribeToAllUsers` reports no
+      // completion), so the spinner is released on a short timer: a
+      // spinner that never stops is worse than one that ends a moment
+      // early.
+      setTimeout(() => {
+        setIsRefreshing(false);
+        showToast(t('forum.members_refreshed'), 'success');
+      }, 600);
+    } catch {
+      setIsRefreshing(false);
+      showToast(t('forum.members_refresh_failed'), 'danger');
+    }
+  };
 
   useEffect(() => {
     setPageTitle(t('nav.members', 'Участники'));
@@ -64,10 +105,14 @@ const MembersPage = () => {
 
   useEffect(() => {
     const unsubUsers = subscribeToAllUsers(setUsers);
+    // Held, not called here: the button reads it later, and calling it on mount
+    // would double the very first load this effect already performs.
+    refreshMembersRef.current = unsubUsers.refresh;
     const unsubStatuses = subscribeToRtdbStatuses(setRtdbStatuses);
     return () => {
       unsubUsers();
       unsubStatuses();
+      refreshMembersRef.current = null;
     };
   }, []);
 
@@ -85,14 +130,13 @@ const MembersPage = () => {
   // no usable value. `last_seen` arrives as an ISO string from the staff DTO
   // and as epoch ms from the live presence cache, so both spellings have to be
   // accepted in one place rather than at each call site.
-  const toMillis = (value) => {
-    if (!value) return 0;
-    if (typeof value === 'number') return value;
-    const parsed = value.toMillis
-      ? value.toMillis()
-      : (typeof value.toDate === 'function' ? value.toDate().getTime() : Date.parse(value));
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
+  //
+  // It is the shared `toMillis`, not a third local copy: the local version fed
+  // `Date.parse` PocketBase's space-instead-of-"T" form raw, and an engine that
+  // reads that as local time shifts the instant by the whole UTC offset — which
+  // is how a member who is online right now gets a LAST SEEN reading in the
+  // future.
+  const toMillis = (value) => sharedToMillis(value);
 
   // getUserLastSeen resolves the LAST SEEN column through three sources, most
   // precise first.
@@ -322,6 +366,20 @@ const MembersPage = () => {
                   <option value="created_at-asc">{lang === 'ru' ? 'Сначала старые' : 'Oldest First'}</option>
                 </Form.Select>
               </div>
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                title={t('forum.refresh_members')}
+                aria-label={t('forum.refresh_members')}
+                className="d-inline-flex align-items-center gap-2"
+              >
+                <RefreshCw size={14} className={isRefreshing ? 'spin' : ''} />
+                <span className="d-none d-xl-inline">
+                  {t('forum.refresh_members')}
+                </span>
+              </Button>
             </Col>
           </Row>
         </Card.Body>

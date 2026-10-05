@@ -489,6 +489,30 @@ label.fw-bold {
   color: var(--primary-color) !important;
 }
 
+/* Dismiss control on the connection banner.
+   `.btn-link` is globally painted `var(--link-color) !important` (above), which
+   tints this X in the theme accent instead of white on the red banner. The
+   `text-white` utility on the button cannot win that: both declarations carry
+   !important and have identical specificity, so source order decides — and this
+   file comes after Bootstrap. An inline style would not settle it either,
+   because an !important declaration in a stylesheet outranks an inline one.
+   Scoping the selector under the banner raises specificity above `.btn-link`,
+   which does win. The hover rule needs its own `:hover` for the same reason
+   `.btn-link:hover` would otherwise paint the accent back in. */
+.connection-status-banner .btn-dismiss {
+  color: #ffffff !important;
+  opacity: 0.9;
+  border-radius: 4px;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.connection-status-banner .btn-dismiss:hover,
+.connection-status-banner .btn-dismiss:focus-visible {
+  color: #ffffff !important;
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
 /* Stackable Table for Mobile */
 @media (max-width: 991.98px) {
   .members-table-stacked-container {
@@ -725,7 +749,9 @@ label.fw-bold {
   color: var(--primary-color) !important;
   border: 1px solid rgba(var(--primary-rgb), 0.15) !important;
   font-weight: 600;
-  font-size: 0.75rem;
+  /* The 14px floor. This label is the only record of WHAT an audit entry did,
+     and 0.75rem left it under the surrounding table text. */
+  font-size: 0.875rem;
   letter-spacing: 0.025em;
   padding: 0.35em 0.7em !important;
   border-radius: 6px !important;
@@ -738,9 +764,29 @@ label.fw-bold {
   font-weight: 600;
 }
 
+/* NOT `0.65rem`. The name of the character is the only thing that tells two
+   posts on the same profile apart, and at 0.65rem (≈10.4px) it rendered smaller
+   than the timestamp beside it — a label you have to lean in to read is not
+   telling anybody anything. 0.875rem is the 14px floor: this badge is the sole
+   identifier of WHO wrote a row, so it is never the thing shrunk to make room.
+   Padding is in `em`, so it grows with the text instead of boxing it in. */
 .badge-character-sm {
-  font-size: 0.65rem !important;
-  padding: 0.25em 0.5em !important;
+  font-size: 0.875rem !important;
+  padding: 0.3em 0.6em !important;
+  line-height: 1.3;
+}
+
+/* The badge shares a line with the topic headline, so it truncates rather than
+   pushing the row into a second line. The `title` attribute carries the full
+   name for hover, and the owner tooltip covers who is behind the mask.
+   The cap is generous — truncation is the fallback, not the expected case. */
+.badge-character .badge-character-name {
+  display: inline-block;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 /* Ensure persistent actions don't wrap on tiny screens */
@@ -1305,9 +1351,16 @@ strike:hover,
 
 
 
-/* Admin Styling */
+/* Tab strips.
+ *
+ * A custom design (DesignProvider injects its stylesheet into <head> AFTER
+ * the app bundles) styles Bootstrap's `.nav-link` for the dark navbar. The
+ * generic `.nav-tabs .nav-link` selector has the SAME specificity, and the
+ * later-injected rule won: light tab labels were painted straight onto the
+ * light forum background photo and became unreadable. The colours are
+ * therefore pinned with !important, so page-level tabs survive any design. */
 .nav-tabs .nav-link {
-  color: var(--text-color);
+  color: var(--text-color) !important;
   transition: all 0.2s ease;
   border-bottom: 3px solid transparent !important;
 }
@@ -1316,11 +1369,155 @@ strike:hover,
   background-color: transparent !important;
   color: var(--primary-color) !important;
   border-bottom: 3px solid var(--primary-color) !important;
+  opacity: 1 !important;
 }
 
 .nav-tabs .nav-link:hover {
   border-color: transparent;
   opacity: 1;
+}
+
+/* Unified page-level tab strip (see components/common/ForumTabs.jsx).
+ *
+ * It carries its own translucent surface instead of floating directly on the
+ * background photo, and renders the selected tab as a filled chip so the
+ * active state does not rely on a 3px underline alone. */
+.forum-tabs-wrap {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.forum-tabs-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+[data-theme='dark'] .forum-tabs-wrap {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme='neutral'] .forum-tabs-wrap {
+  background: rgba(224, 219, 202, 0.6);
+  border-color: rgba(67, 52, 34, 0.12);
+  box-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
+}
+
+.forum-tabs {
+  flex-wrap: nowrap;
+  margin: 0;
+  gap: 0.15rem;
+  border-bottom: 0 !important;
+}
+
+.forum-tabs .nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+  padding: 0.45rem 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: 0 !important;
+  border-radius: 999px !important;
+  color: var(--text-color) !important;
+  background: transparent !important;
+  opacity: 1;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.forum-tabs .nav-link:hover,
+.forum-tabs .nav-link:focus-visible {
+  color: var(--primary-color) !important;
+  background: var(--block-bg) !important;
+}
+
+.forum-tabs .nav-link.active {
+  color: var(--bg-color) !important;
+  background-color: var(--primary-color) !important;
+  border-bottom: 0 !important;
+}
+
+[data-theme='dark'] .forum-tabs .nav-link.active {
+  color: #0f172a !important;
+  background-color: #f1f5f9 !important;
+}
+
+.forum-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.35rem;
+  background: var(--badge-bg);
+  color: var(--badge-text);
+}
+
+.forum-tabs .nav-link.active .forum-tab-badge {
+  background: var(--bg-color);
+  color: var(--primary-color);
+}
+
+[data-theme='dark'] .forum-tabs .nav-link.active .forum-tab-badge {
+  background: #0f172a;
+  color: #f1f5f9;
+}
+
+/* Shared "nothing here yet" panel (components/common/ForumEmptyState.jsx).
+ *
+ * These rules used to live inside a <style> element on NotificationsPage, so
+ * every other page had to reinvent the empty state — most of them settled for
+ * a bare muted sentence. They are global now, and the panel is a touch more
+ * opaque than before: at 0.4 the card nearly vanished into the light
+ * background photo and took its muted copy with it. */
+.empty-state-card {
+  background: rgba(255, 255, 255, 0.55) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] .empty-state-card {
+  background: rgba(15, 23, 42, 0.55) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme='neutral'] .empty-state-card {
+  background: rgba(224, 219, 202, 0.7) !important;
+  border-color: rgba(67, 52, 34, 0.12) !important;
+  box-shadow: 0 6px 24px rgba(56, 45, 29, 0.12);
+}
+
+.empty-state-icon {
+  color: var(--primary-color) !important;
+  opacity: 0.75;
+}
+
+/* The title carries the message, the description only supports it — muted grey
+ * on a translucent panel was too faint for both. */
+.empty-state-title {
+  color: var(--text-color) !important;
+  font-weight: 300;
+}
+
+.empty-state-desc {
+  color: var(--secondary-color) !important;
 }
 
 /* Premium Modal Styles (Used for Characters, Categories, and Confirms) */
@@ -2108,11 +2305,18 @@ a.badge.bg-danger:hover {
   background-color: rgba(var(--primary-rgb, 13, 110, 253), 0.06);
 }
 
+/* 0.875rem = the 14px floor, not a taste call. Every badge here names something
+   the reader has to act on — a group they are looking at, the action an audit
+   entry records — and at 0.65rem (≈10.4px) that name was the smallest text on
+   the row. Padding stays in `em` so the box grows with the label instead of
+   clipping it at the new size. */
 .rep-preview-badge {
-  font-size: 0.65rem !important;
-  padding: 0.15rem 0.35rem !important;
+  font-size: 0.875rem !important;
+  padding: 0.2em 0.4em !important;
   border-radius: 4px !important;
-  min-width: 26px;
+  /* Grown with the text: the old 26px floor was sized for "+1" at 10.4px and
+     would have left the taller digits off-centre. */
+  min-width: 30px;
   text-align: center;
   flex-shrink: 0;
 }
@@ -4048,6 +4252,76 @@ kbd {
 }
 
 /* ── Editor Toolbar Fine-tuning ──────────────────────────────────────────── */
+/* ── Admin empty states ────────────────────────────────────────────
+   A Bootstrap <Table> paints its dark header row even when the body has zero
+   rows, so an admin card with nothing in it rendered a bare black bar that
+   read as "populated table, no content yet". The admin board therefore swaps
+   the whole table for this block instead of rendering an empty one. It is a
+   full-width block (not a table row), so the explanation spans the card. */
+.admin-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  text-align: center;
+  padding: 2.25rem 1.25rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 0.75rem;
+  background-color: var(--block-bg);
+  color: var(--text-color);
+}
+
+.admin-empty-state__icon {
+  color: var(--secondary-color);
+  opacity: 0.7;
+  margin-bottom: 0.25rem;
+}
+
+.admin-empty-state__title {
+  font-weight: 600;
+}
+
+.admin-empty-state__desc {
+  font-size: 0.875rem;
+  color: var(--text-color);
+  opacity: 0.7;
+  /* A long hint should wrap into a readable measure, not one 1200px line. */
+  max-width: 60ch;
+}
+
+/* Badge that labels a row as belonging to a GROUP rather than a category.
+   The group's name is drawn in the Title column, bold — the same shape a
+   category title has — so without this label the separator row read as a
+   duplicated category. */
+.admin-group-badge {
+  /* 14px floor: the label that separates a group's rows from the categories
+     around them must be legible at a glance, which 0.65rem was not. Padding is
+     in `em` so the uppercase label keeps its box as the text grows. */
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background-color: var(--bs-gray-700) !important;
+  color: #ffffff !important;
+  padding: 0.25em 0.5em;
+  line-height: 1.3;
+}
+
+/* Groups listed as blocks while no category exists yet. A table would draw a
+   header naming columns that hold no rows. */
+.admin-group-scaffold {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-group-scaffold__row {
+  border: 1px dashed var(--border-color);
+  border-radius: 0.75rem;
+  background-color: var(--block-bg);
+  padding: 1rem 1.25rem;
+}
+
 .editor-toolbar .dropdown-toggle::after,
 .no-caret.dropdown-toggle::after,
 .no-caret .dropdown-toggle::after {

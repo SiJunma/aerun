@@ -2,8 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import { useI18n } from './I18nProvider';
 import { useDesign } from './DesignProvider';
-import { subscribeToUserNotifications, subscribeToAdminNotifications } from '../api/rtdb-notifications';
-import { subscribeToDmUnread } from '../api/dms';
+import { subscribeToUnreadCounts } from '../api/dms';
 
 const TitleContext = createContext();
 
@@ -16,18 +15,21 @@ export const TitleProvider = ({ children }) => {
   const { lang } = useI18n();
   const { activeDesign } = useDesign();
 
-  const isAdmin = (profile?.role_id === 'admin' || profile?.role_id === 'root') && (hasPermission ? hasPermission(PERMISSIONS?.ADMIN_ACCESS) : false);
-
   // Real-time unread notifications and DMs subscription for browser tab title badge
   const dmUnreadDataRef = React.useRef({ total: 0, conversations: {} });
   const [dmCount, setDmCount] = React.useState(0);
   const [userCount, setUserCount] = React.useState(0);
-  const [adminCount, setAdminCount] = React.useState(0);
 
-  // Combine counts into unreadCount (notifications + admin + DMs + new topics/posts)
+  // Combine counts into unreadCount (notifications + DMs + new topics/posts)
+  //
+  // There is no separate admin term any more. The admin feed was the SAME
+  // request as the member's own — `/me/notifications` is already scoped to the
+  // caller server-side — so it polled the endpoint a second time and then ADDED
+  // the identical rows, doubling both the tab badge and the sound that plays on
+  // a new notification.
   useEffect(() => {
-    setUnreadCount(userCount + adminCount + dmCount + (unreadTopicsCount || 0));
-  }, [userCount, adminCount, dmCount, unreadTopicsCount]);
+    setUnreadCount(userCount + dmCount + (unreadTopicsCount || 0));
+  }, [userCount, dmCount, unreadTopicsCount]);
 
   // Recalculate dmCount whenever activeDmConvId changes (e.g. user opens/closes a chat)
   useEffect(() => {
@@ -42,32 +44,27 @@ export const TitleProvider = ({ children }) => {
     }
   }, [activeDmConvId]);
 
+  // The tab title's notification term is the SERVER's count.
+  //
+  // It used to come from `subscribeToUserNotifications` — a
+  // `GET /me/notifications?limit=100` whose hundred rows were counted in the
+  // browser for one integer, on every page of the forum. `/me/unread-counts`
+  // already returns `unread_notifications`, and this provider was already
+  // subscribing to that resource for the DM term, so the two badges were reading
+  // two endpoints to render one number that one of them already carried.
   useEffect(() => {
     if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') {
       setUserCount(0);
-      setAdminCount(0);
       setDmCount(0);
       return;
     }
 
-    const unsubUser = subscribeToUserNotifications(user.uid, (notifs) => {
-      setUserCount(notifs.filter(n => !n.read).length);
-    });
-
-    let unsubAdmin = () => {};
-    if (isAdmin) {
-      unsubAdmin = subscribeToAdminNotifications((notifs) => {
-        setAdminCount(notifs.filter(n => !n.read).length);
-      });
-    } else {
-      setAdminCount(0);
-    }
-
     let unsubDm = () => {};
     if (hasPermission && hasPermission(PERMISSIONS?.USE_DIRECT_MESSAGES)) {
-      unsubDm = subscribeToDmUnread(user.uid, (data) => {
+      unsubDm = subscribeToUnreadCounts(user.uid, (data) => {
         const raw = data || { total: 0, conversations: {} };
         dmUnreadDataRef.current = raw;
+        setUserCount(raw.notifications || 0);
         const total = raw.total || 0;
         const conversations = raw.conversations || {};
         const openConvId = dmUnreadDataRef._activeDmConvId; // will be set via ref sync
@@ -78,14 +75,19 @@ export const TitleProvider = ({ children }) => {
           setDmCount(total);
         }
       });
+    } else {
+      // No DM permission still leaves the notification badge real: the counters
+      // response carries it, and gating the whole subscription on DMs would blank
+      // the title number for a member who is allowed notifications but not DMs.
+      unsubDm = subscribeToUnreadCounts(user.uid, (data) => {
+        setUserCount((data || {}).notifications || 0);
+      });
     }
 
     return () => {
-      unsubUser();
-      unsubAdmin();
       unsubDm();
     };
-  }, [user?.uid, profile?.role_id, isAdmin, hasPermission, PERMISSIONS?.USE_DIRECT_MESSAGES]);
+  }, [user?.uid, profile?.role_id, hasPermission, PERMISSIONS?.USE_DIRECT_MESSAGES]);
 
   useEffect(() => {
     let baseName = 'Forum';

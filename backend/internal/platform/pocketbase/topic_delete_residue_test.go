@@ -23,19 +23,22 @@ package pocketbase
 // are still there" a worse answer than it sounds: they are unreachable, so
 // nothing that reads them will ever reconcile them.
 //
-// NOT VERIFIED: `go` is not installed on the machine where these tests were
-// written, so they are UNCOMPILED. Run `go build ./... && go test ./...` before
-// relying on them.
+// Verified 2026-10-01: all four pass under `go test ./...`. Getting here first
+// required fixing a compile error in forum_topics.go — the package had never
+// been built, so none of this had ever run. See "Verification found" in
+// markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md.
 
 import (
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 // seedResidueFixture builds a live topic with two posts by DIFFERENT authors.
@@ -57,7 +60,6 @@ func seedResidueFixture(t testing.TB, app *tests.TestApp, firstAuthor, secondAut
 	topic.Set("author_id", firstAuthor)
 	topic.Set("title", "Residue Fixture")
 	topic.Set("posts_count", 2)
-	topic.Set("deleted", false)
 	if err := app.Save(topic); err != nil {
 		t.Fatal(err)
 	}
@@ -66,14 +68,23 @@ func seedResidueFixture(t testing.TB, app *tests.TestApp, firstAuthor, secondAut
 	if err != nil {
 		t.Fatal(err)
 	}
-	mk := func(seq int, author, body string) *core.Record {
+	// `order` sets an EXPLICIT `created` timestamp. The fixture used to express
+	// "this post came first" by writing a `sequence` ordinal, and with that
+	// column gone the intent had nowhere to live: two rows saved in the same
+	// millisecond tie, and the id tie-breaker then decides which one the feed
+	// calls the opening post — which can promote a reply and refuse a
+	// legitimate delete with 409. Stating the arrival time makes the ordering a
+	// property of the data rather than an accident of how fast the loop ran.
+	mk := func(order int, author, body string) *core.Record {
 		p := core.NewRecord(postsCol)
 		p.Set("topic_id", topic.Id)
 		p.Set("author_id", author)
-		p.Set("sequence", seq)
 		p.Set("content", body)
-		p.Set("deleted", false)
 		p.Set("is_draft", false)
+		// SetRaw, not Set: `created` is an AutodateField, and only a raw
+		// assignment survives the save. A plain Set is overwritten with "now",
+		// which is how the fixture ended up with two identical timestamps.
+		p.SetRaw("created", types.NowDateTime().Add(time.Duration(order-1)*time.Hour))
 		if err := app.Save(p); err != nil {
 			t.Fatal(err)
 		}
@@ -191,8 +202,10 @@ func TestDeleteTopicRevertsReputationAndCleansResidue(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
+	// root holds `delete_others_topics`; the thread has a reply from another
+	// member, so the author alone may not remove it.
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-	req.Header.Set("Authorization", tokens["player"])
+	req.Header.Set("Authorization", tokens["root"])
 	req.Header.Set("Idempotency-Key", "topic-delete-residue")
 	res, err := server.Client().Do(req)
 	if err != nil {
@@ -209,10 +222,9 @@ func TestDeleteTopicRevertsReputationAndCleansResidue(t *testing.T) {
 		t.Errorf("reputation after topic delete = %d, want -1 (only the profile vote remains)", got)
 	}
 
-	// The post vote rows are KEPT — a soft delete must stay reversible — so what
-	// matters is that the recompute no longer counts them. If it did, the next
-	// run would hand the reputation straight back and the drift would return,
-	// which is how be6ca82's manual repairs were undone.
+	// The post vote rows are GONE. There is no reversible delete any more, so
+	// keeping them would leave votes pointing at a post that no longer exists —
+	// an orphan sumVotes can never attribute to anyone.
 	postVotes, err := app.FindAllRecords(
 		reputationVotesCollectionName,
 		dbx.NewExp("post_id = {:p}", dbx.Params{"p": firstPostID}),
@@ -220,21 +232,26 @@ func TestDeleteTopicRevertsReputationAndCleansResidue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(postVotes) != 2 {
-		t.Errorf("vote rows must survive a soft delete so it stays reversible, got %d", len(postVotes))
+	if len(postVotes) != 0 {
+		t.Errorf("votes on a deleted post must be removed, %d remain", len(postVotes))
 	}
 
-	// Subscriptions, by contrast, are hard-deleted: they pin a hidden topic id
-	// in the member's list and the member cannot unsubscribe from a topic the
-	// API will not serve.
+	// Subscriptions are removed for the same reason: they pin a topic id in the
+	// member's list and the member cannot unsubscribe from a topic that no
+	// longer exists.
 	if n := countRows(t, app, topicSubscriptionsCollectionName, "topic_id = {:t}", map[string]any{"t": topicID}); n != 0 {
 		t.Errorf("expected subscriptions to be cleaned up, %d remain", n)
 	}
 
-	// The posts survive the soft delete — that is the recoverability win over
-	// Firestore — so this asserts we did NOT cascade.
-	if n := countRows(t, app, postsCollectionName, "topic_id = {:t}", map[string]any{"t": topicID}); n != 2 {
-		t.Errorf("posts must survive a soft delete, got %d", n)
+	// Deleting a topic CASCADES: its posts go with it. This is the behaviour
+	// that lost 21 posts on 2026-09-30, and it is now explicit — the protection
+	// against it is the 409 on DELETE /posts/{id} for a first post, plus the
+	// client's absolute-index check, not a soft delete.
+	if n := countRows(t, app, postsCollectionName, "topic_id = {:t}", map[string]any{"t": topicID}); n != 0 {
+		t.Errorf("deleting a topic must delete its posts, %d remain", n)
+	}
+	if _, err := app.FindRecordById(topicsCollectionName, topicID); err == nil {
+		t.Error("the topic row itself must be gone")
 	}
 
 	// And the repair tool agrees with the payout: run against the same database
@@ -295,14 +312,10 @@ func TestDeletePostRevertsReputation(t *testing.T) {
 		t.Errorf("recomputed reputation = %d, want 0 (a vote on a deleted post must not count)", got)
 	}
 
-	// The tombstone's own per-post total must not keep displaying a score that
-	// no longer exists anywhere else.
-	post, err := app.FindRecordById(postsCollectionName, replyPostID)
-	if err != nil || post == nil {
-		t.Fatalf("deleted post missing: %v", err)
-	}
-	if got := post.GetInt("reputation"); got != 0 {
-		t.Errorf("tombstone reputation = %d, want 0", got)
+	// The post row is GONE — that is what a hard delete means, and it is why the
+	// counter and the feed can no longer disagree.
+	if after, err := app.FindRecordById(postsCollectionName, replyPostID); err == nil && after != nil {
+		t.Fatalf("a deleted post must not survive as a row (reputation %d)", after.GetInt("reputation"))
 	}
 }
 
@@ -327,8 +340,9 @@ func TestDeleteTopicPaysBackReputationExactlyOnce(t *testing.T) {
 	defer server.Close()
 
 	deleteTopic := func(key string) int {
+		// root, for the same reason: the thread carries another member's reply.
 		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-		req.Header.Set("Authorization", tokens["player"])
+		req.Header.Set("Authorization", tokens["root"])
 		req.Header.Set("Idempotency-Key", key)
 		res, err := server.Client().Do(req)
 		if err != nil {
@@ -376,8 +390,14 @@ func TestRecomputeAgreesWithTopicPayout(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
+	// The actor is root, and that is the SUBJECT of this test: the settlement
+	// of a thread that other members have replied to. `delete_others_topics` is
+	// exactly that power, and the author cannot delete this topic any more —
+	// the cascade right is off by default. Which account performs the delete
+	// is not what these tests are about; what they are about is that nothing
+	// denormalized outlives the topic.
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/aerun/topics/%s", server.URL, topicID), nil)
-	req.Header.Set("Authorization", tokens["player"])
+	req.Header.Set("Authorization", tokens["root"])
 	req.Header.Set("Idempotency-Key", "recompute-agrees-delete")
 	res, err := server.Client().Do(req)
 	if err != nil {
@@ -441,7 +461,6 @@ func TestMovePostCarriesItsVotes(t *testing.T) {
 	target.Set("author_id", fixPlayerID)
 	target.Set("title", "Move Target")
 	target.Set("posts_count", 1)
-	target.Set("deleted", false)
 	if err := app.Save(target); err != nil {
 		t.Fatal(err)
 	}

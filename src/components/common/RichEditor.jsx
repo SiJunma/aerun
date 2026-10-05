@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
-import { pb } from '../../api/pocketbase';
+import { sendApi } from '../../api/pocketbase';
 import { resolveAvatarUrl } from '../../api/avatars';
 
 const RichEditor = forwardRef(({
@@ -652,7 +652,17 @@ const RichEditor = forwardRef(({
     setShowColumnsModal(false);
   };
 
-  const handleUserSearch = async (queryText) => {
+  // The mention picker.
+//
+// THIS USED TO BE `pb.collection('users').getList(1, 5, { filter: nickname ~ … })`
+// — one whole auth record per SUGGESTION, per KEYSTROKE. Typing four letters in a
+// reply box handed the typist five strangers' private `settings`. The rows are
+// now a three-column list from GET /api/aerun/users/search: id for the uid the
+// editor stores, nickname for the label, avatar for the chip.
+//
+// The two-character floor is duplicated on the server so the cap cannot be
+// sidestepped by calling the route directly.
+const handleUserSearch = async (queryText) => {
     setHideData(prev => ({ ...prev, username: queryText, uid: '' })); // clear uid when typing
     if (!queryText || queryText.length < 2) {
       setUserSearchResults([]);
@@ -660,10 +670,8 @@ const RichEditor = forwardRef(({
     }
     setIsSearchingUsers(true);
     try {
-      const records = await pb.collection('users').getList(1, 5, {
-        filter: `nickname ~ "${queryText}"`,
-      });
-      setUserSearchResults(records.items.map(doc => ({ id: doc.id, ...doc })));
+      const res = await sendApi(`/api/aerun/users/search?q=${encodeURIComponent(queryText)}`);
+      setUserSearchResults(res?.items || []);
     } catch (err) {
       console.error(err);
       setUserSearchResults([]);

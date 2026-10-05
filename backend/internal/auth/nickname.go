@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
@@ -21,4 +22,34 @@ func NormalizeNickname(nickname string) string {
 	// strings.Fields splits on any Unicode whitespace and collapses runs,
 	// so "  A\t B " and "a b" collide on purpose.
 	return strings.Join(strings.Fields(folded), " ")
+}
+
+// ValidateNickname checks the DISPLAY form: length bounds and emptiness after
+// trimming. It deliberately does not normalise — NormalizeNickname produces the
+// storage key, this decides whether the human-readable form is acceptable.
+//
+// The 2..32 rune bounds are the legacy contract (src/pages/AdminPage.jsx and the
+// registration form agree), and they are counted in RUNES, not bytes, so a
+// nickname written in Cyrillic or CJK is not penalised for its encoding.
+const (
+	MinNicknameLen = 2
+	MaxNicknameLen = 32
+)
+
+func ValidateNickname(nickname string) error {
+	trimmed := strings.TrimSpace(nickname)
+	if trimmed == "" {
+		return fmt.Errorf("nickname must not be empty")
+	}
+	runes := []rune(trimmed)
+	if len(runes) < MinNicknameLen || len(runes) > MaxNicknameLen {
+		return fmt.Errorf("nickname must be %d..%d characters", MinNicknameLen, MaxNicknameLen)
+	}
+	// A nickname that folds to an empty uniqueness key would be unusable: the
+	// partial UNIQUE index on nickname_normalized only constrains non-empty
+	// values, so two accounts could both claim the same blank identity.
+	if NormalizeNickname(trimmed) == "" {
+		return fmt.Errorf("nickname must contain at least one letter or digit")
+	}
+	return nil
 }

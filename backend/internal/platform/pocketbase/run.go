@@ -87,6 +87,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 			return err
 		}
 		registerRoutes(se, cfg)
+		// Records every completed identity-provider sign-in, so the chief-admin
+		// handover can accept "sign in with Google again" as proof of identity
+		// for an account that has no usable password. See oauth_signin_recent.go.
+		registerOAuthSignInHook(se.App)
 		return se.Next()
 	})
 
@@ -234,15 +238,48 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// No enforceIdempotency: that middleware buffers the body and caps it at
 	// 512 KB, which a multipart avatar can never satisfy (see avatar_upload.go).
 	group.PUT("/me/avatar", uploadMyAvatarHandler)
+	// Nicknames. Self-service needs no route-level permission: the handler
+	// checks `edit_self_nickname` so a role that has it revoked by the status
+	// narrowing is refused, and the rank matrix lives in the handler because
+	// it is not expressible as a single permission.
+	group.PATCH("/me/nickname", changeMyNicknameHandler).BindFunc(enforceIdempotency)
+	group.PATCH("/users/{id}/nickname", changeUserNicknameHandler).BindFunc(enforceIdempotency)
+	// Profile fields. The legacy profile form used to save through the ADMIN
+	// route, which silently discarded everything but role and status — see
+	// profile_commands.go for the two ways that failed.
+	group.PATCH("/me/profile", updateMyProfileHandler)
+	group.PATCH("/users/{id}/profile", updateUserProfileHandler).BindFunc(enforceIdempotency)
+
+	// Sign-in credentials. The legacy Security tab called
+	// pb.collection('users').update(), which this backend refuses by design
+	// (users.UpdateRule = nil), so the whole tab had no save path — see
+	// account_credentials.go. Each mutation carries enforceIdempotency: they are
+	// destructive-if-repeated (a re-sent password change re-hashes, a re-sent
+	// email change is a second audit row) and a double-clicked Save must not
+	// produce two of either.
+	group.GET("/me/auth", listMyAuthMethodsHandler)
+	group.PUT("/me/password", changeMyPasswordHandler).BindFunc(enforceIdempotency)
+	group.PATCH("/me/email", changeMyEmailHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/me/auth/{provider}", unlinkMyAuthProviderHandler).BindFunc(enforceIdempotency)
 
 	// Sprint 2 identity commands.
 	group.POST("/auth/register", registerHandler)
 	group.GET("/admin/users", adminListUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
 	group.PATCH("/admin/users/{id}", adminUpdateUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	group.DELETE("/admin/users/{id}", adminDeleteUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+	// The root role changes hands only through this command; a plain role write
+	// refuses it for every caller (see checkRoleChange). Gated on admin_access
+	// as a cheap first gate, but the handler demands the root role AND the
+	// caller's password — see root_transfer.go.
+	group.POST("/admin/transfer-root", transferRootHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 
 	// Catalog & metadata commands (public read + permissioned CRUD)
 	group.GET("/roles", listRolesHandler)
+	// The role EDITOR's list. Same rows, plus the configuration the public route no
+	// longer carries — the permission matrix, system/custom, base role, mask limit.
+	// Public /roles stays ungated on purpose (badges must render before sign-in),
+	// so this is where the security model lives now.
+	group.GET("/admin/roles", listAdminRolesHandler).BindFunc(RequirePermission(auth.PermManageRoles))
 	group.POST("/roles", createRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
 	group.PATCH("/roles/{id}", updateRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
 	group.DELETE("/roles/{id}", deleteRoleHandler).BindFunc(RequirePermission(auth.PermManageRoles)).BindFunc(enforceIdempotency)
@@ -260,13 +297,34 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Categories
 	group.GET("/categories", listCategoriesHandler)
+	// The editor's view of the same rows, and the only response that carries
+	// `allowed_roles`. Gated on the permission to change a category, because
+	// that list is the permission model of the board.
+	group.GET("/admin/categories", listAdminCategoriesHandler).BindFunc(RequirePermission(auth.PermManageCategories))
+	// The forum index: categories AND the groups they are filed under, in one
+	// response, because the screen cannot render without both.
+	group.GET("/forum-index", listForumIndexHandler)
+	// Forum-wide totals for the stats panel. Counted on read rather than cached —
+	// see listForumStatsHandler.
+	group.GET("/forum-stats", listForumStatsHandler)
 	group.POST("/categories", createCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 	group.PATCH("/categories/{id}", updateCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 	group.DELETE("/categories/{id}", deleteCategoryHandler).BindFunc(RequirePermission(auth.PermManageCategories)).BindFunc(enforceIdempotency)
 
+	// The public profile DTO and the public member board. The browser used to
+	// read the `users` table through the SDK, which handed a signed-out visitor
+	// the whole auth record — private `settings` included. See user_profile.go.
+	group.GET("/users", listUsersHandler)
+	group.GET("/users/search", searchUsersHandler)
+	group.GET("/nicknames/check", checkNicknameHandler)
+	group.GET("/users/{id}", getUserProfileHandler)
 	// Characters (masks). Reads follow the users profile visibility rule;
 	// writes are owner-only and self-service (ADR-5).
 	group.GET("/users/{id}/characters", listUserCharactersHandler)
+	// The profile's Posts tab. It used to read `posts` through the browser SDK,
+	// which lockBrowserRules answers with 403 for every non-superuser — see
+	// user_posts.go.
+	group.GET("/users/{id}/posts", listUserPostsHandler)
 	group.GET("/characters/{id}", getCharacterHandler)
 	group.POST("/me/characters", createCharacterHandler).BindFunc(enforceIdempotency)
 	group.PATCH("/characters/{id}", updateCharacterHandler).BindFunc(enforceIdempotency)
@@ -281,6 +339,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// can only POST) and read the public counter through GET /presence/guests.
 	group.POST("/presence/heartbeat", heartbeatHandler)
 	group.POST("/presence/guest/leave", guestLeaveHandler)
+	// The member counterpart of the guest leave. Without it a signed-in account
+	// can only stop beating, which leaves it in the online list for the whole
+	// presenceTTL — see memberLeaveHandler.
+	group.POST("/presence/leave", memberLeaveHandler)
 	group.GET("/presence/guests", listGuestsHandler)
 	group.GET("/presence/online-users", listOnlineUsersHandler)
 
@@ -294,17 +356,28 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	group.POST("/topics/{id}/posts", createPostHandler).BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
 	group.GET("/topics/{id}/posts", listPostsHandler)
-	group.GET("/topics/{id}/posts/by-sequence/{sequence}", getPostBySequenceHandler)
+	group.GET("/posts/{id}", getPostHandler)
 	group.PATCH("/posts/{id}", editPostHandler).BindFunc(enforceIdempotency)
 	group.DELETE("/posts/{id}", deletePostHandler).BindFunc(enforceIdempotency)
 	group.POST("/topics/{id}/posts/move", movePostsHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)
 
 	// Draft posts (drafts page + in-topic editing).
+	//
+	// The WRITE routes carry PermPostReply, the same key POST /topics/{id}/posts
+	// demands. A draft is a reply that has not been sent yet, so gating it on
+	// anything weaker means the reply gate is bypassable: these routes used to
+	// be bound with enforceIdempotency alone, which consults neither the role nor
+	// the status, and an account narrowed to nothing — banned, or pending — could
+	// draft and then publish straight into the live forum.
 	group.GET("/me/drafts", listMyDraftsHandler)
 	group.GET("/topics/{id}/draft", getDraftHandler)
-	group.PUT("/topics/{id}/draft", upsertDraftHandler).BindFunc(enforceIdempotency)
+	group.PUT("/topics/{id}/draft", upsertDraftHandler).
+		BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
+	// Deleting one's own draft grants nothing, so it stays ungated: a banned
+	// account tidying up its unsent text is harmless.
 	group.DELETE("/drafts/{id}", deleteDraftHandler).BindFunc(enforceIdempotency)
-	group.POST("/drafts/{id}/publish", publishDraftHandler).BindFunc(enforceIdempotency)
+	group.POST("/drafts/{id}/publish", publishDraftHandler).
+		BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
 
 	// Sprint 4 reputation, subscriptions and audit routes.
 	group.GET("/admin/audit-logs", adminListAuditLogsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
@@ -314,26 +387,60 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.DELETE("/topics/{id}/subscription", unsubscribeTopicHandler).BindFunc(enforceIdempotency)
 	group.GET("/topics/{id}/subscription", getTopicSubscriptionStatusHandler)
 	group.GET("/me/subscriptions", listUserSubscriptionsHandler)
+	// Read state. These carry no enforceIdempotency: they write exactly one row
+	// keyed (user, topic) and repeat to the same value, so an idempotency key
+	// would only add a way for "I opened a topic" to fail.
+	group.POST("/topics/{id}/read", markTopicReadHandler)
+	group.POST("/me/topics/read-all", markAllTopicsReadHandler)
 
 	group.POST("/posts/{id}/vote", votePostHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.DELETE("/posts/{id}/vote", deletePostVoteHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.POST("/users/{id}/vote", voteUserHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.DELETE("/users/{id}/vote", deleteUserVoteHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
-	group.DELETE("/reputation/{id}", deleteReputationHandler).BindFunc(RequirePermission(auth.PermDeleteReputation)).BindFunc(enforceIdempotency)
+	// Reputation edit and delete are gated ONLY on use_reputation here, and the
+	// per-action decision is made inside the handlers.
+	//
+	// That is a deliberate inversion of the previous shape. The route used to
+	// require `delete_reputation`, a staff-only key, which meant a player could not
+	// retract their own entry even when that was the only entry they were entitled
+	// to touch. Ownership is a property of the RECORD, and the record is loaded
+	// inside the command — a route-level check would have to guess which of the
+	// four keys applies before it has read `voter_id`, and guessing there means
+	// either locking members out or letting them through.
+	group.PUT("/reputation/{id}", editReputationHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
+	group.DELETE("/reputation/{id}", deleteReputationHandler).BindFunc(RequirePermission(auth.PermUseReputation)).BindFunc(enforceIdempotency)
 	group.GET("/posts/{id}/voters", getPostVotersHandler)
 	group.GET("/users/{id}/reputation", getUserReputationLogsHandler)
+	// The caller's OWN votes. The browser used to read `reputation_votes`
+	// directly over the PocketBase SDK, which that collection's nil browser
+	// rules (migration 1766300000) refuse with 403 — see listMyVotesHandler.
+	group.GET("/me/votes", listMyVotesHandler)
 
 	// Sprint 5 direct messages, notifications and outbox routes.
 	group.POST("/dms", createDMHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages)).BindFunc(enforceIdempotency)
 	group.GET("/dms", listConversationsHandler)
+	// Under its own resource root rather than /dms/peer/{peerId}: the router rejects
+	// that shape outright, because /dms/peer/{peerId} and /dms/{id}/messages both
+	// match /dms/peer/messages and neither is more specific.
+	group.GET("/conversations/peer/{peerId}", findConversationWithPeerHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages))
+	// The DM header's view of the correspondent: a nickname, an avatar and whether
+	// the account may still be written to. Deliberately NOT /users/{id}, which is
+	// the profile page and carries a member's `settings` — see getPeerCardHandler.
+	group.GET("/peers/{id}", getPeerCardHandler)
 	group.POST("/dms/{id}/messages", sendDMMessageHandler).BindFunc(RequirePermission(auth.PermUseDirectMessages)).BindFunc(enforceIdempotency)
 	group.GET("/dms/{id}/messages", listDMMessagesHandler)
 	group.POST("/dms/{id}/read", markConversationReadHandler)
 	group.POST("/dms/{id}/clear", clearConversationHandler)
+	// Message lifecycle. No RequirePermission: authority here is MEMBERSHIP and
+	// authorship, both checked in the handler, because `edit_others_posts` must
+	// not extend into a private conversation.
+	group.PATCH("/dm-messages/{id}", editDMMessageHandler).BindFunc(enforceIdempotency)
+	group.DELETE("/dm-messages/{id}", deleteDMMessageHandler).BindFunc(enforceIdempotency)
 
 	group.GET("/me/notifications", listUserNotificationsHandler)
 	group.PATCH("/me/notifications/{id}/read", markNotificationReadHandler)
 	group.POST("/me/notifications/read-all", markAllNotificationsReadHandler)
+	group.POST("/me/notifications/archive-all", archiveAllNotificationsHandler)
 	group.PATCH("/me/notifications/{id}/archive", archiveNotificationHandler)
 	group.GET("/me/unread-counts", getUnreadCountsHandler)
 

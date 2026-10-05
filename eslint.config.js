@@ -5,7 +5,12 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores([
+    'dist',
+    // Regression-test fixtures are deliberately unrunnable code: they exist to
+    // be fed to a check that MUST fail on them, so linting them is noise.
+    'scripts/fixtures/**',
+  ]),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

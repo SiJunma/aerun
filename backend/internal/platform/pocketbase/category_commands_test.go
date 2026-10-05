@@ -15,6 +15,8 @@ import (
 	"testing"
 
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tests"
 )
 
 // bytesContains is a short alias for the payload assertions below; every check
@@ -49,6 +51,76 @@ func categoryCall(t testing.TB, method, path, body, token, idemKey string) (int,
 	return res.StatusCode, payload, res.Header
 }
 
+// seedTestCategoryGroup creates a category group and returns its id.
+//
+// Every category must now name a group: one that does not is invisible on the
+// forum index. Tests about permissions, slugs or idempotency are not about
+// groups, so they seed one rather than re-assert the rule each time — the rule
+// itself is pinned by TestCreateCategoryRequiresAGroup.
+func seedTestCategoryGroup(t testing.TB, app *tests.TestApp) string {
+	t.Helper()
+	col, err := app.FindCollectionByNameOrId(categoryGroupsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := core.NewRecord(col)
+	rec.Set("title", "Test Group")
+	rec.Set("sort_order", 0)
+	if err := app.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec.Id
+}
+
+// A category outside every group is invisible on the forum index, so creating
+// one is refused outright rather than producing a row nobody can reach.
+//
+// This is the rule the admin UI gates on, and the reason the rule exists at
+// all: without it an admin can create a category that is stored perfectly well
+// and never rendered, with no indication of why.
+func TestCreateCategoryRequiresAGroup(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	t.Run("no group_id is refused and explains why", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories", `{"name":"Nowhere"}`,
+			tokens["root"], "test-idem-cat-nogroup")
+		if status != http.StatusBadRequest {
+			t.Fatalf("a category with no group must be refused, got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, "group") {
+			t.Fatalf("the 400 must name the missing group: %s", payload)
+		}
+
+		count, err := app.CountRecords(categoriesCollectionName, dbx.HashExp{"name": "Nowhere"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("a refused create must not persist a row, found %d", count)
+		}
+	})
+
+	t.Run("a named group is accepted", func(t *testing.T) {
+		groupID := seedTestCategoryGroup(t, app)
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories",
+			`{"name":"Visible","group_id":"`+groupID+`"}`,
+			tokens["root"], "test-idem-cat-withgroup")
+		if status != http.StatusCreated {
+			t.Fatalf("a category inside a group must be created, got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, `"group_id":"`+groupID+`"`) {
+			t.Fatalf("the stored row must keep the group: %s", payload)
+		}
+	})
+}
+
 func TestCreateCategoryPermissionMatrix(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -57,7 +129,8 @@ func TestCreateCategoryPermissionMatrix(t *testing.T) {
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	body := `{"name":"Lore","description":"Backstory","allowed_roles":["player","admin"],"sort_order":3}`
+	groupID := seedTestCategoryGroup(t, app)
+	body := `{"name":"Lore","description":"Backstory","allowed_roles":["player","admin"],"sort_order":3,"group_id":"` + groupID + `"}`
 
 	cases := []struct {
 		name   string
@@ -89,6 +162,7 @@ func TestCreateCategoryValidationAndSlug(t *testing.T) {
 	tokens := seedIdentityFixtures(t, app)
 	ts := newTestServer(t, app)
 	defer ts.Close()
+	groupID := seedTestCategoryGroup(t, app)
 
 	t.Run("missing name is rejected", func(t *testing.T) {
 		status, payload, _ := categoryCall(t, http.MethodPost,
@@ -124,7 +198,7 @@ func TestCreateCategoryValidationAndSlug(t *testing.T) {
 		}
 
 		status, payload, _ = categoryCall(t, http.MethodPost,
-			ts.URL+"/api/aerun/categories", `{"name":"Hidden Games","allowed_roles":["demon"]}`,
+			ts.URL+"/api/aerun/categories", `{"name":"Hidden Games","allowed_roles":["demon"],"group_id":"`+groupID+`"}`,
 			tokens["root"], "test-idem-cat-customrole")
 		if status != http.StatusCreated {
 			t.Fatalf("expected 201 for a custom-role category, got %d: %s", status, payload)
@@ -136,7 +210,7 @@ func TestCreateCategoryValidationAndSlug(t *testing.T) {
 
 	t.Run("slug is derived from the name", func(t *testing.T) {
 		status, payload, _ := categoryCall(t, http.MethodPost,
-			ts.URL+"/api/aerun/categories", `{"name":"Общий раздел","slug":"client-supplied"}`,
+			ts.URL+"/api/aerun/categories", `{"name":"Общий раздел","slug":"client-supplied","group_id":"`+groupID+`"}`,
 			tokens["root"], "test-idem-cat-slug")
 		if status != http.StatusCreated {
 			t.Fatalf("expected 201, got %d: %s", status, payload)
@@ -154,7 +228,7 @@ func TestCreateCategoryValidationAndSlug(t *testing.T) {
 
 	t.Run("duplicate slug is a conflict", func(t *testing.T) {
 		status, payload, _ := categoryCall(t, http.MethodPost,
-			ts.URL+"/api/aerun/categories", `{"name":"Общий раздел"}`,
+			ts.URL+"/api/aerun/categories", `{"name":"Общий раздел","group_id":"`+groupID+`"}`,
 			tokens["root"], "test-idem-cat-dupslug")
 		if status != http.StatusConflict {
 			t.Fatalf("expected 409 for a duplicate slug, got %d: %s", status, payload)
@@ -170,7 +244,7 @@ func TestCategoryIdempotentReplayAndAudit(t *testing.T) {
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	body := `{"name":"Replays","allowed_roles":["player"],"sort_order":7}`
+	body := `{"name":"Replays","allowed_roles":["player"],"sort_order":7,"group_id":"` + seedTestCategoryGroup(t, app) + `"}`
 	const key = "test-idem-cat-replay"
 
 	status, first, _ := categoryCall(t, http.MethodPost,

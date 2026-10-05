@@ -4,34 +4,39 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { Folder, MessageSquare, FileText } from 'lucide-react';
-import { subscribeToCategoryGroups } from '../api/categories';
 import LastPostInfo from '../components/common/LastPostInfo';
 import ForumStats from '../components/layout/ForumStats';
 import Skeleton from '../components/common/Skeleton';
 import ErrorCard from '../components/common/ErrorCard';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import { resolveField } from '../utils/text';
+import { toMillis, unreadFloor } from '../utils/dates';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
   const { t, lang } = useI18n();
-  const { user, profile, readMap, categories, forumStateLoading, forumStateError, refreshForumState } = useAuth();
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Categories AND groups come from ONE read, which AuthProvider already makes
+  // (forum-index) and re-makes whenever the identity changes.
+  //
+  // This page used to ALSO call subscribeToForumIndex, which meant opening the
+  // forum issued two reads of the same category rows on two unrelated clocks,
+  // and the index rendered whichever pairing of (categories, groups) happened to
+  // be on screen — a category filed under a group the other read had not returned
+  // yet landed in no section at all, silently.
+  //
+  // The index cannot paint from half of that pair, so it is now delivered half
+  // as often: once, by the provider that already has to re-read it on sign-in,
+  // sign-out and role change. `categories` is filtered by canViewCategory on the
+  // SERVER, so there is no client-side role check to repeat here.
+  const { user, profile, categories, categoryGroups, readMap, forumStateLoading, forumStateError, refreshForumState } = useAuth();
   const [timeoutExpired, setTimeoutExpired] = useState(false);
   const { setPageTitle } = usePageTitle();
 
+  const groups = categoryGroups;
+
   useEffect(() => {
     setPageTitle('');
-    const unsubGroups = subscribeToCategoryGroups((data) => {
-      setGroups(data);
-      setLoading(false);
-    });
-
-    return () => {
-      unsubGroups();
-    };
   }, []);
-
 
   // While a logged-in user's profile is still loading from Firestore, treat as loading
   // to prevent a flash of content with wrong permissions (profile=null → role='player', then
@@ -42,18 +47,18 @@ const MainPage = () => {
   const catsLoading = forumStateLoading;
 
   useEffect(() => {
-    if (loading || profileLoading || catsLoading) {
+    if (catsLoading || profileLoading) {
       const timer = setTimeout(() => {
         setTimeoutExpired(true);
       }, 7000);
       return () => clearTimeout(timer);
     }
-  }, [loading, profileLoading, catsLoading]);
+  }, [catsLoading, profileLoading]);
 
   return (
     <div className="pt-5 pb-4">
 
-      {(loading || profileLoading || catsLoading) ? (
+      {(catsLoading || profileLoading) ? (
         timeoutExpired ? (
           <ErrorCard
             isNetworkError={true}
@@ -112,25 +117,49 @@ const MainPage = () => {
         const visibleCats = categories;
         const groupsWithCats = groups.filter(g => visibleCats.some(c => c.group_id === g.id));
 
+        // Categories that belong to no group are rendered NOWHERE by the loop
+        // below: it walks GROUPS and keeps the categories matching each one, so
+        // `cat.group_id === g.id` never matches "". Such a category is invisible
+        // on the forum index while existing perfectly well in the database.
+        //
+        // The empty-state guard counts `categories`, not rendered rows, so when
+        // every category is ungrouped the index showed neither the list nor the
+        // "no categories" message — a blank area with no way to diagnose it.
+        //
+        // They get their own section here so the row stays reachable and the
+        // misconfiguration is legible instead of silent.
+        const UNGROUPED_KEY = '__ungrouped__';
+        const ungroupedCats = visibleCats.filter(
+          c => !c.group_id || !groups.some(g => g.id === c.group_id)
+        );
+        const renderGroups = ungroupedCats.length
+          ? [...groupsWithCats, { id: UNGROUPED_KEY, __isUngrouped: true }]
+          : groupsWithCats;
+
+        // One accessor for both kinds of group, so the table markup below stays
+        // a single branch instead of a duplicated row.
+        const catsForGroup = (group) => (group.__isUngrouped
+          ? ungroupedCats
+          : visibleCats.filter(cat => cat.group_id === group.id));
+
         if (visibleCats.length === 0) {
           return (
-            <Card className="shadow-sm border-0">
-              <div className="p-5 text-center text-muted">
-                <div className="mb-3 d-flex justify-content-center">
-                  <Folder size={48} strokeWidth={1} />
-                </div>
-                <h5 className="mb-2">{t('forum.no_categories')}</h5>
-                <p className="mb-0 small">{t('forum.no_categories_desc')}</p>
-              </div>
-            </Card>
+            <ForumEmptyState
+              className="mb-4"
+              icon={Folder}
+              title={t('forum.no_categories')}
+              description={t('forum.no_categories_desc')}
+            />
           );
         }
 
-        return groupsWithCats.map(group => (
+        return renderGroups.map(group => (
           <Card key={group.id} className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
             <div className="d-flex align-items-center forum-group-header">
               <h4 className="mb-0">
-                {resolveField(group.title, lang)}
+                {group.__isUngrouped
+                  ? (lang === 'ru' ? 'Без группы' : 'Unassigned')
+                  : resolveField(group.title, lang)}
               </h4>
             </div>
             <Table hover responsive className="mb-0 forum-table forum-table-sub">
@@ -143,9 +172,7 @@ const MainPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {visibleCats
-                  .filter(cat => cat.group_id === group.id)
-                  .map(cat => (
+                {catsForGroup(group).map(cat => (
                     <tr key={cat.id}>
                       <td data-label={t('forum.category')}>
                         <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1 cat-link">
@@ -185,12 +212,8 @@ const MainPage = () => {
                               const lastVisitRaw = readMap[cat.last_post_topic_id];
                               const lastReadOffset = lastVisitRaw?.offset ?? null;
                               const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-                              const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
-                              const registrationMs = profile?.created_at?.toMillis?.() || 0;
-                              const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-                              const lastPostMs = cat.last_post_at 
-                                ? (cat.last_post_at.toMillis ? cat.last_post_at.toMillis() : new Date(cat.last_post_at).getTime())
-                                : 0;
+                              const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
+                              const lastPostMs = toMillis(cat.last_post_at);
                               const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
                               return (

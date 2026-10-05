@@ -198,6 +198,83 @@ All errors return the machine-readable error contract:
 - `DELETE /api/aerun/posts/:id` — soft delete post, updates visible post count and topic `last_post_*` fallback.
 - `POST /api/aerun/topics/:id/posts/move` — move posts between topics, resequencing in target topic and updating projections for both topics in one transaction.
  
+### Board Structure (read model)
+
+These are separated by what the CALLER may know, not by what the screen
+renders. The public list deliberately omits `allowed_roles`: it answered "what
+may this caller see", and shipping the access rule of every category on it told
+every member (including a signed-out guest) the whole permission model of the
+board — which roles exist, which are admitted, and by omission which are
+restricted or root-only.
+
+- `GET /api/aerun/forum-index` — the forum index in ONE response: `items` (the
+  categories this caller may see, with counters and last-post projection) plus
+  `groups` (the folder headings) and `available`. The index cannot paint from half
+  of that pair, so it must not fetch half of it either — a category whose
+  `group_id` named a group the other call had not returned yet rendered in the
+  wrong section. `available` is `false` on a database older than migration
+  1767500000, which is what renders the board ungrouped.
+- `GET /api/aerun/categories` — the same category rows on their own, for callers
+  that need categories without the grouping (moderation pickers). No
+  `allowed_roles`.
+- `GET /api/aerun/admin/categories` — the editor's view: every row, including
+  ones the editor cannot preview (hiding a category from its own editor makes it
+  unfixable), and the ONLY response carrying `allowed_roles`. Requires
+  `manage_categories`.
+- `GET /api/aerun/category-groups` — group headings alone. Kept for the admin
+  board's group CRUD, which edits groups independently of categories.
+
+#### Roles: the same split, for the same reason
+
+`GET /api/aerun/roles` is ungated on purpose — `account_isolation_test.go` pins
+that a signed-OUT visitor must still render role badges, and the theme must load
+before a session exists — so the fields were gated instead of the route. It used to
+serve `permissions`, `is_system`, `base_role_id` and `max_characters_limit` for
+every role, which made the route a complete map of the board's security model
+readable by anyone: which roles exist, exactly what each may do, and which are
+privileged.
+
+- `GET /api/aerun/roles` — `role_id`, `name`, `rank`, `color`. What a badge paints,
+  and all four already public through role badges on posts.
+- `GET /api/aerun/admin/roles` — the same rows plus `permissions`, `is_system`,
+  `base_role_id`, `max_characters_limit` and the record `id` the editor form
+  submits back. Requires `manage_roles`, and returns EVERY row: hiding a role from
+  the editor that manages roles would make it unfixable.
+
+What made this safe to do is that the client no longer needs the matrix to decide
+anything. `hasPermission` reads the caller's effective permission set from
+`GET /api/aerun/me` (`profilePayload`, narrowed by role AND by account status),
+which the guest branch answers too — so a signed-out visitor is not left reaching
+into the registry for an answer it is no longer given.
+
+The permission NAMES remain public in `src/constants/permissions.js`, compiled into
+the bundle. That is a vocabulary, not an assignment; what the split protects is
+which account may do what, and it removes the second authority that could disagree
+with the server.
+
+#### Realtime: blocked on rules, not on the client
+
+Every forum collection is locked with `lockBrowserRules` (migrations 1766100000
+and 1766400000): `ListRule` and `ViewRule` are `nil`, which PocketBase answers
+with "superusers only" (`core/record_query.go`: `if accessRule == nil { return
+false }`). A wildcard realtime subscription resolves its rule through that same
+`ListRule`, so a member's `pb.collection('topics').subscribe('*')` completes the
+SSE handshake — the network tab shows `PB_CONNECT` — and the server then never
+delivers an event. `RealtimeRule` is a separate field and is currently unset
+everywhere.
+
+Realtime is the REASON this stack is Go + PocketBase, so it is coming back as the
+primary transport rather than being written off in favour of intervals. Until a
+scoped `RealtimeRule` exists per collection, `src/api/shared-poll.js` REFUSES a
+realtime hook with a thrown error rather than opening a connection that cannot
+deliver — the failure this guards against is a dead channel that looks configured.
+
+The plan, including the authorization decision that has to come first and the
+unsubscribe rules that keep a long session from accumulating SSE connections, is
+in `markdowns/REALTIME_HYBRID_PLAN.md`. Note for tests written against it: assert
+on DELIVERY, not on connection — a connection-only test passes against the dead
+channel that exists today.
+
 ### Reputation, Subscriptions and Audit (Sprint 4)
  
 - `POST /api/aerun/posts/:id/vote` — cast or update vote on a post (`value`: `1` or `-1`, `comment` up to 1024 chars). Atomically updates post score and author profile reputation. Requires `use_reputation` permission.
@@ -210,7 +287,7 @@ All errors return the machine-readable error contract:
 - `POST /api/aerun/topics/:id/subscribe` — subscribe to topic updates. Strictly idempotent: duplicate requests cannot create duplicate subscription records.
 - `POST /api/aerun/topics/:id/unsubscribe` & `DELETE /api/aerun/topics/:id/subscription` — unsubscribe from topic updates. Idempotent no-op if not subscribed.
 - `GET /api/aerun/topics/:id/subscription` — check caller's subscription status for a topic.
-- `GET /api/aerun/me/subscriptions` — list topics the caller is subscribed to with keyset pagination.
+- `GET /api/aerun/me/subscriptions` — list topics the caller is subscribed to with keyset pagination. Each item embeds the subscribed `topic` payload, so the browser renders the page from ONE request instead of one `GET /topics/:id` per subscription. The `topic` key is OMITTED when the topic is deleted or its category is no longer readable by the caller — the subscription row is still the caller's, but there is nothing there to read.
 - `GET /api/aerun/admin/audit-logs` — keyset-paginated audit trail for administrative actions (`view_audit_log` permission: root/admin). Supports filtering by `action_type` and `performer_id`.
 
 ### Direct Messages, Notifications and Outbox (Sprint 5)
@@ -225,7 +302,30 @@ All errors return the machine-readable error contract:
 - `PATCH /api/aerun/me/notifications/:id/read` — mark single notification as read.
 - `POST /api/aerun/me/notifications/read-all` — mark all caller's notifications as read.
 - `PATCH /api/aerun/me/notifications/:id/archive` — archive notification.
-- `GET /api/aerun/me/unread-counts` — aggregated unread counters (`unread_notifications`, `unread_conversations`, `total_unread_messages`), replacing RTDB unread badges.
+- `GET /api/aerun/me/unread-counts` — aggregated unread counters (`unread_notifications`,
+  `unread_conversations`, `total_unread_messages`, `unread_topics`), replacing the
+  RTDB unread badges. All four belong on one endpoint because they are one
+  question — "what does this member not know about yet" — and the client already
+  polls it on a single shared loop, so the topic count costs no request it was not
+  already making.
+- `unread_topics` is the one number that cannot be derived on the client. It was
+  previously computed in the browser from a `topics?limit=50` list, which made it
+  capped (a member with 60 unread was told 50) and per-device (the read map lived
+  in localStorage, so the desktop and the phone disagreed about the same account).
+  The predicate is `last_post_created > max(last_read_at, users.created)`, filtered
+  by `canViewCategory` so the count never exceeds the list it summarises, and
+  excluding topics whose last post is the caller's own.
+- `POST /api/aerun/topics/:id/read` — move the caller's read position for one
+  topic. Upsert, so revisiting advances the position. A GET is deliberately not a
+  read: the topic is fetched constantly, and marking on every fetch would clear the
+  badge as soon as the member looked at their own inbox.
+- `POST /api/aerun/me/topics/read-all` — the same for a list of ids, behind the
+  "mark all read" button. An id in a category the caller may not read is REFUSED
+  (403) rather than skipped: skipping would return 200 while leaving that
+  category's read state alone, and the button would claim to have read everything
+  having not looked at all. Neither read route takes an idempotency key — they
+  write exactly one row keyed (user, topic) and repeat to the same value, so a key
+  would only add a way for "I opened a topic" to fail.
 - `GET /api/aerun/admin/outbox-events` — keyset-paginated outbox events for staff visibility (`view_audit_log` permission: root/admin).
 - `POST /api/aerun/admin/outbox-events/:id/retry` — reset failed outbox event to pending (`view_audit_log` permission).
 

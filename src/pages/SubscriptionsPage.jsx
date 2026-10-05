@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table } from 'react-bootstrap';
+import { BellOff } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { fetchUserSubscribedTopics } from '../api/subscriptions';
 import TopicRow from '../components/common/TopicRow';
 import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const SubscriptionsPage = () => {
@@ -24,18 +26,27 @@ const SubscriptionsPage = () => {
   const ITEMS_PER_PAGE = 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
+  // The page the SERVER was asked for, not a slice of everything it returned.
+  const [total, setTotal] = useState(0);
+
   useEffect(() => {
     if (!user?.uid) {
       setTopics([]);
+      setTotal(0);
       setLoading(false);
       return;
     }
 
     let isMounted = true;
-    fetchUserSubscribedTopics(user.uid)
+    setLoading(true);
+    // currentPage is in the dependency list: it used to be absent, so switching
+    // page re-read page 1 and never changed what was on screen — the pager moved
+    // and the list did not.
+    fetchUserSubscribedTopics(user.uid, currentPage, ITEMS_PER_PAGE)
       .then(data => {
         if (isMounted) {
-          setTopics(data);
+          setTopics(data.topics);
+          setTotal(data.total);
           setLoading(false);
         }
       })
@@ -45,7 +56,7 @@ const SubscriptionsPage = () => {
       });
 
     return () => { isMounted = false; };
-  }, [user?.uid]);
+  }, [user?.uid, currentPage]);
 
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);
@@ -53,16 +64,18 @@ const SubscriptionsPage = () => {
     return typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title;
   };
 
-  // Filter topics user has permission to view
+  // Permission filter, still applied client-side: it narrows THIS page's rows
+  // and must not be mistaken for a way to shrink the page count, so the pager
+  // divides the server's `total` rather than this filtered length.
   const filteredTopics = topics.filter(topic => {
     const cat = categories.find(c => c.id === topic.category_id);
     return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
   });
 
-  const totalPages = Math.ceil(filteredTopics.length / ITEMS_PER_PAGE);
-  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
-  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentTopics = filteredTopics.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.max(1, Math.ceil(total / ITEMS_PER_PAGE));
+  // NO client-side slice. The server already returned exactly this page; slicing
+  // again would drop rows from page 1 and render page 2+ empty.
+  const currentTopics = filteredTopics;
 
   const handlePageChange = (page) => {
     setSearchParams({ page });
@@ -82,54 +95,57 @@ const SubscriptionsPage = () => {
         </p>
       </div>
 
-      <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-        {loading ? (
+      {loading ? (
+        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
           <div className="p-5 text-center text-muted">
             <div className="spinner-border spinner-border-sm me-2" role="status" />
             {t('common.loading', 'Загрузка...')}
           </div>
-        ) : filteredTopics.length === 0 ? (
-          <div className="p-5 text-center text-muted">
-            {t('stats.no_subscriptions', 'У вас пока нет активных подписок на темы')}
-          </div>
-        ) : (
-          <>
-            <Table hover responsive className="mb-0 align-middle forum-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '40%' }}>{t('forum.topic', 'Тема')}</th>
-                  <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category', 'Категория')}</th>
-                  <th className="text-center">{t('forum.replies', 'Ответов')}</th>
-                  <th>{t('forum.last_post', 'Последнее')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentTopics.map(topic => (
-                  <TopicRow 
-                    key={topic.id}
-                    topic={topic}
-                    user={user}
-                    lang={lang}
-                    showCategory={true}
-                    showCategoryInColumn={true}
-                    categoryName={getCategoryName(topic.category_id)}
-                  />
-                ))}
-              </tbody>
-            </Table>
-            
-            {totalPages > 1 && (
-              <div className="p-3 border-top d-flex justify-content-center">
-                <ForumPagination 
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={handlePageChange}
+        </Card>
+      ) : filteredTopics.length === 0 ? (
+        <ForumEmptyState
+          className="mb-4"
+          icon={BellOff}
+          title={t('stats.no_subscriptions', 'Подписок пока нет')}
+          description={t('stats.no_subscriptions_desc', 'Подпишитесь на тему, чтобы следить за обновлениями.')}
+        />
+      ) : (
+        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
+          <Table hover responsive className="mb-0 align-middle forum-table">
+            <thead>
+              <tr>
+                <th style={{ width: '40%' }}>{t('forum.topic', 'Тема')}</th>
+                <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category', 'Категория')}</th>
+                <th className="text-center">{t('forum.replies', 'Ответов')}</th>
+                <th>{t('forum.last_post', 'Последнее')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentTopics.map(topic => (
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  user={user}
+                  lang={lang}
+                  showCategory={true}
+                  showCategoryInColumn={true}
+                  categoryName={getCategoryName(topic.category_id)}
                 />
-              </div>
-            )}
-          </>
-        )}
-      </Card>
+              ))}
+            </tbody>
+          </Table>
+
+          {totalPages > 1 && (
+            <div className="p-3 border-top d-flex justify-content-center">
+              <ForumPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="mt-4">
         <Link to="/" className="btn btn-outline-secondary">

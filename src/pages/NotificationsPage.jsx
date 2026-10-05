@@ -1,22 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, Row, Col } from 'react-bootstrap';
-import { Bell, BellOff, CheckCheck, UserCheck, Clock, Trash2, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, UserCheck, Clock, Trash2, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign, Mail } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import {
-  subscribeToAdminNotifications,
   subscribeToUserNotifications,
   markNotificationRead,
   markAllNotificationsRead,
-  markAllAdminNotificationsRead,
   deleteNotification,
-  deleteAllAdminNotifications,
   deleteAllUserNotifications
 } from '../api/notifications';
 import { Link } from 'react-router-dom';
 import ForumPagination from '../components/common/ForumPagination';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import Timestamp from '../components/common/Timestamp';
 import { useToast } from '../contexts/ToastProvider';
 
@@ -48,6 +46,11 @@ const TYPE_META = {
     labelKey: 'notifications.types.post_mentioned',
     color: 'secondary'
   },
+  dm: {
+    icon: <Mail size={18} />,
+    labelKey: 'notifications.types.dm',
+    color: 'dark'
+  },
   POST_MENTIONED: {
     icon: <AtSign size={18} />,
     labelKey: 'notifications.types.post_mentioned',
@@ -56,22 +59,16 @@ const TYPE_META = {
 };
 
 const NotificationsPage = () => {
-  const { profile, recordActivity, hasPermission, PERMISSIONS, isRootAdmin } = useAuth();
+  const { profile, recordActivity, isRootAdmin } = useAuth();
   const { t, lang } = useI18n();
   const { showToast } = useToast();
   const [deletingId, setDeletingId] = useState(null);
 
-  const [adminActive, setAdminActive] = useState([]);
   const [userActive, setUserActive] = useState([]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
-
-  // Only users who can actually act on registrations should see these notifications
-  const canManageUsers = hasPermission(PERMISSIONS.APPROVE_USERS)
-    || hasPermission(PERMISSIONS.BAN_USERS)
-    || hasPermission(PERMISSIONS.DELETE_USERS);
 
   const { setPageTitle } = usePageTitle();
 
@@ -81,25 +78,17 @@ const NotificationsPage = () => {
 
   useEffect(() => {
     if (!profile?.uid) return;
-    
-    let unsubAdminActive = () => {};
-    let unsubUserActive = () => {};
-
-    // Personal Notifications (limit 100 newest)
-    unsubUserActive = subscribeToUserNotifications(profile.uid, (notifs) => {
+    // Personal notifications (limit 100 newest).
+    //
+    // There is no second "admin broadcast" subscription. It called the same
+    // caller-scoped endpoint with the same account id, so the page was polling
+    // the identical resource twice and then rendering the union below — every
+    // notification appeared two rows deep for anyone who could moderate.
+    const unsub = subscribeToUserNotifications(profile.uid, (notifs) => {
       setUserActive(notifs);
     });
-
-    // Admin broadcast notifications (backward-compat: legacy recipient_uid=null docs)
-    if ((profile?.role_id === 'admin' || profile?.role_id === 'root') && canManageUsers) {
-      unsubAdminActive = subscribeToAdminNotifications(setAdminActive);
-    }
-
-    return () => {
-      unsubUserActive();
-      unsubAdminActive();
-    };
-  }, [canManageUsers, profile?.uid]);
+    return () => unsub();
+  }, [profile?.uid]);
 
   // Client-side filter: respect user's in_app notification preferences
   const notifSettings = profile?.settings?.notifications;
@@ -120,18 +109,28 @@ const NotificationsPage = () => {
     return 0;
   };
 
-  const activeNotifs = [...adminActive, ...userActive]
+  // One list: the admin broadcast rows were the caller's own notifications
+  // fetched a second time under the same endpoint and account, so the union
+  // below rendered every notification twice.
+  const activeNotifs = [...userActive]
     .filter(filterByPrefs)
     .sort((a, b) => getNotifTs(b) - getNotifTs(a));
 
   const handleMarkRead = (e, id) => {
     if (e) e.stopPropagation();
     recordActivity();
-    const isAdminNotif = adminActive.some(n => n.id === id);
-    markNotificationRead(id, profile?.uid, isAdminNotif)
+
+    // Update the list the member is looking at first. Without this the row stays
+    // bold until the next tick — the click looks like it did nothing. The server
+    // response still decides the truth: on failure the mark is rolled back,
+    // which puts the row back to unread.
+    setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
+
+    markNotificationRead(id)
       .catch(err => {
         console.error('[markNotificationRead]', err);
         showToast(err.message, 'danger');
+        setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: false } : n)));
       });
   };
 
@@ -141,12 +140,16 @@ const NotificationsPage = () => {
     
     // Trigger animation first
     setDeletingId(id);
-    const isAdminNotif = adminActive.some(n => n.id === id);
-    
+
     // Wait for animation to finish before calling API
     setTimeout(() => {
-      deleteNotification(id, profile?.uid, isAdminNotif)
+      deleteNotification(id, profile?.uid)
         .then(() => {
+          // Drop the row locally as well. `archived:true` rows are filtered out
+          // of the next read, so without this an archived notification keeps
+          // occupying its slot — and would disappear on its own seconds later,
+          // looking like a glitch.
+          setUserActive(prev => prev.filter(n => n.id !== id));
           showToast(t('notifications.deleted_toast', 'Уведомление удалено'));
           setDeletingId(null);
         })
@@ -160,29 +163,34 @@ const NotificationsPage = () => {
 
   const handleMarkAllRead = async () => {
     recordActivity();
+
+    // Optimistic: clear the unread marks immediately, then let the server's
+    // answer stand. If a request fails the toast says so AND the marks come
+    // back, because the marks are not a lie we are allowed to keep.
+    setUserActive(prev => prev.map(n => ({ ...n, read: true })));
+
     try {
       if (profile?.uid && userActive.length > 0) {
         await markAllNotificationsRead(profile.uid, userActive);
-      }
-      if (canManageUsers && adminActive.length > 0) {
-        await markAllAdminNotificationsRead(adminActive);
       }
       showToast(t('notifications.all_read_toast', 'Все уведомления прочитаны'));
     } catch (err) {
       console.error('[handleMarkAllRead]', err);
       showToast(err.message, 'danger');
+      // Roll the marks back so the page matches the server.
+      setUserActive(prev => prev.map(n => ({ ...n, read: false })));
     }
   };
 
   const handleDeleteAll = async () => {
     recordActivity();
     try {
-      if (canManageUsers) {
-        await deleteAllAdminNotifications();
-      }
       if (profile?.uid) {
         await deleteAllUserNotifications(profile.uid);
       }
+      // Clear locally too. Archived rows are filtered out of the next read, so
+      // leaving them rendered until then shows the list contradicting itself.
+      setUserActive([]);
       showToast(t('notifications.all_deleted_toast', 'Все уведомления очищены'));
     } catch (err) {
       console.error('[deleteAllNotifications]', err);
@@ -286,6 +294,46 @@ const NotificationsPage = () => {
                             >
                               {payload.topic_title}
                             </Link>
+                          </>
+                        );
+                      })()
+                    ) : n.type === 'dm' ? (
+                      (() => {
+                        // Deep link to the conversation with the sender. The DM
+                        // routes address a USER, not a conversation, so the
+                        // sender_uid in the payload is what makes this a real jump
+                        // rather than a link that lands on the message list.
+                        //
+                        // Comments in this position must live INSIDE the IIFE: a
+                        // bare // placed directly in JSX children is not a comment
+                        // at all, it becomes literal text in the rendered row.
+                        //
+                        // The phrase comes from the dictionary, not a hardcoded
+                        // ternary, so a third locale needs no change here.
+                        const typeLabel = meta?.labelKey
+                          ? t(meta.labelKey, 'Direct message')
+                          : (lang === 'ru' ? 'Личное сообщение' : 'Direct message');
+                        const preview = (payload?.preview || '').trim();
+                        return (
+                          <>
+                            {typeLabel}{' '}
+                            {payload?.sender_uid ? (
+                              <Link
+                                to={`/messages/${payload.sender_uid}`}
+                                className="text-decoration-none hover-underline"
+                                style={{ color: 'var(--content-link-color)', textTransform: 'none', letterSpacing: 'normal', fontSize: '0.75rem' }}
+                                onClick={() => !n.read && handleMarkRead(null, n.id)}
+                              >
+                                {payload?.sender_nickname || payload.sender_uid}
+                              </Link>
+                            ) : (
+                              <span>{payload?.sender_nickname || typeLabel}</span>
+                            )}
+                            {preview && (
+                              <span className="text-muted" style={{ marginLeft: '0.35rem' }}>
+                                «{preview.length > 60 ? `${preview.slice(0, 60)}…` : preview}»
+                              </span>
+                            )}
                           </>
                         );
                       })()
@@ -575,24 +623,6 @@ const NotificationsPage = () => {
           .icon-box:hover {
             opacity: 1;
           }
-          .empty-state-card {
-            background: rgba(255, 255, 255, 0.4) !important;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            border-radius: 20px !important;
-          }
-          [data-theme='dark'] .empty-state-card {
-            background: rgba(15, 23, 42, 0.5) !important;
-            border-color: rgba(255, 255, 255, 0.1) !important;
-          }
-          [data-theme='neutral'] .empty-state-card {
-            background: rgba(224, 219, 202, 0.6) !important;
-            border-color: rgba(67, 52, 34, 0.1) !important;
-          }
-          .empty-state-icon {
-            color: var(--primary-color);
-            opacity: 0.8;
-          }
         `}
       </style>
 
@@ -649,17 +679,11 @@ const NotificationsPage = () => {
       )}
 
       {currentSet.length === 0 ? (
-        <Card className="text-center py-5 border-1 empty-state-card shadow-sm">
-          <Card.Body>
-            <div className="mb-4 empty-state-icon text-muted">
-              <BellOff size={64} strokeWidth={1} />
-            </div>
-            <h4 className="fw-light mb-2 text-muted">
-              {t('notifications.no_notifications')}
-            </h4>
-            <p className="text-muted mb-0 small">{t('notifications.we_will_notify')}</p>
-          </Card.Body>
-        </Card>
+        <ForumEmptyState
+          icon={BellOff}
+          title={t('notifications.no_notifications')}
+          description={t('notifications.we_will_notify')}
+        />
       ) : (
         <>
           <div className="notifications-list mb-4">

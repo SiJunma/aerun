@@ -64,6 +64,42 @@ func (r *AccessResolver) Middleware() func(e *core.RequestEvent) error {
 	}
 }
 
+// accessForUser builds the AccessContext for an arbitrary users row.
+//
+// WHY THIS EXISTS. `resolve` reads e.Auth, so it can only ever describe the
+// CALLER. Checking whether a permission is respected means asking a question
+// about somebody ELSE — "may this recipient be messaged", "is this topic's
+// author allowed to delete it" — and answering it with the caller's own
+// permissions would silently grant the action whenever the sender happens to
+// hold the key.
+//
+// The construction mirrors resolve() exactly, including the
+// collection→guest fallback and the status narrowing, so a permission question
+// about another account is answered by the same rules that authenticate it.
+// Deliberately does NOT consult roles for a role the caller is not: it reads
+// the SAME stored row the resolver would read, with no cache and no shortcut.
+func accessForUser(app core.App, record *core.Record) AccessContext {
+	if record == nil {
+		return guestAccess()
+	}
+	if record.Collection().Name != usersCollectionName {
+		return guestAccess()
+	}
+
+	role := auth.Role(record.GetString("role"))
+	status := auth.Status(record.GetString("status"))
+
+	base, fromCollection := storedRolePermissions(app, role)
+	if !fromCollection {
+		base = auth.DefaultPermissions(role)
+	}
+	return AccessContext{
+		Role:        role,
+		Status:      status,
+		Permissions: auth.NarrowForStatus(base, status),
+	}
+}
+
 func (r *AccessResolver) resolve(e *core.RequestEvent) AccessContext {
 	record := e.Auth
 	if record == nil {
@@ -92,6 +128,17 @@ func (r *AccessResolver) resolve(e *core.RequestEvent) AccessContext {
 // rolePermissions looks the role up in the roles collection. The bool result
 // reports whether a usable row was found.
 func (r *AccessResolver) rolePermissions(app core.App, role auth.Role) ([]auth.Permission, bool) {
+	return storedRolePermissions(app, role)
+}
+
+// storedRolePermissions reads a role's permission set out of the roles
+// collection, the runtime authority, falling back to the compiled matrix.
+//
+// Package-level so that a permission question about ANOTHER account
+// (accessForUser) is answered by exactly this lookup and not by a second copy
+// of it. A second copy is how the two would drift — one learning that a role
+// gained a key and the other not.
+func storedRolePermissions(app core.App, role auth.Role) ([]auth.Permission, bool) {
 	if role == "" {
 		// No role on the record: deny-by-default through the compiled matrix.
 		return nil, false
@@ -103,18 +150,18 @@ func (r *AccessResolver) rolePermissions(app core.App, role auth.Role) ([]auth.P
 	}
 	collection, err := app.FindCachedCollectionByNameOrId(rolesCollectionName)
 	if err != nil {
-		r.logger.Warn("roles collection unavailable; falling back to compiled permission matrix",
+		slog.Default().Warn("roles collection unavailable; falling back to compiled permission matrix",
 			"error", err, "role", string(role))
 		return nil, false
 	}
 	records, err := app.FindAllRecords(collection, dbx.HashExp{"role_id": string(role)})
 	if err != nil {
-		r.logger.Warn("roles lookup failed; falling back to compiled permission matrix",
+		slog.Default().Warn("roles lookup failed; falling back to compiled permission matrix",
 			"error", err, "role", string(role))
 		return nil, false
 	}
 	if len(records) != 1 {
-		r.logger.Warn("roles lookup is ambiguous or missing; falling back to compiled permission matrix",
+		slog.Default().Warn("roles lookup is ambiguous or missing; falling back to compiled permission matrix",
 			"matches", len(records), "role", string(role))
 		return nil, false
 	}

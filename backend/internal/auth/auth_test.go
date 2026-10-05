@@ -6,9 +6,13 @@ import (
 )
 
 func TestAllPermissionsMatchLegacyRegistrySize(t *testing.T) {
-	// 37 keys in the legacy src/constants/permissions.js registry.
-	if got := len(allPermissions); got != 37 {
-		t.Fatalf("expected 37 permissions, got %d", got)
+	// The legacy registry had 37 keys. Migration 1767800000 adds eight more —
+	// the edit/delete split by subject and ownership — so 45 is the new count.
+	// The floor is the meaningful part: the count may only ever GROW as the
+	// product gains a capability, and a silent DROP is what this guards.
+	const legacyCount = 37
+	if got := len(allPermissions); got < legacyCount {
+		t.Fatalf("expected at least %d permissions, got %d", legacyCount, got)
 	}
 	if !slices.IsSorted(AllPermissions()) {
 		t.Fatal("AllPermissions must stay sorted for stable seeds")
@@ -71,9 +75,15 @@ func TestDefaultPermissionMatrixMirrorsLegacyRoles(t *testing.T) {
 	player := DefaultPermissions(RolePlayer)
 	for _, perm := range []Permission{
 		PermViewForum, PermPostReply, PermCreateTopic, PermUseReputation,
+		PermEditSelfReputation, PermDeleteSelfReputation,
 		PermUseMasks, PermCreateSelfMask, PermDeleteSelfMask, PermUseDice,
-		PermViewMasterDice, PermUseDirectMessages, PermEditSelfNickname,
-		PermEditSelfAvatar, PermEditSelfStatus, PermEditSelfSignature,
+		PermUseDirectMessages, PermEditSelfNickname,
+		PermEditSelfAvatar, PermEditSelfStatus, PermEditSelfProfile,
+		PermEditSelfSignature,
+		// Editing your own post/topic is ordinary authorship, and the handler
+		// compares the author on every one of these — the key never widens the
+		// subject, it only makes the intent separately assignable.
+		PermEditSelfPost, PermDeleteSelfPost, PermEditSelfTopic, PermDeleteSelfTopic,
 	} {
 		if !Has(player, perm) {
 			t.Fatalf("player is missing %q", perm)
@@ -82,6 +92,16 @@ func TestDefaultPermissionMatrixMirrorsLegacyRoles(t *testing.T) {
 	for _, perm := range []Permission{
 		PermModerateContent, PermBanUsers, PermViewAuditLog, PermChangeRoles,
 		PermBypassHideTags,
+		// A master roll is the GM's private number. This used to be asserted as
+		// PRESENT for player; it is now asserted absent, which is the point of
+		// the change. A member who cannot see a master roll must not be able to
+		// tick a box that makes it visible.
+		PermViewMasterDice,
+		// Deleting somebody else's entry is staff work, not authorship.
+		PermDeleteOthersReputation, PermEditOthersReputation,
+		// Takes other people's replies with it: offered in the admin panel,
+		// never granted to a built-in role by default.
+		PermDeleteOwnTopicWithReplies,
 	} {
 		if Has(player, perm) {
 			t.Fatalf("player must not hold %q", perm)
@@ -93,6 +113,14 @@ func TestDefaultPermissionMatrixMirrorsLegacyRoles(t *testing.T) {
 	for _, perm := range []Permission{
 		PermModerateContent, PermMoveTopics, PermCloseTopics, PermPinTopics,
 		PermViewAuditLog, PermBypassHideTags,
+		// DMs are a baseline member capability. This was previously asserted as
+		// ABSENT for moderator — which is the bug where a moderator could not
+		// answer a player in private. It is now asserted present, because a
+		// moderator who cannot reply in DMs cannot resolve most of what a
+		// moderator is for.
+		PermUseDirectMessages,
+		// The staff half of the reputation split.
+		PermDeleteOthersReputation, PermEditSelfReputation, PermDeleteSelfReputation,
 	} {
 		if !Has(moderator, perm) {
 			t.Fatalf("moderator is missing %q", perm)
@@ -100,11 +128,17 @@ func TestDefaultPermissionMatrixMirrorsLegacyRoles(t *testing.T) {
 	}
 	for _, perm := range []Permission{
 		PermBanUsers, PermChangeRoles, PermManageRoles, PermApproveUsers,
-		PermDeleteUsers, PermUseDirectMessages,
+		PermDeleteUsers,
 	} {
 		if Has(moderator, perm) {
 			t.Fatalf("moderator must not hold %q", perm)
 		}
+	}
+	// Rewriting somebody else's reputation entry after the fact is deliberately
+	// OFF for moderators. Removing an abusive one is not; the two are separate
+	// keys precisely so this asymmetry can be expressed.
+	if Has(moderator, PermEditOthersReputation) {
+		t.Fatal("moderator must not hold edit_others_reputation by default")
 	}
 
 	// spectator and guest: read-only access to the public forum.

@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Container, Card, Form, Button, Dropdown } from 'react-bootstrap';
 import { User } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { subscribeToCharacters } from '../api/character';
-import { createTopic, updateUser } from '../api/forum';
+import { createTopic } from '../api/forum';
 import RichEditor from '../components/common/RichEditor';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import { resolveField } from '../utils/text';
+import { createInFlight } from '../utils/inflight';
 import { useToast } from '../contexts/ToastProvider';
 
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -17,7 +18,7 @@ const TopicFormPage = () => {
   const { categoryId } = useParams();
   const navigate = useNavigate();
   const { t, lang } = useI18n();
-  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, applyForumState, hasPermission, PERMISSIONS, settings, categories } = useAuth();
+  const { profile, user, recordActivity, markTopicRead, scheduleForumStateRefresh, hasPermission, PERMISSIONS, settings, categories, setLastSelectedMask } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
 
@@ -32,8 +33,29 @@ const TopicFormPage = () => {
   const [characters, setCharacters] = useState([]);
   const [category, setCategory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // Same reason as TopicPage: `submitting` is read from the render closure and
+  // React batches state writes, so two clicks in one tick both see false. The
+  // ref latch is taken before any await and is not batched. See
+  // utils/inflight.js and markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md.
+  const submitInFlightRef = useRef(null);
+  if (submitInFlightRef.current === null) {
+    submitInFlightRef.current = createInFlight();
+  }
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [pinFirstPost, setPinFirstPost] = useState(false);
+
+  // Start on the mask the author last posted as, like the reply form does.
+  //
+  // It did not at all: this picker opened on "post as account" every time,
+  // while the reply picker remembered — so an author who had settled on one
+  // mask had to pick it again every time they opened a NEW topic. Same stored
+  // field, two different answers.
+  useEffect(() => {
+    if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
+      setSelectedCharacterId(profile.last_selected_character_id || '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.last_selected_character_id]);
 
   const DRAFT_KEY = `topic_draft_${categoryId}`;
 
@@ -88,8 +110,18 @@ const TopicFormPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (submitting) return;
+    // The state guard below still drives the button style, but it cannot stop
+    // a same-tick double click: both clicks read `submitting` from the render
+    // closure. The latch can.
+    if (!submitInFlightRef.current.begin()) return;
+    try {
+      await runSubmit();
+    } finally {
+      submitInFlightRef.current.end();
+    }
+  };
 
+  const runSubmit = async () => {
     if (!title.trim()) {
       showToast(lang === 'ru' ? 'Пожалуйста, введите заголовок темы' : 'Please enter a topic title', 'danger');
       return;
@@ -113,6 +145,18 @@ const TopicFormPage = () => {
         category_id: categoryId,
         title,
         description,
+        // The two keys the server actually reads. The block below this used to
+        // assemble a full optimistic author projection (`author_name`,
+        // `author_avatar`, `is_character`, `author_character_id`,
+        // `first_post_pinned`, ...) and then throw it away, because createTopic
+        // sends only category_id/title/content/character_id/pin_first_post. The
+        // mask and the pin lived in that discarded object and nowhere else,
+        // which is precisely why neither took effect.
+        character_id: selectedCharacterId || '',
+        pin_first_post: pinFirstPost,
+        // Local echo for the optimistic first render only. The server
+        // re-derives every one of these from the stored rows (decoratePostAuthor
+        // / decorateTopicAuthor), so nothing here is trusted for persistence.
         author_id: user.uid,
         author_name: authorName,
         author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
@@ -138,14 +182,19 @@ const TopicFormPage = () => {
       };
 
       const newTopic = await createTopic(topicData, firstPostData);
-      const newTopicId = newTopic?.topicId;
-      // The createTopic callable returned the converged main-page projection -
-      // apply it directly instead of firing background refresh calls.
-      if (newTopic?.forum) {
-        applyForumState(newTopic.forum);
-      } else {
-        scheduleForumStateRefresh();
+      // createTopic THROWS rather than returning an id-less object, so a
+      // successful return means there is a real id to navigate to. This used to
+      // read `newTopic.topicId`, which the helper never set: the member was
+      // sent to /topic/undefined and told the topic did not exist, seconds
+      // after creating it.
+      const newTopicId = newTopic.id;
+      if (!newTopicId) {
+        throw new Error('The topic was created but the server did not return its id.');
       }
+      // The command layer returns no converged main-page projection, so the
+      // category counters have to be re-read; they are now computed server-side
+      // from the topics themselves and cannot drift.
+      scheduleForumStateRefresh(0);
       localStorage.removeItem(DRAFT_KEY);
       // Mark as read immediately (server-side, all roles)
       await markTopicRead(newTopicId);
@@ -153,7 +202,20 @@ const TopicFormPage = () => {
 
     } catch (err) {
       console.error(err);
-      alert('Error creating topic');
+      // A failed create leaves the draft in place on purpose: the member keeps
+      // their text and can try again instead of retyping it. A create that
+      // succeeded but lost its id is the exception — retrying would duplicate
+      // the topic, so that case says so instead of inviting another attempt.
+      if (err?.code === 'missing_topic_id') {
+        showToast(
+          lang === 'ru'
+            ? 'Тема создана, но открыть её не удалось. Найдите её в списке раздела.'
+            : 'The topic was created but could not be opened. Find it in the category list.',
+          'warning'
+        );
+        return;
+      }
+      showToast(err?.message || (lang === 'ru' ? 'Ошибка создания темы' : 'Error creating topic'), 'danger');
     } finally {
       setSubmitting(false);
     }
@@ -254,7 +316,7 @@ const TopicFormPage = () => {
                       active={selectedCharacterId === ''}
                       onClick={() => {
                         setSelectedCharacterId('');
-                        if (user) updateUser(user.uid, { last_selected_character_id: '' });
+                        if (user) setLastSelectedMask('');
                       }}
                     >
                       User: {profile?.nickname || profile?.email?.split('@')[0]}
@@ -266,7 +328,7 @@ const TopicFormPage = () => {
                         active={selectedCharacterId === char.id}
                         onClick={() => {
                           setSelectedCharacterId(char.id);
-                          if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                          if (user) setLastSelectedMask(char.id);
                         }}
                       >
                         {lang === 'ru' ? 'Персонаж' : 'Character'}: {char.name}

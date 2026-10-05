@@ -27,6 +27,16 @@ const (
 	fixBannedID    = "userbanned00001"
 	fixModeratorID = "usermoder000001"
 	fixRootID      = "userroot0000001"
+	// fixAdminID exists so the rank matrix is testable: the owner rules differ
+	// for an admin (equal rank allowed) than for a moderator (strictly lower
+	// only), and without an admin account that branch is unreachable.
+	fixAdminID = "useradmin000001"
+	// fixSpectatorID exists so a role that genuinely LACKS a permission can be
+	// exercised. Spectator carries only view_forum, which makes it the right
+	// probe for view_master_dice: a guest proves nothing about a stored role,
+	// and `player` holds the permission (internal/auth role.go), so testing
+	// withholding against `player` would assert the opposite of the contract.
+	fixSpectatorID = "userspect000001"
 )
 
 // newAerunTestApp is the TestAppFactory for the scenarios below. The fresh
@@ -60,6 +70,25 @@ func testAerunConfig() config.Config {
 	}
 }
 
+// identityFixtureCount is the number of accounts seedIdentityFixtures creates.
+//
+// It is written down because the admin user list is an exact-count assertion, so
+// ADDING a role to that fixture without updating this number breaks two tests
+// that have nothing to do with the role — which is how the number drifts out of
+// date in the first place. The list is the source; the constant follows it.
+var identityFixtureRoles = []struct {
+	name string
+}{
+	{"player"},
+	{"pending"},
+	{"banned"},
+	{"moderator"},
+	{"root"},
+	{"spectator"},
+}
+
+func identityFixtureCount() int { return len(identityFixtureRoles) }
+
 // seedIdentityFixtures creates the standard identity matrix and returns the
 // auth tokens per actor ("player", "pending", "banned", "moderator", "root").
 func seedIdentityFixtures(t testing.TB, app *tests.TestApp) map[string]string {
@@ -70,6 +99,7 @@ func seedIdentityFixtures(t testing.TB, app *tests.TestApp) map[string]string {
 		"banned":    createTestUser(t, app, fixBannedID, "banned@example.com", "BannedOne", auth.RolePlayer, auth.StatusBanned),
 		"moderator": createTestUser(t, app, fixModeratorID, "mod@example.com", "ModOne", auth.RoleModerator, auth.StatusActive),
 		"root":      createTestUser(t, app, fixRootID, "root@example.com", "RootOne", auth.RoleRoot, auth.StatusActive),
+		"spectator": createTestUser(t, app, fixSpectatorID, "spec@example.com", "SpecOne", auth.RoleSpectator, auth.StatusActive),
 	}
 }
 
@@ -310,6 +340,12 @@ func TestMeRejectsSuperusers(t *testing.T) {
 
 // TestSecureReadRules verifies the public profile read contract of the users
 // collection directly against the PocketBase record APIs.
+//
+// Profiles are public regardless of account status — 1768100000 removed the
+// `status = "active"` branch that used to hide pending and banned accounts, and
+// canReadCharactersOf follows the same rule. The properties still pinned here
+// are the ones that must survive that: email addresses and the legacy firebase
+// uid never reach another account.
 func TestSecureReadRules(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -322,23 +358,29 @@ func TestSecureReadRules(t *testing.T) {
 		notExpect []string
 	}{
 		{
-			name:   "guest lists only active users",
+			// Status is not a visibility switch. A suspended or unapproved
+			// account stays as readable as an active one: a restriction applies to
+			// the ACCOUNT, not to what other people may see of it. What still must
+			// not leak is the identity plumbing — email and the legacy uid.
+			name:   "guest lists every profile regardless of status",
 			method: http.MethodGet,
 			url:    "/api/collections/users/records",
 			status: http.StatusOK,
 			expect: []string{
 				`"PlayerOne"`,
+				`"PendingOne"`,
+				`"BannedOne"`,
 				`"emailVisibility":false`,
 			},
 			notExpect: []string{
-				`"PendingOne"`,
-				`"BannedOne"`,
 				`player@example.com`,
+				`banned@example.com`,
+				`pending@example.com`,
 				`legacy_firebase_uid`,
 			},
 		},
 		{
-			name:   "pending user lists active users and itself",
+			name:   "pending user lists every profile",
 			method: http.MethodGet,
 			url:    "/api/collections/users/records",
 			actor:  "pending",
@@ -346,22 +388,24 @@ func TestSecureReadRules(t *testing.T) {
 			expect: []string{
 				`"PlayerOne"`,
 				`"PendingOne"`,
+				`"BannedOne"`,
 			},
 			notExpect: []string{
-				`"BannedOne"`,
 				// Listing never leaks email addresses of other accounts.
 				`player@example.com`,
 				`mod@example.com`,
 				`root@example.com`,
+				`banned@example.com`,
+				`legacy_firebase_uid`,
 			},
 		},
 		{
-			name:      "guest cannot view a pending profile by id",
+			name:      "guest views a pending profile by id",
 			method:    http.MethodGet,
 			url:       "/api/collections/users/records/" + fixPendingID,
-			status:    http.StatusNotFound,
-			expect:    []string{`"status":404`},
-			notExpect: []string{`"PendingOne"`},
+			status:    http.StatusOK,
+			expect:    []string{`"PendingOne"`, `"status":"pending"`},
+			notExpect: []string{`pending@example.com`, `legacy_firebase_uid`},
 		},
 		{
 			name:   "pending user views its own record",

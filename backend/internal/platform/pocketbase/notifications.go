@@ -2,6 +2,7 @@ package pocketbase
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -13,6 +14,170 @@ import (
 )
 
 const notificationsCollectionName = "notifications"
+
+// topicReadStatesCollectionName is the server-side read state the unread-topic
+// count reads. Created by migration 1768300000; named here as well because the
+// SQL in countUnreadTopics joins the table by name, and a silent "no such table"
+// would degrade the badge to zero rather than fail loudly.
+const topicReadStatesCollectionName = "topic_read_states"
+
+// markTopicReadHandler records where the caller stopped reading a topic.
+//
+//	POST /api/aerun/topics/:id/read
+//
+// This is what makes the unread badge correct across devices, and it is the only
+// writer of the read state the count reads. It replaces a localStorage map
+// (`aerun_readmap_<uid>`) that only the browser that wrote it could see — so
+// reading a topic on the desktop left the phone's badge untouched, and there was
+// no way to tell a stale count from a correct one.
+//
+// TWO THINGS ARE DELIBERATELY NOT HERE.
+//
+// The timestamp is the caller's arrival time, not the topic's last post time.
+// Writing `topics.last_post_created` instead would be self-fulfilling: the topic
+// would always be exactly read-up-to and never unread again, and a reply landing
+// while the topic was open in another tab would be marked read without anybody
+// having seen it.
+//
+// A GET is not a read. The topic is fetched constantly — by the list, by the
+// badge, by quote tracking — and marking on every fetch would clear the badge the
+// moment the member looked at their own inbox.
+//
+// The write is an UPSERT, so revisiting a topic moves the position forward
+// instead of failing on the unique (user, topic) index. It is not wrapped in the
+// command layer's idempotency machinery: it has no side effect beyond the row it
+// owns, and requiring a client-generated key for "I am here" would only add a
+// failure mode in which a member opened a topic and the badge did not move.
+func markTopicReadHandler(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return forbiddenError("authentication required")
+	}
+
+	topicID := e.Request.PathValue("id")
+	acc := AccessFrom(e)
+
+	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
+	if err != nil || topic == nil {
+		return notFoundError("topic not found")
+	}
+	// Read state is a fact about a topic you can see. Writing one for a topic you
+	// cannot read would be a blind write into another category's space, and the
+	// row would outlive the access that made it meaningless.
+	allowed, err := canViewCategory(e.App, acc, topic.GetString("category_id"))
+	if err != nil {
+		return internalError("failed to check category access", err)
+	}
+	if !allowed {
+		return forbiddenError("you do not have permission to view this category")
+	}
+
+	now := types.NowDateTime()
+	if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, now); err != nil {
+		return internalError("failed to save read state", err)
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"topic_id":     topicID,
+		"last_read_at": now.String(),
+		"request_id":   requestIDFrom(e),
+	})
+}
+
+// upsertTopicReadState moves (or creates) the read position for one topic.
+//
+// Extracted because markTopicReadHandler and markAllTopicsReadHandler must not be
+// able to disagree about what a read position is — the same reasoning that made
+// both notification paths share one helper.
+func upsertTopicReadState(app core.App, userID, topicID string, at types.DateTime) error {
+	existing, err := app.FindFirstRecordByFilter(
+		topicReadStatesCollectionName,
+		"user_id = {:user} && topic_id = {:topic}",
+		dbx.Params{"user": userID, "topic": topicID},
+	)
+	if err == nil && existing != nil {
+		existing.Set("last_read_at", at)
+		return app.Save(existing)
+	}
+
+	col, err := app.FindCollectionByNameOrId(topicReadStatesCollectionName)
+	if err != nil {
+		return err
+	}
+	rec := core.NewRecord(col)
+	rec.Set("user_id", userID)
+	rec.Set("topic_id", topicID)
+	rec.Set("last_read_at", at)
+	if err := app.Save(rec); err != nil {
+		// The concurrent writer's row already says the same thing. Two tabs
+		// opening the same topic race here, and the loser must not see an error.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") ||
+			strings.Contains(err.Error(), "validation_not_unique") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// markAllTopicsReadHandler moves the caller's read position across many topics at
+// once, for the "mark all read" button on /new-replies.
+//
+//	POST /api/aerun/me/topics/read-all
+//
+// The ids are validated against the same category gate as a single read, and an
+// id the caller may not read is REFUSED rather than skipped. Skipping it would let
+// the response report success while quietly leaving another category's read state
+// untouched — and the button would claim to have read everything when it had not
+// even looked. The client's previous behaviour (a localStorage write) marked every
+// id it happened to hold, which was the top 50 topics regardless of visibility.
+func markAllTopicsReadHandler(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return forbiddenError("authentication required")
+	}
+
+	var body struct {
+		TopicIDs []string `json:"topic_ids"`
+	}
+	if e.Request.Body != nil {
+		if err := json.NewDecoder(e.Request.Body).Decode(&body); err != nil {
+			return validationError("invalid request body")
+		}
+	}
+
+	if len(body.TopicIDs) == 0 {
+		return e.JSON(http.StatusOK, map[string]any{
+			"marked":     0,
+			"request_id": requestIDFrom(e),
+		})
+	}
+
+	acc := AccessFrom(e)
+	now := types.NowDateTime()
+
+	marked := 0
+	for _, topicID := range body.TopicIDs {
+		topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
+		if err != nil || topic == nil {
+			return notFoundError("topic not found")
+		}
+		allowed, err := canViewCategory(e.App, acc, topic.GetString("category_id"))
+		if err != nil {
+			return internalError("failed to check category access", err)
+		}
+		if !allowed {
+			return forbiddenError("you do not have permission to view one of these categories")
+		}
+		if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, now); err != nil {
+			return internalError("failed to save read state", err)
+		}
+		marked++
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"marked":     marked,
+		"request_id": requestIDFrom(e),
+	})
+}
 
 // createNotification inserts an in-app notification within a transaction.
 func createNotification(txApp core.App, recipientID, senderID, notifType, title string, payload any) (*core.Record, error) {
@@ -40,6 +205,19 @@ func createNotification(txApp core.App, recipientID, senderID, notifType, title 
 	if err := txApp.Save(record); err != nil {
 		return nil, internalError("failed to save notification", err)
 	}
+
+	// The nudge, inside the same transaction as the notification it announces.
+	//
+	// Publishing from here rather than from each caller is what keeps the signal
+	// and the notification from disagreeing: there is exactly one place a
+	// notification is born, so there is exactly one place its signal is written,
+	// and a new notification type cannot forget to signal.
+	//
+	// It goes through txApp, not the outer app, so a subscriber can never be told
+	// about a notification that the surrounding transaction then rolls back.
+	// A member who somehow sees the signal for a rolled-back row re-reads
+	// /api/aerun and gets nothing, which is the correct answer, not a phantom.
+	publishSignal(txApp, realtimeSignalNotificationNew, record.Id, recipientID)
 
 	return record, nil
 }
@@ -212,8 +390,61 @@ func archiveNotificationHandler(e *core.RequestEvent) error {
 	})
 }
 
-// getUnreadCountsHandler returns aggregated unread counters (DMs and notifications).
-// Replaces the legacy RTDB unread badges.
+// archiveAllNotificationsHandler archives every notification the caller owns.
+//
+// This exists because the client used to implement "clear all" by calling the
+// read-all route: the rows were marked read and NOTHING was removed, while the
+// toast announced they had been cleared. Marking read and removing are
+// different acts, and a button labelled "delete" that only marks read is a lie
+// about the state of the member's inbox.
+func archiveAllNotificationsHandler(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return forbiddenError("authentication required")
+	}
+
+	_, err := e.App.DB().Update(
+		notificationsCollectionName,
+		dbx.Params{"archived": true},
+		dbx.HashExp{"recipient_id": e.Auth.Id, "archived": false},
+	).Execute()
+	if err != nil {
+		return internalError("failed to archive all notifications", err)
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"archived_all": true,
+		"request_id":   requestIDFrom(e),
+	})
+}
+
+// getUnreadCountsHandler returns aggregated unread counters (DMs, notifications
+// and topics). Replaces the legacy RTDB unread badges.
+//
+// UNREAD TOPICS LIVE HERE, not on the topic list, and that is the point of this
+// endpoint's shape. The main-page projection used to carry `topics?limit=50` —
+// fifty whole topic records — so the navbar badge could render a number. Every
+// member on every page paid for fifty rows to be told "3". And the number was
+// wrong twice over: `limit=50` silently caps it (a member with 60 unread is told
+// 50), and `AuthProvider` held `unreadTopicsCount` in a `useState` with NO
+// setter, so the badge and the tab title rendered a permanent 0.
+//
+// A count belongs with the other counts. Computing it here costs one indexed
+// aggregate over rows the caller can already see, and it cannot be capped by a
+// page size: this counts every unread topic, not the first fifty.
+//
+// The predicate is the one the client applied (NewRepliesPage):
+//
+//	last_post_created > max(last_read_at, registration)
+//
+// with two differences only the server can settle. `last_read_at` comes from a
+// per-user read-state table rather than a localStorage map, so the count follows
+// the member to another browser; and the category filter is `canViewCategory`,
+// so a topic in a category the caller may not read does not merely stay out of
+// the list — it does not inflate the badge, which is how a count ends up larger
+// than the list it summarises.
+//
+// Topics whose last post is the caller's own are excluded, matching the client,
+// so replying does not make your own topic unread.
 func getUnreadCountsHandler(e *core.RequestEvent) error {
 	if e.Auth == nil {
 		return forbiddenError("authentication required")
@@ -246,10 +477,154 @@ func getUnreadCountsHandler(e *core.RequestEvent) error {
 	`
 	_ = e.App.DB().NewQuery(query).Bind(dbx.Params{"user": e.Auth.Id}).One(&dmSummary)
 
+	// 3. Unread topics, restricted to categories this caller may read.
+	unreadTopics, err := countUnreadTopics(e)
+	if err != nil {
+		// The cause travels with the message on purpose. A bare "failed to count"
+		// is unactionable: the difference between a missing table (a migration that
+		// did not run) and a bad query (a typo in the SQL) is invisible, and both
+		// present to the client as the same 500.
+		return internalError("failed to count unread topics: "+err.Error(), err)
+	}
+
 	return e.JSON(http.StatusOK, map[string]any{
 		"unread_notifications":  notifCount.Count,
 		"unread_conversations":  dmSummary.UnreadConversations,
 		"total_unread_messages": dmSummary.TotalUnreadMessages,
+		"unread_topics":         unreadTopics,
 		"request_id":            requestIDFrom(e),
 	})
+}
+
+// countUnreadTopics counts topics with a post newer than the caller's last read,
+// in categories they may read.
+//
+// THE LEFT JOIN IS LOAD-BEARING. A caller who has never read anything has no
+// read-state row, and an INNER JOIN would skip their topics entirely — reporting
+// a brand-new member as having zero unread topics, the opposite of the truth.
+// Their floor is their registration instead: nothing posted before they joined
+// can be something they have not seen.
+func countUnreadTopics(e *core.RequestEvent) (int, error) {
+	where, params, err := unreadTopicsPredicate(e)
+	if err != nil || where == "" {
+		return 0, err
+	}
+
+	var counter struct {
+		Count int `db:"count"`
+	}
+	err = e.App.DB().NewQuery(`
+		SELECT COUNT(*) AS count
+		FROM ` + topicsCollectionName + ` t
+		LEFT JOIN ` + topicReadStatesCollectionName + ` r
+			ON r.topic_id = t.id AND r.user_id = {:user}
+		WHERE ` + where).
+		Bind(params).
+		One(&counter)
+	if err != nil {
+		return 0, err
+	}
+	return counter.Count, nil
+}
+
+// unreadTopicIDs returns EVERY topic the caller has unread replies in, as ids.
+//
+// It exists because a count is not a list. The "new replies" feed has to page
+// over unread topics, and the client cannot supply that set: its read map covers
+// only the fifty topics it happened to fetch, so any unread topic past that
+// window was not merely unsorted — it was absent, and the feed reported the
+// member as having fewer new replies than they had.
+//
+// The predicate is shared with countUnreadTopics on purpose. A list and a count
+// that disagreed would produce a pager whose last page is empty while the tab
+// badge claims more unread topics than the feed can ever show — which is the
+// "lost messages" this is meant to prevent.
+func unreadTopicIDs(e *core.RequestEvent) ([]string, error) {
+	where, params, err := unreadTopicsPredicate(e)
+	if err != nil || where == "" {
+		return nil, err
+	}
+
+	var rows []struct {
+		ID string `db:"id"`
+	}
+	err = e.App.DB().NewQuery(`
+		SELECT t.id AS id
+		FROM ` + topicsCollectionName + ` t
+		LEFT JOIN ` + topicReadStatesCollectionName + ` r
+			ON r.topic_id = t.id AND r.user_id = {:user}
+		WHERE ` + where).
+		Bind(params).
+		All(&rows)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	return ids, nil
+}
+
+// unreadTopicsPredicate builds the shared WHERE fragment and its parameters.
+//
+// An empty fragment means "the caller can read nothing", which callers treat as
+// zero rather than as an error: no readable categories is a real state for a
+// brand-new member with no categories granted, not a failure.
+func unreadTopicsPredicate(e *core.RequestEvent) (string, dbx.Params, error) {
+	acc := AccessFrom(e)
+
+	cats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
+	if err != nil {
+		return "", nil, err
+	}
+
+	readable := make([]string, 0, len(cats))
+	for _, c := range cats {
+		allowed, err := canViewCategory(e.App, acc, c.Id)
+		if err != nil {
+			return "", nil, err
+		}
+		if allowed {
+			readable = append(readable, c.Id)
+		}
+	}
+	if len(readable) == 0 {
+		return "", nil, nil
+	}
+
+	var registered struct {
+		Created string `db:"created"`
+	}
+	_ = e.App.DB().NewQuery("SELECT created FROM " + usersCollectionName + " WHERE id = {:user}").
+		Bind(dbx.Params{"user": e.Auth.Id}).One(&registered)
+
+	// The category filter is a generated IN list rather than a bound slice
+	// parameter. dbx only expands a slice into `IN (...)` inside a HashExp; a
+	// []string bound into raw SQL reaches SQLite as one quoted token, which it
+	// rejects with "unrecognized token" rather than matching nothing — so the
+	// attempt costs a 500 on an endpoint every member hits.
+	//
+	// Placeholders are generated rather than the ids interpolated: a category id is
+	// data, and this is the difference between a query no row can break and one a
+	// row could.
+	placeholders := make([]string, 0, len(readable))
+	params := dbx.Params{
+		"user":       e.Auth.Id,
+		"registered": registered.Created,
+	}
+	for i, id := range readable {
+		key := fmt.Sprintf("cat%d", i)
+		placeholders = append(placeholders, "{:"+key+"}")
+		params[key] = id
+	}
+
+	where := `
+		t.category_id IN (` + strings.Join(placeholders, ", ") + `)
+		AND COALESCE(t.last_post_author_id, '') != {:user}
+		AND t.last_post_created > COALESCE(
+			r.last_read_at,
+			CASE WHEN {:registered} = '' THEN t.last_post_created ELSE {:registered} END
+		)`
+	return where, params, nil
 }

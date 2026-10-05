@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Alert, Button, Container } from 'react-bootstrap';
 import { WifiOff, AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
-import { sendApi } from '../../api/pocketbase';
+import { subscribeToStatus, probeStatus } from '../../api/rtdb-presence';
+import { notifyConnectionRestored } from '../../api/connection';
 
 /**
  * ConnectionStatusBanner — Global sticky alert when network or backend connection is lost.
@@ -13,48 +14,75 @@ const ConnectionStatusBanner = () => {
   const [dismissed, setDismissed] = useState(false);
   const disconnectTimerRef = useRef(null);
 
+  // Announce the recovery exactly once per transition, not on every passing probe.
+  // The banner is mounted globally, so it is the only component that knows the
+  // backend came back — without this signal nothing re-runs the reads that failed
+  // while we were down, and the page keeps showing the empty state it settled on.
+  const wasDisconnectedRef = useRef(false);
+
   useEffect(() => {
     // 1. Browser online/offline event
     const handleBrowserOffline = () => {
       setIsDisconnected(true);
     };
     const handleBrowserOnline = () => {
-      checkHealth();
+      // Coming back is the moment a stale "disconnected" verdict is most
+      // likely, so probe immediately rather than waiting for the next tick.
+      probeStatus();
     };
 
     window.addEventListener('offline', handleBrowserOffline);
     window.addEventListener('online', handleBrowserOnline);
 
-    // 2. Periodic backend health check probe (consolidated via /status)
+    // 2. Backend health, from the SHARED /api/aerun/status snapshot.
+    //
+    // This banner used to run its own 25-second interval against that endpoint
+    // while the presence module ran a 20-second one — two loops, one endpoint,
+    // and the second one existed only to decide whether to show a red strip.
+    // Subscribing to the same resource removes the duplicate entirely, and
+    // brings the two clocks into agreement: the banner can no longer disagree
+    // with the online list it sits above.
     let isMounted = true;
-    const checkHealth = async () => {
-      try {
-        await sendApi('/api/aerun/status');
-        if (!isMounted) return;
+    const onStatus = (_snapshot, error) => {
+      if (!isMounted) return;
+      if (!error) {
         if (disconnectTimerRef.current) {
           clearTimeout(disconnectTimerRef.current);
           disconnectTimerRef.current = null;
         }
         setIsDisconnected(false);
         setDismissed(false);
-      } catch {
-        if (!isMounted) return;
-        if (!disconnectTimerRef.current) {
-          disconnectTimerRef.current = setTimeout(() => {
-            if (isMounted) setIsDisconnected(true);
-          }, 4000);
+
+        // Only on a real offline→online transition. This succeeds most of the
+        // time, so announcing unconditionally would refetch the whole app every
+        // twenty seconds.
+        if (wasDisconnectedRef.current) {
+          wasDisconnectedRef.current = false;
+          notifyConnectionRestored();
         }
+        return;
+      }
+      // A single failed probe is not a disconnection — a member on a flaky
+      // mobile connection should not be shown a red banner for one dropped
+      // request. Four seconds of continuous failure is the same threshold this
+      // component always used.
+      if (!disconnectTimerRef.current) {
+        disconnectTimerRef.current = setTimeout(() => {
+          if (isMounted) {
+            setIsDisconnected(true);
+            wasDisconnectedRef.current = true;
+          }
+        }, 4000);
       }
     };
 
-    checkHealth();
-    const interval = setInterval(checkHealth, 25000);
+    const unsubscribe = subscribeToStatus(onStatus);
 
     return () => {
       isMounted = false;
       window.removeEventListener('offline', handleBrowserOffline);
       window.removeEventListener('online', handleBrowserOnline);
-      clearInterval(interval);
+      unsubscribe();
       if (disconnectTimerRef.current) {
         clearTimeout(disconnectTimerRef.current);
       }
@@ -108,8 +136,9 @@ const ConnectionStatusBanner = () => {
             variant="link"
             size="sm"
             onClick={() => setDismissed(true)}
-            className="text-white p-1 text-decoration-none"
+            className="btn-dismiss p-1"
             title={lang === 'ru' ? 'Скрыть предупреждение' : 'Dismiss'}
+            aria-label={lang === 'ru' ? 'Скрыть предупреждение' : 'Dismiss'}
           >
             <X size={18} />
           </Button>

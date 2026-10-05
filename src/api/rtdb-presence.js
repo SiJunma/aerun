@@ -1,4 +1,6 @@
 import { sendApi, pb } from './pocketbase';
+import { createSharedPoll } from './shared-poll';
+import { toMillis } from '../utils/dates';
 
 let heartbeatTimer = null;
 let currentActiveCharacter = null;
@@ -24,10 +26,16 @@ const notifyGuestSubscribers = (guests) => {
 // parseLastSeen normalises the server's date string into milliseconds. The stats
 // panel drops guests outside its own window, so a value it cannot parse must
 // never look like "seen just now".
-const parseLastSeen = (value) => {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+//
+// It is `toMillis`, not a second implementation of it. This one existed on its
+// own and fed `Date.parse` the PocketBase space form RAW — "2026-10-04 16:50:00Z"
+// with a space where ISO 8601 requires "T". That format is not one the spec makes
+// a parser accept: an engine that ignores the trailing Z reads it as LOCAL time
+// and shifts the instant by the whole UTC offset, which for a live heartbeat
+// (~now) lands the value in the FUTURE — the online list claiming somebody was
+// last seen ahead of the clock. V8 happens to honour the Z, so this hides in
+// Chrome and bites elsewhere, which is the worst shape a date bug can have.
+const parseLastSeen = (value) => toMillis(value);
 
 const handlePresenceSnapshot = (presence) => {
   if (!presence) return;
@@ -60,39 +68,43 @@ const handlePresenceSnapshot = (presence) => {
   }
 };
 
-// Snapshot seeding: the first subscriber starts one shared GET /api/aerun/status
-// poll; heartbeat responses feed the same caches, so the poll only covers the
-// gaps between beats and there is never more than one fetch in flight.
-const STATUS_POLL_MS = 20000;
-let statusPollTimer = null;
-let statusFetchInFlight = false;
-
-const fetchStatusSnapshot = async () => {
-  if (statusFetchInFlight) return;
-  statusFetchInFlight = true;
-  try {
+// Snapshot seeding: ONE shared GET /api/aerun/status loop serves every presence
+// consumer, and heartbeat responses feed the same caches, so the poll only covers
+// the gaps between beats and there is never more than one fetch in flight.
+//
+// The banner used to run a SECOND, independent 25-second loop against this same
+// endpoint to decide whether to show its "connection lost" strip. Two clocks, one
+// endpoint, for one piece of information — so the status snapshot is a shared
+// resource now, and the banner is simply another subscriber. Its failure signal
+// is delivered alongside the value, which is what lets it keep working.
+const statusPoll = createSharedPoll({
+  name: 'status',
+  fetch: async () => {
     const res = await sendApi('/api/aerun/status');
     if (res?.presence) handlePresenceSnapshot(res.presence);
-  } catch {
-    // Non-fatal: the next beat or poll tick retries.
-  } finally {
-    statusFetchInFlight = false;
-  }
-};
+    return res;
+  },
+  intervalMs: 20000,
+  initialValue: null,
+});
 
-const startStatusPolling = () => {
-  if (statusPollTimer) return;
-  fetchStatusSnapshot();
-  statusPollTimer = setInterval(fetchStatusSnapshot, STATUS_POLL_MS);
-};
+// The loop is reference-counted by the shared resource itself: the first
+// subscriber starts it, the last one to leave stops it.
+const startStatusPolling = () => statusPoll.subscribe(() => {});
 
 const stopStatusPollingIfIdle = () => {
   if (onlineSubscribers.size > 0 || guestSubscribers.size > 0) return;
-  if (statusPollTimer) {
-    clearInterval(statusPollTimer);
-    statusPollTimer = null;
-  }
+  // Nothing is watching the status loop any more.
+  statusPoll.stopIfIdle();
 };
+
+// Lets the connection banner ride the presence snapshot instead of polling
+// `/api/aerun/status` a second time. `onStatus` receives (snapshot, error).
+export const subscribeToStatus = (onStatus) => statusPoll.subscribe(onStatus);
+
+// An out-of-band read of the same resource, for the browser's `online` event —
+// "the network just came back" is worth a read now rather than at the next tick.
+export const probeStatus = () => statusPoll.refresh();
 
 const sendHeartbeat = async (character = null) => {
   if (!pb.authStore.isValid) return;
@@ -106,8 +118,9 @@ const sendHeartbeat = async (character = null) => {
     if (res?.presence) {
       handlePresenceSnapshot(res.presence);
     }
-  } catch (err) {
-    // Non-fatal presence heartbeat failure
+  } catch {
+    // Non-fatal presence heartbeat failure: the caller keeps its optimistic
+    // local state and the next 30s tick retries.
   }
 };
 
@@ -154,10 +167,48 @@ export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
   await sendHeartbeat(activeCharacter);
 };
 
+/**
+ * Stops the heartbeat, and on an explicit logout LEAVES.
+ *
+ * The two arguments were both ignored (`_uid`, `_isLogout`), which is why the
+ * legacy contract "the last action is what counts" only appeared to hold: the
+ * final beat happened to be close enough to the sign-out click that the durable
+ * `last_seen` was roughly right. It was right by luck, not by design.
+ *
+ * It used to send a final HEARTBEAT, which is exactly backwards. The heartbeat
+ * handler writes `onlineMembers[e.Auth.Id]` with LastSeen=now, so signing out
+ * re-REGISTERED the account as online: it stayed in "Online now" for the whole
+ * presenceTTL (75s), and every other browser polling /status counted a
+ * signed-OUT member as present, because the server genuinely still listed them.
+ * Guests never had this bug — they leave through /presence/guest/leave, which
+ * removes the row instead of refreshing it. Members needed the same call, so
+ * they have one now: /presence/leave deletes the presence row AND writes the
+ * durable users.last_seen, in one request, while the token is still valid.
+ *
+ * `isLogout` distinguishes the two callers on purpose. Idle timeout is not a
+ * departure: the user is still there, just inactive, and the next interaction
+ * re-establishes presence through `recordActivity`. Announcing a departure there
+ * would drop a member who is merely thinking out of the online list, and would
+ * stamp their durable `last_seen` at a moment they are demonstrably still here.
+ */
 export const setRtdbOffline = async (uid, isLogout = false) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+  }
+
+  // Deliberately BEFORE the authStore is cleared by the caller: this is the only
+  // moment the request is still authenticated, so a leave sent later would 401.
+  // A failure here must not block the sign-out itself, so it is swallowed —
+  // the cost of skipping it is a presence row that ages out on its own in 75s,
+  // not a stuck session.
+  if (isLogout && uid) {
+    try {
+      await sendApi('/api/aerun/presence/leave', { method: 'POST', body: {} });
+    } catch {
+      // Best-effort, like every other presence write: the cost of skipping
+      // it is a presence row that ages out on its own, never a stuck session.
+    }
   }
 };
 
@@ -208,9 +259,22 @@ export const subscribeToRtdbStatuses = (callback) =>
     callback(map);
   });
 
-export const subscribeToDailyActiveUsers = (callback) => {
-  return subscribeToOnlineUsers(callback);
-};
+/**
+ * "Visited today" is NOT this subscription.
+ *
+ * This used to exist as `subscribeToDailyActiveUsers`, a one-line alias of
+ * subscribeToOnlineUsers, and the stats panel called it for the "Visited today"
+ * row. That made the panel print the connected-now members twice under two
+ * different labels, and it made the number change meaning with the label: the
+ * "today" row could never show anybody who had already left, which is most of
+ * the people a day is made of.
+ *
+ * The daily list is a different clock with a different source — the durable
+ * users.last_seen column over a 24h window — so it is served by
+ * GET /api/aerun/forum-stats as stats.dailyActiveUsers and read through the
+ * forum state, not through live presence. Presence cannot answer it at all:
+ * this map is windowed to presenceTTL and is empty after a restart.
+ */
 
 // Guest presence (anonymous visitors).
 //
@@ -334,6 +398,6 @@ export const removeRtdbGuestPresence = async (guestId) => {
   }
 };
 
-export const recordActivity = async (uid) => {
+export const recordActivity = async (_uid) => {
   await sendHeartbeat();
 };

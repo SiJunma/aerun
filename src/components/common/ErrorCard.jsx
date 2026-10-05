@@ -8,12 +8,65 @@ import { useI18n } from '../../contexts/I18nProvider';
  * Displays a clear description of the issue, actionable advice (e.g. VPN hints),
  * and an expandable technical details section with a one-click copy button for admins.
  */
+
+// classify works out WHY a request failed from what sendApi throws.
+//
+// This used to be a hardcoded `isNetworkError` at every call site, which meant a
+// 500 from the server was announced as "Unable to connect to the server. Please
+// check your internet connection" — sending the reader to reboot their router
+// because a handler crashed. A wrong diagnosis costs more than no diagnosis:
+// it hides a server fault from exactly the person who could report it.
+//
+// sendApi puts status 0 on a genuine transport failure and the real HTTP status
+// on everything else, so the answer is already in the error.
+const classifyError = (error) => {
+  const status = Number(error?.status ?? 0);
+  if (status === 0 || error?.code === 'network_error') return 'network';
+  if (status >= 500) return 'server';
+  if (status === 401 || status === 403) return 'auth';
+  return 'generic';
+};
+
+const COPY = {
+  network: {
+    title: ['Ошибка соединения с сервером', 'Server Connection Error'],
+    message: [
+      'Не удалось установить соединение с сервером. Пожалуйста, проверьте подключение к интернету или попробуйте обновить страницу.',
+      'Unable to connect to the server. Please check your internet connection or try refreshing the page.'
+    ]
+  },
+  server: {
+    title: ['Сервер не смог выполнить запрос', 'The Server Could Not Complete This Request'],
+    message: [
+      'Сервер ответил ошибкой. Это проблема на стороне сервера, а не ваше подключение — повторная попытка может помочь. Если ошибка повторяется, сообщите администратору: номер запроса указан в технических деталях.',
+      'The server returned an error. This is a server-side problem, not your connection — retrying may help. If it keeps happening, tell an administrator; the request id is in the technical details.'
+    ]
+  },
+  auth: {
+    title: ['Нет доступа', 'Access Denied'],
+    message: [
+      'Сервер не дал доступ к этим данным. Возможно, у вас нет прав или сессия истекла.',
+      'The server refused access to this data. You may lack permission, or the session has expired.'
+    ]
+  },
+  generic: {
+    title: ['Не удалось загрузить данные', 'Failed to Load Data'],
+    message: [
+      'Произошла непредвиденная ошибка при получении данных. Попробуйте обновить страницу или повторить попытку.',
+      'An unexpected error occurred while fetching data. Please try refreshing or retrying.'
+    ]
+  }
+};
+
 const ErrorCard = ({
   title,
   message,
   error,
   onRetry,
-  isNetworkError = false,
+  // `undefined` means "work it out from the error". Passing true/false pins the
+  // kind, which is right only when the caller genuinely knows better than the
+  // status code (a client-side timeout, for instance).
+  isNetworkError,
   className = 'my-4'
 }) => {
   const { lang } = useI18n();
@@ -24,17 +77,15 @@ const ErrorCard = ({
     ? (typeof error === 'object' ? (error.stack || error.message || JSON.stringify(error)) : String(error))
     : '';
 
-  const defaultTitle = isNetworkError
-    ? (lang === 'ru' ? 'Ошибка соединения с сервером' : 'Server Connection Error')
-    : (lang === 'ru' ? 'Не удалось загрузить данные' : 'Failed to Load Data');
+  const kind = typeof isNetworkError === 'boolean'
+    ? (isNetworkError ? 'network' : 'generic')
+    : classifyError(error);
+  const copy = COPY[kind];
+  const pick = (pair) => (lang === 'ru' ? pair[0] : pair[1]);
 
-  const defaultMessage = isNetworkError
-    ? (lang === 'ru'
-        ? 'Не удалось установить соединение с сервером. Пожалуйста, проверьте подключение к интернету или попробуйте обновить страницу.'
-        : 'Unable to connect to the server. Please check your internet connection or try refreshing the page.')
-    : (lang === 'ru'
-        ? 'Произошла непредвиденная ошибка при получении данных. Попробуйте обновить страницу или повторить попытку.'
-        : 'An unexpected error occurred while fetching data. Please try refreshing or retrying.');
+  const defaultTitle = pick(copy.title);
+  const defaultMessage = pick(copy.message);
+  const isNetwork = kind === 'network';
 
   const handleCopy = () => {
     const report = [
@@ -43,6 +94,12 @@ const ErrorCard = ({
       `URL: ${window.location.href}`,
       `Title: ${title || defaultTitle}`,
       `Error: ${errorString}`,
+      // The status and request id are what let an administrator find the
+      // matching server-side log line, so the report carries them rather than
+      // making the reader reconstruct them from the prose.
+      `Status: ${error?.status ?? 'n/a'}`,
+      `Error code: ${error?.code ?? 'n/a'}`,
+      `Request ID: ${error?.requestId ?? 'n/a'}`,
       `User Agent: ${navigator.userAgent}`
     ].join('\n');
 
@@ -57,7 +114,7 @@ const ErrorCard = ({
       <div style={{ height: '4px', background: 'var(--bs-danger, #dc3545)' }} />
       <Card.Body className="p-4 text-center">
         <div className="mb-3 d-inline-flex p-3 rounded-circle" style={{ background: 'rgba(220, 53, 69, 0.1)', color: 'var(--bs-danger, #dc3545)' }}>
-          {isNetworkError ? <WifiOff size={36} /> : <AlertTriangle size={36} />}
+          {isNetwork ? <WifiOff size={36} /> : <AlertTriangle size={36} />}
         </div>
 
         <h5 className="fw-bold mb-2">{title || defaultTitle}</h5>

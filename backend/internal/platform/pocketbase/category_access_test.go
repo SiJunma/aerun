@@ -40,6 +40,116 @@ func newTestCategory(t testing.TB, app *tests.TestApp, slug string, roles []stri
 	return rec
 }
 
+// TestNewRoleAfterCategorySaved reproduces the "a role created later" question.
+//
+// The override panel offers an OFF state that means "this category follows the
+// global role settings". The answer to whether a role created AFTER that
+// category was saved is admitted automatically is YES — but only because the
+// stored list is the inherit marker rather than a snapshot of the registry.
+//
+// The snapshot is what this replaced: naming every role that had view_forum at
+// save time froze the registry, so a role created the next day was absent from
+// the array and its members were refused a public category until an admin
+// re-saved every category by hand. These cases pin the live behaviour so the
+// snapshot cannot be reintroduced by "simplifying" the marker away.
+func TestNewRoleAfterCategorySaved(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// OFF: the inherit marker, exactly what the client sends.
+	inheritCat := newTestCategory(t, app, "inherit", []string{auth.CategoryInheritMarker})
+
+	// A role that did not exist when inheritCat was saved. It is granted
+	// view_forum by the admin afterwards.
+	newRole := "veteran"
+	perms := []auth.Permission{auth.PermViewForum, auth.PermPostReply}
+	mustCreateRole(t, app, newRole, perms)
+	// A category that names OTHER roles explicitly. The new role is not among
+	// them, which is what makes the contrast meaningful.
+	restrictedCat := newTestCategory(t, app, "staff-only", []string{"admin", "moderator"})
+
+	veteranAcc := AccessContext{
+		Role:        auth.Role(newRole),
+		Status:      auth.StatusActive,
+		Permissions: perms,
+	}
+
+	// The new role reads the inherited category with no re-save. This is the
+	// answer to the question, asserted rather than assumed.
+	got, err := canViewCategory(app, veteranAcc, inheritCat.Id)
+	if err != nil {
+		t.Fatalf("inherit view: %v", err)
+	}
+	if !got {
+		t.Fatalf("a role holding view_forum must read an inheriting category even if it " +
+			"was created after the category was saved — the marker is what makes this work")
+	}
+
+	// It still cannot read a category that names roles explicitly and does not
+	// name it: the marker delegates, it does not widen.
+	got, err = canViewCategory(app, veteranAcc, restrictedCat.Id)
+	if err != nil {
+		t.Fatalf("explicit view: %v", err)
+	}
+	if got {
+		t.Fatalf("inherit must not leak into an explicitly restricted category")
+	}
+
+	// A role WITHOUT view_forum is refused the inheriting category, even though
+	// the marker is present. Inherit is not "public" — it is "whatever the
+	// global settings say", and a role with no view_forum says no.
+	noView := auth.Role("silent")
+	noViewAcc := AccessContext{Role: noView, Status: auth.StatusActive}
+	got, err = canViewCategory(app, noViewAcc, inheritCat.Id)
+	if err != nil {
+		t.Fatalf("no-view role: %v", err)
+	}
+	if got {
+		t.Fatalf("inherit must consult the caller's own view_forum, not grant access outright")
+	}
+}
+
+// TestInheritMarkerMixedWithRoles is refused by the command layer, so a stored
+// list can never mean two contradictory things at once.
+func TestInheritMarkerMixedWithRoles(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	_, err := validateAllowedRoles(app, []string{auth.CategoryInheritMarker, "player"})
+	if err == nil {
+		t.Fatalf("expected the inherit marker combined with real roles to be rejected")
+	}
+
+	// Alone it is accepted, and so is a normal list: the guard must not have
+	// narrowed either case.
+	got, err := validateAllowedRoles(app, []string{auth.CategoryInheritMarker})
+	if err != nil {
+		t.Fatalf("the marker alone must be accepted: %v", err)
+	}
+	if len(got) != 1 || got[0] != auth.CategoryInheritMarker {
+		t.Fatalf("marker round trip = %#v", got)
+	}
+}
+
+// mustCreateRole adds a row to the roles registry so the precondition above is
+// stated against real registry data.
+func mustCreateRole(t testing.TB, app *tests.TestApp, roleID string, perms []auth.Permission) {
+	t.Helper()
+	col, err := app.FindCollectionByNameOrId(rolesCollectionName)
+	if err != nil {
+		t.Fatalf("roles collection: %v", err)
+	}
+	rec := core.NewRecord(col)
+	rec.Set("role_id", roleID)
+	rec.Set("name", roleID)
+	rec.Set("rank", 10)
+	rec.Set("is_system", false)
+	rec.Set("permissions", auth.PermissionValues(perms))
+	if err := app.Save(rec); err != nil {
+		t.Fatalf("create role %s: %v", roleID, err)
+	}
+}
+
 func TestCanViewCategoryMatrix(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -206,9 +316,21 @@ func TestListCategoriesHidesUnreadable(t *testing.T) {
 	})
 }
 
-// TestListCategoriesCarriesAllowedRoles pins the two fields the admin board needs
-// to re-submit a category unchanged. Without them, opening a category for editing
-// shows an empty role list and saving silently wipes the real one.
+// TestListCategoriesCarriesAllowedRoles pins WHERE the role list is served: not on
+// the public list, only on the admin one.
+//
+// It originally asserted that GET /categories carries `allowed_roles`, because
+// the admin board needed them and it read that same route. That handed the
+// access rule of every category on the board to every caller — a member could
+// enumerate which roles exist and which categories are restricted or root-only,
+// and a signed-out guest could too.
+//
+// The fields the editor needs did not move to a "detail" route: they moved to the
+// route that already requires `manage_categories`, because the two questions are
+// different. The public list answers "what may this caller see"; the admin list
+// answers "what is stored, so I can change it". Both assertions run here because
+// either half alone is a regression: a public list that leaks it, or an admin
+// list that omits it (which would silently wipe a role list on save).
 func TestListCategoriesCarriesAllowedRoles(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -219,17 +341,68 @@ func TestListCategoriesCarriesAllowedRoles(t *testing.T) {
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	status, body := getAerunAuthed(t, ts.URL+"/api/aerun/categories", tokens["root"])
-	if status != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", status, body)
-	}
-	for _, expected := range []string{
-		`"allowed_roles":["admin","moderator"]`,
-		`"slug":"` + cat.GetString("slug") + `"`,
-		`"group_id":""`,
-	} {
-		if !bytes.Contains(body, []byte(expected)) {
-			t.Fatalf("category payload missing %s: %s", expected, body)
+	t.Run("the public list never exposes it", func(t *testing.T) {
+		// The category is seeded with `admin`,`moderator` allowed, so a guest and a
+		// plain member must not receive it at all. Asserting the LEAK on their
+		// responses is still the point: a route that is allowed to return nothing
+		// can still be one that returns something it should not.
+		for _, who := range []string{"player", ""} {
+			status, body := getAerunAuthed(t, ts.URL+"/api/aerun/categories", tokens[who])
+			if status != http.StatusOK {
+				t.Fatalf("expected 200 for %q, got %d: %s", who, status, body)
+			}
+			if bytes.Contains(body, []byte("allowed_roles")) {
+				t.Fatalf("public category list leaked the access rule to %q: %s", who, body)
+			}
+			if bytes.Contains(body, []byte(cat.GetString("slug"))) {
+				t.Fatalf("%q must not see a category they have no role for: %s", who, body)
+			}
 		}
-	}
+	})
+
+	t.Run("root's own list still carries the row, just not the rule", func(t *testing.T) {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/categories", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", status, body)
+		}
+		if bytes.Contains(body, []byte("allowed_roles")) {
+			t.Fatalf("even root must read the access rule from the admin route: %s", body)
+		}
+		// The rest of the row is unchanged — the cut is the role list alone, so a
+		// client that never edits categories cannot tell the two lists apart.
+		for _, expected := range []string{
+			`"slug":"` + cat.GetString("slug") + `"`,
+			`"group_id":""`,
+		} {
+			if !bytes.Contains(body, []byte(expected)) {
+				t.Fatalf("category payload missing %s: %s", expected, body)
+			}
+		}
+	})
+
+	t.Run("a member without manage_categories is refused", func(t *testing.T) {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/admin/categories", tokens["player"])
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403 for a member, got %d: %s", status, body)
+		}
+		if bytes.Contains(body, []byte("allowed_roles")) {
+			t.Fatalf("a refused caller must receive nothing: %s", body)
+		}
+	})
+
+	t.Run("the admin list carries it", func(t *testing.T) {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/admin/categories", tokens["root"])
+		if status != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", status, body)
+		}
+		for _, expected := range []string{
+			`"allowed_roles":["admin","moderator"]`,
+			`"slug":"` + cat.GetString("slug") + `"`,
+			`"group_id":""`,
+		} {
+			if !bytes.Contains(body, []byte(expected)) {
+				t.Fatalf("admin category payload missing %s: %s", expected, body)
+			}
+		}
+	})
 }

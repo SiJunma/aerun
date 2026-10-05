@@ -1,7 +1,9 @@
 # Incident: deleting a post destroyed the whole topic (2026-09-30)
 
-Status: **client fixed on this branch; Go guard added but UNVERIFIED (no toolchain on
-the machine where it was written).** See "What still needs doing".
+Status: **client and Go both fixed and verified (2026-10-01).** `gofmt`,
+`go build ./...`, `go vet ./...` and `go test ./...` are clean, and the JS gate
+(`npm test`) is clean. See "Verification found" for what that verification
+actually turned up — it was not a formality.
 
 > **Read this first if you are touching any delete path.** This incident had two
 > halves, and the second one is the reason this document exists. Fixing the
@@ -148,12 +150,13 @@ already-deleted row.
 
 ## What still needs doing
 
-- [ ] **Run the Go tests.** `go` is not installed on the machine where these were
-      written, so `forum_topics.go`, `forum_posts.go`, `user_counters.go` and both
-      test files are **unverified — not even compiled**. Run
-      `go build ./... && go test ./...` on the main machine, or push and read the
-      CI report (`.agents/AGENTS.md` §Backend Verification Channel). **This is the
-      single most important open item on this branch.**
+Verified on 2026-10-01 (`gofmt`, `go build ./...`, `go vet ./...`, `go test ./...`
+all clean; the four residue tests and the first-post guard pass).
+
+- [x] ~~**Run the Go tests.**~~ Done, and it found real bugs — see
+      "Verification found" below. The code had never been compiled: `forum_topics.go`
+      did not build (`Execute()` returns two values) and one existing test was
+      asserting against made-up post ids.
 - [ ] Confirm the 409 does not break the draft flow: `drafts.go` sets
       `sequence: 0`, and `publishDraft` assigns a real sequence. A draft must never
       reach `deletePostHandler`, but the interaction is unproven.
@@ -165,12 +168,53 @@ already-deleted row.
       member's post count includes posts in a hidden topic. Reputation is paid
       back immediately, so the two counters now answer different questions. Worth
       a product decision before cutover; do not "fix" it casually.
-- [ ] `movePostsHandler` did not move `reputation_votes.topic_id` with the post. **Fixed
-      here** (the votes are re-pointed inside the move loop) because the residue
-      cleanup pays out by summing the deleted topic's votes, so a stale copy would
-      have made deleting a source topic pay back reputation for a post that had
-      moved to the target. Still unverified — it is part of the same uncompiled
-      `go test ./...` run as everything above.
+- [x] ~~`movePostsHandler` did not move `reputation_votes.topic_id` with the post.~~
+      Fixed, and now covered by `TestMovePostCarriesItsVotes`, which passes.
+
+## Verification found (2026-10-01)
+
+The first `go test ./...` on this branch was not a formality — it found three
+defects that had been sitting in an uncompiled package:
+
+1. **`forum_topics.go` did not compile.** `purgeTopicResidue` bound a single
+   variable to `.Execute()`, which returns `(sql.Result, error)`. The whole
+   package — and therefore every test in it — could not build. This is what CI
+   run 24 was reporting with an empty `checks` map: every step died at
+   `go build`, so no check ever got to record itself.
+
+2. **`TestRecomputeUserCountersSumsEveryVote` was asserting a fiction.** Its
+   fixture voted on `postmissing001`…`postmissing003` — post ids that exist in no
+   table. That was harmless while `sumVotes` counted every vote row, but rule 5
+   made `sumVotes` resolve visibility through the post row (`post_id IN (SELECT
+   id FROM posts WHERE deleted = false AND topic_id IN (...))`), so the new
+   predicate correctly excluded them and the test failed. The rule was right and
+   the fixture was stale; the fixture now seeds real posts. Worth recording
+   because it is rule 5 biting in the least expected direction: tightening a
+   predicate silently invalidates fixtures that only ever *looked* realistic.
+
+3. **A latent `ReferenceError` in `src/api/dm-cache.js`.** Unrelated to this
+   incident but found while verifying the merged changes: commit `2591610`
+   rewrote `reviveTimestamp` to drop the Firebase `Timestamp` import and deleted
+   the declaration block above it in the same hunk, taking `DM_CACHE_PREFIX`,
+   `DM_CACHE_BUILD_KEY`, `MAX_CACHED_MESSAGES`, `CURRENT_BUILD` and `getCacheKey`
+   with it. Every *use* survived. The module would throw the first time anything
+   touched `localStorage` — including `clearAllDmCache()`, which `AuthProvider`
+   calls on signOut.
+
+   It stayed invisible for a month because of a single line:
+   `/* global __APP_BUILD_TIME__ */` at the top of the file. That comment silenced
+   `no-undef` for the build-time constant and made the file read as deliberately
+   configured; the other four identifiers were never in it, but nothing reported
+   them until `be6ca82` removed the comment (by which point `eslint.config.js`
+   declared `__APP_BUILD_TIME__` globally, making it redundant). The lint errors
+   that finally surfaced them were a symptom of a real outage, not lint noise.
+
+   This is the client-side twin of the rules below: a stale copy of a definition
+   is indistinguishable from a live one until something dereferences it. Fixed by
+   restoring the constants, and pinned by `scripts/check-dm-cache-constants.mjs`
+   (`npm run test:dm-cache-constants`, wired into `npm test`), which *executes*
+   the module against a `localStorage` stub rather than reading it — reading the
+   file is exactly what failed to catch this.
 
 ## The duplicate post was probably a double submit
 

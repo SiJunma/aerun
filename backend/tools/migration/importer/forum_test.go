@@ -57,6 +57,18 @@ func findTopic(t *testing.T, fp *ForumPlan, legacyID string) TopicRow {
 	return TopicRow{}
 }
 
+// lookupPost is findPost for rows that are EXPECTED to be absent: it returns nil
+// instead of failing, so a test can assert "this was deliberately skipped"
+// rather than only "this is present".
+func lookupPost(fp *ForumPlan, legacyID string) *PostRow {
+	for i, p := range fp.PostRows {
+		if p.LegacyID == legacyID {
+			return &fp.PostRows[i]
+		}
+	}
+	return nil
+}
+
 func postAt(plan *ImportPlan, id, topic, author string, created time.Time) {
 	plan.Posts[id] = map[string]any{
 		"topic_id":   topic,
@@ -154,10 +166,19 @@ func TestTopicProjectionsAreRecomputedNotCopied(t *testing.T) {
 	}
 }
 
-// TestDeletedPostKeepsItsSequenceSlot pins the tombstone rule. A deleted post
-// occupies a number forever, because the target never reuses one; renumbering
-// around a hole would shift every reply below it on the next import.
-func TestDeletedPostKeepsItsSequenceSlot(t *testing.T) {
+// TestDeletedPostIsSkippedWithoutLeavingAHole pins the hard-delete import rule.
+//
+// This test used to assert the opposite — that a deleted post KEEPS its
+// sequence slot as a tombstone and that later posts are NOT renumbered down.
+// That rule existed to preserve numbering across an un-delete, which no longer
+// exists (1767700000).
+//
+// The rule now is the opposite trade: a deleted post is not imported, and the
+// survivors are numbered 1..n WITHOUT a hole. Keeping the hole would mean the
+// target permanently displays a gap where a post used to be, with nothing at
+// that position and no way to explain it — and since the post genuinely no
+// longer exists in the source either, there is no content the hole refers to.
+func TestDeletedPostIsSkippedWithoutLeavingAHole(t *testing.T) {
 	plan := forumFixture()
 	postAt(plan, "p1", "t1", "u1", time.Unix(100, 0).UTC())
 	postAt(plan, "p2", "t1", "u1", time.Unix(200, 0).UTC())
@@ -166,21 +187,33 @@ func TestDeletedPostKeepsItsSequenceSlot(t *testing.T) {
 
 	fp := BuildForumPlan(plan, alwaysYes, alwaysYes)
 
-	// The tombstone keeps number 2.
-	if got := findPost(t, fp, "p2").Sequence; got != 2 {
-		t.Fatalf("a deleted post must keep its sequence slot, got %d", got)
+	// The deleted post is not written at all.
+	if post := lookupPost(fp, "p2"); post != nil {
+		t.Fatalf("a deleted post must not be imported, got sequence %d", post.Sequence)
 	}
-	// And the one after it must NOT be renumbered down.
-	if got := findPost(t, fp, "p3").Sequence; got != 3 {
-		t.Fatalf("a tombstone must not shift later posts, got %d", got)
+	// It is still REPORTED rather than dropped silently.
+	if !containsString(fp.SkippedPostIDs, "p2") {
+		t.Errorf("a skipped post must be reported, SkippedPostIDs=%v", fp.SkippedPostIDs)
 	}
-	// posts_count counts only what is visible.
+	if _, ok := fp.Findings["post_skipped_deleted"]; !ok {
+		t.Errorf("the skip must be recorded as a finding, got %v", fp.Findings)
+	}
+	// The survivors close the gap: 1 and 2, no hole at 2.
+	if got := findPost(t, fp, "p1").Sequence; got != 1 {
+		t.Fatalf("first post sequence = %d, want 1", got)
+	}
+	if got := findPost(t, fp, "p3").Sequence; got != 2 {
+		t.Fatalf("post after the deleted one = %d, want 2 (the gap must close)", got)
+	}
+	// posts_count counts the rows that were actually written.
 	if got := findTopic(t, fp, "t1").PostsCount; got != 2 {
-		t.Fatalf("posts_count must exclude the tombstone, got %d", got)
+		t.Fatalf("posts_count must exclude the deleted post, got %d", got)
 	}
-	// The deleted row keeps no text.
-	if got := findPost(t, fp, "p2").Content; got != "" {
-		t.Fatalf("a tombstone must carry no content, got %q", got)
+	// Every imported post keeps its text.
+	for _, id := range []string{"p1", "p3"} {
+		if got := findPost(t, fp, id).Content; got == "" {
+			t.Errorf("post %s must keep its content", id)
+		}
 	}
 }
 

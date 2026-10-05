@@ -14,18 +14,44 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
-func roleRecordPayload(r *core.Record) map[string]any {
+// roleBadgePayload is what a BADGE renders, and it is the whole public answer.
+//
+// Everything else about a role — its permission list, whether it is a system role,
+// which system role a custom one derives from, how many masks its members may
+// hold — is configuration for the editor, and it used to ship to everyone on an
+// ungated route. That made GET /roles a complete map of the board's security
+// model, readable by a signed-out guest: every role that exists, exactly what each
+// may do, and by omission which are privileged. It is the most useful thing to
+// read before choosing an account to target.
+//
+// `role_id`, `name`, `rank` and `color` are what ForumAuthorName and the role
+// badges paint, and they are published by design — a role badge on a post already
+// reveals the role to anyone who can read the post.
+//
+// The editable half lives in roleEditorPayload, behind `manage_roles`.
+func roleBadgePayload(r *core.Record) map[string]any {
 	return map[string]any{
-		"id":                   r.Id,
-		"role_id":              r.GetString("role_id"),
-		"name":                 r.GetString("name"),
-		"rank":                 r.GetInt("rank"),
-		"color":                r.GetString("color"),
-		"is_system":            r.GetBool("is_system"),
-		"base_role_id":         r.GetString("base_role_id"),
-		"max_characters_limit": r.GetInt("max_characters_limit"),
-		"permissions":          r.GetStringSlice("permissions"),
+		"role_id": r.GetString("role_id"),
+		"name":    r.GetString("name"),
+		"rank":    r.GetInt("rank"),
+		"color":   r.GetString("color"),
 	}
+}
+
+// roleEditorPayload is the admin view: the badge fields plus what the role editor
+// form submits back.
+//
+// `id` is the record id, which the badge payload does not need — a badge resolves a
+// role by `role_id`, and publishing record ids to every visitor buys an attacker a
+// second identifier for the same row and the editor nothing it cannot already get.
+func roleEditorPayload(r *core.Record) map[string]any {
+	payload := roleBadgePayload(r)
+	payload["id"] = r.Id
+	payload["is_system"] = r.GetBool("is_system")
+	payload["base_role_id"] = r.GetString("base_role_id")
+	payload["max_characters_limit"] = r.GetInt("max_characters_limit")
+	payload["permissions"] = r.GetStringSlice("permissions")
+	return payload
 }
 
 func listRolesHandler(e *core.RequestEvent) error {
@@ -41,7 +67,38 @@ func listRolesHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, 0, len(records))
 	for _, r := range records {
-		items = append(items, roleRecordPayload(r))
+		items = append(items, roleBadgePayload(r))
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      items,
+		"request_id": requestIDFrom(e),
+	})
+}
+
+// listAdminRolesHandler serves GET /api/aerun/admin/roles — the role editor's
+// list, with the configuration the public route no longer carries.
+//
+// It returns EVERY row, not only the ones the caller may edit, on purpose: hiding
+// a role from the editor that manages roles would make it unfixable, which is the
+// same reasoning that put `allowed_roles` on /admin/categories rather than on the
+// public list. `manage_roles` is the gate that matters; narrowing the rows by what
+// this particular admin may edit would only reintroduce the "why can't I see the
+// role I need to fix" class of bug.
+func listAdminRolesHandler(e *core.RequestEvent) error {
+	col, err := e.App.FindCachedCollectionByNameOrId(rolesCollectionName)
+	if err != nil {
+		return internalError("roles collection unavailable", err)
+	}
+
+	records, err := e.App.FindRecordsByFilter(col, "", "rank", 0, 0)
+	if err != nil {
+		return internalError("failed to query roles", err)
+	}
+
+	items := make([]map[string]any, 0, len(records))
+	for _, r := range records {
+		items = append(items, roleEditorPayload(r))
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
@@ -132,7 +189,21 @@ func createRoleHandler(e *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
-	if err := validateRoleRank(form.Rank); err != nil {
+	// A role created WITHOUT a rank. The role form has no rank input, so
+	// "create a role based on Player" posted rank: 0 and validateRoleRank
+	// rejected it — custom roles could not be created at all. An omitted rank
+	// is now placed just above the base role the admin picked in the form,
+	// which is the ordering that choice already implies.
+	//
+	// `== 0`, not `<= 0`: zero is Go's zero value for a missing JSON key, which
+	// is the ONLY case that means "no opinion". A negative rank is a value the
+	// caller actually sent, so it stays a 400 instead of being silently replaced
+	// by a default the admin never asked for.
+	rank := form.Rank
+	if rank == 0 {
+		rank = defaultRoleRank(form.BaseRoleID)
+	}
+	if err := validateRoleRank(rank); err != nil {
 		return err
 	}
 	// The UNIQUE check below only covers rows that exist. A reserved id that has
@@ -143,6 +214,14 @@ func createRoleHandler(e *core.RequestEvent) error {
 	if isReservedRoleID(roleID) {
 		return validationError("role_id '" + roleID + "' is reserved by the compiled role matrix")
 	}
+
+	baseRoleID := strings.TrimSpace(form.BaseRoleID)
+	// Same rule as on update: the base must exist, or the delete-revert path
+	// would later move every holder onto a role that is not there.
+	if err := validateBaseRole(e.App, baseRoleID); err != nil {
+		return err
+	}
+	form.BaseRoleID = baseRoleID
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		col, err := txApp.FindCollectionByNameOrId(rolesCollectionName)
@@ -158,7 +237,7 @@ func createRoleHandler(e *core.RequestEvent) error {
 		rec := core.NewRecord(col)
 		rec.Set("role_id", roleID)
 		rec.Set("name", form.Name)
-		rec.Set("rank", form.Rank)
+		rec.Set("rank", rank)
 		rec.Set("color", form.Color)
 		rec.Set("is_system", false)
 		rec.Set("base_role_id", form.BaseRoleID)
@@ -175,7 +254,7 @@ func createRoleHandler(e *core.RequestEvent) error {
 			"name":      form.Name,
 		})
 
-		return http.StatusCreated, roleRecordPayload(rec), nil
+		return http.StatusCreated, roleEditorPayload(rec), nil
 	})
 	return writeCommandResult(e, outcome, err)
 }
@@ -224,16 +303,19 @@ func updateRoleHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
-		// ADR-3: system roles are reconciled from the compiled matrix by
-		// import-roles, so an API edit would be reverted on the next run — and
-		// until that run, the registry would disagree with the fallback the
-		// resolver uses when a lookup fails. Refusing the whole row (including
-		// color) is simpler to reason about than a per-field allowlist nobody
-		// would trust.
-		if rec.GetBool("is_system") {
-			return 0, nil, forbiddenError(
-				"system roles are reconciled from the compiled matrix and are not editable")
-		}
+		// Roles are data the admin owns: a system role is edited exactly like a
+		// custom one, which is what makes it usable as a live template for the
+		// "create a role based on this" flow. (Previously this returned 403 and
+		// cited import-roles as the reason. That import is a one-shot CLI an
+		// operator runs deliberately — it is NOT on the server start path — so
+		// the argument for immutability never actually held, and the cost was
+		// real: the whole registry could not be reshaped from the admin panel.)
+		//
+		// Two identity fields stay locked regardless, because they are not
+		// presentation. `role_id` is the key users.role and categories
+		// .allowed_roles point at, and `is_system` decides whether the row is
+		// deletable and whether the role may serve as a base. Neither is in the
+		// payload below, so a caller cannot flip them by sending extra keys.
 
 		if nameRaw, ok := form["name"]; ok {
 			name, ok := nameRaw.(string)
@@ -261,7 +343,25 @@ func updateRoleHandler(e *core.RequestEvent) error {
 
 		if baseRaw, ok := form["base_role_id"]; ok {
 			if b, ok := baseRaw.(string); ok {
-				rec.Set("base_role_id", b)
+				base := strings.TrimSpace(b)
+				// A system role IS the template; it cannot itself be derived
+				// from something. Allowing it would give the admin two sources
+				// of truth for one row, and the "revert to base on delete"
+				// path has no defined target for such a role.
+				if base != "" && rec.GetBool("is_system") {
+					return 0, nil, validationError("a system role cannot have a base role")
+				}
+				// A role derived from itself would resolve its own permissions
+				// forever. The delete-revert path below reads base_role_id as
+				// the fallback target, so a self-reference would also point
+				// holders at a row that no longer exists.
+				if base == rec.GetString("role_id") {
+					return 0, nil, validationError("a role cannot be its own base role")
+				}
+				if err := validateBaseRole(txApp, base); err != nil {
+					return 0, nil, err
+				}
+				rec.Set("base_role_id", base)
 			}
 		}
 
@@ -297,7 +397,7 @@ func updateRoleHandler(e *core.RequestEvent) error {
 			"name":      rec.GetString("name"),
 		})
 
-		return http.StatusOK, roleRecordPayload(rec), nil
+		return http.StatusOK, roleEditorPayload(rec), nil
 	})
 	return writeCommandResult(e, outcome, err)
 }
@@ -325,21 +425,38 @@ func deleteRoleHandler(e *core.RequestEvent) error {
 
 		roleID := rec.GetString("role_id")
 
-		// A deleted role leaves users.role and categories.allowed_roles
-		// pointing at nothing. Neither is a foreign key (see 1766500000 for why
-		// they are plain text), so nothing would stop the write and every
-		// affected account would silently fall back to the compiled deny path:
-		// an admin who deleted an unused-looking role would lock its holders
-		// out of the forum without an error anywhere.
-		holders, err := txApp.CountRecords(usersCollectionName, dbx.HashExp{"role": roleID})
+		// Holders fall back to the role's base rather than being locked out.
+		//
+		// The previous contract was a 409 telling the admin to move them by
+		// hand. That made deleting a role with any members impossible from the
+		// panel, which is the one thing an admin does when the role no longer
+		// fits the staff it describes. Reverting to the base is the outcome the
+		// admin already expects: a role derived from Moderator was, until the
+		// moment it was deleted, a Moderator with a few differences.
+		//
+		// `users.role` is plain text (1766500000), so nothing would have stopped
+		// the delete and every holder would have silently fallen through to the
+		// compiled deny path — losing access with no error anywhere. The write
+		// below is what makes the deletion honest instead.
+		baseRoleID := rec.GetString("base_role_id")
+		holders, err := txApp.FindAllRecords(usersCollectionName,
+			dbx.HashExp{"role": roleID})
 		if err != nil {
 			return 0, nil, internalError("failed to count role holders", err)
 		}
-		if holders > 0 {
+		if len(holders) > 0 && baseRoleID == "" {
+			// No base to fall back to. Refusing beats silently stranding them,
+			// and the message names the fix rather than the symptom.
 			return 0, nil, conflictError(
-				"this role is assigned to " + fmt.Sprint(holders) + " account(s); move them to another role first")
+				"this role is assigned to " + fmt.Sprint(len(holders)) +
+					" account(s) and has no base role to fall back to; " +
+					"set a base role or move them to another role first")
 		}
 
+		// A category that lists the role keeps the entry removed below only if
+		// the admin asked for it, so this stays a refusal: dropping the id from
+		// allowed_roles would silently hide the category from everyone it was
+		// granting to, which is a visibility change nobody asked for.
 		categories, err := categoriesGrantingRole(txApp, roleID)
 		if err != nil {
 			return 0, nil, err
@@ -350,19 +467,35 @@ func deleteRoleHandler(e *core.RequestEvent) error {
 					"; remove it from their allowed_roles first")
 		}
 
+		for _, holder := range holders {
+			holder.Set("role", baseRoleID)
+			// custom_role_id names the system role behind a holder's CUSTOM
+			// role. After the revert the holder is on that system role directly,
+			// so the column must be cleared or the staff check would keep
+			// resolving against a role that no longer exists.
+			holder.Set("custom_role_id", "")
+			if err := txApp.Save(holder); err != nil {
+				return 0, nil, internalError("failed to reassign role holders", err)
+			}
+		}
+
 		targetID := rec.Id
 		if err := txApp.Delete(rec); err != nil {
 			return 0, nil, internalError("failed to delete role", err)
 		}
 
 		_ = recordAuditLog(txApp, "role_deleted", e.Auth.Id, map[string]any{
-			"target_id": targetID,
-			"role_id":   roleID,
+			"target_id":        targetID,
+			"role_id":          roleID,
+			"reassigned_to":    baseRoleID,
+			"reassigned_users": len(holders),
 		})
 
 		return http.StatusOK, map[string]any{
-			"ok":        true,
-			"target_id": targetID,
+			"ok":               true,
+			"target_id":        targetID,
+			"reassigned_to":    baseRoleID,
+			"reassigned_users": len(holders),
 		}, nil
 	})
 	return writeCommandResult(e, outcome, err)
@@ -396,11 +529,69 @@ func categoriesGrantingRole(app core.App, roleID string) ([]string, error) {
 	return slugs, nil
 }
 
+// validateBaseRole checks that a base role id names a real, non-deleted role.
+//
+// An empty base is legal and means "this role stands on its own"; callers that
+// require a base (the delete fallback) check for that separately.
+//
+// A base that does not exist would be invisible: the permission resolver reads
+// `permissions` directly and never walks base_role_id, so a dangling base
+// grants nothing today but silently breaks the delete-revert target later.
+// Requiring it to exist keeps the stored value usable as a real pointer.
+func validateBaseRole(app core.App, base string) error {
+	if base == "" {
+		return nil
+	}
+	col, err := app.FindCollectionByNameOrId(rolesCollectionName)
+	if err != nil {
+		return internalError("roles collection unavailable", err)
+	}
+	rec, err := app.FindFirstRecordByFilter(col, "role_id = {:rid}", dbx.Params{"rid": base})
+	if err != nil || rec == nil {
+		return validationError("base role '" + base + "' does not exist")
+	}
+	return nil
+}
+
 // isReservedRoleID reports whether an id belongs to the compiled role matrix.
 // Those ids are the wire contract with the legacy data and the fallback the
 // access resolver uses; a custom row must never take one of their names.
 func isReservedRoleID(roleID string) bool {
 	return slices.Contains(auth.AllRoleValues(), roleID)
+}
+
+// defaultRoleRank derives an authority rank for a role created without one.
+//
+// The admin role form has no rank input at all — it asks for a name, a base
+// role and a permission set — so every create posted rank: 0 and
+// validateRoleRank refused it with "rank must be between 1 and 10000". Creating
+// a custom role was therefore impossible, and the admin could not tell that the
+// missing field was the problem.
+//
+// Rather than adding a field the admin has to reason about, an omitted rank is
+// placed one step above the BASE role they picked. That is the ordering the base
+// role already implies: a role derived from Player is a stronger Player, and
+// the list renders it between Player and the next tier up. A base role that is
+// not in the compiled matrix falls back to just above root, so the new row is
+// always visible rather than buried at the bottom.
+//
+// Rank orders roles in the UI and in the reconciliation; it grants nothing on
+// its own — authority comes from the permissions the admin ticked — so deriving
+// it cannot accidentally widen anybody's access.
+func defaultRoleRank(baseRoleID string) int {
+	if spec, ok := auth.SpecFor(auth.Role(strings.TrimSpace(baseRoleID))); ok {
+		return spec.Rank + 1
+	}
+	// Unknown base: land above every compiled role (root is the highest at 1000)
+	// so the new role is visible instead of sorted to the bottom.
+	systemRoles := auth.SystemRoles()
+	highest := 0
+	for _, spec := range systemRoles {
+		if spec.Rank > highest {
+			highest = spec.Rank
+		}
+	}
+	return highest + 1
 }
 
 // validateRoleRank bounds the authority rank.

@@ -31,7 +31,7 @@ import (
 // draftPayload renders a draft row for the drafts page. Topic fields are
 // attached by the caller when the topic is alive.
 func draftPayload(r *core.Record) map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		"id":       r.Id,
 		"topic_id": r.GetString("topic_id"),
 		"content":  r.GetString("content"),
@@ -39,6 +39,18 @@ func draftPayload(r *core.Record) map[string]any {
 		"created":  r.GetDateTime("created").String(),
 		"updated":  r.GetDateTime("updated").String(),
 	}
+	// The mask the draft is filed under, so a client can render the draft card
+	// with the identity the text was written in. It travels raw exactly like it
+	// does on postPayload: the owner check already happened in the command.
+	if characterID := r.GetString("author_character_id"); characterID != "" {
+		payload["author_character_id"] = characterID
+	}
+	// The throws a draft carries. A draft is private to its author, so there is
+	// no reader to redact for here — the publish response is where that applies.
+	if rolls, err := decodeRolls(r.Get("rolls")); err == nil && len(rolls) > 0 {
+		payload["rolls"] = rolls
+	}
+	return payload
 }
 
 // validateDraftContent validates draft text. A draft may be empty (the user
@@ -66,6 +78,16 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 	}
 	var form struct {
 		Content string `json:"content"`
+		// CharacterID is the mask the reply was picked in. It is stored ON THE
+		// DRAFT, not reconstructed at publish time: publishing has to reproduce
+		// the identity the text was written under, and by then the author may
+		// have switched masks in the composer.
+		CharacterID string `json:"character_id"`
+		// Rolls travels with the text for the same reason it does on a post:
+		// the `[roll=<id>]` reference in the body is meaningless without it.
+		// A draft is published by promoting the row verbatim, so a throw lost
+		// here is a throw lost for good.
+		Rolls map[string]any `json:"rolls"`
 	}
 	if err := json.Unmarshal(raw, &form); err != nil {
 		return validationError("invalid JSON body")
@@ -77,7 +99,7 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
-		if err != nil || topic == nil || topic.GetBool("deleted") {
+		if err != nil || topic == nil {
 			return 0, nil, notFoundError("topic not found")
 		}
 
@@ -98,11 +120,25 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 			post = core.NewRecord(postsCol)
 			post.Set("topic_id", topicID)
 			post.Set("author_id", e.Auth.Id)
-			post.Set("sequence", 0)
-			post.Set("deleted", false)
 		}
 		post.Set("is_draft", true)
 		post.Set("content", content)
+		// Validated against the draft's own body, exactly as on create, so a
+		// draft promoted later carries the same throws the author saw.
+		if err := writeRolls(post, content, form.Rolls); err != nil {
+			return 0, nil, validationError(err.Error())
+		}
+		// The same server-owned resolution createPostHandler uses, for the same
+		// reason: the client names the mask it wants and the server answers with
+		// the one it will accept, so a draft can never be filed under somebody
+		// else's mask. Persisting it HERE is what makes publish reproduce the
+		// identity — a draft published without this column came out under the
+		// account name and the mask was silently lost.
+		characterID, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
+		if err != nil {
+			return 0, nil, err
+		}
+		post.Set("author_character_id", characterID)
 
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to save draft", err)
@@ -164,7 +200,7 @@ func listMyDraftsHandler(e *core.RequestEvent) error {
 	for _, r := range records {
 		it := item{payload: draftPayload(r), orphan: true, updated: r.GetDateTime("updated").String()}
 		topic, err := e.App.FindRecordById(topicsCollectionName, r.GetString("topic_id"))
-		if err == nil && topic != nil && !topic.GetBool("deleted") {
+		if err == nil && topic != nil {
 			it.orphan = false
 			it.payload["topic_title"] = topic.GetString("title")
 			it.payload["category_id"] = topic.GetString("category_id")
@@ -220,7 +256,18 @@ func draftBefore(a, b draftItem) bool {
 	return pa < pb
 }
 
-// deleteDraftHandler hard-deletes the caller's own draft.
+// deleteDraftHandler hard-deletes a draft.
+//
+// AUTHOR ONLY, with no permission that widens it. The owner was explicit:
+// "nobody can see anyone else's drafts except the owner, in principle", and
+// a moderator deleting someone's draft is therefore not a capability at all.
+// This handler previously accepted `moderate_content` for foreign drafts,
+// which contradicted both that rule and the drafts page itself (whose feed is
+// scoped to `author_id = caller`) — the one place in the product where a
+// stranger's draft was readable and destroyable.
+//
+// Consequence: a draft whose author is gone is unreachable, not auto-purgeable.
+// Orphan cleanup is deliberately absent rather than a staff backdoor.
 func deleteDraftHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -233,7 +280,10 @@ func deleteDraftHandler(e *core.RequestEvent) error {
 		if err != nil || post == nil || !post.GetBool("is_draft") {
 			return 0, nil, notFoundError("draft not found")
 		}
-		if post.GetString("author_id") != e.Auth.Id && !auth.Has(AccessFrom(e).Permissions, auth.PermModerateContent) {
+		if post.GetString("author_id") != e.Auth.Id {
+			// 403, not 404: the caller proved the row exists by naming a
+			// draft id, and a draft is not secret state in the way a password
+			// is — but the id is never resolved to its content or author here.
 			return 0, nil, forbiddenError("only the author may delete a draft")
 		}
 		if err := txApp.Delete(post); err != nil {
@@ -248,13 +298,9 @@ func deleteDraftHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// forumMaxPostsPerTopic mirrors the compiled forum ceiling used by
-// createPostHandler (forum.MaxPostsPerTopic); drafts obey it on publish.
-const forumMaxPostsPerTopic = 2000
-
-// publishDraftHandler atomically turns a draft into a real post: assigns the
-// next per-topic sequence, clears is_draft and advances the topic projections
-// in one transaction. An orphan draft can never be published.
+// publishDraftHandler atomically turns a draft into a real post: clears
+// is_draft and advances the topic projections in one transaction. An orphan
+// draft can never be published.
 func publishDraftHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -273,30 +319,36 @@ func publishDraftHandler(e *core.RequestEvent) error {
 
 		topicID := post.GetString("topic_id")
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
-		if err != nil || topic == nil || topic.GetBool("deleted") {
+		if err != nil || topic == nil {
 			return 0, nil, conflictError("draft is orphaned: its topic no longer exists")
 		}
 		acc := AccessFrom(e)
-		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermModerateContent) {
+		// Same rule as createPostHandler: `close_topics` bypasses the lock, and
+		// the post limit below still applies to it.
+		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermCloseTopics) {
 			return 0, nil, conflictError("topic is locked")
 		}
 
-		type maxSeqResult struct {
-			MaxSeq int `db:"max_seq"`
+		// The same settings-backed limit as createPostHandler, and the same
+		// asymmetry: `close_topics` got past the lock above, but the post cap is
+		// not bypassable. A draft saved before a limit was lowered cannot be
+		// published into a topic that is already full.
+		limit := effectiveMaxPostsPerTopic(txApp)
+		existing, err := countPublishedPosts(txApp, topicID)
+		if err != nil {
+			return 0, nil, internalError("failed to count topic posts", err)
 		}
-		var seqRes maxSeqResult
-		if err := txApp.DB().NewQuery("SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM posts WHERE topic_id = {:topic_id}").
-			Bind(dbx.Params{"topic_id": topicID}).
-			One(&seqRes); err != nil {
-			return 0, nil, internalError("failed to calculate next post sequence", err)
-		}
-		nextSeq := seqRes.MaxSeq + 1
-		if nextSeq > forumMaxPostsPerTopic {
+		if existing >= limit {
 			return 0, nil, conflictError("topic has reached the maximum post limit")
 		}
 
 		post.Set("is_draft", false)
-		post.Set("sequence", nextSeq)
+		// The mask lives on the draft row, so publishing keeps the identity the
+		// text was written under. It is NOT re-read from the profile here: the
+		// author may have switched masks since saving, and a post that silently
+		// changed its author identity on publication is exactly the bug that made
+		// "publish my draft" drop the mask.
+		characterID := post.GetString("author_character_id")
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to publish draft", err)
 		}
@@ -305,9 +357,17 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		topic.Set("last_post_id", post.Id)
 		topic.Set("last_post_created", post.GetDateTime("created"))
 		topic.Set("last_post_author_id", post.GetString("author_id"))
+		// Same denormalisation createPostHandler writes: a topic list row renders
+		// "who spoke last" without loading the post, so leaving this out made the
+		// published mask show in the topic but not in the list.
+		topic.Set("last_post_author_character_id", characterID)
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
 		}
+
+		// A published draft IS a post, so it notifies like one. Omitting this would
+		// make the drafts feature a way to post without anybody being told.
+		dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
 
 		// Publishing turns a draft into a real post, so the author's post count
 		// moves now — the draft was deliberately not counted before this.
@@ -315,8 +375,21 @@ func publishDraftHandler(e *core.RequestEvent) error {
 			return 0, nil, err
 		}
 
+		// The published post rides back DECORATED, exactly like a createPost
+		// answer. The raw payload carries no author_name/is_character — the read
+		// model resolves those — so an undecorated response made the client
+		// re-render the fresh post with the account name and the mask appeared to
+		// vanish the moment the draft was published.
+		postOut := postPayload(post)
+		decoratePostAuthors(txApp, []map[string]any{postOut})
+		// Publishing turns a private row into forum content, so this is the first
+		// moment the answer needs the same per-reader redaction the list route
+		// applies — the stored throws are promoted verbatim, master dice included.
+		redactPostRolls([]map[string]any{postOut}, AccessFrom(e))
+
 		return http.StatusOK, map[string]any{
-			"post":       postPayload(post),
+			"post":       postOut,
+			"post_id":    post.Id,
 			"request_id": requestIDFrom(e),
 		}, nil
 	})

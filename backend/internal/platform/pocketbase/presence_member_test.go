@@ -299,6 +299,143 @@ func TestAdminUserListReportsThePersistedLastSeen(t *testing.T) {
 	}
 }
 
+// The member presence departure contract.
+//
+// A member could only stop beating, never leave: there was no route that
+// removed an account from the online map, so a signed-out member stayed in
+// "Online now" for the whole presenceTTL (75s). Worse, the client "fixed" this
+// by sending a final HEARTBEAT on logout — which re-registers the very account
+// it was trying to remove, extending the window to a full TTL from the moment
+// of sign-out. Guests never had this problem because /presence/guest/leave
+// removes the row. These tests pin the member counterpart.
+
+// onlineMemberIDs reads the member half of GET /api/aerun/status.
+func onlineMemberIDs(t testing.TB, baseURL string) map[string]bool {
+	t.Helper()
+
+	status, payload := getAerun(t, baseURL+"/api/aerun/status")
+	if status != http.StatusOK {
+		t.Fatalf("status: expected 200, got %d: %s", status, payload)
+	}
+	var snapshot struct {
+		Presence struct {
+			Users []struct {
+				ID string `json:"id"`
+			} `json:"users"`
+		} `json:"presence"`
+	}
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
+		t.Fatalf("decode status: %v (%s)", err, payload)
+	}
+
+	ids := make(map[string]bool, len(snapshot.Presence.Users))
+	for _, u := range snapshot.Presence.Users {
+		ids[u.ID] = true
+	}
+	return ids
+}
+
+// TestMemberLeaveRemovesThemFromTheOnlineList is the regression: signing out
+// must take the account out of presence immediately, not one TTL later.
+func TestMemberLeaveRemovesThemFromTheOnlineList(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+	memberBeat(t, ts.URL, tokens["player"])
+
+	if !onlineMemberIDs(t, ts.URL)[fixPlayerID] {
+		t.Fatal("precondition: a beating member must appear in the online list")
+	}
+
+	status, payload := postAerun(t, ts.URL+"/api/aerun/presence/leave", `{}`, tokens["player"])
+	if status != http.StatusOK {
+		t.Fatalf("leave: expected 200, got %d: %s", status, payload)
+	}
+
+	if onlineMemberIDs(t, ts.URL)[fixPlayerID] {
+		t.Fatal("a member who signed out is still counted as online — the leave route must " +
+			"delete the presence row, not refresh it")
+	}
+}
+
+// TestMemberLeaveStampsLastSeenUnthrottled pins the durable half.
+//
+// The heartbeat writes users.last_seen at most once per memberLastSeenWriteInterval
+// (5 minutes), which is right for a 30s signal and wrong for a departure: the
+// value the members table shows for somebody who just left must be the moment
+// they left, so this write deliberately bypasses the throttle.
+func TestMemberLeaveStampsLastSeenUnthrottled(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+	memberBeat(t, ts.URL, tokens["player"])
+
+	// Park the stored value INSIDE the throttle window, so a throttled writer
+	// would leave it untouched.
+	record, err := app.FindRecordById(usersCollectionName, fixPlayerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insideWindow := time.Now().Add(-time.Minute).UTC()
+	record.Set(userLastSeenField, insideWindow)
+	if err := app.Save(record); err != nil {
+		t.Fatal(err)
+	}
+
+	status, payload := postAerun(t, ts.URL+"/api/aerun/presence/leave", `{}`, tokens["player"])
+	if status != http.StatusOK {
+		t.Fatalf("leave: expected 200, got %d: %s", status, payload)
+	}
+
+	seen := storedLastSeen(t, app, fixPlayerID)
+	if !seen.After(insideWindow) {
+		t.Fatalf("a departure must stamp last_seen even inside the %s throttle window; it is "+
+			"still %s, which was written before the sign-out", memberLastSeenWriteInterval, seen)
+	}
+	if delta := time.Since(seen); delta > time.Minute || delta < -time.Minute {
+		t.Fatalf("last_seen must be stamped at departure time, got %s", seen)
+	}
+}
+
+// TestMemberLeaveRequiresAuthentication guards the route: identity comes from
+// the resolved auth record, never the body, so an anonymous call has nothing to
+// remove and must be refused rather than silently succeeding.
+func TestMemberLeaveRequiresAuthentication(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, payload := postAerun(t, ts.URL+"/api/aerun/presence/leave", `{}`, "")
+	if status != http.StatusForbidden {
+		t.Fatalf("an anonymous leave must be refused, got %d: %s", status, payload)
+	}
+}
+
+// TestMemberLeaveIsIdempotent: a double submit (retry, two tabs, a slow click
+// landing twice) is a normal outcome, not an error.
+func TestMemberLeaveIsIdempotent(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		status, payload := postAerun(t, ts.URL+"/api/aerun/presence/leave", `{}`, tokens["player"])
+		if status != http.StatusOK {
+			t.Fatalf("leave #%d: expected 200, got %d: %s", attempt, status, payload)
+		}
+	}
+}
+
 // TestLastSeenToWriteIsMonotonic is the release-day guard. Replaying a dump is a
 // routine operation, and last_seen is a clock that has been running since the
 // dump was taken: an unconditional write would rewind every account that has

@@ -19,6 +19,34 @@ const (
 	RoleGuest     Role = "guest"
 )
 
+// CategoryInheritMarker is the sentinel stored in `categories.allowed_roles`
+// that means "visibility follows the global role settings".
+//
+// WHY A MARKER EXISTS. `allowed_roles` is the ONLY input canViewCategory reads
+// (ADR-1), and an empty list means root-only. Without a marker, a category
+// that "follows the global settings" can only be stored as a SNAPSHOT of the
+// role registry taken when the admin last saved — and a role created after
+// that save is silently absent from the array, so its members are denied a
+// public category until every category is re-saved by hand. The marker turns
+// that snapshot into a live rule.
+//
+// WHY THIS PARTICULAR TEXT. It must be impossible to enter as a role name by
+// accident, and it must survive a round trip through a JSON array of ids:
+//
+//   - it is not a plausible role id (the legacy ids are lowercase words; this
+//     is not one, and no UI suggests it);
+//   - it can never become a REAL role, because validateAllowedRoles rejects any
+//     id absent from the roles registry, and the registry is the only writer —
+//     so the marker cannot be shadowed by a role that happens to share the
+//     name;
+//   - the leading non-alphabetic character cannot start a human-chosen slug, so
+//     even a future id-validation relaxation would not collide with it.
+//
+// The alternative — treating an EMPTY list as "inherit" — is exactly the
+// reading ADR-1 removed, and reintroducing it would republish every restricted
+// category whose list ever arrived empty. Empty stays root-only.
+const CategoryInheritMarker = "__aerun_inherit_roles__"
+
 // RoleSpec is the canonical definition of a system role: display name,
 // authority rank, UI color and the default permission set.
 //
@@ -65,6 +93,20 @@ var roleSpecs = []RoleSpec{
 		Rank:     600,
 		Color:    "info",
 		IsSystem: true,
+		// A moderator keeps the full set `moderate_content` used to imply, so
+		// nothing is lost in the split — every action the umbrella key gated is
+		// still gated, now by its own key.
+		//
+		// EXCEPT `delete_others_topics`, which is deliberately absent: the owner
+		// ruled that a moderator does not delete another account's topic. They
+		// keep `delete_others_posts` (removing an individual reply is a normal
+		// moderation act) and they keep `edit_others_topics`.
+		//
+		// The consequence is enforced in deleteTopicHandler, not here: a
+		// moderator may remove their OWN topic only while it still holds just
+		// their opening post. Once somebody has replied, deleting the topic
+		// would destroy their post, which is exactly the loss of other people's
+		// content that removing the key is meant to prevent.
 		Permissions: []Permission{
 			PermBypassHideTags,
 			PermCloseTopics,
@@ -72,19 +114,47 @@ var roleSpecs = []RoleSpec{
 			PermCreateSelfMask,
 			PermCreateTopic,
 			PermDeleteOthersMask,
+			PermDeleteOthersPosts,
 			PermDeleteSelfMask,
+			PermDeleteSelfPost,
+			PermDeleteSelfTopic,
 			PermEditOthersMask,
+			// The owner ranks a moderator as able to edit profile fields of
+			// STRICTLY LOWER accounts only, so `edit_others_nicknames` is
+			// required for the nickname matrix to be reachable at all. The rank
+			// restriction that actually bounds it is not expressible as a
+			// permission and is enforced in the handler.
+			PermEditOthersNicknames,
+			PermEditOthersPosts,
+			PermEditOthersTopics,
 			PermEditSelfAvatar,
 			PermEditSelfNickname,
+			PermEditSelfPost,
+			PermEditSelfProfile,
 			PermEditSelfSignature,
 			PermEditSelfStatus,
+			PermEditSelfTopic,
 			PermModerateContent,
 			PermMoveTopics,
 			PermPinTopics,
 			PermPostReply,
 			PermUseDice,
+			// DMs are a baseline member capability, not a moderator perk: a
+			// moderator who cannot answer a player in private is worse than
+			// useless. It was missing from this row while the admin panel's
+			// ceiling listed it, so the checkbox rendered — unchecked, and
+			// honestly — for the one role that most needs it.
+			PermUseDirectMessages,
 			PermUseMasks,
 			PermUseReputation,
+			// Reputation the moderator may retract: their OWN entries by
+			// default, and anybody else's only because this is the staff role.
+			// Editing somebody else's entry stays OFF by default — rewriting a
+			// reputation comment after the fact is a rarer and more suspicious
+			// act than removing an abusive one, and it is one checkbox away.
+			PermEditSelfReputation,
+			PermDeleteSelfReputation,
+			PermDeleteOthersReputation,
 			PermViewAuditLog,
 			PermViewForum,
 			PermViewMasterDice,
@@ -100,17 +170,30 @@ var roleSpecs = []RoleSpec{
 			PermCreateSelfMask,
 			PermCreateTopic,
 			PermDeleteSelfMask,
+			PermDeleteSelfPost,
+			PermDeleteSelfTopic,
 			PermEditSelfAvatar,
 			PermEditSelfNickname,
+			PermEditSelfPost,
+			PermEditSelfProfile,
 			PermEditSelfSignature,
 			PermEditSelfStatus,
+			PermEditSelfTopic,
 			PermPostReply,
 			PermUseDice,
 			PermUseDirectMessages,
 			PermUseMasks,
 			PermUseReputation,
+			// A player may adjust and retract their OWN reputation entries.
+			// Before the split there was no route for either, so the only way to
+			// take back a "+1" was to ask a moderator.
+			PermEditSelfReputation,
+			PermDeleteSelfReputation,
 			PermViewForum,
-			PermViewMasterDice,
+			// NO view_master_dice. A master roll is the GM's private number;
+			// "everyone but guests" made the players the audience for it. It
+			// stays a moderator-and-above capability, and the key is still in
+			// the registry so a custom role can grant it deliberately.
 		},
 	},
 	{

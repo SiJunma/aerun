@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Card, Button, Image, Badge, Spinner } from 'react-bootstrap';
+import { Card, Button, Image, Badge, Spinner, Form } from 'react-bootstrap';
 import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2, ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useI18n } from '../../contexts/I18nProvider';
@@ -14,11 +14,14 @@ import {
   subscribeToDmMessages,
   fetchOlderDmMessages,
   sendDmMessage,
+  editDmMessage,
+  deleteDmMessage,
+  refreshDmMessages,
   markDmRead,
+  subscribeToPeerCard,
   deleteConversation,
 } from '../../api/dms';
-import { getCachedDmMessages, setCachedDmMessages } from '../../api/dm-cache';
-import { subscribeToUser } from '../../api/auth-resources';
+import { createInFlight, newIdempotencyKey } from '../../utils/inflight';
 import { playNotificationSound } from '../../utils/notificationSound';
 import Timestamp from '../common/Timestamp';
 import ErrorCard from '../common/ErrorCard';
@@ -74,6 +77,13 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const initialScrollDoneRef = useRef(false);
   const prevMessagesCountRef = useRef(0);
   const firstUnreadIdRef = useRef(null);
+  // Highest message sequence already reported as read for this thread. See the
+  // mark-read call in the poll callback for why this gates the write.
+  const lastReadSeqRef = useRef(0);
+  // Set once the member has walked backwards through history. After that the
+  // server's has_more describes the newest page, not what is on screen, so it
+  // must stop steering the button.
+  const hasPrependedRef = useRef(false);
   const sentByMeRef = useRef(false); // flag to force scroll-to-bottom after sending own message
 
   const getScrollContainer = () => {
@@ -119,26 +129,41 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     firstUnreadIdRef.current = null;
   };
 
-  // ── Track peer status ───────────────────────────────────────────────────
+  // ── The correspondent: ONE small read, shared by the header and the lock ────
+  //
+  // Both of these used to call `subscribeToUser`, which is the profile PAGE:
+  // bio, birthday, occupation, contacts, counters and the member's `settings`.
+  // Two effects, so opening a thread issued the same heavy read twice, and the
+  // header only ever rendered a nickname and an avatar out of it.
+  //
+  // `subscribeToPeerCard` is that subset — nickname, avatar, status — off
+  // /api/aerun/peers/{id}. One shared resource, so the header and the composer
+  // lock cost ONE request between them, and a conversation left open all evening
+  // re-reads four fields every two minutes rather than a whole profile.
   useEffect(() => {
-    if (!activePeer || !activePeer.uid) return;
-    const unsub = subscribeToUser(activePeer.uid, (data) => {
-      if (!data) {
+    if (!activePeer?.uid) return;
+    const unsub = subscribeToPeerCard(activePeer.uid, (card) => {
+      if (!card) {
         setPeerStatus('deleted');
-      } else if (data.role_id === 'banned') {
+      } else if (card.status === 'banned') {
         setPeerStatus('banned');
       } else {
         setPeerStatus('active');
       }
     });
     return () => unsub();
-  }, [activePeer]);
+  }, [activePeer?.uid]);
 
   // ── Load target profile if not provided ─────────────────────────────────
+  //
+  // The SAME resource as above, keyed by the same uid: chat mode opens with
+  // `targetUid`, which then becomes `activePeer.uid`. Sharing them is what turns
+  // two reads of one account into one — and before this was `subscribeToUser`,
+  // so the duplicate was two reads of a member's full profile instead.
   useEffect(() => {
     if (!targetUid || initialTargetProfile) return;
-    const unsub = subscribeToUser(targetUid, (data) => setTargetProfile(data));
-    return () => unsub && unsub();
+    const unsub = subscribeToPeerCard(targetUid, (card) => setTargetProfile(card));
+    return () => unsub();
   }, [targetUid, initialTargetProfile]);
 
   // ── Subscribe to inbox ───────────────────────────────────────────────────
@@ -197,19 +222,31 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     setShowScrollBottom(false);
     setUnreadBelowCount(0);
     firstUnreadIdRef.current = null;
-    // 1. Immediately hydrate from local cache
-    const cached = getCachedDmMessages(myUid, activeChatId);
-    if (cached.length > 0) {
-      setMessages(cached);
-      setLoadingChat(false);
-    } else {
-      setLoadingChat(true);
-    }
-    
+    // A new thread starts with nothing marked read, so its first tick writes
+    // once and every tick after it stays quiet.
+    lastReadSeqRef.current = 0;
+    // The server's has_more is authoritative again for this new thread.
+    hasPrependedRef.current = false;
+    // Start empty and let the first read fill it.
+    //
+    // This used to hydrate from a localStorage cache first, up to 50 messages.
+    // It was there for the Firestore era, when a cache kept a thread visible
+    // while the realtime channel was slow to deliver. It is now the opposite of
+    // what we want: the cache outlived a conversation's contents, so a thread
+    // opened at what looked like the whole history while the server had been
+    // asked for fifteen messages and had said so. Worse, messages can now be
+    // EDITED and DELETED, so a cache is a copy of text that is no longer
+    // necessarily true — the reader would be shown words their correspondent had
+    // already withdrawn.
+    //
+    // Each session starts from the newest fifteen and walks backwards on demand.
+    setMessages([]);
+    setLoadingChat(true);
+
     setHasMoreOlder(true);
     setMessageLimit(15);
 
-    // 2. Subscribe to Firestore for real-time updates and merge with cache
+    // 1. Subscribe for updates; the first read delivers the newest page.
     const unsub = subscribeToDmMessages(
       activeChatId,
       messageLimit,
@@ -228,20 +265,42 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
           const map = new Map();
           prev.forEach(m => m.id && map.set(m.id, m));
           msgs.forEach(m => m.id && map.set(m.id, m));
-          const merged = Array.from(map.values()).sort((a, b) => {
-            const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-            const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-            return aTime - bTime;
-          });
-          setCachedDmMessages(myUid, activeChatId, merged);
+          // sequence, not timestamp: two messages written in the same second
+          // have equal timestamps, and a comparator that returns 0 for a tie
+          // leaves their order up to the sort — which is how a thread ends up
+          // reading out of order. sequence is dense and unique per conversation.
+          const merged = Array.from(map.values()).sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
           return merged;
         });
         setLoadingChat(false);
-        markDmRead(activeChatId, myUid).catch(() => {});
+        // Mark read ONLY when there is something new to have read.
+        //
+        // This ran on every poll tick, and the thread polls every 5s, so an open
+        // DM page wrote to the server 12 times a minute forever, to set a value
+        // that was already correct. It was the single biggest contributor to the
+        // request count on this page. The highest sequence seen from the peer is
+        // the watermark: a tick that brings nothing newer does no write at all.
+        const newest = msgs.length ? msgs[msgs.length - 1] : null;
+        if (newest && newest.sequence > lastReadSeqRef.current) {
+          lastReadSeqRef.current = newest.sequence;
+          markDmRead(activeChatId, myUid).catch(() => {});
+        }
       },
       (err) => {
         setChatError(err);
         setLoadingChat(false);
+      },
+      // The server's answer to "is there history older than this page?".
+      //
+      // It was ignored entirely, and hasMoreOlder was hard-coded to true on
+      // every open, so a conversation with nothing older still showed a
+      // "load older messages" button that did nothing when clicked.
+      //
+      // Only applied while the client has NOT walked backwards yet: once the
+      // member has prepended older pages this flag describes the NEWEST page
+      // and would keep re-arming the button they had just emptied.
+      (hasMore) => {
+        if (!hasPrependedRef.current) setHasMoreOlder(hasMore);
       }
     );
 
@@ -263,23 +322,28 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     setLoadingOlder(true);
     try {
       const oldestMsg = messages[0];
-      const olderMsgs = await fetchOlderDmMessages(activeChatId, oldestMsg.timestamp, 15);
+      // The cursor is the oldest message's SEQUENCE, not its timestamp: the
+      // server pages on sequence, and two messages can share a timestamp.
+      const olderMsgs = await fetchOlderDmMessages(activeChatId, oldestMsg?.sequence, 15);
       if (olderMsgs.length === 0) {
         setHasMoreOlder(false);
         isLoadingOlderRef.current = false;
       } else {
+        // From here on the button is ours, not the server's.
+        hasPrependedRef.current = true;
         setMessages(prev => {
           const map = new Map();
           olderMsgs.forEach(m => m.id && map.set(m.id, m));
           prev.forEach(m => m.id && map.set(m.id, m));
-          const merged = Array.from(map.values()).sort((a, b) => {
-            const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-            const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-            return aTime - bTime;
-          });
-          setCachedDmMessages(myUid, activeChatId, merged);
+          // sequence is dense per conversation, so it orders the merged thread
+          // exactly; timestamps can tie, and a tie sorted by timestamp is how a
+          // conversation ended up reading out of order.
+          const merged = Array.from(map.values()).sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
           return merged;
         });
+        // A short page means the beginning of the conversation has been reached.
+        // Otherwise the server told us so on the page itself, which is the same
+        // answer without guessing from a length.
         if (olderMsgs.length < 15) {
           setHasMoreOlder(false);
         }
@@ -351,7 +415,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     if (!myUid) return;
     setActivePeer(peerInfo);
     try {
-      const convId = await getOrCreateConversation(myUid, peerUid, profile, targetProfile || peerInfo);
+      // The inbox list is passed in so an existing thread is REUSED instead of a
+      // duplicate being started — see getOrCreateConversation for why the lookup
+      // cannot happen in the browser.
+      const convId = await getOrCreateConversation(myUid, peerUid, profile, targetProfile || peerInfo, conversations);
       setActiveChatId(convId);
     } catch (err) {
       console.error('[openChat]', err);
@@ -365,7 +432,87 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     navigate(`/messages/${peerUid}`);
   };
 
+  // ── Edit / delete a message you sent ───────────────────────────────────────
+  // The server is the authority on both: only the sender may edit or delete,
+  // and a tombstone cannot be edited. These are the UI affordances for that,
+  // not a second copy of the rule — a staff account has no extra power here,
+  // because private mail is not forum content.
+  const [editingMsgId, setEditingMsgId] = useState(null);
+  const [editingText, setEditingText] = useState('');
+
+  const handleStartDmEdit = (msg) => {
+    setEditingMsgId(msg.id);
+    setEditingText(msg.text || '');
+  };
+
+  const handleCancelDmEdit = () => {
+    setEditingMsgId(null);
+    setEditingText('');
+  };
+
+  // Put the server's answer for one row straight into the thread.
+  //
+  // This is the whole fix for "I edited it and nothing happened". Both mutation
+  // handlers used to await the request, throw the response away and show a
+  // success toast, leaving the bubble to repaint itself — and it could not,
+  // because the author is deliberately not signalled about their own change and
+  // shared-poll removes its fallback timer as soon as ANY signal arrives. The
+  // words on screen were only ever going to change if some unrelated poll tick
+  // happened to land.
+  //
+  // REPLACE rather than merge: a tombstone comes back with no `text` key at all,
+  // and spreading it over the old row would keep the very text that was just
+  // withdrawn. Replacing also drops keys the server deliberately omits, which is
+  // the whole contract of the tombstone payload.
+  const applyMessageUpdate = (updated) => {
+    if (!updated?.id) return;
+    setMessages(prev => {
+      if (!prev.some(m => m.id === updated.id)) return prev;
+      return prev.map(m => (m.id === updated.id ? updated : m));
+    });
+  };
+
+  const handleSaveDmEdit = async (msg) => {
+    if (!editingText.trim()) return;
+    try {
+      const updated = await editDmMessage(msg.id, editingText);
+      handleCancelDmEdit();
+      if (updated) applyMessageUpdate(updated);
+      // Converges the sidebar preview and the counters, which an edit moves.
+      refreshDmMessages(activeChatId);
+      showToast(lang === 'ru' ? 'Сообщение изменено' : 'Message edited');
+    } catch (err) {
+      console.error('[handleSaveDmEdit]', err);
+      showToast(lang === 'ru' ? 'Не удалось изменить сообщение' : 'Failed to edit message', 'danger');
+    }
+  };
+
+  const handleDeleteDm = async (msg) => {
+    try {
+      const tombstone = await deleteDmMessage(msg.id);
+      handleCancelDmEdit();
+      if (tombstone) applyMessageUpdate(tombstone);
+      refreshDmMessages(activeChatId);
+      showToast(
+        lang === 'ru'
+          ? 'Сообщение удалено. Оно остаётся видимым в переписке.'
+          : 'Message deleted. It stays visible in the conversation.'
+      );
+    } catch (err) {
+      console.error('[handleDeleteDm]', err);
+      showToast(lang === 'ru' ? 'Не удалось удалить сообщение' : 'Failed to delete message', 'danger');
+    }
+  };
+
   // ── Send message ─────────────────────────────────────────────────────────
+  // The in-flight latch is a REF, not the `sending` state above. React batches
+  // state writes, so two clicks in the same tick both read `sending === false`
+  // from the render closure and both post. A ref write is not batched.
+  const sendInFlightRef = useRef(null);
+  if (sendInFlightRef.current === null) {
+    sendInFlightRef.current = createInFlight();
+  }
+
   const handleSend = async () => {
     if (!messageText.trim() || !activeChatId || !activePeer) return;
 
@@ -379,10 +526,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       return;
     }
 
+    if (!sendInFlightRef.current.begin()) return;
+
     setSending(true);
-    sentByMeRef.current = true; // flag to force scroll when Firestore message arrives
+    sentByMeRef.current = true; // flag to force scroll when the message arrives
     try {
-      await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid);
+      // ONE key per logical send, reused by anything that retries. Without it
+      // sendApi mints a fresh random key per call, so a duplicate that escapes
+      // the latch would be a genuinely second message.
+      await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid, newIdempotencyKey('dm'));
       setMessageText('');
       editorRef.current?.focus();
       const container = getScrollContainer();
@@ -394,6 +546,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       showToast(lang === 'ru' ? 'Ошибка отправки сообщения' : 'Failed to send message', 'danger');
     } finally {
       setSending(false);
+      sendInFlightRef.current.end();
     }
   };
 
@@ -438,19 +591,35 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   };
 
   // ── Derived State (Filtering) ────────────────────────────────────────────
+  // PocketBase datetimes arrive as "2026-09-11 04:32:07.134Z" — a space where
+  // ISO wants a T. These two filters used to call `.toMillis()` on them, which
+  // is the Firestore accessor the migration removed: it survives only on the
+  // object type this data no longer is, so the first member to CLEAR a
+  // conversation unmounted the whole page with a TypeError instead of a list.
+  const toMillis = (value) => {
+    if (!value) return null;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (value instanceof Date) return value.getTime();
+    const parsed = new Date(String(value).replace(' ', 'T'));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  };
+
   const myClearTime = conversations.find(c => c.id === activeChatId)?.clearedAt?.[myUid];
 
   const visibleMessages = messages.filter(msg => {
-    if (!myClearTime) return true;
-    if (!msg.timestamp) return true; // Optimistic local messages
-    return msg.timestamp.toMillis() > myClearTime.toMillis();
+    const clearMs = toMillis(myClearTime);
+    if (clearMs === null) return true;
+    const msgMs = toMillis(msg.timestamp);
+    if (msgMs === null) return true; // Optimistic local messages
+    return msgMs > clearMs;
   });
 
   const visibleConversations = conversations.filter(c => {
-    const clearTime = c.clearedAt?.[myUid];
-    if (!clearTime) return true;
-    if (!c.lastTimestamp) return false;
-    return c.lastTimestamp.toMillis() > clearTime.toMillis();
+    const clearMs = toMillis(c.clearedAt?.[myUid]);
+    if (clearMs === null) return true;
+    const lastMs = toMillis(c.lastTimestamp);
+    if (lastMs === null) return false;
+    return lastMs > clearMs;
   });
 
   // ── Privacy notice ───────────────────────────────────────────────────────
@@ -531,7 +700,6 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             <PrivacyNotice />
             {chatError ? (
               <ErrorCard
-                isNetworkError={true}
                 title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load messages'}
                 error={chatError}
                 onRetry={() => {
@@ -600,13 +768,85 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                         }}
                       >
-                        <div className="w-100"><BBCode rolls={allConversationRolls} isDM={true}>{msg.text}</BBCode></div>
-                        <div
-                          className="text-end mt-1"
-                          style={{ fontSize: '0.875rem', opacity: 0.6 }}
-                        >
-                          {formatTs(msg.timestamp)}
-                        </div>
+                        {/* Editing replaces the bubble in place, so the surrounding thread does not
+                            jump while somebody fixes a typo. */}
+                        {editingMsgId === msg.id ? (
+                          <div className="w-100">
+                            <Form.Control
+                              as="textarea"
+                              rows={3}
+                              value={editingText}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              autoFocus
+                            />
+                            <div className="d-flex gap-2 justify-content-end mt-2">
+                              <Button size="sm" variant="outline-secondary" onClick={handleCancelDmEdit}>
+                                {lang === 'ru' ? 'Отмена' : 'Cancel'}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={!editingText.trim()}
+                                onClick={() => handleSaveDmEdit(msg)}
+                              >
+                                {lang === 'ru' ? 'Сохранить' : 'Save'}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {msg.deleted ? (
+                              <div className="w-100 fst-italic opacity-75">
+                                {lang === 'ru' ? 'Сообщение удалено' : 'Message deleted'}
+                              </div>
+                            ) : (
+                              <div className="w-100">
+                                <BBCode rolls={allConversationRolls} isDM={true}>{msg.text}</BBCode>
+                              </div>
+                            )}
+                            <div
+                              className="text-end mt-1"
+                              style={{ fontSize: '0.875rem', opacity: 0.6 }}
+                            >
+                              {formatTs(msg.timestamp)}
+                              {/* An edited message says so. A client that cannot
+                                  show this should omit the marker rather than print
+                                  a raw timestamp. */}
+                              {msg.edited && !msg.deleted && (
+                                <span className="ms-2">· {lang === 'ru' ? 'изменено' : 'edited'}</span>
+                              )}
+                            </div>
+                            {/* Actions on YOUR OWN messages only. There is no
+                                permission key here and there must not be: the server
+                                decides by authorship, and a staff account gets no
+                                extra power inside somebody else's conversation.
+                                A tombstone offers neither action — there is no text
+                                left to correct. */}
+                            {isMe && !msg.deleted && editingMsgId !== msg.id && (
+                              <div
+                                className="d-flex gap-2 justify-content-end mt-1"
+                                style={{ fontSize: '0.8rem', opacity: 0.75 }}
+                              >
+                                <button
+                                  type="button"
+                                  className="btn btn-link p-0"
+                                  style={{ color: 'inherit', fontSize: 'inherit' }}
+                                  onClick={() => handleStartDmEdit(msg)}
+                                >
+                                  {lang === 'ru' ? 'Изменить' : 'Edit'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-link p-0"
+                                  style={{ color: 'inherit', fontSize: 'inherit' }}
+                                  onClick={() => handleDeleteDm(msg)}
+                                >
+                                  {lang === 'ru' ? 'Удалить' : 'Delete'}
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
                   );
@@ -752,7 +992,6 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
         {inboxError ? (
           <ErrorCard
-            isNetworkError={true}
             title={lang === 'ru' ? 'Не удалось загрузить диалоги' : 'Failed to load conversations'}
             error={inboxError}
             onRetry={() => {

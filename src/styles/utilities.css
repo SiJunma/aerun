@@ -69,6 +69,24 @@
   white-space: nowrap;
 }
 
+/* Instruction shown while manage mode is on and nothing is ticked yet.
+   It sits at the end of the action bar, so the bar itself now explains what to
+   do instead of leaving the page silent after "Manage" was pressed. */
+.management-toolbar-hint {
+  opacity: 0.85;
+  font-style: italic;
+  white-space: normal;
+  max-width: 22rem;
+  line-height: 1.25;
+}
+
+@media (max-width: 768px) {
+  .management-toolbar-hint {
+    max-width: 100%;
+    text-align: center;
+  }
+}
+
 [data-theme='light'] .management-toolbar {
   background: rgba(255, 255, 255, 0.95);
   border-color: rgba(0, 0, 0, 0.15);
@@ -107,4 +125,24 @@
 [data-theme='light'] .management-toolbar .vr {
   background-color: currentColor;
   opacity: 0.25;
+}
+
+/* The refresh affordance on the members board.
+   A spinner that tells the member their click landed. `.spin` is on the ICON
+   rather than the button so the whole control does not tilt while it turns, and
+   `prefers-reduced-motion` is honoured because a spinning icon is exactly the
+   kind of repeated motion that setting exists to suppress. */
+@keyframes aerun-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: aerun-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation-duration: 3s;
+  }
 }

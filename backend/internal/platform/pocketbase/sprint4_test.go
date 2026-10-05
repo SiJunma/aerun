@@ -39,7 +39,6 @@ func seedTopicAndPost(t testing.TB, app *tests.TestApp, authorID string) (string
 	topic.Set("posts_count", 1)
 	topic.Set("locked", false)
 	topic.Set("pinned", false)
-	topic.Set("deleted", false)
 	if err := app.Save(topic); err != nil {
 		t.Fatal(err)
 	}
@@ -51,9 +50,7 @@ func seedTopicAndPost(t testing.TB, app *tests.TestApp, authorID string) (string
 	post := core.NewRecord(postsCol)
 	post.Set("topic_id", topic.Id)
 	post.Set("author_id", authorID)
-	post.Set("sequence", 1)
 	post.Set("content", "Initial post content")
-	post.Set("deleted", false)
 	if err := app.Save(post); err != nil {
 		t.Fatal(err)
 	}
@@ -104,11 +101,10 @@ func TestSprint4ReputationVotingAndScoreUpdates(t *testing.T) {
 	targetPost := core.NewRecord(colPosts)
 	targetPost.Set("topic_id", "some_topic")
 	targetPost.Set("author_id", targetID)
-	targetPost.Set("sequence", 999)
 	targetPost.Set("content", "Post by target user")
-	targetPost.Set("deleted", false)
-	// Bind to general topic
-	top, _ := app.FindFirstRecordByFilter(topicsCollectionName, "deleted = false")
+	// Bind to general topic. No deleted filter: every topic row is live, because a
+	// deleted one no longer exists (1767700000).
+	top, _ := app.FindFirstRecordByFilter(topicsCollectionName, "id != ''")
 	targetPost.Set("topic_id", top.Id)
 	if err := app.Save(targetPost); err != nil {
 		t.Fatal(err)
@@ -500,7 +496,6 @@ func TestSprint4DoDHiddenCategoryLeakPrevention(t *testing.T) {
 	secretTopic.Set("author_id", targetID)
 	secretTopic.Set("title", "Classified Intelligence")
 	secretTopic.Set("posts_count", 1)
-	secretTopic.Set("deleted", false)
 	if err := app.Save(secretTopic); err != nil {
 		t.Fatal(err)
 	}
@@ -509,9 +504,7 @@ func TestSprint4DoDHiddenCategoryLeakPrevention(t *testing.T) {
 	secretPost := core.NewRecord(colPosts)
 	secretPost.Set("topic_id", secretTopic.Id)
 	secretPost.Set("author_id", targetID)
-	secretPost.Set("sequence", 1)
 	secretPost.Set("content", "Top secret payload")
-	secretPost.Set("deleted", false)
 	if err := app.Save(secretPost); err != nil {
 		t.Fatal(err)
 	}

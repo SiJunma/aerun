@@ -46,7 +46,6 @@ func seedPost(t *testing.T, app core.App, topicID, authorID string, sequence, re
 	post := core.NewRecord(col)
 	post.Set("topic_id", topicID)
 	post.Set("author_id", authorID)
-	post.Set("sequence", sequence)
 	post.Set("content", "content")
 	post.Set("reputation", reputation)
 	if err := app.Save(post); err != nil {
@@ -122,7 +121,6 @@ func TestRecomputePostReputationClearsAStaleCachedScore(t *testing.T) {
 	post := core.NewRecord(col)
 	post.Set("topic_id", "topicmissing001")
 	post.Set("author_id", fixPlayerID)
-	post.Set("sequence", 1)
 	post.Set("content", "legacy text")
 	// A cached score the votes below do not support.
 	post.Set("reputation", 7)

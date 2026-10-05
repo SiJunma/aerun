@@ -7,7 +7,8 @@ import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, 
 import { playNotificationSound } from '../utils/notificationSound';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
-import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter } from '../api/character';
+import ForumCharacterBadge from '../components/common/ForumCharacterBadge';
+import { subscribeToCharacters, addCharacter, updateCharacter, deleteCharacter, uploadCharacterAvatar } from '../api/character';
 import { checkNicknameExists, fetchUserPosts } from '../api/forum';
 import { subscribeToUser } from '../api/auth-resources';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -23,6 +24,7 @@ import BBCode from '../components/common/BBCode';
 import { useToast } from '../contexts/ToastProvider';
 import DirectMessages from '../components/dm/DirectMessages';
 import ForumPagination from '../components/common/ForumPagination';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import Skeleton from '../components/common/Skeleton';
 import SecurityTab from '../components/profile/SecurityTab';
 
@@ -43,7 +45,13 @@ const ProfilePage = () => {
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
 
-  const isLimitedProfile = viewedProfile?.role_id === 'pending' || viewedProfile?.role_id === 'spectator' || viewedProfile?.role_id === 'banned';
+  // `pending` and `banned` are ACCOUNT STATUSES, not roles (internal/auth), so
+// they are read from the status column; only `spectator` is a role. Testing
+// them against role_id could never match, which left a banned member with a
+// full profile — the messaging button and the reputation controls included.
+const isLimitedProfile = viewedProfile?.status === 'pending'
+  || viewedProfile?.status === 'banned'
+  || viewedProfile?.role_id === 'spectator';
   const isOwn = profile?.uid === uid;
   const canEditNickname = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_NICKNAME) : hasPermission(PERMISSIONS.EDIT_OTHERS_NICKNAMES);
   const canEditAvatar = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_AVATAR) : hasPermission(PERMISSIONS.EDIT_OTHERS_AVATARS);
@@ -128,8 +136,11 @@ const ProfilePage = () => {
     signature: ''
   });
   
-  // Track which profile UID is currently loaded into the form to prevent overwriting local edits on background syncs (like last_seen updates)
-  const lastInitUidRef = useRef(null);
+  // Tracks what the account form was last seeded from — the profile uid AND the
+  // seeded values — so background syncs that do not touch the form (a last_seen
+  // write, a presence heartbeat) cannot overwrite in-progress edits, while a
+  // genuine change from the server does reach the inputs.
+  const lastInitRef = useRef(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
@@ -187,7 +198,11 @@ const ProfilePage = () => {
         const result = await fetchReputationLogs(uid, seekLogId ? 1 : currentPageRep, REP_PER_PAGE, seekLogId);
         if (isMounted) {
           setRepLogs(result.logs || []);
-          setTotalRepLogs(result.totalCount || 0);
+          // fetchReputationLogs names it `total` (reputation.js returns
+          // { logs, total, hidden }); reading `totalCount` here yielded
+          // undefined, so the pager always drew "1 of 0" and the reputation
+          // tab looked empty however many rows came back.
+          setTotalRepLogs(result.total || 0);
           
           if (result.page) {
             lastFetchedPageRef.current = result.page;
@@ -234,7 +249,9 @@ const ProfilePage = () => {
       const result = await fetchUserPosts(uid, currentPagePosts, POSTS_PER_PAGE, postFilter);
       if (isMounted) {
         setUserPosts(result.posts);
-        setTotalUserPosts(result.totalCount);
+        // fetchUserPosts names it `total` too; `totalCount` was undefined here,
+        // so the posts tab paginated against NaN and rendered no rows.
+        setTotalUserPosts(result.total || 0);
         setLoadingUserPosts(false);
       }
     };
@@ -245,39 +262,67 @@ const ProfilePage = () => {
 
 
 
+  // THE SEED. One place that turns a profile into form state, because there are now
+  // two callers that must agree: the sync effect below, and the re-seed after a
+  // save. Duplicating this list is how the two drifted — a field added to one and
+  // not the other renders as an input that quietly empties itself.
+  //
+  // It RETURNS the state rather than setting it, because the effect below has to
+  // know whether the server actually said anything new before it overwrites what
+  // the reader is typing — and that comparison is only possible if both sides
+  // come out of this one function.
+  const buildAccountForm = (source) => ({
+    nickname: source.nickname || source.displayName || '',
+    status_line: source.status_line || '',
+    avatar_url: source.avatar_url || '',
+    theme: source.settings?.theme || 'dark',
+    language: source.settings?.language || 'en',
+    signature: source.settings?.signature || '',
+    rep_show_history: source.settings?.rep_show_history !== false,
+    rep_show_comments: source.settings?.rep_show_comments !== false,
+    bio: source.bio || '',
+    location: source.location || '',
+    birthday: source.birthday || '',
+    occupation: source.occupation || '',
+    interests: source.interests || '',
+    contacts: source.contacts || '',
+    notif_topic_reply: source.settings?.notifications?.topic_reply?.in_app !== false,
+    notif_post_quoted: source.settings?.notifications?.post_quoted?.in_app !== false,
+    notif_reputation:  source.settings?.notifications?.reputation_change?.in_app !== false,
+    notif_new_registration: source.settings?.notifications?.new_registration?.in_app !== false,
+    email_notif_dms: source.settings?.email_notifications?.dms !== false,
+    email_notif_topic_replies: source.settings?.email_notifications?.topic_replies !== false,
+    soundEnabled: source.settings?.sound?.enabled ?? false,
+    soundVolume:  source.settings?.sound?.volume  ?? 40
+  });
+
+  const seedAccountForm = (source) => setAccountFormData(buildAccountForm(source));
+
   // Sync form data with profile (own or if admin/mod is editing)
+  //
+  // Re-seed when the profile says something NEW, not once per profile. The guard
+  // used to compare uids alone, which meant the form was seeded from whatever the
+  // app happened to know FIRST and then frozen: `profile` is rebuilt from the
+  // auth store snapshot, so Settings opened with the previous nickname, and the
+  // card — fed by a live read of the row — showed the new one. Every reload
+  // reproduced it.
+  //
+  // Comparing the seeded VALUES keeps the property the uid guard existed for: a
+  // background write that does not touch the form (last_seen, a presence
+  // heartbeat) cannot wipe edits the reader has started. The trade-off is the
+  // other way round — when the server genuinely changes a field this form edits,
+  // the form follows it, which is the correct answer.
   useEffect(() => {
     const source = (profile?.uid === uid) ? profile : (canEditAnyAccount ? viewedProfile : null);
-    
-    // Only initialize/reset the form if we are looking at a different user's profile
-    // This prevents background updates to the profile (like last_seen) from wiping unsaved local edits
-    if (source && source.uid !== lastInitUidRef.current) {
-      setAccountFormData({
-        nickname: source.nickname || source.displayName || '',
-        status_line: source.status_line || '',
-        avatar_url: source.avatar_url || '',
-        theme: source.settings?.theme || 'dark',
-        language: source.settings?.language || 'en',
-        signature: source.settings?.signature || '',
-        rep_show_history: source.settings?.rep_show_history !== false,
-        rep_show_comments: source.settings?.rep_show_comments !== false,
-        bio: source.bio || '',
-        location: source.location || '',
-        birthday: source.birthday || '',
-        occupation: source.occupation || '',
-        interests: source.interests || '',
-        contacts: source.contacts || '',
-        notif_topic_reply: source.settings?.notifications?.topic_reply?.in_app !== false,
-        notif_post_quoted: source.settings?.notifications?.post_quoted?.in_app !== false,
-        notif_reputation:  source.settings?.notifications?.reputation_change?.in_app !== false,
-        notif_new_registration: source.settings?.notifications?.new_registration?.in_app !== false,
-        email_notif_dms: source.settings?.email_notifications?.dms !== false,
-        email_notif_topic_replies: source.settings?.email_notifications?.topic_replies !== false,
-        soundEnabled: source.settings?.sound?.enabled ?? false,
-        soundVolume:  source.settings?.sound?.volume  ?? 40
-      });
-      lastInitUidRef.current = source.uid;
-    }
+    if (!source) return;
+
+    const next = buildAccountForm(source);
+    const key = JSON.stringify(next);
+    const last = lastInitRef.current;
+    if (last && last.uid === source.uid && last.key === key) return;
+
+    lastInitRef.current = { uid: source.uid, key };
+    setAccountFormData(next);
   }, [profile, viewedProfile, uid, canEditAnyAccount]);
 
   const handleOpenModal = (char = null) => {
@@ -301,16 +346,50 @@ const ProfilePage = () => {
     setShowModal(true);
   };
 
+  // A character avatar is addressed by character id, so an existing character
+  // uploads on the spot. A brand-new one has no id until Save creates it, so the
+  // bytes are parked and sent right after — picking a file while ADDING a
+  // character would otherwise look like it worked and change nothing.
+  const [pendingCharAvatar, setPendingCharAvatar] = useState(null);
+
+  const handleCharacterAvatarUpload = async (charId, blob, filename) => {
+    try {
+      if (!charId) {
+        // Park it; handleSaveCharacter flushes once the row exists. The preview
+        // is built here so the user sees their pick immediately, but it is a
+        // local object URL and is never written into formData.avatar_url — that
+        // column is a 512-char text field and a data URL could not be saved.
+        setPendingCharAvatar({ blob, filename });
+        return URL.createObjectURL(blob);
+      }
+      const url = await uploadCharacterAvatar(charId, blob);
+      setPendingCharAvatar(null);
+      return url;
+    } catch (err) {
+      console.error('[characterAvatar]', err);
+      showToast(lang === 'ru' ? 'Не удалось загрузить аватар' : 'Failed to upload avatar', 'danger');
+      throw err;
+    }
+  };
+
   const handleSaveCharacter = async () => {
     if (!formData.name) return;
     recordActivity();
     // Close modal first to avoid "stuck" transitions when subscription updates fire
     setShowModal(false);
     try {
+      let savedId = editingChar?.id;
       if (editingChar) {
         await updateCharacter(uid, editingChar.id, formData);
       } else {
-        await addCharacter(uid, formData);
+        savedId = await addCharacter(uid, formData);
+      }
+      // The file was chosen before this row had an id, so it goes now. Failing
+      // here is not a save failure: the character itself is already stored.
+      if (pendingCharAvatar) {
+        const { blob, filename } = pendingCharAvatar;
+        setPendingCharAvatar(null);
+        await uploadCharacterAvatar(savedId, filename ? new File([blob], filename, { type: blob.type }) : blob);
       }
       scheduleForumStateRefresh();
     } catch (err) {
@@ -375,7 +454,21 @@ const ProfilePage = () => {
           }
         }
       };
-      await updateProfile(updates, uid);
+      const savedProfile = await updateProfile(updates, uid);
+      // Re-seed the form from what the SERVER confirmed, not from what was typed.
+      //
+      // Without this the inputs kept whatever was last typed, and a rejected or
+      // server-normalised value stayed on screen looking saved. More importantly it
+      // is the repair path for the reported "saved, re-opened, fields are old": the
+      // form is a snapshot, and the snapshot has to be refreshed from the profile
+      // the save just updated.
+      //
+      // `lastInitRef` is deliberately NOT cleared here. Clearing it would make the
+      // very next background event (a last_seen write, say) look like a change
+      // and re-seed the form, wiping edits the reader has started since.
+      if (savedProfile) {
+        seedAccountForm(savedProfile);
+      }
       scheduleForumStateRefresh();
       if (uid === profile?.uid && accountFormData.language !== lang) {
         setLang(accountFormData.language);
@@ -438,7 +531,11 @@ const ProfilePage = () => {
   const handleUpdateLogComment = async (logId) => {
     setSavingLogComment(true);
     try {
-      await updateReputationComment(logId, editLogComment);
+      // The whole log row travels, not just its id: the command needs the
+      // target and the current value to make this an EDIT of the existing
+      // vote rather than a second one.
+      const log = repLogs.find((l) => l.id === logId);
+      await updateReputationComment(log, editLogComment);
       setEditingLogId(null);
       showToast(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
     } catch (err) {
@@ -531,7 +628,7 @@ const ProfilePage = () => {
                   </div>
 
                   {/* Send Message button */}
-                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.role_id !== 'banned' && uid !== profile?.uid && (
+                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.status !== 'banned' && uid !== profile?.uid && (
                     <div className="mb-2 text-lg-center">
                       <Button
                         as={Link}
@@ -562,7 +659,7 @@ const ProfilePage = () => {
                           <div className="fw-bold text-accent">
                             {!viewedProfile ? <Skeleton width="30px" height="1.2rem" /> : (viewedProfile?.reputation || 0)}
                           </div>
-                          {profile && profile.role_id !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.role_id !== 'banned' && viewedProfile?.role_id !== 'pending' && (
+                          {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && viewedProfile?.status !== 'pending' && (
                             <div className="d-flex gap-1 align-items-center">
                               {!myVote ? (
                                 <>
@@ -714,8 +811,15 @@ const ProfilePage = () => {
                 </Card.Header>
                 <Card.Body className="p-0">
                   {characters.length === 0 ? (
-                    <div className="p-5 text-center text-muted">
-                      <p className="mb-0">{profile?.uid === uid ? t('profile.no_characters') : t('profile.no_characters_other')}</p>
+                    <div className="p-4">
+                      <ForumEmptyState
+                        icon={User}
+                        title={
+                          profile?.uid === uid
+                            ? t('profile.no_characters', 'У вас пока нет масок')
+                            : t('profile.no_characters_other', 'У этого пользователя нет масок')
+                        }
+                      />
                     </div>
                   ) : (
                     <Row className="g-3 p-3">
@@ -803,7 +907,25 @@ const ProfilePage = () => {
                 <Card.Body className="p-0">
                   {(() => {
                     const isGuest = !profile?.uid;
-                    const canOverride = hasPermission(PERMISSIONS.DELETE_REPUTATION) || hasPermission(PERMISSIONS.ADMIN_ACCESS);
+                    // PER-ROW, not per-table. The old code asked one question — "may this
+                    // viewer delete reputation?" — and applied the answer to every row,
+                    // which could only ever be the staff answer, because the ownership
+                    // half of the question was never asked. The same reader can now
+                    // legitimately act on their own row and not on a stranger’s, so the
+                    // button has to decide per row.
+                    //
+                    // canOverride itself stays blanket on purpose: it governs SEEING
+                    // somebody’s hidden reputation history, not acting on a row.
+                    const canOverride = hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION) ||
+                      hasPermission(PERMISSIONS.ADMIN_ACCESS);
+                    const canDeleteRepLog = log => {
+                      if (!log) return false;
+                      if (log.voter_id === uid) {
+                        return hasPermission(PERMISSIONS.DELETE_SELF_REPUTATION) ||
+                          hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION);
+                      }
+                      return hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION);
+                    }; hasPermission(PERMISSIONS.ADMIN_ACCESS);
                     const historyHidden = viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && !canOverride;
                     const commentsHidden = isGuest || (viewedProfile?.settings?.rep_show_comments === false && profile?.uid !== uid && !canOverride);
                     const historyAdminBypass = !isGuest && viewedProfile?.settings?.rep_show_history === false && profile?.uid !== uid && canOverride;
@@ -814,8 +936,11 @@ const ProfilePage = () => {
                     const visibleRepLogs = historyHidden ? repLogs.filter(l => l.voter_id === profile?.uid) : repLogs;
 
                     if (historyHidden && visibleRepLogs.length === 0) return (
-                      <div className="p-5 text-center text-muted">
-                        <p className="mb-0">{t('profile.rep_history_hidden')}</p>
+                      <div className="p-4">
+                        <ForumEmptyState
+                          icon={Lock}
+                          title={t('profile.rep_history_hidden', 'История репутации скрыта')}
+                        />
                       </div>
                     );
 
@@ -834,8 +959,11 @@ const ProfilePage = () => {
 
                     if (visibleRepLogs.length === 0) {
                       return (
-                        <div className="p-5 text-center text-muted">
-                          <p className="mb-0">{t('profile.no_rep_logs')}</p>
+                        <div className="p-4">
+                          <ForumEmptyState
+                            icon={TrendingUp}
+                            title={t('profile.no_rep_logs', 'Записей о репутации нет.')}
+                          />
                         </div>
                       );
                     }
@@ -865,7 +993,7 @@ const ProfilePage = () => {
                             <th>{t('profile.rep_from')}</th>
                             <th className="text-center">{t('profile.rep_value')}</th>
                             <th>{t('profile.rep_comment')}</th>
-                            {hasPermission(PERMISSIONS.DELETE_REPUTATION) && <th></th>}
+                            {hasPermission(PERMISSIONS.DELETE_OTHERS_REPUTATION) && <th></th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -878,7 +1006,7 @@ const ProfilePage = () => {
                               className={searchParams.get('log') === log.id ? 'highlight-rep-row' : ''}
                             >
                               <td className="px-4 py-3 small text-muted">
-                                {log.created_at ? <Timestamp date={log.created_at?.toDate ? log.created_at.toDate() : new Date(log.created_at)} /> : '...'}
+                                {log.created_at ? <Timestamp date={log.created_at} /> : '...'}
                               </td>
                               <td className="py-3 text-center">
                                 <OverlayTrigger
@@ -998,7 +1126,7 @@ const ProfilePage = () => {
                                               onClick={async () => {
                                                 if (window.confirm(lang === 'ru' ? 'Удалить комментарий?' : 'Delete comment?')) {
                                                   try {
-                                                    await updateReputationComment(log.id, '');
+                                                    await updateReputationComment(log, '');
                                                     showToast(lang === 'ru' ? 'Комментарий удален' : 'Comment deleted');
                                                   } catch (err) {
                                                     showToast(err.message, 'danger');
@@ -1016,7 +1144,7 @@ const ProfilePage = () => {
                                   )
                                 )}
                               </td>
-                              {hasPermission(PERMISSIONS.DELETE_REPUTATION) && (
+                              {canDeleteRepLog(log) && (
                                 <td className="py-3 text-end pe-3">
                                   <Button
                                     size="sm"
@@ -1138,9 +1266,19 @@ const ProfilePage = () => {
                       const totalPagesPosts = Math.ceil(totalUserPosts / POSTS_PER_PAGE);
 
                       if (userPosts.length === 0 && !loadingUserPosts) {
+                        // The message has to follow the FILTER. With a mask
+                        // selected, "This user hasn't posted anything yet" is
+                        // false and actively confusing — they have posts, just not
+                        // ones written as this character, and the reader is left
+                        // looking for a bug that isn't there.
                         return (
-                          <div className="p-5 text-center text-muted">
-                            <p className="mb-0">{t('profile.no_posts_user')}</p>
+                          <div className="p-4">
+                            <ForumEmptyState
+                              icon={MessageSquare}
+                              title={postFilter === 'all'
+                                ? t('profile.no_posts_user', 'Этот пользователь еще ничего не опубликовал.')
+                                : t('profile.no_posts_filtered', 'Нет сообщений по этому фильтру.')}
+                            />
                           </div>
                         );
                       }
@@ -1192,14 +1330,42 @@ const ProfilePage = () => {
                                           </Badge>
                                         )}
                                         <span className="text-muted small">
-                                          {post.created_at ? <Timestamp date={post.created_at.toDate()} /> : '...'}
+                                          {post.created_at ? <Timestamp date={post.created_at} /> : '...'}
                                         </span>
                                       </div>
                                     </div>
+                                    {/* THE MASK BADGE.
+                                        It carried only `badge-character`, so the
+                                        theme rules — which are all scoped to
+                                        `.role-badge.badge-character` — never matched
+                                        it and the row rendered the stock Bootstrap
+                                        blue, against every theme. Adding the
+                                        `role-badge` class is what puts it back in the
+                                        themed system: the same violet/amber ghost
+                                        styling a mask gets in a topic.
+
+                                        `size="sm"` keeps it from outweighing the
+                                        topic headline it sits beside, and the tooltip
+                                        carries the account nickname the server now
+                                        attaches, so the same "who is really behind
+                                        this mask" answer works here too.
+
+                                        `characterName` is what makes the badge name
+                                        the character rather than read "Char." for
+                                        every row: the server already swaps
+                                        `author_name` to the character's own name on
+                                        a masked post (applyMask), and this list has
+                                        no author header to show it, so the badge was
+                                        the only place it could appear. Two rows
+                                        written as two different characters were
+                                        otherwise indistinguishable. */}
                                     {post.is_character && (
-                                      <Badge className="ms-2 badge-character">
-                                        {post.author_name}
-                                      </Badge>
+                                      <ForumCharacterBadge
+                                        characterName={post.author_name}
+                                        ownerName={post.owner_name}
+                                        size="sm"
+                                        className="ms-2"
+                                      />
                                     )}
                                   </div>
                                   <div className="post-preview text-muted small text-break line-clamp-4">
@@ -1715,12 +1881,12 @@ const ProfilePage = () => {
             value={formData.avatar_url}
             allowGifs={settings?.allowGifAvatars !== false}
             onChange={(url) => setFormData({ ...formData, avatar_url: url })}
-            // No onUpload: a character avatar has nowhere to be stored yet.
-            // The `characters` collection is server-only (all browser rules
-            // are nil) and has no command layer, so there is no endpoint to
-            // send bytes to — the control stays visible but refuses clearly
-            // instead of producing a data URL that could never be saved.
-            canUpload={false}
+            // PUT /characters/{id}/avatar is addressed by character id, so an
+            // existing character uploads straight away. A NEW one has no id
+            // until Save creates it, so the file is held here and flushed in
+            // handleSaveCharacter — otherwise picking an image while adding a
+            // character would silently do nothing.
+            onUpload={(blob, filename) => handleCharacterAvatarUpload(editingChar?.id, blob, filename)}
             storagePath={`users/${uid}/characters/avatar`}
             size={100}
           />

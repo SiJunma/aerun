@@ -5,14 +5,17 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import {
   fetchSecuredPosts, createPost, updatePost, deletePost, subscribeToTopic,
-  updateUser, updateTopic,
-  deleteTopics, moveTopics, movePosts, createDraftPost, updateDraftPost, publishDraft,
-  subscribeToTopicDraft, deleteDraftPost, locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
+  updateTopic,
+  deleteTopics, moveTopics, movePosts, getTopicDraft, saveTopicDraft,
+  deleteDraft, publishDraft,
+  locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
 
-import { pb } from '../api/pocketbase';
 import { processDiceRolls } from '../utils/dice';
-import { subscribeToCharacters } from '../api/character';
+import { createInFlight, newIdempotencyKey } from '../utils/inflight';
+import { toMillis, unreadFloor } from '../utils/dates';
+import { subscribeToCharacters, fetchCharacter } from '../api/character';
+import { fetchUserProfile } from '../api/auth-resources';
 
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumModal from '../components/common/ForumModal';
@@ -26,7 +29,7 @@ import {
   Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
   Dices, User, FilePen, MessageSquareOff, Keyboard, Eye
 } from 'lucide-react';
-import { subscribeToUserNotifications, markNotificationRead, clearOrphanedPostNotifications } from '../api/notifications';
+import { subscribeToUserNotifications, markNotificationRead } from '../api/notifications';
 import { voteOnPost, getVotesInTopic, updateReputationComment } from '../api/reputation';
 import PostVotersModal from '../components/common/PostVotersModal';
 import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
@@ -79,7 +82,7 @@ const TopicPage = () => {
   locationRef.current = location;
   const pendingCreatedPostIdRef = useRef(null);
   const { t, lang } = useI18n();
-  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, scheduleForumStateRefresh, applyForumState, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline } = useAuth();
+  const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, scheduleForumStateRefresh, applyForumState, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline, setLastSelectedMask } = useAuth();
   const { showToast } = useToast();
 
   // A mutation callable returns a converged main-page projection. Apply it
@@ -103,6 +106,16 @@ const TopicPage = () => {
   const [pinnedFirstPost, setPinnedFirstPost] = useState(null);
   const [myDraft, setMyDraft] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // The in-flight latch for the reply form. A REF, not state: `submitting`
+  // above still drives the button's disabled style, but it is read from the
+  // render closure and React batches state writes, so two clicks in the same
+  // tick both see `submitting === false` and both post. A ref write is not
+  // batched, so the second click sees the first one's write immediately.
+  // See markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md and utils/inflight.js.
+  const replyInFlightRef = useRef(null);
+  if (replyInFlightRef.current === null) {
+    replyInFlightRef.current = createInFlight();
+  }
   const [authorStats, setAuthorStats] = useState({}); // { uid: { post_count: N } }
   const [maskStats, setMaskStats] = useState({}); // { charId: { status_line: '' } }
 
@@ -288,10 +301,9 @@ const TopicPage = () => {
     if (overridePage === undefined && isGoLast && !hasPageParam) {
       pageToFetch = 'last';
       const lastVisitRaw = initialVisitRef.current[id] ?? readMapRef.current[id];
-      const regMs = profileRef.current?.created_at?.toMillis?.() || 0;
       const lastVisitVal = lastVisitRaw?.timestamp || lastVisitRaw;
-      const rawMs = lastVisitVal?.toMillis ? lastVisitVal.toMillis() : (typeof lastVisitVal === 'number' ? lastVisitVal : 0);
-      lastVisitMs = Math.max(rawMs, regMs) || null;
+      const floored = unreadFloor(lastVisitVal, profileRef.current?.created_at);
+      lastVisitMs = floored || null;
     }
 
     // Идентификатор текущего запроса для предотвращения гонки состояний
@@ -343,7 +355,7 @@ const TopicPage = () => {
           return [...data, ...optimisticPosts];
         });
         if (data.length > 0) {
-          latestPostTimestampRef.current = Math.max(...data.map(p => p.created_at?.toMillis?.() || 0));
+          latestPostTimestampRef.current = Math.max(...data.map(p => toMillis(p.created_at)));
         } else {
           latestPostTimestampRef.current = Date.now();
         }
@@ -518,11 +530,54 @@ const TopicPage = () => {
     }
   }, [posts.length, id, user?.uid, markTopicRead, currentPage, profile?.role_id, ITEMS_PER_PAGE]);
 
-  // Subscribe to draft
+  // decorateDraft adapts a server draft to the shape the draft card renders.
+  //
+  // The server deliberately stores only the AUTHORED part of a draft — its text
+  // and ownership. Everything the card displays about the author is derived
+  // here from the live profile instead of being snapshotted into storage, so a
+  // draft can never render a stale name or avatar, and can never render the
+  // "Guest" fallback the old localStorage version did after its first edit.
+  const decorateDraft = (draft, charId = '') => {
+    if (!draft) return null;
+    // The server stores the mask on the draft row and echoes it back, so that
+    // value wins: it is what publish will actually promote. `charId` is only
+    // the local fallback for a response that predates the column.
+    const maskId = draft.author_character_id || charId || '';
+    const char = characters.find(c => c.id === maskId);
+    return {
+      ...draft,
+      is_draft: true,
+      author_id: user?.uid || null,
+      author_name: char ? char.name : (profile?.nickname || user?.displayName || 'Guest'),
+      author_avatar: char ? char.avatar_url : (profile?.avatar_url || ''),
+      author_role_id: profile?.role_id || 'spectator',
+      author_status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
+      author_signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
+      is_character: !!char,
+      author_character_id: char ? char.id : null,
+    };
+  };
+
+  // Load this topic's draft for the signed-in member.
+  //
+  // This reads the SERVER, not a browser key. The previous localStorage
+  // subscription fired exactly once on mount and never again, which is why a
+  // freshly saved draft stayed invisible until a manual reload; here every
+  // write goes through saveTopicDraft and the handler updates state itself, so
+  // the load only has to establish the starting point.
   useEffect(() => {
     if (!user?.uid || !id) return;
-    const unsub = subscribeToTopicDraft(id, user.uid, setMyDraft);
-    return () => unsub();
+    let cancelled = false;
+    (async () => {
+      try {
+        const draft = await getTopicDraft(id);
+        if (!cancelled && isMountedRef.current) setMyDraft(decorateDraft(draft));
+      } catch {
+        // A draft read that fails is a missing draft, not a broken page: the
+        // reply box is still usable and saving will recreate the row.
+      }
+    })();
+    return () => { cancelled = true; };
   }, [user?.uid, id]);
 
   // Track unread quote and mention notifications and clear them via IntersectionObserver
@@ -549,8 +604,13 @@ const TopicPage = () => {
           const matchingNotifs = unreadQuotes.filter(n => n.payload?.post_id === postId);
 
           if (matchingNotifs.length > 0) {
-            // Передаем ID уведомления 1-м параметром, user.uid — 2-м параметром
-            matchingNotifs.forEach(n => markNotificationRead(n.id, user?.uid));
+            // ONE argument, the notification id. This used to pass
+            // `markNotificationRead(n.id, user?.uid)` — id first, uid second —
+            // against a signature of `(uid, notifId)`, so the PATCH addressed
+            // `me/notifications/<accountId>/read` and 404'd: scrolling a quoted
+            // post into view marked nothing while the row below it stopped
+            // rendering as unread.
+            matchingNotifs.forEach(n => markNotificationRead(n.id));
             setUnreadQuotes(prev => prev.filter(p => !matchingNotifs.some(m => m.id === p.id)));
           }
         }
@@ -584,7 +644,13 @@ const TopicPage = () => {
     return () => unsub();
   }, [user?.uid, id, profile?.role_id]);
 
-  // Set initial selectedCharacterId from profile
+  // Set initial selectedCharacterId from profile.
+  //
+  // The `selectedCharacterId === ''` guard is what makes this an INITIAL value
+  // rather than an override: without it the effect would fight the picker on
+  // every profile change, because picking a mask writes that same field back.
+  // It is safe because the state starts empty and only the user moves it off
+  // empty afterwards.
   useEffect(() => {
     if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
       setSelectedCharacterId(profile.last_selected_character_id || '');
@@ -620,12 +686,24 @@ const TopicPage = () => {
   // authorStats are populated from getSecuredPosts server hydration (author_posts_count, author_reputation)
   // No extra Firestore reads needed per author
 
-  // Fetch character masks with deduplication
+  // Resolve OTHER people's masks for their live status line and signature.
+  //
+  // This used to read `pb.collection('users').getOne(uid)` and then look inside
+  // `u.settings.characters` — the pre-migration fold ADR-5 retracted, which no
+  // longer holds anything, so every lookup resolved to null and the card fell
+  // back to whatever the server had sent. Worse, the pb SDK auto-cancels a
+  // duplicate in-flight request, and this effect re-runs on every `posts` /
+  // `maskStats` change, so each pass aborted the previous one and the console
+  // filled with "The request was aborted" for every mask on the page.
+  //
+  // The `characters` collection is the authoritative store (src/api/character.js),
+  // and `fetchCharacter` is its single-row endpoint. Own masks never come here —
+  // getLiveAuthorStatus/getLiveAuthorSignature read those from the `characters`
+  // subscription.
   useEffect(() => {
     if (posts.length === 0) return;
-    const characterMasks = posts.filter(p => p.is_character && p.author_character_id);
     const uniqueChars = new Map();
-    characterMasks.forEach(p => {
+    posts.forEach(p => {
       if (p.author_id && p.author_character_id && maskStats[p.author_character_id] === undefined) {
         uniqueChars.set(p.author_character_id, p.author_id);
       }
@@ -633,22 +711,39 @@ const TopicPage = () => {
 
     if (uniqueChars.size === 0) return;
 
-    uniqueChars.forEach(async (uid, charId) => {
-      try {
-        const u = await pb.collection('users').getOne(uid);
-        const characters = u?.settings?.characters || [];
-        const char = characters.find(c => c.id === charId || c._id === charId);
-        setMaskStats(prev => ({
-          ...prev,
-          [charId]: char || null
-        }));
-      } catch (err) {
-        console.error('[fetchCharacter error]', err);
-      }
-    });
+    // Snapshot the ids so the effect body does not depend on `maskStats`: the
+    // old dependency list made every resolved mask re-trigger the whole effect.
+    const pending = Array.from(uniqueChars.keys());
+    let cancelled = false;
+
+    (async () => {
+      const entries = await Promise.all(pending.map(async (charId) => {
+        try {
+          const char = await fetchCharacter(charId);
+          return [charId, char || null];
+        } catch {
+          // A mask the server will not serve (deleted, or its owner is pending)
+          // resolves to null, which the render helpers already treat as "no mask
+          // data" and fall back to the payload for.
+          return [charId, null];
+        }
+      }));
+      if (cancelled || !isMountedRef.current) return;
+      setMaskStats(prev => {
+        const next = { ...prev };
+        for (const [charId, char] of entries) next[charId] = char;
+        return next;
+      });
+    })();
+
+    return () => { cancelled = true; };
   }, [posts, maskStats]);
 
-  // Fallback hydration for missing author signatures or status lines
+  // Fallback hydration for missing author signatures or status lines.
+  //
+  // Only authors whose post carries NO denormalised signature need a read, and
+  // only their unique ids are fetched, so a thread of distinct posters issues
+  // one request per author at most, once per page load (hydratedAuthorsRef).
   const hydratedAuthorsRef = useRef(new Set());
   useEffect(() => {
     if (posts.length === 0) return;
@@ -669,12 +764,18 @@ const TopicPage = () => {
 
     if (missingUids.size === 0) return;
 
+    // THE READ MOVED TO /api/aerun/users/{id}. This was `pb.collection('users')
+    // .getOne(uid)`, which handed every one of these N authors their ENTIRE auth
+    // record to the browser — private `settings`, email scaffolding and all —
+    // purely to render a signature under a post. The command layer now sends a
+    // whitelist whose `settings` holds just the public keys, signature among
+    // them, so this hydration gets what it needs and nothing else.
     missingUids.forEach(async (uid) => {
       hydratedAuthorsRef.current.add(uid);
       try {
-        const uData = await pb.collection('users').getOne(uid);
+        const uData = await fetchUserProfile(uid);
         if (uData) {
-          const sig = uData.settings?.signature || uData.signature || '';
+          const sig = uData.settings?.signature || '';
           if (sig || uData.status_line) {
             setAuthorStats(prev => ({
               ...prev,
@@ -706,10 +807,24 @@ const TopicPage = () => {
   const alreadyJumpedRef = useRef(false);
   const { key: locationKey } = useLocation();
 
+  // `isJumping` below is derived from alreadyJumpedRef during render, but the
+  // flag is flipped from effects, promise callbacks and setTimeout callbacks.
+  // Writing a ref does not re-render, so when a jump finished without any other
+  // state change the `topic-jump-loading` class (which hides the whole page
+  // behind TopicPageSkeleton) stayed forever. Guests hit this every time:
+  // nothing else re-renders the page — no read map, no mark-as-read write, no
+  // presence tick — so the ref flipped while the overlay stayed on screen.
+  const [, forceJumpRender] = React.useReducer(x => x + 1, 0);
+  const setAlreadyJumped = React.useCallback((value) => {
+    if (alreadyJumpedRef.current === value) return;
+    alreadyJumpedRef.current = value;
+    forceJumpRender();
+  }, []);
+
   // Reset jump flag when navigating to a DIFFERENT topic or clicking a new link
   useEffect(() => {
-    alreadyJumpedRef.current = false;
-  }, [id, locationKey]);
+    setAlreadyJumped(false);
+  }, [id, locationKey, setAlreadyJumped]);
 
   // Reset locatingPostIdRef ONLY when the topic changes
   useEffect(() => {
@@ -782,7 +897,7 @@ const TopicPage = () => {
           if (result.found) {
             if (result.topicId === id) {
               if (result.page !== currentPage) {
-                alreadyJumpedRef.current = false;
+                setAlreadyJumped(false);
                 setSearchParams({ page: result.page, post: queryPostId }, { preventScrollReset: true });
               } else {
                 if (!searchParams.has('page')) {
@@ -796,11 +911,8 @@ const TopicPage = () => {
             }
           } else {
             locatingPostIdRef.current = null;
-            if (user?.uid) {
-              clearOrphanedPostNotifications(user.uid, queryPostId).catch(err => console.error('[Cleanup Orphaned Notification error]', err));
-            }
             setIsPageLoading(false);
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
 
             setSearchParams(prev => {
               const params = new URLSearchParams(prev);
@@ -816,7 +928,7 @@ const TopicPage = () => {
           locatingPostIdRef.current = null;
           console.error('[TopicPage navigation locator error]', err);
           setIsPageLoading(false);
-          alreadyJumpedRef.current = true;
+          setAlreadyJumped(true);
         });
         return;
       }
@@ -836,7 +948,7 @@ const TopicPage = () => {
         locatePost(postId, ITEMS_PER_PAGE).then(result => {
           if (result.found && result.topicId === id) {
             if (result.page !== currentPage) {
-              alreadyJumpedRef.current = false;
+              setAlreadyJumped(false);
               setSearchParams({ page: result.page }, { preventScrollReset: true });
               // hash stays in window.location.hash natively
             } else {
@@ -845,12 +957,12 @@ const TopicPage = () => {
           } else {
             locatingPostIdRef.current = null;
             setIsPageLoading(false);
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
           }
         }).catch(() => {
           locatingPostIdRef.current = null;
           setIsPageLoading(false);
-          alreadyJumpedRef.current = true;
+          setAlreadyJumped(true);
         });
         return;
       }
@@ -859,17 +971,13 @@ const TopicPage = () => {
     else if (goLast && !alreadyJumpedRef.current) {
       if (user && (initialVisitRef.current[id] !== undefined || readMap[id] !== undefined)) {
         const lastVisitRaw = initialVisitRef.current[id] ?? readMap[id];
-        const registrationMs = profile?.created_at?.toMillis?.() || 0;
         const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-        const lastVisit = Math.max(
-          lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0),
-          registrationMs
-        );
+        const lastVisit = unreadFloor(lastVisitValue, profile?.created_at);
 
         // Server posts carry created_at as an ISO string; optimistic/RTDB posts
         // carry Timestamp-like objects. Support both when locating the first
         // unread post on the resolved page.
-        const toPostMs = (p) => p.created_at?.toMillis?.() ?? (p.created_at ? new Date(p.created_at).getTime() : 0);
+        const toPostMs = (p) => toMillis(p.created_at);
         const unreadIndex = posts.findIndex(p => toPostMs(p) > lastVisit);
 
         if (unreadIndex !== -1) {
@@ -883,8 +991,13 @@ const TopicPage = () => {
         // for this topic. Only now may the posts_count fallback run: while the
         // read map is still loading it would race ahead of the server-side
         // unread resolution and throw the user onto the last page.
+        // A goLast load that is still in flight resolves the page itself; writing
+        // the URL now would consume no skip flag (the pending response sets it
+        // only when it lands) and fire a second, identical getSecuredPosts call.
+        // The effect re-runs when the response arrives (posts change), and by then
+        // the server-resolved page is already in the URL.
         const hasExplicitPage = searchParams.has('page');
-        if (!hasExplicitPage && topic?.posts_count) {
+        if (!hasExplicitPage && !isFetchingPostsRef.current && topic?.posts_count) {
           const finalTargetPage = Math.ceil(topic.posts_count / ITEMS_PER_PAGE) || 1;
           if (currentPage !== finalTargetPage) {
             setSearchParams({ page: finalTargetPage, goLast: '1' }, { preventScrollReset: true });
@@ -911,7 +1024,7 @@ const TopicPage = () => {
           el.classList.add('highlight-new-post');
           setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
           if (goLast || searchParams.get('post')) {
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
           }
           setIsPageLoading(false);
         } else {
@@ -920,7 +1033,7 @@ const TopicPage = () => {
             setTimeout(tryScroll, 100);
           } else {
             setIsPageLoading(false);
-            alreadyJumpedRef.current = true;
+            setAlreadyJumped(true);
           }
         }
       };
@@ -930,18 +1043,30 @@ const TopicPage = () => {
       if (isJumpRequested || searchParams.get('post') || goLast) {
         if (posts.length > 0 || !isFetchingPostsRef.current) {
           setIsPageLoading(false);
-          alreadyJumpedRef.current = true;
+          setAlreadyJumped(true);
         }
       } else if (posts.length > 0 || !isFetchingPostsRef.current) {
         setIsPageLoading(false);
       }
     }
-  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE]);
+  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped]);
+  // The badge tooltip names the ACCOUNT behind a mask ("Player: …"), so it must
+  // resolve for every post, not only for the viewer's own.
+  //
+  // `owner_name` is the account nickname the server attaches when a mask takes
+  // over the display name — a masked post's `author_name` is the CHARACTER's
+  // name, so the person is named nowhere else in the payload. It is the first
+  // choice rather than the last fallback because it is the only one that needs
+  // no local state: `authorStats[uid].nickname` is written by no hydration path
+  // (loadPosts and the signature fallback both store counters, role and status
+  // only), and a guest has no `profile` at all — which is exactly why the badge
+  // rendered a tooltip on your own posts and on nobody else's.
   const getLiveOwnerName = (post) => {
+    if (post.owner_name) return post.owner_name;
     if (post.author_id === user?.uid) {
-      return profile?.nickname || post.owner_name;
+      return profile?.nickname || '';
     }
-    return authorStats[post.author_id]?.nickname || post.owner_name;
+    return authorStats[post.author_id]?.nickname || '';
   };
 
   const handleQuoteAuthor = (authorName) => {
@@ -1154,7 +1279,7 @@ const TopicPage = () => {
     if (!selectedVote || !user) return;
     setSavingRepComment(true);
     try {
-      await updateReputationComment(selectedVote.id, editingRepComment, selectedVote.post_id);
+      await updateReputationComment(selectedVote, editingRepComment);
 
       const updatedVote = { ...selectedVote, comment: editingRepComment };
       setSelectedVote(updatedVote);
@@ -1248,8 +1373,22 @@ const TopicPage = () => {
 
   const handleReply = async (e) => {
     e?.preventDefault?.();
-    if (submitting) return;
+    // The latch is taken FIRST, before any await and before the optimistic
+    // insert, so the second click of a double click cannot get past this line.
+    // The state guard alone is not enough: it is read from the render closure.
+    if (!replyInFlightRef.current.begin()) return;
+    try {
+      await submitReply();
+    } finally {
+      replyInFlightRef.current.end();
+    }
+  };
 
+  const submitReply = async () => {
+    // ONE key per logical submit, reused by every request this attempt makes.
+    // The latch above stops the second click; this stops the server treating
+    // any duplicate that does escape as a second post. Neither alone is enough.
+    const idempotencyKey = newIdempotencyKey('post');
     if (!replyContent.trim()) {
       showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
       return;
@@ -1350,7 +1489,7 @@ const TopicPage = () => {
     };
 
     if (targetPage !== currentPage) {
-      alreadyJumpedRef.current = false;
+      setAlreadyJumped(false);
       setSearchParams({ page: targetPage }, {
         preventScrollReset: true,
         state: { pendingPostId: tempId }
@@ -1374,7 +1513,7 @@ const TopicPage = () => {
     setSubmitting(true);
 
     try {
-      const replyResult = await createPost(postData);
+      const replyResult = await createPost(postData, idempotencyKey);
       const newPostId = replyResult?.postId;
       navigateToCreatedPost(tempId, newPostId);
 
@@ -1481,6 +1620,12 @@ const TopicPage = () => {
       category_id: topic?.category_id,
       content: replyContent.trim(),
       author_id: user?.uid || null,
+      // `character_id` is the key createPost actually transmits. Everything below
+      // it is a local echo for the optimistic render only: the server re-derives
+      // the display from the stored rows and ownership-checks the mask, so
+      // `author_character_id` alone never reached the database and the reply
+      // came out under the account's name.
+      character_id: selectedCharacterId || '',
       author_name: selectedChar ? selectedChar.name : (profile?.nickname || guestNickname.trim() || user?.displayName || profile?.email?.split('@')[0] || 'Guest'),
       author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
       author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
@@ -1496,8 +1641,19 @@ const TopicPage = () => {
     if (!replyContent.trim() || hasDraft || draftSaving) return;
     setDraftSaving(true);
     try {
-      await createDraftPost(buildPostData());
-      if (isMountedRef.current) setReplyContent('');
+      // Thrown HERE, while the text still carries `[dice=…]`, and stored on the
+      // draft row: publish promotes that row verbatim, so a dice saved as raw
+      // markup and thrown at publish time would publish a post whose
+      // `[roll=…]` reference points at nothing.
+      const { content: draftContent, rolls } = processDiceRolls(replyContent.trim());
+      const saved = await saveTopicDraft(id, draftContent, selectedCharacterId, rolls);
+      // The card is rendered from this state, so leaving it untouched is the
+      // whole bug: the draft was on the server and the page said it did not
+      // exist. The returned row is the one to show, not a guess at it.
+      if (isMountedRef.current) {
+        setMyDraft(decorateDraft(saved, selectedCharacterId));
+        setReplyContent('');
+      }
       showToast(t('forum.draft_saved'));
       // Navigate to last page so draft is visible
       const lastPage = Math.max(1, totalPages);
@@ -1518,18 +1674,28 @@ const TopicPage = () => {
     }
     setDraftSaving(true);
     try {
-      const selectedChar = characters.find(c => c.id === editCharacterId);
-      const metadata = {
-        author_name: selectedChar ? selectedChar.name : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User'),
-        author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
-        author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
-        is_character: !!selectedChar,
-        author_character_id: editCharacterId || null
-      };
-
-      await updateDraftPost(user.uid, id, editContent.trim(), metadata);
+      // Addressed by the TOPIC, not by the draft row: the command is
+      // (author, topic) unique, so the topic id is what identifies the draft
+      // the editor is currently showing.
+      //
+      // The rolls are carried over from the stored draft and MERGED with anything
+      // newly typed: an edit that did not touch the dice must not strip the
+      // throws the draft already has, and the server keeps only what the new
+      // body still references.
+      const existingRolls = myDraft?.rolls || {};
+      const { content: draftContent, rolls: freshRolls } = processDiceRolls(editContent.trim());
+      const saved = await saveTopicDraft(
+        id,
+        draftContent,
+        editCharacterId,
+        { ...existingRolls, ...(freshRolls || {}) }
+      );
+      // Re-render from the server's answer. Previously this wrote a different
+      // object shape into localStorage and never touched `myDraft`, so the card
+      // kept displaying the text from before the edit — the second reported
+      // symptom, and the one that also dropped every author_* field.
       if (isMountedRef.current) {
+        setMyDraft(decorateDraft(saved, editCharacterId));
         setEditingPostId(null);
         setEditContent('');
         setEditCharacterId('');
@@ -1544,7 +1710,7 @@ const TopicPage = () => {
   };
 
   const handlePublishDraft = async () => {
-    if (topic?.is_locked && !hasPermission('moderate_content')) {
+    if (topic?.is_locked && !hasPermission(PERMISSIONS.CLOSE_TOPICS)) {
       showToast(t('forum.draft_locked_error'), 'danger');
       return;
     }
@@ -1639,7 +1805,7 @@ const TopicPage = () => {
     };
 
     if (targetPage !== currentPage) {
-      alreadyJumpedRef.current = false;
+      setAlreadyJumped(false);
       setSearchParams({ page: targetPage }, {
         preventScrollReset: true,
         state: { pendingPostId: tempId }
@@ -1661,19 +1827,24 @@ const TopicPage = () => {
     }
 
     try {
-      const pubResult = await publishDraft(user.uid, id);
-      const newPostId = pubResult?.postId;
+      const pubResult = await publishDraft(publishedDraft.id);
+      const newPostId = pubResult?.postId || pubResult?.id;
       navigateToCreatedPost(tempId, newPostId);
 
+      // The server's decorated post is the authority on WHO spoke. The draft
+      // card only knows what the client believed when the optimistic render was
+      // built, and the published row is what the read endpoints will serve from
+      // now on — so the list projection and the reconciled card both take their
+      // author fields from the answer, never from the pre-publish guess.
       if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
           id: newPostId,
-          author_id: user?.uid || null,
-          author_name: publishedDraft?.author_name || profile?.nickname || 'User',
-          author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
-          author_role_id: profile?.role_id || 'player',
-          is_character: !!publishedDraft?.is_character,
-          author_character_id: publishedDraft?.author_character_id || null,
+          author_id: pubResult?.author_id || user?.uid || null,
+          author_name: pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
+          author_avatar: pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
+          author_role_id: pubResult?.author_role_id || profile?.role_id || 'player',
+          is_character: pubResult?.is_character ?? !!publishedDraft?.is_character,
+          author_character_id: pubResult?.author_character_id || publishedDraft?.author_character_id || null,
           created_at: new Date().toISOString()
         }, newTotalPosts, 1);
       }
@@ -1692,7 +1863,16 @@ const TopicPage = () => {
                 return {
                   ...p,
                   id: newPostId,
-                  _isOptimistic: false
+                  _isOptimistic: false,
+                  // Roll the card forward onto the server's identity. Keeping
+                  // the optimistic author_* here is what made the mask look like
+                  // it had been dropped the instant the draft was published.
+                  ...(pubResult?.author_name ? { author_name: pubResult.author_name } : {}),
+                  ...(pubResult?.author_avatar !== undefined ? { author_avatar: pubResult.author_avatar } : {}),
+                  ...(pubResult?.author_status_line !== undefined ? { author_status_line: pubResult.author_status_line } : {}),
+                  ...(pubResult?.author_signature !== undefined ? { author_signature: pubResult.author_signature } : {}),
+                  ...(pubResult?.is_character !== undefined ? { is_character: pubResult.is_character } : {}),
+                  ...(pubResult?.author_character_id !== undefined ? { author_character_id: pubResult.author_character_id } : {}),
                 };
               }
               return p;
@@ -1751,6 +1931,28 @@ const TopicPage = () => {
       setEditPinFirstPost(topic.first_post_pinned || false);
     }
   };
+
+  // ?draft=1 — what the drafts page's "Edit" links to.
+  //
+  // The draft arrives asynchronously (the getTopicDraft effect above), so the
+  // editor is opened when the draft LANDS, not when the page mounts: opening on
+  // mount would run against a null draft and never retry, which is the same class
+  // of bug as the old localStorage subscription that fired once and never again.
+  //
+  // The ref is what makes it once-only. Without it, cancelling the edit would
+  // set `myDraft`-adjacent state back to a shape that re-triggers this effect and
+  // reopen the editor the user just closed — the page would fight the reader.
+  const draftAutoOpenRef = useRef(false);
+  const wantDraftEditor = searchParams.get('draft') === '1';
+  useEffect(() => {
+    if (!wantDraftEditor || !myDraft || draftAutoOpenRef.current) return;
+    draftAutoOpenRef.current = true;
+    handleStartEdit(myDraft, false);
+    // handleStartEdit is re-created on every render and must not re-trigger this:
+    // the ref already guards it, and listing it here would make the effect fire
+    // on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantDraftEditor, myDraft]);
 
   const handleSaveEdit = async (postId) => {
     if (!editContent.trim()) {
@@ -1865,7 +2067,14 @@ const TopicPage = () => {
 
     try {
       if (deletingPost.is_draft) {
-        await deleteDraftPost(user.uid, id);
+        // By the draft's OWN id. The old call was deleteDraftPost(uid, id)
+        // with `id` being the TOPIC, which built a localStorage key rather than
+        // deleting anything — and because buildPostData never set `is_draft`,
+        // this branch was not even reached and the request went to the real
+        // deletePost path with an id that was never a post. That is the error
+        // reported when Delete was pressed on a draft.
+        await deleteDraft(deletingPost.id);
+        if (isMountedRef.current) setMyDraft(null);
       } else {
         // Only the topic's real first post may delete the topic. Using
         // posts[0].id here made every first post of *any* page delete the whole
@@ -1967,10 +2176,40 @@ const TopicPage = () => {
     }
   };
 
-  const canManagePost = (post) => {
+  // Edit and delete are SEPARATE questions now, and one umbrella for both is
+  // exactly what made the permission split pointless: a role granted
+  // edit_others_posts but not delete_others_posts would still be shown a Delete
+  // button that the server answers with 403.
+  //
+  // An `_others_` key only ever widens WHO may act on a post that is not
+  // theirs. The author comparison is still what proves ownership — a
+  // permission never substitutes for it.
+  //
+  // The `_self_` keys are consulted too, because the SERVER now does. Both
+  // sides have to ask the same question or the UI offers a button that answers
+  // 403: these previously read `author_id === user.uid || …`, which meant an
+  // author always saw Edit/Delete regardless of what their role granted, and a
+  // role could not take the right away from its own members.
+  const canActOnPost = (post) => {
     if (!user || profile?.role_id === 'pending') return false;
     if (post?._isOptimistic || (typeof post?.id === 'string' && post.id.startsWith('temp_'))) return false;
-    return post.author_id === user.uid || hasPermission('moderate_content');
+    return true;
+  };
+
+  const canEditPost = (post) => {
+    if (!canActOnPost(post)) return false;
+    if (post.author_id === user.uid) {
+      return hasPermission(PERMISSIONS.EDIT_SELF_POST);
+    }
+    return hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS);
+  };
+
+  const canDeletePost = (post) => {
+    if (!canActOnPost(post)) return false;
+    if (post.author_id === user.uid) {
+      return hasPermission(PERMISSIONS.DELETE_SELF_POST);
+    }
+    return hasPermission(PERMISSIONS.DELETE_OTHERS_POSTS);
   };
 
   const getRoleBadge = (post, extraClass = 'mb-2') => {
@@ -2096,7 +2335,6 @@ const TopicPage = () => {
       return (
         <Container className="py-5">
           <ErrorCard
-            isNetworkError={true}
             title={lang === 'ru' ? 'Не удалось загрузить тему' : 'Failed to load topic'}
             error={accessError}
             onRetry={() => window.location.reload()}
@@ -2432,7 +2670,7 @@ const TopicPage = () => {
                       </div>
                     </div>
                     {/* Quote button */}
-                    {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                    {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                       <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-end align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
                         <Button
                           variant="link"
@@ -2463,7 +2701,6 @@ const TopicPage = () => {
         <div className="posts-container">
           {postsLoadError && currentPosts.length === 0 ? (
             <ErrorCard
-              isNetworkError={true}
               title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load posts'}
               error={postsLoadError}
               onRetry={() => loadPosts(currentPage)}
@@ -2908,7 +3145,7 @@ const TopicPage = () => {
 
                     {/* Post Management Links — only render if at least one button is visible */}
                     {((user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator') || hasPermission(PERMISSIONS.POST_REPLY, { category })) && (
-                      (!topic?.is_locked || hasPermission('moderate_content')) || canManagePost(post)
+                      (!topic?.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) || canEditPost(post) || canDeletePost(post)
                     ) && (
                         <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
                           {/* Left side: Profile Links (Mobile Only) */}
@@ -2921,7 +3158,14 @@ const TopicPage = () => {
                                   <Link to={`/profile/${post.author_id}`} className="author-res-footer-link">
                                     {t('profile.view_profile')}
                                   </Link>
-                                  {user && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
+                                  {user && profile?.role_id !== 'pending' && authorData.role_id !== 'banned' && post.author_id !== user?.uid &&
+                                    // The permission, not a role list. The sibling
+                                    // footer above already gates on it, and a hardcoded
+                                    // role list silently denies a custom role that HOLDS
+                                    // the key while granting it to one that does not —
+                                    // the admin panel's whole point is that roles are
+                                    // editable and the code keeps up.
+                                    hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && (
                                     <Link to={`/messages/${post.author_id}`} className="author-res-footer-link">
                                       {t('profile.pm')}
                                     </Link>
@@ -2936,9 +3180,9 @@ const TopicPage = () => {
 
                           {/* Right side: Management Actions */}
                           <div className="d-flex gap-2 gap-md-3">
-                            {canManagePost(post) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                            {canDeletePost(post) && (!topic.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                               <>
-                                {(!((index + indexOfFirstItem) === 0) || (posts.length <= 1 && (topic?.posts_count || 0) <= 1) || hasPermission('moderate_content')) && (
+                                {(!((index + indexOfFirstItem) === 0) || (posts.length <= 1 && (topic?.posts_count || 0) <= 1) || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                                   <Button
                                     variant="link"
                                     size="sm"
@@ -2948,17 +3192,19 @@ const TopicPage = () => {
                                     {lang === 'ru' ? 'Удалить' : 'Delete'}
                                   </Button>
                                 )}
-                                <Button
-                                  variant="link"
-                                  size="sm"
-                                  className="footer-link p-0"
-                                  onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
-                                >
-                                  {lang === 'ru' ? 'Редактировать' : 'Edit'}
-                                </Button>
+                                {canEditPost(post) && (
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="footer-link p-0"
+                                    onClick={() => handleStartEdit(post, (index + indexOfFirstItem) === 0)}
+                                  >
+                                    {lang === 'ru' ? 'Редактировать' : 'Edit'}
+                                  </Button>
+                                )}
                               </>
                             )}
-                            {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission('moderate_content')) && (
+                            {hasPermission(PERMISSIONS.POST_REPLY, { category }) && (!topic.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                               <Button
                                 variant="link"
                                 size="sm"
@@ -3341,7 +3587,7 @@ const TopicPage = () => {
                 </Card.Body>
               </Card>
             </div>
-          ) : topic.is_locked && !hasPermission('moderate_content') ? (
+          ) : topic.is_locked && !hasPermission(PERMISSIONS.CLOSE_TOPICS) ? (
             <div className="mt-5 p-4 text-center text-muted rounded" style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }} ref={replyRef}>
               <div className="mb-3">
                 <MessageSquareOff size={48} className="opacity-25" />
@@ -3397,7 +3643,11 @@ const TopicPage = () => {
                               active={selectedCharacterId === ''}
                               onClick={() => {
                                 setSelectedCharacterId('');
-                                if (user) updateUser(user.uid, { last_selected_character_id: '' });
+                                // setLastSelectedMask writes through the auth
+                                // store, so the value the picker reads back on
+                                // the NEXT topic is the one just chosen —
+                                // updateUser's PATCH left the client stale.
+                                if (user) setLastSelectedMask('');
                               }}
                             >
                               {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0]}
@@ -3409,7 +3659,7 @@ const TopicPage = () => {
                                 active={selectedCharacterId === char.id}
                                 onClick={() => {
                                   setSelectedCharacterId(char.id);
-                                  if (user) updateUser(user.uid, { last_selected_character_id: char.id });
+                                  if (user) setLastSelectedMask(char.id);
                                 }}
                               >
                                 {t('forum.post_as_character')}: {char.name}

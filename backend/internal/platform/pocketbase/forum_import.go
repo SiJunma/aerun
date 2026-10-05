@@ -43,7 +43,6 @@ type TopicUpsert struct {
 	Title      string
 	Locked     bool
 	Pinned     bool
-	Deleted    bool
 	// PostsCount and the last_post_* projection are RECOMPUTED by the importer and
 	// written here as-is. They are never copied from the legacy cached values.
 	PostsCount       int
@@ -66,7 +65,6 @@ type PostUpsert struct {
 	// topic (1766700000).
 	Sequence   int
 	IsDraft    bool
-	Deleted    bool
 	Content    string
 	Reputation int
 	EditedAt   string
@@ -353,7 +351,6 @@ func applyTopicUpsert(rec *core.Record, u TopicUpsert) {
 	rec.Set("title", u.Title)
 	rec.Set("locked", u.Locked)
 	rec.Set("pinned", u.Pinned)
-	rec.Set("deleted", u.Deleted)
 	rec.Set("posts_count", u.PostsCount)
 	// No `reputation` write: the topics collection has no such column (1766100000),
 	// so setting it was a silent no-op that read as a successful import. The
@@ -384,16 +381,8 @@ func applyPostUpsert(rec *core.Record, u PostUpsert, carryCharacter bool) {
 	rec.Set("author_id", u.AuthorID)
 	rec.Set("sequence", u.Sequence)
 	rec.Set("is_draft", u.IsDraft)
-	rec.Set("deleted", u.Deleted)
 	rec.Set("reputation", u.Reputation)
-
-	if u.Deleted {
-		// A tombstone keeps its sequence slot and its place in the topic, but not
-		// its text — the same shape the runtime's soft delete produces.
-		rec.Set("content", "")
-	} else {
-		rec.Set("content", u.Content)
-	}
+	rec.Set("content", u.Content)
 
 	if u.EditedAt != "" {
 		if parsed, err := types.ParseDateTime(u.EditedAt); err == nil {
@@ -419,7 +408,6 @@ func topicMatches(rec *core.Record, u TopicUpsert) bool {
 		rec.GetString("title") == u.Title &&
 		rec.GetBool("locked") == u.Locked &&
 		rec.GetBool("pinned") == u.Pinned &&
-		rec.GetBool("deleted") == u.Deleted &&
 		rec.GetInt("posts_count") == u.PostsCount &&
 		// No `reputation` comparison: the column does not exist on topics, so
 		// GetInt returned 0 while the upsert carried the legacy cached score.
@@ -434,17 +422,12 @@ func topicMatches(rec *core.Record, u TopicUpsert) bool {
 
 // postMatches compares a stored post with the desired state.
 func postMatches(rec *core.Record, u PostUpsert, carryCharacter bool) bool {
-	want := u.Content
-	if u.Deleted {
-		want = ""
-	}
 	match := rec.GetString("topic_id") == u.TopicID &&
 		rec.GetString("author_id") == u.AuthorID &&
 		rec.GetInt("sequence") == u.Sequence &&
 		rec.GetBool("is_draft") == u.IsDraft &&
-		rec.GetBool("deleted") == u.Deleted &&
 		rec.GetInt("reputation") == u.Reputation &&
-		rec.GetString("content") == want &&
+		rec.GetString("content") == u.Content &&
 		autodateMatches(rec, "edited", u.EditedAt) &&
 		autodateMatches(rec, "created", u.CreatedAt)
 	if !match {
