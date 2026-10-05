@@ -3,7 +3,9 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
-const ROOT = 'g:/Stacionar/WEB/My Web Sites/forum-Aerun';
+import { fileURLToPath } from 'url';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {

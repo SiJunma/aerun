@@ -291,6 +291,7 @@ const AdminPage = () => {
     registrationEnabled: true,
     maxCharsPerPost: 15000,
     postsPerPage: 20,
+    topicsPerPage: 20,
     maxPostsPerTopic: 1000,
     maintenanceMode: false,
     welcomeMessage: { en: 'Welcome to our TTRPG home!', ru: 'Добро пожаловать в наш дом TTRPG!' },
@@ -332,6 +333,7 @@ const AdminPage = () => {
           maintenanceMode: data.maintenanceMode ?? false,
           maxCharsPerPost: data.maxCharsPerPost ?? 15000,
           postsPerPage: data.postsPerPage ?? 20,
+          topicsPerPage: data.topicsPerPage ?? 20,
           maxPostsPerTopic: data.maxPostsPerTopic ?? 1000,
           whitelistMode: data.whitelistMode ?? false,
           requireApproval: data.requireApproval ?? true,
@@ -1265,11 +1267,28 @@ const handleDeleteGroup = (id) => {
                 <Form.Label className="fw-bold">{t('admin.settings.posts_per_page')}</Form.Label>
                 <Form.Control
                   type="number"
+                  min="1"
+                  max="100"
                   value={settings.postsPerPage ?? 20}
                   onChange={(e) => setSettings({ ...settings, postsPerPage: parseInt(e.target.value) || 20 })}
                 />
                 <div className="small text-muted mt-1 opacity-75">
                   {t('admin.settings.posts_per_page_help')}
+                </div>
+              </Form.Group>
+            </Col>
+            <Col md={12}>
+              <Form.Group className="mb-4" controlId="topicsPerPage">
+                <Form.Label className="fw-bold">{t('admin.settings.topics_per_page')}</Form.Label>
+                <Form.Control
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={settings.topicsPerPage ?? 20}
+                  onChange={(e) => setSettings({ ...settings, topicsPerPage: parseInt(e.target.value) || 20 })}
+                />
+                <div className="small text-muted mt-1 opacity-75">
+                  {t('admin.settings.topics_per_page_help')}
                 </div>
               </Form.Group>
             </Col>

@@ -25,7 +25,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user, hasPermission, PERMISSIONS, categories, scheduleForumStateRefresh, applyForumState } = useAuth();
+  const { user, hasPermission, PERMISSIONS, categories, settings, scheduleForumStateRefresh, applyForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -41,7 +41,7 @@ const CategoryPage = () => {
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  const ITEMS_PER_PAGE = 20;
+  const ITEMS_PER_PAGE = settings?.topicsPerPage || 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   const isStaff = hasPermission(PERMISSIONS.MODERATE_CONTENT);
@@ -68,7 +68,7 @@ const CategoryPage = () => {
 
   useEffect(() => {
     loadTopics(true);
-  }, [id, currentPage, lang, setPageTitle]);
+  }, [id, currentPage, ITEMS_PER_PAGE, lang, setPageTitle]);
 
   useEffect(() => {
     if (category) {

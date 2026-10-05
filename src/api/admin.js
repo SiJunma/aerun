@@ -2,38 +2,83 @@ import { sendApi } from './pocketbase';
 import { logAdminAction } from './audit';
 import { DEFAULT_ROLES } from '../constants/permissions';
 
-const SETTINGS_KEY = 'aerun_global_settings';
-
-const DEFAULT_GLOBAL_SETTINGS = {
-  forumName: 'Aerun Forum',
+export const DEFAULT_GLOBAL_SETTINGS = {
+  forumName: { en: 'Aerun Forum', ru: 'Aerun Forum' },
   registrationEnabled: true,
-  requireApproval: false,
-  maintenanceMode: false
+  requireApproval: true,
+  whitelistMode: false,
+  maintenanceMode: false,
+  maxCharsPerPost: 15000,
+  postsPerPage: 20,
+  topicsPerPage: 20,
+  maxPostsPerTopic: 1000,
+  enableReputation: true,
+  reputationStyle: 'both',
+  enableCharacters: true,
+  enableDice: true,
+  allowGifAvatars: true,
+  allowGifInPosts: true,
+  allowUserCustomDesign: true,
+  defaultDesignId: '',
+  logoUrl: '',
+  bgLight: '',
+  bgDark: '',
+  bgNeutral: '',
+  bgOpacityLight: 0.5,
+  bgOpacityDark: 0.5,
+  bgOpacityNeutral: 0.5
+};
+
+let _settingsCache = null;
+const _settingsSubscribers = new Set();
+
+export const fetchGlobalSettings = async () => {
+  try {
+    const res = await sendApi('/api/aerun/settings');
+    if (res?.settings) {
+      _settingsCache = { ...DEFAULT_GLOBAL_SETTINGS, ...res.settings };
+    }
+  } catch (err) {
+    console.warn('[fetchGlobalSettings err]', err);
+    if (!_settingsCache) {
+      _settingsCache = DEFAULT_GLOBAL_SETTINGS;
+    }
+  }
+  const snapshot = _settingsCache;
+  _settingsSubscribers.forEach(cb => {
+    try { cb(snapshot); } catch (e) { console.error(e); }
+  });
+  return snapshot;
 };
 
 export const getGlobalSettings = (callback) => {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    const data = raw ? JSON.parse(raw) : DEFAULT_GLOBAL_SETTINGS;
-    callback(data);
-  } catch {
-    callback(DEFAULT_GLOBAL_SETTINGS);
+  _settingsSubscribers.add(callback);
+  if (_settingsCache) {
+    callback(_settingsCache);
+  } else {
+    fetchGlobalSettings();
   }
-  // Settings are read from localStorage and delivered once, so there is
-  // nothing to unsubscribe from. The no-op is kept because callers treat the
-  // return value as a cleanup handle.
-  return () => {};
+  return () => {
+    _settingsSubscribers.delete(callback);
+  };
 };
 
 export const updateGlobalSettings = async (settings, performerId) => {
   try {
-    const currentRaw = localStorage.getItem(SETTINGS_KEY);
-    const current = currentRaw ? JSON.parse(currentRaw) : DEFAULT_GLOBAL_SETTINGS;
-    const merged = { ...current, ...settings };
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
-    await logAdminAction('settings_updated', performerId, { changes: settings });
+    const res = await sendApi('/api/aerun/admin/settings', {
+      method: 'PATCH',
+      body: settings
+    });
+    if (res?.settings) {
+      _settingsCache = { ...DEFAULT_GLOBAL_SETTINGS, ...res.settings };
+      _settingsSubscribers.forEach(cb => {
+        try { cb(_settingsCache); } catch (e) { console.error(e); }
+      });
+    }
+    return _settingsCache;
   } catch (err) {
     console.warn('[updateGlobalSettings err]', err);
+    throw err;
   }
 };
 

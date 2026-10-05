@@ -35,12 +35,9 @@ func TestConfigureAuthTemplatesInstallsTheAerunDesign(t *testing.T) {
 		if tc.tpl.Subject == "" || tc.tpl.Body == "" {
 			t.Fatalf("%s: template must not be empty, got %+v", tc.name, tc.tpl)
 		}
-		// PocketBase's English default must be gone.
-		if tc.tpl.Subject == "Verify your "+phAppName+" email" {
-			t.Fatalf("%s: PocketBase's default subject survived the reconcile", tc.name)
-		}
-		if !strings.Contains(tc.tpl.Subject, authTemplateAppName) {
-			t.Fatalf("%s: subject must name the forum, got %q", tc.name, tc.tpl.Subject)
+		// The template carries {APP_NAME} for send-time resolution.
+		if !strings.Contains(tc.tpl.Subject, phAppName) {
+			t.Fatalf("%s: subject must contain placeholder %s, got %q", tc.name, phAppName, tc.tpl.Subject)
 		}
 		// The design vocabulary from functions/email.js.
 		for _, marker := range []string{`class="btn"`, "#0f172a", "#64748b"} {
@@ -92,21 +89,12 @@ func TestConfigureAuthTemplatesUsesTheDeploymentURL(t *testing.T) {
 // into the body — so the template must not be able to carry attacker HTML into
 // a mailbox.
 func TestConfigureAuthTemplatesEscapesUntrustedValues(t *testing.T) {
-	data := authTemplateData{
-		Brand:    authTemplateAppName,
-		AppURL:   "https://forum.aerun.example",
-		NewEmail: `<script>alert(1)</script>`,
+	substituted := substituteNewEmail(confirmEmailChangeTemplate.Body, `<script>alert(1)</script>`)
+	if strings.Contains(substituted, "<script>") {
+		t.Fatalf("an untrusted value reached the body unescaped:\n%s", substituted)
 	}
-
-	rendered, err := renderAuthTemplate(confirmEmailChangeTemplate, data)
-	if err != nil {
-		t.Fatalf("render must succeed: %v", err)
-	}
-	if strings.Contains(rendered.Body, "<script>") {
-		t.Fatalf("an untrusted value reached the body unescaped:\n%s", rendered.Body)
-	}
-	if !strings.Contains(rendered.Body, "&lt;script&gt;") {
-		t.Fatalf("the value must appear escaped, got:\n%s", rendered.Body)
+	if !strings.Contains(substituted, "&lt;script&gt;") {
+		t.Fatalf("the value must appear escaped, got:\n%s", substituted)
 	}
 }
 

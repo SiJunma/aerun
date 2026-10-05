@@ -457,6 +457,8 @@ export const translations = {
         max_chars: "Max Characters per Post (0 = unlimited)",
         posts_per_page: "Posts per Page in Topics",
         posts_per_page_help: "How many posts are shown per page. Affects navigation and the 'locate post' feature.",
+        topics_per_page: "Topics per Page in Categories",
+        topics_per_page_help: "How many topics are shown per page in a category.",
         max_posts_per_topic: "Max Posts per Topic",
         max_posts_per_topic_help: "When a topic reaches this many posts, it will be automatically locked.",
         registration: "Allow New User Registration",
@@ -686,6 +688,7 @@ export const translations = {
           email_change: "Email Changed",
           password_change: "Password Changed",
           provider_unlink: "Sign-in Provider Unlinked",
+          settings_updated: "Forum Settings Updated",
           topic_delete: "Topic Deleted",
           topic_lock: "Topic Locked",
           topic_move: "Topic Moved",
@@ -743,6 +746,7 @@ export const translations = {
           post_id: "Post ID",
           topic_id: "Topic ID",
           postsPerPage: "Posts per Page",
+          topicsPerPage: "Topics per Page",
           maxPostsPerTopic: "Max Posts per Topic"
         }
       }
@@ -1204,6 +1208,8 @@ export const translations = {
         max_chars: "Макс. символов в сообщении (0 = безлимит)",
         posts_per_page: "Сообщений на страницу в темах",
         posts_per_page_help: "Сколько сообщений показывается на одной странице. Влияет на навигацию и поиск нужного поста.",
+        topics_per_page: "Тем на страницу в разделах",
+        topics_per_page_help: "Сколько тем показывается на одной странице в разделе.",
         max_posts_per_topic: "Максимум сообщений в теме",
         max_posts_per_topic_help: "При достижении этого количества сообщений тема автоматически закроется (lock).",
         registration: "Разрешить регистрацию",
@@ -1434,6 +1440,7 @@ export const translations = {
           email_change: "Почта изменена",
           password_change: "Пароль изменён",
           provider_unlink: "Способ входа отвязан",
+          settings_updated: "Настройки форума обновлены",
           topic_delete: "Тема удалена",
           topic_lock: "Тема закрыта",
           topic_move: "Тема перемещена",
@@ -1489,6 +1496,7 @@ export const translations = {
           post_id: "ID поста",
           topic_id: "ID темы",
           postsPerPage: "Сообщений на страницу",
+          topicsPerPage: "Тем на страницу",
           maxPostsPerTopic: "Максимум сообщений в теме"
         }
       }

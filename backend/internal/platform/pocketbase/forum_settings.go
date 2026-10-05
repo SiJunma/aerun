@@ -26,6 +26,13 @@ const forumSettingsCollectionName = "forum_settings"
 // migration. A literal, so the read is a primary-key lookup.
 const forumSettingsID = "forumsettings01"
 
+// defaultMaxCharsPerPost matches the admin panel's initial maxCharsPerPost and
+// the seed value the migration writes. Declared here rather than imported from
+// internal/migrations so the platform adapter keeps no dependency on the
+// migration package (which would invert the layering migrations themselves
+// already point at).
+const defaultMaxCharsPerPost = 15000
+
 // forumSettings holds the effective, clamped limits.
 type forumSettings struct {
 	MaxPostsPerTopic int
@@ -34,6 +41,32 @@ type forumSettings struct {
 	// because a topic row and a post row are not the same height, and one shared
 	// number would have to be wrong for one of them.
 	TopicsPerPage int
+
+	// The fields below arrive with 1768800000, which moved the admin panel's
+	// global settings out of each browser's localStorage. They live here rather
+	// than in a second struct so there is exactly one read of the settings row:
+	// the access guards, the API snapshot and the mail templates all take their
+	// answer from this one function.
+	RegistrationEnabled   bool
+	RequireApproval       bool
+	WhitelistMode         bool
+	MaintenanceMode       bool
+	MaxCharsPerPost       int
+	EnableReputation      bool
+	ReputationStyle       string
+	EnableCharacters      bool
+	EnableDice            bool
+	AllowGifAvatars       bool
+	AllowGifInPosts       bool
+	AllowUserCustomDesign bool
+	DefaultDesignID       string
+	LogoURL               string
+	BgLight               string
+	BgDark                string
+	BgNeutral             string
+	BgOpacityLight        float64
+	BgOpacityDark         float64
+	BgOpacityNeutral      float64
 }
 
 // loadForumSettings reads the singleton row and clamps it.
@@ -49,6 +82,24 @@ func loadForumSettings(app core.App) forumSettings {
 		MaxPostsPerTopic: auth.DefaultMaxPostsPerTopic,
 		PostsPerPage:     auth.DefaultPostsPerPage,
 		TopicsPerPage:    auth.DefaultTopicsPerPage,
+		// The defaults below are what the admin panel displayed as its initial
+		// state before 1768800000, so an untouched forum behaves identically
+		// after the move. Registration and every feature stay ON: defaulting a
+		// feature OFF would silently delete it from every deployment that
+		// upgraded without anyone opening the panel.
+		RegistrationEnabled:   true,
+		RequireApproval:       true,
+		MaxCharsPerPost:       defaultMaxCharsPerPost,
+		EnableReputation:      true,
+		ReputationStyle:       "both",
+		EnableCharacters:      true,
+		EnableDice:            true,
+		AllowGifAvatars:       true,
+		AllowGifInPosts:       true,
+		AllowUserCustomDesign: true,
+		BgOpacityLight:        0.5,
+		BgOpacityDark:         0.5,
+		BgOpacityNeutral:      0.5,
 	}
 
 	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
@@ -61,7 +112,54 @@ func loadForumSettings(app core.App) forumSettings {
 	// ClampTopicsPerPage reads 0 as "unset" — so a pre-migration database picks
 	// up the default here rather than clamping to a floor of 1.
 	settings.TopicsPerPage = auth.ClampTopicsPerPage(record.GetInt("topics_per_page"))
+
+	settings.RegistrationEnabled = record.GetBool("registration_enabled")
+	settings.RequireApproval = record.GetBool("require_approval")
+	settings.WhitelistMode = record.GetBool("whitelist_mode")
+	settings.MaintenanceMode = record.GetBool("maintenance_mode")
+	settings.EnableReputation = record.GetBool("enable_reputation")
+	settings.EnableCharacters = record.GetBool("enable_characters")
+	settings.EnableDice = record.GetBool("enable_dice")
+	settings.AllowGifAvatars = record.GetBool("allow_gif_avatars")
+	settings.AllowGifInPosts = record.GetBool("allow_gif_in_posts")
+	settings.AllowUserCustomDesign = record.GetBool("allow_user_custom_design")
+	settings.DefaultDesignID = record.GetString("default_design_id")
+	settings.LogoURL = record.GetString("logo_url")
+	settings.BgLight = record.GetString("bg_light")
+	settings.BgDark = record.GetString("bg_dark")
+	settings.BgNeutral = record.GetString("bg_neutral")
+	if v := record.GetString("reputation_style"); v != "" {
+		settings.ReputationStyle = v
+	}
+	if n := record.GetInt("max_chars_per_post"); n > 0 {
+		settings.MaxCharsPerPost = n
+	}
+	settings.BgOpacityLight = clampOpacity(record, "bg_opacity_light", 0.5)
+	settings.BgOpacityDark = clampOpacity(record, "bg_opacity_dark", 0.5)
+	settings.BgOpacityNeutral = clampOpacity(record, "bg_opacity_neutral", 0.5)
 	return settings
+}
+
+// clampOpacity reads a CSS alpha.
+//
+// The column carries Min/Max 0..1, but the value is clamped again here because
+// the read path must not depend on the schema being present: a snapshot restored
+// from before the field exists reads 0, which would render the forum with a
+// fully transparent background — unreadable — instead of falling back.
+func clampOpacity(record *core.Record, field string, fallback float64) float64 {
+	switch v := record.Get(field).(type) {
+	case float64:
+		if v <= 0 || v > 1 {
+			return fallback
+		}
+		return v
+	case int64:
+		if v <= 0 || float64(v) > 1 {
+			return fallback
+		}
+		return float64(v)
+	}
+	return fallback
 }
 
 // isTopicOpeningPost reports whether postID is the earliest published post in

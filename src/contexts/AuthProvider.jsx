@@ -62,6 +62,7 @@ export const AuthProvider = ({ children }) => {
     registrationEnabled: true,
     requireApproval: false,
     postsPerPage: 20,
+    topicsPerPage: 20,
     maxPostsPerTopic: 1000
   });
   const [loading, setLoading] = useState(true);
@@ -237,7 +238,7 @@ export const AuthProvider = ({ children }) => {
     });
 
     // Load global settings
-    getGlobalSettings(data => {
+    const unsubSettings = getGlobalSettings(data => {
       if (data) setSettings(prev => ({ ...prev, ...data }));
     });
 
@@ -253,6 +254,7 @@ export const AuthProvider = ({ children }) => {
 
     return () => {
       unsubAuth();
+      unsubSettings();
       unsubRoles();
       clearTimeout(timer);
     };

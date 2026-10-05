@@ -57,9 +57,15 @@ func configureSMTP(app core.App, cfg config.Config) error {
 	// Sender identity first: verification, password reset and the outbox worker
 	// all read Meta.SenderAddress, and a wrong value there is the difference
 	// between a mail that is delivered and one rejected by SPF.
-	settings.Meta.AppName = "Aerun"
+	//
+	// AppName is the brand every auth template shows through {APP_NAME} at send
+	// time, so it is read from forum_settings.forum_name — the row the admin
+	// panel edits — rather than from any literal here. Renaming the forum
+	// updates Meta on the next settings write (see updateGlobalSettingsHandler)
+	// and the very next mail carries the new name, no restart involved.
+	settings.Meta.AppName = forumName(app, "en")
 	settings.Meta.AppURL = cfg.PublicURL
-	settings.Meta.SenderName = mailSenderName(cfg)
+	settings.Meta.SenderName = mailSenderName(cfg, settings.Meta.AppName)
 	settings.Meta.SenderAddress = mailSenderAddress(cfg)
 
 	if cfg.MailMode != MailModeSMTP {
@@ -117,11 +123,24 @@ func mailSenderAddress(cfg config.Config) string {
 	return "no-reply@aerun.invalid"
 }
 
-func mailSenderName(cfg config.Config) string {
+// mailSenderName prefers the explicit AERUN_MAIL_SENDER_NAME and falls back to
+// the forum's own name — never to a literal.
+//
+// The From header and the body of the mail are read by the same recipient in the
+// same glance; a member seeing one brand as the sender and another in the
+// signature has been handed two names for one letter. The fallback argument is
+// settings.Meta.AppName, which configureSMTP derives from
+// settings.forum_name, so an unset env var keeps the two in step automatically.
+func mailSenderName(cfg config.Config, forum string) string {
 	if cfg.MailSenderName != "" {
 		return cfg.MailSenderName
 	}
-	return "Aerun"
+	if forum != "" {
+		return forum
+	}
+	// Last resort only: no env override and an unreadable settings row. The
+	// templates' own fallback chain ends the same way (forumName's "Forum").
+	return "Forum"
 }
 
 // smtpLocalName derives the EHLO/HELO identity from the public URL, falling back

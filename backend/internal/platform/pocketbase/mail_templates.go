@@ -16,14 +16,30 @@ package pocketbase
 // deployment content, and a schema migration would freeze whatever text existed
 // the day it ran.
 //
-// HTML escaping: everything interpolated into a body goes through
-// html/template with no functions registered, so the context is escaped for us.
-// NewEmail is the one value that arrives from the request rather than from
-// configuration, and leaving it out of this struct would make a future template
-// that interpolates it into an injection bug.
+// WHAT THE STORED TEMPLATE HOLDS, AND WHY. The installed template is a contract
+// with PocketBase's send-time resolver, not a rendered message:
+//
+//   - {APP_NAME} stays a placeholder in both subject and body. PocketBase
+//     substitutes it from settings.Meta.AppName on every send, and
+//     configureSMTP derives Meta.AppName from the admin-editable forum_name —
+//     so renaming the forum in the admin panel changes the very next mail with
+//     no restart and no re-install of the templates. Baking the brand in here
+//     instead would freeze it at whatever the name was on boot day.
+//   - {TOKEN} stays a placeholder for the same reason: PocketBase mints a fresh
+//     token per message. (Rendering it through the Go template with an empty
+//     Token — what this file did before — produced a link with NO token at all,
+//     because {{ .Token }} collapses to "" at install time.)
+//   - {NEW_EMAIL} is PocketBase-less: PB has no such placeholder, so
+//     bindEmailChangePlaceholder substitutes it in the OnMailer hook right
+//     before the send, HTML-escaped, from the event's own Meta payload.
+//   - {{ .AppURL }} IS rendered at install time. The origin is environment
+//     state (AERUN_PUBLIC_URL) that changes only with a restart, and the
+//     restart re-runs this reconcile — the same no-churn property the link
+//     tests pin down.
 
 import (
 	"fmt"
+	"html"
 	"html/template"
 	"strings"
 
@@ -31,14 +47,6 @@ import (
 
 	"github.com/SiJunma/aerun/backend/internal/config"
 )
-
-// authTemplateAppName is the brand line in every template.
-//
-// The JS version defaulted to "Aerun Forum" and read FORUM_NAME from the
-// environment. The name is single-sourced here and matched to what
-// configureSMTP writes into Meta.SenderName, so the From header, the admin
-// dashboard and the visible brand agree instead of drifting apart.
-const authTemplateAppName = "Aerun Forum"
 
 // PocketBase's own template placeholders (core.EmailPlaceholder*). Spelled out
 // as literals rather than imported so the templates below read exactly as they
@@ -48,6 +56,10 @@ const (
 	phAppName = "{APP_NAME}"
 	phAppURL  = "{APP_URL}"
 	phToken   = "{TOKEN}"
+	// phNewEmail is NOT a PocketBase placeholder — PB has none for the address
+	// being confirmed. It is substituted by bindEmailChangePlaceholder at send
+	// time, which is the only place the address exists (the event Meta).
+	phNewEmail = "{NEW_EMAIL}"
 )
 
 // verificationTemplate and resetPasswordTemplate replace PocketBase's built-in
@@ -58,19 +70,25 @@ const (
 // contain <html>/<head>/<body> the way the Firebase templates did — those were
 // sent through Brevo's API as standalone documents. Keeping them fragments is
 // what makes the two eras produce the same message.
+//
+// Brand trust: {APP_NAME} is replaced by PocketBase with the RAW settings value
+// and no HTML escaping — exactly as PB's own default templates treat it. The
+// value comes from forum_settings.forum_name, writable only by a manage_forum
+// holder, which is the same trust boundary PocketBase draws around
+// Meta.AppName in its dashboard.
 var verificationTemplate = core.EmailTemplate{
 	Subject: "Verify your " + phAppName + " email",
 	Body: `
 <h2 style="margin:0 0 16px;font-size:17px;font-weight:600;color:#0f172a;">Confirm your email address</h2>
-<p>Welcome to {{ .Brand }}.</p>
+<p>Welcome to ` + phAppName + `.</p>
 <p>One click and your account is fully active — your profile becomes visible to the forum and you can take part in discussions and private messages.</p>
 <p style="margin:24px 0;">
-  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-verification/{{ .Token }}" target="_blank" rel="noopener">Verify my email</a>
+  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-verification/` + phToken + `" target="_blank" rel="noopener">Verify my email</a>
 </p>
 <p style="color:#64748b;font-size:13px;line-height:1.5;">
-  If you did not create an account on {{ .Brand }}, you can safely ignore this message — nothing will happen without the button above.
+  If you did not create an account on ` + phAppName + `, you can safely ignore this message — nothing will happen without the button above.
 </p>
-<p style="margin-top:20px;">See you soon,<br/>The {{ .Brand }} team</p>
+<p style="margin-top:20px;">See you soon,<br/>The ` + phAppName + ` team</p>
 `,
 }
 
@@ -79,29 +97,34 @@ var resetPasswordTemplate = core.EmailTemplate{
 	Body: `
 <h2 style="margin:0 0 16px;font-size:17px;font-weight:600;color:#0f172a;">Password reset</h2>
 <p>Hello,</p>
-<p>We received a request to reset the password for your {{ .Brand }} account. Click the button below to choose a new one.</p>
+<p>We received a request to reset the password for your ` + phAppName + ` account. Click the button below to choose a new one.</p>
 <p style="margin:24px 0;">
-  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-password-reset/{{ .Token }}" target="_blank" rel="noopener">Choose a new password</a>
+  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-password-reset/` + phToken + `" target="_blank" rel="noopener">Choose a new password</a>
 </p>
 <p style="color:#64748b;font-size:13px;line-height:1.5;">
   The link is valid for a short time and can be used once. If you did not ask for this, ignore this email — your current password stays in place and nothing changes.
 </p>
-<p style="margin-top:20px;">Thanks,<br/>The {{ .Brand }} team</p>
+<p style="margin-top:20px;">Thanks,<br/>The ` + phAppName + ` team</p>
 `,
 }
 
 // confirmEmailChangeTemplate covers the third PocketBase-owned auth mail. It
 // exists because leaving it in PocketBase's English default while the other two
 // are Aerun-branded would look like a bug to the one member who changes email.
+//
+// The address box carries {NEW_EMAIL} — not a PB placeholder, but the literal
+// our own OnMailer hook replaces at send time (see bindEmailChangePlaceholder).
+// Installing it through the Go template with an empty NewEmail — what this file
+// did before — shipped an empty .highlight-box to every recipient.
 var confirmEmailChangeTemplate = core.EmailTemplate{
 	Subject: "Confirm your new " + phAppName + " email address",
 	Body: `
 <h2 style="margin:0 0 16px;font-size:17px;font-weight:600;color:#0f172a;">Confirm your new email address</h2>
 <p>Hello,</p>
-<p>Someone asked to change the email address on this {{ .Brand }} account to:</p>
-<div class="highlight-box">{{ .NewEmail }}</div>
+<p>Someone asked to change the email address on this ` + phAppName + ` account to:</p>
+<div class="highlight-box">` + phNewEmail + `</div>
 <p style="margin:24px 0;">
-  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-email-change/{{ .Token }}" target="_blank" rel="noopener">Confirm new address</a>
+  <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-email-change/` + phToken + `" target="_blank" rel="noopener">Confirm new address</a>
 </p>
 <p style="color:#64748b;font-size:13px;line-height:1.5;">
   If you did not request this change, ignore this email — the address on your account stays as it is.
@@ -111,14 +134,15 @@ var confirmEmailChangeTemplate = core.EmailTemplate{
 
 // authTemplateData is the value set passed to every template.
 //
-// Token is deliberately empty when the template is installed: PocketBase
-// substitutes {TOKEN} itself when it renders a per-message copy. Baking a token
-// in here would ship one shared secret into every verification mail ever sent.
+// Only AppURL is renderable at install time: it is environment state
+// (AERUN_PUBLIC_URL) whose change implies a restart, and the restart re-runs
+// configureAuthTemplates. Token is deliberately NOT here — PocketBase mints one
+// per message and substitutes {TOKEN} itself; rendering it through this struct
+// with an empty value is what previously produced tokenless confirmation links.
+// Brand is not here either: {APP_NAME} resolves from settings.Meta.AppName at
+// send time, which configureSMTP keeps pointed at forum_settings.forum_name.
 type authTemplateData struct {
-	Brand    string
-	AppURL   string
-	Token    string
-	NewEmail string
+	AppURL string
 }
 
 // configureAuthTemplates installs the Aerun templates on the users collection.
@@ -141,7 +165,6 @@ func configureAuthTemplates(app core.App, cfg config.Config) error {
 	}
 
 	data := authTemplateData{
-		Brand:  authTemplateAppName,
 		AppURL: strings.TrimSuffix(cfg.PublicURL, "/"),
 	}
 
@@ -178,19 +201,22 @@ func configureAuthTemplates(app core.App, cfg config.Config) error {
 		return fmt.Errorf("save users auth templates: %w", err)
 	}
 	// Only the resulting state is logged. The bodies are public content; the fact
-	// that they changed is what an operator is watching for.
+	// that they changed is what an operator is watching for. The brand is NOT
+	// logged as a value because it is not rendered here — {APP_NAME} resolves
+	// per send from Meta.AppName (see authTemplateData).
 	app.Logger().Info("users auth email templates reconciled",
-		"app_url", data.AppURL, "brand", data.Brand)
+		"app_url", data.AppURL)
 	return nil
 }
 
-// renderAuthTemplate resolves one template.
+// renderAuthTemplate resolves the install-time part of one template.
 //
-// The stored template keeps the {TOKEN} placeholder for PocketBase to substitute
-// per message; this helper exists to validate the markup before it is installed
-// and to let the tests assert on the rendered result. The html/template context
-// escapes Brand, AppURL and NewEmail, so a value that ever reaches them from a
-// request cannot inject markup.
+// {{ .AppURL }} is the only Go-template action left in the sources: the origin
+// is environment state and belongs to the reconcile. Everything a per-message or
+// per-rename value needs — {TOKEN}, {APP_NAME}, {NEW_EMAIL} — stays a literal
+// brace token in the stored text for the send-time layer (PocketBase's resolver
+// and bindEmailChangePlaceholder). The html/template context escapes AppURL, so
+// a malformed origin cannot inject markup into the href.
 func renderAuthTemplate(t core.EmailTemplate, data authTemplateData) (core.EmailTemplate, error) {
 	parsed, err := template.New("mail").Parse(t.Body)
 	if err != nil {
@@ -200,10 +226,39 @@ func renderAuthTemplate(t core.EmailTemplate, data authTemplateData) (core.Email
 	if err := parsed.Execute(&body, data); err != nil {
 		return core.EmailTemplate{}, err
 	}
-	subject := strings.NewReplacer(
-		phAppName, data.Brand,
-		phAppURL, data.AppURL,
-		phToken, data.Token,
-	).Replace(t.Subject)
-	return core.EmailTemplate{Subject: subject, Body: body.String()}, nil
+	return core.EmailTemplate{Subject: t.Subject, Body: body.String()}, nil
+}
+
+// bindEmailChangePlaceholder is the send-time half of {NEW_EMAIL}.
+//
+// PocketBase has no placeholder for the address a change-email request is
+// confirming: SendRecordChangeEmail resolves only {TOKEN} and the system
+// placeholders, and the address lives solely in the event Meta. The hook runs
+// after that resolve and before the mailer, so the stored template can carry a
+// stable literal while every other auth mail keeps working through PB alone.
+//
+// The substitution itself is a pure function so the escaping property has a
+// test that does not have to construct a mailer event; the hook is the thinnest
+// possible adapter over it. Messages without the literal pass through
+// untouched, and rebinding on every serve is harmless — PB replaces the
+// previous binding for the same event.
+func bindEmailChangePlaceholder(app core.App) {
+	app.OnMailerRecordEmailChangeSend().BindFunc(func(e *core.MailerRecordEvent) error {
+		newEmail, _ := e.Meta["newEmail"].(string)
+		e.Message.HTML = substituteNewEmail(e.Message.HTML, newEmail)
+		e.Message.Subject = substituteNewEmail(e.Message.Subject, newEmail)
+		return e.Next()
+	})
+}
+
+// substituteNewEmail replaces {NEW_EMAIL} with the address, HTML-escaped.
+//
+// The address originates from a user-supplied request, so it is the one
+// request-derived value this package puts into a body — and it is escaped
+// here, in one place, rather than trusted to every call site.
+func substituteNewEmail(content, newEmail string) string {
+	if newEmail == "" || !strings.Contains(content, phNewEmail) {
+		return content
+	}
+	return strings.ReplaceAll(content, phNewEmail, html.EscapeString(newEmail))
 }

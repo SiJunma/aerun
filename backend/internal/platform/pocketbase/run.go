@@ -86,6 +86,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := configureAuthTemplates(se.App, cfg); err != nil {
 			return err
 		}
+		bindEmailChangePlaceholder(se.App)
 		registerRoutes(se, cfg)
 		// Records every completed identity-provider sign-in, so the chief-admin
 		// handover can accept "sign in with Google again" as proof of identity
@@ -232,6 +233,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Unified status & health probe (combines liveness check with presence stats)
 	group.GET("/status", statusHandler)
+
+	// Global forum settings (public snapshot read, admin write)
+	group.GET("/settings", getGlobalSettingsHandler)
+	group.PATCH("/admin/settings", updateGlobalSettingsHandler(cfg)).
+		BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+	group.PUT("/admin/settings", updateGlobalSettingsHandler(cfg)).
+		BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 
 	group.GET("/me", meHandler)
 	group.PUT("/me/settings", updateSettingsHandler)
