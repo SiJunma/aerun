@@ -142,6 +142,8 @@ const AdminPage = () => {
     postsPerPage: 20,
     maxPostsPerTopic: 1000,
     maintenanceMode: false,
+    showMaintenanceMessage: false,
+    maintenanceMessage: { en: '', ru: '' },
     welcomeMessage: { en: 'Welcome to our TTRPG home!', ru: 'Добро пожаловать в наш дом TTRPG!' },
     enableReputation: true,
     reputationStyle: 'both',
@@ -177,8 +179,10 @@ const AdminPage = () => {
           ...data,
           forumName: ensureBilingual(data.forumName, 'Aerun Forum'),
           welcomeMessage: ensureBilingual(data.welcomeMessage, ''),
+          maintenanceMessage: ensureBilingual(data.maintenanceMessage, ''),
           registrationEnabled: data.registrationEnabled ?? true,
           maintenanceMode: data.maintenanceMode ?? false,
+          showMaintenanceMessage: data.showMaintenanceMessage ?? false,
           maxCharsPerPost: data.maxCharsPerPost ?? 15000,
           postsPerPage: data.postsPerPage ?? 20,
           maxPostsPerTopic: data.maxPostsPerTopic ?? 1000,
@@ -869,13 +873,13 @@ const AdminPage = () => {
               <Form.Check
                 type="switch"
                 id="whitelist-switch"
-                label={t('admin.settings.whitelist_mode')}
+                label={t('admin.settings.white_wall')}
                 className="fw-bold"
                 checked={settings.whitelistMode}
                 onChange={(e) => setSettings({ ...settings, whitelistMode: e.target.checked })}
               />
               <div className="small text-muted mt-1 opacity-75">
-                {t('admin.settings.whitelist_mode_help')}
+                {t('admin.settings.white_wall_help')}
               </div>
             </div>
 
@@ -888,7 +892,52 @@ const AdminPage = () => {
                 checked={settings.maintenanceMode}
                 onChange={(e) => setSettings({ ...settings, maintenanceMode: e.target.checked })}
               />
+              <div className="small text-muted mt-1 opacity-75">
+                {t('admin.settings.maintenance_help')}
+              </div>
             </div>
+
+            {settings.maintenanceMode && (
+              <div className="ms-4 ps-3 mt-2 border-start border-2 border-danger-subtle">
+                <div className="mb-3">
+                  <Form.Check
+                    type="switch"
+                    id="show-maintenance-message-switch"
+                    label={t('admin.settings.show_maintenance_message')}
+                    className="fw-bold"
+                    checked={settings.showMaintenanceMessage ?? false}
+                    onChange={(e) => setSettings({ ...settings, showMaintenanceMessage: e.target.checked })}
+                  />
+                  <div className="small text-muted mt-1 opacity-75">
+                    {t('admin.settings.show_maintenance_message_help')}
+                  </div>
+                </div>
+
+                <Form.Group className="mb-3" controlId="maintenanceMessageEn">
+                  <Form.Label className="fw-bold">{t('admin.settings.maintenance_message_label')} (EN)</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={4}
+                    value={settings.maintenanceMessage?.en || ''}
+                    onChange={(e) => setSettings({ ...settings, maintenanceMessage: { ...settings.maintenanceMessage, en: e.target.value } })}
+                    placeholder={t('admin.settings.maintenance_message_placeholder')}
+                  />
+                </Form.Group>
+                <Form.Group className="mb-3" controlId="maintenanceMessageRu">
+                  <Form.Label className="fw-bold">{t('admin.settings.maintenance_message_label')} (RU)</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={4}
+                    value={settings.maintenanceMessage?.ru || ''}
+                    onChange={(e) => setSettings({ ...settings, maintenanceMessage: { ...settings.maintenanceMessage, ru: e.target.value } })}
+                    placeholder={t('admin.settings.maintenance_message_placeholder')}
+                  />
+                  <div className="small text-muted mt-1">
+                    {t('admin.settings.maintenance_message_help')}
+                  </div>
+                </Form.Group>
+              </div>
+            )}
           </div>
 
           <hr className="my-5" />

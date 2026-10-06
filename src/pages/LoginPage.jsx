@@ -6,6 +6,7 @@ import LoginForm from '../components/auth/LoginForm';
 import { useI18n } from '../contexts/I18nProvider';
 
 import { usePageTitle } from '../contexts/TitleProvider';
+import { sanitizeHtml } from '../utils/text';
 
 const LoginPage = () => {
   const { user, profile, settings, hasPermission, PERMISSIONS } = useAuth();
@@ -18,6 +19,27 @@ const LoginPage = () => {
     setPageTitle(t('auth.login', 'Вход'));
   }, [setPageTitle, t, lang]);
 
+  /**
+   * Maintenance notice on the white wall. Shown only when BOTH Maintenance Mode
+   * and the White Wall for Guests are on AND the admin checked
+   * "Show Maintenance Message". Renders the admin's HTML message in a
+   * highlighted box; without a custom message a default text is shown.
+   */
+  const maintenanceNotice = React.useMemo(() => {
+    if (!settings?.maintenanceMode || !settings?.whitelistMode || !settings?.showMaintenanceMessage) {
+      return null;
+    }
+    const raw = settings?.maintenanceMessage;
+    const custom = sanitizeHtml(
+      typeof raw === 'string' ? raw : (raw?.[lang] || raw?.en || raw?.ru || '')
+    );
+    return custom || sanitizeHtml(
+      lang === 'ru'
+        ? 'На форуме ведутся технические работы. Мы скоро вернемся! Пожалуйста, зайдите позже.'
+        : 'The forum is currently under maintenance. We will be back soon! Please check again later.'
+    );
+  }, [settings?.maintenanceMode, settings?.whitelistMode, settings?.showMaintenanceMessage, settings?.maintenanceMessage, lang]);
+
   if (user) {
     if (!profile) return null; // Wait for profile to load before redirecting
 
@@ -27,7 +49,7 @@ const LoginPage = () => {
     
     // Default redirect for other logged-in users
     const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
-    const target = (isAdmin && (from === '/maintenance' || from === '/pending' || from === '/banned')) ? '/' : from;
+    const target = (isAdmin && (from === '/pending' || from === '/banned')) ? '/' : from;
     return <Navigate to={target} replace />;
   }
 
@@ -43,12 +65,29 @@ const LoginPage = () => {
     return <Navigate to="/" replace />;
   }
 
-
   return (
     <Container className="d-flex align-items-center justify-content-center vh-100">
       <Card style={{ maxWidth: '400px', width: '100%' }} className="p-4 shadow border-0 rounded-4">
         <Card.Body>
+          {maintenanceNotice && (
+            // Plain div, NOT react-bootstrap <Alert>: Alert always passes both
+            // children and the spread props (incl. dangerouslySetInnerHTML) to
+            // its inner <div>, which makes React throw
+            // "Can only set one of `children` or `props.dangerouslySetInnerHTML`".
+            <div
+              className="alert alert-warning maintenance-message small mb-3"
+              role="alert"
+              dangerouslySetInnerHTML={{ __html: maintenanceNotice }}
+            />
+          )}
           <LoginForm />
+          {settings?.maintenanceMode && (
+            <div className="mt-3 text-center small text-muted">
+              {lang === 'ru'
+                ? 'Только администраторы могут войти в данный момент.'
+                : 'Only administrators can log in at this time.'}
+            </div>
+          )}
           {settings?.registrationEnabled !== false && (
             <div className="mt-4 text-center small border-top pt-3">
               <span className="text-muted">{t('auth.dont_have_account')}</span>

@@ -22,3 +22,15 @@ export const resolveField = (field, lang) => {
   // Fallback to the alternative language
   return fallback || '';
 };
+
+/**
+ * Strips scripts and inline event handlers from admin-supplied HTML
+ * (welcome banners, maintenance messages). Returns '' for non-strings.
+ */
+export const sanitizeHtml = (rawHtml) => {
+  if (!rawHtml || typeof rawHtml !== 'string') return '';
+  let html = rawHtml;
+  html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  html = html.replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+  return html;
+};

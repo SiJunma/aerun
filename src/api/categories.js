@@ -21,19 +21,26 @@ const CAT_GROUPS_TTL_MS = 60 * 60 * 1000; // 1 час
 
 export const subscribeToCategoryGroups = (callback) => {
   let isSubscribed = true;
+  let cacheTs = 0;
 
-  const fetchGroups = async () => {
-    // 1. Пробуем localStorage
-    try {
-      const raw = localStorage.getItem(CAT_GROUPS_CACHE_KEY);
-      if (raw) {
-        const { data, ts } = JSON.parse(raw);
-        if (Date.now() - ts < CAT_GROUPS_TTL_MS) {
-          if (isSubscribed) callback(data);
-          return;
+  const fetchGroups = async ({ force = false } = {}) => {
+    // 1. Пробуем localStorage (stale-while-revalidate: кэш отдаём сразу,
+    //    но всегда дёргаем Firestore в фоне, чтобы протухший список групп
+    //    не оставлял главную пустой).
+    if (!force) {
+      try {
+        const raw = localStorage.getItem(CAT_GROUPS_CACHE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const data = Array.isArray(parsed?.data) ? parsed.data : null;
+          if (data && typeof parsed.ts === 'number' && Date.now() - parsed.ts < CAT_GROUPS_TTL_MS) {
+            cacheTs = parsed.ts;
+            if (isSubscribed) callback(data);
+            // Fall through to a background refresh below.
+          }
         }
-      }
-    } catch { /* Кэш повреждён — читаем свежие данные */ }
+      } catch { /* Кэш повреждён — читаем свежие данные */ }
+    }
 
     // 2. Идём в Firestore
     try {
@@ -42,10 +49,12 @@ export const subscribeToCategoryGroups = (callback) => {
       if (!isSubscribed) return;
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       localStorage.setItem(CAT_GROUPS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+      cacheTs = Date.now();
       callback(data);
     } catch (err) {
       console.error('[subscribeToCategoryGroups]', err);
-      if (isSubscribed) callback([]);
+      // Only surface an empty list if we never delivered a cached one.
+      if (isSubscribed && !cacheTs) callback([]);
     }
   };
 

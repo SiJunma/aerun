@@ -36,6 +36,19 @@ function effectiveRole(roleId, settings) {
   return roleId || "guest";
 }
 
+/** Normalises a category-level permission value to an array of role ids.
+ *  Accepts arrays, {role: true} maps, and single strings; anything else → []. */
+function normaliseAllowedRoles(raw) {
+  if (Array.isArray(raw)) return raw.filter(r => typeof r === 'string');
+  if (typeof raw === 'string') return [raw];
+  if (raw && typeof raw === 'object') {
+    return Object.entries(raw)
+      .filter(([, v]) => v === true || v === 'true')
+      .map(([k]) => k);
+  }
+  return [];
+}
+
 /**
  * THE single implementation of view_forum:
  *   category override wins -> otherwise the role's global permission list,
@@ -51,8 +64,14 @@ function hasViewForum(rawRole, categoryId, ctx) {
   const category = ctx.categories[categoryId];
   if (!category) return false;
 
-  const allowed = (category.permissions || {}).view_forum;
-  if (!allowed) return (roleData.permissions || []).includes("view_forum");
+  const rawAllowed = (category.permissions || {}).view_forum;
+  // No override (missing / null / empty) → inherit the role's global list.
+  if (!rawAllowed) return (roleData.permissions || []).includes("view_forum");
+
+  const allowed = normaliseAllowedRoles(rawAllowed);
+  // A non-array override that normalises to nothing is treated as "no override"
+  // rather than "deny everyone" — malformed data must not blank the forum.
+  if (allowed.length === 0) return (roleData.permissions || []).includes("view_forum");
 
   if (allowed.includes(role)) return true;
   if (roleData.base_role_id && allowed.includes(roleData.base_role_id)) return true;
@@ -102,4 +121,4 @@ function hasRuleCategoryPermission(ctx, rawRole, categoryId, permission) {
   return Array.isArray(catPerms[permission]) && catPerms[permission].includes(role);
 }
 
-module.exports = { loadContext, invalidateContext, effectiveRole, hasViewForum, getRequester, isRuleAdmin, hasRulePermission, hasRuleCategoryPermission };
+module.exports = { loadContext, invalidateContext, effectiveRole, hasViewForum, getRequester, isRuleAdmin, hasRulePermission, hasRuleCategoryPermission, normaliseAllowedRoles };

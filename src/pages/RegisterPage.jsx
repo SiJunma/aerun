@@ -21,7 +21,7 @@ const RegisterPage = () => {
   if (user) {
     // If admin logs in/registers, don't send them back to the maintenance/pending page
     const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
-    const target = (isAdmin && (from === '/maintenance' || from === '/pending' || from === '/banned')) ? '/' : from;
+    const target = (isAdmin && (from === '/pending' || from === '/banned')) ? '/' : from;
     return <Navigate to={target} replace />;
   }
 

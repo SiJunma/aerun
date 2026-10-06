@@ -108,28 +108,50 @@ export const AuthProvider = ({ children }) => {
   // Cloud Function projection may still be pre-trigger (stale) data.
   const lastOptimisticForumUpdateRef = useRef(0);
 
+  /**
+   * whiteWall — true while the "White Wall for Guests" setting (whitelistMode)
+   * is on and the current viewer is a guest (not signed in). A guest on the
+   * white wall must not trigger ANY forum-facing reads, subscriptions or
+   * presence streams: the login page is the only UI they get. Turning the
+   * setting off flips this back to false and the forum becomes visible again.
+   */
+  const whiteWall = useMemo(() => {
+    if (!settings?.whitelistMode) return false;
+    return !user;
+  }, [settings?.whitelistMode, user]);
+  // Ref mirror so async callbacks (refreshForumState) see the latest wall state
+  // without being re-created on every wall flip.
+  const whiteWallRef = useRef(whiteWall);
+  whiteWallRef.current = whiteWall;
+
   // RTDB Presence initialization (runs on connect / login / profile load)
+  // Skipped while the white wall is up: no presence streams behind the wall.
   useEffect(() => {
+    if (whiteWall) return;
     if (user?.uid && profile && profile.id === user.uid) {
       isRtdbOnlineRef.current = true;
       lastPushTimeRef.current = Date.now();
       return initRtdbPresence(user.uid, profile);
     }
-  }, [user?.uid, profile?.id, profile?.nickname, profile?.avatar_url, profile?.role_id]);
+  }, [whiteWall, user?.uid, profile?.id, profile?.nickname, profile?.avatar_url, profile?.role_id]);
 
   // Real-time Online Users subscription from RTDB (0 Firestore reads)
   useEffect(() => {
+    if (whiteWall) {
+      setActiveUsers([]);
+      return undefined;
+    }
     return subscribeToOnlineUsers(setActiveUsers);
-  }, []);
+  }, [whiteWall]);
 
   // Real-time DM Unread subscription from RTDB (0 Firestore reads)
   useEffect(() => {
-    if (user?.uid) {
-      return subscribeToDmUnread(user.uid, setDmUnread);
-    } else {
+    if (whiteWall || !user?.uid) {
       setDmUnread({ total: 0, conversations: {} });
+      return undefined;
     }
-  }, [user?.uid]);
+    return subscribeToDmUnread(user.uid, setDmUnread);
+  }, [whiteWall, user?.uid]);
 
   const getOrCreateGuestId = useCallback(() => {
     let gid = localStorage.getItem('guest_id');
@@ -361,11 +383,21 @@ export const AuthProvider = ({ children }) => {
     const unsubGlobalSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        // maintenanceMessage may historically be a plain string — normalise to { en, ru }
+        const rawMessage = data.maintenanceMessage;
+        const maintenanceMessage = (typeof rawMessage === 'string')
+          ? { en: rawMessage, ru: rawMessage }
+          : {
+            en: typeof rawMessage?.en === 'string' ? rawMessage.en : '',
+            ru: typeof rawMessage?.ru === 'string' ? rawMessage.ru : ''
+          };
         const migrated = {
           ...data,
           forumName: data.forumName || 'Aerun Forum',
           welcomeMessage: data.welcomeMessage || '',
           maintenanceMode: data.maintenanceMode ?? false,
+          showMaintenanceMessage: data.showMaintenanceMessage ?? false,
+          maintenanceMessage,
           whitelistMode: data.whitelistMode ?? false,
           requireApproval: data.requireApproval ?? true,
           registrationEnabled: data.registrationEnabled ?? true,
@@ -803,7 +835,15 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const refreshForumState = useCallback(async (force = false, showLoading = false) => {
+    // White wall: never pull forum projections for a guest behind the wall.
+    if (whiteWallRef.current) return;
     const now = Date.now();
+    // A projection computed before the last optimistic update would revert it
+    // (triggers lag behind the write). Skip the request entirely — before the
+    // cooldown timestamp or in-flight id are touched, so a skipped call can
+    // never invalidate a real load or leave forumStateLoading stuck.
+    // The initial load (showLoading) must never be blocked by this guard.
+    if (!showLoading && now - lastOptimisticForumUpdateRef.current < 3000) return;
     if (!force && (now - lastForumRefreshTimeRef.current < FORUM_REFRESH_COOLDOWN_MS)) {
       return;
     }
@@ -811,11 +851,6 @@ export const AuthProvider = ({ children }) => {
     const requestId = ++forumStateRequestRef.current;
     if (showLoading) setForumStateLoading(true);
     setForumStateError(null);
-    // A projection computed before the last optimistic update would revert it
-    // (triggers lag behind the write). Skip the request entirely — calling the
-    // server here would be a wasted invocation. The initial load (showLoading)
-    // must never be blocked by this guard.
-    if (!showLoading && now - lastOptimisticForumUpdateRef.current < 3000) return;
     try {
       const data = await fetchSecuredMainPageData();
       // A response made for the previous auth state (e.g. guest → signed in)
@@ -890,18 +925,23 @@ export const AuthProvider = ({ children }) => {
     // identity changes.  This keeps guest and prior-user category lists out of
     // the next render.
     forumStateRequestRef.current += 1;
-    setForumStateLoading(true);
     setForumStateError(null);
     setCategories([]);
     setLatestTopics([]);
-    if (loading) return;
+    if (whiteWall) {
+      // Behind the wall: no projections, no skeleton — the login page owns the UI.
+      setForumStateLoading(false);
+      return undefined;
+    }
+    setForumStateLoading(true);
+    if (loading) return undefined;
     // Debounce: loading→false and uid→value can fire as two separate renders.
     // Wait 100ms so both settle before making the network call.
     const timer = setTimeout(() => {
       refreshForumState(true, true);
     }, 100);
     return () => clearTimeout(timer);
-  }, [loading, user?.uid, refreshForumState]);
+  }, [loading, user?.uid, refreshForumState, whiteWall]);
 
   useEffect(() => {
     if (!user?.uid || latestTopics.length === 0) {
@@ -998,19 +1038,23 @@ export const AuthProvider = ({ children }) => {
       if (profile) {
         const isAdmin = hasPermission(PERMISSIONS.ADMIN_ACCESS);
         const isBanned = profile.role_id === 'banned';
-
-        const isMaintenanceStrict = settings?.maintenanceMode && (settings.whitelistMode !== false);
+        const isMaintenanceActive = !!settings?.maintenanceMode;
 
         if (isBanned) {
           sessionStorage.setItem('banned_logout', 'true');
           logout(true);
-        } else if (isMaintenanceStrict && !isAdmin) {
+        } else if (isMaintenanceActive && !isAdmin) {
+          // Only admins may stay signed in during maintenance.
           sessionStorage.setItem('maintenance_logout', 'true');
           logout();
+        } else if (!isMaintenanceActive) {
+          // Maintenance mode is disabled - clear the stale maintenance_logout flag
+          // so users can access the forum again after maintenance is turned off
+          sessionStorage.removeItem('maintenance_logout');
         }
       }
     }
-  }, [settings?.maintenanceMode, settings?.whitelistMode, user, profile, loading, hasPermission, logout, authError]);
+  }, [settings?.maintenanceMode, user, profile, loading, hasPermission, logout, authError]);
 
   useEffect(() => {
     // При возвращении на вкладку обновляем активность и статичные данные форума (с соблюдением cooldown)
@@ -1048,6 +1092,7 @@ export const AuthProvider = ({ children }) => {
     categories,
     forumStateLoading,
     forumStateError,
+    whiteWall,
     unreadTopicsCount,
     dmUnread,
     activeDmConvId,
@@ -1082,7 +1127,7 @@ export const AuthProvider = ({ children }) => {
     PERMISSIONS,
     DEFAULT_ROLES
   }), [
-    user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, forumStateLoading, forumStateError,
+    user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, forumStateLoading, forumStateError, whiteWall,
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,

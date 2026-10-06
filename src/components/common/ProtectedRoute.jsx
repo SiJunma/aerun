@@ -38,28 +38,8 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
       return <Navigate to="/" replace />;
     }
 
+    // Whitelist (White Wall for Guests) is ON → the login page is the wall.
     return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  // Maintenance mode check: redirect non-admins to /maintenance
-  // We MUST wait for profile to exist if user is logged in, to avoid race conditions 
-  // where profile is null for a split second and the system thinks it's a non-admin.
-  if (settings.maintenanceMode && location.pathname !== '/maintenance') {
-    if (!profile) {
-      return (
-        <div className="d-flex justify-content-center align-items-center vh-100">
-          <div className="spinner-border text-primary" role="status">
-            <span className="visually-hidden">Loading Profile...</span>
-          </div>
-        </div>
-      );
-    }
-
-    if (!hasPermission(PERMISSIONS.ADMIN_ACCESS)) {
-      if (settings.whitelistMode === true) {
-        return <Navigate to="/maintenance" replace />;
-      }
-    }
   }
 
   // Banned status handling - only relevant if they are on /banned already or if they are "shadow logged out"

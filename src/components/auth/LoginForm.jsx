@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Button, Form, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { describeAuthError } from '../../utils/auth-errors';
 
 const LoginForm = ({ onSuccess, onForgotPassword }) => {
   const { loginWithGoogle, loginWithEmail, settings } = useAuth();
@@ -41,7 +42,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
       if (error.code === 'auth/account-exists-with-different-credential') {
         setAuthError(t('auth.link_account_password'));
       } else {
-        setAuthError(error.message);
+        setAuthError(describeAuthError(error, t) || error.message);
       }
     }
   };
@@ -62,7 +63,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setAuthError(t('auth.wrong_password')); // use a generic wrong password or user not found
       } else {
-        setAuthError(error.message);
+        setAuthError(describeAuthError(error, t) || error.message);
       }
     }
   };
@@ -75,9 +76,11 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
           : (settings?.forumName || t('auth.login_title'))}
       </h2>
       <p className="text-muted mb-4">
-        {settings?.whitelistMode === false 
-          ? t('auth.login_subtitle_public') 
-          : t('auth.login_subtitle')}
+        {settings?.whitelistMode === false
+          ? t('auth.login_subtitle_public')
+          : settings?.maintenanceMode
+            ? t('auth.login_subtitle_maintenance')
+            : t('auth.login_subtitle_closed')}
       </p>
 
       {authError && (
