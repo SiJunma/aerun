@@ -1,0 +1,2 @@
+Use Windows Command Prompt (cmd.exe) syntax for terminal commands.
+Do not run `dir /s /b` or recursive list commands without filtering.
