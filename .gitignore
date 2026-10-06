@@ -69,6 +69,9 @@ Thumbs.db
 # contain personal data)
 backend/migration-data/
 backend/pb_data/
+# Timestamped PocketBase data backups/snapshots (contain personal data + avatars).
+# Examples: backend/pb_data-backup-20261004-182707/, backend/pb_data-PRELEGACY-20261004-194247/
+backend/pb_data-*/
 
 # Locally built backend binary, its logs and the stray "..local-run" directory
 # a crashed run leaves behind. All untracked, none of it belongs in git.
