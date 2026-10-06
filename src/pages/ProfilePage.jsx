@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
@@ -1920,7 +1920,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
             // handleSaveCharacter — otherwise picking an image while adding a
             // character would silently do nothing.
             onUpload={(blob, filename) => handleCharacterAvatarUpload(editingChar?.id, blob, filename)}
-            storagePath={`users/${uid}/characters/avatar`}
+            storagePath={maskAvatarPath(uid, avatarSlot)}
             size={100}
           />
           

@@ -665,11 +665,12 @@ const TopicPage = () => {
     }
   }, [topic?.category_id, categories]);
 
-  // Draft Auto-save
-  const DRAFT_KEY = `reply_draft_${id}`;
+  // Draft Auto-save scoped to user so unsent text does not leak across accounts
+  const DRAFT_KEY = `aerun_reply_draft_${id}_${user?.uid || 'guest'}`;
 
   useEffect(() => {
-    const savedDraft = localStorage.getItem(DRAFT_KEY);
+    // Check scoped draft first, fallback to legacy key if user had unsent text before this fix
+    const savedDraft = localStorage.getItem(DRAFT_KEY) || localStorage.getItem(`reply_draft_${id}`);
     if (savedDraft) {
       setReplyContent(savedDraft);
     }
@@ -1533,6 +1534,7 @@ const TopicPage = () => {
       applyMutationResult(replyResult);
 
       try {
+        localStorage.removeItem(DRAFT_KEY);
         localStorage.removeItem(`reply_draft_${id}`);
       } catch {
         // ignore
@@ -1563,7 +1565,7 @@ const TopicPage = () => {
       // it will be restored when they revisit this topic!
       try {
         if (savedReplyContent) {
-          localStorage.setItem(`reply_draft_${id}`, savedReplyContent);
+          localStorage.setItem(DRAFT_KEY, savedReplyContent);
         }
       } catch (storageErr) {
         console.warn('[Failed to restore reply draft to localStorage]', storageErr);

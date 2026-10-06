@@ -401,9 +401,24 @@ export const AuthProvider = ({ children }) => {
     };
   }, [user?.uid, profile, recordActivity]);
 
-  // Auth actions
   const loginWithGoogle = async () => {
     const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
+    const isRegistering = sessionStorage.getItem('is_registering') === 'true';
+    const pendingNickname = sessionStorage.getItem('pending_nickname');
+    if (isRegistering && pendingNickname && pendingNickname.trim()) {
+      try {
+        await sendApi('/api/aerun/me/nickname', {
+          method: 'PATCH',
+          body: { nickname: pendingNickname.trim() }
+        });
+        await pb.collection('users').authRefresh().catch(() => {});
+      } catch (nickErr) {
+        console.warn('[loginWithGoogle] could not apply pending nickname', nickErr);
+      }
+    }
+    sessionStorage.removeItem('is_registering');
+    sessionStorage.removeItem('pending_nickname');
+    sessionStorage.removeItem('pending_message');
     syncUserFromAuthStore();
     return authData;
   };

@@ -46,7 +46,7 @@ const BBCodeSpoiler = ({ title, children }) => {
         style={{ cursor: 'pointer' }}
       >
         <span className="spoiler-title fw-bold small">
-          {title || (localStorage.getItem('i18nextLng') === 'ru' ? 'Спойлер' : 'Spoiler')}
+          {title || ((localStorage.getItem('language') || localStorage.getItem('i18nextLng')) === 'ru' ? 'Спойлер' : 'Spoiler')}
         </span>
         <span className="spoiler-icon opacity-50">
           {isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}

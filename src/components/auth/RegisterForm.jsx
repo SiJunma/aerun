@@ -54,6 +54,8 @@ const RegisterForm = ({ onSuccess }) => {
 
     sessionStorage.setItem('is_registering', 'true');
     if (lang) {
+      sessionStorage.setItem('language', lang);
+      localStorage.setItem('language', lang);
       sessionStorage.setItem('preferred_language', lang);
       localStorage.setItem('preferred_language', lang);
     }

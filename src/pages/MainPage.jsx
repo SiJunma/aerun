@@ -161,12 +161,8 @@ const MainPage = () => {
                     const lastVisitRaw = readMap[cat.last_post_topic_id];
                     const lastReadOffset = lastVisitRaw?.offset ?? null;
                     const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-                    const lastVisitMs = lastVisitValue?.toMillis ? lastVisitValue.toMillis() : (lastVisitValue || 0);
-                    const registrationMs = profile?.created_at?.toMillis?.() || 0;
-                    const effectiveLastVisitMs = Math.max(lastVisitMs, registrationMs);
-                    const lastPostMs = cat.last_post_at
-                      ? (cat.last_post_at.toMillis ? cat.last_post_at.toMillis() : new Date(cat.last_post_at).getTime())
-                      : 0;
+                    const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
+                    const lastPostMs = toMillis(cat.last_post_at);
                     const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
 
                     return (
@@ -211,31 +207,6 @@ const MainPage = () => {
           </Card>
         );
 
-        // Categories that belong to no group are rendered NOWHERE by the loop
-        // below: it walks GROUPS and keeps the categories matching each one, so
-        // `cat.group_id === g.id` never matches "". Such a category is invisible
-        // on the forum index while existing perfectly well in the database.
-        //
-        // The empty-state guard counts `categories`, not rendered rows, so when
-        // every category is ungrouped the index showed neither the list nor the
-        // "no categories" message — a blank area with no way to diagnose it.
-        //
-        // They get their own section here so the row stays reachable and the
-        // misconfiguration is legible instead of silent.
-        const UNGROUPED_KEY = '__ungrouped__';
-        const ungroupedCats = visibleCats.filter(
-          c => !c.group_id || !groups.some(g => g.id === c.group_id)
-        );
-        const renderGroups = ungroupedCats.length
-          ? [...groupsWithCats, { id: UNGROUPED_KEY, __isUngrouped: true }]
-          : groupsWithCats;
-
-        // One accessor for both kinds of group, so the table markup below stays
-        // a single branch instead of a duplicated row.
-        const catsForGroup = (group) => (group.__isUngrouped
-          ? ungroupedCats
-          : visibleCats.filter(cat => cat.group_id === group.id));
-
         if (visibleCats.length === 0) {
           return (
             <ForumEmptyState
@@ -247,98 +218,6 @@ const MainPage = () => {
           );
         }
 
-<<<<<<< HEAD
-        return renderGroups.map(group => (
-          <Card key={group.id} className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-            <div className="d-flex align-items-center forum-group-header">
-              <h4 className="mb-0">
-                {group.__isUngrouped
-                  ? (lang === 'ru' ? 'Без группы' : 'Unassigned')
-                  : resolveField(group.title, lang)}
-              </h4>
-            </div>
-            <Table hover responsive className="mb-0 forum-table forum-table-sub">
-              <thead>
-                <tr>
-                  <th style={{ minWidth: 260 }}>{t('forum.category')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.topics')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.posts')}</th>
-                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {catsForGroup(group).map(cat => (
-                    <tr key={cat.id}>
-                      <td data-label={t('forum.category')}>
-                        <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1 cat-link">
-                          {resolveField(cat.title, lang)}
-                        </Link>
-                        <div className="text-muted cat-desc" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
-                          {resolveField(cat.description, lang)}
-                        </div>
-                        {/* Mobile Stats Line */}
-                        <div className="d-md-none mt-2 d-flex gap-3 small forum-mobile-stats text-muted">
-                          <span className="d-flex align-items-center gap-1">
-                            <MessageSquare size={12} /> {cat.topics_count || 0}
-                          </span>
-                          <span className="d-flex align-items-center gap-1">
-                            <FileText size={12} /> {cat.posts_count || 0}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="text-center align-middle forum-td-stat" data-label={t('forum.topics')}>
-                        {cat.topics_count || 0}
-                      </td>
-                      <td className="text-center align-middle forum-td-stat" data-label={t('forum.posts')}>
-                        {cat.posts_count || 0}
-                      </td>
-                      <td className="align-middle" data-label={t('forum.last_post')}>
-                        {cat.last_post_topic_id ? (
-                          <div>
-                            <Link
-                              to={`/topic/${cat.last_post_topic_id}`}
-                              className="d-block fw-semibold text-decoration-none text-truncate mb-1 last-topic-link"
-                              title={t('stats.to_first_post')}
-                            >
-                              {cat.last_post_topic_title || '—'}
-                            </Link>
-
-                            {(() => {
-                              const lastVisitRaw = readMap[cat.last_post_topic_id];
-                              const lastReadOffset = lastVisitRaw?.offset ?? null;
-                              const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-                              const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
-                              const lastPostMs = toMillis(cat.last_post_at);
-                              const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
-
-                              return (
-                                <LastPostInfo
-                                  topicId={cat.last_post_topic_id}
-                                  lastPostAt={cat.last_post_at}
-                                  authorId={cat.last_post_author_id}
-                                  authorCharacterId={cat.last_post_author_character_id}
-                                  isCharacter={!!cat.last_post_is_character}
-                                  authorName={cat.last_post_author}
-                                  authorAvatar={cat.last_post_author_avatar}
-                                  hasUnread={hasUnread}
-                                  lastReadOffset={lastReadOffset}
-                                  postsCount={cat.last_post_topic_posts_count || null}
-                                  lang={lang}
-                                />
-                              );
-                            })()}
-                          </div>
-                        ) : (
-                          <span className="text-muted small">{t('forum.no_posts')}</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </Table>
-          </Card>
-        ));
-=======
         return (
           <>
             {groupsWithCats.map(group => (
@@ -366,7 +245,6 @@ const MainPage = () => {
             )}
           </>
         );
->>>>>>> main
       })()}
 
       <ForumStats />

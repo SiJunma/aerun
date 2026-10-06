@@ -63,7 +63,7 @@ export const getGlobalSettings = (callback) => {
   };
 };
 
-export const updateGlobalSettings = async (settings, performerId) => {
+export const updateGlobalSettings = async (settings, _performerId) => {
   try {
     const res = await sendApi('/api/aerun/admin/settings', {
       method: 'PATCH',
