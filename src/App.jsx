@@ -13,7 +13,6 @@ import TopicPage from './pages/TopicPage';
 import ProfilePage from './pages/ProfilePage';
 import MembersPage from './pages/MembersPage';
 import AdminPage from './pages/AdminPage';
-import MaintenancePage from './pages/MaintenancePage';
 import NotificationsPage from './pages/NotificationsPage';
 import ActiveTopicsPage from './pages/ActiveTopicsPage';
 import NewRepliesPage from './pages/NewRepliesPage';
@@ -112,7 +111,6 @@ const App = () => {
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
-        <Route path="/maintenance" element={<MaintenancePage />} />
         <Route path="/pending" element={<ProtectedRoute requireActive={false}><Layout><PendingPage /></Layout></ProtectedRoute>} />
         <Route path="/banned" element={<ProtectedRoute requireActive={false}><Layout><BannedPage /></Layout></ProtectedRoute>} />
 

@@ -9,6 +9,7 @@ import { useLocation, Link } from 'react-router-dom';
 import ConnectionStatusBanner from '../common/ConnectionStatusBanner';
 import EmailVerificationBanner from '../common/EmailVerificationBanner';
 import ScrollButtons from '../common/ScrollButtons';
+import { sanitizeHtml } from '../../utils/text';
 
 const Layout = ({ children }) => {
   const { settings, PERMISSIONS } = useAuth();
@@ -29,27 +30,7 @@ const Layout = ({ children }) => {
       }
     }
 
-    if (!rawHtml) return null;
-
-    try {
-
-      if (!rawHtml || typeof rawHtml !== 'string') {
-        if (rawHtml && typeof rawHtml === 'object') {
-          console.error('[Layout] rawHtml is an object, keys:', Object.keys(rawHtml));
-        }
-        return null;
-      }
-
-      let html = rawHtml;
-      // Remove scripts
-      html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-      // Remove inline event handlers (onmouseover, onclick, etc.)
-      html = html.replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
-      return html;
-    } catch (e) {
-      console.error('Error sanitizing banner:', e);
-      return null;
-    }
+    return sanitizeHtml(rawHtml) || null;
   }, [settings?.welcomeMessage, activeDesign?.welcomeMessage, lang]);
 
   return (
@@ -60,7 +41,7 @@ const Layout = ({ children }) => {
         <ConnectionStatusBanner />
         <Navigation />
 
-        {settings?.maintenanceMode && location.pathname !== '/maintenance' && (
+        {settings?.maintenanceMode && (
           <Alert variant="danger" className="m-0 text-center rounded-0 border-0 shadow-sm sticky-top maintenance-status-banner" style={{ zIndex: 900, top: '56px' }}>
             <span className="small fw-medium">
               {t('auth.maintenance_banner')}

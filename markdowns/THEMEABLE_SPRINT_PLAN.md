@@ -132,7 +132,6 @@ markdowns/
 | `/messages`, `/messages/:uid` | `pages/MessagesPage.jsx` | 77 стр. | Низкая |
 | `/login` | `pages/LoginPage.jsx` | 67 стр. | Минимальная |
 | `/register` | `pages/RegisterPage.jsx` | 60 стр. | Минимальная |
-| `/maintenance` | `pages/MaintenancePage.jsx` | 90 стр. | Минимальная |
 | `/pending` | `pages/PendingPage.jsx` | 57 стр. | Минимальная |
 | `/banned` | `pages/BannedPage.jsx` | 45 стр. | Минимальная |
 
@@ -189,12 +188,11 @@ markdowns/
 5. **Notifications** (`/notifications`) — уведомления
 6. **Topic Form** (`/category/:id/new-topic`) — создание темы
 7. **Messages** (`/messages`, `/messages/:uid`) — личные сообщения
-8. **Login** (`/login`) — вход
+8. **Login** (`/login`) — вход (также «белая стена для гостей» при `whitelistMode`)
 9. **Register** (`/register`) — регистрация
-10. **Maintenance** (`/maintenance`) — техническое обслуживание
-11. **Pending** (`/pending`) — ожидание подтверждения
-12. **Banned** (`/banned`) — заблокирован
-13. **Admin** (`/admin`) — панель администратора
+10. **Pending** (`/pending`) — ожидание подтверждения
+11. **Banned** (`/banned`) — заблокирован
+12. **Admin** (`/admin`) — панель администратора
 
 ---
 
@@ -1084,14 +1082,12 @@ ProfilePage — вторая по сложности страница (1802 ст
 </div>
 ```
 
-### MaintenancePage
+### LoginPage — White Wall for Guests (`whitelistMode` + `showMaintenanceMessage`)
 ```
-<div id="maintenance-page" class="maintenance-page system-page">
+<div class="system-page">
   <div class="system-card">
-    <div class="system-icon">...</div>
-    <h1 class="system-title">...</h1>
-    <p class="system-message">...</p>
-    <div class="system-actions">...</div>
+    <div class="alert alert-warning maintenance-message">...сервисное сообщение техработ (опционально)...</div>
+    <div class="login-form">...</div>
   </div>
 </div>
 ```

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
@@ -30,6 +30,31 @@ import SecurityTab from '../components/profile/SecurityTab';
 
 
 import { usePageTitle } from '../contexts/TitleProvider';
+
+/**
+ * Mints a throwaway Storage slot for a mask that has not been saved yet.
+ *
+ * addDoc() only mints the Firestore id at save time, so a brand new mask has
+ * no id to put in its path. It still must not share its path with anything —
+ * a fixed 'new' slot would give every mask the user creates the very same
+ * collision this bug is about.
+ */
+const newAvatarSlot = () =>
+  `draft_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+
+/**
+ * Storage object that holds one mask's avatar.
+ *
+ * WHY THE SLOT IS PART OF THE PATH. Every mask used to upload to the single
+ * object `users/<uid>/characters/avatar`. Firebase keeps a download URL
+ * working across an overwrite: getDownloadURL() returns the SAME url, token
+ * and all, for the path before and after. A mask that had already saved that
+ * url into its document therefore kept rendering it, so replacing the picture
+ * on one mask silently repainted every other mask pointing at the same file.
+ * One object per mask is the only way to keep them independent.
+ */
+const maskAvatarPath = (ownerUid, slot) =>
+  `users/${ownerUid}/characters/${slot}_avatar`;
 
 const ProfilePage = () => {
   const { uid } = useParams();
@@ -135,6 +160,12 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
     avatar_url: '',
     signature: ''
   });
+
+  // Which Storage object this mask's avatar belongs to. Held in state (not
+  // derived from editingChar at upload time) so that a mask opened for editing
+  // keeps its own slot, and an unsaved mask gets a fresh one instead of
+  // inheriting whatever the previously edited mask was using.
+  const [avatarSlot, setAvatarSlot] = useState(() => newAvatarSlot());
   
   // Tracks what the account form was last seeded from — the profile uid AND the
   // seeded values — so background syncs that do not touch the form (a last_seen
@@ -328,6 +359,9 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
   const handleOpenModal = (char = null) => {
     if (char) {
       setEditingChar(char);
+      // An existing mask always owns the slot named after its document id, so
+      // reopening it keeps writing to the object it already had.
+      setAvatarSlot(char.id);
       setFormData({
         name: char.name,
         status_line: char.status_line || '',
@@ -336,6 +370,8 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
       });
     } else {
       setEditingChar(null);
+      // A mask that does not exist yet has no id, so it gets a throwaway slot.
+      setAvatarSlot(newAvatarSlot());
       setFormData({
         name: '',
         status_line: '',
@@ -1880,9 +1916,6 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
             label={<div className="fw-bold mb-2">{t('profile.character_avatar')}</div>}
             value={formData.avatar_url}
             allowGifs={settings?.allowGifAvatars !== false}
-            onChange={(url) => setFormData({ ...formData, avatar_url: url })}
-            // PUT /characters/{id}/avatar is addressed by character id, so an
-            // existing character uploads straight away. A NEW one has no id
             // until Save creates it, so the file is held here and flushed in
             // handleSaveCharacter — otherwise picking an image while adding a
             // character would silently do nothing.

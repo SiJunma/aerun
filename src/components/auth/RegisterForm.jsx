@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Button, Form, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { describeAuthError } from '../../utils/auth-errors';
 import { checkNicknameExists } from '../../api/forum';
 import { getGlobalSettings } from '../../api/admin';
 
@@ -79,7 +80,7 @@ const RegisterForm = ({ onSuccess }) => {
     } catch (error) {
       setLoadingGoogle(false);
       console.error(t('auth.login_failed'), error);
-      setAuthError(error.message);
+      setAuthError(describeAuthError(error, t) || error.message);
     }
   };
 

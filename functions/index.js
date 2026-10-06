@@ -1,4 +1,4 @@
-const { loadContext, invalidateContext, hasViewForum, getRequester, isRuleAdmin, hasRulePermission, hasRuleCategoryPermission } = require("./permissions");
+const { loadContext, invalidateContext, hasViewForum, getRequester, isRuleAdmin, hasRulePermission, hasRuleCategoryPermission, normaliseAllowedRoles } = require("./permissions");
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
@@ -584,14 +584,19 @@ exports.getSecuredCategories = onCall(
       }
 
       const catPerms = catData.permissions || {};
-      const allowedRoles = catPerms['view_forum'];
+      const rawAllowed = catPerms['view_forum'];
 
       let hasViewPerm = false;
-      if (!allowedRoles) {
+      if (!rawAllowed) {
         const roleData = rolesMap[effectiveRole];
         hasViewPerm = (roleData?.permissions || []).includes('view_forum');
       } else {
-        if (allowedRoles.includes(effectiveRole)) {
+        const allowedRoles = normaliseAllowedRoles(rawAllowed);
+        if (allowedRoles.length === 0) {
+          // Malformed override — inherit role permissions instead of denying everyone.
+          const roleData = rolesMap[effectiveRole];
+          hasViewPerm = (roleData?.permissions || []).includes('view_forum');
+        } else if (allowedRoles.includes(effectiveRole)) {
           hasViewPerm = true;
         } else {
           const roleData = rolesMap[effectiveRole];
@@ -2960,7 +2965,7 @@ async function queueIncrement(batch, ref, field, delta) {
  */
 async function deleteAllByQuery(db, ref, label) {
   let deleted = 0;
-  while (true) {
+  for (;;) {
     const snap = await ref.limit(400).get();
     if (snap.empty) break;
     const batch = db.batch();

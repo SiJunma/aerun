@@ -130,9 +130,8 @@ Forum Engine (React 19 + Vite)
 | Страница / Компонент | Назначение |
 |---|---|
 | `src/pages/PendingPage.jsx` | Страница пользователя на премодерации (ожидание подтверждения) |
-| `src/pages/MaintenancePage.jsx` | Экран техобслуживания форума |
 | `src/pages/BannedPage.jsx` | Экран заблокированного пользователя |
-| `src/components/common/ProtectedRoute.jsx` | Логика `whitelistMode` (закрытый форум для гостей), режимы ролей `spectator`, `pending`, `banned` |
+| `src/components/common/ProtectedRoute.jsx` | Логика `whitelistMode` (белая стена: гости видят только `/login`), режимы ролей `spectator`, `pending`, `banned` |
 | `src/components/modals/MaintenanceLogoutModal.jsx` | Модальное окно принудительного разлогина при старте техработ |
 | `src/components/common/ErrorCard.jsx` | Карточка сетевой устойчивости и ошибок с повтором действия |
 
@@ -509,7 +508,8 @@ export * as statsFixtures from './stats';
    - **Режим чтения при премодерации**: когда `whitelistMode === false`, pending-пользователь может читать форум как зритель, но вверху отображается плашка премодерации, а создание тем и ответов заблокировано
 
 9. **MaintenanceModeStory (Режим технических работ)**:
-   - **Экран `/maintenance`**: `MaintenancePage.jsx` — полноэкранная заглушка техобслуживания с иконкой и сообщением для посетителей
+   - **Интерфейс форума ничего не скрывает**: во время техработ форум ведёт себя как обычно, войти и остаться могут только администраторы
+   - **Белая стена + техработы**: при включённой `whitelistMode` гости видят только страницу `/login` (`LoginPage.jsx`) с формой входа и, при чекбоксе `showMaintenanceMessage`, сервисное сообщение в выделенном блоке
    - **Форум во время техработ глазами администратора**: липкий красный баннер `<Alert className="maintenance-status-banner">` под навбаром и бейдж `ТЕХРАБОТЫ` в шапке
    - **Модалка разлогина**: `MaintenanceLogoutModal` — модальное окно, информирующее игрока о завершении сессии из-за начала технических работ
 
