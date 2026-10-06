@@ -1,9 +1,9 @@
 # Backend audit and Go/PocketBase migration plan
 
-**Status:** approved planning baseline — cleaned 2026-09-29
+**Status:** approved planning baseline — updated 2026-10-06
 **Scope:** current Firebase application, a local-first replacement backend, and later single-VPS deployment
 **Primary audience:** implementation agents and maintainers
-**Last reviewed:** 2026-09-29
+**Last reviewed:** 2026-10-06
 
 > **Reading protocol for agents.** This file is the single source of truth for
 > what is DONE, what is NEXT, and what the contracts are. The dated progress
@@ -53,7 +53,7 @@ React SPA ── PocketBase SDK (safe reads, auth, SSE) + /api/aerun/* commands
 - `POST /api/aerun/auth/register` is not idempotency-enveloped: it is a guest
   endpoint guarded by UNIQUE indexes; a duplicate submit answers `409`.
 
-## 2. Where the project actually is (scoreboard, 2026-09-29)
+## 2. Where the project actually is (scoreboard, 2026-10-06)
 
 | Sprint | Scope | Status |
 |---|---|---|
@@ -62,43 +62,40 @@ React SPA ── PocketBase SDK (safe reads, auth, SSE) + /api/aerun/* commands
 | 2 — Identity, RBAC, secure reads | register, settings, admin users, Google OAuth | **DONE** (OAuth closed 2026-09-28) |
 | 3 — Forum transactional commands | topics/posts/move/lock/pin, cursors, 100-concurrency DoD | **DONE** |
 | 4 — Reputation, subscriptions, audit | transactional votes/subscribe, append-only audit | **DONE** |
-| 5 — DMs, notifications, outbox | conversations, unread, outbox rows + worker logic | **DONE** 2026-09-29 — worker is scheduled in the serve path (TASK-4) |
-| 6 — Frontend adapter | `src/api/*` on `/api/aerun/*`, PB auth store, presence | **DONE** 2026-09-29 — categories + characters CRUD moved onto the command layer (TASK-2, TASK-3) |
-| 7 — Migration tooling | exporter, staging, rehearsal, 4 domain writers | **board import landed** 2026-09-29 — categories/groups (L2/L3), topics/posts/drafts (L5/L6) with sequence reconstruction; L7–L9 (reputation, subscriptions, notifications, DMs, audit, settings) + post-import counters remain → TASK-6 |
-| 8 — VPS production readiness | DNS/TLS/systemd/backups/restore drill | **NOT STARTED** |
-| 9 — Cutover | final export, import delta, reconciliation, switch | **NOT STARTED** |
+| 5 — DMs, notifications, outbox | conversations, unread, outbox rows + worker logic | **DONE** (worker scheduled, real SMTP + branded mail templates) |
+| 6 — Frontend adapter | `src/api/*` on `/api/aerun/*`, PB auth store, presence | **DONE** (categories, characters, SSE realtime-signals adapter) |
+| 7 — Migration tooling | exporter, staging, rehearsal, 4 domain writers | **DONE** (L0–L9 writers complete, rehearsals passed, post-import reputation recompute verified, 2-DB equivalence proven at 0 diffs) |
+| 7.5 — Post-import hardening | delete semantics incident fix, SSE signaling, server settings, dice rolls | **DONE** (migrations 1767700000–1768800000, see §5.G) |
+| 8 — VPS production readiness | DNS/TLS/systemd/backups/restore drill, smile asset rehosting | **NOT STARTED** (see §9 for updated scope & audit findings) |
+| 9 — Cutover | final export, import delta, reconciliation, switch, Firebase teardown | **NOT STARTED** |
 
 **Checkpoint 2026-09-29 #1 — «runtime command layer closed».** TASK-1 … TASK-5 of §5
-are landed and green: the P0 showstopper (category visibility), the dead admin
-board (category + category-group commands), the characters domain API that
-replaces the retracted `settings.characters` fold, the outbox worker that now
-actually runs, and the role hardening.
+landed and green: category visibility, admin category commands, characters domain API,
+outbox worker in serve path, role command hardening.
 
-**Checkpoint 2026-09-29 #2 — «board import».** TASK-6 sub-items 1 and 2 (L2/L3/L5/L6)
-are landed and rehearsed on a real database: 5 groups, 15 categories, 34 topics,
-3124 posts (3123 sequenced + 1 draft) from the 2026-09 export, with a second run
-proving idempotency. Two bugs were caught by that rehearsal and fixed. What
-remains for TASK-6 is L7–L9, the post-import counter pass, and the
-two-database record-equivalence comparison.
+**Checkpoint 2026-09-29 #2 — «board import & equivalence».** TASK-6 landed and
+rehearsed: groups (L2), categories (L3), topics/posts/drafts (L5/L6), reputation/subscriptions (L7),
+social/DMs/audit (L8/L9), post-import reputation recompute pass, and two-database equivalence
+verification (5,132 rows across 14 collections, 0 differences).
 
-**Known gaps deliberately left for TASK-6** (recorded here so they are not
-mistaken for oversights):
+**Checkpoint 2026-10-06 — «incident resolution, realtime signaling, server settings, and audit».**
+Hard delete rule enforced for posts/topics (`POST_DELETE_WIPED_TOPIC_INCIDENT.md`),
+DMs retain soft tombstone (`1767900000`), hybrid realtime signals SSE + `sharedPoll` debouncing
+landed (`1768400000`), global settings moved server-side (`1768800000`), dice rolls landed (`1768200000`),
+and server-side topic read tracking landed (`1768300000`).
+Comprehensive audit conducted identifying smiles asset Firebase Storage lock-in, localStorage
+key mismatches, and Google OAuth registration metadata gap (see §5.H).
 
-- `categories.topics_count` / `posts_count` are not in the target schema. The
-  admin board and the main page read them with a `|| 0` fallback and therefore
-  render `0` rather than crashing; the real numbers arrive with the post writer
-  and `recompute-counters`.
-- The category modal still shows separate EN/RU inputs. The command contract
-  stores one string, and `pickTitle` submits the RU value (falling back to EN), so
-  an EN-only label survives and a bilingual one is stored in Russian only. That is
-  the contract the brief specifies, not an accident of the adapter.
-- `src/constants/permissions.js` still exports `DEFAULT_ROLES` and
-  `MAX_ROLE_PERMISSIONS`; the runtime authority is now the `roles` collection
-  (§3.2), so those constants are a fallback for the role-construction UI only.
+**Known gaps deliberately recorded for Sprint 8/9** (see §5.H for full audit):
+
+- Smiles in `src/config/smiles.js` still point to Firebase Storage URLs; local files exist
+  in `backend/migration-data/storage/smiles/` but must be moved to `public/smiles/` before Firebase teardown.
+- `TopicRow.jsx` per-topic unread dot still derives from browser `localStorage` readmap;
+  `topic_read_states` table is currently only queried for the aggregate unread badge count.
+- Category modal EN/RU input collapse: `pickTitle` submits Russian (fallback English).
 
 Live verification state: `go test ./...` all packages ok, `npm run build` ok,
-`eslint` clean on the touched files (2026-09-29). The CI channel
-(`origin/ci-report`, §7) is the authoritative external check.
+external Linux CI runner green (`origin/ci-report` run 25: `gofmt:ok, build:ok, vet:ok, test:ok`).
 
 ### 2.1 Legacy facts that must survive the migration window
 
@@ -244,6 +241,35 @@ here. `ADR-n` items are binding.
 - **ADR-7 (category delete).** Deleting a category with topics is refused
   with `409 conflict` (§5.B). Moving topics first is the operator's job
   (`POST /topics/{id}/move` already exists).
+- **ADR-8 (Deletion is HARD for posts/topics; SOFT for DMs — 2026-09-30 incident).**
+  A deleted post or topic is physically dropped (`1767700000_drop_deleted_flag.go`),
+  matching Firestore and MyBB legacy semantics; audit logs are the only surviving record.
+  Denormalized copies (counters, votes, subscriptions, topic projections) MUST be
+  settled inside the same transaction. In contrast, direct messages use soft-delete
+  tombstones (`1767900000_dm_tombstones.go`): conversations are messenger-style,
+  both participants must see that a message was there and what it said.
+- **ADR-9 (Realtime hybrid architecture: SSE triggers + sharedPoll).**
+  PocketBase realtime SSE (`1768400000_realtime_signals.go`) acts strictly as a
+  change TRIGGER rather than a data transport. Multiple subscribers coalesce onto
+  `sharedPoll(name, ...)` (`src/api/shared-poll.js`). No bare `setInterval` in UI
+  components; duplicate callers cost zero requests; background tabs pause polling.
+- **ADR-10 (Global settings server-side storage & mail branding).**
+  Global forum settings are moved from pure process env vars into authoritative server
+  storage (`1768800000_global_settings_server_side.go`). `GET /api/aerun/settings`
+  serves public settings (branding, pagination, features); `PATCH /api/aerun/admin/settings`
+  allows root/admin editing with audit trails. Transactional emails (welcome, reset,
+  notifications) dynamically brand their `From:` name from `settings.forumName`.
+- **ADR-11 (Post dice rolls and pinned posts).**
+  Dice rolling syntax `[roll=...]` is validated and executed server-side
+  (`1768200000_post_rolls.go`). Results are frozen in `posts.rolls` JSON column.
+  Posts can be pinned within a topic (`1768000000_post_author_character_and_pin.go`).
+- **ADR-12 (Server-side topic read tracking).**
+  `topic_read_states` table (`1768300000_topic_read_states.go`) stores `(user_id, topic_id, last_read_at)`
+  to calculate accurate unread topic count for `GET /api/aerun/me/unread-counts`.
+  `POST /api/aerun/topics/{id}/read` and `POST /api/aerun/me/topics/read-all` update it.
+- **ADR-13 (Configurable pagination).**
+  `topics_per_page` setting (`1768700000_topics_per_page_setting.go`) allows runtime
+  pagination customization alongside `posts_per_page`.
 
 ## 5. Normative specifications and task briefs (agent-ready)
 
@@ -880,6 +906,94 @@ reports 0 differences.
 opens; a re-run over its own output is a no-op (`changed=false`); rows in the
 target but absent from the batch are reported, never deleted.
 
+### 5.G TASK-7 — Post-import incident fixes and extended architecture (Migrations 1767700000–1768800000)
+
+**Status:** ☑ DONE (landed 2026-09-30 – 2026-10-05)
+
+Following the initial Sprint 7 board import, several critical operational and functional requirements were resolved:
+
+1. **Hard deletion for posts/topics vs Soft delete for DMs (2026-09-30 incident):**
+   - Incident `markdowns/POST_DELETE_WIPED_TOPIC_INCIDENT.md`: soft-delete tombstones on forum posts caused orphaned counts, dangling votes, and broken subscriptions.
+   - Migration `1767700000_drop_deleted_flag.go` removed `is_deleted` from `posts` and `topics`. Content is physically removed, and all denormalized copies (user post counters, reputation votes, subscriptions, topic projections) are settled within the SAME transaction.
+   - In contrast, migration `1767900000_dm_tombstones.go` maintains soft-delete tombstones for direct messages because conversations are private dialogues where both participants retain history.
+2. **Granular permission splitting:**
+   - Migration `1767800000_split_post_topic_permissions.go` split `post_topic` into granular permissions (`create_topic`, `reply_topic`, etc.).
+   - Migration `1768600000_reputation_permission_split.go` split reputation capabilities (`give_reputation`, `take_reputation`, post vs profile voting).
+3. **Post pins and native dice rolling:**
+   - Migration `1768000000_post_author_character_and_pin.go` added post pinning (`is_pinned`) and frozen character authorship.
+   - Migration `1768200000_post_rolls.go` implemented server-side dice rolling `[roll=...]` stored in `posts.rolls`.
+4. **Profile visibility uncoupling:**
+   - Migration `1768100000_profiles_visible_regardless_of_status.go` allowed public profile view regardless of user status (`pending/banned` members can be viewed; permissions remain stripped).
+5. **Server-side topic read tracking:**
+   - Migration `1768300000_topic_read_states.go` established the `topic_read_states` table (`user_id, topic_id, last_read_at`).
+   - Added `POST /api/aerun/topics/{id}/read` and `POST /api/aerun/me/topics/read-all`.
+   - `countUnreadTopics` in `notifications.go` computes unread counts accurately via SQL LEFT JOIN.
+6. **Realtime signaling hybrid transport:**
+   - Migration `1768400000_realtime_signals.go` established SSE change notifications.
+   - Integrated with frontend `src/api/shared-poll.js` and `src/api/realtime-signals.js`. Multiple UI components share single polling resources; SSE triggers debounced fetches.
+7. **Server-side global settings and branded email dispatch:**
+   - Migration `1768700000_topics_per_page_setting.go` added `topics_per_page`.
+   - Migration `1768800000_global_settings_server_side.go` transitioned global configuration from static env vars to authoritative server storage (`GET /api/aerun/settings` and `PATCH /api/aerun/admin/settings`).
+   - Transactional email templates (`mail_templates.go`) dynamically brand their sender name using `settings.forumName`.
+
+---
+
+### 5.H TASK-8 — Comprehensive Migration Audit & Discovered Gaps (2026-10-06)
+
+**Status:** 🔍 AUDIT COMPLETE — actionable remediation tasks identified for Sprint 8 & 9.
+
+A systematic audit across `src/`, `backend/`, and migration scripts revealed hidden dependencies, legacy residues, and client-side storage discrepancies:
+
+#### 1. Firebase Storage Smiles / Emojis Lock-In (P1 Cutover Blocker)
+- **Problem:** `src/config/smiles.js` contains ~200 smile definitions referencing live Firebase Storage URLs (`https://firebasestorage.googleapis.com/v0/b/aerun-forum.firebasestorage.app/o/smiles/...`).
+- **Impact:** When Firebase is decommissioned in Sprint 9, all emojis in forum posts (via `BBCode.jsx`) and the emoji selector (`SmilesPicker.jsx`) will break (404/403 errors).
+- **Current State:** The files are already downloaded in `backend/migration-data/storage/smiles/{jcdragon,possum,tumblr}`.
+- **Required Action (Sprint 8):**
+  1. Move the smile packs to `public/smiles/` (or serve via PocketBase file storage).
+  2. Rewrite `src/config/smiles.js` to use relative paths (`/smiles/jcdragon/...`).
+  3. Add a test to verify no `firebasestorage.googleapis.com` references remain in `src/`.
+
+#### 2. Legacy Firebase Error Handling in `src/utils/auth-errors.js`
+- **Problem:** `src/utils/auth-errors.js` maps only Firebase-specific errors (`auth/internal-error`, Firebase App Check reCAPTCHA v3).
+- **Impact:** PocketBase errors surface as generic or untranslated `ClientResponseError` messages rather than localized user-friendly alerts.
+- **Required Action:** Adapt `describeAuthError` to parse PocketBase error codes (e.g. `validation_not_unique`, `Account pending approval`, 400 validation payloads).
+
+#### 3. Dead Firebase Storage Code in `src/pages/ProfilePage.jsx`
+- **Problem:** Lines 42–58 of `ProfilePage.jsx` contain unused legacy helpers `maskAvatarPath` and `newAvatarSlot` and comments regarding Firebase Storage URL tokens.
+- **Required Action:** Prune dead helper functions to eliminate confusion.
+
+#### 4. `localStorage` & `sessionStorage` Language Key Inconsistencies
+- **Problem:**
+  - `src/components/common/BBCode.jsx` (L49) checks `localStorage.getItem('i18nextLng') === 'ru'` to label spoilers, but `I18nProvider.jsx` stores the language under key `'language'`. As a result, untitled spoilers default to `'Spoiler'` in English even in Russian locale.
+  - `src/components/auth/RegisterForm.jsx` (L58) sets `localStorage.setItem('preferred_language', lang)` instead of key `'language'`.
+- **Required Action:** Standardize language key across all components to `'language'`.
+
+#### 5. Google OAuth Registration Drops Custom Nickname & Admin Message
+- **Problem:** When registering via Google OAuth, `RegisterForm.jsx` stores `pending_nickname` and `pending_message` in `sessionStorage`. However, `AuthProvider.jsx#loginWithGoogle` executes `pb.collection('users').authWithOAuth2({ provider: 'google' })` and never sends the pending nickname or message to PocketBase.
+- **Impact:** New members signing up via Google lose their requested nickname and message for admin review.
+- **Required Action:** Following successful OAuth login in `AuthProvider.jsx`, if `sessionStorage.getItem('is_registering') === 'true'`, immediately submit the pending nickname and admin message via `PATCH /api/aerun/me/profile`, then clear `sessionStorage`.
+
+#### 6. Dead `localStorage` Fallback in `src/api/designs.js`
+- **Problem:** `src/api/designs.js` maintains a complete CRUD fallback in `localStorage` under `aerun_custom_designs` under the claim that "Server has no designs collection yet".
+- **Reality:** Migration `1766600000` created the `designs` collection, and `catalog_designs.go` provides endpoints (`/api/aerun/designs`). However, `importer.go` (L626) skips Firestore `designs`.
+- **Required Action:** Clarify whether custom forum themes from Firestore should be imported. Align `src/api/designs.js` so errors from the server are surfaced rather than masked by silent localStorage diversion.
+
+#### 7. Topic Read States: Aggregate Server Counter vs Client-Only Row Highlighting
+- **Problem:** Migration `1768300000` added `topic_read_states` to calculate total unread topics for `/me/unread-counts`. However, `TopicRow.jsx` determines whether an individual topic has unread posts by reading `readMap[topic.id]` from `localStorage.getItem('aerun_readmap_' + uid)`.
+- **Impact:** If a user logs in from a new computer or clears browser data, `readMap` is empty, causing EVERY topic to appear unread with a new post badge, despite server-side read states.
+- **Required Action:** Expose topic read state in topic listings (e.g. `last_read_at` joined on `topic_read_states`) or provide a `GET /api/aerun/me/topic-read-states` endpoint to hydrate `readMap` upon authentication.
+
+#### 8. Unscoped Reply Draft in `TopicPage.jsx`
+- **Problem:** `TopicPage.jsx` autosaves unsent textarea input under `reply_draft_${id}` without including `user.uid`.
+- **Impact:** If User A types an unposted reply and signs out, User B logging in on the same browser sees User A's unposted text.
+- **Required Action:** Prefix key with `user.uid`: `aerun_reply_draft_${id}_${user?.uid || 'guest'}`.
+
+#### 9. Firebase Dependencies and Cloud Functions Cleanup
+- **Problem:** `package.json` contains `firebase` (^12.10.0) and `firebase-tools` (^15.12.0); `functions/` directory remains in the repository.
+- **Required Action (Sprint 9):** Remove Firebase packages and archive `functions/` upon cutover completion.
+
+---
+
 ## 6. Cutover exporter requirements (Sprint 9 gate)
 
 The rehearsal exporter is explicitly NOT the cutover exporter
@@ -925,22 +1039,28 @@ missing key means failed or skipped. A green report is the authoritative
 external check — local success is not enough. Remember the CRLF lesson:
 new Go files must be LF in the worktree or gofmt fails CI.
 
-## 9. Sprint 8 and Sprint 9 checklists (unchanged scope, not started)
+## 9. Sprint 8 and Sprint 9 checklists (updated 2026-10-06)
 
-**Sprint 8 — VPS production readiness:** domain + DNS + TLS reverse proxy;
-SPF/DKIM/DMARC and SMTP relay credentials; PocketBase as non-root systemd
-service behind Caddy/Nginx (only 80/443 + SSH keys); `pb_data` on local
-encrypted SSD, one active process; encrypted offsite backups, retention,
-disk/RAM/error monitoring, outbox-failure alert; restore drill into an
-isolated environment within the agreed RTO/RPO; dedicated read-only service
-account for any remaining export access; delete the short-lived strip
-service-account key if still present.
+**Sprint 8 — VPS production readiness & asset migration:**
+- [ ] **Infrastructure & Hosting:** domain + DNS + TLS reverse proxy; SPF/DKIM/DMARC and SMTP relay credentials; PocketBase as non-root systemd service behind Caddy/Nginx (only 80/443 + SSH keys); `pb_data` on local encrypted SSD, one active process; encrypted offsite backups, retention, disk/RAM/error monitoring, outbox-failure alert; restore drill into an isolated environment within the agreed RTO/RPO.
+- [ ] **Smiles Asset Rehosting (§5.H.1):** copy smile image assets from `backend/migration-data/storage/smiles/` to `public/smiles/`; rewrite all URLs in `src/config/smiles.js` to local `/smiles/...` paths; add automated test ensuring zero references to `firebasestorage.googleapis.com` remain in frontend code.
+- [ ] **Frontend Storage & Auth Alignment (§5.H.2–5.H.8):**
+  - Fix language key inconsistency in `BBCode.jsx` and `RegisterForm.jsx` (standardize on `localStorage.getItem('language')`).
+  - Fix Google OAuth registration so `pending_nickname` and `pending_message` in `sessionStorage` are patched to the user profile upon first sign-in.
+  - Scope `TopicPage.jsx` unsaved textarea draft key to include user id (`aerun_reply_draft_${id}_${uid}`).
+  - Remove dead Firebase Storage code (`maskAvatarPath`, `newAvatarSlot`) from `ProfilePage.jsx`.
+  - Update `src/utils/auth-errors.js` to map PocketBase errors.
+  - Hydrate `TopicRow.jsx` unread indicators using server-side read states.
+- [ ] **Security & Cleanup:** dedicated read-only service account for any remaining export access; delete short-lived strip service-account key if still present.
 
-**Sprint 9 — Cutover:** announce maintenance; freeze Firebase writes;
-final exports (§6); import the delta into the rehearsed target; automated
-reconciliation + privileged/guest smoke tests; switch frontend config/DNS;
-monitor errors, disk, auth, outbox, realtime; keep Firebase read-only for
-the rollback window, then revoke credentials and archive exports.
+**Sprint 9 — Cutover & Firebase decommissioning:**
+- [ ] **Cutover Execution:** announce maintenance window; freeze Firebase writes (`firestore.rules` and `database.rules.json` to `allow write: false`); final Firestore and Auth export (§6); import delta into rehearsed target; run `recompute-counters`; run `cmd/verify-equivalence` automated reconciliation; run privileged/guest smoke tests.
+- [ ] **DNS & Client Cutover:** switch frontend config/DNS to production VPS; verify realtime SSE streams, auth flows, mail dispatch, and presence.
+- [ ] **Firebase Decommissioning & Teardown (§5.H.9):**
+  - Keep Firebase read-only during the rollback window (7–14 days).
+  - Remove `@firebase/*` and `firebase` dependencies from `package.json`.
+  - Archive or delete `functions/` (Cloud Functions) and `firebase.json` deployment targets.
+  - Revoke Firebase service accounts and terminate Firebase project resources.
 
 ## 10. Explicitly deferred items
 
