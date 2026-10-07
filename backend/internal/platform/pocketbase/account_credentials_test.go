@@ -353,3 +353,50 @@ func TestAuthStateRequiresAuthentication(t *testing.T) {
 		t.Fatalf("a guest must not read credential state, got 200: %s", payload)
 	}
 }
+
+// TestAuthPayloadReportsLiveMailState pins the field the Security tab's
+// forgot-password disclosure branches on.
+//
+// `mail_enabled` must (a) be present as a boolean even when mail is off, so
+// the UI can branch rather than fall back to a guess, and (b) follow the LIVE
+// SMTP settings — flipping settings.SMTP.Enabled without any restart must
+// flip the reported value, otherwise the field is a snapshot of boot time and
+// the tab can promise a link a relabeled deployment will never send (or hide
+// a working one behind the old "this server does not send mail" notice).
+func TestAuthPayloadReportsLiveMailState(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	readMailState := func() (bool, string) {
+		t.Helper()
+		status, payload, _ := categoryCall(t, http.MethodGet, server.URL+"/api/aerun/me/auth", "", tokens["player"], "")
+		if status != http.StatusOK {
+			t.Fatalf("expected 200 reading auth state, got %d: %s", status, payload)
+		}
+		state := decodeAuthPayload(t, payload)
+		got, ok := state["mail_enabled"].(bool)
+		if !ok {
+			t.Fatalf("mail_enabled must be a present boolean, got %v (%s)", state["mail_enabled"], payload)
+		}
+		return got, string(payload)
+	}
+
+	// Baseline: the test app never configures a relay, so the honest answer is
+	// false — a hardcoded `true` here would be the exact bug being pinned.
+	if got, payload := readMailState(); got {
+		t.Fatalf("mail_enabled must be false while SMTP is off: %s", payload)
+	}
+
+	settings := app.Settings()
+	settings.SMTP.Enabled = true
+	if err := app.Save(settings); err != nil {
+		t.Fatalf("failed to enable SMTP settings: %v", err)
+	}
+	if got, payload := readMailState(); !got {
+		t.Fatalf("mail_enabled must follow the live SMTP settings: %s", payload)
+	}
+}

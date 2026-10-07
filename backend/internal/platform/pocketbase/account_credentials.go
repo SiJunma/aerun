@@ -58,6 +58,13 @@ type linkedProvider struct {
 // credentialsPayload is the /me/auth response. `can_unlink_google` is computed
 // on the server rather than left to the client so the guard is one rule: the UI
 // reflects it, and so would any other caller.
+//
+// `mail_enabled` reports whether this deployment actually delivers mail. It is
+// read from the live SMTP settings — which configureSMTP reconciles from
+// AERUN_MAIL_MODE on every boot — rather than from config, so the UI reflects
+// the running server and not a stale assumption. The profile's "forgot
+// password" control branches on it: a real reset link when true, an honest
+// "no mail on this server" notice when false.
 func credentialsPayload(e *core.RequestEvent, record *core.Record, hasPassword bool, providers []linkedProvider) map[string]any {
 	users, err := e.App.FindCollectionByNameOrId(usersCollectionName)
 	googleEnabled := err == nil && users.OAuth2.Enabled && oauthProviderConfigured(users, googleProviderName)
@@ -86,6 +93,7 @@ func credentialsPayload(e *core.RequestEvent, record *core.Record, hasPassword b
 		"email":            record.Email(),
 		"email_verified":   record.Verified(),
 		"has_password":     hasPassword,
+		"mail_enabled":     e.App.Settings().SMTP.Enabled,
 		"google_enabled":   googleEnabled,
 		"google_linked":    googleLinked,
 		"linked_providers": providers,

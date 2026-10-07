@@ -200,8 +200,8 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 		if style := body.ReputationStyle; style != nil && *style != "both" && *style != "positive_only" {
 			return validationError("reputationStyle must be \"both\" or \"positive_only\"")
 		}
-		if n := body.MaxCharsPerPost; n != nil && (*n < 1 || *n > 1_000_000) {
-			return validationError("maxCharsPerPost must be between 1 and 1000000")
+		if n := body.MaxCharsPerPost; n != nil && (*n < 0 || *n > 1_000_000) {
+			return validationError("maxCharsPerPost must be between 0 and 1000000 (0 = unlimited)")
 		}
 		// The three pagination keys are rejected out of range here rather than
 		// left to the field-level Min/Max: a validation error surfaced by Save

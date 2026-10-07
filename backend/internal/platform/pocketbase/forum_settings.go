@@ -131,13 +131,26 @@ func loadForumSettings(app core.App) forumSettings {
 	if v := record.GetString("reputation_style"); v != "" {
 		settings.ReputationStyle = v
 	}
-	if n := record.GetInt("max_chars_per_post"); n > 0 {
+	// 0 is a deliberate admin choice meaning "unlimited" — the label the admin
+	// panel has always shown ("0 = unlimited") and the value the Firestore
+	// legacy export carried. It must survive the read: only an ABSENT column
+	// (a schema older than 1768800000) falls back to the default. GetInt reads
+	// 0 for both shapes, so the field's presence is what disambiguates them.
+	if n := record.GetInt("max_chars_per_post"); n > 0 || unlimitedCharsPerPost(record) {
 		settings.MaxCharsPerPost = n
 	}
 	settings.BgOpacityLight = clampOpacity(record, "bg_opacity_light", 0.5)
 	settings.BgOpacityDark = clampOpacity(record, "bg_opacity_dark", 0.5)
 	settings.BgOpacityNeutral = clampOpacity(record, "bg_opacity_neutral", 0.5)
 	return settings
+}
+
+// unlimitedCharsPerPost reports whether the row's max_chars_per_post column
+// exists and the admin's stored 0 must be honored as "unlimited" rather than
+// collapsed into the default. A schema without the column (a pre-1768800000
+// database) keeps the default: its 0 means "unset", not a choice.
+func unlimitedCharsPerPost(record *core.Record) bool {
+	return record.Collection().Fields.GetByName("max_chars_per_post") != nil
 }
 
 // clampOpacity reads a CSS alpha.

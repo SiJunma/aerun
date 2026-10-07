@@ -150,13 +150,16 @@ func globalSettingsFields() []core.Field {
 		&core.TextField{Name: "default_design_id", Max: 32},
 
 		// --- Limits ----------------------------------------------------
-		// Enforced on every post write, hence a real ceiling. Min is 1: a zero
-		// limit would reject every post and read as a broken forum.
+		// Enforced on every post write, hence a real ceiling. Min is 0: the
+		// admin panel's label promises "0 = unlimited" and 0 is the value the
+		// legacy Firestore export carried. Required must stay FALSE — a
+		// required NumberField rejects 0 as a missing value, which would make
+		// the promised unlimited state impossible to save.
 		&core.NumberField{
 			Name:     "max_chars_per_post",
-			Min:      float64Ptr(1),
+			Min:      float64Ptr(0),
 			Max:      float64Ptr(1_000_000),
-			Required: true,
+			Required: false,
 		},
 	}
 }

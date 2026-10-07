@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Card, Button, Form, Spinner, Alert, ListGroup, Badge } from 'react-bootstrap';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { useToast } from '../../contexts/ToastProvider';
 import { pb } from '../../api/pocketbase';
-import { fetchMyAuthState, changeMyPassword, changeMyEmail, unlinkGoogle } from '../../api/account-credentials';
+import { fetchMyAuthState, changeMyPassword, changeMyEmail, unlinkGoogle, requestMyPasswordReset } from '../../api/account-credentials';
 import { Key, Mail } from 'lucide-react';
 
 // SecurityTab manages the caller's sign-in methods.
@@ -23,12 +24,12 @@ import { Key, Mail } from 'lucide-react';
 const SecurityTab = () => {
   const { user } = useAuth();
   const { t } = useI18n();
+  const { showToast } = useToast();
 
   const [auth, setAuth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -63,13 +64,20 @@ const SecurityTab = () => {
 
   // One place owns the busy flag, the banners and the state refresh, so no
   // action can forget to clear its own spinner or reload the row it changed.
+  //
+  // SUCCESS TRAVELS AS A TOAST, NOT AS A BANNER. The success Alert used to
+  // render at the very top of the card — on the password form that is several
+  // screens of scrolling away from the "Send Reset Link" button the member just
+  // pressed, so the confirmation was effectively invisible. Every other screen
+  // in this app reports outcomes through the shared ToastProvider; this tab now
+  // does the same. Errors stay inline: they belong to a specific form field the
+  // caller must fix, and a toast would be gone before they read it.
   const run = async (key, action, successKey) => {
     setBusy(key);
     setError(null);
-    setSuccess(null);
     try {
       await action();
-      setSuccess(t(successKey));
+      showToast(t(successKey), 'success');
       await load();
       return true;
     } catch (err) {
@@ -144,11 +152,6 @@ const SecurityTab = () => {
         {error && (
           <Alert variant="danger" className="py-2 small fw-bold mb-4">
             {error}
-          </Alert>
-        )}
-        {success && (
-          <Alert variant="success" className="py-2 small fw-bold mb-4">
-            {success}
           </Alert>
         )}
 
@@ -288,16 +291,22 @@ const SecurityTab = () => {
 
           {/* FORGOT THE PASSWORD.
               The reset flow exists and is reachable from the login screen
-              (ForgotPasswordForm), but this server sends NO mail at all:
-              MailHardDisableGuard aborts every send while
-              AERUN_MAIL_MODE=disabled, and run.go clears SMTP on each boot.
+              (ForgotPasswordForm), but whether this deployment ACTUALLY sends
+              mail is a server fact reported by /me/auth as `mail_enabled`
+              (configureSMTP reconciles it from AERUN_MAIL_MODE on every boot).
 
-              So this control must not claim a link is on its way — a reset that
-              silently never arrives is worse than no reset at all, because the
-              member waits for a mail that cannot come. It says plainly what is
-              true instead, and points at the two routes that actually work
-              without mail: signing in with Google, or an administrator setting a
-              new one. It only appears when the account actually HAS a password,
+              With mail off, MailHardDisableGuard aborts every send, so the
+              disclosure must not claim a link is on its way — a reset that
+              silently never arrives is worse than no reset at all. It says
+              plainly what is true instead, and points at the two routes that
+              work without mail: signing in with Google, or an administrator
+              setting a new one.
+
+              With mail on, the same disclosure issues the real request — to
+              the address the server already holds for this account, never a
+              typed one — and only then may say the link was sent.
+
+              It only appears when the account actually HAS a password,
               because that is the only case where somebody can have forgotten it. */}
           {auth?.hasPassword && (
             <div className="mt-3 pt-3 border-top">
@@ -310,9 +319,32 @@ const SecurityTab = () => {
                 {t('profile.auth_forgot_password')}
               </Button>
 
-              {forgotOpen && (
+              {forgotOpen && !auth?.mailEnabled && (
                 <Alert variant="warning" className="py-2 small mt-2 mb-0 text-start">
                   {t('profile.auth_reset_mail_disabled')}
+                </Alert>
+              )}
+
+              {forgotOpen && auth?.mailEnabled && (
+                <Alert variant="info" className="py-2 small mt-2 mb-0 text-start">
+                  <div className="mb-2">
+                    {t('profile.auth_reset_mail_hint')}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline-primary"
+                    className="fw-bold"
+                    disabled={busy === 'reset-mail'}
+                    onClick={() =>
+                      run(
+                        'reset-mail',
+                        () => requestMyPasswordReset(auth.email),
+                        'profile.auth_reset_sent'
+                      )
+                    }
+                  >
+                    {busy === 'reset-mail' ? <Spinner size="sm" animation="border" /> : t('auth.send_reset_link')}
+                  </Button>
                 </Alert>
               )}
             </div>

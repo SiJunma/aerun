@@ -128,17 +128,24 @@ for (const key of [
   assert.equal(hits, 2, `${key} must exist in both en and ru, found ${hits}`);
 }
 
-// ── "Forgot password" must not promise a mail this server cannot send ───────
+// ── "Forgot password" must tell the truth about this server's mail ───────────
 //
-// The reset flow is real and reachable from the login screen, but MailHardDisable
-// Guard aborts every send while AERUN_MAIL_MODE=disabled, and run.go clears SMTP
-// on every boot. So the Security tab's control is allowed to exist — a member who
-// has forgotten their password needs somewhere to be told what is actually true —
-// and it is NOT allowed to claim a link is on its way.
+// The reset flow is real and reachable from the login screen, and whether mail
+// actually LEAVES this server is a server fact: /me/auth reports
+// `mail_enabled`, which configureSMTP reconciles from AERUN_MAIL_MODE on every
+// boot. Two branches, two truths:
 //
-// This is the failure mode worth pinning: a control that returns 204 and says
-// "check your inbox" teaches members that the forum's mail works, and it is the
-// exact claim that sends someone away waiting for a message that can never exist.
+//   - mail off → MailHardDisableGuard aborts every send, so the disclosure may
+//     exist (a member who has forgotten their password needs somewhere to be
+//     told what is actually true) but must NOT claim a link is on its way.
+//     That is the failure mode worth pinning: a control that returns 204 and
+//     says "check your inbox" teaches members that the forum's mail works, and
+//     it is the exact claim that sends someone away waiting for a message that
+//     can never exist.
+//
+//   - mail on → the disclosure must issue the real request (to the address the
+//     server already holds for the account, never a typed one) and only then
+//     may say the link was sent.
 assert.match(
   tab,
   /auth_reset_mail_disabled/,
@@ -149,10 +156,35 @@ assert.match(
   /auth_reset_mail_disabled:[^\n]*(does not send mail|не отправляет письма)/,
   'the reset notice must say the server does not send mail — in both languages'
 );
+assert.match(
+  tab,
+  /!auth\?\.mailEnabled/,
+  'the no-mail notice must be gated on the server-reported mail state'
+);
+assert.match(
+  tab,
+  /auth\?\.mailEnabled/,
+  'the real reset request must be gated on the server-reported mail state'
+);
+assert.match(
+  api,
+  /requestMyPasswordReset/,
+  'the tab must be able to request a real reset link when mail works'
+);
+assert.match(
+  tab,
+  /requestMyPasswordReset\(auth\.email\)/,
+  'the reset must go to the fetched account address, never a typed one'
+);
+assert.match(
+  dict,
+  /auth_reset_sent:[^\n]*(check your inbox|проверьте почту)/,
+  'the sent confirmation must say the mail went out — in both languages'
+);
 assert.ok(
   !/auth\.reset_link_sent/.test(tab),
   'SecurityTab must not reuse the login screen\'s "reset link sent!" string: that one is ' +
-    'only truthful if mail actually leaves the server, and here it cannot'
+    'the login screen\'s own wording, and the profile needs its own message'
 );
 // It must appear only where forgetting is possible: an account with no password
 // has nothing to forget.
@@ -163,4 +195,4 @@ assert.match(
 );
 
 console.log('OK  security tab: real state, command-layer writes, unlink guard');
-console.log('OK  forgot password: honest about mail, never claims an unsendable link');
+console.log('OK  forgot password: branches on the server-reported mail state, never lies either way');

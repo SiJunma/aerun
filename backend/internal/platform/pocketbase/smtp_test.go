@@ -111,6 +111,55 @@ func TestConfigureSMTPIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestConfigureSMTPKeepsDashboardCredentials pins the ownership rule: once the
+// operator configured the relay through the PocketBase admin UI, the environment
+// must never overwrite it — a stale env file must not silently roll a rotated
+// credential back on the next restart.
+func TestConfigureSMTPKeepsDashboardCredentials(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// First boot: env seeds the relay.
+	if err := configureSMTP(app, smtpTestConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The operator rotates the credentials in the dashboard.
+	settings := app.Settings()
+	settings.SMTP.Username = "b8cebf001@smtp-brevo.com"
+	settings.SMTP.Password = "rotated-secret"
+	settings.SMTP.Port = 465
+	settings.Meta.SenderAddress = "noreply@aerun-world.com"
+	if err := app.Save(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next restart carries a stale (or even different) env relay.
+	stale := smtpTestConfig()
+	stale.SMTPHost = "smtp-relay.example.net"
+	stale.SMTPPort = 2525
+	stale.SMTPUsername = "postmaster"
+	stale.SMTPPassword = "old-secret"
+	if err := configureSMTP(app, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	settings = app.Settings()
+	if settings.SMTP.Username != "b8cebf001@smtp-brevo.com" || settings.SMTP.Password != "rotated-secret" {
+		t.Fatalf("dashboard credentials must survive a restart, got username=%q", settings.SMTP.Username)
+	}
+	if settings.SMTP.Host != "smtp-relay.example.com" || settings.SMTP.Port != 465 {
+		t.Fatalf("dashboard endpoint edits must survive a restart, got %s:%d",
+			settings.SMTP.Host, settings.SMTP.Port)
+	}
+	if settings.Meta.SenderAddress != "noreply@aerun-world.com" {
+		t.Fatalf("dashboard sender address must survive a restart, got %q", settings.Meta.SenderAddress)
+	}
+	if !settings.SMTP.Enabled {
+		t.Fatal("smtp mode must keep SMTP enabled across restarts")
+	}
+}
+
 // TestOutboxDispatchesOnlyWhenSMTPEnabled pins the ADR-6 boundary against the new
 // capability: with SMTP off the outbox must leave rows untouched, and with it on
 // the worker must at least be reached (it is allowed to fail against a relay

@@ -20,6 +20,13 @@ package pocketbase
 //     disabled mode, so an operator who enables SMTP in the dashboard while the
 //     mode is "disabled" still gets it switched back off.
 //
+// WHO OWNS THE RELAY CREDENTIALS. The PocketBase settings row does — the admin
+// dashboard is the operator's surface, and env values only SEED the fields a
+// first boot finds empty. Rotation therefore never touches code or env files:
+// change the credentials in the dashboard (and in the relay provider), restart
+// nothing. The reverse is also true — stale credentials in the environment
+// cannot clobber what the dashboard holds.
+//
 // The reconcile lives in OnServe rather than in a migration for exactly the
 // reason configureOAuth2 documents: credentials are environment state, and a
 // migration runs once — a relay rotated after the first boot would otherwise be
@@ -41,32 +48,32 @@ const MailModeSMTP = "smtp"
 // configureSMTP reconciles PocketBase's SMTP settings and mail metadata with
 // the deployment environment on every startup.
 //
-// Everything it owns is environment state: the relay host/port/credentials, the
-// TLS and AUTH choices, and the From identity. None of it belongs in a
-// migration, and all of it would otherwise be reachable only through the admin
-// dashboard — a second configuration surface that drifts from the environment
-// and, on a VPS restart, from the systemd unit that actually defines the
-// deployment.
+// It owns two different things in two different ways:
 //
-// The disabled mode is handled here too rather than only in OnBootstrap: it
-// clears the host and credentials as well as the flag, so switching a deployment
-// from "smtp" to "disabled" does not leave a live relay password in pb_data.
+//   - The MODE is environmental: "disabled" always wins and wipes the relay
+//     (no live relay password may linger in pb_data while mail is off), "smtp"
+//     always turns the Enabled flag on.
+//   - The relay credentials themselves are POCKETBASE state. The environment
+//     only seeds fields the stored settings leave empty — a first boot, or the
+//     wipe a disabled stretch performed. The admin dashboard is the operator's
+//     surface for them afterwards, and its values survive every restart.
+//
+// Nothing here belongs in a migration: both the mode and a first relay seed are
+// environment state, and a migration runs once — a relay supplied after the
+// initial boot would otherwise be stranded in pb_data until the next schema
+// change.
 func configureSMTP(app core.App, cfg config.Config) error {
 	settings := app.Settings()
 
-	// Sender identity first: verification, password reset and the outbox worker
-	// all read Meta.SenderAddress, and a wrong value there is the difference
-	// between a mail that is delivered and one rejected by SPF.
-	//
 	// AppName is the brand every auth template shows through {APP_NAME} at send
 	// time, so it is read from forum_settings.forum_name — the row the admin
 	// panel edits — rather than from any literal here. Renaming the forum
 	// updates Meta on the next settings write (see updateGlobalSettingsHandler)
 	// and the very next mail carries the new name, no restart involved.
+	// The sender identity is seeded below, per mode: in smtp mode it follows the
+	// same dashboard-is-truth rule as the relay credentials.
 	settings.Meta.AppName = forumName(app, "en")
 	settings.Meta.AppURL = cfg.PublicURL
-	settings.Meta.SenderName = mailSenderName(cfg, settings.Meta.AppName)
-	settings.Meta.SenderAddress = mailSenderAddress(cfg)
 
 	if cfg.MailMode != MailModeSMTP {
 		settings.SMTP.Enabled = false
@@ -74,6 +81,12 @@ func configureSMTP(app core.App, cfg config.Config) error {
 		settings.SMTP.Port = 0
 		settings.SMTP.Username = ""
 		settings.SMTP.Password = ""
+		// The .invalid sender is what keeps a disabled deployment undeliverable
+		// even if something ever bypassed the MailHardDisableGuard.
+		settings.Meta.SenderAddress = "no-reply@aerun.invalid"
+		if settings.Meta.SenderName == "" {
+			settings.Meta.SenderName = mailSenderName(cfg, settings.Meta.AppName)
+		}
 		if err := app.Save(settings); err != nil {
 			return fmt.Errorf("save mail settings: %w", err)
 		}
@@ -84,30 +97,82 @@ func configureSMTP(app core.App, cfg config.Config) error {
 	}
 
 	settings.SMTP.Enabled = true
-	settings.SMTP.Host = cfg.SMTPHost
-	settings.SMTP.Port = cfg.SMTPPort
-	settings.SMTP.Username = cfg.SMTPUsername
-	settings.SMTP.Password = cfg.SMTPPassword
-	settings.SMTP.TLS = cfg.SMTPTLS
-	settings.SMTP.AuthMethod = strings.ToUpper(cfg.SMTPAuthMethod)
+
+	// THE DASHBOARD IS THE SOURCE OF TRUTH, NOT THE ENVIRONMENT. From here on
+	// the environment only SEEDS values the stored settings do not have yet —
+	// a first boot, or a mode that was "disabled" (which deliberately wipes the
+	// relay, see the branch above). Whatever the operator configured through
+	// the PocketBase admin UI survives every restart: credential rotation
+	// happens in the Brevo dashboard + this settings form, never in code or
+	// env files, and a redeploy can no longer silently roll it back.
+	//
+	// The env values are therefore a convenience for the very first boot only.
+	// Once set, they are dead weight — and stale ones are harmless for exactly
+	// that reason.
+	// NOTE ON "EMPTY". A fresh PocketBase settings row is not empty: PB ships
+	// placeholder defaults (core/settings_model.go: SMTP.Host
+	// "smtp.example.com", Port 587). They are indistinguishable from an
+	// operator's choice by emptiness alone, so the PB-blessed placeholder host
+	// counts as unset too — nobody configures a real relay at smtp.example.com.
+	// Host and Port are seeded together for the same reason: 587 is PB's
+	// placeholder port, so port emptiness cannot be judged on its own.
+	hostUnset := settings.SMTP.Host == "" || settings.SMTP.Host == "smtp.example.com"
+	if hostUnset {
+		settings.SMTP.Host = cfg.SMTPHost
+		settings.SMTP.Port = cfg.SMTPPort
+	}
+	if settings.SMTP.Username == "" {
+		settings.SMTP.Username = cfg.SMTPUsername
+	}
+	if settings.SMTP.Password == "" {
+		settings.SMTP.Password = cfg.SMTPPassword
+	}
+	if settings.SMTP.AuthMethod == "" {
+		settings.SMTP.AuthMethod = strings.ToUpper(cfg.SMTPAuthMethod)
+	}
+	// TLS is a bool with no "unset" state, so it seeds one-way: the environment
+	// may switch it ON, but never back off — the dashboard remains the only
+	// place TLS can be disabled.
+	if cfg.SMTPTLS {
+		settings.SMTP.TLS = true
+	}
 	// LocalName is the EHLO/HELO name. Leaving it empty makes PocketBase send
 	// "localhost", which several relays (Gmail among them) refuse outright; the
 	// deployment's public host is the correct value in every real case.
-	settings.SMTP.LocalName = smtpLocalName(cfg)
+	if settings.SMTP.LocalName == "" {
+		settings.SMTP.LocalName = smtpLocalName(cfg)
+	}
+	// The From identity: the same dashboard-is-truth rule. A wrong SenderAddress
+	// is the difference between a delivered mail and one rejected by SPF/DKIM,
+	// so the operator fixes it where they fix everything else — the settings
+	// form — and the environment only fills the gap of a first boot.
+	// PocketBase's own defaults ("Support" / "support@example.com",
+	// settings_model.go) count as unset here, for the same placeholder reason
+	// as the SMTP host above.
+	senderUnset := settings.Meta.SenderAddress == "" ||
+		settings.Meta.SenderAddress == "no-reply@aerun.invalid" ||
+		settings.Meta.SenderAddress == "support@example.com"
+	if senderUnset {
+		settings.Meta.SenderAddress = mailSenderAddress(cfg)
+	}
+	if settings.Meta.SenderName == "" || settings.Meta.SenderName == "Support" {
+		settings.Meta.SenderName = mailSenderName(cfg, settings.Meta.AppName)
+	}
 
 	if err := app.Save(settings); err != nil {
 		return fmt.Errorf("save mail settings: %w", err)
 	}
 
-	// Only non-secret facts are logged. The password never appears: it exists in
-	// the environment and in the settings row, and nowhere else.
+	// Only non-secret facts are logged, and they come from the EFFECTIVE
+	// settings row rather than from the env, because env values may be stale
+	// once the dashboard owns the credentials. The password never appears.
 	app.Logger().Info("outgoing email enabled",
-		"host", cfg.SMTPHost,
-		"port", cfg.SMTPPort,
-		"auth", strings.ToUpper(cfg.SMTPAuthMethod),
-		"tls", cfg.SMTPTLS,
-		"username", cfg.SMTPUsername,
-		"sender", mailSenderAddress(cfg))
+		"host", settings.SMTP.Host,
+		"port", settings.SMTP.Port,
+		"auth", settings.SMTP.AuthMethod,
+		"tls", settings.SMTP.TLS,
+		"username", settings.SMTP.Username,
+		"sender", settings.Meta.SenderAddress)
 	return nil
 }
 

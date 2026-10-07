@@ -1,4 +1,4 @@
-import { sendApi } from './pocketbase';
+import { pb, sendApi } from './pocketbase';
 
 /**
  * Account sign-in credentials.
@@ -28,6 +28,11 @@ export const fetchMyAuthState = async () => {
     email: res?.email || '',
     emailVerified: !!res?.email_verified,
     hasPassword: !!res?.has_password,
+    // mailEnabled is the server's own statement that SMTP is reconciled and on.
+    // The "forgot password" disclosure branches on it: a real reset request
+    // when true, the honest "no mail on this server" notice when false — the
+    // same rule can_unlink_google follows, never a client-side guess.
+    mailEnabled: !!res?.mail_enabled,
     googleEnabled: !!res?.google_enabled,
     googleLinked: !!res?.google_linked,
     canUnlinkGoogle: !!res?.can_unlink_google,
@@ -57,6 +62,21 @@ export const changeMyEmail = async ({ email, currentPassword }) => {
   const body = { email };
   if (currentPassword) body.current_password = currentPassword;
   await sendApi('/api/aerun/me/email', { method: 'PATCH', body });
+};
+
+/**
+ * requestMyPasswordReset asks for a reset link to `email`.
+ *
+ * This is PocketBase's own public endpoint — the one the login screen's
+ * ForgotPasswordForm already uses — so it inherits the server's rate limit and
+ * its anti-enumeration behaviour (204 whether or not the address exists).
+ * The Security tab passes the CALLER's address, taken from the fetched auth
+ * state rather than a form field: the member already proved which account they
+ * are, and a typed address here would only add a way to reset somebody else's
+ * password from a hijacked session.
+ */
+export const requestMyPasswordReset = async (email) => {
+  await pb.collection('users').requestPasswordReset(email);
 };
 
 /**

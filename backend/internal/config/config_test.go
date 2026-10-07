@@ -59,9 +59,9 @@ func TestLoadMailModes(t *testing.T) {
 
 	cfgSMTP, err := Load(envGetter(map[string]string{
 		"AERUN_MAIL_MODE":           "smtp",
-		"AERUN_SMTP_HOST":           "smtp-relay.example.com",
+		"AERUN_SMTP_HOST":           "smtp-relay.brevo.com",
 		"AERUN_SMTP_PORT":           "587",
-		"AERUN_MAIL_SENDER_ADDRESS": "no-reply@aerun.example",
+		"AERUN_MAIL_SENDER_ADDRESS": "noreply@aerun-world.com",
 	}))
 	if err != nil {
 		t.Fatalf("a complete smtp mail mode must load: %v", err)
