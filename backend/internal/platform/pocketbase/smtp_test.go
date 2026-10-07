@@ -160,6 +160,53 @@ func TestConfigureSMTPKeepsDashboardCredentials(t *testing.T) {
 	}
 }
 
+// TestConfigureSMTPDashboardLeavesEnabledToTheAdminUI pins the dashboard mode:
+// the Enabled flag and the relay belong to the PocketBase admin UI, and the
+// environment only seeds fields the UI has not filled yet. This is what makes
+// a fresh install need no code or env edits — the forum boots, the operator
+// turns email on in Settings > Mail settings, and no restart undoes it.
+func TestConfigureSMTPDashboardLeavesEnabledToTheAdminUI(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// A dashboard-mode boot with a full env relay seeds nothing that is already
+	// set and must NOT force the flag on.
+	dash := smtpTestConfig()
+	dash.MailMode = MailModeDashboard
+	if err := configureSMTP(app, dash); err != nil {
+		t.Fatal(err)
+	}
+	settings := app.Settings()
+	if settings.SMTP.Enabled {
+		t.Fatal("dashboard mode must not force SMTP on; the admin UI owns the flag")
+	}
+	if settings.SMTP.Host != "smtp.example.com" {
+		t.Fatalf("dashboard mode must not edit the stored settings (PB ships its own placeholder host), got host=%q", settings.SMTP.Host)
+	}
+
+	// The operator enables and configures the relay in the admin UI.
+	settings.SMTP.Enabled = true
+	settings.SMTP.Host = "smtp-relay.example.com"
+	settings.SMTP.Port = 587
+	settings.SMTP.Username = "b8cebf001@smtp-brevo.com"
+	settings.SMTP.Password = "ui-secret"
+	if err := app.Save(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restart: the dashboard configuration must survive untouched.
+	if err := configureSMTP(app, dash); err != nil {
+		t.Fatal(err)
+	}
+	settings = app.Settings()
+	if !settings.SMTP.Enabled {
+		t.Fatal("dashboard mode must keep the UI-enabled flag on across restarts")
+	}
+	if settings.SMTP.Username != "b8cebf001@smtp-brevo.com" || settings.SMTP.Password != "ui-secret" {
+		t.Fatalf("dashboard mode must keep the UI credentials, got username=%q", settings.SMTP.Username)
+	}
+}
+
 // TestOutboxDispatchesOnlyWhenSMTPEnabled pins the ADR-6 boundary against the new
 // capability: with SMTP off the outbox must leave rows untouched, and with it on
 // the worker must at least be reached (it is allowed to fail against a relay

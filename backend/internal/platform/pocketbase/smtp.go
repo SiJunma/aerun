@@ -43,7 +43,16 @@ import (
 
 // MailModeSMTP is the MailMode value that enables real delivery. Mirrors the
 // config package's accepted values without importing a second constant.
-const MailModeSMTP = "smtp"
+const (
+	MailModeSMTP     = "smtp"
+	// MailModeDashboard leaves the Enabled flag and the relay credentials to
+	// the PocketBase admin UI: the default install mode, where email works as
+	// soon as the operator fills Settings > Mail settings — no env, no code.
+	MailModeDashboard = "dashboard"
+	// MailModeDisabled is the explicit hard-off. Only this mode binds the
+	// MailHardDisableGuard and wipes the relay from pb_data.
+	MailModeDisabled  = "disabled"
+)
 
 // configureSMTP reconciles PocketBase's SMTP settings and mail metadata with
 // the deployment environment on every startup.
@@ -75,7 +84,7 @@ func configureSMTP(app core.App, cfg config.Config) error {
 	settings.Meta.AppName = forumName(app, "en")
 	settings.Meta.AppURL = cfg.PublicURL
 
-	if cfg.MailMode != MailModeSMTP {
+	if cfg.MailMode == MailModeDisabled || cfg.MailMode == "" {
 		settings.SMTP.Enabled = false
 		settings.SMTP.Host = ""
 		settings.SMTP.Port = 0
@@ -92,30 +101,62 @@ func configureSMTP(app core.App, cfg config.Config) error {
 		}
 		app.Logger().Info("outgoing email is disabled",
 			"mode", cfg.MailMode,
-			"reason", "AERUN_MAIL_MODE is not smtp; verification, reset and outbox mail are queued, not sent")
+			"reason", "AERUN_MAIL_MODE is disabled; verification, reset and outbox mail are queued, not sent")
+		return nil
+	}
+
+	// Dashboard mode: the operator turns email on in the PocketBase admin UI.
+	// The environment does NOT touch the stored settings at all — not even as a
+	// seed — because the whole point of the mode is that Settings > Mail
+	// settings is the single owner of both the Enabled flag and the relay
+	// credentials. A relay that is not configured yet simply fails at the
+	// connection when a send is attempted, which the senders report; it is a
+	// dashboard concern, never a boot error and never a veto from here.
+	if cfg.MailMode == MailModeDashboard {
+		app.Logger().Info("outgoing email is dashboard-managed",
+			"mode", cfg.MailMode,
+			"enabled", settings.SMTP.Enabled,
+			"reason", "configure the relay in Settings > Mail settings; the environment never edits mail settings in this mode")
 		return nil
 	}
 
 	settings.SMTP.Enabled = true
+	seedRelayFromEnv(app, cfg, settings)
 
-	// THE DASHBOARD IS THE SOURCE OF TRUTH, NOT THE ENVIRONMENT. From here on
-	// the environment only SEEDS values the stored settings do not have yet —
-	// a first boot, or a mode that was "disabled" (which deliberately wipes the
-	// relay, see the branch above). Whatever the operator configured through
-	// the PocketBase admin UI survives every restart: credential rotation
-	// happens in the Brevo dashboard + this settings form, never in code or
-	// env files, and a redeploy can no longer silently roll it back.
-	//
-	// The env values are therefore a convenience for the very first boot only.
-	// Once set, they are dead weight — and stale ones are harmless for exactly
-	// that reason.
-	// NOTE ON "EMPTY". A fresh PocketBase settings row is not empty: PB ships
-	// placeholder defaults (core/settings_model.go: SMTP.Host
-	// "smtp.example.com", Port 587). They are indistinguishable from an
-	// operator's choice by emptiness alone, so the PB-blessed placeholder host
-	// counts as unset too — nobody configures a real relay at smtp.example.com.
-	// Host and Port are seeded together for the same reason: 587 is PB's
-	// placeholder port, so port emptiness cannot be judged on its own.
+	// Only non-secret facts are logged, and they come from the EFFECTIVE
+	// settings row rather than from the env, because env values may be stale
+	// once the dashboard owns the credentials. The password never appears.
+	app.Logger().Info("outgoing email enabled",
+		"host", settings.SMTP.Host,
+		"port", settings.SMTP.Port,
+		"auth", settings.SMTP.AuthMethod,
+		"tls", settings.SMTP.TLS,
+		"username", settings.SMTP.Username,
+		"sender", settings.Meta.SenderAddress)
+	return nil
+}
+
+// seedRelayFromEnv fills ONLY the relay fields the stored settings leave
+// unset — a first boot, or the wipe a disabled stretch performed — then saves.
+// It is shared by the smtp and dashboard modes; the difference between them is
+// who owns settings.SMTP.Enabled, decided by the callers.
+//
+// THE DASHBOARD IS THE SOURCE OF TRUTH, NOT THE ENVIRONMENT. Whatever the
+// operator configured through the PocketBase admin UI survives every restart:
+// credential rotation happens in the relay dashboard + this settings form,
+// never in code or env files, and a redeploy can no longer silently roll it
+// back. The env values are therefore a convenience for the very first boot
+// only; once set, they are dead weight — and stale ones are harmless for
+// exactly that reason.
+//
+// NOTE ON "EMPTY". A fresh PocketBase settings row is not empty: PB ships
+// placeholder defaults (core/settings_model.go: SMTP.Host "smtp.example.com",
+// Port 587). They are indistinguishable from an operator's choice by emptiness
+// alone, so the PB-blessed placeholder host counts as unset too — nobody
+// configures a real relay at smtp.example.com. Host and Port are seeded
+// together for the same reason: 587 is PB's placeholder port, so port
+// emptiness cannot be judged on its own.
+func seedRelayFromEnv(app core.App, cfg config.Config, settings *core.Settings) error {
 	hostUnset := settings.SMTP.Host == "" || settings.SMTP.Host == "smtp.example.com"
 	if hostUnset {
 		settings.SMTP.Host = cfg.SMTPHost
@@ -162,17 +203,6 @@ func configureSMTP(app core.App, cfg config.Config) error {
 	if err := app.Save(settings); err != nil {
 		return fmt.Errorf("save mail settings: %w", err)
 	}
-
-	// Only non-secret facts are logged, and they come from the EFFECTIVE
-	// settings row rather than from the env, because env values may be stale
-	// once the dashboard owns the credentials. The password never appears.
-	app.Logger().Info("outgoing email enabled",
-		"host", settings.SMTP.Host,
-		"port", settings.SMTP.Port,
-		"auth", settings.SMTP.AuthMethod,
-		"tls", settings.SMTP.TLS,
-		"username", settings.SMTP.Username,
-		"sender", settings.Meta.SenderAddress)
 	return nil
 }
 

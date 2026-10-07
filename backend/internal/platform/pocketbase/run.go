@@ -101,10 +101,13 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 	// Bound ONLY in the disabled mode. It was unconditional until Sprint 8,
 	// which is why a configured relay could never deliver anything: the guard
 	// returned 503 for every message regardless of AERUN_MAIL_MODE, so
-	// switching the mode to "smtp" changed nothing. In smtp mode there is
-	// nothing to guard against — the operator opted in explicitly, and
-	// config.Validate has already refused to boot on an incomplete relay.
-	if cfg.MailMode != MailModeSMTP {
+	// switching the mode changed nothing. In "smtp" and "dashboard" modes
+	// there is nothing to guard against: smtp opted in explicitly (and
+	// config.Validate refused to boot on an incomplete relay), dashboard
+	// makes the PocketBase admin UI the operator's surface — a relay that is
+	// not configured yet simply fails at the connection, which the senders
+	// report, rather than being vetoed here.
+	if cfg.MailMode == MailModeDisabled {
 		pb.OnMailerSend().BindFunc(MailHardDisableGuard())
 	}
 
@@ -122,6 +125,11 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		// second half of why email could never work. In "disabled" mode
 		// configureSMTP clears the flag anyway, and this hook still resets it
 		// before the first OnServe so nothing can send during startup.
+		// In "disabled" mode configureSMTP clears the flag anyway, and this hook
+		// still resets it before the first OnServe so nothing can send during
+		// startup. In "dashboard" mode the flag BELONGS to the admin UI — the
+		// whole point of the mode is that the operator turns email on there —
+		// so it must not be forced off here either.
 		settings := pb.Settings()
 		settings.Meta.AppName = "Aerun"
 		settings.Meta.AppURL = cfg.PublicURL
@@ -131,7 +139,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if settings.Meta.SenderName == "" {
 			settings.Meta.SenderName = "Aerun"
 		}
-		if cfg.MailMode != MailModeSMTP {
+		if cfg.MailMode == MailModeDisabled {
 			settings.SMTP.Enabled = false
 		}
 		return pb.Save(settings)

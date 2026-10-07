@@ -19,7 +19,10 @@ type Config struct {
 	// EncryptionKeySet reports that a 32-byte AERUN_ENCRYPTION_KEY was provided.
 	// The value itself never leaves config; Validate re-checks via the getter.
 	EncryptionKeySet bool
-	// MailMode defines email delivery mode: "disabled" (explicit no-SMTP) or "smtp".
+	// MailMode defines email delivery mode: "dashboard" (default; the relay is
+	// configured in the PocketBase admin UI and survives restarts), "smtp"
+	// (relay forced from the environment, validated at startup) or "disabled"
+	// (explicit no-SMTP hard off).
 	MailMode string
 	// SMTPHost, SMTPPort, SMTPUsername, SMTPPassword and SMTPAuthMethod are the
 	// relay credentials. They are only read when MailMode is "smtp", and the
@@ -58,9 +61,13 @@ func Validate(cfg Config, get func(string) string) error {
 	if cfg.Environment != "local" && cfg.Environment != "production" {
 		return fmt.Errorf("AERUN_ENV must be local or production")
 	}
-	mailMode := value("AERUN_MAIL_MODE", "disabled", get)
-	if mailMode != "disabled" && mailMode != "smtp" {
-		return fmt.Errorf("AERUN_MAIL_MODE must be \"disabled\" or \"smtp\"")
+	// "dashboard" is the DEFAULT so a fresh install never requires code or env
+	// edits: the forum boots, and the operator turns email on in the PocketBase
+	// admin UI (Settings > Mail settings). The dashboard is the source of truth
+	// for both the Enabled flag and the relay credentials in this mode.
+	mailMode := value("AERUN_MAIL_MODE", "dashboard", get)
+	if mailMode != "disabled" && mailMode != "smtp" && mailMode != "dashboard" {
+		return fmt.Errorf("AERUN_MAIL_MODE must be \"disabled\", \"dashboard\" or \"smtp\"")
 	}
 	// With the mode switch alone, "smtp" would start a relay-less mailer: the
 	// process would report email as configured while every send failed, and the
@@ -127,7 +134,7 @@ func Load(get func(string) string) (Config, error) {
 		Listen:      value("AERUN_LISTEN", "127.0.0.1:8090"),
 		DataDir:     value("AERUN_DATA_DIR", "./pb_data"),
 		PublicURL:   value("AERUN_PUBLIC_URL", "http://127.0.0.1:8090"),
-		MailMode:    value("AERUN_MAIL_MODE", "disabled"),
+		MailMode:    value("AERUN_MAIL_MODE", "dashboard"),
 	}
 	// SMTP relay settings. PLAIN is PocketBase's own default when the field is
 	// empty (core.SMTPConfig.Validate documents the fallback), so an unset

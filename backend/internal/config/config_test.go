@@ -69,6 +69,27 @@ func TestLoadMailModes(t *testing.T) {
 	if cfgSMTP.MailMode != "smtp" {
 		t.Fatalf("expected smtp mail mode, got %q", cfgSMTP.MailMode)
 	}
+
+	// "dashboard" is the default so a fresh install never needs code or env
+	// edits: no relay is required to boot, the operator configures mail in the
+	// PocketBase admin UI.
+	cfgDashboard, err := Load(envGetter(map[string]string{"AERUN_MAIL_MODE": "dashboard"}))
+	if err != nil {
+		t.Fatalf("dashboard mail mode must load without any relay: %v", err)
+	}
+	if cfgDashboard.MailMode != "dashboard" {
+		t.Fatalf("expected dashboard mail mode, got %q", cfgDashboard.MailMode)
+	}
+	cfgDefault, err := Load(envGetter(map[string]string{}))
+	if err != nil {
+		t.Fatalf("an unset mail mode must load: %v", err)
+	}
+	if cfgDefault.MailMode != "dashboard" {
+		t.Fatalf("unset AERUN_MAIL_MODE must default to dashboard, got %q", cfgDefault.MailMode)
+	}
+	if _, err := Load(envGetter(map[string]string{"AERUN_MAIL_MODE": "bogus"})); err == nil {
+		t.Fatal("an unknown mail mode must be rejected, got nil")
+	}
 }
 
 func TestLoadProductionRequiresExplicitOriginsAndKey(t *testing.T) {
