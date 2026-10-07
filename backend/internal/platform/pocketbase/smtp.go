@@ -44,14 +44,14 @@ import (
 // MailModeSMTP is the MailMode value that enables real delivery. Mirrors the
 // config package's accepted values without importing a second constant.
 const (
-	MailModeSMTP     = "smtp"
+	MailModeSMTP = "smtp"
 	// MailModeDashboard leaves the Enabled flag and the relay credentials to
 	// the PocketBase admin UI: the default install mode, where email works as
 	// soon as the operator fills Settings > Mail settings — no env, no code.
 	MailModeDashboard = "dashboard"
 	// MailModeDisabled is the explicit hard-off. Only this mode binds the
 	// MailHardDisableGuard and wipes the relay from pb_data.
-	MailModeDisabled  = "disabled"
+	MailModeDisabled = "disabled"
 )
 
 // configureSMTP reconciles PocketBase's SMTP settings and mail metadata with

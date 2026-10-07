@@ -124,9 +124,21 @@ func TestUpdateGlobalSettingsValidatesBounds(t *testing.T) {
 		t.Fatalf("expected 400 for out-of-bounds topicsPerPage, got %d", status)
 	}
 
-	// maxCharsPerPost out of bounds (0)
-	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings", `{"maxCharsPerPost":0}`, tokens["root"], "test-idem-settings-chars")
+	// maxCharsPerPost: 0 means "unlimited" since migration 1769000000 and must
+	// be ACCEPTED. This assertion used to expect 400 for 0 and went stale when
+	// the lower bound was deliberately dropped to 0 — the handler's bounds
+	// check is `*n < 0 || *n > 1_000_000`, so the cases that remain refused
+	// are negative and above the hard ceiling, and both are pinned below.
+	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings", `{"maxCharsPerPost":0}`, tokens["root"], "test-idem-settings-chars-zero")
+	if status != http.StatusOK {
+		t.Fatalf("0 maxCharsPerPost must be accepted as unlimited, got %d", status)
+	}
+	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings", `{"maxCharsPerPost":-1}`, tokens["root"], "test-idem-settings-chars-negative")
 	if status != http.StatusBadRequest {
-		t.Fatalf("expected 400 for 0 maxCharsPerPost, got %d", status)
+		t.Fatalf("expected 400 for negative maxCharsPerPost, got %d", status)
+	}
+	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings", `{"maxCharsPerPost":1000001}`, tokens["root"], "test-idem-settings-chars-over")
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected 400 for over-ceiling maxCharsPerPost, got %d", status)
 	}
 }
