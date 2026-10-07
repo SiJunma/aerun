@@ -182,7 +182,7 @@ const CategoryPage = () => {
           <h2 className="mb-1">{categoryTitle}</h2>
           {!category ? (
             <Skeleton width={250} height="1rem" className="mt-2" />
-          ) : category.description && (
+          ) : resolveField(category.description, lang) && (
             <div className="text-muted mb-0" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
               {resolveField(category.description, lang)}
             </div>

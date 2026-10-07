@@ -735,15 +735,20 @@ const payloadSource = categories.match(
 );
 assert.ok(payloadSource, 'toCategoryPayload must be extractable for the behavioural check');
 
-const pickTitle = (value) => (typeof value === 'string' ? value.trim() : '');
+// pickLabel is injected under the name the extracted function uses: it mirrors
+// src/api/categories.js pickLabel, which sends BOTH languages ({en, ru}) so an
+// EN-only or RU-only label survives the round trip.
+const pickLabel = (value) => (typeof value === 'string'
+  ? { en: value.trim(), ru: value.trim() }
+  : { en: (value?.en || '').trim(), ru: (value?.ru || '').trim() });
 const toCategoryPayload = new Function(
-  'pickTitle',
+  'pickLabel',
   'normalizeOrder',
   'VIEW_FORUM',
   'INHERIT_ROLES',
   `${payloadSource[0]}; return toCategoryPayload;`
 )(
-  pickTitle,
+  pickLabel,
   (order) => {
     const value = Number.parseInt(order, 10);
     return Number.isFinite(value) ? value : null;

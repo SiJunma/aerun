@@ -459,9 +459,9 @@ func listCategoriesHandler(e *core.RequestEvent) error {
 		}
 		item := map[string]any{
 			"id":          c.Id,
-			"name":        c.GetString("name"),
+			"name":        labelFromRecord(c, "name_i18n", "name"),
 			"slug":        c.GetString("slug"),
-			"description": c.GetString("description"),
+			"description": labelFromRecord(c, "description_i18n", "description"),
 			"group_id":    c.GetString("group_id"),
 			"sort_order":  c.GetInt("sort_order"),
 		}
@@ -518,9 +518,9 @@ func listForumIndexHandler(e *core.RequestEvent) error {
 		}
 		item := map[string]any{
 			"id":          c.Id,
-			"name":        c.GetString("name"),
+			"name":        labelFromRecord(c, "name_i18n", "name"),
 			"slug":        c.GetString("slug"),
-			"description": c.GetString("description"),
+			"description": labelFromRecord(c, "description_i18n", "description"),
 			"group_id":    c.GetString("group_id"),
 			"sort_order":  c.GetInt("sort_order"),
 		}
@@ -596,9 +596,9 @@ func listAdminCategoriesHandler(e *core.RequestEvent) error {
 		}
 		item := map[string]any{
 			"id":            c.Id,
-			"name":          c.GetString("name"),
+			"name":          labelFromRecord(c, "name_i18n", "name"),
 			"slug":          c.GetString("slug"),
-			"description":   c.GetString("description"),
+			"description":   labelFromRecord(c, "description_i18n", "description"),
 			"group_id":      c.GetString("group_id"),
 			"sort_order":    c.GetInt("sort_order"),
 			"allowed_roles": roles,

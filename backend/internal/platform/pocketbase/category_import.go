@@ -122,7 +122,7 @@ func ImportCategoryGroups(app core.App, upserts []CategoryGroupUpsert) (Category
 			if !ok {
 				rec = core.NewRecord(col)
 				rec.Set("id", id)
-				rec.Set("title", u.Title)
+				applyGroupLabelImport(rec, u.Title)
 				rec.Set("sort_order", u.SortOrder)
 				setHistoricalDate(rec, "created_at", u.CreatedAt)
 				setHistoricalDate(rec, "updated_at", u.UpdatedAt)
@@ -136,7 +136,7 @@ func ImportCategoryGroups(app core.App, upserts []CategoryGroupUpsert) (Category
 				report.GroupsUnchanged = append(report.GroupsUnchanged, id)
 				continue
 			}
-			rec.Set("title", u.Title)
+			applyGroupLabelImport(rec, u.Title)
 			rec.Set("sort_order", u.SortOrder)
 			setHistoricalDate(rec, "created_at", u.CreatedAt)
 			setHistoricalDate(rec, "updated_at", u.UpdatedAt)
@@ -162,6 +162,16 @@ func ImportCategoryGroups(app core.App, upserts []CategoryGroupUpsert) (Category
 	sort.Strings(report.GroupsUnchanged)
 	sort.Strings(report.ExtraTargetIDs)
 	return report, nil
+}
+
+// applyGroupLabelImport writes the group title and its i18n twin in one place.
+// The importer collapses the legacy {en, ru} map to one value, so both languages
+// receive it — identical to what the read path would serve from the fallback,
+// but written explicitly so a later admin bilingual edit is never paired with a
+// stale legacy string (or vice versa) by a re-run.
+func applyGroupLabelImport(rec *core.Record, title string) {
+	rec.Set("title", title)
+	rec.Set("title_i18n", map[string]any{"en": title, "ru": title})
 }
 
 func categoryGroupMatches(rec *core.Record, u CategoryGroupUpsert) bool {
@@ -288,6 +298,14 @@ func applyCategoryUpsert(rec *core.Record, u CategoryUpsert) {
 	rec.Set("name", u.Name)
 	rec.Set("slug", u.Slug)
 	rec.Set("description", u.Description)
+	// The i18n pair travels WITH the legacy string: the importer collapses the
+	// legacy {en, ru} map to one value (collapseLabelMap), and writing both
+	// languages here keeps the read path from pairing a freshly imported legacy
+	// string with a stale i18n payload an admin had edited earlier. When the
+	// match check says "unchanged" this writer is skipped and those admin
+	// edits survive untouched.
+	rec.Set("name_i18n", map[string]any{"en": u.Name, "ru": u.Name})
+	rec.Set("description_i18n", map[string]any{"en": u.Description, "ru": u.Description})
 	rec.Set("group_id", u.GroupID)
 	rec.Set("sort_order", u.SortOrder)
 	// allowed_roles is stored as JSON because the column is a JSONField. The

@@ -18,11 +18,14 @@ import { subscribeToRefetch } from './connection';
 const CAT_GROUPS_CACHE_KEY = 'aerun_cat_groups';
 const CAT_GROUPS_TTL_MS = 60 * 60 * 1000; // 1 час
 
-// The legacy documents stored a {en, ru} title map. The command contract
-// collapsed it to a single string (the importer does the same), so the page
-// components — which still branch on `typeof title === 'object'` — keep
-// working against a plain string without a page-wide rewrite.
-const toTitleMap = (title) => ({ en: title || '', ru: title || '' });
+// The command contract stores ONE string per label, and for a long time the
+// reads pretended that string was both languages: `{ en: s, ru: s }`. The
+// contract now serves {en, ru} objects (the admin board edits two languages per
+// label), so the map passes through as-is and only a plain string — a legacy
+// row, or an older backend — is duplicated into both languages.
+const toTitleMap = (title) => (typeof title === 'object' && title !== null
+  ? { en: title.en || '', ru: title.ru || '' }
+  : { en: title || '', ru: title || '' });
 
 // fetchSecuredCategoryGroups reads the group list and owns the localStorage
 // cache. `useCache: false` forces the network, which is what a caller needs after
@@ -73,7 +76,7 @@ export const subscribeToCategoryGroups = (callback) => {
 export const addCategoryGroup = async (groupData) => {
   const res = await sendApi('/api/aerun/category-groups', {
     method: 'POST',
-    body: { title: pickTitle(groupData?.title), sort_order: normalizeOrder(groupData?.order) }
+    body: { title: pickLabel(groupData?.title), sort_order: normalizeOrder(groupData?.order) }
   });
   localStorage.removeItem(CAT_GROUPS_CACHE_KEY);
   return res?.id;
@@ -84,7 +87,7 @@ export const updateCategoryGroup = async (id, groupData) => {
   // Only send what the caller actually supplied: the PATCH handler treats an
   // absent field as "leave alone", and a blanket send would blank a title the
   // form did not load.
-  if (groupData?.title !== undefined) body.title = pickTitle(groupData.title);
+  if (groupData?.title !== undefined) body.title = pickLabel(groupData.title);
   if (groupData?.order !== undefined) body.sort_order = normalizeOrder(groupData.order);
 
   await sendApi(`/api/aerun/category-groups/${id}`, { method: 'PATCH', body });
@@ -96,22 +99,24 @@ export const deleteCategoryGroup = async (id) => {
   localStorage.removeItem(CAT_GROUPS_CACHE_KEY);
 };
 
-// pickTitle collapses the legacy {en, ru} map to the single string the command
-// accepts.
+// pickLabel normalises either label shape onto the {en, ru} object the command
+// contract accepts, trimmed on the way out.
 //
-// `ru` is preferred because the admin board defaults to it, but this must not
-// silently discard an EN-only category: the legacy board has two independent
-// inputs per label, and the target schema has one string. A label that only
-// exists in one language therefore survives, and an admin who fills both gets
-// the Russian text — which is the language the board renders by default.
-const pickTitle = (title) => {
-  if (typeof title === 'string') return title.trim();
-  if (title && typeof title === 'object') {
-    const ru = (title.ru || '').trim();
-    const en = (title.en || '').trim();
-    return ru || en;
+// The languages stay independent: the board has two inputs per label, and an
+// EN-only or RU-only label must survive the round trip. This used to be
+// `pickTitle`, which collapsed the map to ONE string (Russian first) — so an
+// edit to the EN field was accepted by the form, dropped on the way to the
+// server, and served back as the RU text in both columns: the toast said
+// "saved" while English reverted to Russian.
+const pickLabel = (label) => {
+  if (typeof label === 'string') {
+    const value = label.trim();
+    return { en: value, ru: value };
   }
-  return '';
+  if (label && typeof label === 'object') {
+    return { en: (label.en || '').trim(), ru: (label.ru || '').trim() };
+  }
+  return { en: '', ru: '' };
 };
 
 // normalizeOrder maps the UI's `order` onto the API's `sort_order`. null means
@@ -409,8 +414,8 @@ export const subscribeToForumIndex = (callback) => {
 //     group. The server maps "" and the "unassigned" sentinel to "no group".
 const toCategoryPayload = (catData) => {
   const body = {
-    name: pickTitle(catData?.title),
-    description: pickTitle(catData?.description),
+    name: pickLabel(catData?.title),
+    description: pickLabel(catData?.description),
     sort_order: normalizeOrder(catData?.order),
     group_id: catData?.group_id || ''
   };

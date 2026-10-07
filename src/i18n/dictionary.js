@@ -619,7 +619,8 @@ export const translations = {
         group_no_forums: "No forums in this group",
         unassigned_warning: "These categories do not appear on the forum — none belongs to a group. Assign them one.",
         // The two title inputs are alternatives, not a pair of required fields:
-        // api/categories.js pickTitle() sends `ru || en`, so EITHER one is
+        // api/categories.js pickLabel() sends both languages, and the server
+        // takes `ru || en` as the primary — so EITHER one is
         // enough. The hint therefore states the rule instead of marking a single
         // input as required.
         title_one_required: "Fill in at least one title (EN or RU) to enable Save.",
@@ -1383,7 +1384,8 @@ export const translations = {
         group_no_forums: "В этой группе пока нет форумов",
         unassigned_warning: "Эти категории не отображаются на форуме — они не входят ни в одну группу. Назначьте им группу.",
         // Два поля заголовка — альтернативы, а не пара обязательных полей:
-        // pickTitle() в api/categories.js отправляет `ru || en`, поэтому
+        // pickLabel() в api/categories.js отправляет оба языка, а сервер
+        // берёт `ru || en` как основной, поэтому
         // достаточно ЛЮБОГО из них. Поэтому подсказка объясняет правило,
         // а не помечает одно поле как обязательное.
         title_one_required: "Заполните хотя бы один заголовок (EN или RU), чтобы включить «Сохранить».",

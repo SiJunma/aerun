@@ -377,3 +377,152 @@ func TestCategoryGroupLifecycle(t *testing.T) {
 		}
 	})
 }
+
+// TestCategoryLabelsRoundTripBothLanguages pins the fix for "the EN key never
+// saves". The command contract used to collapse {en, ru} to one string on the
+// way in (pickTitle kept Russian) and duplicate it back into both languages on
+// the way out, so an EN edit was accepted, dropped, and served as the RU text —
+// the toast said "saved" while English reverted. Every half of that round trip
+// is asserted here: the object travels in, both languages are stored, both are
+// served, and editing one language cannot wipe the other.
+func TestCategoryLabelsRoundTripBothLanguages(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	t.Run("a bilingual group title is stored and served in both languages", func(t *testing.T) {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/category-groups",
+			`{"title":{"en":"General Chat","ru":"Общение"}}`,
+			tokens["root"], "test-idem-bilingual-group-create")
+		if status != http.StatusCreated {
+			t.Fatalf("bilingual group create: got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, `"en":"General Chat"`) || !bytesContains(payload, `"ru":"Общение"`) {
+			t.Fatalf("the group payload must carry both languages: %s", payload)
+		}
+
+		var created struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(payload, &created); err != nil {
+			t.Fatalf("decode: %v (%s)", err, payload)
+		}
+
+		// The legacy column keeps the PRIMARY rendering (Russian): slug
+		// derivation, the importer's match checks and audit rows read it as a
+		// plain string and must never see JSON.
+		stored, err := app.FindRecordById(categoryGroupsCollectionName, created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stored.GetString("title"); got != "Общение" {
+			t.Fatalf("legacy title must stay the RU primary, got %q", got)
+		}
+		i18n, err := json.Marshal(stored.Get("title_i18n"))
+		if err != nil {
+			t.Fatalf("marshal title_i18n: %v", err)
+		}
+		if !bytes.Contains(i18n, []byte("General Chat")) || !bytes.Contains(i18n, []byte("Общение")) {
+			t.Fatalf("title_i18n must hold both languages, got %s", i18n)
+		}
+
+		// PATCH naming ONLY en must leave ru alone — this is the exact shape a
+		// partial edit used to wipe the other language with.
+		status, payload, _ = categoryCall(t, http.MethodPatch,
+			ts.URL+"/api/aerun/category-groups/"+created.ID,
+			`{"title":{"en":"Lobby"}}`,
+			tokens["root"], "test-idem-bilingual-group-patch")
+		if status != http.StatusOK {
+			t.Fatalf("EN-only patch: got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, `"en":"Lobby"`) {
+			t.Fatalf("the EN edit did not apply: %s", payload)
+		}
+		if !bytesContains(payload, `"ru":"Общение"`) {
+			t.Fatalf("an EN-only edit must not wipe RU: %s", payload)
+		}
+	})
+
+	t.Run("a bilingual category round-trips through the list", func(t *testing.T) {
+		groupID := seedTestCategoryGroup(t, app)
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/categories",
+			`{"name":{"en":"Echo of Beasts","ru":"Эхо зверя"},`+
+				`"description":{"en":"EN description","ru":"RU description"},`+
+				`"group_id":"`+groupID+`"}`,
+			tokens["root"], "test-idem-bilingual-cat-create")
+		if status != http.StatusCreated {
+			t.Fatalf("bilingual category create: got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, `"en":"Echo of Beasts"`) || !bytesContains(payload, `"ru":"Эхо зверя"`) {
+			t.Fatalf("the category payload must carry both name languages: %s", payload)
+		}
+		if !bytesContains(payload, `"en":"EN description"`) {
+			t.Fatalf("the category payload must carry the EN description: %s", payload)
+		}
+
+		var created struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(payload, &created); err != nil {
+			t.Fatalf("decode: %v (%s)", err, payload)
+		}
+
+		// The PUBLIC list is what the admin board reloads from — it must serve
+		// the {en, ru} pair, not a collapsed string.
+		status, listPayload, _ := categoryCall(t, http.MethodGet,
+			ts.URL+"/api/aerun/categories", "",
+			tokens["root"], "test-idem-bilingual-cat-list")
+		if status != http.StatusOK {
+			t.Fatalf("list categories: got %d: %s", status, listPayload)
+		}
+		if !bytesContains(listPayload, `"en":"Echo of Beasts"`) || !bytesContains(listPayload, `"ru":"Эхо зверя"`) {
+			t.Fatalf("the list must serve both name languages: %s", listPayload)
+		}
+
+		// PATCH naming only en keeps ru — the EN edit sticks across saves.
+		status, payload, _ = categoryCall(t, http.MethodPatch,
+			ts.URL+"/api/aerun/categories/"+created.ID,
+			`{"name":{"en":"Echoes"}}`,
+			tokens["root"], "test-idem-bilingual-cat-patch")
+		if status != http.StatusOK {
+			t.Fatalf("EN-only patch: got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, `"en":"Echoes"`) {
+			t.Fatalf("the EN edit did not apply: %s", payload)
+		}
+		if !bytesContains(payload, `"ru":"Эхо зверя"`) {
+			t.Fatalf("an EN-only edit must not wipe RU: %s", payload)
+		}
+	})
+
+	t.Run("a row written before bilingual storage serves its string in both languages", func(t *testing.T) {
+		// The importer and every pre-1769200000 row carry the legacy column
+		// only. The read path must duplicate that string into both languages —
+		// what the collapsed contract served — rather than go blank.
+		col, err := app.FindCollectionByNameOrId(categoryGroupsCollectionName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy := core.NewRecord(col)
+		legacy.Set("title", "Legacy Group")
+		legacy.Set("sort_order", 42)
+		if err := app.Save(legacy); err != nil {
+			t.Fatal(err)
+		}
+
+		status, payload, _ := categoryCall(t, http.MethodGet,
+			ts.URL+"/api/aerun/category-groups", "",
+			tokens["root"], "test-idem-bilingual-legacy-list")
+		if status != http.StatusOK {
+			t.Fatalf("list groups: got %d: %s", status, payload)
+		}
+		if !bytesContains(payload, `"en":"Legacy Group"`) || !bytesContains(payload, `"ru":"Legacy Group"`) {
+			t.Fatalf("a legacy row must serve its string in both languages: %s", payload)
+		}
+	})
+}

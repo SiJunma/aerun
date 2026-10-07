@@ -26,7 +26,7 @@ const form = (title, over = {}) => ({
   ...over,
 });
 
-// ── title: EITHER language is enough (pickTitle sends `ru || en`) ─────────────
+// ── title: EITHER language is enough (server primary is `ru || en`) ───────────
 assert.equal(groupTitleFilled(form({ en: 'News' })), true, 'EN alone must satisfy the group title');
 assert.equal(groupTitleFilled(form({ ru: 'Новости' })), true, 'RU alone must satisfy the group title');
 assert.equal(groupTitleFilled(form({ en: 'News', ru: 'Новости' })), true, 'both must satisfy it');

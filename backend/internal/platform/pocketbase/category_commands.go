@@ -59,6 +59,10 @@ const (
 
 // categoryRecordPayload is the shape every category answer uses, so the list,
 // the create response and the update response cannot drift apart.
+//
+// name and description are {en, ru} objects: the admin board edits two
+// languages per label and a single string could only ever carry one of them.
+// Rows written before bilingual storage serve the legacy string in both.
 func categoryRecordPayload(r *core.Record) map[string]any {
 	roles := decodeRoleIDList(r.Get("allowed_roles"))
 	if roles == nil {
@@ -66,9 +70,9 @@ func categoryRecordPayload(r *core.Record) map[string]any {
 	}
 	return map[string]any{
 		"id":            r.Id,
-		"name":          r.GetString("name"),
+		"name":          labelFromRecord(r, "name_i18n", "name"),
 		"slug":          r.GetString("slug"),
-		"description":   r.GetString("description"),
+		"description":   labelFromRecord(r, "description_i18n", "description"),
 		"group_id":      r.GetString("group_id"),
 		"sort_order":    r.GetInt("sort_order"),
 		"allowed_roles": roles,
@@ -77,10 +81,11 @@ func categoryRecordPayload(r *core.Record) map[string]any {
 	}
 }
 
+// categoryGroupPayload likewise serves the group title as {en, ru}.
 func categoryGroupPayload(r *core.Record) map[string]any {
 	return map[string]any{
 		"id":         r.Id,
-		"title":      r.GetString("title"),
+		"title":      labelFromRecord(r, "title_i18n", "title"),
 		"sort_order": r.GetInt("sort_order"),
 		"created":    r.GetDateTime("created").String(),
 		"updated":    r.GetDateTime("updated").String(),
@@ -92,8 +97,8 @@ func categoryGroupPayload(r *core.Record) map[string]any {
 // ---------------------------------------------------------------------------
 
 type categoryGroupForm struct {
-	Title     string `json:"title"`
-	SortOrder *int   `json:"sort_order"`
+	Title     labelInput `json:"title"`
+	SortOrder *int       `json:"sort_order"`
 }
 
 // createCategoryGroupHandler adds a group. sort_order defaults to max+1 so the
@@ -113,10 +118,14 @@ func createCategoryGroupHandler(e *core.RequestEvent) error {
 		return validationError("malformed category group payload")
 	}
 
-	title := strings.TrimSpace(form.Title)
-	if title == "" || len(title) > categoryGroupTitleMaxLen {
+	// Both languages share the 128-char ceiling; at least one must carry text,
+	// the same rule the admin form gates its Save button on.
+	if form.Title.isEmpty() ||
+		len(form.Title.en) > categoryGroupTitleMaxLen ||
+		len(form.Title.ru) > categoryGroupTitleMaxLen {
 		return validationError("category group title is required and must not exceed 128 characters")
 	}
+	title := form.Title.primary()
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		col, err := txApp.FindCollectionByNameOrId(categoryGroupsCollectionName)
@@ -125,7 +134,7 @@ func createCategoryGroupHandler(e *core.RequestEvent) error {
 		}
 
 		rec := core.NewRecord(col)
-		rec.Set("title", title)
+		applyLabel(rec, "title_i18n", "title", form.Title.en, form.Title.ru)
 		rec.Set("sort_order", nextGroupSortOrder(txApp, form.SortOrder))
 		if err := txApp.Save(rec); err != nil {
 			return 0, nil, internalError("failed to create category group", err)
@@ -171,13 +180,20 @@ func updateCategoryGroupHandler(e *core.RequestEvent) error {
 		}
 
 		// A field absent from the payload is left alone: this is a PATCH, and
-		// "title omitted" must not blank the title.
-		if form.Title != "" {
-			title := strings.TrimSpace(form.Title)
-			if len(title) > categoryGroupTitleMaxLen {
-				return 0, nil, validationError("category group title must not exceed 128 characters")
+		// "title omitted" must not blank the title. A present field replaces
+		// the languages it names; a language the object omits keeps its stored
+		// text, so editing EN cannot wipe RU. Both languages empty after the
+		// merge means "nothing to write" — the same leave-alone answer the
+		// single-string contract gave an empty string.
+		if form.Title.set {
+			en, ru := labelPair(rec, "title_i18n", "title")
+			en, ru = mergeLabel(en, ru, form.Title)
+			if en != "" || ru != "" {
+				if len(en) > categoryGroupTitleMaxLen || len(ru) > categoryGroupTitleMaxLen {
+					return 0, nil, validationError("category group title must not exceed 128 characters")
+				}
+				applyLabel(rec, "title_i18n", "title", en, ru)
 			}
-			rec.Set("title", title)
 		}
 		if form.SortOrder != nil {
 			rec.Set("sort_order", *form.SortOrder)
@@ -263,11 +279,11 @@ func nextGroupSortOrder(app core.App, provided *int) int {
 // ---------------------------------------------------------------------------
 
 type categoryForm struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	GroupID      *string  `json:"group_id"`
-	SortOrder    *int     `json:"sort_order"`
-	AllowedRoles []string `json:"allowed_roles"`
+	Name         labelInput `json:"name"`
+	Description  labelInput `json:"description"`
+	GroupID      *string    `json:"group_id"`
+	SortOrder    *int       `json:"sort_order"`
+	AllowedRoles []string   `json:"allowed_roles"`
 }
 
 func createCategoryHandler(e *core.RequestEvent) error {
@@ -285,12 +301,18 @@ func createCategoryHandler(e *core.RequestEvent) error {
 		return validationError("malformed category payload")
 	}
 
-	name := strings.TrimSpace(form.Name)
-	if name == "" || len(name) > categoryNameMaxLen {
+	// The name must resolve to a primary rendering (Russian, English as
+	// fallback) and each language must fit the column; the description is
+	// checked per language the same way. Both checks happen before the
+	// transaction so a 400 cannot leave a half-written row.
+	name := form.Name.primary()
+	if name == "" ||
+		len(form.Name.en) > categoryNameMaxLen ||
+		len(form.Name.ru) > categoryNameMaxLen {
 		return validationError("category name is required and must not exceed 128 characters")
 	}
-	description := strings.TrimSpace(form.Description)
-	if len(description) > categoryDescriptionMaxLen {
+	if len(form.Description.en) > categoryDescriptionMaxLen ||
+		len(form.Description.ru) > categoryDescriptionMaxLen {
 		return validationError("category description must not exceed 1024 characters")
 	}
 
@@ -335,8 +357,8 @@ func createCategoryHandler(e *core.RequestEvent) error {
 		// column rejects with "id: Invalid value format" — a 500 that reads like
 		// a server fault while it is really a charset mismatch.
 		rec.Set("id", security.RandomStringWithAlphabet(recordIDLength, recordIDAlphabet))
-		rec.Set("name", name)
-		rec.Set("description", description)
+		applyLabel(rec, "name_i18n", "name", form.Name.en, form.Name.ru)
+		applyLabel(rec, "description_i18n", "description", form.Description.en, form.Description.ru)
 		rec.Set("group_id", groupID)
 		if form.SortOrder != nil {
 			rec.Set("sort_order", *form.SortOrder)
@@ -394,21 +416,32 @@ func updateCategoryHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("category not found")
 		}
 
-		if form.Name != "" {
-			name := strings.TrimSpace(form.Name)
-			if len(name) > categoryNameMaxLen {
-				return 0, nil, validationError("category name must not exceed 128 characters")
+		// Labels follow the same PATCH rule as the group title: an absent field
+		// is left alone, a present one replaces the languages it names, and a
+		// language the object omits keeps its stored text — editing EN cannot
+		// wipe RU. Both languages empty means nothing to write (the collapsed
+		// contract also refused to blank a label with an empty string).
+		if form.Name.set {
+			en, ru := labelPair(rec, "name_i18n", "name")
+			en, ru = mergeLabel(en, ru, form.Name)
+			if en != "" || ru != "" {
+				if len(en) > categoryNameMaxLen || len(ru) > categoryNameMaxLen {
+					return 0, nil, validationError("category name must not exceed 128 characters")
+				}
+				applyLabel(rec, "name_i18n", "name", en, ru)
+				// slug is immutable after creation: it is part of the URL contract
+				// the frontend resolves, so a rename must not move the category.
 			}
-			rec.Set("name", name)
-			// slug is immutable after creation: it is part of the URL contract
-			// the frontend resolves, so a rename must not move the category.
 		}
-		if form.Description != "" {
-			description := strings.TrimSpace(form.Description)
-			if len(description) > categoryDescriptionMaxLen {
-				return 0, nil, validationError("category description must not exceed 1024 characters")
+		if form.Description.set {
+			en, ru := labelPair(rec, "description_i18n", "description")
+			en, ru = mergeLabel(en, ru, form.Description)
+			if en != "" || ru != "" {
+				if len(en) > categoryDescriptionMaxLen || len(ru) > categoryDescriptionMaxLen {
+					return 0, nil, validationError("category description must not exceed 1024 characters")
+				}
+				applyLabel(rec, "description_i18n", "description", en, ru)
 			}
-			rec.Set("description", description)
 		}
 		if form.GroupID != nil {
 			groupID, err := normalizeGroupReference(txApp, form.GroupID)

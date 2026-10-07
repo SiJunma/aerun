@@ -6,12 +6,12 @@ import {
   getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
   updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles
 } from '../api/admin';
-import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchSecuredCategories, fetchSecuredCategoryGroups } from '../api/categories';
+import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns } from '../api/designs';
-import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID } from '../constants/permissions';
+import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID, DEFAULT_ROLES } from '../constants/permissions';
 import TransferRootModal from '../components/modals/TransferRootModal';
 import { transferRoot } from '../api/admin';
 import Timestamp from '../components/common/Timestamp';
@@ -143,7 +143,8 @@ const AdminPage = () => {
   const roleNameRef = useRef(null);
 
   // The two language inputs are ALTERNATIVES, not a required pair:
-  // api/categories.js pickTitle() sends `ru || en`, so either one suffices.
+  // api/categories.js pickLabel() sends both, and the server takes `ru || en`
+  // as the primary, so either one suffices.
   const groupTitleFilled = Boolean(trimmed(groupForm.title?.en) || trimmed(groupForm.title?.ru));
   const catTitleFilled = Boolean(trimmed(catForm.title?.en) || trimmed(catForm.title?.ru));
   // The server rejects a category with no group (category_commands.go), and such
@@ -522,10 +523,23 @@ const AdminPage = () => {
         // was overridden — revert to inherit
         perms[permKey] = null;
       } else {
-        // activate override with roles that currently have this permission globally
-        // This prevents accidentally giving spectators/guests write access when toggling on an override.
-        const roleIds = roles
-          .filter(r => r.id !== 'root' && r.permissions?.includes(permKey))
+        // Activate the override pre-ticked with the roles that hold this
+        // permission GLOBALLY, so the seeded list mirrors what the forum
+        // already grants and saving it unchanged changes nobody's access.
+        //
+        // The source is `adminRoles`, NOT the `roles` from useAuth(): that one
+        // is the public badge registry (roleBadgePayload — role_id/name/rank/
+        // color), so `r.permissions` was always `[]` there and the filter
+        // matched nobody — the ONLY pre-checked box came from the hardcoded
+        // guest push below. This is the same wrong-source bug the role editor
+        // hit (see the note in handleOpenRoleModal), one table over.
+        //
+        // DEFAULT_ROLES is the fallback for an editor without manage_roles,
+        // who never loads adminRoles: static defaults still beat an empty
+        // pre-tick, and custom roles simply stay unticked for them to pick.
+        const source = adminRoles.length > 0 ? adminRoles : DEFAULT_ROLES;
+        const roleIds = source
+          .filter(r => r.id !== 'root' && normalizePermissions(r.permissions).includes(permKey))
           .map(r => r.id);
         // For VIEW_FORUM specifically, also include 'guest' by default
         if (permKey === PERMISSIONS.VIEW_FORUM && !roleIds.includes('guest')) {
@@ -555,9 +569,17 @@ const AdminPage = () => {
   //
   // These reload the board's own state from the server, so what the admin sees
   // is what the server actually holds rather than an optimistic guess.
+  //
+  // The reload reads the ADMIN list, never the public one: only
+  // GET /admin/categories carries `allowed_roles`. Re-reading the public list
+  // after every save mapped the absent key through toViewOverride into `[]` —
+  // "override ON with nobody ticked" — so a category saved as inherit re-opened
+  // with the switch flipped, a badge of 1 and every role box empty, and a
+  // second Save from that state would have stored root-only ([]). The mount
+  // subscription already uses the admin route; this has to match it.
   const reloadCategories = async () => {
     try {
-      setCategories(await fetchSecuredCategories());
+      setCategories(await fetchAdminCategories());
     } catch (err) {
       console.error('[reloadCategories]', err);
     }
