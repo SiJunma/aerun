@@ -1,0 +1,17 @@
+[Unit]
+Description=Aerun backend (Go + PocketBase)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/home/deploy/project/backend
+EnvironmentFile=/home/deploy/project/.env
+ExecStart=/home/deploy/project/backend/aerun
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

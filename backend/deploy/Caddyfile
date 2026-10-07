@@ -1,0 +1,22 @@
+aerun-world.com {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	# Backend API and the PocketBase admin dashboard.
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /_/* {
+		reverse_proxy 127.0.0.1:8090
+	}
+	# SPA: built frontend from the feature/pocketbase-migration branch.
+	handle {
+		root * /home/deploy/project/dist
+		try_files {path} /index.html
+		file_server
+	}
+}
