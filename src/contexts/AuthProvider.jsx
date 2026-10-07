@@ -419,6 +419,11 @@ export const AuthProvider = ({ children }) => {
     sessionStorage.removeItem('is_registering');
     sessionStorage.removeItem('pending_nickname');
     sessionStorage.removeItem('pending_message');
+    // Clean up any previous guest presence when a new user logs in
+    const guestId = localStorage.getItem('guest_id');
+    if (guestId) {
+      removeRtdbGuestPresence(guestId);
+    }
     syncUserFromAuthStore();
     return authData;
   };
@@ -434,12 +439,22 @@ export const AuthProvider = ({ children }) => {
       }
     });
     const authData = await pb.collection('users').authWithPassword(email, password);
+    // Clean up any previous guest presence when a new user registers
+    const guestId = localStorage.getItem('guest_id');
+    if (guestId) {
+      removeRtdbGuestPresence(guestId);
+    }
     syncUserFromAuthStore();
     return authData;
   };
 
   const loginWithEmail = async (email, password) => {
     const authData = await pb.collection('users').authWithPassword(email, password);
+    // Clean up any previous guest presence when a new user logs in
+    const guestId = localStorage.getItem('guest_id');
+    if (guestId) {
+      removeRtdbGuestPresence(guestId);
+    }
     syncUserFromAuthStore();
     return authData;
   };
