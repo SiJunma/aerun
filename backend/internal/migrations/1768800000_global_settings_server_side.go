@@ -62,11 +62,11 @@ var reputationStyleValues = []string{"both", "positive_only"}
 // and everything that needs a forum name reads that row. The value matches what
 // AdminPage has always displayed as its initial state, so a forum that never
 // touched the admin panel looks identical after the migration.
-var defaultForumName = map[string]any{"en": "Aerun Forum", "ru": "Aerun Forum"}
+var defaultForumName = map[string]any{"en": "Aerun", "ru": "Aerun"}
 
 var defaultWelcomeMessage = map[string]any{
-	"en": "Welcome to our TTRPG home!",
-	"ru": "Добро пожаловать в наш дом TTRPG!",
+	"en": "",
+	"ru": "",
 }
 
 // defaultMaxCharsPerPost matches the admin panel's initial maxCharsPerPost.

@@ -296,7 +296,7 @@ const AdminPage = () => {
     maintenanceMode: false,
     showMaintenanceMessage: false,
     maintenanceMessage: { en: '', ru: '' },
-    welcomeMessage: { en: 'Welcome to our TTRPG home!', ru: 'Добро пожаловать в наш дом TTRPG!' },
+    welcomeMessage: { en: '', ru: '' },
     enableReputation: true,
     reputationStyle: 'both',
     enableCharacters: true,
@@ -717,19 +717,19 @@ const AdminPage = () => {
   };
 
   // Titles are either a legacy {en, ru} map or a plain string depending on which
-// code path produced the record, so every render site handles both. The blocked
-// -delete modal needs the same rule and must not invent a third spelling.
-const resolveTitle = (title) => (typeof title === 'object' && title !== null
-  ? (title[currentLang] || title.en || title.ru || '')
-  : (title || ''));
+  // code path produced the record, so every render site handles both. The blocked
+  // -delete modal needs the same rule and must not invent a third spelling.
+  const resolveTitle = (title) => (typeof title === 'object' && title !== null
+    ? (title[currentLang] || title.en || title.ru || '')
+    : (title || ''));
 
-// A 409 means the server found a blocker our local copy did not know about —
-// this list went stale, or the row changed in another tab. Treat it as the same
-// blocked case rather than dumping the server's English sentence into a toast.
-const conflictFrom = (err) => /conflict/i.test(String(err?.status || err?.code || ''))
-  || /out of this (group|category)/i.test(String(err?.message || ''));
+  // A 409 means the server found a blocker our local copy did not know about —
+  // this list went stale, or the row changed in another tab. Treat it as the same
+  // blocked case rather than dumping the server's English sentence into a toast.
+  const conflictFrom = (err) => /conflict/i.test(String(err?.status || err?.code || ''))
+    || /out of this (group|category)/i.test(String(err?.message || ''));
 
-const handleDeleteGroup = (id) => {
+  const handleDeleteGroup = (id) => {
     const group = groups.find(g => g.id === id);
     const blocking = categories.filter(c => c.group_id === id);
 
@@ -970,7 +970,7 @@ const handleDeleteGroup = (id) => {
         name: '',
         permissions: defaultPlayerRole
           ? normalizePermissions(defaultPlayerRole.permissions || [])
-              .filter(p => MAX_ROLE_PERMISSIONS.player?.includes(p))
+            .filter(p => MAX_ROLE_PERMISSIONS.player?.includes(p))
           : [],
         color: 'primary',
         base_role_id: 'player'
@@ -1745,230 +1745,230 @@ const handleDeleteGroup = (id) => {
     const showGroupScaffold = groups.length > 0 && categories.length === 0;
 
     return (
-    <>
-      <Card className="shadow-sm border-0 mb-4">
-        <Card.Body className="p-4">
-          <div className="d-flex justify-content-between mb-4">
-            <h5 className="mb-0">{t('admin.categories.groups_title')}</h5>
-            {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-              <Button variant="primary" size="sm" onClick={() => handleOpenGroupModal()}>
-                {t('admin.categories.add_group')}
-              </Button>
-            )}
-          </div>
-          {/* An empty <Table> still paints its header row, so a groups table
-              with nothing in it read as a populated table whose content failed
-              to load. Swapping the table for a block removes that. */}
-          {groups.length === 0 ? (
-            <div className="admin-empty-state">
-              <Layers size={40} strokeWidth={1} className="admin-empty-state__icon" />
-              <div className="admin-empty-state__title">{t('admin.categories.groups_empty')}</div>
-              <div className="admin-empty-state__desc">{t('admin.categories.groups_empty_desc')}</div>
+      <>
+        <Card className="shadow-sm border-0 mb-4">
+          <Card.Body className="p-4">
+            <div className="d-flex justify-content-between mb-4">
+              <h5 className="mb-0">{t('admin.categories.groups_title')}</h5>
               {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                <Button variant="primary" size="sm" className="mt-2" onClick={() => handleOpenGroupModal()}>
-                  <PlusCircle size={14} className="me-1" /> {t('admin.categories.add_group')}
+                <Button variant="primary" size="sm" onClick={() => handleOpenGroupModal()}>
+                  {t('admin.categories.add_group')}
                 </Button>
               )}
             </div>
-          ) : (
-            <Table hover responsive>
-              <thead>
-                <tr>
-                  <th style={{ width: '80px' }}>{t('admin.categories.group_order')}</th>
-                  <th>{t('admin.categories.group_title_en')}</th>
-                  <th>{t('admin.categories.group_title_ru')}</th>
-                  <th className="text-end">{t('admin.categories.group_actions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groups.map(group => (
-                  <tr key={group.id} className="align-middle">
-                    <td>{group.order}</td>
-                    <td>{group.title?.en}</td>
-                    <td>{group.title?.ru}</td>
-                    <td className="text-end">
-                      {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                        <>
-                          <Button variant="link" size="sm" onClick={() => handleOpenGroupModal(group)}>{t('common.edit')}</Button>
-                          <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteGroup(group.id)}>{t('common.delete')}</Button>
-                        </>
-                      )}
-                    </td>
+            {/* An empty <Table> still paints its header row, so a groups table
+              with nothing in it read as a populated table whose content failed
+              to load. Swapping the table for a block removes that. */}
+            {groups.length === 0 ? (
+              <div className="admin-empty-state">
+                <Layers size={40} strokeWidth={1} className="admin-empty-state__icon" />
+                <div className="admin-empty-state__title">{t('admin.categories.groups_empty')}</div>
+                <div className="admin-empty-state__desc">{t('admin.categories.groups_empty_desc')}</div>
+                {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                  <Button variant="primary" size="sm" className="mt-2" onClick={() => handleOpenGroupModal()}>
+                    <PlusCircle size={14} className="me-1" /> {t('admin.categories.add_group')}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <Table hover responsive>
+                <thead>
+                  <tr>
+                    <th style={{ width: '80px' }}>{t('admin.categories.group_order')}</th>
+                    <th>{t('admin.categories.group_title_en')}</th>
+                    <th>{t('admin.categories.group_title_ru')}</th>
+                    <th className="text-end">{t('admin.categories.group_actions')}</th>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </Card.Body>
-      </Card>
-
-      <Card className="shadow-sm border-0">
-        <Card.Body className="p-4">
-          <div className="d-flex justify-content-between mb-4">
-            <h5 className="mb-0">{t('admin.categories.title')}</h5>
-          </div>
-          {showEmptyState ? (
-            <div className="admin-empty-state">
-              <FolderTree size={40} strokeWidth={1} className="admin-empty-state__icon" />
-              <div className="admin-empty-state__title">{t('admin.categories.empty')}</div>
-              <div className="admin-empty-state__desc">{t('admin.categories.need_group_first')}</div>
-            </div>
-          ) : showGroupScaffold ? (
-            /* No categories yet, so no table: its header names columns that
-               would hold no rows. Each group gets its own block, which keeps the
-               "add a category" action that the table row used to carry. */
-            <div className="admin-group-scaffold">
-              {groups.map(group => (
-                <div key={group.id} className="admin-group-scaffold__row">
-                  <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
-                    <Badge bg="secondary" className="admin-group-badge">
-                      {t('admin.categories.group_row_label')}
-                    </Badge>
-                    <span className="fw-bold">
-                      {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
-                    </span>
-                  </div>
-                  <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap">
-                    <span className="small text-muted">{t('admin.categories.scaffold_hint')}</span>
-                    {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                      <Button variant="outline-primary" size="sm" className="d-inline-flex align-items-center flex-shrink-0" onClick={() => handleOpenCatModal(null, group.id)}>
-                        <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-          <Table hover responsive>
-            <thead>
-              <tr>
-                <th style={{ width: '80px' }}>{t('admin.categories.table_order')}</th>
-                <th>{t('admin.categories.table_title')}</th>
-                <th>{t('admin.categories.table_stats')}</th>
-                <th className="text-end">{t('admin.categories.table_actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map(group => {
-                const groupCats = categories.filter(c => c.group_id === group.id).sort((a, b) => a.order - b.order);
-                return (
-                  <React.Fragment key={group.id}>
-                    <tr className="table-active">
-                      {/* The badge is what stops this row from reading as a
-                          category: its name sits in the Title column, bold, in
-                          the same place a category title does — which looked
-                          like the group had been duplicated into a category. */}
-                      <td colSpan="3" className="align-middle">
-                        <div className="d-flex align-items-center gap-2 flex-wrap">
-                          <Badge bg="secondary" className="admin-group-badge">
-                            {t('admin.categories.group_row_label')}
-                          </Badge>
-                          <span className="fw-bold">
-                            {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
-                          </span>
-                        </div>
-                      </td>
+                </thead>
+                <tbody>
+                  {groups.map(group => (
+                    <tr key={group.id} className="align-middle">
+                      <td>{group.order}</td>
+                      <td>{group.title?.en}</td>
+                      <td>{group.title?.ru}</td>
                       <td className="text-end">
                         {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                          <Button variant="outline-primary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, group.id)}>
-                            <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
-                          </Button>
+                          <>
+                            <Button variant="link" size="sm" onClick={() => handleOpenGroupModal(group)}>{t('common.edit')}</Button>
+                            <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteGroup(group.id)}>{t('common.delete')}</Button>
+                          </>
                         )}
                       </td>
                     </tr>
-                    {groupCats.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="text-center text-muted py-3 small">
-                          {t('admin.categories.group_no_forums')}
-                        </td>
-                      </tr>
-                    ) : groupCats.map(cat => (
-                      <tr key={cat.id} className="align-middle">
-                        <td>{cat.order}</td>
-                        <td>
-                          <div className="fw-bold">
-                            {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
-                          </div>
-                          <div className="small text-muted">
-                            {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
-                          </div>
-                        </td>
-                        <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
-                        <td className="text-end">
-                          {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                            <>
-                              <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
-                              <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </React.Fragment>
-                );
-              })}
-              {/* Drawn ONLY when such rows exist. This used to render whenever there were
+                  ))}
+                </tbody>
+              </Table>
+            )}
+          </Card.Body>
+        </Card>
+
+        <Card className="shadow-sm border-0">
+          <Card.Body className="p-4">
+            <div className="d-flex justify-content-between mb-4">
+              <h5 className="mb-0">{t('admin.categories.title')}</h5>
+            </div>
+            {showEmptyState ? (
+              <div className="admin-empty-state">
+                <FolderTree size={40} strokeWidth={1} className="admin-empty-state__icon" />
+                <div className="admin-empty-state__title">{t('admin.categories.empty')}</div>
+                <div className="admin-empty-state__desc">{t('admin.categories.need_group_first')}</div>
+              </div>
+            ) : showGroupScaffold ? (
+              /* No categories yet, so no table: its header names columns that
+                 would hold no rows. Each group gets its own block, which keeps the
+                 "add a category" action that the table row used to carry. */
+              <div className="admin-group-scaffold">
+                {groups.map(group => (
+                  <div key={group.id} className="admin-group-scaffold__row">
+                    <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                      <Badge bg="secondary" className="admin-group-badge">
+                        {t('admin.categories.group_row_label')}
+                      </Badge>
+                      <span className="fw-bold">
+                        {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
+                      </span>
+                    </div>
+                    <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+                      <span className="small text-muted">{t('admin.categories.scaffold_hint')}</span>
+                      {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                        <Button variant="outline-primary" size="sm" className="d-inline-flex align-items-center flex-shrink-0" onClick={() => handleOpenCatModal(null, group.id)}>
+                          <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Table hover responsive>
+                <thead>
+                  <tr>
+                    <th style={{ width: '80px' }}>{t('admin.categories.table_order')}</th>
+                    <th>{t('admin.categories.table_title')}</th>
+                    <th>{t('admin.categories.table_stats')}</th>
+                    <th className="text-end">{t('admin.categories.table_actions')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.map(group => {
+                    const groupCats = categories.filter(c => c.group_id === group.id).sort((a, b) => a.order - b.order);
+                    return (
+                      <React.Fragment key={group.id}>
+                        <tr className="table-active">
+                          {/* The badge is what stops this row from reading as a
+                          category: its name sits in the Title column, bold, in
+                          the same place a category title does — which looked
+                          like the group had been duplicated into a category. */}
+                          <td colSpan="3" className="align-middle">
+                            <div className="d-flex align-items-center gap-2 flex-wrap">
+                              <Badge bg="secondary" className="admin-group-badge">
+                                {t('admin.categories.group_row_label')}
+                              </Badge>
+                              <span className="fw-bold">
+                                {typeof group.title === 'object' ? (group.title[currentLang] || group.title.en) : group.title}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="text-end">
+                            {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                              <Button variant="outline-primary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, group.id)}>
+                                <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                        {groupCats.length === 0 ? (
+                          <tr>
+                            <td colSpan="4" className="text-center text-muted py-3 small">
+                              {t('admin.categories.group_no_forums')}
+                            </td>
+                          </tr>
+                        ) : groupCats.map(cat => (
+                          <tr key={cat.id} className="align-middle">
+                            <td>{cat.order}</td>
+                            <td>
+                              <div className="fw-bold">
+                                {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                              </div>
+                              <div className="small text-muted">
+                                {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                              </div>
+                            </td>
+                            <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
+                            <td className="text-end">
+                              {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                                <>
+                                  <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
+                                  <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                  {/* Drawn ONLY when such rows exist. This used to render whenever there were
                   no groups at all, which put a "General" heading over an empty
                   table — a category that does not exist, invented by the UI. */}
-              {showUnassignedSection && (
-                  <React.Fragment>
-                    <tr className="table-active">
-                      <td colSpan="3" className="fw-bold text-muted align-middle">
-                        {t('admin.categories.group_unassigned')}
-                      </td>
-                      <td className="text-end">
-                        {/* The create button here prefills NO group, and a category with
+                  {showUnassignedSection && (
+                    <React.Fragment>
+                      <tr className="table-active">
+                        <td colSpan="3" className="fw-bold text-muted align-middle">
+                          {t('admin.categories.group_unassigned')}
+                        </td>
+                        <td className="text-end">
+                          {/* The create button here prefills NO group, and a category with
                             no group is rejected and would be invisible on the forum. So
                             it is offered only once a group exists to place the category
                             into — with zero groups the admin is told to make one instead.
                             This MUST be a JSX comment: a bare // in JSX children is not a
                             comment at all, it renders as literal text. Guarded by
                             scripts/check-jsx-no-line-comments.mjs. */}
-                        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (groups.length > 0 ? (
-                  <Button variant="outline-secondary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, 'unassigned')}>
-                    <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
-                  </Button>
-                ) : (
-                  <span className="text-muted small">{t('admin.categories.need_group_first')}</span>
-                ))}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colSpan="4" className="small text-warning">
-                        {t('admin.categories.unassigned_warning')}
-                      </td>
-                    </tr>
-                    {unassignedCats.map(cat => (
-                      <tr key={cat.id} className="align-middle">
-                        <td>{cat.order}</td>
-                        <td>
-                          <div className="fw-bold">
-                            {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
-                          </div>
-                          <div className="small text-muted">
-                            {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
-                          </div>
-                        </td>
-                        <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
-                        <td className="text-end">
-                          {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-                            <>
-                              <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
-                              <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
-                            </>
-                          )}
+                          {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (groups.length > 0 ? (
+                            <Button variant="outline-secondary" size="sm" className="d-inline-flex align-items-center" onClick={() => handleOpenCatModal(null, 'unassigned')}>
+                              <PlusCircle size={14} className="me-1" /> {t('admin.categories.create_btn')}
+                            </Button>
+                          ) : (
+                            <span className="text-muted small">{t('admin.categories.need_group_first')}</span>
+                          ))}
                         </td>
                       </tr>
-                    ))}
-                  </React.Fragment>
-              )}
-            </tbody>
-          </Table>
-          )}
-        </Card.Body>
-      </Card>
-    </>
+                      <tr>
+                        <td colSpan="4" className="small text-warning">
+                          {t('admin.categories.unassigned_warning')}
+                        </td>
+                      </tr>
+                      {unassignedCats.map(cat => (
+                        <tr key={cat.id} className="align-middle">
+                          <td>{cat.order}</td>
+                          <td>
+                            <div className="fw-bold">
+                              {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                            </div>
+                            <div className="small text-muted">
+                              {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                            </div>
+                          </td>
+                          <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
+                          <td className="text-end">
+                            {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
+                              <>
+                                <Button variant="link" size="sm" onClick={() => handleOpenCatModal(cat)}>{t('common.edit')}</Button>
+                                <Button variant="link" size="sm" className="text-danger" onClick={() => handleDeleteCategory(cat.id)}>{t('common.delete')}</Button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  )}
+                </tbody>
+              </Table>
+            )}
+          </Card.Body>
+        </Card>
+      </>
     );
   };
 
@@ -2194,9 +2194,9 @@ const handleDeleteGroup = (id) => {
 
       {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
       {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
-        <DesignsTab 
-          designs={designs} 
-          settings={settings} 
+        <DesignsTab
+          designs={designs}
+          settings={settings}
           updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
           userId={user.uid}
         />
@@ -2260,19 +2260,19 @@ const handleDeleteGroup = (id) => {
                           active={roleForm.base_role_id === baseId}
                           onClick={() => {
                             // The base role's CURRENT permissions come from adminRoles, the one list that
-// actually carries them — see the note in handleOpenRoleModal. Reading the
-// public `roles` here blanked the form a second time on every base change.
-const template = adminRoles.find(r => r.id === baseId);
+                            // actually carries them — see the note in handleOpenRoleModal. Reading the
+                            // public `roles` here blanked the form a second time on every base change.
+                            const template = adminRoles.find(r => r.id === baseId);
                             const allowed = MAX_ROLE_PERMISSIONS[baseId];
                             setRoleForm({
                               ...roleForm,
                               base_role_id: baseId,
                               permissions: template
                                 ? normalizePermissions(template.permissions || [])
-                                    // Pre-fill exactly what this base may hold, so a
-                                    // role cannot start life carrying a key its own
-                                    // ceiling forbids — which the save would reject.
-                                    .filter(p => !allowed || allowed.includes(p))
+                                  // Pre-fill exactly what this base may hold, so a
+                                  // role cannot start life carrying a key its own
+                                  // ceiling forbids — which the save would reject.
+                                  .filter(p => !allowed || allowed.includes(p))
                                 : roleForm.permissions
                             });
                           }}
@@ -2469,47 +2469,47 @@ const template = adminRoles.find(r => r.id === baseId);
             <p className="text-muted small mb-3">{t('admin.categories.modal_perms_hint')}</p>
             <div id="cat-perm-overrides-panel" className="admin-perm-overrides__panel">
               {[
-                  { permKey: PERMISSIONS.VIEW_FORUM, label: t('admin.categories.perm_view') },
-                  { permKey: PERMISSIONS.CREATE_TOPIC, label: t('admin.categories.perm_create_topic') },
-                  { permKey: PERMISSIONS.POST_REPLY, label: t('admin.categories.perm_post_reply') },
-                  { permKey: PERMISSIONS.USE_MASKS, label: t('admin.categories.perm_use_masks') },
-                  { permKey: PERMISSIONS.USE_DICE, label: t('admin.categories.perm_use_dice') },
-                ].map(({ permKey, label }) => {
-                  const isOverridden = catForm.permissions[permKey] !== undefined && catForm.permissions[permKey] !== null;
-                  const allowedRoles = isOverridden ? (catForm.permissions[permKey] || []) : [];
-                  const displayRoles = roles.filter(r => r.id !== 'root');
-                  return (
-                    <div key={permKey} className="modal-section-themed p-3 rounded mb-2">
-                      <Form.Check
-                        type="switch"
-                        id={`cat-perm-override-${permKey}`}
-                        label={<span className="fw-bold">{label}</span>}
-                        checked={isOverridden}
-                        onChange={() => toggleCatPermOverride(permKey)}
-                        className="mb-2"
-                      />
-                      {isOverridden && (
-                        <>
-                          <div className="text-muted small mb-2" style={{ marginLeft: '2rem' }}>
-                            {t('admin.categories.perm_allowed_roles')}
-                          </div>
-                          <div className="d-flex flex-column gap-2" style={{ marginLeft: '2rem' }}>
-                            {displayRoles.map(role => (
-                              <Form.Check
-                                key={role.id}
-                                type="checkbox"
-                                id={`cat-perm-${permKey}-${role.id}`}
-                                label={role.name}
-                                checked={allowedRoles.includes(role.id)}
-                                onChange={() => toggleCatPermRole(permKey, role.id)}
-                              />
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
+                { permKey: PERMISSIONS.VIEW_FORUM, label: t('admin.categories.perm_view') },
+                { permKey: PERMISSIONS.CREATE_TOPIC, label: t('admin.categories.perm_create_topic') },
+                { permKey: PERMISSIONS.POST_REPLY, label: t('admin.categories.perm_post_reply') },
+                { permKey: PERMISSIONS.USE_MASKS, label: t('admin.categories.perm_use_masks') },
+                { permKey: PERMISSIONS.USE_DICE, label: t('admin.categories.perm_use_dice') },
+              ].map(({ permKey, label }) => {
+                const isOverridden = catForm.permissions[permKey] !== undefined && catForm.permissions[permKey] !== null;
+                const allowedRoles = isOverridden ? (catForm.permissions[permKey] || []) : [];
+                const displayRoles = roles.filter(r => r.id !== 'root');
+                return (
+                  <div key={permKey} className="modal-section-themed p-3 rounded mb-2">
+                    <Form.Check
+                      type="switch"
+                      id={`cat-perm-override-${permKey}`}
+                      label={<span className="fw-bold">{label}</span>}
+                      checked={isOverridden}
+                      onChange={() => toggleCatPermOverride(permKey)}
+                      className="mb-2"
+                    />
+                    {isOverridden && (
+                      <>
+                        <div className="text-muted small mb-2" style={{ marginLeft: '2rem' }}>
+                          {t('admin.categories.perm_allowed_roles')}
+                        </div>
+                        <div className="d-flex flex-column gap-2" style={{ marginLeft: '2rem' }}>
+                          {displayRoles.map(role => (
+                            <Form.Check
+                              key={role.id}
+                              type="checkbox"
+                              id={`cat-perm-${permKey}-${role.id}`}
+                              label={role.name}
+                              checked={allowedRoles.includes(role.id)}
+                              onChange={() => toggleCatPermRole(permKey, role.id)}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </Form>
@@ -2610,7 +2610,7 @@ const template = adminRoles.find(r => r.id === baseId);
       <ConfirmModal
         show={!!blockedDelete}
         onHide={() => setBlockedDelete(null)}
-        onConfirm={() => {}}
+        onConfirm={() => { }}
         hideConfirm
         confirmText=""
         cancelText={currentLang === 'ru' ? 'Понятно' : 'Got it'}

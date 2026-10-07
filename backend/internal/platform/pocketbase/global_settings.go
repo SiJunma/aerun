@@ -48,7 +48,7 @@ func forumName(app core.App, lang string) string {
 			return strings.TrimSpace(v)
 		}
 	}
-	return "Forum"
+	return "Aerun"
 }
 
 // readBilingual decodes a JSON field, tolerating both the object form and the
