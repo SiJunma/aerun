@@ -12,8 +12,9 @@ import (
 // TestConfigureOAuth2ReconcilesGoogleLogin pins the serve-time contract: the
 // migration baseline keeps OAuth2 disabled, a complete credential pair enables
 // exactly the google provider without disturbing password auth or the mapped
-// fields, an incomplete pair counts as unconfigured, and withdrawing the pair
-// switches the provider back off.
+// fields, and — the ownership rule shared with the mail modes — an absent or
+// incomplete pair means the ADMIN UI owns the provider, so the reconcile must
+// not touch the collection at all.
 func TestConfigureOAuth2ReconcilesGoogleLogin(t *testing.T) {
 	app, err := tests.NewTestApp(t.TempDir())
 	if err != nil {
@@ -34,6 +35,30 @@ func TestConfigureOAuth2ReconcilesGoogleLogin(t *testing.T) {
 	pair := config.Config{
 		GoogleClientID:     "test-client-id.apps.googleusercontent.com",
 		GoogleClientSecret: "GOCSPX-test-secret",
+	}
+
+	// An empty environment is the DEFAULT-INSTALL path: the admin UI owns the
+	// provider, and the reconcile must leave the collection exactly as the
+	// operator configured it — enabling Google there must survive restarts.
+	if err := configureOAuth2(app, config.Config{}); err != nil {
+		t.Fatalf("credential-less reconcile must succeed: %v", err)
+	}
+	users.OAuth2.Enabled = true
+	users.OAuth2.Providers = []core.OAuth2ProviderConfig{{
+		Name:         "google",
+		ClientId:     "dashboard-client-id.apps.googleusercontent.com",
+		ClientSecret: "dashboard-secret",
+	}}
+	if err := app.Save(users); err != nil {
+		t.Fatal(err)
+	}
+	if err := configureOAuth2(app, config.Config{}); err != nil {
+		t.Fatalf("credential-less reconcile after a dashboard config must succeed: %v", err)
+	}
+	users = reloadUsers(t, app)
+	if !users.OAuth2.Enabled || len(users.OAuth2.Providers) != 1 ||
+		users.OAuth2.Providers[0].ClientId != "dashboard-client-id.apps.googleusercontent.com" {
+		t.Fatalf("dashboard configuration must survive a credential-less restart, got %+v", users.OAuth2)
 	}
 
 	if err := configureOAuth2(app, pair); err != nil {
@@ -69,27 +94,15 @@ func TestConfigureOAuth2ReconcilesGoogleLogin(t *testing.T) {
 	}
 
 	// A half pair is rejected by config.Load before this point; the reconcile
-	// treats it as unconfigured rather than enabling a broken provider.
+	// treats it as unconfigured — the admin UI keeps ownership — rather than
+	// enabling a broken provider or wiping the env-configured one.
 	if err := configureOAuth2(app, config.Config{GoogleClientID: pair.GoogleClientID}); err != nil {
 		t.Fatalf("half pair reconcile must succeed: %v", err)
 	}
 	users = reloadUsers(t, app)
-	if users.OAuth2.Enabled || len(users.OAuth2.Providers) != 0 {
-		t.Fatalf("a half pair must keep OAuth2 disabled, got enabled=%v providers=%d",
-			users.OAuth2.Enabled, len(users.OAuth2.Providers))
-	}
-
-	// Full pair again, then withdrawal restores the disabled baseline.
-	if err := configureOAuth2(app, pair); err != nil {
-		t.Fatal(err)
-	}
-	if err := configureOAuth2(app, config.Config{}); err != nil {
-		t.Fatalf("withdrawing credentials must succeed: %v", err)
-	}
-	users = reloadUsers(t, app)
-	if users.OAuth2.Enabled || len(users.OAuth2.Providers) != 0 {
-		t.Fatalf("withdrawing credentials must disable OAuth2, got enabled=%v providers=%d",
-			users.OAuth2.Enabled, len(users.OAuth2.Providers))
+	if !users.OAuth2.Enabled || len(users.OAuth2.Providers) != 1 ||
+		users.OAuth2.Providers[0].ClientSecret != pair.GoogleClientSecret {
+		t.Fatalf("a half pair must leave the env-configured provider alone, got %+v", users.OAuth2)
 	}
 }
 

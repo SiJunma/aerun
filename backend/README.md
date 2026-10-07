@@ -65,13 +65,19 @@ $env:AERUN_GOOGLE_CLIENT_SECRET='…'
 Local runs may keep the pair in `.env.local` at the repository root instead
 (gitignored): `cmd/aerun` seeds unset keys from it before `config.Load` (cwd
 first, then its parent, so a server started from `backend/` finds the root
-file), and a real environment variable always wins. On every startup
-`configureOAuth2` reconciles the collection with the environment — with the
-pair present it enables the `google` provider (endpoints, PKCE and scopes come
-from PocketBase's Google defaults; only the client id/secret are stored),
-without it OAuth2 goes back to the migration baseline of off. Password login
-is unaffected either way; `GET /api/collections/users/auth-methods` reports
-the result.
+file), and a real environment variable always wins. The ownership rule on
+every startup `configureOAuth2`:
+
+- with the pair present in the environment, the `google` provider is FORCED on
+  with those credentials (endpoints, PKCE and scopes come from PocketBase's
+  Google defaults; only the client id/secret are stored);
+- with no (or an incomplete) pair, the reconcile touches nothing — the
+  PocketBase admin UI (users collection → OAuth2) is the owner, so the
+  operator enables Google there and no restart undoes it. This is the
+  default-install path: no code, no env edits.
+
+Password login is unaffected either way; `GET /api/collections/users/auth-methods`
+reports the result.
 
 The Google Cloud console must list the exact redirect URI of the PocketBase
 URL: `<AERUN_PUBLIC_URL origin>/api/oauth2-redirect` (locally
