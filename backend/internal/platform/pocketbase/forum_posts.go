@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -267,11 +269,10 @@ func listPostsHandler(e *core.RequestEvent) error {
 	topicID := e.Request.PathValue("id")
 	settings := loadForumSettings(e.App)
 	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.PostsPerPage), settings.PostsPerPage)
-	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
+	page, readCutoff := resolveListPage(e, limit)
 	if page < 1 {
 		page = 1
 	}
-
 	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
 	if err != nil || topic == nil {
 		return notFoundError("topic not found")
@@ -333,7 +334,116 @@ func listPostsHandler(e *core.RequestEvent) error {
 	if pinnedPost != nil {
 		resp["pinned_post"] = pinnedPost
 	}
+	// Echoed only in the goLast modes: the instant the resolved page was
+	// computed against. The client uses it to aim the scroll at the first
+	// unread post without consulting any browser-localStorage read map.
+	if readCutoff != "" {
+		resp["read_cutoff"] = readCutoff
+	}
 	return e.JSON(http.StatusOK, resp)
+}
+
+// resolveListPage turns the `page` query parameter into a page number and
+// reports the read cutoff it used (`read_cutoff`, empty for a numeric page).
+//
+// Besides the plain numeric page it honours the goLast contract the retired
+// Firebase callable (`getSecuredPosts`) served and the Go port had silently
+// dropped: `page=last|latest|unread`. The dropped mode meant
+// `/topic/<id>?goLast=1` always landed on page 1 — `parseIntParam("last", 1)`
+// — and the client's scroll effect then jumped to the bottom of that first
+// page instead of the first unread post.
+//
+// THE CUTOFF IS SERVER-SIDE FIRST. For an authenticated caller the read
+// position comes from their own `topic_read_states.last_read_at` row (ADR-12)
+// — the same table the unread badge counts — so the jump is correct on any
+// device and never depends on a browser-localStorage map. The client's
+// `last_visit` parameter is only a FALLBACK for a caller the table knows
+// nothing about yet. The math mirrors the old callable:
+//   - with a cutoff, count the posts created up to and AT that instant
+//     (already read). If unread posts exist, serve the page holding the FIRST
+//     unread one; otherwise serve the last page.
+//   - without any cutoff (a guest, or no read state), serve the last page.
+//
+// Both counts carry the same draft predicate the feed query does, so the
+// resolved page can never disagree with the pagination window it is computed
+// from. An unparseable cutoff degrades to the no-cutoff case rather than
+// failing the request: "go to the end" is still correct, just not unread-aware.
+func resolveListPage(e *core.RequestEvent, limit int) (int, string) {
+	pageRaw := strings.TrimSpace(e.Request.URL.Query().Get("page"))
+	switch pageRaw {
+	case "last", "latest", "unread":
+	default:
+		return parseIntParam(pageRaw, 1), ""
+	}
+	topicID := e.Request.PathValue("id")
+
+	draftVisible := dbx.NewExp("is_draft = false OR is_draft IS NULL")
+	total, err := e.App.CountRecords(postsCollectionName,
+		dbx.HashExp{"topic_id": topicID},
+		draftVisible)
+	if err != nil {
+		return 1, ""
+	}
+	resolved := int((total + int64(limit) - 1) / int64(limit))
+	if resolved < 1 {
+		resolved = 1
+	}
+
+	// Server-side read state first (ADR-12); the query param is the fallback.
+	var cutoff time.Time
+	cutoffEcho := ""
+	if e.Auth != nil {
+		state, err := e.App.FindFirstRecordByFilter(topicReadStatesCollectionName,
+			"user_id = {:user} && topic_id = {:topic}",
+			dbx.Params{"user": e.Auth.Id, "topic": topicID},
+		)
+		if err == nil && state != nil {
+			if dt, perr := types.ParseDateTime(state.GetString("last_read_at")); perr == nil && !dt.IsZero() {
+				cutoff = dt.Time()
+				cutoffEcho = dt.String()
+			}
+		}
+	}
+	if cutoffEcho == "" {
+		if paramCut, ok := parseVisitCutoff(e.Request.URL.Query().Get("last_visit")); ok {
+			cutoff = paramCut
+			cutoffEcho = paramCut.UTC().Format("2006-01-02 15:04:05.000Z")
+		}
+	}
+	if cutoffEcho == "" {
+		return resolved, ""
+	}
+
+	countBefore, err := e.App.CountRecords(postsCollectionName,
+		dbx.HashExp{"topic_id": topicID},
+		draftVisible,
+		dbx.NewExp("created <= {:cut}", dbx.Params{"cut": cutoff}))
+	if err != nil {
+		return resolved, cutoffEcho
+	}
+	if countBefore < total {
+		// Zero-based index of the first unread post is `countBefore`; its page
+		// is that index divided by the page size, plus one.
+		resolved = int(countBefore/int64(limit)) + 1
+	}
+	return resolved, cutoffEcho
+}
+
+// parseVisitCutoff accepts the client's last-visit instant as unix milliseconds
+// or as any date string PocketBase can parse, and reports whether a cutoff
+// should be applied at all.
+func parseVisitCutoff(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if ms, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return time.UnixMilli(ms), true
+	}
+	if dt, err := types.ParseDateTime(raw); err == nil && !dt.IsZero() {
+		return dt.Time(), true
+	}
+	return time.Time{}, false
 }
 
 // loadTopicFirstPost returns the topic's earliest post, or nil.

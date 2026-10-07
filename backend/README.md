@@ -192,7 +192,7 @@ All errors return the machine-readable error contract:
 - `POST /api/aerun/topics/:id/move` — move topic to a different category (`move_topics` permission).
 - `DELETE /api/aerun/topics/:id` — soft delete a topic (`moderate_content` or author).
 - `POST /api/aerun/topics/:id/posts` — create a reply. Monotonically assigns sequence inside the topic transaction, verifies max post limit and locked state, and advances topic metadata atomically (`post_reply` permission).
-- `GET /api/aerun/topics/:id/posts` — list posts in a topic ordered by sequence.
+- `GET /api/aerun/topics/:id/posts` — list posts ordered by `created ASC, id ASC` (page pagination: `page`, `limit`). `page=last|latest|unread` resolves the page holding the first unread post: for an authenticated caller the read cutoff comes from their server-side `topic_read_states.last_read_at` row (the `last_visit` query param is only a fallback), otherwise the last page is served. The response echoes the cutoff used as `read_cutoff` — this is what `?goLast=1` topic links rely on.
 - `GET /api/aerun/topics/:id/posts/by-sequence/:sequence` — deep-link lookup by topic sequence number.
 - `PATCH /api/aerun/posts/:id` — edit post content (`moderate_content` or author).
 - `DELETE /api/aerun/posts/:id` — soft delete post, updates visible post count and topic `last_post_*` fallback.
@@ -345,12 +345,28 @@ send fails would surface only as a permanently bounced verification link:
 | `AERUN_MAIL_SENDER_ADDRESS` | yes | The From address. Must be one the relay may send from or SPF/DKIM alignment fails. |
 | `AERUN_MAIL_SENDER_NAME` | no | Defaults to `Aerun`. |
 
-The relay, its credentials and the From identity are reconciled from the
-environment into PocketBase's settings on **every startup** (`configureSMTP` in
-`internal/platform/pocketbase/smtp.go`), not by a migration: credentials are
-environment state, and a rotation must not wait for the next schema change. In
+All the relay variables above are **first-boot seeds only**. Once the matching
+fields in PocketBase's Mail settings are filled (the dashboard's own placeholder
+defaults count as unfilled), the environment stops being consulted for them, so
+credential rotation happens in the dashboard and survives every restart — see
+the paragraph below.
+
+The relay, its credentials and the From identity are seeded into PocketBase's
+settings from the environment **only while the corresponding settings fields
+hold nothing usable** — a first boot, PocketBase's own placeholder defaults, or
+the wipe a "disabled" stretch performed (`configureSMTP` in
+`internal/platform/pocketbase/smtp.go`). After that **the PocketBase settings
+row (admin dashboard) is the source of truth**: credentials are rotated in the
+relay provider's dashboard plus PocketBase's Mail settings form, and every
+restart keeps them. Stale values in the environment are harmless — they are
+never re-applied over dashboard-configured fields. The mode itself
+(`AERUN_MAIL_MODE`) remains environmental on purpose: "disabled" is a hard
+switch that always wipes the stored relay on boot, and "smtp" always enables
+sending. In
 `disabled` mode the same reconcile clears the stored host, username and password,
-so rolling a deployment back does not leave a live relay secret in `pb_data`.
+so rolling a deployment back does not leave a live relay secret in `pb_data`
+(and the next "smtp" boot re-seeds the relay from the environment, because the
+wipe leaves the fields empty again).
 
 This one switch covers every outgoing path, because all of them go through
 PocketBase's own mailer: verification and password-reset mails

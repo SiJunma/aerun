@@ -237,14 +237,24 @@ export const subscribeToPostRemovalsRtdb = (_topicId, _callback) => {
 // `per_page` for the page size. The old `res.posts` read is why an existing
 // topic rendered with no messages: the key is never present, so every page came
 // back as an empty array regardless of what the topic held.
-export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, _lastVisit = null) => {
-  const res = await sendApi(`/api/aerun/topics/${topicId}/posts?page=${page}&limit=${pageSize}`);
+export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null) => {
+  // `lastVisit` rides along ONLY for the goLast modes: the backend resolves
+  // `page=last|unread` against it to land on the first unread post. Dropping
+  // the argument (the old `_lastVisit`) left `?goLast=1` resolving to page 1.
+  let qs = `page=${encodeURIComponent(page)}&limit=${pageSize}`;
+  if (lastVisit && ['last', 'latest', 'unread'].includes(String(page))) {
+    qs += `&last_visit=${encodeURIComponent(lastVisit)}`;
+  }
+  const res = await sendApi(`/api/aerun/topics/${topicId}/posts?${qs}`);
   const items = (res?.items || []).map(normalizePost);
   return {
     posts: items,
     total: res?.posts_count ?? items.length,
     page: res?.page || page,
-    limit: res?.per_page || pageSize
+    limit: res?.per_page || pageSize,
+    // Present only in the goLast modes: the read cutoff the SERVER resolved the
+    // page against (its own topic_read_states row, not our localStorage map).
+    readCutoff: res?.read_cutoff || null
   };
 };
 

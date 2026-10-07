@@ -285,6 +285,10 @@ const TopicPage = () => {
   const prevTopicStatsRef = useRef(null);
   // Page number whose posts are currently rendered (set by loadPosts on success).
   const loadedPageRef = useRef(null);
+  // The read cutoff the SERVER resolved the last goLast page against
+  // ({ topicId, valueMs } | null). It, not the localStorage read map, is what
+  // the jump-to-first-unread effect aims the scroll with.
+  const readCutoffRef = useRef(null);
 
   const [accessError, setAccessError] = React.useState(null);
   const [topicNotFound, setTopicNotFound] = React.useState(false);
@@ -311,11 +315,15 @@ const TopicPage = () => {
     isFetchingPostsRef.current = pageToFetch;
 
     try {
-      const { posts: data, pinnedPost, page: resolvedPage, lastPost } = await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE, lastVisitMs);
+      const { posts: data, pinnedPost, page: resolvedPage, lastPost, readCutoff } = await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE, lastVisitMs);
 
       // Если стартовал более свежий запрос, отбрасываем старый ответ!
       if (currentFetchId !== activeFetchIdRef.current) {
         return [];
+      }
+
+      if (pageToFetch === 'last' && readCutoff) {
+        readCutoffRef.current = { topicId: id, value: toMillis(readCutoff) };
       }
 
       if (lastPost && topicRef.current) {
@@ -970,8 +978,12 @@ const TopicPage = () => {
     }
     // Priority 3: goLast (New unread or bottom)
     else if (goLast && !alreadyJumpedRef.current) {
-      if (user && (initialVisitRef.current[id] !== undefined || readMap[id] !== undefined)) {
-        const lastVisitRaw = initialVisitRef.current[id] ?? readMap[id];
+      // The SERVER's read cutoff from the response that resolved this page is
+      // the authoritative "read up to here" instant; the localStorage read map
+      // is only a fallback for the legacy shape.
+      const serverCutoff = readCutoffRef.current?.topicId === id ? readCutoffRef.current.value : undefined;
+      if (user && (serverCutoff !== undefined || initialVisitRef.current[id] !== undefined || readMap[id] !== undefined)) {
+        const lastVisitRaw = serverCutoff ?? initialVisitRef.current[id] ?? readMap[id];
         const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
         const lastVisit = unreadFloor(lastVisitValue, profile?.created_at);
 
