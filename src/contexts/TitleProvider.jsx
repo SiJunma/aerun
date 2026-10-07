@@ -117,12 +117,19 @@ export const TitleProvider = ({ children }) => {
       let link = document.querySelector("link[rel*='icon']");
       if (!link) {
         link = document.createElement('link');
-        link.type = 'image/x-icon';
+        link.type = 'image/jpeg';
         link.rel = 'shortcut icon';
         document.head.appendChild(link);
       }
-      
-      const originalFaviconUrl = '/favicon.ico'; // default favicon
+
+      // THE BASE ICON IS THE ONE INDEX.HTML DECLARES: /favicon.jpg, a real
+      // image. /favicon.ico used to be referenced here, but that file is a
+      // ~750-byte stub next to the real 79KB jpg — swapping to it mid-load is
+      // exactly the "favicon flashes then disappears" the site showed.
+      const originalFaviconUrl = '/favicon.jpg';
+      // Keep the link's declared type in step with the href: a stale
+      // image/x-icon type makes some browsers reject the jpeg silently.
+      link.type = 'image/jpeg';
 
       if (count > 0) {
         const canvas = document.createElement('canvas');
