@@ -2687,6 +2687,17 @@ a.rep-preview-name:hover {
 .draft-post-card .post-header-strip {
   background-color: var(--footer-bg) !important;
   border-bottom: 1px dashed var(--border-color);
+  border-top-right-radius: 0.8rem;
+}
+
+@media (max-width: 768px) {
+  .draft-post-card .post-header-strip {
+    border-top-right-radius: 0;
+  }
+
+  .author-avatar-wrapper {
+    height: 60px;
+  }
 }
 
 [data-theme='dark'] .draft-post-card .post-header-strip {
@@ -3871,7 +3882,8 @@ a.rep-preview-name:hover {
 
 .forum-group-card {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08) !important;
-  border-radius: 12px !important;
+  border-radius: 0 0 12px 12px !important;
+  overflow: hidden;
 }
 
 [data-theme='dark'] .forum-group-card {
@@ -3887,17 +3899,20 @@ a.rep-preview-name:hover {
   color: #ffffff !important;
   border-bottom: 1px solid var(--border-color);
   padding: 0.75rem 1rem !important;
+  border-radius: 12px 12px 0 0 !important;
+  overflow: hidden;
 }
 
 .forum-group-header h4 {
   color: #ffffff !important;
   font-size: 1rem !important;
   font-weight: 700 !important;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .forum-table-sub thead th {
+  border-radius: 0 !important;
   background-color: var(--block-bg) !important;
   color: var(--secondary-color) !important;
   font-size: 0.65rem !important;
@@ -4015,9 +4030,9 @@ a.rep-preview-name:hover {
   .forum-group-header h4 {
     color: #fff !important;
     font-size: 0.85rem !important;
-    text-transform: uppercase;
+    text-transform: none;
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: normal;
     margin: 0 !important;
   }
 
@@ -4025,7 +4040,8 @@ a.rep-preview-name:hover {
   .forum-group-card {
     background-color: var(--card-bg) !important;
     border: 1px solid var(--border-color) !important;
-    border-radius: 12px !important;
+    border-top: none !important;
+    border-radius: 0 0 12px 12px !important;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06) !important;
     margin-bottom: 2.5rem !important;
     overflow: hidden;
@@ -4117,6 +4133,7 @@ a.rep-preview-name:hover {
     border-right: none !important;
     border-bottom: 1px solid var(--border-color) !important;
     background-color: rgba(var(--primary-rgb), 0.01) !important;
+    border-radius: 1rem 1rem 0 0 !important;
   }
 
   .author-res-avatar {
