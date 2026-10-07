@@ -2490,6 +2490,10 @@ a.rep-preview-name:hover {
   .draft-post-card .post-header-strip {
     border-top-right-radius: 0;
   }
+
+  .author-avatar-wrapper {
+    height: 60px;
+  }
 }
 
 [data-theme='dark'] .draft-post-card .post-header-strip {
