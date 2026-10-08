@@ -1,4 +1,5 @@
 Use Windows Command Prompt (cmd.exe) syntax for terminal commands.
+(Если терминал в настройках не cmd.exe, то так и скажи об этом пользователю-человеку, чтобы он поменял настройку и мы не бились головой об стену с глюкающим терминалом!)
 Do not run `dir /s /b` or recursive list commands without filtering.
 
 ## Email templates (global email template rule)
