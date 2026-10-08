@@ -175,3 +175,60 @@ func TestAerunWrapFoldsContentIntoTheWrapper(t *testing.T) {
 		t.Fatal("title and forum name must remain placeholders for the delivery path")
 	}
 }
+
+// TestDefaultTopicReplyTemplateExists is the out-of-the-box promise for the
+// second notification type: the functions/email.js renderTopicReplyEmail
+// design, wrapped, with its per-send placeholders open.
+func TestDefaultTopicReplyTemplateExists(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tpl, ok := loadEmailTemplates(app)[emailTemplateTopicReply]
+	if !ok {
+		t.Fatal("the built-in defaults must include the topic_reply type")
+	}
+	if !strings.HasPrefix(tpl.Subject, "New reply in: ") {
+		t.Fatalf("unexpected default topic_reply subject: %q", tpl.Subject)
+	}
+	for _, marker := range []string{
+		".top-accent",
+		"New Reply in Subscribed Topic",
+		"View Discussion",
+		phTopicTitle,
+		phTopicURL,
+		phRecipientName,
+		phSenderName,
+		phSnippet,
+	} {
+		if !strings.Contains(tpl.Body, marker) {
+			t.Fatalf("default topic_reply body must carry %q", marker)
+		}
+	}
+}
+
+// TestRenderEmailFromTemplateEscapesBodyNotSubject pins the escaping
+// contract: values arrive raw, the body pass escapes them (it is HTML), the
+// subject pass does not (an &amp; in a subject line would be a lie).
+func TestRenderEmailFromTemplateEscapesBodyNotSubject(t *testing.T) {
+	tpl := emailTemplate{
+		Subject: "About " + phTopicTitle,
+		Body:    "<h1>" + phTopicTitle + "</h1><p>" + phSnippet + "</p><title>" + phTitle + "</title><b>" + phAppName + "</b>",
+	}
+	const nasty = `Tom & Jerry <b>vs</b> "them"`
+	subject, body := renderEmailFromTemplate(tpl, "A & B", "About "+nasty, map[string]string{
+		phTopicTitle: nasty,
+		phSnippet:    nasty,
+	})
+
+	if subject != "About "+nasty {
+		t.Errorf("the subject must stay raw, got %q", subject)
+	}
+	if strings.Contains(body, "<b>vs</b>") || strings.Contains(body, `"them"`) {
+		t.Errorf("the body must escape the values, got %s", body)
+	}
+	for _, want := range []string{"Tom &amp; Jerry", "&lt;b&gt;vs&lt;/b&gt;", "&#34;them&#34;", "A &amp; B"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body must contain escaped form %q, got %s", want, body)
+		}
+	}
+}

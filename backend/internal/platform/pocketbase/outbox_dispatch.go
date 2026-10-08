@@ -115,13 +115,14 @@ type pocketBaseMailSender struct {
 	app core.App
 }
 
-func (s pocketBaseMailSender) Send(ctx context.Context, to, subject, body string) error {
-	to = strings.TrimSpace(to)
+func (s pocketBaseMailSender) Send(ctx context.Context, payload MailPayload) error {
+	to := strings.TrimSpace(payload.ToEmail)
 	if to == "" {
-		// An event with no recipient is a data problem, not a transport
-		// problem. Returning an error burns the retry budget and ends as
-		// `failed`, which is the honest outcome for an undeliverable message —
-		// but the worker records the reason in last_error, so it is not silent.
+		// An event with no recipient address is a data problem, not a
+		// transport problem. Returning an error burns the retry budget and
+		// ends as `failed`, which is the honest outcome for an undeliverable
+		// message — but the worker records the reason in last_error, so it is
+		// not silent.
 		return errors.New("outbox event has no recipient address")
 	}
 
@@ -135,10 +136,15 @@ func (s pocketBaseMailSender) Send(ctx context.Context, to, subject, body string
 		sender = "no-reply@aerun.invalid"
 	}
 
+	// BodyHTML carries the shared-template wrapper; BodyText is its
+	// plain-text alternative. PocketBase builds a multipart/alternative
+	// message when both are set and a text-only one when HTML is empty, so a
+	// payload from before HTML delivery keeps sending exactly as it did.
 	return client.Send(&mailer.Message{
 		From:    mail.Address{Name: s.app.Settings().Meta.SenderName, Address: sender},
 		To:      []mail.Address{{Address: to}},
-		Subject: subject,
-		Text:    body,
+		Subject: payload.Subject,
+		Text:    payload.BodyText,
+		HTML:    payload.BodyHTML,
 	})
 }

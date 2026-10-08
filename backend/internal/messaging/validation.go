@@ -76,6 +76,18 @@ func MakeDMUnreadDedupeKey(conversationID, recipientID string) string {
 	return fmt.Sprintf("dm:first-unread:%s:%s", conversationID, recipientID)
 }
 
+// MakeTopicReplyDedupeKey constructs the deterministic dedupe key for
+// topic-subscription reply emails.
+// Example: topic-reply:first-unread:{post}:{recipient}
+//
+// The key is per POST rather than per topic: the enqueue path only fires on the
+// first unread reply in a topic (Firebase parity), so one post can never
+// produce two emails for the same subscriber, while the next unread wave —
+// after everything was read — keys off a different post and sails through.
+func MakeTopicReplyDedupeKey(postID, recipientID string) string {
+	return fmt.Sprintf("topic-reply:first-unread:%s:%s", postID, recipientID)
+}
+
 // ClampLimit clamps page limit between 1 and MaxPageLimit.
 func ClampLimit(limit, fallback int) int {
 	if limit <= 0 {

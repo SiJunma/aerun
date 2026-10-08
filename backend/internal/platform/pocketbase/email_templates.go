@@ -3,7 +3,8 @@ package pocketbase
 // The global email wrapper: one design, resolved per send.
 //
 // Every mail this backend sends — auth (verification, password reset, email
-// change) and notifications (DM now; replies/mentions when they arrive) — must
+// change) and notifications (DMs and topic replies now; mentions/quotes when
+// they arrive) — must
 // resolve its subject and body through loadEmailTemplates rather than carrying
 // its own HTML. That is the rule written into .clinerules, and it exists
 // because the alternative is how the design drifted in the first place:
@@ -36,6 +37,7 @@ package pocketbase
 
 import (
 	"encoding/json"
+	"html/template"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -54,6 +56,8 @@ const (
 	phSenderName    = "{SENDER_NAME}"
 	phSnippet       = "{SNIPPET}"
 	phMessagesURL   = "{MESSAGES_URL}"
+	phTopicTitle    = "{TOPIC_TITLE}"
+	phTopicURL      = "{TOPIC_URL}"
 )
 
 // emailTemplate is one mail type: its subject line and its HTML body — the
@@ -68,11 +72,14 @@ type emailTemplate struct {
 // mentions, quotes, topic replies — is a new JSON key, not a schema change.
 type emailTemplates map[string]emailTemplate
 
-// emailTemplateDM is the only notification type that delivers today. Auth
-// types are deliberately absent: their content is rendered by PocketBase at
-// send time and re-dressed by the OnMailerSend hook, so a stored copy here
-// would go stale. When a type stops being PB-rendered, it earns a key here.
-const emailTemplateDM = "dm"
+// Notification template types. Auth types are deliberately absent: their
+// content is rendered by PocketBase at send time and re-dressed by the
+// OnMailerSend hook (step 5 of the plan), so a stored copy here would go
+// stale. When a type stops being PB-rendered, it earns a key here.
+const (
+	emailTemplateDM         = "dm"
+	emailTemplateTopicReply = "topic_reply"
+)
 
 // defaultEmailWrapper is the Go port of wrapEmailTemplate from
 // functions/email.js — the same slate palette, the same 560px container, the
@@ -228,6 +235,26 @@ const defaultDMContent = `
     </div>
   `
 
+// defaultTopicReplyContent is the content block of renderTopicReplyEmail from
+// functions/email.js, ported verbatim — same heading, same highlight-box, same
+// "you will not get more mail until you visit the topic" notice, same
+// "View Discussion" CTA (folded in here because the wrapper is a static
+// string), pointing at the reply via {TOPIC_URL}.
+const defaultTopicReplyContent = `
+    <h2 style="color: #0f172a; margin: 0 0 16px; font-size: 17px; font-weight: 600;">New Reply in Subscribed Topic</h2>
+    <p>Hello <strong>` + phRecipientName + `</strong>,</p>
+    <p><strong>` + phSenderName + `</strong> has posted a new reply in <strong>"` + phTopicTitle + `"</strong>:</p>
+    <div class="highlight-box">
+      "` + phSnippet + `"
+    </div>
+    <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin-top: 18px;">
+      There may be other new replies in this topic, but you will not receive further email notifications until you visit the topic.
+    </p>
+    <div class="btn-container">
+      <a href="` + phTopicURL + `" class="btn" target="_blank" rel="noopener">View Discussion</a>
+    </div>
+  `
+
 // defaultEmailTemplates is what an untouched forum sends: the design from
 // functions/email.js, out of the box, with no row in forum_settings yet.
 func defaultEmailTemplates() emailTemplates {
@@ -236,7 +263,38 @@ func defaultEmailTemplates() emailTemplates {
 			Subject: "New Direct Message from " + phSenderName,
 			Body:    aerunWrap(defaultDMContent),
 		},
+		emailTemplateTopicReply: {
+			Subject: "New reply in: " + phTopicTitle,
+			Body:    aerunWrap(defaultTopicReplyContent),
+		},
 	}
+}
+
+// renderEmailFromTemplate folds the per-send values into one resolved
+// template and returns the subject plus the wrapped HTML body.
+//
+// Escaping happens HERE, in one place, and asymmetrically on purpose: the
+// body is HTML, so every value is escaped for it, while the subject is a
+// header line where an escape like &amp; would be noise. Callers therefore
+// pass RAW values — nicknames, titles, snippets — and never pre-escape.
+//
+// title feeds {TITLE} (the wrapper's <title>); appName feeds {APP_NAME},
+// which the notification path must fill itself because PocketBase only
+// resolves it for the auth mails it sends on its own. values are the
+// content-level placeholders of the type ({RECIPIENT_NAME}, {SNIPPET}, ...).
+func renderEmailFromTemplate(tpl emailTemplate, appName, title string, values map[string]string) (subject, bodyHTML string) {
+	esc := template.HTMLEscapeString
+
+	subjectPairs := []string{phTitle, title, phAppName, appName}
+	bodyPairs := []string{phTitle, esc(title), phAppName, esc(appName)}
+	for ph, val := range values {
+		subjectPairs = append(subjectPairs, ph, val)
+		bodyPairs = append(bodyPairs, ph, esc(val))
+	}
+
+	subject = strings.NewReplacer(subjectPairs...).Replace(tpl.Subject)
+	bodyHTML = strings.NewReplacer(bodyPairs...).Replace(tpl.Body)
+	return subject, bodyHTML
 }
 
 // loadEmailTemplates resolves the effective templates for this send.

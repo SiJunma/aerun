@@ -93,6 +93,14 @@ func TestMakeDMUnreadDedupeKey(t *testing.T) {
 	}
 }
 
+func TestMakeTopicReplyDedupeKey(t *testing.T) {
+	key := MakeTopicReplyDedupeKey("post123", "user456")
+	expected := "topic-reply:first-unread:post123:user456"
+	if key != expected {
+		t.Fatalf("expected dedupe key %q, got %q", expected, key)
+	}
+}
+
 func TestClampLimit(t *testing.T) {
 	if got := ClampLimit(0, 20); got != 20 {
 		t.Fatalf("expected fallback 20, got %d", got)

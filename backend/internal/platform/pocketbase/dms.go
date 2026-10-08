@@ -61,6 +61,15 @@ func isMemberOnline(userID string, now time.Time) bool {
 // dmEmailEnabled mirrors the Firebase check
 // `settings.email_notifications.dms !== false` (default true).
 func dmEmailEnabled(user *core.Record) bool {
+	return emailNotificationsPref(user, "dms")
+}
+
+// emailNotificationsPref reads one boolean from
+// settings.email_notifications.<prefKey>, defaulting to true when the member
+// never touched the toggle — the same "absent means enabled" contract
+// Firebase had. It backs dmEmailEnabled ("dms") and topicReplyEmailEnabled
+// ("topic_replies").
+func emailNotificationsPref(user *core.Record, prefKey string) bool {
 	raw := user.Get("settings")
 	if raw == nil {
 		return true
@@ -95,7 +104,7 @@ func dmEmailEnabled(user *core.Record) bool {
 	if group == nil {
 		return true
 	}
-	val, ok := group["dms"]
+	val, ok := group[prefKey]
 	if !ok || val == nil {
 		return true
 	}
@@ -118,12 +127,30 @@ func maybeEnqueueDMEmail(txApp core.App, conversationID string, recipient *core.
 	if isMemberOnline(recipient.Id, time.Now()) {
 		return
 	}
+	tpl, ok := loadEmailTemplates(txApp)[emailTemplateDM]
+	if !ok {
+		// The resolver guarantees the built-in default, so this only ever
+		// happens if the defaults themselves lose the key — better to skip
+		// one mail than to send an empty one.
+		return
+	}
+	// The subject template carries {SENDER_NAME}; the title also feeds the
+	// wrapper's <title>, exactly as renderDmNotificationEmail set it in
+	// functions/email.js.
+	title := "New Direct Message from " + senderNick
+	subject, bodyHTML := renderEmailFromTemplate(tpl, txApp.Settings().Meta.AppName, title, map[string]string{
+		phRecipientName: recipient.GetString("nickname"),
+		phSenderName:    senderNick,
+		phSnippet:       dmEmailSnippet(text),
+		phMessagesURL:   strings.TrimRight(txApp.Settings().Meta.AppURL, "/") + "/messages",
+	})
 	dedupeKey := messaging.MakeDMUnreadDedupeKey(conversationID, recipient.Id)
 	_ = enqueueOutboxEvent(txApp, dedupeKey, "email:dm_unread", MailPayload{
 		RecipientID: recipient.Id,
 		ToEmail:     recipient.Email(),
-		Subject:     "New direct message from " + senderNick,
+		Subject:     subject,
 		BodyText:    fmt.Sprintf("%s sent you a message:\n\n%s", senderNick, text),
+		BodyHTML:    bodyHTML,
 	})
 }
 

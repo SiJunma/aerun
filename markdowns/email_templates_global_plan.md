@@ -1,6 +1,43 @@
 # План: глобальные email-шаблоны (админка форума)
 
-**Трекер прогресса.** Текущий статус: **phase 1 — планирование / принятие решений** (финальные решения зафиксированы).
+**Трекер прогресса.** Текущий статус: **phase 2 — реализация идёт**.
+
+- [x] Шаг 1 (J.1–J.2): миграция `1769300000_email_templates.go` + backfill для legacy `forumsettings01` + поле `EmailTemplates` в `forum_settings.go` — `facc1c6`, `078cf7f`.
+- [x] Шаг 2 (J.3): `email_templates.go` — `aerunWrap` (порт `wrapEmailTemplate`), дефолты, резолвер `loadEmailTemplates` (global > default, оверлей по типам, fallback при битом JSON) — `078cf7f`.
+- [x] Шаг 3 (J.4): уведомления через резолвер — типы `dm` и `topic_reply`; `MailPayload.body_html`; `outbox_dispatch.go` шлёт multipart (HTML + text); ответ в подписанной теме шлёт email по первому непрочитанному ответу (паритет Firebase, guard `settings.email_notifications.topic_replies`, dispatch-time re-check) — см. `notification_email.go`, `topic_reply_email_test.go`.
+- [ ] Шаг 4 (J.5): auth-хуки `OnMailerRecord*Send` (переодеть PB-контент в `aerunWrap`; убрать force-overwrite в `configureAuthTemplates`).
+- [ ] Шаг 5 (J.6): админка — форма глобального шаблона + `POST /api/aerun/admin/email-templates/test` (recipient = свой емейл).
+- [ ] Шаг 6: отключить Brevo-дубли в `functions/index.js` при переходе на Go-отправку.
+
+### Handoff: точка остановки (сессия 08.10.2026)
+
+**Статус: шаг 3 (J.4) ВЫПОЛНЕН ПОЛНОСТЬЮ, ВСЕ ТЕСТЫ ЗЕЛЁНЫЕ, ЗАКОММИЧЕН (см. `git log`). Следующий шаг — шаг 4 (J.5): auth-хуки.**
+
+Что сделано в этой сессии (шаг 3 — уведомления через резолвер + email ответов в теме):
+- `messaging/validation.go` + `_test.go`: `MakeTopicReplyDedupeKey(postID, recipientID)` → `topic-reply:first-unread:{post}:{recipient}` (dedupe per-POST: следующая волна непрочитанных после чтения ленты — новый ключ).
+- `email_templates.go`: тип `emailTemplateTopicReply="topic_reply"`; плейсхолдеры `phTopicTitle`/`phTopicURL`; `defaultTopicReplyContent` (порт `renderTopicReplyEmail` из `functions/email.js`); `renderEmailFromTemplate(tpl, appName, title, values)` — значения в body экранируются (`html/template`; Go даёт `&#34;`, не `&quot;`), subject сырой.
+- Новый `notification_email.go`: `postEmailSnippet` (BBCode-strip, 200 рун), `dmEmailSnippet` (150 рун), `topicReplyEmailEnabled`, `hasUnreadTopicReply` (first-unread gate — проверяется ДО создания текущего notification, иначе ответ заглушил бы собственную почту), `topicEmailURL` (`/topic/{id}?post={post}`), `maybeEnqueueTopicReplyEmail` (enqueue `email:topic_reply` c `BodyHTML`), `topicReplyEmailText`, `topicReplyEmailSkipReason` (re-check тумблера при dispatch).
+- `dms.go`: `emailNotificationsPref(user, prefKey)` (обобщённый), `maybeEnqueueDMEmail` рендерится через `loadEmailTemplates` + `renderEmailFromTemplate` + `BodyHTML`.
+- `post_notifications.go`: `deliver()` считает `firstUnreadReply` до `createNotification` и для `topic_reply` зовёт `maybeEnqueueTopicReplyEmail` (in-app нотификации — по-прежнему на каждый ответ; email — только на первый непрочитанный; Firebase-паритет).
+- `outbox.go`: `MailSender.Send(ctx, payload MailPayload)` (было строки), `MailPayload.BodyHTML`; skip-switch в dispatch знает `email:dm_unread` и `email:topic_reply` (skipped → `status=sent`, `last_error: "skipped: ..."`).
+- `outbox_dispatch.go`: `pocketBaseMailSender` шлёт `mailer.Message{Text, HTML}` (PB v0.40.4 multipart/alternative).
+- Тесты: новый `topic_reply_email_test.go` (6: enqueue на первом непрочитанном, coalescing/второй без письма, чтение открывает gate, тумблер-off на enqueue, тумблер-off на dispatch, BodyHTML до sender); обновлены `sprint5_test.go` (mock `sentPayloads`), `email_templates_test.go` (+2 теста, `&#34;`), `outbox_dispatch_test.go` (payload-сигнатура).
+
+**Верификация — ВСЁ ЗЕЛЁНОЕ:**
+- `go test ./internal/... -count=1` (полный) — **ok, все пакеты**: `pocketbase 435.474s`, `messaging 0.789s`, `migrations 17.324s`, `auth/config/forum/importer` — ok.
+- Ранее: `go build ./...` ok, `go vet ./internal/...` чисто, `gofmt` применён; точечные прогоны template/snippet (`TestRenderEmailFromTemplate|TestLoadEmailTemplates|TestAerunWrap|TestDefaultTopicReplyTemplate|TestEmailSnippets`), регрессии (`TestDMEmail|TestSprint5|TestOutbox|TestADR6|TestRegisterOutbox|TestQuote*|TestMention*`) — ok.
+- Temp-файлы `*_out.txt` удалены, рабочее дерево содержит только осмысленные правки.
+
+**Следующая сессия — план действий:**
+1. `git log -1 --stat` убедиться, что шаг 3 закоммичен; `git status` — дерево чистое.
+2. Быстро перепроверить перед началом работы: `cd backend && go build ./... && go vet ./internal/...`.
+3. Приступить к шагу 4 (J.5): auth-хуки `OnMailerRecord*Send` — извлечь inner-контент PB-шаблона, переодеть в `aerunWrap`; убрать force-overwrite в `configureAuthTemplates` (seed только если пусто); расширить `mail_templates_test.go` золотыми тестами обёртки.
+4. Затем шаг 5 (J.6): админка — форма глобального шаблона + `POST /api/aerun/admin/email-templates/test` (recipient принудительно = свой емейл аккаунта).
+
+**Известные тонкости окружения (для будущей сессии):**
+- PowerShell 5.1: нет `&&` (использовать `;` или `cmd /c`), `$_` в командах вырезается экранированием — избегать, кириллический вывод в терминал ломает следующий ввод (глюк «сcmd»); длинные тесты → редирект в файл, читать через read_files.
+- Редактор: чанки <6000 символов.
+- Двойная отправка (Firebase ещё шлёт эти же письма) — осознанно отложено, решается шагом 6 (отключение Brevo-дублей).
 
 ## 1. Проблема
 В production (PocketBase) почтовые шаблоны для верификации и уведомлений отсутствуют или не согласованы с написанным дизайном:

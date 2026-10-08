@@ -25,6 +25,10 @@ package pocketbase
 //
 // The author is never notified about their own post, in all three.
 //
+// EMAIL, REPLY ONLY. A subscribed topic's first unread reply also queues an
+// outbox email through the shared template; see notification_email.go for
+// the first-unread gate and the Firebase contract it reproduces.
+//
 // ONE DEVIATION, DELIBERATE. Mention lookup there matched `nickname` for EXACT
 // string equality, so "[b]alice [/b]" notified nobody. Here it uses
 // `nickname_normalized` — the key the uniqueness index enforces — so bold text
@@ -73,6 +77,11 @@ func dispatchPostNotifications(txApp core.App, actorID string, post *core.Record
 		}
 		seen[key] = true
 
+		// The email gate runs BEFORE the current notification exists: the
+		// reply being dispatched must not count itself as "an earlier
+		// unread" and silence its own mail (Firebase parity).
+		firstUnreadReply := notifType != "topic_reply" || !hasUnreadTopicReply(txApp, recipientID, topicID)
+
 		payload := map[string]any{
 			"topic_id":        topicID,
 			"topic_title":     topicTitle,
@@ -80,6 +89,13 @@ func dispatchPostNotifications(txApp core.App, actorID string, post *core.Record
 			"author_nickname": authorNickname(txApp, actorID),
 		}
 		_, _ = createNotification(txApp, recipientID, actorID, notifType, notificationTitle(notifType, topicTitle), payload)
+
+		// The email half of a topic reply — outbox, same transaction, shared
+		// template (see notification_email.go). Quotes and mentions stay
+		// in-app only until their own mail types are designed.
+		if notifType == "topic_reply" && firstUnreadReply {
+			maybeEnqueueTopicReplyEmail(txApp, recipientID, actorID, topicID, topicTitle, post.Id, content)
+		}
 	}
 
 	// ── 1. Subscribers ──────────────────────────────────────────────────────

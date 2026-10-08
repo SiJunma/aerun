@@ -247,16 +247,18 @@ type mockMailSender struct {
 	calls        int
 	failUntil    int
 	sentMessages []string
+	sentPayloads []MailPayload
 }
 
-func (m *mockMailSender) Send(ctx context.Context, to, subject, body string) error {
+func (m *mockMailSender) Send(ctx context.Context, payload MailPayload) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls++
 	if m.calls <= m.failUntil {
 		return errors.New("temporary SMTP connection timeout")
 	}
-	m.sentMessages = append(m.sentMessages, to)
+	m.sentMessages = append(m.sentMessages, payload.ToEmail)
+	m.sentPayloads = append(m.sentPayloads, payload)
 	return nil
 }
 

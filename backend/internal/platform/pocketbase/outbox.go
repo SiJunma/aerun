@@ -21,8 +21,11 @@ const (
 )
 
 // MailSender is the interface for dispatching emails from the outbox worker.
+// It takes the whole payload rather than loose strings because the payload
+// carries both bodies: the plain-text one and the HTML wrapper the shared
+// email template produced. See pocketBaseMailSender for the multipart build.
 type MailSender interface {
-	Send(ctx context.Context, to, subject, body string) error
+	Send(ctx context.Context, payload MailPayload) error
 }
 
 // MailPayload represents the structured data for an outbox email event.
@@ -31,6 +34,10 @@ type MailPayload struct {
 	ToEmail     string `json:"to_email"`
 	Subject     string `json:"subject"`
 	BodyText    string `json:"body_text"`
+	// BodyHTML is the rendered shared-template wrapper. Empty means the event
+	// predates HTML delivery or was queued by a plain-text path, and the
+	// sender falls back to text-only.
+	BodyHTML string `json:"body_html,omitempty"`
 }
 
 // enqueueOutboxEvent inserts a pending outbox event within a transaction.
@@ -176,12 +183,22 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 			}
 		}
 
-		// DM emails are re-checked at dispatch time: up to a minute passes
-		// between queue and send, and the recipient may have come online or
-		// read the conversation in between (Firebase parity: email only while
-		// the recipient is offline with unread mail).
-		if rec.GetString("event_type") == "email:dm_unread" {
+		// Notification emails are re-checked at dispatch time: up to a
+		// minute passes between queue and send, and the recipient's state
+		// may have changed in between (Firebase parity: DM mail only while
+		// offline with unread mail; topic mail only while the toggle is on).
+		switch rec.GetString("event_type") {
+		case "email:dm_unread":
 			if skipReason := dmEmailSkipReason(app, rec); skipReason != "" {
+				rec.Set("status", "sent")
+				rec.Set("sent_at", time.Now().UTC().Format(time.RFC3339))
+				rec.Set("last_error", "skipped: "+skipReason)
+				_ = app.Save(rec)
+				processed++
+				continue
+			}
+		case "email:topic_reply":
+			if skipReason := topicReplyEmailSkipReason(app, rec); skipReason != "" {
 				rec.Set("status", "sent")
 				rec.Set("sent_at", time.Now().UTC().Format(time.RFC3339))
 				rec.Set("last_error", "skipped: "+skipReason)
@@ -191,7 +208,7 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 			}
 		}
 
-		sendErr := sender.Send(ctx, payload.ToEmail, payload.Subject, payload.BodyText)
+		sendErr := sender.Send(ctx, payload)
 		if sendErr == nil {
 			// Successful delivery: mark sent
 			rec.Set("status", "sent")

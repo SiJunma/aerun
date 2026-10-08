@@ -123,7 +123,7 @@ func TestOutboxSenderRejectsMissingRecipient(t *testing.T) {
 	defer app.Cleanup()
 
 	sender := pocketBaseMailSender{app: app}
-	if err := sender.Send(t.Context(), "   ", "subject", "body"); err == nil {
+	if err := sender.Send(t.Context(), MailPayload{ToEmail: "   ", Subject: "subject", BodyText: "body"}); err == nil {
 		t.Fatal("a blank recipient must be an error, not a silent success")
 	}
 }
