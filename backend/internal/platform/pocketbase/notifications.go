@@ -180,7 +180,14 @@ func markAllTopicsReadHandler(e *core.RequestEvent) error {
 }
 
 // createNotification inserts an in-app notification within a transaction.
+//
+// Direct messages never come through here: DMs are signalled only by the DM
+// unread counter (see dms.go). A "dm" type is rejected so a future caller
+// cannot reintroduce DM rows into the notifications feed.
 func createNotification(txApp core.App, recipientID, senderID, notifType, title string, payload any) (*core.Record, error) {
+	if notifType == "dm" {
+		return nil, validationError("direct messages do not create in-app notifications")
+	}
 	col, err := txApp.FindCollectionByNameOrId(notificationsCollectionName)
 	if err != nil {
 		return nil, internalError("notifications collection unavailable", err)
@@ -262,7 +269,8 @@ func listUserNotificationsHandler(e *core.RequestEvent) error {
 	includeArchived := e.Request.URL.Query().Get("archived") == "true"
 
 	query := e.App.RecordQuery(notificationsCollectionName).
-		AndWhere(dbx.HashExp{"recipient_id": e.Auth.Id})
+		AndWhere(dbx.HashExp{"recipient_id": e.Auth.Id}).
+		AndWhere(dbx.NewExp("type != {:t}", dbx.Params{"t": "dm"}))
 
 	if unreadOnly {
 		query = query.AndWhere(dbx.HashExp{"read": false})
@@ -457,6 +465,7 @@ func getUnreadCountsHandler(e *core.RequestEvent) error {
 	err := e.App.DB().Select("COUNT(*) as count").
 		From(notificationsCollectionName).
 		Where(dbx.HashExp{"recipient_id": e.Auth.Id, "read": false, "archived": false}).
+		AndWhere(dbx.NewExp("type != {:t}", dbx.Params{"t": "dm"})).
 		One(&notifCount)
 	if err != nil {
 		return internalError("failed to count unread notifications", err)

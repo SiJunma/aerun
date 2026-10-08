@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Badge, Button, Row, Col } from 'react-bootstrap';
-import { Bell, BellOff, CheckCheck, UserCheck, Clock, Trash2, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign, Mail } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, UserCheck, Clock, Trash2, X, MessageSquare, TrendingUp, TrendingDown, Quote, AtSign } from 'lucide-react';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -46,11 +46,9 @@ const TYPE_META = {
     labelKey: 'notifications.types.post_mentioned',
     color: 'secondary'
   },
-  dm: {
-    icon: <Mail size={18} />,
-    labelKey: 'notifications.types.dm',
-    color: 'dark'
-  },
+  // DMs are signalled only by the DM unread counter on the envelope icon,
+  // never by the notifications feed (Firebase parity: onDmMessageCreated
+  // never wrote to the notifications collection). No 'dm' entry here.
   POST_MENTIONED: {
     icon: <AtSign size={18} />,
     labelKey: 'notifications.types.post_mentioned',

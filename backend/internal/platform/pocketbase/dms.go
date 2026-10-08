@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -41,6 +42,89 @@ type editDMMessageForm struct {
 	// A POINTER, like editPostForm.Rolls: an edit that did not touch the dice
 	// must not wipe the throws the message already carries.
 	Rolls *map[string]any `json:"rolls"`
+}
+
+// isMemberOnline reports whether userID is currently active in the live presence map.
+//
+// Firebase parity: onDmMessageCreated checked whether the recipient was currently
+// online on the forum (state == 'online'). In PocketBase, live presence is
+// tracked in onlineMembers with presenceTTL (75s, refreshed every 30s by heartbeat).
+// When a user logs out, they are removed from onlineMembers immediately.
+// When a user closes the tab, they expire after presenceTTL.
+func isMemberOnline(userID string, now time.Time) bool {
+	presenceMu.RLock()
+	defer presenceMu.RUnlock()
+	m, ok := onlineMembers[userID]
+	return ok && !m.LastSeen.Before(now.Add(-presenceTTL))
+}
+
+// dmEmailEnabled mirrors the Firebase check
+// `settings.email_notifications.dms !== false` (default true).
+func dmEmailEnabled(user *core.Record) bool {
+	raw := user.Get("settings")
+	if raw == nil {
+		return true
+	}
+	var settings map[string]any
+	switch v := raw.(type) {
+	case string:
+		if err := json.Unmarshal([]byte(v), &settings); err != nil {
+			return true
+		}
+	case map[string]any:
+		settings = v
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return true
+		}
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return true
+		}
+	}
+	node, ok := settings["email_notifications"]
+	if !ok || node == nil {
+		return true
+	}
+	group, ok := node.(map[string]any)
+	if !ok {
+		if data, err := json.Marshal(node); err == nil {
+			_ = json.Unmarshal(data, &group)
+		}
+	}
+	if group == nil {
+		return true
+	}
+	val, ok := group["dms"]
+	if !ok || val == nil {
+		return true
+	}
+	if b, ok := val.(bool); ok {
+		return b
+	}
+	return true
+}
+
+// maybeEnqueueDMEmail queues the first-unread DM email for recipient — unless
+// the recipient disabled DM mail or is currently online.
+//
+// Enqueue-time guard (fixes "both online, email still sent"). The dispatch
+// worker re-checks before sending: up to a minute passes between queue and
+// send, and the recipient may come online in between.
+func maybeEnqueueDMEmail(txApp core.App, conversationID string, recipient *core.Record, senderNick, text string) {
+	if recipient == nil || !dmEmailEnabled(recipient) {
+		return
+	}
+	if isMemberOnline(recipient.Id, time.Now()) {
+		return
+	}
+	dedupeKey := messaging.MakeDMUnreadDedupeKey(conversationID, recipient.Id)
+	_ = enqueueOutboxEvent(txApp, dedupeKey, "email:dm_unread", MailPayload{
+		RecipientID: recipient.Id,
+		ToEmail:     recipient.Email(),
+		Subject:     "New direct message from " + senderNick,
+		BodyText:    fmt.Sprintf("%s sent you a message:\n\n%s", senderNick, text),
+	})
 }
 
 // requireDMMember reports whether userID is a participant in conversationID.
@@ -470,37 +554,27 @@ func createDMHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to save message", err)
 		}
 
-		// 4. Create in-app notifications and outbox events for recipients
+		// 4. Outbox email events for recipients.
+		//
+		// There is deliberately NO in-app notification here. A direct message is
+		// signalled only through the DM counter (dm_members.last_read_sequence vs
+		// dm_conversations.messages_count) plus the per-recipient dm.post realtime
+		// nudge below — exactly like the Firebase era (onDmMessageCreated never
+		// wrote to the notifications collection). Writing a "dm" row as well would
+		// surface every DM in the notifications feed and inflate unread_notifications.
 		senderNick := e.Auth.GetString("nickname")
 		for _, rUser := range recipientUsers {
-			// Persistent in-app notification
-			_, _ = createNotification(txApp, rUser.Id, e.Auth.Id, "dm", "New direct message from "+senderNick, map[string]any{
-				"conversation_id": conv.Id,
-				"message_id":      msg.Id,
-				"sequence":        1,
-				"sender_uid":      e.Auth.Id,
-				"sender_nickname": senderNick,
-				"preview":         cleanText,
-			})
-
-			// The DM list is a SEPARATE resource from the notification list, and
-			// the notification signal fired above — so without this nudge the
-			// conversation preview waits for a poll while the badge updates
-			// instantly.
+			// The DM list is a SEPARATE resource from the notification list —
+			// so without this nudge the conversation preview waits for a poll
+			// while the badge updates instantly.
 			//
 			// Addressed to each recipient individually rather than to the
 			// conversation: a conversation id is not something a non-member may
 			// learn from the stream.
 			publishSignal(txApp, realtimeSignalDMPost, msg.Id, rUser.Id)
 
-			// Outbox email event with deduplication key: dm:first-unread:{conv}:{recipient}
-			dedupeKey := messaging.MakeDMUnreadDedupeKey(conv.Id, rUser.Id)
-			_ = enqueueOutboxEvent(txApp, dedupeKey, "email:dm_unread", MailPayload{
-				RecipientID: rUser.Id,
-				ToEmail:     rUser.Email(),
-				Subject:     "New direct message from " + senderNick,
-				BodyText:    fmt.Sprintf("%s sent you a message:\n\n%s", senderNick, cleanText),
-			})
+			// Email, first-unread only, offline only (Firebase parity).
+			maybeEnqueueDMEmail(txApp, conv.Id, rUser, senderNick, cleanText)
 		}
 
 		return http.StatusOK, map[string]any{
@@ -654,35 +728,19 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			senderNick := e.Auth.GetString("nickname")
 			for _, m := range otherMembers {
 				rID := m.GetString("user_id")
-				_, _ = createNotification(txApp, rID, e.Auth.Id, "dm", "New direct message from "+senderNick, map[string]any{
-					"conversation_id": conv.Id,
-					"message_id":      msg.Id,
-					"sequence":        nextSeq,
-					"sender_uid":      e.Auth.Id,
-					"sender_nickname": senderNick,
-					"preview":         cleanText,
-				})
-
-				// The DM list is a SEPARATE resource from the notification list,
-				// and the notification signal fired above — so without this nudge
-				// the conversation preview waits for a poll while the badge updates
-				// instantly.
+				// The DM list is a SEPARATE resource from the notification list —
+				// so without this nudge the conversation preview waits for a poll
+				// while the badge updates instantly.
 				//
 				// Addressed to each recipient individually rather than to the
 				// conversation: a conversation id is not something a non-member
 				// may learn from the stream.
 				publishSignal(txApp, realtimeSignalDMPost, msg.Id, rID)
 
-				// Deduplicated email outbox event
-				dedupeKey := messaging.MakeDMUnreadDedupeKey(conv.Id, rID)
+				// Email, first-unread only, offline only (Firebase parity).
 				u, _ := txApp.FindRecordById(usersCollectionName, rID)
 				if u != nil {
-					_ = enqueueOutboxEvent(txApp, dedupeKey, "email:dm_unread", MailPayload{
-						RecipientID: rID,
-						ToEmail:     u.Email(),
-						Subject:     "New direct message from " + senderNick,
-						BodyText:    fmt.Sprintf("%s sent you a message:\n\n%s", senderNick, cleanText),
-					})
+					maybeEnqueueDMEmail(txApp, conv.Id, u, senderNick, cleanText)
 				}
 			}
 		}
@@ -1085,15 +1143,30 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 		return internalError("failed to update read sequence", err)
 	}
 
-	// Also mark in-app notifications for this conversation as read
-	_, _ = e.App.DB().NewQuery(`
-		UPDATE notifications 
-		SET read = true 
-		WHERE recipient_id = {:user} AND type = 'dm' AND payload LIKE {:pattern}
-	`).Bind(dbx.Params{
-		"user":    e.Auth.Id,
-		"pattern": `%"conversation_id":"` + convID + `"%`,
-	}).Execute()
+	// Reset the first-unread email dedupe: the conversation is fully read, so
+	// the NEXT unread message wave is a new "first unread" and must queue its own
+	// email (Firebase parity: email notification per unread wave).
+	dedupeKey := messaging.MakeDMUnreadDedupeKey(convID, e.Auth.Id)
+	// 1. A pending row from the wave just read was not sent yet; delete it rather
+	// than send an email about messages the user already read.
+	if pending, err := e.App.FindFirstRecordByFilter(
+		outboxEventsCollectionName,
+		"dedupe_key = {:key} && status = 'pending'",
+		dbx.Params{"key": dedupeKey},
+	); err == nil && pending != nil {
+		_ = e.App.Delete(pending)
+	}
+	// 2. An already sent event with this dedupe_key would block future waves due
+	// to the UNIQUE index on dedupe_key. Retire its dedupe_key so audit history
+	// is preserved while freeing the dedupe key for the next wave.
+	if sent, err := e.App.FindFirstRecordByFilter(
+		outboxEventsCollectionName,
+		"dedupe_key = {:key} && status != 'pending'",
+		dbx.Params{"key": dedupeKey},
+	); err == nil && sent != nil {
+		sent.Set("dedupe_key", fmt.Sprintf("%s:read:%d", dedupeKey, time.Now().UnixNano()))
+		_ = e.App.Save(sent)
+	}
 
 	return e.JSON(http.StatusOK, map[string]any{
 		"conversation_id":    convID,

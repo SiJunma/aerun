@@ -176,6 +176,21 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 			}
 		}
 
+		// DM emails are re-checked at dispatch time: up to a minute passes
+		// between queue and send, and the recipient may have come online or
+		// read the conversation in between (Firebase parity: email only while
+		// the recipient is offline with unread mail).
+		if rec.GetString("event_type") == "email:dm_unread" {
+			if skipReason := dmEmailSkipReason(app, rec); skipReason != "" {
+				rec.Set("status", "sent")
+				rec.Set("sent_at", time.Now().UTC().Format(time.RFC3339))
+				rec.Set("last_error", "skipped: "+skipReason)
+				_ = app.Save(rec)
+				processed++
+				continue
+			}
+		}
+
 		sendErr := sender.Send(ctx, payload.ToEmail, payload.Subject, payload.BodyText)
 		if sendErr == nil {
 			// Successful delivery: mark sent
@@ -209,6 +224,80 @@ func (w *OutboxWorker) ProcessBatch(ctx context.Context, app core.App, sender Ma
 	}
 
 	return processed, nil
+}
+
+// dmEmailSkipReason reports why a queued DM email must NOT be sent, or ""
+// when it may go out.
+//
+// Firebase parity (onDmMessageCreated): no mail while the recipient is online,
+// after they read the conversation, or when they disabled DM mail. A skipped
+// event is retired as sent-with-reason rather than deleted, so the audit trail
+// shows it was considered, not lost.
+func dmEmailSkipReason(app core.App, rec *core.Record) string {
+	now := time.Now()
+
+	var payload MailPayload
+	if raw := rec.Get("payload"); raw != nil {
+		switch p := raw.(type) {
+		case types.JSONRaw:
+			_ = json.Unmarshal([]byte(p), &payload)
+		case string:
+			_ = json.Unmarshal([]byte(p), &payload)
+		default:
+			data, _ := json.Marshal(p)
+			_ = json.Unmarshal(data, &payload)
+		}
+	}
+	recipientID := payload.RecipientID
+	conversationID := ""
+	if key := rec.GetString("dedupe_key"); key != "" {
+		conversationID = parseDMUnreadConversationID(key)
+	}
+	if recipientID == "" || conversationID == "" {
+		return "unparseable dm_unread event"
+	}
+
+	if isMemberOnline(recipientID, now) {
+		return "recipient online"
+	}
+
+	if user, err := app.FindRecordById(usersCollectionName, recipientID); err == nil && user != nil {
+		if !dmEmailEnabled(user) {
+			return "dm mail disabled"
+		}
+	}
+
+	member, err := app.FindFirstRecordByFilter(
+		dmMembersCollectionName,
+		"conversation_id = {:conv} && user_id = {:user}",
+		dbx.Params{"conv": conversationID, "user": recipientID},
+	)
+	if err != nil || member == nil {
+		return "not a conversation member"
+	}
+	conv, err := app.FindRecordById(dmConversationsCollectionName, conversationID)
+	if err != nil || conv == nil {
+		return "conversation gone"
+	}
+	if conv.GetInt("messages_count") <= member.GetInt("last_read_sequence") {
+		return "already read"
+	}
+	return ""
+}
+
+// parseDMUnreadConversationID extracts the conversation id from a
+// dm:first-unread:{conversation}:{recipient} dedupe key.
+func parseDMUnreadConversationID(dedupeKey string) string {
+	const prefix = "dm:first-unread:"
+	rest := strings.TrimPrefix(dedupeKey, prefix)
+	if rest == dedupeKey {
+		return ""
+	}
+	idx := strings.LastIndex(rest, ":")
+	if idx <= 0 {
+		return ""
+	}
+	return rest[:idx]
 }
 
 // adminListOutboxEventsHandler returns paginated outbox events for staff visibility.

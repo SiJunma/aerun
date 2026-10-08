@@ -75,16 +75,17 @@ func TestSprint5DMConversationAndSequencing(t *testing.T) {
 			t.Fatalf("expected initial sequence 1, got %d", payload.Sequence)
 		}
 
-		// Verify in-app notification created for Player 2
-		notif, err := app.FindFirstRecordByFilter(notificationsCollectionName, "recipient_id = {:r}", map[string]any{"r": player2ID})
-		if err != nil || notif == nil {
-			t.Fatal("expected in-app notification for recipient")
-		}
-		if notif.GetString("type") != "dm" {
-			t.Fatalf("expected type dm, got %s", notif.GetString("type"))
+		// Verify NO in-app notification was created for Player 2.
+		// DMs are signalled only by the DM unread counter, never by the
+		// notifications feed (Firebase parity: onDmMessageCreated never wrote
+		// to the notifications collection).
+		stale, err := app.FindFirstRecordByFilter(notificationsCollectionName, "recipient_id = {:r} && type = 'dm'", map[string]any{"r": player2ID})
+		if err == nil && stale != nil {
+			t.Fatal("direct messages must not create in-app notifications")
 		}
 
-		// Verify outbox email created for Player 2
+		// Verify outbox email created for Player 2 (offline by default in tests:
+		// no heartbeat beats, last_seen backfilled from created which is old).
 		dedupeKey := fmt.Sprintf("dm:first-unread:%s:%s", convID, player2ID)
 		outbox, err := app.FindFirstRecordByFilter(outboxEventsCollectionName, "dedupe_key = {:key}", map[string]any{"key": dedupeKey})
 		if err != nil || outbox == nil {
@@ -149,8 +150,8 @@ func TestSprint5DMConversationAndSequencing(t *testing.T) {
 		if counts.TotalUnreadMessages != 2 {
 			t.Fatalf("expected 2 unread messages, got %d", counts.TotalUnreadMessages)
 		}
-		if counts.UnreadNotifications < 1 {
-			t.Fatalf("expected unread notifications >= 1, got %d", counts.UnreadNotifications)
+		if counts.UnreadNotifications != 0 {
+			t.Fatalf("expected 0 unread notifications for DMs, got %d", counts.UnreadNotifications)
 		}
 	}
 
@@ -573,11 +574,11 @@ func TestSprint5NotificationsEndpoints(t *testing.T) {
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	// Seed 2 notifications for Player 2
+	// Seed 2 notifications for Player 2 (topic_reply: DMs never create rows).
 	var notif1ID, notif2ID string
 	_ = app.RunInTransaction(func(txApp core.App) error {
-		n1, _ := createNotification(txApp, player2ID, fixPlayerID, "dm", "Message 1", map[string]any{"text": "one"})
-		n2, _ := createNotification(txApp, player2ID, fixPlayerID, "dm", "Message 2", map[string]any{"text": "two"})
+		n1, _ := createNotification(txApp, player2ID, fixPlayerID, "topic_reply", "Reply 1", map[string]any{"text": "one"})
+		n2, _ := createNotification(txApp, player2ID, fixPlayerID, "topic_reply", "Reply 2", map[string]any{"text": "two"})
 		notif1ID = n1.Id
 		notif2ID = n2.Id
 		return nil
