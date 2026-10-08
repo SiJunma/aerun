@@ -67,6 +67,15 @@ type forumSettings struct {
 	BgOpacityLight        float64
 	BgOpacityDark         float64
 	BgOpacityNeutral      float64
+
+	// EmailTemplates is the raw JSON of forum_settings.email_templates
+	// (migration 1769300000): a map of mail type -> {subject, body}. The
+	// resolver loadEmailTemplates reads it from here rather than issuing a
+	// second query, so every mail path sees the same snapshot of the row as
+	// the access guards. Read-only by construction: nothing in this package
+	// writes it back, which is what makes an admin's edit survive restarts
+	// the same way SMTP settings do.
+	EmailTemplates string
 }
 
 // loadForumSettings reads the singleton row and clamps it.
@@ -142,6 +151,7 @@ func loadForumSettings(app core.App) forumSettings {
 	settings.BgOpacityLight = clampOpacity(record, "bg_opacity_light", 0.5)
 	settings.BgOpacityDark = clampOpacity(record, "bg_opacity_dark", 0.5)
 	settings.BgOpacityNeutral = clampOpacity(record, "bg_opacity_neutral", 0.5)
+	settings.EmailTemplates = record.GetString("email_templates")
 	return settings
 }
 
