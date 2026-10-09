@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Form, Button } from 'react-bootstrap';
 import ForumModal from '../common/ForumModal';
 import { subscribeToCategoryGroups } from '../../api/categories';
@@ -9,22 +9,26 @@ import { resolveField } from '../../utils/text';
 const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryId }) => {
   const { t, lang } = useI18n();
   const { hasPermission, PERMISSIONS, categories: allCategories } = useAuth();
-  const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [targetId, setTargetId] = useState('');
 
+  // Filter categories from context (derived during render, no effect needed).
+  const categories = useMemo(() => allCategories.filter(cat => {
+    const isExcluded = excludeCategoryId && cat.id === excludeCategoryId;
+    if (isExcluded) return false;
+    return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+  }), [allCategories, excludeCategoryId, hasPermission, PERMISSIONS.VIEW_FORUM]);
+
+  // Reset the selection when the modal is (re)opened. Resetting during render
+  // (instead of inside an effect) avoids a cascading render.
+  const [prevShow, setPrevShow] = useState(show);
+  if (show !== prevShow) {
+    setPrevShow(show);
+    if (show) setTargetId('');
+  }
+
   useEffect(() => {
     if (show) {
-      setTargetId('');
-      
-      // Filter categories from context
-      const filtered = allCategories.filter(cat => {
-        const isExcluded = excludeCategoryId && cat.id === excludeCategoryId;
-        if (isExcluded) return false;
-        return hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
-      });
-      setCategories(filtered);
-
       const unsubGroups = subscribeToCategoryGroups((grps) => {
         setGroups(grps);
       });
@@ -33,7 +37,7 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
         unsubGroups();
       };
     }
-  }, [show, excludeCategoryId, hasPermission, PERMISSIONS.VIEW_FORUM, allCategories]);
+  }, [show]);
 
   const handleConfirm = () => {
     if (targetId) {

@@ -78,6 +78,7 @@ const RegisterForm = ({ onSuccess }) => {
         return;
       }
       await loginWithGoogle();
+      setLoadingGoogle(false);
       if (onSuccess) onSuccess();
     } catch (error) {
       setLoadingGoogle(false);
@@ -107,6 +108,9 @@ const RegisterForm = ({ onSuccess }) => {
       }
 
       await registerWithEmail(email.trim(), password, nickname.trim(), adminMessage.trim());
+      // Reset before closing: if the exit transition is ever interrupted and the
+      // modal remounts, it must not reopen with a stuck spinner.
+      setLoadingEmail(false);
       if (onSuccess) onSuccess();
     } catch (error) {
       setLoadingEmail(false);

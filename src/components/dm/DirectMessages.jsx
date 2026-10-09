@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Card, Button, Image, Badge, Spinner, Form } from 'react-bootstrap';
 import { Shield, Send, ArrowLeft, MessageCircle, Lock, Dices, Trash2, ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -90,12 +90,12 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     return scrollContainerRef.current;
   };
 
-  const checkIfAtBottom = (threshold = 90) => {
+  const checkIfAtBottom = useCallback((threshold = 90) => {
     const container = getScrollContainer();
     if (!container) return true;
     const dist = container.scrollHeight - container.scrollTop - container.clientHeight;
     return dist <= threshold;
-  };
+  }, []);
 
   const handleScroll = (e) => {
     const target = e?.currentTarget || getScrollContainer();
@@ -408,7 +408,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       }
     }
     prevMessagesCountRef.current = messages.length;
-  }, [messages, myUid]);
+  }, [messages, myUid, checkIfAtBottom]);
 
   // ── Open a chat ──────────────────────────────────────────────────────────
   const openChat = async (peerUid, peerInfo) => {

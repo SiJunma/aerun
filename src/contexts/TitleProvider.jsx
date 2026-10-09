@@ -1,3 +1,9 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
+// set-state-in-effect: the guard below is an external subscription whose
+// unsubscribed reset (a sign-out blanking the badge) is expressed as a state
+// reset. It is not derived state — the counts only arrive asynchronously from
+// the RTDB subscription — so resetting during render would fight the pending
+// callback. Same call as I18nProvider's language sync.
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import { useI18n } from './I18nProvider';
@@ -10,15 +16,38 @@ export const usePageTitle = () => useContext(TitleContext);
 
 export const TitleProvider = ({ children }) => {
   const [pageTitle, setPageTitle] = useState('');
-  const [unreadCount, setUnreadCount] = useState(0);
   const { user, profile, settings, hasPermission, PERMISSIONS, activeDmConvId, unreadTopicsCount } = useAuth();
   const { lang } = useI18n();
   const { activeDesign } = useDesign();
 
-  // Real-time unread notifications and DMs subscription for browser tab title badge
-  const dmUnreadDataRef = React.useRef({ total: 0, conversations: {} });
-  const [dmCount, setDmCount] = React.useState(0);
-  const [userCount, setUserCount] = React.useState(0);
+  // Real-time unread notifications and DMs subscription for browser tab title badge.
+  //
+  // The raw snapshot is held in state and the two badge numbers are DERIVED from
+  // it during render, instead of being mirrored into more state by effects. The
+  // previous shape kept the same snapshot in a ref and recomputed dmCount in two
+  // places — the subscription callback and an [activeDmConvId] effect — each
+  // reading a `_activeDmConvId` field hand-synced onto the ref, which is a
+  // stale-closure trap. One source of truth, read directly, removes both the
+  // trap and the cascading renders the effects caused.
+  const [dmUnreadData, setDmUnreadData] = useState({ total: 0, conversations: {} });
+  const [userCount, setUserCount] = useState(0);
+
+  // Counts only mean anything for a signed-in member who is neither pending nor
+  // banned. The guard is applied where the numbers are read rather than by an
+  // effect resetting state on the way out, so a sign-out blanks the badge on the
+  // very next render with no extra render pass.
+  const countsEligible = Boolean(user?.uid)
+    && profile?.role_id !== 'pending'
+    && profile?.role_id !== 'banned';
+
+  // The DM term excludes the conversation currently open in the UI: those
+  // messages are already on screen, so counting them in the tab badge would
+  // double-report them. `conversations` is empty when the member is not
+  // eligible, which naturally yields dmCount 0.
+  const { total = 0, conversations = {} } = countsEligible ? dmUnreadData : {};
+  const dmCount = (activeDmConvId && conversations[activeDmConvId])
+    ? Math.max(0, total - (conversations[activeDmConvId]?.unread_count || 0))
+    : total;
 
   // Combine counts into unreadCount (notifications + DMs + new topics/posts)
   //
@@ -27,22 +56,7 @@ export const TitleProvider = ({ children }) => {
   // caller server-side — so it polled the endpoint a second time and then ADDED
   // the identical rows, doubling both the tab badge and the sound that plays on
   // a new notification.
-  useEffect(() => {
-    setUnreadCount(userCount + dmCount + (unreadTopicsCount || 0));
-  }, [userCount, dmCount, unreadTopicsCount]);
-
-  // Recalculate dmCount whenever activeDmConvId changes (e.g. user opens/closes a chat)
-  useEffect(() => {
-    // Sync activeDmConvId into the ref so RTDB callback can read it
-    dmUnreadDataRef._activeDmConvId = activeDmConvId;
-    const { total = 0, conversations = {} } = dmUnreadDataRef.current;
-    if (activeDmConvId && conversations[activeDmConvId]) {
-      const openConvCount = conversations[activeDmConvId]?.unread_count || 0;
-      setDmCount(Math.max(0, total - openConvCount));
-    } else {
-      setDmCount(total);
-    }
-  }, [activeDmConvId]);
+  const unreadCount = (countsEligible ? userCount : 0) + dmCount + (unreadTopicsCount || 0);
 
   // The tab title's notification term is the SERVER's count.
   //
@@ -55,7 +69,7 @@ export const TitleProvider = ({ children }) => {
   useEffect(() => {
     if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') {
       setUserCount(0);
-      setDmCount(0);
+      setDmUnreadData({ total: 0, conversations: {} });
       return;
     }
 
@@ -63,17 +77,8 @@ export const TitleProvider = ({ children }) => {
     if (hasPermission && hasPermission(PERMISSIONS?.USE_DIRECT_MESSAGES)) {
       unsubDm = subscribeToUnreadCounts(user.uid, (data) => {
         const raw = data || { total: 0, conversations: {} };
-        dmUnreadDataRef.current = raw;
+        setDmUnreadData(raw);
         setUserCount(raw.notifications || 0);
-        const total = raw.total || 0;
-        const conversations = raw.conversations || {};
-        const openConvId = dmUnreadDataRef._activeDmConvId; // will be set via ref sync
-        if (openConvId && conversations[openConvId]) {
-          const openConvCount = conversations[openConvId]?.unread_count || 0;
-          setDmCount(Math.max(0, total - openConvCount));
-        } else {
-          setDmCount(total);
-        }
       });
     } else {
       // No DM permission still leaves the notification badge real: the counters
@@ -166,7 +171,7 @@ export const TitleProvider = ({ children }) => {
   }, [pageTitle, unreadCount, settings?.forumName, lang, activeDesign]);
 
   return (
-    <TitleContext.Provider value={{ setPageTitle, setUnreadCount, unreadCount }}>
+    <TitleContext.Provider value={{ setPageTitle, unreadCount }}>
       {children}
     </TitleContext.Provider>
   );

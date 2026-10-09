@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth } from './AuthProvider';
 
@@ -7,7 +8,7 @@ export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider = ({ children }) => {
   const { profile, settings } = useAuth();
-  
+
   const getFallbackTheme = useCallback(() => {
     if (settings?.defaultDesignId && ['light', 'dark', 'neutral'].includes(settings.defaultDesignId)) {
       return settings.defaultDesignId;
@@ -19,15 +20,26 @@ export const ThemeProvider = ({ children }) => {
     return localStorage.getItem('guest_theme') || 'dark';
   });
 
+  // Sync the active theme with the signed-in member's preference during render
+  // instead of inside an effect: `profile.settings.theme` is the source of truth
+  // when present, otherwise the guest/fallback theme applies. Doing it here (a
+  // state adjustment on a changed source, React's documented pattern) avoids the
+  // cascading render the old effect triggered on every mount.
+  const themeSource = profile?.settings?.theme || null;
+  const [prevThemeSource, setPrevThemeSource] = useState(themeSource);
+  if (themeSource !== prevThemeSource) {
+    setPrevThemeSource(themeSource);
+    setTheme(themeSource || localStorage.getItem('guest_theme') || getFallbackTheme());
+  }
+
+  // Persist the member's own theme choice to the guest store so it survives a
+  // reload. Kept as a pure side-effect here (no setState), so it is not a
+  // cascading render.
   useEffect(() => {
-    if (profile?.settings?.theme) {
-      setTheme(profile.settings.theme);
-      localStorage.setItem('guest_theme', profile.settings.theme);
-    } else {
-      // For guests or new users
-      setTheme(localStorage.getItem('guest_theme') || getFallbackTheme());
+    if (themeSource) {
+      localStorage.setItem('guest_theme', themeSource);
     }
-  }, [profile, getFallbackTheme]);
+  }, [themeSource]);
 
   useEffect(() => {
     const isStandardTheme = ['light', 'dark', 'neutral'].includes(theme);

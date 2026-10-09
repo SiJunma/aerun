@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Button, Form, Alert } from 'react-bootstrap';
 import { ShieldAlert, CheckCircle2 } from 'lucide-react';
 import ForumModal from '../common/ForumModal';
@@ -48,9 +48,12 @@ const TransferRootModal = ({
   const [submitted, setSubmitted] = useState(false);
   const [reauthState, setReauthState] = useState('idle'); // idle | busy | done | error
 
-  // Reset on every open, so a half-finished attempt — including the password —
-  // never leaks into the next one.
-  useEffect(() => {
+  // Reset on every open, so a half-finished attempt never leaks into the next
+  // one. Resetting during render (instead of inside an effect) avoids a
+  // cascading render.
+  const [prevShow, setPrevShow] = useState(show);
+  if (show !== prevShow) {
+    setPrevShow(show);
     if (show) {
       setSuccessorId('');
       setPassword('');
@@ -58,7 +61,7 @@ const TransferRootModal = ({
       setSubmitted(false);
       setReauthState('idle');
     }
-  }, [show]);
+  }
 
   // The self row is filtered by ID, not by a flag on the row.
   //

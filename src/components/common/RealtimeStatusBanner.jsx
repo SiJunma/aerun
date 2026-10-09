@@ -28,9 +28,9 @@ const RealtimeStatusBanner = ({ uid }) => {
   const [degraded, setDegraded] = useState(false);
 
   useEffect(() => {
+    // uid отсутствует — состояние уже false по умолчанию, сбрасывать не нужно.
     if (!uid) {
-      setDegraded(false);
-      return undefined;
+      return;
     }
     const resource = notificationsResource(uid);
     return resource.onTransportChange((transport) => {

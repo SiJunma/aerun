@@ -40,6 +40,18 @@ const NewRepliesPage = () => {
   const activeTab = searchParams.get('tab') === TABS.NEW ? TABS.NEW : TABS.ALL;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
+  // Re-entering the loading state is derived from (tab, page), not from the
+  // subscription, so it is reset during render when either changes rather than
+  // inside the effect — the effect's own setTopicsLoading(true) ran on every
+  // mount and triggered a cascading render. `topicsLoading` already starts true,
+  // so only a tab/page change needs the reset.
+  const feedKey = `${activeTab}:${currentPage}`;
+  const [prevFeedKey, setPrevFeedKey] = useState(feedKey);
+  if (feedKey !== prevFeedKey) {
+    setPrevFeedKey(feedKey);
+    setTopicsLoading(true);
+  }
+
   useEffect(() => {
     setPageTitle(t('stats.latest_replies', 'Активные темы'));
   }, [setPageTitle, t, lang]);
@@ -57,7 +69,6 @@ const NewRepliesPage = () => {
   // to freeze the list.
   useEffect(() => {
     let active = true;
-    setTopicsLoading(true);
 
     // Two explicit subscriptions rather than one selected by a variable.
     //

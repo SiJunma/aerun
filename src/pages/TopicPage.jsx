@@ -440,7 +440,7 @@ const TopicPage = () => {
       last_post_at: topic.last_post_at,
       last_post_id: topic.last_post_id
     };
-  }, [topic?.id, topic?.posts_count, topic?.last_post_at, topic?.last_post_id, setPageTitle, loadPosts, currentPage]);
+  }, [topic, setPageTitle, loadPosts, currentPage]);
 
   const currentTopicIdRef = useRef(id);
   const skipNextLoadForPageRef = useRef(null);
@@ -586,6 +586,10 @@ const TopicPage = () => {
       }
     })();
     return () => { cancelled = true; };
+    // decorateDraft is re-created on every render (it closes over characters and
+    // profile), and it is only called inside the async load below — listing it
+    // would re-fetch the draft on every render instead of on a uid/id change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, id]);
 
   // Track unread quote and mention notifications and clear them via IntersectionObserver
@@ -1062,7 +1066,7 @@ const TopicPage = () => {
         setIsPageLoading(false);
       }
     }
-  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped]);
+  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped, loadPosts]);
   // The badge tooltip names the ACCOUNT behind a mask ("Player: …"), so it must
   // resolve for every post, not only for the viewer's own.
   //

@@ -35,6 +35,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
       setAuthError(null);
       sessionStorage.removeItem('pending_nickname');
       await loginWithGoogle();
+      setLoadingGoogle(false);
       if (onSuccess) onSuccess();
     } catch (error) {
       setLoadingGoogle(false);
@@ -56,6 +57,7 @@ const LoginForm = ({ onSuccess, onForgotPassword }) => {
       setAuthError(null);
       sessionStorage.removeItem('pending_nickname');
       await loginWithEmail(email.trim(), password);
+      setLoadingEmail(false);
       if (onSuccess) onSuccess();
     } catch (error) {
       setLoadingEmail(false);

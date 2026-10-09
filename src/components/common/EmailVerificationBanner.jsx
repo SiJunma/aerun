@@ -1,9 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Button, Spinner } from 'react-bootstrap';
-import { Mail, RefreshCw, Send, CheckCircle } from 'lucide-react';
+import { Container, Button, Spinner, Alert } from 'react-bootstrap';
+import { Mail, RefreshCw, Send, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 
+// EmailVerificationBanner — the honest resend control.
+//
+// WHY THE SUCCESS/ERROR STATES EXIST. The banner used to show
+// "a new verification link has been sent" after calling a resend function
+// that was an empty stub — the success message appeared while no request ever
+// left the browser, which is exactly the reported bug ("Brevo shows nothing").
+// Success now renders ONLY after the honest resend command answers
+// mail_sent=true; a 503/502 (mail off, relay down) renders the error text
+// instead of a green checkmark.
 const EmailVerificationBanner = () => {
   const { user, emailUnverified, resendVerificationEmail, checkVerificationStatus } = useAuth();
   const { t } = useI18n();
@@ -12,6 +21,7 @@ const EmailVerificationBanner = () => {
   const [checking, setChecking] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [sentSuccess, setSentSuccess] = useState(false);
+  const [sendError, setSendError] = useState('');
 
   useEffect(() => {
     let timer = null;
@@ -31,17 +41,21 @@ const EmailVerificationBanner = () => {
     };
   }, [cooldown]);
 
-  if (!user || !emailUnverified) return null;
-
   const handleResend = async () => {
     if (cooldown > 0 || resending) return;
     setResending(true);
+    setSendError('');
     try {
       await resendVerificationEmail();
+      // The command answered mail_sent=true — only now may the banner claim a
+      // link was sent. Anything else (503 mail off, 502 relay down) threw and
+      // lands in the error branch below.
       setSentSuccess(true);
       setCooldown(60); // 60 seconds rate limit
     } catch (err) {
       console.error('[Resend Verification Error]', err);
+      setSentSuccess(false);
+      setSendError(err?.message || 'Failed to send the verification email');
     } finally {
       setResending(false);
     }
@@ -58,6 +72,9 @@ const EmailVerificationBanner = () => {
       setChecking(false);
     }
   };
+
+  // After all hooks: a non-member never sees the banner.
+  if (!user || !emailUnverified) return null;
 
   return (
     <Container className="email-verification-banner-wrapper py-2">
@@ -78,6 +95,12 @@ const EmailVerificationBanner = () => {
                 <CheckCircle size={14} />
                 <span>{t('auth.verification_email_sent') || 'A new verification link has been sent to your email.'}</span>
               </div>
+            )}
+            {sendError && (
+              <Alert variant="danger" className="py-1 px-2 small mt-2 mb-0 d-flex align-items-center gap-2">
+                <AlertTriangle size={14} className="flex-shrink-0" />
+                <span>{t('auth.verification_email_failed') || 'Could not send the verification email'}: {sendError}</span>
+              </Alert>
             )}
           </div>
         </div>

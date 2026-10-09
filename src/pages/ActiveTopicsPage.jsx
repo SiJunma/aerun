@@ -38,12 +38,22 @@ const ActiveTopicsPage = () => {
   const [loading, setLoading] = useState(true);
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
+  // Re-entering the loading state is derived from the page, not from the
+  // subscription, so it is reset during render when the page changes rather
+  // than inside the effect — the effect's own setLoading(true) ran on every
+  // mount and triggered a cascading render. `loading` already starts true, so
+  // only a page change needs the reset.
+  const [prevPage, setPrevPage] = useState(currentPage);
+  if (currentPage !== prevPage) {
+    setPrevPage(currentPage);
+    setLoading(true);
+  }
+
   useEffect(() => {
     setPageTitle(t('nav.active_topics', 'Активные темы'));
   }, [setPageTitle, t, lang]);
 
   useEffect(() => {
-    setLoading(true);
     const unsubscribe = subscribeToTopTopics((data) => {
       setTopics(data?.topics || []);
       setTotal(data?.total ?? 0);

@@ -401,7 +401,7 @@ export const AuthProvider = ({ children }) => {
     };
   }, [user?.uid, profile, recordActivity]);
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = useCallback(async () => {
     const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
     const isRegistering = sessionStorage.getItem('is_registering') === 'true';
     const pendingNickname = sessionStorage.getItem('pending_nickname');
@@ -426,10 +426,10 @@ export const AuthProvider = ({ children }) => {
     }
     syncUserFromAuthStore();
     return authData;
-  };
+  }, [syncUserFromAuthStore]);
 
-  const registerWithEmail = async (email, password, nickname = '', adminMessage = '') => {
-    await sendApi('/api/aerun/auth/register', {
+  const registerWithEmail = useCallback(async (email, password, nickname = '', adminMessage = '') => {
+    const res = await sendApi('/api/aerun/auth/register', {
       method: 'POST',
       body: {
         email,
@@ -445,10 +445,13 @@ export const AuthProvider = ({ children }) => {
       removeRtdbGuestPresence(guestId);
     }
     syncUserFromAuthStore();
-    return authData;
-  };
+    // Surface the server's mail verdict (mail_sent / mail_error) alongside the
+    // auth payload, so the registration form can say "account created, but the
+    // letter was not sent" instead of pretending.
+    return { ...authData, mailSent: res?.mail_sent === true, mailError: res?.mail_error || '' };
+  }, [syncUserFromAuthStore]);
 
-  const loginWithEmail = async (email, password) => {
+  const loginWithEmail = useCallback(async (email, password) => {
     const authData = await pb.collection('users').authWithPassword(email, password);
     // Clean up any previous guest presence when a new user logs in
     const guestId = localStorage.getItem('guest_id');
@@ -457,14 +460,50 @@ export const AuthProvider = ({ children }) => {
     }
     syncUserFromAuthStore();
     return authData;
-  };
+  }, [syncUserFromAuthStore]);
 
-  const resetPassword = async (email) => {
+  const resetPassword = useCallback(async (email) => {
     return await pb.collection('users').requestPasswordReset(email);
-  };
+  }, []);
 
-  const resendVerificationEmail = async () => {};
-  const checkVerificationStatus = async () => {};
+  // Sends (or re-sends) the verification mail through the honest server command
+  // POST /api/aerun/auth/resend-verification — NOT through PocketBase's native
+  // request-verification endpoint, which answers 204 even when the mail stack
+  // is off (the guard aborts the send after the status is decided), so a UI
+  // built on it claims "sent" while nothing left the server. The command
+  // answers mail_sent=true only after a real send, 503 when mail is disabled,
+  // and {verified:true} when there is nothing left to send.
+  const resendVerificationEmail = useCallback(async () => {
+    const res = await sendApi('/api/aerun/auth/resend-verification', { method: 'POST', body: {} });
+    if (res?.verified) {
+      setEmailUnverified(false);
+      return res;
+    }
+    if (res?.mail_sent !== true) {
+      throw new Error(res?.mail_error || 'Email delivery is disabled on this server');
+    }
+    return res;
+  }, []);
+
+  // Re-reads the caller's verification flag: refresh the auth record (which
+  // updates `verified` when the token link was already clicked), then correct
+  // the unverified flag. Returns true when the account is now verified.
+  const checkVerificationStatus = useCallback(async () => {
+    try {
+      const authData = await pb.collection('users').authRefresh();
+      const verified = authData?.record?.verified !== false;
+      setEmailUnverified(!verified);
+      if (verified && authData?.record) {
+        setProfile(toOwnProfile(authData.record));
+      }
+      return verified;
+    } catch (err) {
+      // A stale/expired session cannot be refreshed — re-sync from whatever
+      // the store still holds rather than leaving the banner stuck.
+      syncUserFromAuthStore();
+      throw err;
+    }
+  }, [syncUserFromAuthStore, toOwnProfile]);
 
   const logout = useCallback(async (skipPresenceCleanup = false) => {
     const uid = user?.uid;
@@ -489,7 +528,7 @@ export const AuthProvider = ({ children }) => {
   // this profile actually holds, and the authoritative result is returned
   // rather than discarded — see updateProfile, where it used to be overwritten
   // again by the same partial object the form started from.
-  const updateSettings = async (newSettings) => {
+  const updateSettings = useCallback(async (newSettings) => {
     if (!user) return null;
     const updated = { ...(profile?.settings || {}), ...newSettings };
     const res = await sendApi('/api/aerun/me/settings', {
@@ -502,7 +541,9 @@ export const AuthProvider = ({ children }) => {
       settings: stored
     }));
     return stored;
-  };
+  }, [user, profile]);
+
+  // updateProfile saves the profile form.
 
   // updateProfile saves the profile form.
   //
@@ -523,7 +564,7 @@ export const AuthProvider = ({ children }) => {
   //
   // Sequential, not parallel: two PATCHes to the same row can interleave, and a
   // failure in the second must not leave the caller believing nothing saved.
-  const updateProfile = async (newData, targetUid = null) => {
+  const updateProfile = useCallback(async (newData, targetUid = null) => {
     if (!user) return;
     const finalUid = targetUid || user.uid;
     const isOwn = finalUid === user.uid;
@@ -617,7 +658,7 @@ export const AuthProvider = ({ children }) => {
     // Somebody else's account: the caller's form is re-seeded from `viewedProfile`,
     // which subscribeToUser refreshes, so there is nothing to hand back here.
     return null;
-  };
+  }, [user, profile, updateSettings]);
 
   // setLastSelectedMask records which mask the author is posting as.
   //

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { useAuth } from './AuthProvider';
 import { getDesigns } from '../api/designs';
@@ -67,7 +68,7 @@ export const DesignProvider = ({ children }) => {
 
     // No custom design found → let built-in theme apply
     return null;
-  }, [designs, settings, profile?.settings?.theme, previewId]);
+  }, [designs, settings, profile, previewId]);
 
   useEffect(() => {
     if (activeDesign) {

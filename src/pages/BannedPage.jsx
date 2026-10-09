@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Card, Button } from 'react-bootstrap';
 import { useAuth } from '../contexts/AuthProvider';
 import { useI18n } from '../contexts/I18nProvider';
@@ -11,18 +11,20 @@ const BannedPage = () => {
   const { setPageTitle } = usePageTitle();
 
   // Force English for this page as requested
-  const t = (path) => {
+  // Memoised on `translations` (a stable module import) so the page-title effect
+  // below can depend on it without re-running on every render.
+  const t = useCallback((path) => {
     const keys = path.split('.');
     let result = translations['en'];
     for (const key of keys) {
       if (result) result = result[key];
     }
     return result || path;
-  };
+  }, [translations]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setPageTitle(t('gatekeeper.banned_title') || 'Access Banned');
-  }, [setPageTitle]);
+  }, [setPageTitle, t]);
 
   return (
     <div className="d-flex align-items-center justify-content-center py-5" style={{ minHeight: '60vh' }}>

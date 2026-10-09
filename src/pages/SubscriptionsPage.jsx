@@ -29,16 +29,32 @@ const SubscriptionsPage = () => {
   // The page the SERVER was asked for, not a slice of everything it returned.
   const [total, setTotal] = useState(0);
 
+  // Reset the list when the identity or page changes. Doing this during render
+  // (rather than by resetting state inside the effect below) removes the
+  // synchronous setState the effect used to run on sign-out and on every page
+  // change, which cascaded into a second render. The loading flag is set here so
+  // a page switch shows the spinner again until the fetch resolves.
+  const feedKey = `${user?.uid || ''}:${currentPage}`;
+  const [prevFeedKey, setPrevFeedKey] = useState(feedKey);
+  if (feedKey !== prevFeedKey) {
+    setPrevFeedKey(feedKey);
+    setTopics([]);
+    setTotal(0);
+    setLoading(true);
+  }
+
+  // A signed-out visitor is never "loading" — there is nothing to fetch. Showing
+  // the empty state instead of an eternal spinner is what the old in-effect guard
+  // achieved by setting loading=false; deriving it here does the same without a
+  // setState call.
+  const displayLoading = user?.uid ? loading : false;
+
   useEffect(() => {
-    if (!user?.uid) {
-      setTopics([]);
-      setTotal(0);
-      setLoading(false);
-      return;
-    }
+    // No identity means no subscriptions to read; the render-level reset above
+    // has already cleared the list, so the effect simply does nothing.
+    if (!user?.uid) return;
 
     let isMounted = true;
-    setLoading(true);
     // currentPage is in the dependency list: it used to be absent, so switching
     // page re-read page 1 and never changed what was on screen — the pager moved
     // and the list did not.
@@ -95,7 +111,7 @@ const SubscriptionsPage = () => {
         </p>
       </div>
 
-      {loading ? (
+      {displayLoading ? (
         <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
           <div className="p-5 text-center text-muted">
             <div className="spinner-border spinner-border-sm me-2" role="status" />

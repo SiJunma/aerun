@@ -36,7 +36,7 @@ const MainPage = () => {
 
   useEffect(() => {
     setPageTitle('');
-  }, []);
+  }, [setPageTitle]);
 
   // While a logged-in user's profile is still loading from Firestore, treat as loading
   // to prevent a flash of content with wrong permissions (profile=null → role='player', then

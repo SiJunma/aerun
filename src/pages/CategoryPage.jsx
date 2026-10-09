@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Card, Table, Button, Badge, Row, Col, Form } from 'react-bootstrap';
 import { Trash2, Move, Settings, PinOff, Pin, Lock, PlusCircle, Search, MessageSquare, Clock, Filter, FolderInput, Unlock, CheckCircle } from 'lucide-react';
@@ -46,7 +46,7 @@ const CategoryPage = () => {
 
   const isStaff = hasPermission(PERMISSIONS.MODERATE_CONTENT);
 
-  const loadTopics = async (showLoading = true) => {
+  const loadTopics = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     setLoadError(null);
     try {
@@ -59,7 +59,7 @@ const CategoryPage = () => {
     } finally {
       if (showLoading) setLoading(false);
     }
-  };
+  }, [id, currentPage, ITEMS_PER_PAGE]);
 
   useEffect(() => {
     const found = categories.find(c => c.id === id);
@@ -68,7 +68,7 @@ const CategoryPage = () => {
 
   useEffect(() => {
     loadTopics(true);
-  }, [id, currentPage, ITEMS_PER_PAGE, lang, setPageTitle]);
+  }, [id, currentPage, ITEMS_PER_PAGE, lang, setPageTitle, loadTopics]);
 
   useEffect(() => {
     if (category) {

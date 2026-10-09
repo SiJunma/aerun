@@ -1,4 +1,4 @@
-﻿# Visual Studio files
+# Visual Studio files
 .vs/
 [Bb]in/
 [Oo]bj/
@@ -97,3 +97,10 @@ restore/
 # in the repository — read the output from the terminal instead.
 err.txt
 npmtest.txt
+
+# ESLint scratch dumps from ad-hoc `npx eslint ... > lint_*.txt` runs. The gate
+# is `npm run lint:js`; these redirects are how a single file is checked while
+# fixing it, and their output is read from the terminal, never committed.
+lint_*.txt
++eslint-report.txt
+eslint-report.txt
