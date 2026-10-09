@@ -808,6 +808,10 @@ const AdminPage = () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
           await rejectUser(uid, user.uid);
+          // Reject deletes the pending account, so the public stats panel
+          // (member count, newest member, today's visitors) has to be re-read;
+          // this board's local `users` patch does not touch that snapshot.
+          await refreshForumState?.(true);
           showToast(t('admin.users.toast_rejected'), 'success');
         } catch (err) {
           console.error(err);
@@ -822,6 +826,9 @@ const AdminPage = () => {
     setUsers(prev => prev.map(u => u.id === uid ? { ...u, status: 'active' } : u));
     try {
       await approveUser(uid, user.uid);
+      // Approving flips pending -> active, which is what lets the account start
+      // showing up in the online list and today's visitors on the public index.
+      await refreshForumState?.(true);
       showToast(t('admin.users.toast_approved'), 'success');
     } catch (err) {
       setUsers(before);
@@ -843,6 +850,9 @@ const AdminPage = () => {
         setUsers(prev => prev.map(u => u.id === uid ? { ...u, status: 'banned' } : u));
         try {
           await banUser(uid, user.uid);
+          // A ban changes who the public stats may list (a banned account leaves
+          // today's visitors / online), so re-read the shared snapshot.
+          await refreshForumState?.(true);
           showToast(t('admin.users.toast_banned'), 'success');
         } catch (err) {
           setUsers(before);
@@ -858,6 +868,9 @@ const AdminPage = () => {
     setUsers(prev => prev.map(u => u.id === uid ? { ...u, status: 'active' } : u));
     try {
       await unbanUser(uid, user.uid);
+      // Mirror of the ban path: the account rejoins the population the public
+      // stats may list, so the snapshot has to be refreshed.
+      await refreshForumState?.(true);
       showToast(t('admin.users.toast_unbanned'), 'success');
     } catch (err) {
       // Without the revert the row would stay banned in the table after a
@@ -934,6 +947,14 @@ const AdminPage = () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
           await deleteUser(uid, user.uid);
+          // The stats panel (ForumStats) reads forumStats from AuthProvider —
+          // total members, newest member, today's visitors — NOT from this
+          // board's local `users` array. Filtering the row here left the shared
+          // snapshot naming the deleted account, so navigating back to the index
+          // (client-side, no reload) showed "Test" as the newest member over a
+          // dead account until a full refresh re-ran the identity effect.
+          // Refresh it here like every other mutation on this page does.
+          await refreshForumState?.(true);
           showToast(t('admin.users.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
