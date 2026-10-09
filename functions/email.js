@@ -1,5 +1,12 @@
 /**
- * Brevo Transactional Email Service
+ * Brevo Transactional Email Service — DEPRECATED (read-only reference).
+ *
+ * Email delivery is now owned centrally by the PocketBase backend
+ * (outbox_events + pocketBaseMailSender with the global wrapper from
+ * forum_settings.email_templates). The two call sites in index.js
+ * (topic-reply + DM notifications) are disabled to avoid duplicate sends.
+ * This module is kept only as the design reference ported to Go
+ * (backend/internal/platform/pocketbase/email_templates.go).
  * Uses native fetch (Node 18+) to communicate with Brevo REST API v3.
  */
 const logger = require("firebase-functions/logger");

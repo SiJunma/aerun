@@ -7,6 +7,13 @@ const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 const { sendBrevoEmail, renderDmNotificationEmail, renderTopicReplyEmail } = require("./email");
 
+// Step 6 of CURRENT_email_templates_global_plan.md: Firebase email delivery is
+// permanently disabled — the PocketBase backend owns ALL outgoing mail via
+// outbox_events + pocketBaseMailSender (global wrapper from
+// forum_settings.email_templates). In-app notifications (RTDB + Firestore)
+// below are untouched; only the Brevo SMTP sends are gated off.
+const FIREBASE_EMAIL_DELIVERY_DISABLED = true;
+
 admin.initializeApp();
 
 // Ensure only a reasonable amount of instances run at once to manage billing safely
@@ -2527,7 +2534,11 @@ async function handlePostNotifications(db, { postId, topicId, authorId, authorNa
             }
 
             // Transactional email for topic reply: ONLY send for the FIRST unread reply in the topic
-            if (!isFirstUnreadReply) {
+            // [Step 6: DISABLED] Firebase Brevo delivery is off — PocketBase
+            // (outbox_events) owns this mail now. In-app RTDB/Firestore writes above stay.
+            if (FIREBASE_EMAIL_DELIVERY_DISABLED) {
+              logger.info(`[Brevo Topic Reply Disabled] recipientUid=${recipientUid} — delivery owned by PocketBase outbox`);
+            } else if (!isFirstUnreadReply) {
               logger.info(`[Brevo Topic Reply Skipped] recipientUid=${recipientUid} already has unread notification in topic ${topicId}`);
             } else {
               try {
@@ -4039,6 +4050,13 @@ exports.onDmMessageCreated = onDocumentCreated("dms/{convId}/messages/{msgId}", 
     // Only send DM email notification for the FIRST unread message in this conversation!
     if (prevUnreadCount > 0) {
       logger.info(`[Brevo DM Email Skipped] recipientUid=${recipientUid} already has ${prevUnreadCount} unread DM(s) in conversation ${convId}`);
+      return;
+    }
+
+    // [Step 6: DISABLED] Firebase Brevo DM delivery is off — PocketBase
+    // (outbox_events) owns this mail now. Unread counters above stay.
+    if (FIREBASE_EMAIL_DELIVERY_DISABLED) {
+      logger.info(`[Brevo DM Email Disabled] recipientUid=${recipientUid} conv=${convId} — delivery owned by PocketBase outbox`);
       return;
     }
 

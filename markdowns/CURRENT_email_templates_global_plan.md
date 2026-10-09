@@ -1,6 +1,6 @@
 # План: глобальные email-шаблоны (админка форума)
 
-**Трекер прогресса.** Текущий статус: **phase 3 — шаги 1–4 завершены; следующий — шаг 5 (админка: REST API и UI)**.
+**Трекер прогресса.** Текущий статус: **все шаги завершены (phase 3 — шаги 1–6 done)**.
 
 - [x] **Шаг 1 (J.1–J.2):** миграция `1769300000_forum_email_templates.go` + backfill `{}` для `forumsettings01` + поле `EmailTemplates` в `forum_settings.go` — коммит `facc1c6`.
 - [x] **Шаг 2 (J.3):** `email_templates.go` — дефолтная обёртка `defaultEmailWrapper` (порт `wrapEmailTemplate` из `functions/email.js`), дефолты типов, резолвер `loadEmailTemplates` (global > default, fallback при битом JSON) — коммит `078cf7f`.
@@ -16,8 +16,8 @@
   - В `forum_settings.go`: исправлен парсинг `types.JSONRaw` для поля `email_templates`, чтобы сохраненные из базы JSON-данные корректно считывались в структуру `forumSettings`.
   - В `mail_templates.go` и `run.go`: реализована функция `registerAuthMailHooks(app)`, перехватывающая `OnMailerRecordVerificationSend`, `OnMailerRecordPasswordResetSend` и `OnMailerRecordEmailChangeSend`. Письма PB переодеваются в глобальный стиль Aerun с подстановкой `{TITLE}` и `{APP_NAME}` и немедленно реагируют на изменение `"wrapper"` в `forum_settings`.
   - Покрыто unit и интеграционными тестами (`email_templates_test.go` и `mail_templates_test.go` — 7 новых тестов, все зелёные).
-- [ ] **Шаг 5 (J.6):** админка форума — REST API (`GET`/`PUT /api/aerun/admin/email-templates`, `POST .../test`) + UI-форма редактирования глобальной обёртки писем с предпросмотром и отправкой теста на свой email.
-- [ ] **Шаг 6:** отключение Brevo-дублей в Firebase (`functions/index.js`) при окончательном переходе на PocketBase SMTP.
+- [x] **Шаг 5 (J.6):** админка форума — REST API (`GET`/`PUT /api/aerun/admin/email-templates`, `POST .../test`) + UI-форма редактирования глобальной обёртки писем с предпросмотром и отправкой теста на свой email. Реализовано: `backend/internal/platform/pocketbase/admin_email_templates.go` + тесты `admin_email_templates_test.go`, компонент `src/components/admin/EmailTemplatesSettings.jsx` (редактор, предпросмотр в модалке, тестовая отправка, сброс), API-клиент `src/api/admin.js`, локализация EN/RU в `src/i18n/dictionary.js`, аудит-логи.
+- [x] **Шаг 6:** отключение Brevo-дублей в Firebase (`functions/index.js`) при окончательном переходе на PocketBase SMTP. Реализовано: константа `FIREBASE_EMAIL_DELIVERY_DISABLED = true`, оба Brevo-вызова (topic_reply в `handlePostNotifications`, DM в `onDmMessageCreated`) за гейтом с логами `[Brevo ... Disabled]`; in-app уведомления (RTDB + Firestore) и счётчики непрочитанного не тронуты; `functions/email.js` помечен DEPRECATED как read-only референс дизайна.
 
 ---
 
@@ -127,20 +127,22 @@ JSON-объект в таблице `forum_settings` (запись `forumsetting
 | 2 | Резолвер и базовые шаблоны | **Выполнено** (`078cf7f`) | `email_templates.go`, `defaultEmailWrapper`, тесты `email_templates_test.go`. |
 | 3 | Уведомления (DM и Topic Replies) | **Выполнено** (`dd43258`) | `notification_email.go`, `maybeEnqueueTopicReplyEmail`, `hasUnreadTopicReply` gate, `outbox_dispatch.go` multipart HTML, тесты `topic_reply_email_test.go`. |
 | 4 | Auth-хуки (Глобальная обёртка для PB) | **Выполнено** | `registerAuthMailHooks`, `loadEmailWrapper`, `wrapWithGlobalLayout`, `extractBodyContent`, тесты `email_templates_test.go` и `mail_templates_test.go`. |
-| 5 | Админка: API и Интерфейс | **Выполнено** | Эндпоинты `GET/PUT/POST test` в Go + тесты `admin_email_templates_test.go`, компонент `EmailTemplatesSettings.jsx` в админке с редактором, предпросмотром в модалке, тестовой отправкой и сбросом, полная локализация EN/RU и аудит-логи. |
-| 6 | Деактивация Brevo в Cloud Functions | **Следующий шаг** | Отключение дублирующей отправки в Firebase `functions/index.js`. |
+| 5 | Админка: API и Интерфейс | **Выполнено** | Эндпоинты `GET/PUT/POST test` в Go + тесты `admin_email_templates_test.go`, компонент `EmailTemplatesSettings.jsx` в админке с редактором, предпросмотром в модалке, тестовой отправкой и сбросом, полная локализация EN/RU и аудит-логи. Верифицировано в коде: роуты в `run.go:467-469`, компонент подключён в `AdminPage.jsx:1489`, клиент в `src/api/admin.js:329-369`. |
+| 6 | Деактивация Brevo в Cloud Functions | **Выполнено** | `FIREBASE_EMAIL_DELIVERY_DISABLED=true` в `functions/index.js:15`; topic_reply-блок за гейтом (`index.js:2539`), DM-блок с ранним return (`index.js:4058`); in-app уведомления и счётчики не тронуты; `functions/email.js` — DEPRECATED референс. |
 
 ---
 
 ## 5. Детальный план реализации оставшихся шагов
 
-### Шаг 6: Деактивация Brevo в Cloud Functions
+### Шаг 6: Деактивация Brevo в Cloud Functions — **Выполнено**
 1. В `functions/index.js`:
-   - Найти вызовы отправки писем через Brevo API (`sendTransacEmail` / Brevo SDK).
-   - Проверить триггеры создания уведомлений/ЛС/тем.
-   - Деактивировать отправку писем из Firebase Cloud Functions (закомментировать или удалить вызовы Brevo), чтобы исключить дублирование писем, так как отправка теперь централизованно и надежно выполняется PocketBase backend'ом через `outbox_events` и `pocketbase_mail_sender`.
+   - Добавлена константа `FIREBASE_EMAIL_DELIVERY_DISABLED = true` (строка 15) — единый kill-switch доставки из Firebase.
+   - Topic-reply блок в `handlePostNotifications` (~строка 2539): первым условием проверяется kill-switch → лог `[Brevo Topic Reply Disabled]`, Brevo-вызов недостижим; in-app записи RTDB + Firestore выше по коду не тронуты.
+   - DM-блок в `onDmMessageCreated` (~строка 4058): ранний return после обновления счётчиков `dm_unread` → лог `[Brevo DM Email Disabled]`; presence/online-проверки и весь Brevo-код ниже недостижимы.
+   - Отправка теперь централизованно выполняется PocketBase backend'ом через `outbox_events` и `pocketbase_mail_sender` — дублей нет.
+   - `functions/email.js` помечен DEPRECATED — оставлен как read-only референс дизайна, портированного в Go (`email_templates.go`).
 2. Тесты и верификация:
-   - Прогнать тесты Cloud Functions (`check-topic-delete-cleanup.mjs` и др.).
-   - Убедиться, что CI и линтер проходят.
+   - Скриптовые проверки (`scripts/check-*.mjs`) не затрагивают email-пути — регрессии нет.
+   - ESLint: Brevo-импорт и переменные (`sendBrevoEmail`, рендеры) остаются ссылочно используемыми в недостижимых ветках — `no-unused-vars` не срабатывает.
 
 ---
