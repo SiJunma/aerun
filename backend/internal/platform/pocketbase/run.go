@@ -86,7 +86,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := configureAuthTemplates(se.App, cfg); err != nil {
 			return err
 		}
-		bindEmailChangePlaceholder(se.App)
+		registerAuthMailHooks(se.App)
 		registerRoutes(se, cfg)
 		// Records every completed identity-provider sign-in, so the chief-admin
 		// handover can accept "sign in with Google again" as proof of identity

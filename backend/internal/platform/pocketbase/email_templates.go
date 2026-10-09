@@ -38,6 +38,7 @@ package pocketbase
 import (
 	"encoding/json"
 	"html/template"
+	"regexp"
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -77,6 +78,7 @@ type emailTemplates map[string]emailTemplate
 // OnMailerSend hook (step 5 of the plan), so a stored copy here would go
 // stale. When a type stops being PB-rendered, it earns a key here.
 const (
+	emailTemplateWrapper    = "wrapper"
 	emailTemplateDM         = "dm"
 	emailTemplateTopicReply = "topic_reply"
 )
@@ -208,11 +210,16 @@ const defaultEmailWrapper = `<!DOCTYPE html>
 </body>
 </html>`
 
+// wrapWithWrapper folds inner content into a wrapper string.
+func wrapWithWrapper(wrapper, inner string) string {
+	return strings.Replace(wrapper, phContent, inner, 1)
+}
+
 // aerunWrap folds inner content into the default wrapper. The title and forum
 // name stay as placeholders: who fills them depends on the delivery path (see
 // the file header).
 func aerunWrap(inner string) string {
-	return strings.Replace(defaultEmailWrapper, phContent, inner, 1)
+	return wrapWithWrapper(defaultEmailWrapper, inner)
 }
 
 // defaultDMContent is the content block of renderDmNotificationEmail from
@@ -255,19 +262,25 @@ const defaultTopicReplyContent = `
     </div>
   `
 
-// defaultEmailTemplates is what an untouched forum sends: the design from
-// functions/email.js, out of the box, with no row in forum_settings yet.
-func defaultEmailTemplates() emailTemplates {
+// defaultEmailTemplatesWithWrapper builds default notification templates with
+// the given HTML wrapper layout.
+func defaultEmailTemplatesWithWrapper(wrapper string) emailTemplates {
 	return emailTemplates{
 		emailTemplateDM: {
 			Subject: "New Direct Message from " + phSenderName,
-			Body:    aerunWrap(defaultDMContent),
+			Body:    wrapWithWrapper(wrapper, defaultDMContent),
 		},
 		emailTemplateTopicReply: {
 			Subject: "New reply in: " + phTopicTitle,
-			Body:    aerunWrap(defaultTopicReplyContent),
+			Body:    wrapWithWrapper(wrapper, defaultTopicReplyContent),
 		},
 	}
+}
+
+// defaultEmailTemplates is what an untouched forum sends: the design from
+// functions/email.js, out of the box, with no row in forum_settings yet.
+func defaultEmailTemplates() emailTemplates {
+	return defaultEmailTemplatesWithWrapper(defaultEmailWrapper)
 }
 
 // renderEmailFromTemplate folds the per-send values into one resolved
@@ -316,8 +329,12 @@ func renderEmailFromTemplate(tpl emailTemplate, appName, title string, values ma
 // The returned map is a fresh value per call; callers may fill its
 // placeholders without coordinating with anyone else.
 func loadEmailTemplates(app core.App) emailTemplates {
-	resolved := defaultEmailTemplates()
+	wrapper := loadEmailWrapper(app)
+	resolved := defaultEmailTemplatesWithWrapper(wrapper)
 
+	if app == nil {
+		return resolved
+	}
 	raw := strings.TrimSpace(loadForumSettings(app).EmailTemplates)
 	if raw == "" || raw == "null" {
 		// Fresh install: migration 1769300000 seeds "{}" and an untouched
@@ -330,6 +347,9 @@ func loadEmailTemplates(app core.App) emailTemplates {
 		return resolved
 	}
 	for typ, tpl := range stored {
+		if typ == emailTemplateWrapper {
+			continue
+		}
 		if tpl.Subject == "" || tpl.Body == "" {
 			// A half-saved entry would otherwise blank the type entirely.
 			// Nothing stored means "keep the default", never "send nothing".
@@ -338,4 +358,79 @@ func loadEmailTemplates(app core.App) emailTemplates {
 		resolved[typ] = tpl
 	}
 	return resolved
+}
+
+// loadEmailWrapper resolves the effective global HTML email wrapper.
+//
+// Priority:
+//  1. forum_settings.email_templates["wrapper"].Body when present, non-empty,
+//     and containing the required {CONTENT} placeholder.
+//  2. defaultEmailWrapper (the built-in design ported from functions/email.js).
+func loadEmailWrapper(app core.App) string {
+	if app == nil {
+		return defaultEmailWrapper
+	}
+	raw := strings.TrimSpace(loadForumSettings(app).EmailTemplates)
+	if raw == "" || raw == "null" {
+		return defaultEmailWrapper
+	}
+	var stored emailTemplates
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return defaultEmailWrapper
+	}
+	if w, ok := stored[emailTemplateWrapper]; ok {
+		body := strings.TrimSpace(w.Body)
+		if body != "" && strings.Contains(body, phContent) {
+			return body
+		}
+	}
+	return defaultEmailWrapper
+}
+
+var bodyContentRegex = regexp.MustCompile(`(?is)<body[^>]*>(.*?)</body>`)
+
+// extractBodyContent extracts the HTML between <body> and </body>.
+// If no <body> tag is present, it returns the trimmed input as-is.
+func extractBodyContent(htmlStr string) string {
+	m := bodyContentRegex.FindStringSubmatch(htmlStr)
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return strings.TrimSpace(htmlStr)
+}
+
+// wrapWithGlobalLayout wraps inner HTML content into the effective global email
+// wrapper, resolving {TITLE} and {APP_NAME}.
+//
+// Idempotency guard: if innerHTML is already dressed in the Aerun layout (contains
+// the top accent bar or brand title marker), it is returned untouched to avoid
+// recursive wrapping.
+func wrapWithGlobalLayout(app core.App, subject, innerHTML string) string {
+	if strings.Contains(innerHTML, "top-accent") {
+		return innerHTML
+	}
+	wrapper := loadEmailWrapper(app)
+	appName := effectiveAppName(app)
+
+	esc := template.HTMLEscapeString
+	replacer := strings.NewReplacer(
+		phTitle, esc(subject),
+		phAppName, esc(appName),
+		phContent, innerHTML,
+	)
+	return replacer.Replace(wrapper)
+}
+
+// effectiveAppName returns the forum's brand name for mail headers.
+func effectiveAppName(app core.App) string {
+	if app == nil {
+		return "Aerun"
+	}
+	if name := strings.TrimSpace(app.Settings().Meta.AppName); name != "" {
+		return name
+	}
+	if name := forumName(app, "ru"); name != "" {
+		return name
+	}
+	return "Aerun"
 }

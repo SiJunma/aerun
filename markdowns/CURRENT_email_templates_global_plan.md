@@ -1,6 +1,6 @@
 # План: глобальные email-шаблоны (админка форума)
 
-**Трекер прогресса.** Текущий статус: **phase 2 — шаги 1, 2, 3 завершены; следующий — шаг 4 (auth-хуки с глобальной обёрткой)**.
+**Трекер прогресса.** Текущий статус: **phase 3 — шаги 1–4 завершены; следующий — шаг 5 (админка: REST API и UI)**.
 
 - [x] **Шаг 1 (J.1–J.2):** миграция `1769300000_forum_email_templates.go` + backfill `{}` для `forumsettings01` + поле `EmailTemplates` в `forum_settings.go` — коммит `facc1c6`.
 - [x] **Шаг 2 (J.3):** `email_templates.go` — дефолтная обёртка `defaultEmailWrapper` (порт `wrapEmailTemplate` из `functions/email.js`), дефолты типов, резолвер `loadEmailTemplates` (global > default, fallback при битом JSON) — коммит `078cf7f`.
@@ -11,7 +11,11 @@
   - Сниппет с вырезанием BBCode (до 200 рун без разрезания UTF-8 символов), deep link `/topic/{id}?post={post}`.
   - Полноценный multipart/alternative (HTML + Plain text) через `pocketBaseMailSender` и `outbox_events`.
   - Покрыто unit/integration тестами (`topic_reply_email_test.go` — 6 тестов, все зелёные) — коммит `dd43258`.
-- [ ] **Шаг 4 (J.5):** auth-хуки `OnMailerRecord*Send` — переодеть авторизационные письма PocketBase в глобальную обёртку `loadEmailWrapper(app)` с динамической подстановкой `{TITLE}` и `{APP_NAME}`.
+- [x] **Шаг 4 (J.5):** auth-хуки `OnMailerRecord*Send` (переодевание PB-писем в `loadEmailWrapper(app)`):
+  - В `email_templates.go`: реализованы `loadEmailWrapper(app)`, `wrapWithGlobalLayout(app, subject, innerHTML)` (с защитой от повторного оборачивания), `extractBodyContent(html)` (надежный парсинг `<body>...</body>`), `effectiveAppName(app)`.
+  - В `forum_settings.go`: исправлен парсинг `types.JSONRaw` для поля `email_templates`, чтобы сохраненные из базы JSON-данные корректно считывались в структуру `forumSettings`.
+  - В `mail_templates.go` и `run.go`: реализована функция `registerAuthMailHooks(app)`, перехватывающая `OnMailerRecordVerificationSend`, `OnMailerRecordPasswordResetSend` и `OnMailerRecordEmailChangeSend`. Письма PB переодеваются в глобальный стиль Aerun с подстановкой `{TITLE}` и `{APP_NAME}` и немедленно реагируют на изменение `"wrapper"` в `forum_settings`.
+  - Покрыто unit и интеграционными тестами (`email_templates_test.go` и `mail_templates_test.go` — 7 новых тестов, все зелёные).
 - [ ] **Шаг 5 (J.6):** админка форума — REST API (`GET`/`PUT /api/aerun/admin/email-templates`, `POST .../test`) + UI-форма редактирования глобальной обёртки писем с предпросмотром и отправкой теста на свой email.
 - [ ] **Шаг 6:** отключение Brevo-дублей в Firebase (`functions/index.js`) при окончательном переходе на PocketBase SMTP.
 
@@ -122,8 +126,8 @@ JSON-объект в таблице `forum_settings` (запись `forumsetting
 | 1 | Миграция и поле настроек | **Выполнено** (`facc1c6`) | `1769300000_forum_email_templates.go` + поле `EmailTemplates` в `forum_settings.go`. |
 | 2 | Резолвер и базовые шаблоны | **Выполнено** (`078cf7f`) | `email_templates.go`, `defaultEmailWrapper`, тесты `email_templates_test.go`. |
 | 3 | Уведомления (DM и Topic Replies) | **Выполнено** (`dd43258`) | `notification_email.go`, `maybeEnqueueTopicReplyEmail`, `hasUnreadTopicReply` gate, `outbox_dispatch.go` multipart HTML, тесты `topic_reply_email_test.go`. |
-| 4 | Auth-хуки (Глобальная обёртка для PB) | **Следующий шаг** | Хуки `OnMailerRecord*Send` переодевают auth-письма в `loadEmailWrapper(app)`. |
-| 5 | Админка: API и Интерфейс | В планах | Эндпоинты `GET/PUT/POST test` в Go + форма редактирования обёртки в UI с предпросмотром. |
+| 4 | Auth-хуки (Глобальная обёртка для PB) | **Выполнено** | `registerAuthMailHooks`, `loadEmailWrapper`, `wrapWithGlobalLayout`, `extractBodyContent`, тесты `email_templates_test.go` и `mail_templates_test.go`. |
+| 5 | Админка: API и Интерфейс | **Следующий шаг** | Эндпоинты `GET/PUT/POST test` в Go + форма редактирования обёртки в UI с предпросмотром. |
 | 6 | Деактивация Brevo в Cloud Functions | Финал | Отключение дублирующей отправки в Firebase `functions/index.js`. |
 
 ---

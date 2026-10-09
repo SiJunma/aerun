@@ -14,8 +14,11 @@ package pocketbase
 // replies. Failing closed here would turn a data problem into an outage.
 
 import (
+	"encoding/json"
+
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
@@ -151,7 +154,21 @@ func loadForumSettings(app core.App) forumSettings {
 	settings.BgOpacityLight = clampOpacity(record, "bg_opacity_light", 0.5)
 	settings.BgOpacityDark = clampOpacity(record, "bg_opacity_dark", 0.5)
 	settings.BgOpacityNeutral = clampOpacity(record, "bg_opacity_neutral", 0.5)
-	settings.EmailTemplates = record.GetString("email_templates")
+	rawTemplates := record.Get("email_templates")
+	switch v := rawTemplates.(type) {
+	case string:
+		settings.EmailTemplates = v
+	case types.JSONRaw:
+		settings.EmailTemplates = string(v)
+	case []byte:
+		settings.EmailTemplates = string(v)
+	default:
+		if v != nil {
+			if b, err := json.Marshal(v); err == nil {
+				settings.EmailTemplates = string(b)
+			}
+		}
+	}
 	return settings
 }
 

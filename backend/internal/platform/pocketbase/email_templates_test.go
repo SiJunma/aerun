@@ -232,3 +232,81 @@ func TestRenderEmailFromTemplateEscapesBodyNotSubject(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadEmailWrapperResolvesDefaultAndCustomWrapper pins the wrapper resolution:
+// default wrapper out of the box, custom wrapper when stored in forum_settings,
+// and graceful fallback if the custom wrapper omits {CONTENT}.
+func TestLoadEmailWrapperResolvesDefaultAndCustomWrapper(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// 1. Fresh install returns default wrapper.
+	got := loadEmailWrapper(app)
+	if !strings.Contains(got, ".top-accent") || !strings.Contains(got, phContent) {
+		t.Fatal("default wrapper must be returned out of the box")
+	}
+
+	// 2. Custom wrapper in forum_settings.email_templates["wrapper"].
+	storeEmailTemplates(t, app, `{"wrapper":{"body":"<!DOCTYPE html><html><body><header>Custom Aerun</header><main>`+phContent+`</main></body></html>"}}`)
+	if w := loadEmailWrapper(app); !strings.Contains(w, "Custom Aerun") {
+		t.Fatalf("custom wrapper must win, got:\n%s", w)
+	}
+
+	// 3. Broken custom wrapper missing {CONTENT} falls back to default.
+	storeEmailTemplates(t, app, `{"wrapper":{"body":"<p>no placeholder</p>"}}`)
+	if w := loadEmailWrapper(app); !strings.Contains(w, ".top-accent") {
+		t.Fatal("wrapper missing {CONTENT} must fall back to defaultEmailWrapper")
+	}
+}
+
+// TestExtractBodyContentExtractsInnerHtml pins the extractor:
+// extracts whatever is between <body> and </body>, tolerating attributes,
+// newlines and falling back to raw string when no <body> tag is present.
+func TestExtractBodyContent(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: `<!DOCTYPE html><html><head><title>Hi</title></head><body><p>Hello world</p></body></html>`,
+			want:  `<p>Hello world</p>`,
+		},
+		{
+			input: `<body style="background:#fff;" class="main"><div>Text</div></body>`,
+			want:  `<div>Text</div>`,
+		},
+		{
+			input: `  <p>plain fragment without body tags</p>  `,
+			want:  `<p>plain fragment without body tags</p>`,
+		},
+	}
+	for _, tc := range cases {
+		if got := extractBodyContent(tc.input); got != tc.want {
+			t.Errorf("extractBodyContent(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+// TestWrapWithGlobalLayoutAppliesTitleAppNameAndContent tests that wrapWithGlobalLayout
+// resolves all placeholders and does not double-wrap.
+func TestWrapWithGlobalLayout(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	wrapped := wrapWithGlobalLayout(app, "Special & Urgent", "<p>inner content</p>")
+	if !strings.Contains(wrapped, "Special &amp; Urgent") {
+		t.Fatalf("subject in title must be HTML-escaped, got:\n%s", wrapped)
+	}
+	if !strings.Contains(wrapped, "<p>inner content</p>") {
+		t.Fatalf("inner content must appear verbatim in body, got:\n%s", wrapped)
+	}
+	if strings.Contains(wrapped, phTitle) || strings.Contains(wrapped, phContent) {
+		t.Fatalf("all placeholders must be resolved, got:\n%s", wrapped)
+	}
+
+	// Idempotency: wrapping an already wrapped string must return it untouched.
+	again := wrapWithGlobalLayout(app, "Another", wrapped)
+	if again != wrapped {
+		t.Fatal("wrapWithGlobalLayout must be idempotent and avoid double-wrapping")
+	}
+}

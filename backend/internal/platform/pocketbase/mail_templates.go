@@ -242,13 +242,40 @@ func renderAuthTemplate(t core.EmailTemplate, data authTemplateData) (core.Email
 // possible adapter over it. Messages without the literal pass through
 // untouched, and rebinding on every serve is harmless — PB replaces the
 // previous binding for the same event.
-func bindEmailChangePlaceholder(app core.App) {
+// registerAuthMailHooks attaches send hooks for PocketBase-managed auth emails
+// (verification, password reset, confirm email change).
+//
+// PocketBase resolves per-send placeholders ({TOKEN}, system links) and wraps
+// the collection fragment in its own generic layout before triggering these hooks.
+// Each hook extracts the inner content and re-dresses it in the forum's global
+// wrapper (loadEmailWrapper), ensuring consistent brand design and instant
+// reactivity to admin panel changes without altering users collection rows.
+func registerAuthMailHooks(app core.App) {
+	app.OnMailerRecordVerificationSend().BindFunc(func(e *core.MailerRecordEvent) error {
+		inner := extractBodyContent(e.Message.HTML)
+		e.Message.HTML = wrapWithGlobalLayout(e.App, e.Message.Subject, inner)
+		return e.Next()
+	})
+
+	app.OnMailerRecordPasswordResetSend().BindFunc(func(e *core.MailerRecordEvent) error {
+		inner := extractBodyContent(e.Message.HTML)
+		e.Message.HTML = wrapWithGlobalLayout(e.App, e.Message.Subject, inner)
+		return e.Next()
+	})
+
 	app.OnMailerRecordEmailChangeSend().BindFunc(func(e *core.MailerRecordEvent) error {
 		newEmail, _ := e.Meta["newEmail"].(string)
 		e.Message.HTML = substituteNewEmail(e.Message.HTML, newEmail)
 		e.Message.Subject = substituteNewEmail(e.Message.Subject, newEmail)
+		inner := extractBodyContent(e.Message.HTML)
+		e.Message.HTML = wrapWithGlobalLayout(e.App, e.Message.Subject, inner)
 		return e.Next()
 	})
+}
+
+// bindEmailChangePlaceholder is an alias for registerAuthMailHooks kept for backward compatibility.
+func bindEmailChangePlaceholder(app core.App) {
+	registerAuthMailHooks(app)
 }
 
 // substituteNewEmail replaces {NEW_EMAIL} with the address, HTML-escaped.
