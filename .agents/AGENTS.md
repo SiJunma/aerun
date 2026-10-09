@@ -19,6 +19,7 @@
 Target: VPS at 202.148.54.64 (or `aerun-world.com`), user `deploy`, repository `~/project`.
 
 Prerequisites (one-time, on the deploy machine):
+- Путь к SSH-ключу: C:\Users\....\.ssh\aerun_deploy (ключ без passphrase, авторизация по паролю отключена).
 - The GitHub Deploy Key `aerun_deploy` (public part `aerun_deploy.pub`, installed in the repo's GitHub Deploy keys) lets the deploy machine `git clone`/`git fetch` the repo over SSH from GitHub.
 - Caddy terminates TLS; the Go backend listens loopback on 127.0.0.1:8090 (systemd unit `aerun.service`).
 - The backend `.env` used by `aerun.service` (`EnvironmentFile=/home/deploy/project/.env`) must contain at least: `AERUN_ENV=production`, `AERUN_LISTEN=127.0.0.1:8090`, `AERUN_PUBLIC_URL=https://aerun-world.com`, `AERUN_ALLOWED_ORIGINS=https://aerun-world.com`, `AERUN_DATA_DIR=/home/deploy/project/pb_data`, and `AERUN_ENCRYPTION_KEY=<32 random bytes>` (required in production). Mail runs in `dashboard` mode by default (relay configured in the PocketBase admin UI).
