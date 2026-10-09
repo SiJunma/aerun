@@ -51,14 +51,32 @@ const EmailTemplatesSettings = ({ forumName }) => {
       setWrapper((prev) => prev + tag);
       return;
     }
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? el.value.length;
-    const nextVal = el.value.substring(0, start) + tag + el.value.substring(end);
+    const start = el.selectionStart ?? wrapper.length;
+    const end = el.selectionEnd ?? wrapper.length;
+    const scrollTop = el.scrollTop;
+    const scrollLeft = el.scrollLeft;
+    const current = wrapper ?? el.value;
+    const nextVal = current.substring(0, start) + tag + current.substring(end);
+    const caret = start + tag.length;
     setWrapper(nextVal);
-    setTimeout(() => {
-      el.focus();
-      el.setSelectionRange(start + tag.length, start + tag.length);
-    }, 0);
+    // Restore caret + scroll after React re-renders the controlled textarea.
+    // focus({ preventScroll: true }) avoids scrolling the editor/page to top.
+    requestAnimationFrame(() => {
+      const node = textareaRef.current;
+      if (!node) return;
+      try {
+        node.focus({ preventScroll: true });
+      } catch {
+        node.focus();
+      }
+      try {
+        node.setSelectionRange(caret, caret);
+      } catch {
+        // ignore — some browsers throw if element is not focusable yet
+      }
+      node.scrollTop = scrollTop;
+      node.scrollLeft = scrollLeft;
+    });
   };
 
   const handleSave = async () => {
@@ -197,6 +215,7 @@ const EmailTemplatesSettings = ({ forumName }) => {
                 size="sm"
                 className="py-0 px-2 font-monospace"
                 style={{ fontSize: '12px' }}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => insertPlaceholder(tag)}
                 title={`Insert ${tag}`}
               >
