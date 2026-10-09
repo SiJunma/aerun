@@ -19,7 +19,9 @@ import (
 // TestRegisterCreatesPendingAccount pins the registration contract: a guest
 // gets a pending, unverified account, the normalised nickname is stored for
 // the unique index, and the response never contains the email address or any
-// private auth column.
+// private auth column. The response DOES report the mail verdict (mail_sent /
+// mail_error): in tests SMTP is off, so mail_sent=false with the disabled
+// reason — the honest branch the UI renders instead of "a link was sent".
 func TestRegisterCreatesPendingAccount(t *testing.T) {
 	scenario := tests.ApiScenario{
 		Name:           "guest registers a pending account without email in the response",
@@ -33,6 +35,8 @@ func TestRegisterCreatesPendingAccount(t *testing.T) {
 			`"role":"player"`,
 			`"status":"pending"`,
 			`"verified":false`,
+			`"mail_sent":false`,
+			`"mail_error":"email delivery is disabled`,
 			`"request_id":"`,
 		},
 		NotExpectedContent: []string{
@@ -213,6 +217,67 @@ func TestRegisterOversizedBody(t *testing.T) {
 		TestAppFactory:  newAerunTestApp,
 		ExpectedStatus:  http.StatusRequestEntityTooLarge,
 		ExpectedContent: []string{"Request body is too large."},
+	}
+	scenario.Test(t)
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/aerun/auth/resend-verification (honest resend)
+// ---------------------------------------------------------------------------
+
+// TestResendVerificationIsHonestAboutDisabledMail pins the reported bug's fix:
+// with SMTP off the endpoint must NOT answer 200/mail_sent=true (what the
+// native request-verification 204 made the UI claim). It answers 503 with
+// mail_sent=false and the disabled reason, so the banner renders an error —
+// never a green "link sent" checkmark for a letter that never left.
+func TestResendVerificationIsHonestAboutDisabledMail(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:           "unverified caller learns mail is disabled instead of a fake success",
+		Method:         http.MethodPost,
+		URL:            "/api/aerun/auth/resend-verification",
+		Body:           strings.NewReader(`{}`),
+		TestAppFactory: newAerunTestApp,
+		ExpectedStatus: http.StatusServiceUnavailable,
+		ExpectedContent: []string{
+			`"mail_sent":false`,
+			`email delivery is disabled`,
+			`"request_id":"`,
+		},
+		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			scenario.Headers = authHeader(seedIdentityFixtures(t, app)["pending"])
+		},
+		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
+			if got := app.TestMailer.TotalSend(); got != 0 {
+				t.Fatalf("a disabled mail stack must send nothing, got %d", got)
+			}
+		},
+	}
+	scenario.Test(t)
+}
+
+// TestResendVerificationNeedsNothingLeftToSend pins the already-verified
+// branch: a verified caller gets {verified:true} rather than another letter,
+// so the banner can clear itself instead of spamming the mailbox.
+func TestResendVerificationNeedsNothingLeftToSend(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:           "verified caller is told there is nothing to send",
+		Method:         http.MethodPost,
+		URL:            "/api/aerun/auth/resend-verification",
+		Body:           strings.NewReader(`{}`),
+		TestAppFactory: newAerunTestApp,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"verified":true`,
+			`"request_id":"`,
+		},
+		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+			scenario.Headers = authHeader(seedIdentityFixtures(t, app)["player"])
+		},
+		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
+			if got := app.TestMailer.TotalSend(); got != 0 {
+				t.Fatalf("an already-verified caller must trigger no send, got %d", got)
+			}
+		},
 	}
 	scenario.Test(t)
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/mails"
 	"github.com/pocketbase/pocketbase/tools/router"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
@@ -17,12 +18,18 @@ import (
 
 // Sprint 2 command (plan §4 Sprint 2 task 2): POST /api/aerun/auth/register.
 //
-// Email delivery is hard-disabled, so the account is created in its safe
-// state: verified=false and status=pending (the legacy "pending" pseudo-role
-// becomes an account status). The response must never claim that a
-// verification email was sent (plan §3.2) and must never contain the email
-// address, the password hash or the token key — the caller knows all public
-// fields already, everything else stays server-side.
+// The account is created in its safe state: verified=false and status=pending
+// (the legacy "pending" pseudo-role becomes an account status). The handler
+// ALSO triggers the PocketBase verification mail (best-effort): when the mail
+// stack is on (settings.SMTP.Enabled), the member receives the Aerun-branded
+// verification template installed by configureAuthTemplates; when mail is off
+// (disabled mode, or dashboard mode with no relay yet) the account still
+// registers with 201 and the response reports mail_sent=false so the UI can be
+// honest instead of claiming "a link was sent".
+//
+// The response never contains the email address, the password hash or the
+// token key — the caller knows all public fields already, everything else
+// stays server-side.
 const (
 	registerMaxBodyBytes = 64 * 1024
 	minPasswordLen       = 8
@@ -113,12 +120,81 @@ func registerHandler(e *core.RequestEvent) error {
 		return e.BadRequestError("registration failed", err)
 	}
 
+	// Trigger the verification mail through PocketBase's own sender, so it
+	// goes through the same stack as every other auth mail: the Aerun
+	// template from configureAuthTemplates, the global wrapper from
+	// registerAuthMailHooks, the SMTP relay from configureSMTP. Best-effort:
+	// when mail is off (disabled mode, or dashboard mode with no relay yet)
+	// the send fails and the account still registers — the response says so.
+	mailEnabled := e.App.Settings().SMTP.Enabled
+	mailSent := false
+	mailError := ""
+	if mailEnabled {
+		if err := mails.SendRecordVerification(e.App, record); err != nil {
+			mailError = err.Error()
+			e.App.Logger().Warn("registration verification mail failed",
+				"error", err, "userId", record.Id)
+		} else {
+			mailSent = true
+		}
+	} else {
+		mailError = "email delivery is disabled on this server"
+		e.App.Logger().Info("registration verification mail skipped",
+			"reason", "SMTP is disabled; account created without a verification mail",
+			"userId", record.Id)
+	}
+
 	return e.JSON(http.StatusCreated, map[string]any{
 		"id":         record.Id,
 		"nickname":   record.GetString("nickname"),
 		"role":       string(auth.RolePlayer),
 		"status":     string(auth.StatusPending),
 		"verified":   false,
+		"mail_sent":  mailSent,
+		"mail_error": mailError,
+		"request_id": requestIDFrom(e),
+	})
+}
+
+// resendVerificationHandler re-sends the verification mail to the CALLER.
+//
+// WHY A SERVER ENDPOINT INSTEAD OF THE NATIVE ONE. PocketBase's own
+// POST /api/collections/users/request-verification answers 204 even when the
+// mail stack is off (the guard aborts the send AFTER the 204 is decided), so
+// a UI built on it claims "a link was sent" while nothing left the server —
+// the exact reported bug. This command checks settings.SMTP.Enabled FIRST and
+// answers 503 with mail_sent=false when mail is off, 200 with mail_sent=true
+// only after SendRecordVerification really succeeded. The address always comes
+// from the caller's own auth record, never from a body field.
+func resendVerificationHandler(e *core.RequestEvent) error {
+	record, err := requireForumAccount(e)
+	if err != nil {
+		return err
+	}
+	if record.Verified() {
+		return e.JSON(http.StatusOK, map[string]any{
+			"mail_sent":  false,
+			"verified":   true,
+			"request_id": requestIDFrom(e),
+		})
+	}
+	if !e.App.Settings().SMTP.Enabled {
+		return e.JSON(http.StatusServiceUnavailable, map[string]any{
+			"mail_sent":  false,
+			"mail_error": "email delivery is disabled on this server — ask an administrator to enable mail or to confirm your address manually",
+			"request_id": requestIDFrom(e),
+		})
+	}
+	if err := mails.SendRecordVerification(e.App, record); err != nil {
+		e.App.Logger().Warn("verification resend failed", "error", err, "userId", record.Id)
+		return e.JSON(http.StatusBadGateway, map[string]any{
+			"mail_sent":  false,
+			"mail_error": err.Error(),
+			"request_id": requestIDFrom(e),
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]any{
+		"mail_sent":  true,
 		"request_id": requestIDFrom(e),
 	})
 }

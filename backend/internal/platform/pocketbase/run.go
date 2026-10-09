@@ -280,6 +280,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Sprint 2 identity commands.
 	group.POST("/auth/register", registerHandler)
+	group.POST("/auth/resend-verification", resendVerificationHandler).BindFunc(enforceIdempotency)
 	group.GET("/admin/users", adminListUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
 	group.PATCH("/admin/users/{id}", adminUpdateUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	group.DELETE("/admin/users/{id}", adminDeleteUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)

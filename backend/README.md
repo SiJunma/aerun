@@ -164,7 +164,17 @@ the self-edit rights, `banned` denies everything.
   hash or token key. Conflicts: `409` for duplicate email or nickname
   (case/whitespace variants collide via `nickname_normalized`); reserved
   nicknames (role names, "aerun", "staff", …) are rejected. Bodies beyond
-  64 KiB get `413`.
+  64 KiB get `413`. The handler also triggers the PocketBase verification mail
+  (best-effort, Aerun-branded template + global wrapper) and reports the
+  verdict as `mail_sent` / `mail_error` — `false` with the disabled reason when
+  SMTP is off, so the UI never claims "a link was sent" for a letter that
+  never left.
+- `POST /api/aerun/auth/resend-verification` — honest resend for the caller
+  (idempotency-enveloped). Unlike PocketBase's native `request-verification`
+  (always `204`, even when the mail guard swallowed the send), this command
+  answers `mail_sent=true` only after a real send, `503` + `mail_sent=false`
+  when mail is disabled, and `{verified:true}` when there is nothing left to
+  send.
 - `GET /api/aerun/me` — public profile DTO of the caller (no email, no
   `legacy_firebase_uid`); guests receive the guest identity.
 - `PUT /api/aerun/me/settings` — owner-only replacement of the caller's
