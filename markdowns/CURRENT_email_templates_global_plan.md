@@ -127,43 +127,20 @@ JSON-объект в таблице `forum_settings` (запись `forumsetting
 | 2 | Резолвер и базовые шаблоны | **Выполнено** (`078cf7f`) | `email_templates.go`, `defaultEmailWrapper`, тесты `email_templates_test.go`. |
 | 3 | Уведомления (DM и Topic Replies) | **Выполнено** (`dd43258`) | `notification_email.go`, `maybeEnqueueTopicReplyEmail`, `hasUnreadTopicReply` gate, `outbox_dispatch.go` multipart HTML, тесты `topic_reply_email_test.go`. |
 | 4 | Auth-хуки (Глобальная обёртка для PB) | **Выполнено** | `registerAuthMailHooks`, `loadEmailWrapper`, `wrapWithGlobalLayout`, `extractBodyContent`, тесты `email_templates_test.go` и `mail_templates_test.go`. |
-| 5 | Админка: API и Интерфейс | **Следующий шаг** | Эндпоинты `GET/PUT/POST test` в Go + форма редактирования обёртки в UI с предпросмотром. |
-| 6 | Деактивация Brevo в Cloud Functions | Финал | Отключение дублирующей отправки в Firebase `functions/index.js`. |
+| 5 | Админка: API и Интерфейс | **Выполнено** | Эндпоинты `GET/PUT/POST test` в Go + тесты `admin_email_templates_test.go`, компонент `EmailTemplatesSettings.jsx` в админке с редактором, предпросмотром в модалке, тестовой отправкой и сбросом, полная локализация EN/RU и аудит-логи. |
+| 6 | Деактивация Brevo в Cloud Functions | **Следующий шаг** | Отключение дублирующей отправки в Firebase `functions/index.js`. |
 
 ---
 
 ## 5. Детальный план реализации оставшихся шагов
 
-### Шаг 4: Auth-хуки (переодевание писем PB в глобальную обёртку)
-1. В `email_templates.go`:
-   - Реализовать `loadEmailWrapper(app core.App) string`.
-   - Реализовать `wrapWithGlobalLayout(app core.App, subject, innerHTML string) string`.
-   - Реализовать надежный экстрактор `extractBodyContent(html string) string` (извлекает всё между `<body...>` и `</body>`).
-2. В `mail_templates.go` / `run.go`:
-   - Зарегистрировать перехватчики:
-     - `app.OnMailerRecordVerificationSend()`
-     - `app.OnMailerRecordPasswordResetSend()`
-     - `app.OnMailerRecordEmailChangeSend()`
-   - Для каждого:
-     ```go
-     inner := extractBodyContent(e.Message.HTML)
-     e.Message.HTML = wrapWithGlobalLayout(e.App, e.Message.Subject, inner)
-     ```
-3. Тесты:
-   - Добавить золотые тесты в `mail_templates_test.go`, проверяющие, что auth-письма выходят в дизайне Aerun (с градиентом, кнопкой `.btn`, заголовком форума).
-
-### Шаг 5: Админка (API + UI)
-1. **Backend (`admin_email_templates.go`):**
-   - Зарегистрировать маршруты в `run.go` под группой `/api/aerun/admin/email-templates`.
-   - `GET`: отдает текущий wrapper и дефолтный wrapper для сброса.
-   - `PUT`: сохраняет `"wrapper"` в `forum_settings.email_templates`.
-   - `POST /test`: генерирует тестовое письмо с текстом «Это тестовое письмо для проверки шаблона оформления писем форума.» и отправляет на `e.Auth.Email()`.
-2. **Frontend (`src/pages/AdminPage.jsx`, `src/api/admin.js`):**
-   - Добавить клиентские методы в `src/api/admin.js`.
-   - Добавить блок «Email-шаблоны» на вкладке «Настройки» (Settings):
-     - Редактор HTML-кода обёртки с подсказкой плейсхолдеров (`{TITLE}`, `{APP_NAME}`, `{CONTENT}`).
-     - Кнопка предпросмотра (iframe/modal).
-     - Кнопка «Отправить тестовое письмо».
-     - Кнопка «Сбросить к дефолтному».
+### Шаг 6: Деактивация Brevo в Cloud Functions
+1. В `functions/index.js`:
+   - Найти вызовы отправки писем через Brevo API (`sendTransacEmail` / Brevo SDK).
+   - Проверить триггеры создания уведомлений/ЛС/тем.
+   - Деактивировать отправку писем из Firebase Cloud Functions (закомментировать или удалить вызовы Brevo), чтобы исключить дублирование писем, так как отправка теперь централизованно и надежно выполняется PocketBase backend'ом через `outbox_events` и `pocketbase_mail_sender`.
+2. Тесты и верификация:
+   - Прогнать тесты Cloud Functions (`check-topic-delete-cleanup.mjs` и др.).
+   - Убедиться, что CI и линтер проходят.
 
 ---

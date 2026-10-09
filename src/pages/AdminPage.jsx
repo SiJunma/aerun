@@ -30,6 +30,7 @@ import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
 import { pb } from '../api/pocketbase';
 import DesignsTab from '../components/admin/DesignsTab';
+import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const ROLE_LEVELS = {
@@ -1079,8 +1080,9 @@ const AdminPage = () => {
   };
 
   const renderSettings = () => (
-    <Card className="shadow-sm border-0">
-      <Card.Body className="p-4">
+    <>
+      <Card className="shadow-sm border-0 mb-4">
+        <Card.Body className="p-4">
         <Form>
           <h5 className="mb-4 text-primary">{t('admin.settings.general')}</h5>
           <Row>
@@ -1483,7 +1485,12 @@ const AdminPage = () => {
         </Form>
       </Card.Body>
     </Card>
-  );
+
+    <EmailTemplatesSettings
+      forumName={settings.forumName?.[currentLang] || settings.forumName?.en || 'Aerun'}
+    />
+  </>
+);
 
 
 

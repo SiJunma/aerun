@@ -319,3 +319,51 @@ export const deleteRole = async (id, isSystem, performerId) => {
 export const seedSystemRoles = async (_defaultRoles) => {
   // System roles are already seeded by Go backend migration
 };
+
+// --- Email Template Management ---
+
+/**
+ * Fetches the current email wrapper, whether it's custom, and the default wrapper.
+ * @returns {{ wrapper: string, is_custom: boolean, default_wrapper: string }}
+ */
+export const fetchEmailTemplates = async () => {
+  try {
+    return await sendApi('/api/aerun/admin/email-templates');
+  } catch (err) {
+    console.warn('[fetchEmailTemplates err]', err);
+    throw err;
+  }
+};
+
+/**
+ * Saves a new global email wrapper. The wrapper must contain {CONTENT}.
+ * Sending an empty string resets to the built-in default.
+ * @param {string} wrapper - The HTML wrapper string.
+ * @returns {{ wrapper: string, is_custom: boolean }}
+ */
+export const updateEmailWrapper = async (wrapper) => {
+  try {
+    return await sendApi('/api/aerun/admin/email-templates', {
+      method: 'PUT',
+      body: { wrapper }
+    });
+  } catch (err) {
+    console.warn('[updateEmailWrapper err]', err);
+    throw err;
+  }
+};
+
+/**
+ * Sends a test email to the current admin's address using the active wrapper.
+ * @returns {{ sent_to: string }}
+ */
+export const sendTestEmail = async () => {
+  try {
+    return await sendApi('/api/aerun/admin/email-templates/test', {
+      method: 'POST'
+    });
+  } catch (err) {
+    console.warn('[sendTestEmail err]', err);
+    throw err;
+  }
+};

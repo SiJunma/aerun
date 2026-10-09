@@ -462,4 +462,9 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	group.GET("/admin/outbox-events", adminListOutboxEventsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
 	group.POST("/admin/outbox-events/{id}/retry", adminRetryOutboxEventHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))
+
+	// Admin email template management (plan step 5).
+	group.GET("/admin/email-templates", getEmailTemplatesHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
+	group.PUT("/admin/email-templates", putEmailTemplatesHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+	group.POST("/admin/email-templates/test", testEmailTemplatesHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 }

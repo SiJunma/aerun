@@ -487,6 +487,30 @@ export const translations = {
         success: "Settings saved successfully!",
         error: "Error saving settings"
       },
+      email_templates: {
+        title: "Email Templates",
+        subtitle: "Global layout wrapper for all outgoing forum emails (auth, direct messages, topic replies).",
+        wrapper_label: "Global HTML Wrapper",
+        placeholders_hint: "Available placeholders: {TITLE} (subject/heading), {APP_NAME} (forum name), {CONTENT} (email body). Note: {CONTENT} is required.",
+        content_required_error: "The wrapper must include the {CONTENT} placeholder.",
+        preview_btn: "Preview",
+        preview_title: "Email Template Preview",
+        send_test_btn: "Send Test Email",
+        sending_test: "Sending...",
+        test_sent_success: "Test email successfully sent to {email}!",
+        test_sent_error: "Failed to send test email. Please check your SMTP configuration.",
+        reset_btn: "Reset to Default",
+        reset_confirm_title: "Reset Email Wrapper",
+        reset_confirm_body: "Are you sure you want to revert the email wrapper to the built-in system default?",
+        save_btn: "Save Template",
+        saving: "Saving...",
+        save_success: "Email template saved successfully!",
+        save_error: "Failed to save email template.",
+        custom_badge: "Custom Template",
+        default_badge: "Default System Template",
+        sample_title: "Welcome to Aerun",
+        sample_content: "<h2 style=\"color: #0f172a; margin: 0 0 16px; font-size: 17px; font-weight: 600;\">Preview Demonstration</h2><p>Hello adventurer,</p><p>This is a live preview showing how email content appears inside the forum's layout wrapper.</p><div class=\"highlight-box\">\"This is a sample highlighted quote or message excerpt.\"</div><div class=\"btn-container\"><a href=\"#\" class=\"btn\">Example Action Button</a></div>"
+      },
       users: {
         table_user: "User",
         table_role: "Role Assignment",
@@ -705,7 +729,9 @@ export const translations = {
           topic_lock: "Topic Locked",
           topic_move: "Topic Moved",
           topic_pin: "Topic Pinned",
-          topic_title_edit: "Topic Renamed"
+          topic_title_edit: "Topic Renamed",
+          email_template_updated: "Email Template Updated",
+          email_template_test_sent: "Test Email Sent"
         },
         fields: {
           targetId: "Target",
@@ -1251,6 +1277,30 @@ export const translations = {
         success: "Настройки успешно сохранены!",
         error: "Ошибка при сохранении"
       },
+      email_templates: {
+        title: "Email-шаблоны",
+        subtitle: "Глобальное оформление для всех писем форума (авторизация, ЛС, ответы в темах).",
+        wrapper_label: "Глобальная HTML-обёртка",
+        placeholders_hint: "Доступные плейсхолдеры: {TITLE} (заголовок письма), {APP_NAME} (название форума), {CONTENT} (основной контент). Важно: тег {CONTENT} обязателен.",
+        content_required_error: "Шаблон обязательно должен содержать тег {CONTENT}.",
+        preview_btn: "Предпросмотр",
+        preview_title: "Предпросмотр email-шаблона",
+        send_test_btn: "Отправить тестовое письмо",
+        sending_test: "Отправка...",
+        test_sent_success: "Тестовое письмо успешно отправлено на {email}!",
+        test_sent_error: "Не удалось отправить тестовое письмо. Проверьте настройки SMTP.",
+        reset_btn: "Сбросить к дефолтному",
+        reset_confirm_title: "Сброс email-шаблона",
+        reset_confirm_body: "Вы уверены, что хотите вернуть стандартный системный шаблон оформления писем?",
+        save_btn: "Сохранить шаблон",
+        saving: "Сохранение...",
+        save_success: "Шаблон email успешно сохранен!",
+        save_error: "Не удалось сохранить шаблон email.",
+        custom_badge: "Пользовательский шаблон",
+        default_badge: "Стандартный системный шаблон",
+        sample_title: "Добро пожаловать в Aerun",
+        sample_content: "<h2 style=\"color: #0f172a; margin: 0 0 16px; font-size: 17px; font-weight: 600;\">Демонстрация оформления</h2><p>Приветствуем, путешественник!</p><p>Это интерактивный предпросмотр того, как сообщения будут выглядеть внутри оформления писем.</p><div class=\"highlight-box\">«Это пример выделенной цитаты или фрагмента сообщения форума.»</div><div class=\"btn-container\"><a href=\"#\" class=\"btn\">Пример кнопки действия</a></div>"
+      },
       users: {
         table_user: "Пользователь",
         table_role: "Назначение роли",
@@ -1470,7 +1520,9 @@ export const translations = {
           topic_lock: "Тема закрыта",
           topic_move: "Тема перемещена",
           topic_pin: "Тема закреплена",
-          topic_title_edit: "Тема переименована"
+          topic_title_edit: "Тема переименована",
+          email_template_updated: "Шаблон email обновлён",
+          email_template_test_sent: "Тестовое email-письмо отправлено"
         },
         fields: {
           targetId: "Цель",
