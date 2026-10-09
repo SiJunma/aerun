@@ -92,6 +92,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		// handover can accept "sign in with Google again" as proof of identity
 		// for an account that has no usable password. See oauth_signin_recent.go.
 		registerOAuthSignInHook(se.App)
+		// Promotes a still-pending forum account to active on sign-in when the
+		// "require approval" gate is off — the server-side half of that switch
+		// that nothing used to honour. See account_activation.go.
+		registerAccountActivationHook(se.App)
 		return se.Next()
 	})
 

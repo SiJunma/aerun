@@ -18,10 +18,13 @@ import (
 
 // Sprint 2 command (plan §4 Sprint 2 task 2): POST /api/aerun/auth/register.
 //
-// The account is created in its safe state: verified=false and status=pending
-// (the legacy "pending" pseudo-role becomes an account status). The handler
-// ALSO triggers the PocketBase verification mail (best-effort): when the mail
-// stack is on (settings.SMTP.Enabled), the member receives the Aerun-branded
+// The account is created in its safe state: verified=false (the legacy "pending"
+// pseudo-role becomes an account status). Its `status` follows the admin's
+// "require approval" switch — pending while staff approval is required, active
+// when it is not — so a forum that turned the gate off does not trap new members
+// behind /pending. Email verification stays a separate axis either way. The
+// handler ALSO triggers the PocketBase verification mail (best-effort): when the
+// mail stack is on (settings.SMTP.Enabled), the member receives the Aerun-branded
 // verification template installed by configureAuthTemplates; when mail is off
 // (disabled mode, or dashboard mode with no relay yet) the account still
 // registers with 201 and the response reports mail_sent=false so the UI can be
@@ -90,6 +93,17 @@ func registerHandler(e *core.RequestEvent) error {
 		return router.NewApiError(http.StatusConflict, "nickname is already taken", nil)
 	}
 
+	// The account's initial lifecycle state follows the admin's "require
+	// approval" switch, so a forum that turned approval OFF does not bury every
+	// new email/password member behind /pending. When approval is required the
+	// account starts pending and waits for staff; when it is not, the account is
+	// active from birth. Email verification is a SEPARATE axis (the `verified`
+	// flag, still false here): an active member may still be unverified and be
+	// nudged by the verification banner — approval and verification are
+	// independent, which is exactly why the OAuth path (where the provider
+	// vouches for the address) can skip the latter. See account_activation.go.
+	status := initialAccountStatus(e.App)
+
 	record := core.NewRecord(users)
 	record.SetEmail(email)
 	record.SetVerified(false)
@@ -97,7 +111,7 @@ func registerHandler(e *core.RequestEvent) error {
 	record.Set("nickname", nickname)
 	record.Set("nickname_normalized", auth.NormalizeNickname(nickname))
 	record.Set("role", string(auth.RolePlayer))
-	record.Set("status", string(auth.StatusPending))
+	record.Set("status", string(status))
 	record.Set("avatar_url", "")
 	record.Set("settings", map[string]any{})
 	// Registering is real activity, and it is the one moment we know for certain
@@ -148,7 +162,7 @@ func registerHandler(e *core.RequestEvent) error {
 		"id":         record.Id,
 		"nickname":   record.GetString("nickname"),
 		"role":       string(auth.RolePlayer),
-		"status":     string(auth.StatusPending),
+		"status":     string(status),
 		"verified":   false,
 		"mail_sent":  mailSent,
 		"mail_error": mailError,

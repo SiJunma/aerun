@@ -243,14 +243,16 @@ func TestResendVerificationIsHonestAboutDisabledMail(t *testing.T) {
 			`email delivery is disabled`,
 			`"request_id":"`,
 		},
-		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
-			scenario.Headers = authHeader(seedIdentityFixtures(t, app)["pending"])
-		},
 		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
 			if got := app.TestMailer.TotalSend(); got != 0 {
 				t.Fatalf("a disabled mail stack must send nothing, got %d", got)
 			}
 		},
+	}
+	scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+		// resend-verification is a mutation bound to enforceIdempotency, so the
+		// request needs the Idempotency-Key header on top of the auth token.
+		scenario.Headers = mergeHeaders(testIdemHeaders(), authHeader(seedIdentityFixtures(t, app)["pending"]))
 	}
 	scenario.Test(t)
 }
@@ -270,14 +272,16 @@ func TestResendVerificationNeedsNothingLeftToSend(t *testing.T) {
 			`"verified":true`,
 			`"request_id":"`,
 		},
-		BeforeTestFunc: func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
-			scenario.Headers = authHeader(seedIdentityFixtures(t, app)["player"])
-		},
 		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
 			if got := app.TestMailer.TotalSend(); got != 0 {
 				t.Fatalf("an already-verified caller must trigger no send, got %d", got)
 			}
 		},
+	}
+	scenario.BeforeTestFunc = func(t testing.TB, app *tests.TestApp, e *core.ServeEvent) {
+		// resend-verification is a mutation bound to enforceIdempotency, so the
+		// request needs the Idempotency-Key header on top of the auth token.
+		scenario.Headers = mergeHeaders(testIdemHeaders(), authHeader(seedIdentityFixtures(t, app)["player"]))
 	}
 	scenario.Test(t)
 }
