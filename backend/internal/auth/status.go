@@ -46,12 +46,20 @@ func (s Status) IsValid() bool {
 // pendingAllowedPermissions mirrors the legacy MAX_ROLE_PERMISSIONS.pending
 // set: while an account is unapproved it may only look at the public forum
 // and edit its own presentation fields.
+//
+// PermEditSelfProfile is in this list on purpose: it gates the WHOLE
+// PATCH /me/profile body (bio, location, birthday, status line), and the UI
+// already exposes those fields to pending members — the OAuth registration
+// flow saves a profile while the account is still pending. Without the key
+// NarrowForStatus stripped the permission for every pending account and the
+// save failed with 403 even though the role row granted it.
 var pendingAllowedPermissions = []Permission{
 	PermViewForum,
 	PermEditSelfNickname,
 	PermEditSelfAvatar,
 	PermEditSelfStatus,
 	PermEditSelfSignature,
+	PermEditSelfProfile,
 }
 
 // NarrowForStatus narrows a role permission list according to the account

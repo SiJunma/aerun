@@ -357,6 +357,12 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
   }, [profile, viewedProfile, uid, canEditAnyAccount]);
 
   const handleOpenModal = (char = null) => {
+    // A stale new-mask preview (a local blob: URL) must never show for
+    // another mask; revoke its bytes and start clean.
+    if (charAvatarPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(charAvatarPreview);
+    }
+    setCharAvatarPreview('');
     if (char) {
       setEditingChar(char);
       // An existing mask always owns the slot named after its document id, so
@@ -387,6 +393,13 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
   // bytes are parked and sent right after — picking a file while ADDING a
   // character would otherwise look like it worked and change nothing.
   const [pendingCharAvatar, setPendingCharAvatar] = useState(null);
+
+  // The new-mask branch of handleCharacterAvatarUpload returns a LOCAL object
+  // URL for the immediate preview. It is deliberately kept OUT of
+  // formData.avatar_url — that column is a 512-char text field (see the
+  // comment inside the handler) — so the mask modal's preview reads it from
+  // here instead.
+  const [charAvatarPreview, setCharAvatarPreview] = useState('');
 
   const handleCharacterAvatarUpload = async (charId, blob, filename) => {
     try {
@@ -1920,12 +1933,29 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
 
           <AvatarUploader
             label={<div className="fw-bold mb-2">{t('profile.character_avatar')}</div>}
-            value={formData.avatar_url}
+            value={charAvatarPreview || formData.avatar_url}
             allowGifs={settings?.allowGifAvatars !== false}
             // until Save creates it, so the file is held here and flushed in
             // handleSaveCharacter — otherwise picking an image while adding a
             // character would silently do nothing.
             onUpload={(blob, filename) => handleCharacterAvatarUpload(editingChar?.id, blob, filename)}
+            onChange={(url) => {
+              // The NEW-mask branch returns a LOCAL object URL, which must
+              // never enter formData.avatar_url — that column is a 512-char
+              // text field (see handleCharacterAvatarUpload). Its preview
+              // lives in charAvatarPreview instead. Only an EXISTING mask's
+              // upload returns the server URL, which is safe to store in the
+              // form (and even that is never sent back: toCharacterPayload
+              // deliberately omits avatar_url).
+              if (editingChar?.id) {
+                setFormData({ ...formData, avatar_url: url });
+              } else {
+                setCharAvatarPreview((prev) => {
+                  if (prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                  return url;
+                });
+              }
+            }}
             storagePath={maskAvatarPath(uid, avatarSlot)}
             size={100}
           />

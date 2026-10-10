@@ -169,6 +169,13 @@ func TestEffectivePermissionsNarrowedByStatus(t *testing.T) {
 	if !Has(playerPending, PermViewForum) || !Has(playerPending, PermEditSelfNickname) {
 		t.Fatal("pending users keep view_forum and self-edit rights")
 	}
+	// The whole biographical block rides on this ONE key: PATCH /me/profile
+	// gates every field on it, and the UI exposes those fields to pending
+	// members (the OAuth flow even saves a profile before approval). Losing it
+	// here is what made every pending save answer 403.
+	if !Has(playerPending, PermEditSelfProfile) {
+		t.Fatal("pending users keep edit_self_profile — the profile form must save")
+	}
 	for _, perm := range []Permission{
 		PermPostReply, PermCreateTopic, PermUseReputation, PermUseDirectMessages,
 	} {

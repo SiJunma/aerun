@@ -9,7 +9,10 @@ const isStorageEnabled = true;
  * AvatarUploader
  * Props:
  *   value        – current avatar URL (string)
- *   onChange     – called with new URL when upload/URL change is confirmed
+ *   onChange     – OPTIONAL, called with the new URL when upload/URL change is
+ *                  confirmed. Omitted by callers that keep the saved URL
+ *                  elsewhere (e.g. a new character's local preview); a missing
+ *                  callback must never turn a successful upload into an error.
  *   onUpload     – async (blob, filename) => newUrl. REQUIRED for the file
  *                  picker: the component no longer fabricates a data URL,
  *                  because `avatar_url` is a 512-character text column and an
@@ -18,7 +21,7 @@ const isStorageEnabled = true;
  *   size         – preview circle size in px (default 80)
  *   label        – optional label text
  */
-const AvatarUploader = ({ value, onChange, onUpload, _storagePath, size = 80, label, disabled = false, canUpload = true, allowGifs = true }) => {
+const AvatarUploader = ({ value, onChange = () => {}, onUpload, _storagePath, size = 80, label, disabled = false, canUpload = true, allowGifs = true }) => {
   const fileInputRef = useRef(null);
   const { t } = useI18n();
   const [mode, setMode] = useState('preview'); // 'preview' | 'url'

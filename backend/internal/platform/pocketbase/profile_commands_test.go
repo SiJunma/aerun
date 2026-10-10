@@ -63,6 +63,44 @@ func TestProfileEditIsPersistedForSelf(t *testing.T) {
 	}
 }
 
+// TestPendingAccountMayEditOwnProfile: pending is a STATUS, not a lack of
+// role — the UI exposes bio/status fields to an unapproved member (the OAuth
+// registration flow even saves a profile while pending), so the save must not
+// 403. This pins BOTH halves of the earlier bug: the pending allowlist in
+// internal/auth/status.go must keep PermEditSelfProfile, and the stored role
+// row must carry the key (the repair migration's job on old databases).
+func TestPendingAccountMayEditOwnProfile(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	body := `{"status_line":"Awaiting approval","bio":"fresh arrival"}`
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/aerun/me/profile", strings.NewReader(body))
+	req.Header.Set("Authorization", tokens["pending"])
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("pending self profile save = %d, want 200 (the allowlist must keep edit_self_profile)", res.StatusCode)
+	}
+
+	for field, want := range map[string]string{
+		"status_line": "Awaiting approval",
+		"bio":         "fresh arrival",
+	} {
+		if got := profileField(t, app, fixPendingID, field); got != want {
+			t.Errorf("%s = %q, want %q — the value did not persist", field, got, want)
+		}
+	}
+}
+
 // TestProfileEditIsPartialNotWholesale: sending one field must not blank the
 // others. Every field is a pointer for this reason.
 func TestProfileEditIsPartialNotWholesale(t *testing.T) {

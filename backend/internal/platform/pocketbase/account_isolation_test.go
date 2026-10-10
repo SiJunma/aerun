@@ -158,13 +158,14 @@ func TestPendingAccountCannotPost(t *testing.T) {
 	if me["status"] != string(auth.StatusPending) {
 		t.Fatalf("the status must be reported as pending, got %v", me["status"])
 	}
-	// The pending ceiling is not "nothing" — view_forum plus the four self-edit
+	// The pending ceiling is not "nothing" — view_forum plus the five self-edit
 	// keys survive, which is what lets the account personalise itself while it
 	// waits. Asserting the exact set is the point: a widening here would be
 	// invisible in the UI, which only greys out buttons.
 	want := map[string]bool{
 		"view_forum": true, "edit_self_nickname": true, "edit_self_avatar": true,
 		"edit_self_status": true, "edit_self_signature": true,
+		"edit_self_profile": true,
 	}
 	got, _ := me["permissions"].([]any)
 	if len(got) != len(want) {

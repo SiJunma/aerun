@@ -408,7 +408,12 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.EDIT_SELF_NICKNAME,
     PERMISSIONS.EDIT_SELF_AVATAR,
     PERMISSIONS.EDIT_SELF_STATUS, // Optional but safe
-    PERMISSIONS.EDIT_SELF_SIGNATURE
+    PERMISSIONS.EDIT_SELF_SIGNATURE,
+    // Mirrors pendingAllowedPermissions in backend/internal/auth/status.go:
+    // PATCH /me/profile gates the WHOLE bio block on this one key, so without
+    // it the client ceiling and the server allowlist disagree and every
+    // pending save 403s.
+    PERMISSIONS.EDIT_SELF_PROFILE
   ],
   // A spectator is a viewer. `create_topic` and `post_reply` are gone so the
 // system role means exactly what its name says, and masks and dice went with
