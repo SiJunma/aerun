@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Card, Button, Badge, Modal, Form, Row, Col } from 'react-bootstrap';
+import { Card, Button, Badge, Form, Row, Col } from 'react-bootstrap';
+import ForumModal from '../common/ForumModal';
 import { useI18n } from '../../contexts/I18nProvider';
 import { PlusCircle, Edit2, Trash2, Copy, Eye, EyeOff, Palette } from 'lucide-react';
 import { createDesign, updateDesign, deleteDesign } from '../../api/designs';
@@ -236,11 +237,20 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
       </Row>
 
       {/* Edit/Create Modal */}
-      <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
-        <Modal.Header closeButton>
-          <Modal.Title>{editingDesign ? t('admin.designs.modal_edit') : t('admin.designs.modal_create')}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
+      <ForumModal
+        show={showModal}
+        onHide={() => setShowModal(false)}
+        size="lg"
+        title={editingDesign ? t('admin.designs.modal_edit') : t('admin.designs.modal_create')}
+        bodyClassName=""
+        footerClassName=""
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowModal(false)}>{t('common.cancel')}</Button>
+            <Button variant="primary" onClick={handleSave} disabled={!form.name.trim()}>{t('admin.designs.save_btn')}</Button>
+          </>
+        }
+      >
           <Form>
             <Row>
               <Col md={6}>
@@ -291,19 +301,22 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
               className="fw-bold"
             />
           </Form>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowModal(false)}>{t('common.cancel')}</Button>
-          <Button variant="primary" onClick={handleSave} disabled={!form.name.trim()}>{t('admin.designs.save_btn')}</Button>
-        </Modal.Footer>
-      </Modal>
+      </ForumModal>
 
       {/* Deactivate Replacement Modal */}
-      <Modal show={deactivateModal.show} onHide={() => setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })}>
-        <Modal.Header closeButton>
-          <Modal.Title>{t('admin.designs.confirm_deactivate_title')}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
+      <ForumModal
+        show={deactivateModal.show}
+        onHide={() => setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })}
+        title={t('admin.designs.confirm_deactivate_title')}
+        bodyClassName=""
+        footerClassName=""
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })}>{t('common.cancel')}</Button>
+            <Button variant="primary" onClick={handleConfirmDeactivate}>{t('common.confirm')}</Button>
+          </>
+        }
+      >
           <p>{t('admin.designs.confirm_deactivate_message')}</p>
           <Form.Group>
             <Form.Label className="fw-bold">{t('admin.designs.select_replacement')}</Form.Label>
@@ -325,12 +338,7 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
               )}
             </Form.Select>
           </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setDeactivateModal({ show: false, designIdToDeactivate: null, replacementId: '' })}>{t('common.cancel')}</Button>
-          <Button variant="primary" onClick={handleConfirmDeactivate}>{t('common.confirm')}</Button>
-        </Modal.Footer>
-      </Modal>
+      </ForumModal>
 
       <ConfirmModal
         show={confirmState.show}

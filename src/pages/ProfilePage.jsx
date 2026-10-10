@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Row, Col, Card, Button, Table, Modal, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
+import { Container, Row, Col, Card, Button, Table, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2, Bell, Volume2, Mail } from 'lucide-react';
@@ -1947,14 +1947,35 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
 
 
 
-      {/* Profile Reputation Modal */}
-      <Modal show={showRepModal} onHide={() => setShowRepModal(false)} centered className="reputation-modal shadow-lg">
-        <Modal.Header closeButton className="border-0 pb-0">
-          <Modal.Title className="fw-bold text-accent">
-            {lang === 'ru' ? 'Репутация пользователя' : 'User Reputation'}
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="pt-4">
+      {/* Profile Reputation Modal. ForumModal closes by unmounting (no exit
+          transition), so the re-render storm of a vote cannot strand the
+          dialog in the flow the way the old raw react-bootstrap Modal did. */}
+      <ForumModal
+        show={showRepModal}
+        onHide={() => setShowRepModal(false)}
+        title={lang === 'ru' ? 'Репутация пользователя' : 'User Reputation'}
+        titleClassName="fw-bold text-accent"
+        headerClassName="border-0 pb-0"
+        bodyClassName="pt-4"
+        footerClassName="border-0 pt-0"
+        className="reputation-modal shadow-lg"
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => setShowRepModal(false)} disabled={submittingRep}>
+              {t('common.cancel')}
+            </Button>
+            <Button 
+              variant={repValue > 0 ? 'success' : 'danger'} 
+              onClick={handleRepVote} 
+              disabled={submittingRep}
+              className="px-4 fw-bold shadow-sm"
+            >
+              {submittingRep ? <Spinner size="sm" animation="border" className="me-2" /> : null}
+              {lang === 'ru' ? 'Проголосовать' : 'Submit Vote'}
+            </Button>
+          </>
+        }
+      >
           <div className="text-center mb-4">
             <h5 className="mb-2">
               {lang === 'ru' ? 'Ваш голос для' : 'Your vote for'} <strong>{viewedProfile?.nickname}</strong>: 
@@ -1982,22 +2003,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
               <span>{repComment.length}/200</span>
             </div>
           </Form.Group>
-        </Modal.Body>
-        <Modal.Footer className="border-0 pt-0">
-          <Button variant="outline-secondary" onClick={() => setShowRepModal(false)} disabled={submittingRep}>
-            {t('common.cancel')}
-          </Button>
-          <Button 
-            variant={repValue > 0 ? 'success' : 'danger'} 
-            onClick={handleRepVote} 
-            disabled={submittingRep}
-            className="px-4 fw-bold shadow-sm"
-          >
-            {submittingRep ? <Spinner size="sm" animation="border" className="me-2" /> : null}
-            {lang === 'ru' ? 'Проголосовать' : 'Submit Vote'}
-          </Button>
-        </Modal.Footer>
-      </Modal>
+      </ForumModal>
 
 
 

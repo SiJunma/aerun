@@ -56,6 +56,25 @@ export default defineConfig([
       'react-hooks/preserve-manual-memoization': 'warn',
       'react-hooks/set-state-in-effect': 'warn',
       'react-refresh/only-export-components': 'warn',
+
+      // Disallow raw react-bootstrap <Modal> usage — use ForumModal instead.
+      // This catches the "stuck modal" bug class. Importing Modal is also flagged
+      // because that usually leads to direct usage. Only the Modal specifier matches; other react-bootstrap imports are fine.
+      'no-restricted-syntax': ['error', {
+        selector: 'JSXOpeningElement[name.name=Modal]',
+        message: 'Raw <Modal> from react-bootstrap is prohibited — use ForumModal instead (stuck-modal bug class).',
+      }, {
+        selector: "ImportDeclaration[source.value='react-bootstrap'] > ImportSpecifier[imported.name=Modal]",
+        message: 'Direct import of Modal from react-bootstrap is prohibited — use ForumModal instead (stuck-modal bug class).',
+      },
+      ],
+    },
+  },
+  {
+    // ForumModal is the single sanctioned wrapper around react-bootstrap Modal (scripts/check-no-raw-modal.mjs enforces the same rule), so it is exempt from the ban it exists to implement.
+    files: ['src/components/common/ForumModal.jsx'],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   {

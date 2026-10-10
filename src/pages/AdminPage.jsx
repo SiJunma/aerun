@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown, Modal } from 'react-bootstrap';
+import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -2689,11 +2689,12 @@ const AdminPage = () => {
       </ConfirmModal>
 
       {/* Audit Log Details Modal */}
-      <Modal show={!!selectedAuditLog} onHide={() => setSelectedAuditLog(null)} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>{t('admin.audit.table_details')}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="small">
+      <ForumModal
+        show={!!selectedAuditLog}
+        onHide={() => setSelectedAuditLog(null)}
+        title={t('admin.audit.table_details')}
+        bodyClassName="small"
+      >
           {selectedAuditLog && (
             <div className="d-flex flex-column gap-3" style={{ wordBreak: 'break-word' }}>
               <div>
@@ -2770,8 +2771,7 @@ const AdminPage = () => {
               </div>
             </div>
           )}
-        </Modal.Body>
-      </Modal>
+      </ForumModal>
 
       {/* Group Modal */}
       <ForumModal

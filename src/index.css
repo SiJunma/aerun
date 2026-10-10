@@ -1668,6 +1668,18 @@ strike:hover,
   backdrop-filter: blur(8px);
 }
 
+/* Belt-and-suspenders for the "stuck modal" family of bugs. A react-bootstrap
+   modal without .show is invisible (opacity 0) yet keeps display:block — the
+   leftover of an interrupted exit transition sits in the flow swallowing every
+   click over the forum. ForumModal never renders a modal without .show (it
+   returns null when closed, unmounting everything), so this rule only ever
+   fires for a raw <Modal> regression — and then it makes such a leftover
+   invisible AND click-through instead of forum-blocking. */
+.modal:not(.show) {
+  display: none !important;
+  pointer-events: none !important;
+}
+
 .premium-modal .modal-header .btn-close,
 .confirm-modal .modal-header .btn-close {
   filter: var(--theme-invert, none);

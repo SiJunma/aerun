@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Container, Card, Row, Col, Image, Badge, Button, Form, Modal, Pagination, Dropdown } from 'react-bootstrap';
+import { Container, Card, Row, Col, Image, Badge, Button, Form, Pagination, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import {
