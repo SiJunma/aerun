@@ -560,3 +560,74 @@ func TestCategoryCountersReachTheClient(t *testing.T) {
 	}
 	t.Fatalf("category %s missing from the list", catID)
 }
+
+// TestPostReputationReachesTheClient pins the read half of the post-reputation
+// contract. A member opened a reputation-log deep link
+// (?post=<id>) and found the post rendering "0" with no "who evaluated" eye,
+// even though the log said a vote existed.
+//
+// The vote was real and posts.reputation held it: votePostHandler writes the
+// column atomically (reputation.go) and RecomputePostReputation keeps it in
+// step. The score was simply never projected into the post payload that
+// listPostsHandler serves, so post.reputation arrived undefined and TopicPage
+// rendered `post.reputation || 0` = 0 while gating its eye button on
+// `(post.reputation || 0) !== 0`. The write half already has its own test
+// (sprint4_test.go); what failed was the READ, so that is what is asserted
+// here: after a real vote, the topic feed carries the score the log promised.
+func TestPostReputationReachesTheClient(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+	catID := getGeneralCategoryID(t, app)
+
+	// Player owns the topic+opening post; the target user casts the vote, since
+	// self-voting is rejected and would never move posts.reputation.
+	targetID, _ := seedTargetUser(t, app)
+	topicID, postID := seedTopicAndPost(t, app, targetID)
+	if catID == "" {
+		t.Fatalf("general category missing")
+	}
+
+	status, vote := doJSON(t, server.URL, http.MethodPost,
+		fmt.Sprintf("/api/aerun/posts/%s/vote", postID),
+		tokens["player"], "rep-post-read-1", `{"value":1,"comment":"helpful"}`)
+	if status != http.StatusOK {
+		t.Fatalf("vote: got %d, want 200 (%v)", status, vote)
+	}
+	if got, _ := vote["post_reputation"].(float64); got != 1 {
+		t.Fatalf("vote answer post_reputation = %v, want 1 — the write half did not run", vote["post_reputation"])
+	}
+
+	// The exact read the topic page makes when it opens ?post=<id>.
+	status, payload := doJSON(t, server.URL, http.MethodGet,
+		fmt.Sprintf("/api/aerun/topics/%s/posts", topicID),
+		tokens["player"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("list posts: got %d, want 200 (%v)", status, payload)
+	}
+
+	items, _ := payload["items"].([]any)
+	var found map[string]any
+	for _, raw := range items {
+		entry, _ := raw.(map[string]any)
+		if entry["id"] == postID {
+			found = entry
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("post %s missing from the topic feed: %#v", postID, payload)
+	}
+
+	rep, present := found["reputation"]
+	if !present {
+		t.Fatalf("post payload has no `reputation` key at all: %#v — TopicPage reads post.reputation and always renders 0 without it", found)
+	}
+	if got, _ := rep.(float64); got != 1 {
+		t.Errorf("post.reputation = %v, want 1 — the vote exists in the DB but the feed hid it, so the karma badge showed 0 and the eye button never appeared", rep)
+	}
+}

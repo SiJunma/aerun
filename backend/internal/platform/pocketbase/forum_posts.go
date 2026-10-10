@@ -95,6 +95,16 @@ func postPayload(record *core.Record) map[string]any {
 	// invites a branch that can never be true.
 	payload["content"] = record.GetString("content")
 
+	// `reputation` is the post's vote score. The command layer keeps
+	// posts.reputation in step with every cast, replace and withdrawal
+	// (reputation.go), so the column is authoritative — but until it is
+	// projected here the topic page had no way to see it: its karma badge
+	// renders `post.reputation || 0` and gates the "view who evaluated" eye on
+	// `(post.reputation || 0) !== 0`, so a post that plainly carried votes
+	// rendered "0" and the eye never appeared. `GetInt` yields 0 for a row that
+	// predates the reputation column, which is exactly the correct empty score.
+	payload["reputation"] = record.GetInt("reputation")
+
 	edited := record.GetDateTime("edited")
 	if !edited.IsZero() {
 		payload["edited"] = edited.String()
