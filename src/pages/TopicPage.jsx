@@ -907,7 +907,11 @@ const TopicPage = () => {
         locatingPostIdRef.current = queryPostId;
 
         locatePost(queryPostId, ITEMS_PER_PAGE).then(result => {
-          if (result.found) {
+          // locatePost resolves to `{ topicId, page, postId }` on a hit and
+          // `null` on a miss (forum.js) — there is no `.found` flag any more.
+          // Branching on `result` itself (not a boolean on it) is what keeps a
+          // VALID permalink from falling into the "deleted" branch below.
+          if (result) {
             if (result.topicId === id) {
               if (result.page !== currentPage) {
                 setAlreadyJumped(false);
@@ -959,7 +963,8 @@ const TopicPage = () => {
         }
         locatingPostIdRef.current = postId;
         locatePost(postId, ITEMS_PER_PAGE).then(result => {
-          if (result.found && result.topicId === id) {
+          // Same contract as Priority 1: an object on a hit, `null` on a miss.
+          if (result && result.topicId === id) {
             if (result.page !== currentPage) {
               setAlreadyJumped(false);
               setSearchParams({ page: result.page }, { preventScrollReset: true });

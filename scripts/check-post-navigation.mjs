@@ -109,6 +109,25 @@ assert.equal(shouldSkip('p9', { current: 2 }, 2, { current: [{ id: 'p9' }] }), t
 console.log('PASS: ?post=ID on a loaded page → scroll target set, no clear+refetch, no locator');
 console.log('PASS: in-topic post links scroll locally without a redundant locate');
 
+// locatePost's return contract (src/api/forum.js): `{ topicId, page, postId }`
+// on a hit and `null` on a miss — the retired Firebase callable's `.found` flag
+// is gone. TopicPage must branch on the object itself; reading `.found` off a
+// successful resolve is `undefined`, so a VALID permalink fell straight into the
+// "the original post was deleted" branch and dropped the reader at the top of
+// the topic. This pins both halves of the contract so the bug cannot return.
+const forumFile = fileURLToPath(new URL('../src/api/forum.js', import.meta.url));
+const forumSource = readFileSync(forumFile, 'utf8');
+const locatePostFn = forumSource.match(/export const locatePost = async[\s\S]*?\n\};/);
+assert.ok(locatePostFn, 'locatePost must be defined in src/api/forum.js');
+assert.match(locatePostFn[0], /return \{ topicId, page, postId \};/,
+  'locatePost resolves to the hit object {topicId, page, postId}');
+assert.doesNotMatch(locatePostFn[0], /found:/,
+  'locatePost no longer emits a .found flag — that was the retired callable shape');
+assert.doesNotMatch(source, /result\.found/,
+  'TopicPage must branch on the locatePost result object, not the removed .found flag');
+console.log('PASS: locatePost result contract (object|null) matches how TopicPage branches on it');
+
+
 // Sending an optimistic post must not show any in-flight visualization on the
 // post card: the header strip renders a normal timestamp in every state.
 assert.doesNotMatch(source, /Отправка\.\.\.|Sending\.\.\./, 'No "Sending..." label on the post card');
