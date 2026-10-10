@@ -165,18 +165,27 @@ export const editReputationEntry = async (voteId, patch = {}) => {
  * fetchReputationLogs
  * Fetches reputation changes for a user securely through backend API.
  */
-export const fetchReputationLogs = async (uid, _page = 1, pageSize = 20, _seekLogId = null) => {
-  if (!uid) return { logs: [], total: 0, hidden: false };
+export const fetchReputationLogs = async (uid, page = 1, pageSize = 20, seekLogId = null) => {
+  if (!uid) return { logs: [], total: 0, hidden: false, page: 1, totalPages: 0 };
+  // `page` and `seekLogId` were both declared with an underscore prefix — the
+  // codebase's convention for "accepted and deliberately unused" — so neither
+  // ever reached the wire: the request carried only `limit`, the reputation
+  // pager could not have worked even once the server learned to count, and a
+  // ?log=<id> deep link always landed on page 1. The endpoint is now page/offset
+  // paginated (it answers `total`, `page`, `total_pages`), so both travel now.
+  const seek = seekLogId ? `&seek=${encodeURIComponent(seekLogId)}` : '';
   try {
-    const res = await sendApi(`/api/aerun/users/${uid}/reputation?limit=${pageSize}`);
+    const res = await sendApi(`/api/aerun/users/${uid}/reputation?page=${page}&limit=${pageSize}${seek}`);
     return {
       logs: res?.items || [],
       total: res?.total || (res?.items || []).length,
-      hidden: !!res?.hidden
+      hidden: !!res?.hidden,
+      page: res?.page || page,
+      totalPages: res?.total_pages ?? 0
     };
   } catch (err) {
     console.warn('[fetchReputationLogs]', err);
-    return { logs: [], total: 0, hidden: false };
+    return { logs: [], total: 0, hidden: false, page, totalPages: 0 };
   }
 };
 

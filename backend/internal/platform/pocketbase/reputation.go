@@ -2,7 +2,6 @@ package pocketbase
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -750,38 +749,55 @@ func getUserReputationLogsHandler(e *core.RequestEvent) error {
 	shouldHideComments := (e.Auth == nil || !repShowComments) && !isTargetUser && !isCallerStaff
 
 	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), forum.DefaultPageLimit), forum.DefaultPageLimit)
-	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
+	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
+	if page < 1 {
+		page = 1
+	}
 
-	query := e.App.RecordQuery(reputationVotesCollectionName).
-		AndWhere(dbx.HashExp{"target_id": targetUserID})
-
-	if cursor != "" {
-		parts := strings.Split(cursor, "|")
-		if len(parts) == 2 {
-			created := parts[0]
-			id := parts[1]
-			query = query.AndWhere(dbx.NewExp(
-				"(created < {:created}) OR (created = {:created} AND id < {:id})",
-				dbx.Params{
-					"created": created,
-					"id":      id,
-				},
-			))
+	// Optional deep-link seek: ?seek=<voteId> resolves the page that actually
+	// holds that one row, so a notification's ?log=<id> link lands on the page
+	// containing it instead of page 1. The row's position is how many votes sort
+	// BEFORE it in the created DESC, id DESC order the list uses; the target_id
+	// guard keeps a foreign id from steering the pager of an unrelated profile.
+	if seekID := strings.TrimSpace(e.Request.URL.Query().Get("seek")); seekID != "" {
+		if seekRec, err := e.App.FindRecordById(reputationVotesCollectionName, seekID); err == nil && seekRec != nil && seekRec.GetString("target_id") == targetUserID {
+			if before, err := e.App.CountRecords(reputationVotesCollectionName,
+				dbx.HashExp{"target_id": targetUserID},
+				dbx.NewExp("(created > {:created}) OR (created = {:created} AND id > {:id})",
+					dbx.Params{
+						"created": seekRec.GetDateTime("created").String(),
+						"id":      seekRec.Id,
+					},
+				),
+			); err == nil {
+				page = int(before/int64(limit)) + 1
+			}
 		}
 	}
 
-	query = query.OrderBy("created DESC", "id DESC").Limit(int64(limit + 1))
+	query := e.App.RecordQuery(reputationVotesCollectionName).
+		AndWhere(dbx.HashExp{"target_id": targetUserID}).
+		OrderBy("created DESC", "id DESC").
+		Limit(int64(limit)).
+		Offset(int64((page - 1) * limit))
 
 	var records []*core.Record
 	if err := query.All(&records); err != nil {
 		return internalError("failed to query reputation logs", err)
 	}
 
-	var nextCursor string
-	if len(records) > limit {
-		lastRec := records[limit-1]
-		records = records[:limit]
-		nextCursor = fmt.Sprintf("%s|%s", lastRec.GetDateTime("created").String(), lastRec.Id)
+	// The WHOLE history, under the same target_id scope as the page query, so the
+	// pager and the rows it pages through can never disagree. Reading len(items)
+	// here (the page in hand) is what pinned the pager to a single page before:
+	// totalPages collapsed to 1 and the numbered pager never drew.
+	total, err := e.App.CountRecords(reputationVotesCollectionName, dbx.HashExp{"target_id": targetUserID})
+	if err != nil {
+		return internalError("failed to count reputation logs", err)
+	}
+	perPage := int64(limit)
+	totalPages := int64(0)
+	if total > 0 {
+		totalPages = (total + perPage - 1) / perPage
 	}
 
 	items := make([]map[string]any, 0, len(records))
@@ -843,6 +859,28 @@ func getUserReputationLogsHandler(e *core.RequestEvent) error {
 				item["post_id"] = postID
 				item["topic_id"] = topicID
 				item["topic_title"] = topic.GetString("title")
+				// The post's "#N" position, which the tooltip prints next to the
+				// topic title. reputation_votes carries no post_number column —
+				// Firestore denormalised it onto the vote; the command layer does
+				// not — so it is recomputed from the post row here: the count of
+				// visible posts in the topic that sort at or before this one by
+				// created ASC, id ASC, which is exactly how the topic feed numbers
+				// its posts. A post the topic no longer has (hard delete) resolves
+				// to 0, and the tooltip drops the number rather than inventing one.
+				if post, perr := e.App.FindRecordById(postsCollectionName, postID); perr == nil && post != nil {
+					if n, cerr := e.App.CountRecords(postsCollectionName,
+						dbx.HashExp{"topic_id": topicID},
+						dbx.NewExp("is_draft = false OR is_draft IS NULL"),
+						dbx.NewExp("(created < {:created}) OR (created = {:created} AND id <= {:id})",
+							dbx.Params{
+								"created": post.GetDateTime("created").String(),
+								"id":      postID,
+							},
+						),
+					); cerr == nil {
+						item["post_number"] = int(n)
+					}
+				}
 			}
 		}
 
@@ -852,8 +890,10 @@ func getUserReputationLogsHandler(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]any{
 		"hidden":      false,
 		"items":       items,
-		"next_cursor": nextCursor,
-		"total":       len(items),
+		"total":       total,
+		"page":        page,
+		"per_page":    limit,
+		"total_pages": totalPages,
 		"request_id":  requestIDFrom(e),
 	})
 }
