@@ -790,19 +790,44 @@ func getUserReputationLogsHandler(e *core.RequestEvent) error {
 		topicID := rec.GetString("topic_id")
 		voterID := rec.GetString("voter_id")
 
+		// Resolve the voter so the history row shows a real nickname instead of
+		// the "User" placeholder the frontend falls back to when voter_nickname
+		// is absent — the server used to ship only voter_id here, so every row
+		// read "User" even for staff. This mirrors getPostVotersHandler: a voter
+		// who set rep_show_history = false stays anonymous to everyone but
+		// themselves and staff.
+		voterUser, _ := e.App.FindRecordById(usersCollectionName, voterID)
+		voterShowHistory := true
+		voterNickname := "User"
+		var avatarURL any
+		if voterUser != nil {
+			voterShowHistory = getUserSettingBool(voterUser, "rep_show_history", true)
+			voterNickname = voterUser.GetString("nickname")
+			avatarURL = voterUser.GetString("avatar_url")
+		}
+		voterIsPrivate := !voterShowHistory && voterID != requesterID && !isCallerStaff
+
 		comment := rec.GetString("comment")
 		if shouldHideComments && voterID != requesterID {
 			comment = ""
 		}
 
 		item := map[string]any{
-			"id":         rec.Id,
-			"voter_id":   voterID,
-			"target_id":  targetUserID,
-			"value":      rec.GetInt("value"),
-			"comment":    comment,
-			"created_at": rec.GetDateTime("created").String(),
-			"is_allowed": true,
+			"id":             rec.Id,
+			"voter_id":       voterID,
+			"target_id":      targetUserID,
+			"voter_nickname": voterNickname,
+			"avatar_url":     avatarURL,
+			"value":          rec.GetInt("value"),
+			"comment":        comment,
+			"created_at":     rec.GetDateTime("created").String(),
+			"is_allowed":     true,
+		}
+
+		if voterIsPrivate {
+			item["voter_id"] = nil
+			item["voter_nickname"] = "Anonymous"
+			item["avatar_url"] = nil
 		}
 
 		if postID != "" {

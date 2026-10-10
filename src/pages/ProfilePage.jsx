@@ -1072,9 +1072,15 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                                 </OverlayTrigger>
                               </td>
                               <td className="py-3">
-                                <Link to={`/profile/${log.voter_id}`} className="text-decoration-none fw-semibold">
-                                  {log.voter_nickname || 'User'}
-                                </Link>
+                                {log.voter_id ? (
+                                  <Link to={`/profile/${log.voter_id}`} className="text-decoration-none fw-semibold">
+                                    {log.voter_nickname || 'User'}
+                                  </Link>
+                                ) : (
+                                  <span className="fw-semibold text-muted">
+                                    {log.voter_nickname || (lang === 'ru' ? 'Аноним' : 'Anonymous')}
+                                  </span>
+                                )}
                               </td>
                               <td className="py-3 text-center">
                                 <OverlayTrigger

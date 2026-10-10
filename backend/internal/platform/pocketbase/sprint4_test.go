@@ -678,6 +678,19 @@ func TestSprint4PrivacySettingsMasking(t *testing.T) {
 		if p.Hidden || len(p.Items) == 0 {
 			t.Fatalf("expected staff to view private reputation, got hidden=%v, items=%d", p.Hidden, len(p.Items))
 		}
+
+		// The server must ship the voter's real nickname, not leave the field
+		// absent — an absent voter_nickname made every history row render the
+		// "User" placeholder, even for staff. The voter here is the seeded
+		// player ("PlayerOne"), whose own rep_show_history defaults to true, so
+		// staff see the resolved name and the voter id.
+		item := p.Items[0]
+		if nick, _ := item["voter_nickname"].(string); nick != "PlayerOne" {
+			t.Fatalf("expected voter_nickname %q in reputation history, got %v", "PlayerOne", item["voter_nickname"])
+		}
+		if id, _ := item["voter_id"].(string); id != fixPlayerID {
+			t.Fatalf("expected voter_id %q, got %v", fixPlayerID, item["voter_id"])
+		}
 	}
 }
 
