@@ -59,7 +59,7 @@ func auditLogsFor(t *testing.T, app *tests.TestApp, action string) []map[string]
 		}
 		var details any
 		if raw := r.Get("details"); raw != nil {
-			_ = json.Unmarshal([]byte(fmt.Sprint(raw)), &details)
+			_ = json.Unmarshal(fmt.Append(nil, raw), &details)
 		}
 		out = append(out, map[string]any{
 			"action_type": r.GetString("action_type"),

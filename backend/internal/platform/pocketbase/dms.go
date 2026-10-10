@@ -751,24 +751,22 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			}
 		}
 
-		if err == nil {
-			senderNick := e.Auth.GetString("nickname")
-			for _, m := range otherMembers {
-				rID := m.GetString("user_id")
-				// The DM list is a SEPARATE resource from the notification list —
-				// so without this nudge the conversation preview waits for a poll
-				// while the badge updates instantly.
-				//
-				// Addressed to each recipient individually rather than to the
-				// conversation: a conversation id is not something a non-member
-				// may learn from the stream.
-				publishSignal(txApp, realtimeSignalDMPost, msg.Id, rID)
+		senderNick := e.Auth.GetString("nickname")
+		for _, m := range otherMembers {
+			rID := m.GetString("user_id")
+			// The DM list is a SEPARATE resource from the notification list —
+			// so without this nudge the conversation preview waits for a poll
+			// while the badge updates instantly.
+			//
+			// Addressed to each recipient individually rather than to the
+			// conversation: a conversation id is not something a non-member
+			// may learn from the stream.
+			publishSignal(txApp, realtimeSignalDMPost, msg.Id, rID)
 
-				// Email, first-unread only, offline only (Firebase parity).
-				u, _ := txApp.FindRecordById(usersCollectionName, rID)
-				if u != nil {
-					maybeEnqueueDMEmail(txApp, conv.Id, u, senderNick, cleanText)
-				}
+			// Email, first-unread only, offline only (Firebase parity).
+			u, _ := txApp.FindRecordById(usersCollectionName, rID)
+			if u != nil {
+				maybeEnqueueDMEmail(txApp, conv.Id, u, senderNick, cleanText)
 			}
 		}
 
