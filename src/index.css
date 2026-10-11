@@ -235,47 +235,60 @@ a:hover {
 /* Outgoing message (isMe) link contrast across all 3 themes */
 [data-theme='light'] .dm-bubble-me a,
 body:not([data-theme]) .dm-bubble-me a {
-  color: #38bdf8 !important; /* Sky 400 - bright glowing contrast on dark slate bubble */
+  color: #38bdf8 !important;
+  /* Sky 400 - bright glowing contrast on dark slate bubble */
 }
+
 [data-theme='light'] .dm-bubble-me a:hover,
 body:not([data-theme]) .dm-bubble-me a:hover {
   color: #7dd3fc !important;
 }
 
 [data-theme='dark'] .dm-bubble-me a {
-  color: #1d4ed8 !important; /* Blue 700 - deep contrast on white bubble */
+  color: #1d4ed8 !important;
+  /* Blue 700 - deep contrast on white bubble */
 }
+
 [data-theme='dark'] .dm-bubble-me a:hover {
   color: #1e40af !important;
 }
 
 [data-theme='neutral'] .dm-bubble-me a {
-  color: #ffffff !important; /* Pure white on tan/gold bubble */
+  color: #ffffff !important;
+  /* Pure white on tan/gold bubble */
 }
+
 [data-theme='neutral'] .dm-bubble-me a:hover {
-  color: #fef08a !important; /* Warm gold on hover */
+  color: #fef08a !important;
+  /* Warm gold on hover */
 }
 
 /* Incoming message (peer) link contrast across all 3 themes */
 [data-theme='light'] .dm-bubble-peer a,
 body:not([data-theme]) .dm-bubble-peer a {
-  color: #0284c7 !important; /* Deep blue - contrast on light/gray background */
+  color: #0284c7 !important;
+  /* Deep blue - contrast on light/gray background */
 }
+
 [data-theme='light'] .dm-bubble-peer a:hover,
 body:not([data-theme]) .dm-bubble-peer a:hover {
   color: #0369a1 !important;
 }
 
 [data-theme='dark'] .dm-bubble-peer a {
-  color: #38bdf8 !important; /* Sky 400 - contrast on dark background */
+  color: #38bdf8 !important;
+  /* Sky 400 - contrast on dark background */
 }
+
 [data-theme='dark'] .dm-bubble-peer a:hover {
   color: #7dd3fc !important;
 }
 
 [data-theme='neutral'] .dm-bubble-peer a {
-  color: #b45309 !important; /* Amber 700 - contrast on sepia card background */
+  color: #b45309 !important;
+  /* Amber 700 - contrast on sepia card background */
 }
+
 [data-theme='neutral'] .dm-bubble-peer a:hover {
   color: #d97706 !important;
 }
@@ -1015,6 +1028,7 @@ strike,
 .bbcode-strike,
 .text-decoration-line-through,
 [style*="line-through"] {
+  text-decoration-thickness: 2px;
   transition: text-decoration-color 0.15s ease-in-out, opacity 0.15s ease-in-out;
 }
 
@@ -1619,14 +1633,17 @@ strike:hover,
     align-items: center !important;
     text-align: center !important;
   }
+
   .profile-sidebar-wrapper .profile-sidebar-info,
   .profile-sidebar-wrapper .profile-sidebar-role,
   .profile-sidebar-wrapper .profile-stat-item {
     text-align: center !important;
   }
+
   .profile-sidebar-wrapper .profile-sidebar-stats {
     justify-content: center !important;
   }
+
   .profile-sidebar-wrapper .profile-rep-row {
     justify-content: center !important;
   }
@@ -3706,7 +3723,7 @@ a.rep-preview-name:hover {
   overflow: hidden !important;
 }
 
-.dm-fullscreen-card > .card-body {
+.dm-fullscreen-card>.card-body {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto !important;
@@ -3720,6 +3737,7 @@ a.rep-preview-name:hover {
 
 /* Mobile/Tablet: stack vertically with compact pinned bottom editor and maximized message area */
 @media (max-width: 991.98px) {
+
   /* In DM chat mode on mobile, hide site footer so chat pins to the bottom edge of screen */
   body:has(.dm-fullscreen-card) footer.footer-custom {
     display: none !important;
@@ -3731,7 +3749,7 @@ a.rep-preview-name:hover {
     margin-bottom: 0 !important;
   }
 
-  body:has(.dm-fullscreen-card) main > .container {
+  body:has(.dm-fullscreen-card) main>.container {
     padding-left: 0.25rem !important;
     padding-right: 0.25rem !important;
     padding-bottom: 0 !important;
