@@ -29,7 +29,6 @@ func mergeHeaders(a, b map[string]string) map[string]string {
 	return out
 }
 
-
 // TestAdminEmailTemplatesGetAccessMatrix pins the permission gate for the
 // GET /api/aerun/admin/email-templates endpoint: only admin_access holders
 // (root, admin) may read the wrapper; every other actor is refused.
