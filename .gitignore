@@ -103,3 +103,7 @@ npmtest.txt
 # fixing it, and their output is read from the terminal, never committed.
 lint_*.txt
 eslint-report.txt
+
+# Local artifacts of python deploy.py (VPS deploy CLI): packed frontend/backend
+# bundles reused with --skip-build. Never committed.
+.deploy/
