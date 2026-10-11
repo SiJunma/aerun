@@ -137,6 +137,15 @@ func markAllTopicsReadHandler(e *core.RequestEvent) error {
 
 	var body struct {
 		TopicIDs []string `json:"topic_ids"`
+		// All asks the server to resolve the set itself, from the SAME predicate
+		// that drives the unread feed and the counter. A client-supplied list can
+		// only ever be a stale snapshot of that set — the feed it is drawn from is
+		// polled and paginated — so a "mark all read" that trusts the client
+		// leaves real unread topics behind: the badge drops, the page the client
+		// sent empties, and the topics that were on page two, or that arrived
+		// after the last poll, stay unread and keep their row indicator. The
+		// server owns the read states, so the server decides what "all" means.
+		All bool `json:"all"`
 	}
 	if e.Request.Body != nil {
 		if err := json.NewDecoder(e.Request.Body).Decode(&body); err != nil {
@@ -144,18 +153,28 @@ func markAllTopicsReadHandler(e *core.RequestEvent) error {
 		}
 	}
 
-	if len(body.TopicIDs) == 0 {
+	acc := AccessFrom(e)
+	now := types.NowDateTime()
+
+	topicIDs := body.TopicIDs
+	if body.All {
+		ids, err := unreadTopicIDs(e)
+		if err != nil {
+			return internalError("failed to resolve unread topics", err)
+		}
+		topicIDs = ids
+	}
+
+	if len(topicIDs) == 0 {
 		return e.JSON(http.StatusOK, map[string]any{
 			"marked":     0,
+			"ids":        []string{},
 			"request_id": requestIDFrom(e),
 		})
 	}
 
-	acc := AccessFrom(e)
-	now := types.NowDateTime()
-
 	marked := 0
-	for _, topicID := range body.TopicIDs {
+	for _, topicID := range topicIDs {
 		topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
 		if err != nil || topic == nil {
 			return notFoundError("topic not found")
@@ -173,8 +192,17 @@ func markAllTopicsReadHandler(e *core.RequestEvent) error {
 		marked++
 	}
 
+	// `ids` is the FULL set the server actually marked, echoed back. With
+	// `all:true` this is every unread topic the server resolved — including the
+	// ones that were NOT on the caller's screen (page two, or posted after the
+	// last poll). The client renders its row indicators from a local map that
+	// knows nothing about the server's predicate, so without this echo it would
+	// mark only what it had sent and leave those off-screen rows lit until a full
+	// reload. Marking read and the row going dark are the same act, decided in
+	// one place.
 	return e.JSON(http.StatusOK, map[string]any{
 		"marked":     marked,
+		"ids":        topicIDs,
 		"request_id": requestIDFrom(e),
 	})
 }

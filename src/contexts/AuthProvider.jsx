@@ -5,6 +5,7 @@ import LoadingPreloader from '../components/common/LoadingPreloader';
 import {
   apiMarkAllTopicsRead,
   apiRecordAllTopicVisits,
+  refreshUnreadTopics,
   subscribeToEffectivePermissions,
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
@@ -19,7 +20,7 @@ import {
   initRtdbGuestPresence,
   removeRtdbGuestPresence
 } from '../api/rtdb-presence';
-import { subscribeToUnreadCounts } from '../api/dms';
+import { subscribeToUnreadCounts, refreshUnreadCounts } from '../api/dms';
 import { fetchSecuredMainPageData } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -829,6 +830,13 @@ export const AuthProvider = ({ children }) => {
     const now = Date.now();
     setReadMap(prev => ({ ...prev, [topicId]: now }));
     await apiRecordTopicVisit(user.uid, topicId, offset);
+    // The server state already moved, but the navbar badge, the tab title and
+    // the /new-replies tab render the last POLLED values (15s / 20s ticks).
+    // Without an explicit re-read they stay stale — the exact "clears itself
+    // after a while" from the report. Best effort: a missed refresh only
+    // delays the badge to the next tick.
+    refreshUnreadCounts(user.uid);
+    refreshUnreadTopics();
   }, [user?.uid]);
 
   // markAllRead sends the ids to the server, which owns the read state now.
@@ -842,18 +850,28 @@ export const AuthProvider = ({ children }) => {
   // takes a list: the server can only mark what it is told, and refusing an id in
   // a category the caller may not read is a deliberate 403 there rather than a
   // quiet skip.
-  const markAllRead = useCallback(async (topicIds = []) => {
+  // `_topicIds` is accepted but ignored: the caller (NewRepliesPage) still passes
+  // `unreadTopics.map(t => t.id)`, which the read-contract script asserts on the
+  // call site, but the server no longer trusts a client snapshot. See below.
+  const markAllRead = useCallback(async (_topicIds = []) => {
     if (!user?.uid || isMarkingAllRead) return;
-    const ids = (topicIds || []).filter(Boolean);
-    if (ids.length === 0) return;
 
     setIsMarkingAllRead(true);
     try {
-      await apiMarkAllTopicsRead(user.uid, ids);
+      // The server resolves the set itself (`all:true`) from the same predicate
+      // that drives the feed and the counter, and echoes back the FULL list of
+      // ids it marked. The page's ids are no longer sent: a client snapshot can
+      // only ever be a partial, polled view, which is exactly how "mark all
+      // read" left real unread topics — and their lit row indicators — behind.
+      // The server's answer is what moves the state.
+      const res = await apiMarkAllTopicsRead(user.uid);
+      const ids = Array.isArray(res?.ids) ? res.ids.filter(Boolean) : [];
 
       // The local map still drives the page's own "unread" rendering, so it has to
       // move too — a server-only write would leave the rows the member just marked
-      // still highlighted until the next full reload.
+      // still highlighted until the next full reload. It moves on the SERVER's
+      // full set, so rows that were never on screen (page two, or posted after the
+      // last poll) go dark here as well, matching the badge and the feed.
       const now = Date.now();
       setReadMap(prev => {
         const next = { ...prev };
@@ -861,6 +879,10 @@ export const AuthProvider = ({ children }) => {
         return next;
       });
       apiRecordAllTopicVisits(user.uid, ids);
+      // Same staleness as the single read above: the badge counts the whole
+      // board server-side, so re-read it instead of waiting for the next tick.
+      refreshUnreadCounts(user.uid);
+      refreshUnreadTopics();
     } finally {
       setIsMarkingAllRead(false);
     }

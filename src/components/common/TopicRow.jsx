@@ -33,7 +33,16 @@ const TopicRow = ({
   // unread count at the epoch instead of failing loudly.
   const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
   const lastPostMs = toMillis(topic.last_post_at);
-  const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
+  // Prefer the SERVER's unread flag when present. topicPayload now emits `unread`
+  // from the same predicate that drives the badge and /new-replies, so this row
+  // and those counters cannot disagree. The per-device readMap is only a FALLBACK
+  // for guests and payloads that predate the field: after the PocketBase
+  // migration a topic read server-side but stale in localStorage kept its dot
+  // forever, and "mark all read" could not reach it. The author/role guards stay
+  // because the server flag never marks my own last post unread anyway.
+  const serverUnread = typeof topic.unread === 'boolean' ? topic.unread : null;
+  const isUnreadByState = serverUnread !== null ? serverUnread : lastPostMs > effectiveLastVisitMs;
+  const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_id !== user?.uid && isUnreadByState;
 
   const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
   const totalPages = Math.ceil((topic.posts_count || 1) / ITEMS_PER_PAGE);

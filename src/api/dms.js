@@ -125,6 +125,8 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
 // The shared resource name is unchanged, and it is scoped by account: the counters
 // are caller-scoped, so AuthProvider (dmUnread) and TitleProvider (tab title) are
 // reading the SAME resource and the second subscriber costs nothing.
+const unreadCountsPolls = new Map();
+
 export const subscribeToUnreadCounts = (uid, callback) => {
   if (!uid) {
     callback({ total: 0, conversations: {}, topics: 0, notifications: 0 });
@@ -177,8 +179,30 @@ export const subscribeToUnreadCounts = (uid, callback) => {
       )
       : null,
   });
+  if (uid) unreadCountsPolls.set(uid, poll);
 
-  return poll.subscribe((counts) => callback(counts));
+  const unsubscribe = poll.subscribe((counts) => callback(counts));
+  return () => {
+    unsubscribe();
+    if (poll !== unreadCountsPolls.get(uid)) return;
+    // sharedPoll keeps the loop alive while ANY subscriber remains (AuthProvider
+    // + TitleProvider share it), so only drop the handle when nobody is left.
+    // There is no subscriber count exposed, so keep the handle — a stale entry
+    // only costs a map slot, while dropping it early would lose the refresh.
+  };
+};
+
+// refreshUnreadCounts re-reads /me/unread-counts WITHOUT waiting for the 15s
+// tick. Called after the member marks topic(s) read: the server state already
+// moved, but the badge (navbar + tab title + /new-replies tab) renders the
+// last POLLED value, so without this it stays stale until the next interval.
+export const refreshUnreadCounts = (uid) => {
+  try {
+    unreadCountsPolls.get(uid)?.refresh();
+  } catch {
+    // A missed refresh only delays the badge to the next tick — never fail a
+    // navigation or a mark-read for it.
+  }
 };
 
 // subscribeToDmUnread keeps its name at the call sites that only read DMs.

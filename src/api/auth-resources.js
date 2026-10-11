@@ -124,16 +124,23 @@ export const subscribeToReadMap = (uid, callback) => {
 
 // apiMarkAllTopicsRead moves the caller's read position server-side.
 //
-// The id list is the caller's, not a page size: the server can only mark what it
-// is told, and it refuses an id in a category this member may not read rather than
-// skipping it — a 200 that quietly left another category's state alone would let
-// the button claim "read everything" having not looked at all.
-export const apiMarkAllTopicsRead = async (uid, topicIds) => {
-  if (!uid || !topicIds?.length) return;
+// It sends `all:true` and lets the SERVER resolve the set from the same
+// predicate that drives the unread feed and the counter. A client-supplied id
+// list can only ever be a stale, paginated snapshot of that set — the feed it is
+// drawn from is polled — so "mark all read" that trusted the client left real
+// unread topics behind: the badge dropped, the page the client sent emptied, and
+// the topics on page two (or posted after the last poll) stayed unread and kept
+// their row indicator. The server owns the read states, so it decides what
+// "all" means.
+//
+// The response is returned, not discarded: the server echoes back the FULL list
+// of ids it marked, which is what the local row-indicator map must move on.
+export const apiMarkAllTopicsRead = async (uid) => {
+  if (!uid) return { marked: 0, ids: [] };
   try {
-    await sendApi('/api/aerun/me/topics/read-all', {
+    return await sendApi('/api/aerun/me/topics/read-all', {
       method: 'POST',
-      body: { topic_ids: topicIds },
+      body: { all: true },
     });
   } catch (err) {
     // Reported, not swallowed: the badge will keep showing the old number and the
@@ -223,6 +230,8 @@ export const fetchUnreadTopics = async (page = 1, pageSize = 20) => {
 // the screen stop updating: it used to re-read every 20s, and a member watching
 // for replies would simply have seen a frozen list. Paging does not justify
 // losing that.
+const unreadTopicsPolls = new Map();
+
 export const subscribeToUnreadTopics = (callback, page = 1, pageSize = 20) => {
   const poll = sharedPoll(`unread-topics:${page}:${pageSize}`, {
     fetch: () => fetchUnreadTopics(page, pageSize),
@@ -230,8 +239,22 @@ export const subscribeToUnreadTopics = (callback, page = 1, pageSize = 20) => {
     initialValue: { topics: [], total: 0, perPage: pageSize },
     onError: (err) => console.error('[subscribeToUnreadTopics]', err),
   });
+  unreadTopicsPolls.set(`unread-topics:${page}:${pageSize}`, poll);
 
   return poll.subscribe((data) => callback(data));
+};
+
+// refreshUnreadTopics re-reads every live page of the unread feed. The feed is
+// server-filtered by read state, so after a mark-read the just-read row is
+// already gone server-side — but the page renders the last POLLED value, which
+// is why a topic just opened from the main page lingered in /new-replies until
+// the next 20s tick.
+export const refreshUnreadTopics = () => {
+  try {
+    unreadTopicsPolls.forEach((poll) => poll?.refresh());
+  } catch {
+    // Same contract as the counters refresh: best effort, never throws.
+  }
 };
 
 // Polls one page of the general topic feed.

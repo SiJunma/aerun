@@ -367,6 +367,32 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	}
 	decorateTopicAuthors(e.App, items)
 
+	// Per-row unread flag, resolved SERVER-side against the SAME predicate the
+	// badge and the /new-replies feed use (unreadTopicIDs → unreadTopicsPredicate).
+	//
+	// The row indicators on the category page and the main index still derive
+	// "unread" from a per-device localStorage readMap, which the PocketBase
+	// migration left behind from the Firestore era. That map can disagree with the
+	// server's read state — a topic read server-side but stale locally keeps its
+	// dot forever, and "mark all read" cannot reach it because it is absent from
+	// the server's own unread list. Emitting the authoritative flag here gives
+	// every row renderer one source of truth; a guest (no e.Auth) keeps the
+	// existing behaviour with the field simply absent.
+	//
+	// TODO(sprint): reuse the ids already resolved above when unreadOnly, and add
+	// the same flag to the main-index last-post projection (category_access.go).
+	if e.Auth != nil {
+		if ids, err := unreadTopicIDs(e); err == nil {
+			unreadSet := make(map[string]bool, len(ids))
+			for _, id := range ids {
+				unreadSet[id] = true
+			}
+			for i, r := range records {
+				items[i]["unread"] = unreadSet[r.Id]
+			}
+		}
+	}
+
 	// `total` is what the client paginates against. It is counted over the same
 	// filter as the page, so a category with 45 topics reports 45 on every page
 	// rather than the 20 that happen to be in this response.
