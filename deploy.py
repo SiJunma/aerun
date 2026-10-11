@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -183,18 +184,35 @@ def wait_for_health(*, tries: int = 12, pause: float = 10.0) -> str:
 
 
 def public_get(path: str) -> str:
-    """GET a public URL tolerating TLS issues (expired cert must not fail deploy)."""
+    """GET a public URL. Prefers system curl (fresh CA store) over urllib.
+
+    Python 3.12's bundled CA store predates the 2026 Let's Encrypt root
+    rollover (Root YE / ISRG Root X2), so verified urllib fails even though
+    the chain is valid. System curl uses the Windows store and verifies fine.
+    curl -k is the last resort: the body proves the deploy, not the chain.
+    """
     import ssl
 
     url = PROD_URL + path
+    curl = shutil.which("curl")
+    if curl:
+        proc = subprocess.run(
+            [curl, "-s", "-m", "20", "-A", "aerun-deploy/1", url],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout
+        log("  ! verified curl failed, retrying urllib...")
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "aerun-deploy/1"})
         with urllib.request.urlopen(req, timeout=20) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
         log("  ! verified HTTPS failed (%r), retrying with curl -k..." % (exc,))
+    if not curl:
+        raise Fail("curl not found and verified HTTPS failed for %s" % url)
     proc = subprocess.run(
-        ["curl", "-sk", "-m", "20", "-A", "aerun-deploy/1", url],
+        [curl, "-sk", "-m", "20", "-A", "aerun-deploy/1", url],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     if proc.returncode != 0:
