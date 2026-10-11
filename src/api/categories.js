@@ -177,6 +177,13 @@ const toCategory = (d) => ({
     last_post_author: d.last_post_author,
     last_post_author_avatar: d.last_post_author_avatar,
     last_post_topic_posts_count: d.last_post_topic_posts_count,
+    // Server-authoritative unread flag (listForumIndexHandler → unreadTopicIDs),
+    // the SAME predicate behind the badge and /new-replies. Propagated only when
+    // the server actually had an opinion: a guest's payload omits it, and we
+    // keep `undefined` rather than defaulting to false so MainPage can tell
+    // "server said read" from "no server answer" and fall back to the
+    // localStorage predicate only in the latter case.
+    ...(typeof d.unread === 'boolean' ? { unread: d.unread } : {}),
   } : {})
 });
 

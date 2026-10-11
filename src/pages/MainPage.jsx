@@ -163,7 +163,15 @@ const MainPage = () => {
                     const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
                     const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
                     const lastPostMs = toMillis(cat.last_post_at);
-                    const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && lastPostMs > effectiveLastVisitMs;
+                    // The server owns read state now: `cat.unread` is the SAME
+                    // unreadTopicIDs predicate that drives the badge and
+                    // /new-replies, so when it is present it wins. The
+                    // localStorage predicate stays only as a fallback for a
+                    // payload that did not carry the flag (guest, or a stale
+                    // index), and it remains behind the same `!!user` / role /
+                    // own-post gates.
+                    const serverUnread = typeof cat.unread === 'boolean' ? cat.unread : null;
+                    const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && (serverUnread ?? lastPostMs > effectiveLastVisitMs);
 
                     return (
                       <LastPostInfo

@@ -500,6 +500,25 @@ func listCategoriesHandler(e *core.RequestEvent) error {
 // this endpoint was asked to be.
 func listForumIndexHandler(e *core.RequestEvent) error {
 	acc := AccessFrom(e)
+
+	// The caller's unread topic set, resolved from the SAME predicate the
+	// new-replies feed and the badge counter use (unreadTopicIDs). Resolving it
+	// once here is what lets a lit row on the index agree with the feed: a row
+	// is unread iff its last-post topic is in this set, so the index can never
+	// light more topics than the feed can show. A guest gets a nil set and is
+	// handled by the e.Auth != nil guard below.
+	var unreadSet map[string]bool
+	if e.Auth != nil {
+		ids, err := unreadTopicIDs(e)
+		if err != nil {
+			return internalError("failed to resolve unread topics", err)
+		}
+		unreadSet = make(map[string]bool, len(ids))
+		for _, id := range ids {
+			unreadSet[id] = true
+		}
+	}
+
 	cats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
 	if err != nil {
 		return internalError("failed to query categories", err)
@@ -533,6 +552,14 @@ func listForumIndexHandler(e *core.RequestEvent) error {
 		if _, ok := item["topics_count"]; !ok {
 			item["topics_count"] = 0
 			item["posts_count"] = 0
+		}
+		// Authoritative unread flag for a member (see unreadSet above): the row
+		// is lit iff its last-post topic is in the caller's unread set. Left
+		// absent for a guest so the client can tell "no server opinion" from
+		// "the server says read".
+		if e.Auth != nil {
+			topicID, _ := item["last_post_topic_id"].(string)
+			item["unread"] = topicID != "" && unreadSet[topicID]
 		}
 		items = append(items, item)
 	}
