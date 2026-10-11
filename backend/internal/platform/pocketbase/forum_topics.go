@@ -246,6 +246,18 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	settings := loadForumSettings(e.App)
 	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.TopicsPerPage), settings.TopicsPerPage)
 	categoryID := strings.TrimSpace(e.Request.URL.Query().Get("category_id"))
+
+	// Pinned-first ranking is a CATEGORY-PAGE guarantee, and it is requested
+	// EXPLICITLY, never inferred. The one screen that renders a category's topic
+	// table (CategoryPage → fetchSecuredTopics) sends `pinned_first=1`; every
+	// other reader of this endpoint wants pure recency — the global /active-topics
+	// and /new-replies feeds, AND subscribeToTopics / subscribeToLastTopicInCategory,
+	// which read a category's topics for index and last-post cards while still
+	// expecting "newest first". Inferring the pin from the mere presence of a
+	// category_id handed those callers a pinned block they never asked for; an
+	// explicit flag keeps the guarantee exactly where it belongs.
+	pinPriority := parseIntParam(e.Request.URL.Query().Get("pinned_first"), 0) == 1
+
 	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
 	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
 	if page < 1 {
@@ -310,10 +322,17 @@ func listTopicsHandler(e *core.RequestEvent) error {
 		query = query.AndWhere(dbx.In("id", inArgs...))
 	}
 
-	// Keyset pagination cursor: pinned DESC, last_post_created DESC, id DESC
+	// Keyset pagination cursor. The cursor shape mirrors the ordering, and the
+	// ordering is pin-aware ONLY when pinned_first was requested (pinPriority).
+	// Encoding the pin for a recency feed — where pinned topics are NOT ranked
+	// first — would make the predicate jump to a rank the list never used, so the
+	// two cursor shapes stay distinct:
+	//
+	//   pinned_first=1  → `pinned|last_post_created|id`  (pinned DESC first)
+	//   everything else → `last_post_created|id`          (recency only)
 	if cursor != "" {
 		parts := strings.Split(cursor, "|")
-		if len(parts) == 3 {
+		if pinPriority && len(parts) == 3 {
 			pinned := parts[0] == "1"
 			lastPostCreated := parts[1]
 			lastID := parts[2]
@@ -327,11 +346,34 @@ func listTopicsHandler(e *core.RequestEvent) error {
 					"id":      lastID,
 				},
 			))
+		} else if !pinPriority && len(parts) == 2 {
+			lastPostCreated := parts[0]
+			lastID := parts[1]
+
+			// Keyset predicate for (last_post_created DESC, id DESC)
+			query = query.AndWhere(dbx.NewExp(
+				"(last_post_created < {:created}) OR (last_post_created = {:created} AND id < {:id})",
+				dbx.Params{
+					"created": lastPostCreated,
+					"id":      lastID,
+				},
+			))
 		}
 	}
 
-	query = query.OrderBy("pinned DESC", "last_post_created DESC", "id DESC").
-		Limit(int64(limit + 1))
+	// Pinned-first ranking is a CATEGORY-PAGE guarantee, requested via
+	// pinned_first=1. Everywhere else — the global /active-topics and /new-replies
+	// feeds, and the category reads that back the index cards (subscribeToTopics,
+	// subscribeToLastTopicInCategory) — a pinned topic must NOT outrank a fresher
+	// one: a member scanning "latest activity" expects pure recency, with the pin
+	// acting only as a row icon. Ordering those lists by pin would strand an old
+	// pinned announcement above every recent reply.
+	if pinPriority {
+		query = query.OrderBy("pinned DESC", "last_post_created DESC", "id DESC")
+	} else {
+		query = query.OrderBy("last_post_created DESC", "id DESC")
+	}
+	query = query.Limit(int64(limit + 1))
 
 	// Page pagination, offset-based, for the CATEGORY VIEW. It applies only when
 	// no cursor was supplied: a keyset cursor already encodes the position, and
@@ -354,11 +396,20 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	if len(records) > limit {
 		lastRec := records[limit-1]
 		records = records[:limit]
-		pinnedFlag := "0"
-		if lastRec.GetBool("pinned") {
-			pinnedFlag = "1"
+		lastPostCreated := lastRec.GetDateTime("last_post_created").String()
+		if pinPriority {
+			// pinned_first request: encode the pin so the cursor can resume after
+			// the pinned-first block (pinned|last_post_created|id).
+			pinnedFlag := "0"
+			if lastRec.GetBool("pinned") {
+				pinnedFlag = "1"
+			}
+			nextCursor = fmt.Sprintf("%s|%s|%s", pinnedFlag, lastPostCreated, lastRec.Id)
+		} else {
+			// Recency feeds: no pin in the ordering, so none in the cursor
+			// (last_post_created|id).
+			nextCursor = fmt.Sprintf("%s|%s", lastPostCreated, lastRec.Id)
 		}
-		nextCursor = fmt.Sprintf("%s|%s|%s", pinnedFlag, lastRec.GetDateTime("last_post_created").String(), lastRec.Id)
 	}
 
 	items := make([]map[string]any, len(records))

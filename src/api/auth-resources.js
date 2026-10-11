@@ -174,9 +174,10 @@ export const apiRecordAllTopicVisits = (uid, topicIds) => {
 // never present, so "Most Active Topics" and the new-replies feed rendered
 // empty for every member.
 //
-// `order_by` is gone from the URL too: listTopicsHandler orders by
-// `pinned DESC, last_post_created DESC, id DESC` unconditionally, so the
-// parameter never did anything except look like it did.
+// `order_by` is gone from the URL too: listTopicsHandler picks the ordering
+// itself — `pinned DESC, last_post_created DESC, id DESC` inside a category
+// (this request carries no category_id) — so the parameter never did anything
+// except look like it did.
 //
 // NORMALISE BEFORE HANDING A ROW TO A RENDERER. This used to pass the raw
 // `items` through, and normalizeTopic is what maps the server's own field names

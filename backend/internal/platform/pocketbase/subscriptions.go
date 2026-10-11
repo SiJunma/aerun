@@ -166,7 +166,15 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 		return forbiddenError("authentication is required to view subscriptions")
 	}
 
-	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), forum.DefaultPageLimit), forum.DefaultPageLimit)
+	// Page size defaults to the SAME "topics per page" setting the category and
+	// feed lists use, so /subscriptions paginates at the same density as every
+	// other topic list. This is the page SIZE, never a cap on how many
+	// subscriptions are reachable: the pager still spans the full `total` below
+	// (every subscription the member holds), so nothing is cut off — the setting
+	// only decides how many share a page. A caller-supplied `limit` still wins;
+	// ClampLimit only guards the MaxPageLimit ceiling.
+	settings := loadForumSettings(e.App)
+	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.TopicsPerPage), settings.TopicsPerPage)
 	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
 	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
 

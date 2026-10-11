@@ -13,7 +13,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 
 const SubscriptionsPage = () => {
   const { t, lang } = useI18n();
-  const { user, hasPermission, PERMISSIONS, categories } = useAuth();
+  const { user, hasPermission, PERMISSIONS, categories, settings } = useAuth();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const [topics, setTopics] = useState([]);
@@ -23,7 +23,13 @@ const SubscriptionsPage = () => {
     setPageTitle(t('nav.subscriptions', 'Подписки'));
   }, [setPageTitle, t, lang]);
 
-  const ITEMS_PER_PAGE = 20;
+  // Page size follows the SAME admin setting ("topics per page") the category
+  // page uses, so a member's subscriptions paginate at the same density as any
+  // topic list. It is NOT a hard cap on how many subscriptions are reachable:
+  // the pager still spans the server's full `total` (every subscription), so no
+  // subscription is ever cut off — the setting only decides how many share a
+  // page. The old hardcoded 20 ignored the setting entirely.
+  const ITEMS_PER_PAGE = settings?.topicsPerPage || 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   // The page the SERVER was asked for, not a slice of everything it returned.
@@ -72,7 +78,7 @@ const SubscriptionsPage = () => {
       });
 
     return () => { isMounted = false; };
-  }, [user?.uid, currentPage]);
+  }, [user?.uid, currentPage, ITEMS_PER_PAGE]);
 
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);

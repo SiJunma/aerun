@@ -112,7 +112,13 @@ export const subscribeToTopic = (topicId, callback) => {
 // arrays empty and the total zero, so the category page rendered as empty and
 // the pager rendered as a single page.
 export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) => {
-  const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&page=${page}&limit=${pageSize}`);
+  // `pinned_first=1` is what makes the server rank pinned topics above the rest
+  // for THIS screen, and it is a deliberate, explicit request. The same endpoint
+  // also backs subscribeToTopics (the index's per-category cards) and the global
+  // feeds, which must stay in pure recency order — so the pin is never inferred
+  // from the category_id alone. Here it IS the category page's topic table, so
+  // the flag belongs. Paging stays offset-based on the server (page + limit).
+  const res = await sendApi(`/api/aerun/topics?category_id=${categoryId}&pinned_first=1&page=${page}&limit=${pageSize}`);
   const items = (res?.items || []).map(normalizeTopic);
   return {
     pinned: items.filter(t => t.is_pinned),
