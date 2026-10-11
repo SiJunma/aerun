@@ -432,4 +432,3 @@ func TestForumIndexCarriesServerUnreadFlag(t *testing.T) {
 		t.Fatalf("after reading the last-post topic, the index must report unread=false, got %v", flag)
 	}
 }
-
