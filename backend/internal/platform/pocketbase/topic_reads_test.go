@@ -342,3 +342,94 @@ func TestMarkTopicReadRequiresAuthentication(t *testing.T) {
 		t.Fatalf("an anonymous mark-all must be refused, got %d", status)
 	}
 }
+
+// TestForumIndexCarriesServerUnreadFlag is the Sprint-4 verification: the main
+// index renders its last-post dot from the SERVER read-state, not from the
+// localStorage read map.
+//
+// Before this the index dot and the navbar badge were fed by two different
+// sources, so "mark all read" could zero the badge while leaving category rows
+// lit — the exact symptom reported (a 0 badge with rows still marked new).
+// listForumIndexHandler now stamps every category row with `unread` from the
+// SAME unreadTopicIDs the badge and the /new-replies feed read, so the three
+// surfaces cannot drift. This asserts that through the real endpoint, for a
+// member AND for a guest, and that reading the topic flips the flag with no
+// reload.
+func TestForumIndexCarriesServerUnreadFlag(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	publicCat := newTestCategory(t, app, "open", []string{auth.CategoryInheritMarker})
+
+	registered := time.Now().Add(-time.Hour)
+	stampRegistration(t, app, fixPlayerID, registered)
+	topic := seedTopicIn(t, app, "unread", publicCat.Id, fixRootID, registered.Add(time.Minute))
+
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// unreadFlag reads the forum index and returns the per-category `unread`
+	// pointer for the seeded category, or nil when the key was absent (the guest
+	// case). A pointer, not a bool, so "no server opinion" and "server says
+	// false" stay distinguishable — the whole reason the flag is omitted rather
+	// than sent as false for a guest.
+	unreadFlag := func(token string) *bool {
+		t.Helper()
+		var (
+			status int
+			body   []byte
+		)
+		if token == "" {
+			status, body = getAerun(t, ts.URL+"/api/aerun/forum-index")
+		} else {
+			status, body = getAerunAuthed(t, ts.URL+"/api/aerun/forum-index", token)
+		}
+		if status != http.StatusOK {
+			t.Fatalf("forum-index must answer 200, got %d: %s", status, body)
+		}
+		var payload struct {
+			Items []struct {
+				ID              string `json:"id"`
+				LastPostTopicID string `json:"last_post_topic_id"`
+				Unread          *bool  `json:"unread"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("forum-index payload is not JSON: %s", body)
+		}
+		for _, item := range payload.Items {
+			if item.ID == publicCat.Id {
+				if item.LastPostTopicID != topic.Id {
+					t.Fatalf("forum-index last_post_topic_id = %q, want %q — the row must name the topic it summarises", item.LastPostTopicID, topic.Id)
+				}
+				return item.Unread
+			}
+		}
+		t.Fatalf("seeded category %s missing from forum-index: %s", publicCat.Id, body)
+		return nil
+	}
+
+	// A guest index carries no opinion: `unread` is absent, not false.
+	if flag := unreadFlag(""); flag != nil {
+		t.Fatalf("a guest index must omit unread, got %v", *flag)
+	}
+
+	// The member sees the topic as unread — the SAME predicate the badge reads.
+	if flag := unreadFlag(tokens["player"]); flag == nil || !*flag {
+		t.Fatalf("a member with an unread last-post topic must see unread=true on the index")
+	}
+
+	// Reading the last-post topic through the real endpoint must flip the index
+	// flag off with no reload: this is the half of "mark all read" that used to
+	// leave the row lit because the index read localStorage, which read-all
+	// never touched for that topic.
+	status, body := postAerun(t, ts.URL+"/api/aerun/topics/"+topic.Id+"/read", `{}`, tokens["player"])
+	if status != http.StatusOK {
+		t.Fatalf("marking the topic read must succeed, got %d: %s", status, body)
+	}
+	if flag := unreadFlag(tokens["player"]); flag == nil || *flag {
+		t.Fatalf("after reading the last-post topic, the index must report unread=false, got %v", flag)
+	}
+}
+
