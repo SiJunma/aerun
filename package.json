@@ -19,6 +19,8 @@
     "deploy:vps:health": "python deploy.py health",
     "deploy:vps:restart": "python deploy.py restart",
     "deploy:vps:db": "python deploy.py db",
+    "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1",
+    "dev:backend:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1 -StopOnly",
     "lint:js": "eslint .",
     "test:first-post-guard": "node scripts/check-first-post-guard.mjs",
     "test:topic-delete-cleanup": "node scripts/check-topic-delete-cleanup.mjs",

@@ -1,36 +1,60 @@
-# Deploy (VPS, PocketBase branch)
+# Команды: что запустить и когда
 
-One script, no agents: `python deploy.py <command>` from the repo root.
-Full help: `python deploy.py --help`, `python deploy.py db --help`.
+Всё запускается из корня проекта (`forum-Aerun`). Без агентов, без магии.
 
-| Command | What it does |
+## Локальная разработка (твой компьютер)
+
+| Хочу... | Команда |
 |---|---|
-| `deploy [--yes]` | Everything: git pull → build front+back → upload → unpack → restart → verify |
-| `deploy --only frontend [--yes]` | Only the SPA (no service restart) |
-| `deploy --only backend [--yes]` | Only the Go binary (with restart) |
-| `deploy --skip-build` | Reuse `.deploy/` artifacts, skip npm/go builds |
-| `deploy --skip-restart` | Upload + unpack only, leave the running service alone |
-| `frontend` | Build + upload + unpack the SPA, then check `https://aerun-world.com/` |
-| `backend` | Cross-compile + upload + swap binary + restart + full verify |
-| `restart` | `systemctl restart aerun.service` + wait for healthy + verify |
-| `sync` | `git fetch/reset` on the VPS clone only, no artifacts |
-| `status` | systemd state + VPS commit + disk use + public health |
-| `health` | VPS loopback + public API + frontend (read-only, safe anytime) |
-| `db backup` | `tar -czf ~/project/pb_data-backup-<stamp>.tgz backend/pb_data` on VPS |
-| `db migrate` | Restart (Go migrations auto-apply on start) + show migration lines |
-| `db restore --file <name.tgz> [--yes]` | Stop service → replace `pb_data` → start → health |
+| Пересобрать бэкенд и перезапустить локальный сервер | `npm run dev:backend` |
+| Остановить локальный сервер | `npm run dev:backend:stop` |
+| Перезапустить без пересборки (поменял только фронт) | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1 -NoBuild` |
+| Запустить фронт для разработки | `npm run dev` |
+| Проверить, жив ли локальный бэкенд | открыть `http://127.0.0.1:8090/api/aerun/health` в браузере |
 
-Notes:
+Локальный сервер: `backend/.local-run/aerun.exe`, логи — `stdout.log` / `stderr.log`
+рядом. Порт `8090` занят? `npm run dev:backend` сам убьёт старый процесс.
 
-- Branch is pinned to `feature/pocketbase-migration` on both sides; `main`
-  (legacy Firebase) is never touched.
-- Requirements: `python + paramiko`, `node/npm`, `go`, SSH key
-  `C:\Users\alina\.ssh\aerun_deploy`.
-- Local build artifacts live in `.deploy/` (gitignored); uploads go to `/tmp`
-  in 256 KiB chunks with resume and sha256 verification (the tunnel truncates
-  big raw files, hence gzip + hash check).
-- Two ELF guards (local + remote) refuse to ship a Windows binary — that was
-  the `203/EXEC` outage.
-- Public HTTPS checks tolerate an expired certificate (verified try first,
-  then `curl -k`): the body proves the deploy, not the cert chain. If you see
-  the `! verified HTTPS failed` line, renew the Caddy cert when convenient.
+## Деплой на VPS (прод, ветка `feature/pocketbase-migration`)
+
+Сначала убедиться, что код запушен: `git push origin feature/pocketbase-migration`.
+Потом одна из команд:
+
+| Хочу... | Команда |
+|---|---|
+| Выкатить всё (фронт + бэкенд) | `python deploy.py deploy --yes` |
+| Выкатить только фронт (без рестарта) | `python deploy.py deploy --only frontend --yes` |
+| Выкатить только бэкенд (с рестартом) | `python deploy.py deploy --only backend --yes` |
+| Залить без пересборки (уже собирал, повторить) | добавить `--skip-build` |
+| Залить, но не рестартить сервис | добавить `--skip-restart` |
+| Просто глянуть, жив ли прод | `python deploy.py health` (безопасно) |
+| Состояние сервиса + какой коммит на VPS | `python deploy.py status` |
+| Перезапустить сервис на VPS | `python deploy.py restart` |
+| Подтянуть git на VPS без заливки | `python deploy.py sync` |
+
+Через npm (то же самое): `npm run deploy:vps -- --yes`,
+`npm run deploy:vps:frontend -- --yes`, `npm run deploy:vps:backend -- --yes`.
+
+Скрипт сам: подтянет код, соберёт фронт (`VITE_POCKETBASE_URL` прод),
+скомпилирует бэкенд под Linux, проверит что это ELF (не Windows),
+зальёт по чанкам с проверкой sha256, распакует, перезапустит
+`aerun.service` и проверит health локально, на VPS и публично.
+
+## База данных на VPS (до релиза)
+
+| Хочу... | Команда |
+|---|---|
+| Сделать бэкап базы | `python deploy.py db backup` |
+| Применить миграции (рестарт, они сами) | `python deploy.py db migrate` |
+| Восстановить базу из бэкапа | `python deploy.py db restore --file ~/project/pb_data-backup-<дата>.tgz` |
+
+`db restore` спросит подтверждение и остановит сервис на время замены.
+
+## Если что-то пошло не так
+
+| Симптом | Что делать |
+|---|---|
+| `deploy.py health` говорит healthy, а сайт не открывается | проверить сертификат: скрипт терпит просроченный серт, а браузер — нет |
+| `203/EXEC` в журнале сервиса | на VPS попал Windows-бинарник — запусти `deploy --only backend` заново, ELF-проверка не пропустит битый файл |
+| Порт `8090` занят локально | `npm run dev:backend:stop`, потом `npm run dev:backend` |
+| Заливка оборвалась на середине | запусти ту же команду ещё раз — чанки докачаются, а не зальются заново |
