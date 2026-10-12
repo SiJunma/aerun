@@ -21,6 +21,7 @@ import DraftsPage from './pages/DraftsPage';
 import MessagesPage from './pages/MessagesPage';
 import { useAuth } from './contexts/AuthProvider';
 import GlobalModals from './components/common/GlobalModals';
+import UnsentReplyNotice from './components/common/UnsentReplyNotice';
 import RealtimeStatusBanner from './components/common/RealtimeStatusBanner';
 
 /**
@@ -107,6 +108,10 @@ const App = () => {
       <ScrollToTop />
       <IdentityRedirect />
       <GlobalModals />
+      {/* The rescue for a reply the forum never sent. Mounted HERE, outside the
+          router, because the case that needs it most is the one where the topic
+          page no longer exists to show it on. */}
+      <UnsentReplyNotice />
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />

@@ -16,10 +16,65 @@ touching anything below.
 **Status: IN PROGRESS. Checkpoint 1 (B1 stats) SHIPPED 2026-10-12 — all five §7 questions resolved 2026-10-11 —
 §7.5 settled as Variant B (two notification resource names). Part 9 (`@All`
 mention tag) added the same day from owner rulings. Step 2 (F3 characters
-sharedPoll) SHIPPED 2026-10-12. The F6/Part 8 banned-member incident is a live
-defect, not a design question.**
+sharedPoll) SHIPPED 2026-10-12. Part 4 (F4 unsent-reply rescue) SHIPPED
+2026-10-12. The F6/Part 8 banned-member incident is a live defect, not a
+design question.**
 
 ## Progress log
+
+### Part 4 — F4 the unsent-reply rescue (SHIPPED 2026-10-12)
+
+The incident: a member writes a reply, presses send, and the server refuses
+(post limit reached, moderator lock) or the topic is deleted underneath them.
+The form died and the text was gone, because it only ever lived in React state
+and in `DRAFT_KEY` — which only *that topic's page* reads back, and a locked
+topic has no composer while a deleted topic has no page.
+
+Client-side only, localStorage only, no server change. Second key
+`aerun_unsent_reply_${topicId}_${uid} → {content, saved_at, reason}`, uid a
+correctness requirement (no pooling of visitors' text on a shared machine).
+
+Decisions taken while building (owner ruling preserved):
+
+- **Three write paths, one gate.** `submitReply`'s catch (the incident itself:
+  404 → `topic_unavailable`, anything else → `topic_closed`); and a postability
+  effect that fires when `is_locked` flips via the stats poll *or* the read
+  turns 404/403 — written from the effect, before React unmounts the composer,
+  because an unmount cleanup is not guaranteed to run and is too late anyway.
+  An empty form writes nothing: a rescue nobody typed reads as a phantom reply.
+- **Dedupe via `rescueWrittenRef`**, latched only on a successful key write and
+  compared per-topic, so the 15s stats poll cannot re-write every tick. The
+  latch is an OBJECT (`{topicId, reason}`), not the reason string: the
+  postability effect reads `.topicId`, and a bare string would leave it
+  undefined so a navigation's old-topic poll could suppress a new rescue.
+  Cleared when the text changes or is emptied.
+- **Cleared in exactly two situations** — successful submit (beside `DRAFT_KEY`)
+  and the modal's delete. **No age-based eviction**, by explicit owner ruling:
+  *«Как только юзер нажмёт "удалить автордафт" — он удалится и из хранилища»*.
+- **Global surface, not a TopicPage button.** `UnsentReplyNotice` mounts in
+  `App.jsx` beside `GlobalModals` — the case that most needs the rescue is the
+  one where the topic page no longer exists to show it on. Cross-tab via the
+  `storage` event, same-tab via a listener bus (`storage` does not fire in the
+  document that wrote).
+- **The modal is a copy, not a form.** `<pre>`, BBCode deliberately not applied
+  — what must reach the clipboard is the SOURCE, exactly as DraftsPage reasons.
+  Delete takes two clicks. Explicitly out of scope: pasting it into another
+  topic's form.
+- **`listUnsentReplies` scans with `key(i)`**, not `Object.keys`: a Storage
+  object exposes entries as indexed properties, so `Object.keys` returns `[]`
+  and the notice would show nothing forever while every single read worked.
+- **Guests are not served** — no uid, and a `guest` bucket would pool every
+  visitor's text on a shared machine. Their text still survives in `DRAFT_KEY`.
+
+Files: `src/api/unsent-replies.js` (store, bus, list, lifecycle),
+`src/components/modals/UnsentReplyModal.jsx` (ForumModal),
+`src/components/common/UnsentReplyNotice.jsx` (global button + auto-open),
+`src/pages/TopicPage.jsx` (three write paths + clear on success),
+`src/App.jsx` (mount), `src/i18n/dictionary.js` (both languages),
+`scripts/check-unsent-reply-rescue.mjs` (13 checks, wired into `npm test`).
+
+Verified: 13/13 gate checks PASS, eslint clean (0 warnings) on all five touched
+frontend files, full `npm test` green.
 
 ### Checkpoint 1 — B1 `GET /topics/{id}/stats` (SHIPPED 2026-10-12)
 

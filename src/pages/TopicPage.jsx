@@ -11,7 +11,14 @@ import {
   deleteDraft, publishDraft,
   locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
-
+import {
+  saveUnsentReply,
+  clearUnsentReply,
+  hasUnsentReply,
+  isTopicUnavailableError,
+  REASON_TOPIC_CLOSED,
+  REASON_TOPIC_UNAVAILABLE
+} from '../api/unsent-replies';
 import { processDiceRolls } from '../utils/dice';
 import { createInFlight, newIdempotencyKey } from '../utils/inflight';
 import { toMillis, unreadFloor } from '../utils/dates';
@@ -120,6 +127,15 @@ const TopicPage = () => {
   const [authorStats, setAuthorStats] = useState({}); // { uid: { post_count: N } }
   const [maskStats, setMaskStats] = useState({}); // { charId: { status_line: '' } }
 
+  // The unsent-reply rescue is written AT MOST ONCE per topic visit, and this
+  // ref is what makes that true. Three independent effects watch the same
+  // topic (the stats poll flipping `is_locked`, the topic read answering
+  // 404, the posts read answering 403) and every one of them can observe the
+  // same single event, because a locked topic also stops delivering posts and a
+  // vanished one makes the stats loop fall back to the topic read. Without the
+  // latch the member gets three identical offers for one lost reply.
+  const rescueWrittenRef = useRef(null);
+
   // Edit state
   const [editingPostId, setEditingPostId] = useState(null);
   const [editContent, setEditContent] = useState('');
@@ -190,6 +206,13 @@ const TopicPage = () => {
 
   const topicRef = useRef(topic);
   topicRef.current = topic;
+
+  // The live text of the reply form, for the one place that cannot subscribe to
+  // `replyContent` itself (the postability effect below). Declared here beside
+  // topicRef because it is read exactly the same way — the value at the moment
+  // an effect fires, not the value the closure was created with.
+  const replyContentRef = useRef('');
+  replyContentRef.current = replyContent;
 
   const postsRef = useRef(posts);
   postsRef.current = posts;
@@ -292,6 +315,14 @@ const TopicPage = () => {
   const readCutoffRef = useRef(null);
 
   const [accessError, setAccessError] = React.useState(null);
+  // The SAME failure as `accessError`, but still an Error.
+  //
+  // `accessError` is flattened to `err.message` because that is what the
+  // access-denied card renders — and flattening is exactly where the HTTP status
+  // is lost. The unsent-reply rescue has to ask "404/403 or just a failed
+  // read?", so it reads the original here rather than guessing from prose.
+  // Kept in a separate state so the rendering contract above stays untouched.
+  const [accessErrRaw, setAccessErrRaw] = React.useState(null);
   const [topicNotFound, setTopicNotFound] = React.useState(false);
   const [postsLoadError, setPostsLoadError] = React.useState(null);
 
@@ -404,8 +435,15 @@ const TopicPage = () => {
       if (errMsg.includes('topic not found') || err?.code === 'not-found') {
         if (isMountedRef.current) setTopicNotFound(true);
       } else if (errMsg.includes('permission') || errMsg.includes('403') || err?.code === 'permission-denied') {
-        if (isMountedRef.current) setAccessError(err.message || 'Access denied');
+        if (isMountedRef.current) {
+          setAccessError(err.message || 'Access denied');
+          setAccessErrRaw(err);
+        }
       } else {
+        // A transport failure is NOT the topic vanishing. The consolidated
+        // rescue effect keys off topicNotFound/accessError and deliberately does
+        // not fire on a transient error — a page that is about to work again
+        // must not earn a permanent notice.
         if (isMountedRef.current) setPostsLoadError(err);
       }
       if (isMountedRef.current) setIsPageLoading(false);
@@ -430,7 +468,12 @@ const TopicPage = () => {
 
     const unsubStats = subscribeToTopicStats(id, (stats, err) => {
       if (err) {
+        // Any error reaches this branch, not just a 404/403: subscribeToTopicStats
+        // (forum.js) has already folded 404/403 into `callback(null, null)`, so
+        // what lands here is a timeout, a 5xx or a contract error. The string is
+        // what the card renders; the object is what the rescue classifies.
         setAccessError(err.message || 'Access denied');
+        setAccessErrRaw(err);
         setIsPageLoading(false);
         return;
       }
@@ -556,7 +599,11 @@ const TopicPage = () => {
       }
     }).catch((err) => {
       if (cancelled) return;
+      // fetchTopic already answers null for a 404/403 (forum.js), so this catch
+      // is a genuine read failure — the raw error is kept only so the rescue's
+      // classification sees the real status rather than a flattened sentence.
       setAccessError(err.message || 'Access denied');
+      setAccessErrRaw(err);
       setIsPageLoading(false);
     });
 
@@ -770,6 +817,16 @@ const TopicPage = () => {
   // Draft Auto-save scoped to user so unsent text does not leak across accounts
   const DRAFT_KEY = `aerun_reply_draft_${id}_${user?.uid || 'guest'}`;
 
+  // Which reason already produced a rescue for the text currently in the form.
+  //
+  // Two triggers can fire for one paragraph — the submit that was refused, and
+  // then the topic closing or vanishing under that same text — and each would
+  // raise its own copy of the modal for identical content. The latch collapses
+  // them: once this attempt was rescued, the postability effect steps aside
+  // until the member changes the text. Cleared on success and on a new keystroke
+  // via the effect that owns DRAFT_KEY below.
+  //
+  // The declaration lives at the top of the component, beside the other latches.
   useEffect(() => {
     // Check scoped draft first, fallback to legacy key if user had unsent text before this fix
     const savedDraft = localStorage.getItem(DRAFT_KEY) || localStorage.getItem(`reply_draft_${id}`);
@@ -781,10 +838,83 @@ const TopicPage = () => {
   useEffect(() => {
     if (replyContent) {
       localStorage.setItem(DRAFT_KEY, replyContent);
+      // The text changed, so whatever was rescued no longer describes it. A new
+      // refusal deserves a fresh rescue — and a topic closing under the NEW text
+      // must be able to raise the modal again.
+      rescueWrittenRef.current = null;
     } else {
       localStorage.removeItem(DRAFT_KEY);
+      // An emptied form has nothing to rescue; clearing the latch here means the
+      // next write is evaluated from scratch rather than suppressed by a refusal
+      // the member already backed out of.
+      rescueWrittenRef.current = null;
     }
   }, [replyContent, DRAFT_KEY]);
+
+  // THE SECOND RESCUE PATH — the form becomes unusable while the text sits in it.
+  //
+  // The submit-catch rescue (below) only fires when the member actually presses
+  // send. But the two events that make the reply unsendable happen to the topic,
+  // not to the form: it locks, or it is deleted/hidden. When that happens the
+  // composer is replaced by the closed-lock card or the not-found card — React
+  // unmounts it — and the in-memory snapshot `savedReplyContent` (which lives in
+  // a closure inside submitReply and never even existed yet, if the member had
+  // not pressed send) dies with it. The DRAFT_KEY autosave survives, but only
+  // THIS topic's page reads it back, and there is no page left to do so.
+  //
+  // So the key is written from the effect, BEFORE the composer disappears, keyed
+  // to the one observable that is true in every closing/vanishing case: the
+  // stats poll reports is_locked, or the read turns 404/403. A still-empty form
+  // is not rescued — there is nothing to save, and a rescue the member never
+  // wrote would read as a phantom reply.
+  //
+  // DEDUPE: reasonUid is committed only when the key write succeeds, and the
+  // topic id is re-checked against `currentTopicIdRef` before every write, so
+  // the stats poll cannot write another member's words into this key after a
+  // navigation (the poll lives on the OLD topic id, the form on the NEW one).
+  useEffect(() => {
+    if (!id || !user?.uid) return;
+    const text = replyContent.trim();
+    if (!text) return;
+
+    // A topic that is neither locked nor missing is still postable: leave it be.
+    if (topic && !topic.is_locked && !topicNotFound && !accessError) return;
+
+    // Only a 404/403 STRANDED the text. `accessError` is set for every failure of
+    // the read, and one of those is a timeout or a 500: the topic is alive, the
+    // request was not. Raising the rescue there would tell the member their reply
+    // is undeliverable because the server blinked, and the modal's wording names
+    // a cause that never happened.
+    //
+    // The classification therefore runs against `accessErrRaw`, the original
+    // Error — never against `accessError`, whose `err.message` no longer carries
+    // the status the predicate exists to read (a string is refused by it on
+    // purpose). `topicNotFound` is separate because it is the OTHER path: the
+    // read helpers fold a 404/403 into a null/flag of their own rather than
+    // throwing, so those never arrive here as an error object at all.
+    const gone = topicNotFound || isTopicUnavailableError(accessErrRaw);
+    if (accessError && !gone) return;
+
+    // Reason is decided from the state that changed, in the same precedence the
+    // page's own cards use: not-found beats access-denied beats a lock.
+    const reason = gone ? REASON_TOPIC_UNAVAILABLE : REASON_TOPIC_CLOSED;
+
+    if (rescueWrittenRef.current?.topicId === id && rescueWrittenRef.current.reason === reason) {
+      // Already rescued this exact event on this exact topic; the stats poll
+      // would otherwise re-write it every 15s until the page is left.
+      return;
+    }
+    const saved = saveUnsentReply({ topicId: id, uid: user.uid, content: replyContent, reason });
+    if (saved) rescueWrittenRef.current = { topicId: id, reason };
+  }, [id, user?.uid, replyContent, topic, topicNotFound, accessError, accessErrRaw]);
+
+  // A rescue is stale once its key is gone (the member deleted it, or a submit
+  // cleared it): forget it so a later rescue on the same topic can re-open.
+  useEffect(() => {
+    if (rescueWrittenRef.current && !hasUnsentReply(rescueWrittenRef.current.topicId, user?.uid)) {
+      rescueWrittenRef.current = null;
+    }
+  });
 
   // authorStats are populated from getSecuredPosts server hydration (author_posts_count, author_reputation)
   // No extra Firestore reads needed per author
@@ -1647,6 +1777,12 @@ const TopicPage = () => {
       try {
         localStorage.removeItem(DRAFT_KEY);
         localStorage.removeItem(`reply_draft_${id}`);
+        // The rescue's other half. A successful send means the text reached the
+        // topic, so there is nothing left to rescue — and leaving the key would
+        // make the global notice offer a copy the member can now just read on
+        // the page. This is one of only two things allowed to clear it.
+        clearUnsentReply(id, user?.uid);
+        rescueWrittenRef.current = null;
       } catch {
         // ignore
       }
@@ -1671,6 +1807,47 @@ const TopicPage = () => {
       }
     } catch (err) {
       console.error('[createPost error]', err);
+
+      // The rescue. DRAFT_KEY below is read back only by THIS topic's page, and
+      // the two ways this request fails are exactly the two cases where that
+      // page is no longer usable: the topic hit its post limit and closed, or a
+      // moderator locked it (the server answers conflict), and the topic was
+      // deleted or hidden underneath the member (the server answers not-found).
+      // In all of them the text in the form is about to become unreachable, so a
+      // second, deliberately persistent key records it and the global notice
+      // (UnsentReplyNotice, mounted in App.jsx) offers it back on any page.
+      //
+      // The gone / not-gone split goes through isTopicUnavailableError rather
+      // than a hand-rolled status check: this catch is the one place the
+      // original Error is already in hand, so the predicate can do the one thing
+      // it exists for. A 403 belongs beside the 404 — the topic is unreachable
+      // for this member either way — and a timeout or a 500 falls through to
+      // CLOSED, so the modal never names a cause that did not happen.
+      //
+      // Written from `savedReplyContent`, not from `replyContent`: the snapshot
+      // is what this attempt actually tried to send, and a later edit between
+      // the throw and the catch must not be what gets rescued.
+      if (user?.uid && savedReplyContent?.trim()) {
+        const gone = isTopicUnavailableError(err);
+        const reason = gone ? REASON_TOPIC_UNAVAILABLE : REASON_TOPIC_CLOSED;
+        saveUnsentReply({
+          topicId: id,
+          uid: user.uid,
+          content: savedReplyContent,
+          reason
+        });
+        // This attempt was rescued, so a topic that later stops being postable
+        // under the SAME text must not raise a second copy of it. Without the
+        // latch the member gets the modal twice for one paragraph.
+        //
+        // The latch is an OBJECT, not the bare reason string: the postability
+        // effect reads `.topicId` to decide whether a rescue belongs to the
+        // topic currently on screen, and after a navigation the poll of the OLD
+        // topic must not be able to suppress a rescue on the new one. A string
+        // would make `.topicId` undefined and every comparison against `id`
+        // fail.
+        rescueWrittenRef.current = { topicId: id, reason };
+      }
 
       // Save unsent text back into localStorage so if user is on another page,
       // it will be restored when they revisit this topic!

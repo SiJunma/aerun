@@ -211,6 +211,23 @@ export const translations = {
       load_error: "Could not load your drafts",
       orphan_badge: "Topic deleted",
     },
+    // The reply the forum never sent. Deliberately NOT `forum.draft_*`: that is
+    // the composer's autosave, and this is the rescue for text whose destination
+    // is gone (src/api/unsent-replies.js explains the split).
+    unsent_reply: {
+      title: "Your reply was not sent",
+      reason_closed: "The topic is closed to new replies, so it could not be sent. Your text is saved below — copy it so you do not lose it.",
+      reason_unavailable: "The topic was deleted or hidden, so your reply cannot be sent there anymore. Your text is saved below — copy it so you do not lose it.",
+      saved_at: "Saved:",
+      copy: "Copy",
+      copied: "Text copied",
+      copy_failed: "Could not copy. Select the text manually.",
+      delete: "Delete this text",
+      delete_confirm: "Delete for good?",
+      delete_warning: "Once deleted, the text cannot be recovered.",
+      notice_one: "You have an unsent reply",
+      notice_many: "You have unsent replies ({n})",
+    },
     profile: {
       info: "Account Info",
       characters: "My Characters",
@@ -1004,6 +1021,23 @@ export const translations = {
       deleted: "Драфт удалён",
       load_error: "Не удалось загрузить драфты",
       orphan_badge: "Тема удалена",
+    },
+    // Ответ, который форум не отправил. Сознательно НЕ `forum.draft_*`: то —
+    // автосохранение композера, а это — спасение текста, чьего адресата больше
+    // нет (почему так — см. src/api/unsent-replies.js).
+    unsent_reply: {
+      title: "Ваш ответ не отправлен",
+      reason_closed: "Тема закрыта для новых ответов, поэтому отправить его не получилось. Текст сохранён ниже — скопируйте его, чтобы не потерять.",
+      reason_unavailable: "Тема была удалена или скрыта, поэтому отправить ответ в неё уже нельзя. Текст сохранён ниже — скопируйте его, чтобы не потерять.",
+      saved_at: "Сохранено:",
+      copy: "Копировать",
+      copied: "Текст скопирован",
+      copy_failed: "Не удалось скопировать. Выделите текст вручную.",
+      delete: "Удалить этот текст",
+      delete_confirm: "Точно удалить?",
+      delete_warning: "После удаления восстановить текст будет нельзя.",
+      notice_one: "У вас есть неотправленный ответ",
+      notice_many: "У вас есть неотправленные ответы ({n})",
     },
     profile: {
       info: "Данные аккаунта",
