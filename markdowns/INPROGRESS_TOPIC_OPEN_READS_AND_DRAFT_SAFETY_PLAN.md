@@ -17,10 +17,54 @@ touching anything below.
 §7.5 settled as Variant B (two notification resource names). Part 9 (`@All`
 mention tag) added the same day from owner rulings. Step 2 (F3 characters
 sharedPoll) SHIPPED 2026-10-12. Part 4 (F4 unsent-reply rescue) SHIPPED
-2026-10-12. The F6/Part 8 banned-member incident is a live defect, not a
-design question.**
+2026-10-12. Part 8 (F6 banned-member contract) SHIPPED 2026-10-12.**
 
 ## Progress log
+
+### Part 8 — F6 the banned-member contract (SHIPPED 2026-10-12)
+
+The incident: `GlobalModals` has always read `sessionStorage['banned_logout']`
+(`GlobalModals.jsx:24-26`) to raise «Доступ заблокирован», but the Firebase-era
+effect that WROTE the flag (commit `e746c09`) was lost in the PocketBase
+migration. Nothing wrote it, so a banned member was evicted silently:
+`ProtectedRoute` shadow-logged them to a guest for routing, every topic read
+answered `404` that read as "content missing", the forum shell came back empty
+after a reload — and the modal never appeared. `LoginPage.jsx:46-48` returned
+`null` waiting for a forced logout that never came. Silent failure by
+`.agent/rules/AGENTS.md` §Zero Silent Failures.
+
+- **C6 — `AuthProvider.jsx`.** The monitoring effect is restored immediately
+  after `logout` (it must be, or `logout` in the deps array is a TDZ error at
+  render time). One branch covers both halves of the owner's ruling because
+  both arrive identically — as a profile whose `status` reads `'banned'`:
+  banned mid-session (the `refreshOwnProfile` snapshot re-reads the row) and
+  banned at sign-in (the OAuth branch loads it right after the credentials
+  resolve). It writes the flag, then `logout(true)` — presence cleanup skipped,
+  because a banned account has already lost every permission and
+  `setRtdbOffline` would only be a permission-denied write on the way out. No
+  re-entrancy latch: `logout` clears the auth store, `pb.authStore.onChange`
+  hands that to `resetAuthState`, and a null user/profile returns before the
+  flag can be written twice.
+- **C7 — `scripts/check-account-status-axis.mjs`.** Extended with the section
+  this incident needs: AuthProvider must write `banned_logout` BEFORE it signs
+  the session out, and no component may read the flag unless that writer
+  exists. Verified by negative test — deleting the writer makes the gate name
+  the orphaned reader (`GlobalModals.jsx`); deleting the eviction makes it
+  report "writes but never signs out". Both directions fire.
+- **Go — `forum_read_contract_regressions_test.go`.** `TestMyVotesAreServable`
+  now pins `403` for a banned caller on `/me/votes`, the same refusal the
+  future `/context` (Part 6c) must mirror. The `404` half — banned topic reads —
+  was already pinned at `topic_stats_test.go:117-128`. `/context` itself does
+  not exist yet, so its `403` pin lands with Part 6, not here.
+
+**Gates:** `check-account-status-axis.mjs` 3/3 ok (plus both negative tests);
+`check-identity-refresh` / `check-drafts-and-settings` /
+`check-forum-read-contract` / `check-last-selected-mask` /
+`check-user-profile-normalization` all ok (every gate that reads AuthProvider);
+`eslint .` clean; `TestMyVotesAreServable` PASS. The full `npm test` chain
+reached `test:shared-poll` (4/4) before the terminal wrapper killed the run —
+an environment artifact, not a failure; the touched files' own gates are green.
+
 
 ### Part 4 — F4 the unsent-reply rescue (SHIPPED 2026-10-12)
 

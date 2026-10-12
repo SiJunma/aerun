@@ -445,6 +445,20 @@ func TestMyVotesAreServable(t *testing.T) {
 	if status != http.StatusUnauthorized {
 		t.Errorf("anonymous my-votes: got %d, want 401", status)
 	}
+
+	// A banned account is refused 403 by requireNotBanned before its votes are
+	// even looked up. Pinned for Part 8: the client learns of the ban from the
+	// identity read and evicts the session globally, so the server must keep
+	// answering with a refusal the client can recognise as a ban. A silent 200
+	// here would let a banned member keep reading their own votes while every
+	// topic read says 404 — and a future /context (Part 6) must mirror this same
+	// 403 rather than serve an empty context.
+	status, payload = doJSON(t, server.URL, http.MethodGet, "/api/aerun/me/votes",
+		tokens["banned"], "", "")
+	if status != http.StatusForbidden {
+		t.Errorf("banned my-votes: got %d, want 403 — the ban must refuse, never answer (%v)",
+			status, payload)
+	}
 }
 
 // TestForumStatsAreCounted is issue #6 for the stats panel. ForumStats.jsx reads

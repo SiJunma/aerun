@@ -17,7 +17,8 @@
 // Both halves are pinned here: no mutation may name a pseudo-role, and no
 // decision about account state may read it off the role.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 const api = readFileSync('src/api/admin.js', 'utf8');
 const page = readFileSync('src/pages/AdminPage.jsx', 'utf8');
@@ -81,6 +82,56 @@ for (const r of roleStateReads) {
   );
 }
 
+// --- 4. The ban must be EXPLAINED, not just enforced ------------------------
+// `GlobalModals` has always read sessionStorage['banned_logout'] to raise the
+// «Доступ заблокирован» modal, but the Firebase-era effect that wrote it
+// (e746c09) was lost in the PocketBase migration — nothing wrote the flag, so a
+// banned member was evicted SILENTLY: shadow-logged to a guest, 404s on every
+// topic read, an empty forum shell, and no modal. A reader with no writer is
+// exactly that silent failure, so both halves are pinned: AuthProvider must
+// write the flag before it signs the session out, and no component may read the
+// flag unless that writer exists.
+const authProvider = readFileSync('src/contexts/AuthProvider.jsx', 'utf8');
+const FLAG = 'banned_logout';
+
+const writeIdx = authProvider.search(new RegExp(`setItem\\(\\s*['"\`]${FLAG}['"\`]`));
+if (writeIdx !== -1) {
+  // The flag must go up BEFORE the eviction. Writing it after logout() still
+  // surfaces the modal on the next mount, but the order is the contract the
+  // legacy effect established, and inverting it is a one-line slip.
+  if (!/logout\(/.test(authProvider.slice(writeIdx, writeIdx + 400))) {
+    failures.push(
+      `src/contexts/AuthProvider.jsx writes ${FLAG} but never signs the session out — ` +
+        'the banned member would keep browsing as a banned account'
+    );
+  }
+}
+
+const flagReaders = [];
+const walkForReaders = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkForReaders(path);
+    } else if (/\.(jsx?|tsx?)$/.test(entry.name)) {
+      if (new RegExp(`getItem\\(\\s*['"\`]${FLAG}['"\`]`).test(readFileSync(path, 'utf8'))) {
+        flagReaders.push(path);
+      }
+    }
+  }
+};
+walkForReaders('src');
+
+if (writeIdx === -1) {
+  failures.push(
+    flagReaders.length > 0
+      ? `${flagReaders.join(', ')} read(s) sessionStorage['${FLAG}'], but nothing writes it — ` +
+          'the ban modal can never appear, so a banned member is evicted silently'
+      : `src/contexts/AuthProvider.jsx never writes sessionStorage['${FLAG}'] — ` +
+          'a banned member must be told why the session ended, not just dropped'
+  );
+}
+
 if (failures.length > 0) {
   console.error('FAIL  account status axis:');
   for (const f of failures) console.error(`      ${f}`);
@@ -89,3 +140,4 @@ if (failures.length > 0) {
 
 console.log('OK  account status axis: no mutation names a pseudo-role as the role');
 console.log('OK  account status axis: ban/pending are read from the status column');
+console.log(`OK  account status axis: '${FLAG}' is written before the session is evicted`);

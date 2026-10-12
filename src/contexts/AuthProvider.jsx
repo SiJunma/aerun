@@ -544,7 +544,55 @@ export const AuthProvider = ({ children }) => {
     return stored;
   }, [user, profile]);
 
-  // updateProfile saves the profile form.
+  // THE BANNED-MEMBER EVICTION, RESTORED — F6.
+  //
+  // This effect existed on Firebase (commit e746c09) and was lost in the
+  // PocketBase migration: nothing wrote `sessionStorage['banned_logout']`, so
+  // `GlobalModals` — which has always READ the flag (GlobalModals.jsx:24-26) —
+  // had nothing to raise. A banned member was evicted SILENTLY: `ProtectedRoute`
+  // shadow-logged them to a guest for routing, every topic read answered 404
+  // that read as "content missing", the forum shell came back empty after a
+  // reload — and never once did the «Доступ заблокирован» modal appear. That is
+  // a silent failure by `.agent/rules/AGENTS.md` §Zero Silent Failures.
+  //
+  // ONE BRANCH COVERS BOTH HALVES of the owner's ruling (2026-10-11), because
+  // both arrive here identically — as a profile whose status reads 'banned':
+  //   - banned MID-SESSION: `refreshOwnProfile` above re-reads the row from the
+  //     server (a pb.authStore record is a sign-in snapshot), so the next
+  //     identity read after an admin flips the status lands here;
+  //   - banned AT SIGN-IN: the OAuth branch loads the profile right after the
+  //     credentials resolve, so the member is evicted before the first page
+  //     rather than after the first failed load.
+  // `LoginPage.jsx:46-48` returns null waiting for exactly this — the comment
+  // «AuthProvider will handle the forced logout shortly» describes behaviour
+  // that had never actually been ported.
+  //
+  // NO ENDPOINT IS SPECIAL-CASED, and none may be: the server owes a banned
+  // caller only the refusal (404 on topic reads, 403 on /me/votes — `auth_test.go`
+  // already pins that it strips every permission). The CLIENT owes the member
+  // the explanation, which is why this lives here and not in a route handler.
+  // `ProtectedRoute` keeps its shadow-logout, but it is no longer the only line
+  // of defence.
+  //
+  // The flag is written BEFORE the eviction and is NOT cleared on mount —
+  // `GlobalModals` removes it only on hide, so it survives the redirect and the
+  // page transitions in between until the member acknowledges the modal.
+  //
+  // `logout(true)` skips presence cleanup deliberately: a banned account has
+  // already lost every permission, so setRtdbOffline would be a
+  // permission-denied write whose only output is the error loop e746c09 also
+  // had to dodge.
+  //
+  // No re-entrancy latch on purpose (the legacy effect had none either): logout
+  // clears the auth store, `pb.authStore.onChange` hands that to
+  // `resetAuthState`, and a null user/profile returns above before the flag can
+  // be written twice.
+  useEffect(() => {
+    if (!user || !profile || loading) return;
+    if (profile.status !== 'banned') return;
+    sessionStorage.setItem('banned_logout', 'true');
+    logout(true);
+  }, [user, profile, loading, logout]);
 
   // updateProfile saves the profile form.
   //
