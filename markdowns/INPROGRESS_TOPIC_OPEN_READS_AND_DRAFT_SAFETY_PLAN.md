@@ -15,8 +15,9 @@ touching anything below.
 
 **Status: IN PROGRESS. Checkpoint 1 (B1 stats) SHIPPED 2026-10-12 — all five §7 questions resolved 2026-10-11 —
 §7.5 settled as Variant B (two notification resource names). Part 9 (`@All`
-mention tag) added the same day from owner rulings. The F6/Part 8 banned-member
-incident is a live defect, not a design question.**
+mention tag) added the same day from owner rulings. Step 2 (F3 characters
+sharedPoll) SHIPPED 2026-10-12. The F6/Part 8 banned-member incident is a live
+defect, not a design question.**
 
 ## Progress log
 
@@ -40,10 +41,42 @@ Files: `backend/.../forum_topics.go` (stats handler + canViewTopic in both),
 Verified: `gofmt -l` empty, `go vet` clean, 5/5 stats tests PASS, read-contract
 gate prints `OK topic freshness`, eslint clean.
 
-### Step 2 — F3 `subscribeToCharacters` on sharedPoll (IN PROGRESS)
+### Step 2 — F3 `subscribeToCharacters` on sharedPoll (SHIPPED 2026-10-12)
 
-`src/api/character.js` wrapped in `sharedPoll('characters:${uid}')`, no timer
-(masks change through the session's own editor) + `refreshCharacters(uid)`.
+Row #4 of Part 1: `GET /users/{uid}/characters` was the one topic-open read with
+no shared cache — TopicPage, TopicFormPage and ProfilePage each paid their own
+request for the same member's masks.
+
+- `subscribeToCharacters` wrapped in `sharedPoll('characters:${uid}')`. Keyed by
+  account for the same reason as `notifications:${uid}`: the resource caches the
+  last value, so without the uid a sign-out/sign-in on a shared machine would
+  paint the previous member's masks for one tick.
+- `intervalMs: 0` — no timer. Masks move through the profile editor this session
+  owns, so a poll would re-read what nobody else writes. A mask edited elsewhere
+  re-reads on remount.
+- `refreshCharacters(uid)` added and called from `addCharacter`,
+  `updateCharacter`, `deleteCharacter`, `uploadCharacterAvatar`: the server state
+  already moved, every subscriber still renders the last read value. Best effort,
+  wrapped in try/catch — a missed refresh only delays masks, never fails a write
+  (same contract as `refreshUnreadCounts` in `dms.js`).
+- `uploadCharacterAvatar(charId, file, uid = '')` gained the third parameter.
+  Without it the call sites silently passed `undefined` and the refresh no-oped.
+  `ProfilePage.jsx` now passes the real `uid`.
+
+Also fixed in passing: `scripts/check-last-selected-mask.mjs` matched
+`const updateProfile = async (…` literally, so the gate would break the day
+`updateProfile` is wrapped in `useCallback` in `AuthProvider.jsx` — it now
+accepts both forms.
+
+Files: `src/api/character.js`, `src/pages/ProfilePage.jsx`,
+`scripts/check-last-selected-mask.mjs`.
+
+Verified: `npm test` gates (shared-poll, identity-refresh, mask-avatar-isolation,
+user-profile-normalization, forum-read-contract, last-selected-mask,
+roles-live-update, dm-mutation-state, jsx-comments, endpoints — 0 unmatched
+frontend calls), eslint clean.
+
+Next up: Step 3 (F4) — the unsent-reply safety net.
 
 ---
 

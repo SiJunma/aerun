@@ -1,4 +1,5 @@
 import { sendApi } from './pocketbase';
+import { sharedPoll } from './shared-poll';
 
 // Character (mask) access.
 //
@@ -24,23 +25,63 @@ export const fetchCharacters = async (uid) => {
 };
 
 export const subscribeToCharacters = (uid, callback) => {
-  let isSubscribed = true;
+  if (!uid) {
+    callback([]);
+    return () => {};
+  }
 
-  const load = async () => {
-    try {
-      const chars = await fetchCharacters(uid);
-      if (isSubscribed) callback(chars);
-    } catch (err) {
-      // A 404 here means the owner is pending or banned. That is an expected
-      // answer, not a failure: the profile shows "no characters" rather than an
-      // error banner, which is what the legacy page did too.
-      console.warn('[subscribeToCharacters err]', err);
-      if (isSubscribed) callback([]);
+  // ONE loop per owner (F3): TopicPage, TopicFormPage and ProfilePage all read
+  // this member's masks, and each used to pay a full request. The second
+  // subscriber costs zero requests — it is handed the value the loop holds.
+  //
+  // Keyed by account (same correctness rule as notifications:${uid}): the
+  // resource caches the last value, so without the uid a sign-out/sign-in on
+  // a shared machine would paint the previous member's masks for one tick.
+  //
+  // No realtime hook and no interval: masks change through the profile editor
+  // this session owns (add/update/delete below refresh the resource
+  // directly), so a timer would only re-read what nobody else writes. A
+  // member edited elsewhere re-reads on remount — the cached value is handed
+  // over only within one session's loop.
+  const poll = sharedPoll(`characters:${uid}`, {
+    fetch: () => fetchCharacters(uid),
+    intervalMs: 0,
+    initialValue: [],
+    onError: (err) => console.warn('[subscribeToCharacters err]', err),
+  });
+
+  // A 404 means the owner is pending or banned. That is an expected answer,
+  // not a failure: the profile shows "no characters" rather than an error
+  // banner, which is what the legacy page did too. shared-poll delivers the
+  // error WITH the last good value rather than replacing it, so the mapping
+  // below keeps rendering masks through one slow response.
+  return poll.subscribe((chars, err) => {
+    if (!err) {
+      callback(chars || []);
+    } else if (err?.status === 404 || err?.code === 'not-found') {
+      callback([]);
+    } else {
+      callback(chars || []);
     }
-  };
+  });
+};
 
-  load();
-  return () => { isSubscribed = false; };
+// refreshCharacters re-reads this owner's masks WITHOUT waiting for a
+// remount. Called after the member's own mask writes below: the server state
+// already moved, but every subscriber renders the last read value, so without
+// this the editor shows stale masks until the page is left and reopened.
+export const refreshCharacters = (uid) => {
+  if (!uid) return;
+  try {
+    sharedPoll(`characters:${uid}`, {
+      fetch: () => fetchCharacters(uid),
+      intervalMs: 0,
+      initialValue: [],
+    }).refresh();
+  } catch {
+    // A missed refresh only delays the masks to the next mount — never fail
+    // a mask write for it.
+  }
 };
 
 export const subscribeToCharacter = (uid, charId, callback) => {
@@ -78,6 +119,11 @@ export const addCharacter = async (uid, characterData) => {
     method: 'POST',
     body: toCharacterPayload(characterData)
   });
+  // The server state already moved, but every subscriber renders the last
+  // read value — without this the editor shows stale masks until remount.
+  // Best effort: a missed refresh only delays the masks, never fails the
+  // write (same contract as refreshUnreadCounts in dms.js).
+  refreshCharacters(uid);
   return res?.id;
 };
 
@@ -86,21 +132,26 @@ export const updateCharacter = async (uid, charId, characterData) => {
     method: 'PATCH',
     body: toCharacterPayload(characterData)
   });
+  refreshCharacters(uid);
 };
 
 export const deleteCharacter = async (uid, charId) => {
   await sendApi(`/api/aerun/characters/${charId}`, { method: 'DELETE' });
+  refreshCharacters(uid);
 };
 
 // uploadCharacterAvatar sends the multipart body. sendApi attaches the auth
 // token but skips the JSON content type and the Idempotency-Key for FormData —
 // the upload command is a replace, so a retry converges (ADR-4).
-export const uploadCharacterAvatar = async (charId, file) => {
+export const uploadCharacterAvatar = async (charId, file, uid = '') => {
   const form = new FormData();
   form.append('file', file);
   const res = await sendApi(`/api/aerun/characters/${charId}/avatar`, {
     method: 'PUT',
     body: form
   });
+  // Same staleness as the text writes above: the avatar changed server-side,
+  // every subscriber still renders the old one.
+  refreshCharacters(uid);
   return res?.avatar_url;
 };

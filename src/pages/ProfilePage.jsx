@@ -411,7 +411,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
         setPendingCharAvatar({ blob, filename });
         return URL.createObjectURL(blob);
       }
-      const url = await uploadCharacterAvatar(charId, blob);
+      const url = await uploadCharacterAvatar(charId, blob, uid);
       setPendingCharAvatar(null);
       return url;
     } catch (err) {

@@ -66,7 +66,9 @@ const orderedWrites = [
   },
   {
     label: 'updateProfile',
-    source: provider.match(/const updateProfile = async \(newData, targetUid = null\) => \{[\s\S]*?\n  \};/),
+    source: provider.match(
+      /const updateProfile = (?:useCallback\()?async \(newData, targetUid = null\) => \{[\s\S]*?\n  \}(?:, \[[^\]]*\]\))?;/
+    ),
     patch: "/api/aerun/me/profile"
   }
 ];
