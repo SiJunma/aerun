@@ -811,7 +811,7 @@ console.log('OK  forum read contract: the topic form transmits the mask and the 
 console.log('OK  forum read contract: "override off" is stored as the live inherit marker, not a snapshot');
 // ── The members board must be refreshable ─────────────────────────────────────
 //
-// WHY THIS GATE. The board is polled on purpose (REALTIME_TRANSPORT_DESIGN.md:
+// WHY THIS GATE. The board is polled on purpose (DONE_REALTIME_TRANSPORT_DESIGN.md:
 // a realtime subscription over every account would stream the membership to
 // every visitor), so the page cannot answer "is this list current?" by itself.
 // The member's only options were reloading the tab or navigating away and back —

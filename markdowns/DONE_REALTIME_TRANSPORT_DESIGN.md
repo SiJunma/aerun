@@ -1,12 +1,20 @@
 # Realtime: transport design
 
-Status: **proposal, not implemented.** Written 2026-10-04 as the inventory and
-design that `REALTIME_HYBRID_PLAN.md` asks for in its work item 1. Nothing here
-is built; nothing here changes a rule.
+Status: **☑ DONE — implemented.** Written 2026-10-04 as the inventory and design
+that `DONE_REALTIME_HYBRID_PLAN.md` asks for in its work item 1; shipped
+2026-10-04…05 and verified 2026-10-11 — Go delivery tests, `test:shared-poll`
+and `test:forum-read-contract` are all green. Everything in the rollout below
+was built: migration `1768400000` with the rule below (no other rule changes;
+`lockBrowserRules` intact for REST), `publishSignal` on post create / DM send /
+notification create, the `shared-poll` hook + transport state + hybrid switch +
+banner, delivery tests, notifications first, then DMs. Open items: the last
+rollout step — topic posts on the client — and the post-signal scope, see
+"Who writes a signal" below (the code follows the rollout list: post create
+only, no signal on delete).
 
 ## The finding that reframes the plan
 
-`REALTIME_HYBRID_PLAN.md` rests on one sentence:
+`DONE_REALTIME_HYBRID_PLAN.md` rests on one sentence:
 
 > `RealtimeRule` is a separate field from `ListRule`, and it is currently unset
 > on every collection. Opening it is the prerequisite for everything below.
@@ -205,8 +213,9 @@ which is exactly the trap. Plus:
 
 ## What I want agreed before building
 
-- The plan's `RealtimeRule` premise is wrong and should be corrected in
-  `REALTIME_HYBRID_PLAN.md`. Everything above is built for the engine as it is.
+- The plan's `RealtimeRule` premise is wrong and HAS BEEN corrected (the
+  CORRECTION header at the top of) `DONE_REALTIME_HYBRID_PLAN.md`. Everything
+  above is built for the engine as it is.
 - Signalling carries **no content**; the browser re-reads through `/api/aerun`.
   If anyone prefers true push of row data, that requires opening `ListRule` on
   real collections — I would not recommend it, and I would want that argued
@@ -231,5 +240,6 @@ Two of these are not realtime candidates at all:
 only way to honour it is to not put forum content behind a realtime subscription
 at all.
 
-`REALTIME_HYBRID_PLAN.md` should have its premise corrected before anyone builds
-against it. Everything below is built to work with the engine as it actually is.
+`DONE_REALTIME_HYBRID_PLAN.md` had its premise corrected (CORRECTION header) —
+before anything here was built. Everything below was built to work with the
+engine as it actually is.

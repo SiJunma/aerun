@@ -147,7 +147,7 @@ test('a realtime hook is ACCEPTED, and its events drive the reads', async () => 
   // This test used to assert the opposite — that a hook must THROW — because
   // every collection was locked and a subscription could connect but never
   // deliver. The rules were not opened to fix that (see
-  // markdowns/REALTIME_TRANSPORT_DESIGN.md); the browser now subscribes to a
+  // markdowns/DONE_REALTIME_TRANSPORT_DESIGN.md); the browser now subscribes to a
   // signals table that carries no forum content and re-reads through
   // /api/aerun. So the refusal is gone and this asserts the new contract
   // instead, including the part that matters: an event causes a READ, never a

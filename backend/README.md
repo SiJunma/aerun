@@ -268,28 +268,32 @@ the bundle. That is a vocabulary, not an assignment; what the split protects is
 which account may do what, and it removes the second authority that could disagree
 with the server.
 
-#### Realtime: blocked on rules, not on the client
+#### Realtime: signals transport (DONE)
 
-Every forum collection is locked with `lockBrowserRules` (migrations 1766100000
-and 1766400000): `ListRule` and `ViewRule` are `nil`, which PocketBase answers
-with "superusers only" (`core/record_query.go`: `if accessRule == nil { return
-false }`). A wildcard realtime subscription resolves its rule through that same
-`ListRule`, so a member's `pb.collection('topics').subscribe('*')` completes the
-SSE handshake — the network tab shows `PB_CONNECT` — and the server then never
-delivers an event. `RealtimeRule` is a separate field and is currently unset
-everywhere.
+Realtime is implemented as a hybrid transport: it is primary, polling is the
+permanent fallback. The design and its history are in
+`markdowns/DONE_REALTIME_TRANSPORT_DESIGN.md` (the corrected replacement) and
+`markdowns/DONE_REALTIME_HYBRID_PLAN.md` (the original plan, kept for its
+reasoning).
 
-Realtime is the REASON this stack is Go + PocketBase, so it is coming back as the
-primary transport rather than being written off in favour of intervals. Until a
-scoped `RealtimeRule` exists per collection, `src/api/shared-poll.js` REFUSES a
-realtime hook with a thrown error rather than opening a connection that cannot
-deliver — the failure this guards against is a dead channel that looks configured.
+How it works: PocketBase authorizes realtime through the same ListRule/ViewRule
+as REST, so enabling realtime on forum content would re-open REST reads on it.
+Instead the browser subscribes to `realtime_signals` (migration
+`1768400000`) — a table holding only `{topic, entity_id, audience_id, at}`, no
+forum content — and re-reads through `/api/aerun`, where authorization lives.
+`src/api/shared-poll.js` implements the hybrid contract: connected ⇒ no
+interval; not connected within the 10 s grace window ⇒ polling starts; dropped
+after being healthy ⇒ polling resumes. `RealtimeStatusBanner` surfaces the
+degraded transport per resource. Publishing is `publishSignal` /
+`publishTopicSignal` (post create, DM send, notification create); write
+failures are logged and swallowed, so a missed nudge degrades to one poll
+interval.
 
-The plan, including the authorization decision that has to come first and the
-unsubscribe rules that keep a long session from accumulating SSE connections, is
-in `markdowns/REALTIME_HYBRID_PLAN.md`. Note for tests written against it: assert
-on DELIVERY, not on connection — a connection-only test passes against the dead
-channel that exists today.
+`lockBrowserRules` stays intact for REST — the signal collection's wide
+audience rule is safe only because its rows carry no content.
+
+Note for tests: assert on DELIVERY, not on connection — a connection-only test
+passes against a stream that is open and permanently silent.
 
 ### Reputation, Subscriptions and Audit (Sprint 4)
  

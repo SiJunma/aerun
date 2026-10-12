@@ -358,12 +358,11 @@ export const fetchUserProfile = async (uid) => {
 // A single read of one account, delivered once.
 //
 // THE REALTIME HOOK THAT WAS HERE IS GONE, and it was not a working refresh:
-// `RealtimeRule` is unset on every collection (see REALTIME_HYBRID_PLAN.md and
-// backend/README.md), so `pb.collection('users').subscribe(uid, …)` completed the
-// SSE handshake and then never delivered an event. The two `realtime` entries in
-// a profile page's network log were exactly that: open connections carrying
-// nothing. `shared-poll` refuses such a hook with a thrown error for the same
-// reason, and this one was the exception that escaped it.
+// forum content collections are locked (ListRule nil — see
+// markdowns/DONE_REALTIME_TRANSPORT_DESIGN.md and backend/README.md), so
+// `pb.collection('users').subscribe(uid, …)` completed the SSE handshake and then
+// never delivered an event. The two `realtime` entries in a profile page's
+// network log were exactly that: open connections carrying nothing.
 //
 // It was also a SECOND DOOR onto the payload this change exists to close: an
 // event delivers the whole auth record, so `e.record` would have pushed every
@@ -371,9 +370,9 @@ export const fetchUserProfile = async (uid) => {
 // above was narrowed.
 //
 // Nothing is lost by removing it, because nothing ever arrived: the page has
-// always rendered from this one read. When a scoped `RealtimeRule` exists, this
-// is the place the subscription comes back — carrying the same DTO as the read,
-// never the record.
+// always rendered from this one read. If the profile ever gets a signal-based
+// refresh, this is the place the subscription comes back — carrying the same
+// DTO as the read, never the record.
 export const subscribeToUser = (uid, callback) => {
   if (!uid) {
     callback(null);

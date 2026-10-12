@@ -11,7 +11,7 @@ import (
 
 const (
 	// realtimeSignalsCollection is the nudge queue realtime delivers through. See
-	// migration 1768400000 and markdowns/REALTIME_TRANSPORT_DESIGN.md.
+	// migration 1768400000 and markdowns/DONE_REALTIME_TRANSPORT_DESIGN.md.
 	realtimeSignalsCollection = "realtime_signals"
 
 	// realtimeSignalAudienceAll marks a signal every signed-in member may see.

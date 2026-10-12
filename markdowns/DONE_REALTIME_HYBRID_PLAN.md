@@ -15,11 +15,19 @@
 > content.
 >
 > The replacement design, with the verified inventory, is in
-> **`REALTIME_TRANSPORT_DESIGN.md`**. This document is left unedited below so the
+> **`DONE_REALTIME_TRANSPORT_DESIGN.md`**. This document is left unedited below so the
 > original reasoning — and its error — stays on the record.
 
-Status: **plan only, not started.** Written 2026-10-03 before implementation, so
-the reasoning survives the session.
+Status: **☑ DONE** — implemented 2026-10-04…05, verified 2026-10-11. Written
+2026-10-03 before implementation, so the reasoning survives the session.
+Work items 1–5 were carried out under the corrected design in
+`DONE_REALTIME_TRANSPORT_DESIGN.md`: migration `1768400000` (a signal table that
+holds no content), `publishSignal` on the mutation handlers, Go tests that
+assert delivery rather than connection, `shared-poll`'s hybrid switch with
+transport state, hooks on notifications and DMs first, and
+`RealtimeStatusBanner`. Work item 6 (resource-by-resource rollout) is partial:
+notifications, DMs and unread counts run on signals; the topic page
+(`subscribeToTopic`/`subscribeToPosts`) still polls.
 
 ## Why this document exists
 

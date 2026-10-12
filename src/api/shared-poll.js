@@ -86,7 +86,7 @@ const tabIsHidden = () =>
 // learn why instead of shipping another silent stream.
 //
 // That is no longer true, and the fix was NOT to open the collections. See
-// markdowns/REALTIME_TRANSPORT_DESIGN.md: realtime is authorized by the very
+// markdowns/DONE_REALTIME_TRANSPORT_DESIGN.md: realtime is authorized by the very
 // same ListRule/ViewRule as REST, so streaming forum content would mean
 // re-opening REST reads on it. Instead the browser subscribes to
 // `realtime_signals`, a table that carries only {topic, entity_id,
