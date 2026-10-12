@@ -462,11 +462,58 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	})
 }
 
+// getTopicStatsHandler answers GET /api/aerun/topics/{id}/stats — the topic
+// page's 15-second freshness read ("did this topic change while I was
+// reading it").
+//
+// WHY A SEPARATE ROUTE. The poll compares posts_count, last_post_id and
+// last_post_at against prevTopicStatsRef and calls loadPosts() when one
+// moved — that is its whole job. Answering it with GET /topics/{id} carries
+// ~1.2 KB of author decoration TopicPage never reads (the same class as the
+// row-list-for-a-number defect check-forum-read-contract pins). This route
+// answers only what the loop reads, plus `locked`: the is_locked gate is
+// refreshed by the same poll, and removing the poll without carrying locked
+// leaves readers looking at a live reply form after a moderator closes the
+// topic.
+//
+// NO RequirePermission: a read of a publicly visible topic, same as
+// GET /topics/{id}. Visibility is enforced by canViewTopic — a topic in a
+// category the caller may not see answers 404, byte-identical to a missing
+// topic, so the existence of a hidden thread never leaks. That check was
+// MISSING from getTopicHandler (it answered any topic by id); it is added
+// there in the same change, because a stats route that checks visibility
+// while the full read next to it does not would be the wrong way round.
+//
+// Guest-safe: the four facts are not caller-scoped, so a signed-out visitor
+// gets the same shape.
+//
+// Field contract (pinned by TestTopicStats*): topic_id, posts_count,
+// last_post_id, last_post_at, locked, request_id — and nothing else. Every
+// extra field is F1 happening again.
+func getTopicStatsHandler(e *core.RequestEvent) error {
+	id := e.Request.PathValue("id")
+	acc := AccessFrom(e)
+	allowed, topic, err := canViewTopic(e.App, acc, id)
+	if err != nil || !allowed || topic == nil {
+		return notFoundError("topic not found")
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"topic_id":     topic.Id,
+		"posts_count":  topic.GetInt("posts_count"),
+		"last_post_id": topic.GetString("last_post_id"),
+		"last_post_at": topic.GetDateTime("last_post_created").String(),
+		"locked":       topic.GetBool("locked"),
+		"request_id":   requestIDFrom(e),
+	})
+}
+
 // getTopicHandler returns a single topic by ID.
 func getTopicHandler(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
-	topic, err := e.App.FindRecordById(topicsCollectionName, id)
-	if err != nil || topic == nil {
+	acc := AccessFrom(e)
+	allowed, topic, err := canViewTopic(e.App, acc, id)
+	if err != nil || !allowed || topic == nil {
 		return notFoundError("topic not found")
 	}
 

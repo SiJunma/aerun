@@ -793,11 +793,6 @@ assert.deepEqual(
   'an explicit override must be sent verbatim, de-duplicated'
 );
 
-if (failures.length > 0) {
-  for (const failure of failures) console.error(`FAIL: ${failure}`);
-  process.exit(1);
-}
-
 console.log('OK  forum read contract: every topic/post list is read under `items`');
 console.log('OK  forum read contract: the topic form and reply path navigate with real ids');
 console.log('OK  forum read contract: category paging reads `total`/`per_page`');
@@ -1001,3 +996,65 @@ console.log('OK  forum read contract: the members board refreshes, says so, and 
   );
 }
 console.log('OK  realtime client: signals are nudges, and the fallback is observable');
+// ── The topic page polls stats, not the whole topic (B1) ───────────────────
+// The 15s freshness loop ("did this topic change while I was reading it")
+// used to re-read GET /topics/{id} — ~1.2 KB of author decoration
+// TopicPage never reads — just to compare posts_count, last_post_id and
+// last_post_at. The loop now reads GET /topics/{id}/stats (six fields);
+// the full payload is fetched ONCE per topic open via fetchTopic.
+//
+// These pin that split, because re-adding a full-topic loop "for freshness"
+// looks like a fix in review and silently restores the payload this step
+// exists to shed.
+assert.match(
+  forum,
+  /export const fetchTopicStats = async \(topicId\)/,
+  'fetchTopicStats must exist — it is the topic page freshness read'
+);
+assert.match(
+  forum,
+  /\/api\/aerun\/topics\/\$\{topicId\}\/stats/,
+  'the freshness read must hit /topics/{id}/stats, not the full topic payload'
+);
+assert.match(
+  forum,
+  /export const subscribeToTopicStats = \(topicId, callback\)/,
+  'subscribeToTopicStats must exist — it is the 15s freshness loop over the stats endpoint'
+);
+assert.match(
+  forum,
+  /sharedPoll\(`topic-stats:\$\{topicId\}`/,
+  'the stats loop must be a shared resource keyed by topic, so two readers of one thread cost one loop'
+);
+assert.match(
+  forum,
+  /export const fetchTopic = async \(topicId\)/,
+  'fetchTopic must exist — the full topic payload is a one-shot read per topic open, never a loop'
+);
+assert.match(
+  topicPageCode,
+  /subscribeToTopicStats\(id,/,
+  'TopicPage must drive its freshness loop from subscribeToTopicStats, not from the full topic read'
+);
+assert.match(
+  topicPageCode,
+  /fetchTopic\(id\)\.then/,
+  'TopicPage must load the full topic once via fetchTopic — the stats loop carries no title or decoration'
+);
+forbid(
+  topicPageCode,
+  'TopicPage.jsx freshness loop',
+  /const unsubTopic = subscribeToTopic\(id,/,
+  'the full-topic loop must not live on TopicPage — freshness is subscribeToTopicStats, and a second loop bills ~1.2 KB per tick'
+);
+assert.match(
+  forum,
+  /realtime:\s*canReceiveSignals\(\)/,
+  'the stats loop must ride realtime with polling as the fallback — a healthy member pays no polling, a degraded one is unchanged'
+);
+console.log('OK  topic freshness: the 15s loop reads /stats, the full topic loads once');
+
+if (failures.length > 0) {
+  for (const failure of failures) console.error(`FAIL: ${failure}`);
+  process.exit(1);
+}

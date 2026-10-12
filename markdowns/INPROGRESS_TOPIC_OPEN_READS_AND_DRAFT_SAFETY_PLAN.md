@@ -13,10 +13,37 @@ one page, a new global modal and — since Part 9 — a permission key; nothing 
 it survives an agent change in chat history. Read `.agent/rules/AGENTS.md` before
 touching anything below.
 
-**Status: PLANNED. No code written. All five §7 questions resolved 2026-10-11 —
+**Status: IN PROGRESS. Checkpoint 1 (B1 stats) SHIPPED 2026-10-12 — all five §7 questions resolved 2026-10-11 —
 §7.5 settled as Variant B (two notification resource names). Part 9 (`@All`
 mention tag) added the same day from owner rulings. The F6/Part 8 banned-member
 incident is a live defect, not a design question.**
+
+## Progress log
+
+### Checkpoint 1 — B1 `GET /topics/{id}/stats` (SHIPPED 2026-10-12)
+
+Owner rulings taken during implementation (verified against the code, §B1):
+
+- `getTopicHandler` carries NO visibility check — the plan's "same check as
+  getTopicHandler" describes a check that does not exist. `canViewTopic` added
+  to BOTH handlers in one change; hidden thread answers `404` from both.
+- Full topic loads ONCE per open (`fetchTopic`); `stats` runs sequentially
+  after it as the freshness loop (15s + `topic.post` realtime nudge, polling
+  as fallback).
+
+Files: `backend/.../forum_topics.go` (stats handler + canViewTopic in both),
+`run.go` (route), `topic_stats_test.go` (5 tests), `src/api/forum.js`
+(fetchTopic/fetchTopicStats/subscribeToTopicStats), `src/pages/TopicPage.jsx`
+(one-shot full read + stats-loop merge), `scripts/check-forum-read-contract.mjs`
+(B1 gate), `backend/README.md` (route docs).
+
+Verified: `gofmt -l` empty, `go vet` clean, 5/5 stats tests PASS, read-contract
+gate prints `OK topic freshness`, eslint clean.
+
+### Step 2 — F3 `subscribeToCharacters` on sharedPoll (IN PROGRESS)
+
+`src/api/character.js` wrapped in `sharedPoll('characters:${uid}')`, no timer
+(masks change through the session's own editor) + `refreshCharacters(uid)`.
 
 ---
 
@@ -260,6 +287,26 @@ No `RequirePermission` — it is a read of a publicly visible topic, same as
 `GET /topics/{id}`. Must honour the same category-visibility check
 (`canViewCategory`) that `getTopicHandler` uses, or it becomes a way to read a
 topic the caller may not see.
+
+> **Owner ruling 2026-10-12 (verified against the code, not the plan).**
+> `getTopicHandler` (`forum_topics.go:466`) carries NO visibility check — it
+> answers any topic by id, while `canViewTopic` is used only in
+> `reputation.go`/etc. So the plan's "same check as getTopicHandler" describes
+> a check that does not exist. Resolution: `canViewTopic` is added to BOTH
+> handlers in one change (a stats route that checks visibility while the full
+> read next to it does not would be the wrong way round). A topic in a
+> category the caller may not see answers `404` from both routes —
+> byte-identical to a missing topic. Sequential stats (below) does NOT remove
+> this requirement: the client order is a freshness optimisation, the server
+> check is the security boundary, and a direct `GET /stats` must refuse a
+> hidden thread on its own.
+>
+> **Sequencing (owner ruling 2026-10-12).** The full topic loads ONCE per
+> topic open (`fetchTopic`); `stats` runs sequentially after it as the
+> freshness loop (15s + `topic.post` realtime nudge, polling as fallback).
+> The one-shot `fetchTopicStats` right after the full read seeds
+> `prevTopicStatsRef`, so the first loop tick compares against what the page
+> rendered rather than against nothing.
 
 Fields: `posts_count`, `last_post_id`, `last_post_at`, `locked`, `topic_id`,
 `request_id`. Nothing else — every extra field is §F1 happening again.

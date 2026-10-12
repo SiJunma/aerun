@@ -1,6 +1,7 @@
 ﻿import { sendApi } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
+import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
 
 // normalizeTopic maps a server topic row onto the field names the renderers
 // read. EXPORTED because three different topic lists exist (the category page,
@@ -90,6 +91,102 @@ export const subscribeToTopic = (topicId, callback) => {
   return poll.subscribe((topic, err) => {
     if (!err) {
       callback(topic, null);
+    } else if (err?.status === 404 || err?.status === 403) {
+      callback(null, null);
+    } else {
+      callback(null, err);
+    }
+  });
+};
+
+// fetchTopic is the ONE-SHOT full-topic read: title, decoration, pins —
+// everything the page renders but never re-polls.
+//
+// WHY IT EXISTS. subscribeToTopic above still owns a 15s loop, and TopicPage
+// used to live on it. Freshness now lives on subscribeToTopicStats (six
+// fields), so the full payload must be read ONCE per topic open — not on a
+// timer. Keeping the loop subscribed "just in case" would bill the member
+// for the ~1.2 KB this whole step exists to stop paying for.
+//
+// The (data, err) SHAPE matches subscribeToTopic exactly: null data means
+// "not visible to you" (404/403), a thrown error means a real failure — so
+// the page's access contract does not change with the transport.
+export const fetchTopic = async (topicId) => {
+  if (!topicId) return null;
+  try {
+    return normalizeTopic((await sendApi(`/api/aerun/topics/${topicId}`))?.topic);
+  } catch (err) {
+    if (err?.status === 404 || err?.status === 403) return null;
+    throw err;
+  }
+};
+
+// fetchTopicStats reads GET /api/aerun/topics/{id}/stats — the topic page's
+// freshness read ("did this topic change while I was reading it").
+//
+// WHY IT EXISTS. The 15s poll used to re-read the WHOLE topic (~1.2 KB of
+// author decoration TopicPage never reads) just to compare posts_count,
+// last_post_id and last_post_at. This answers only that, plus `locked`:
+// the is_locked reply gate is refreshed by the same poll, and without the
+// flag a moderator closing the topic leaves readers at a live form.
+//
+// The wire shape is normalised onto the SAME field names the page compares
+// (last_post_created → last_post_at, locked → is_locked), so the consumer at
+// TopicPage.jsx:420-443 keeps comparing what it always compared.
+export const fetchTopicStats = async (topicId) => {
+  if (!topicId) return null;
+  const res = await sendApi(`/api/aerun/topics/${topicId}/stats`);
+  if (!res) return null;
+  const lastPostDate = res.last_post_at || res.last_post_created || null;
+  return {
+    id: res.topic_id || topicId,
+    posts_count: res.posts_count ?? 0,
+    last_post_id: res.last_post_id || null,
+    last_post_at: lastPostDate,
+    last_post_at_ms: lastPostDate ? new Date(lastPostDate).getTime() : 0,
+    is_locked: !!res.locked,
+  };
+};
+
+// subscribeToTopicStats is the 15s freshness LOOP over fetchTopicStats.
+//
+// Realtime-driven with polling as the fallback (owner ruling, F5): the
+// server publishes a `topic.post` signal on every post write
+// (realtime_signals.go publishTopicSignal), shared-poll drops the interval
+// the moment the stream connects, and a member with a healthy stream pays no
+// polling. Restricted categories publish NO signal, so their readers keep
+// the 15s interval — the correct degradation: slower, never wrong.
+//
+// The resource name carries the topic id: two open topics are two loops,
+// and leaving a thread releases its loop when the last subscriber goes.
+export const subscribeToTopicStats = (topicId, callback) => {
+  if (!topicId) {
+    callback(null, null);
+    return () => {};
+  }
+
+  const poll = sharedPoll(`topic-stats:${topicId}`, {
+    fetch: () => fetchTopicStats(topicId),
+    intervalMs: 15000,
+    initialValue: null,
+    onError: (err) => console.warn('[subscribeToTopicStats err]', err),
+    realtime: canReceiveSignals()
+      ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+        // Every signal re-reads the stats; the topic/entity filter reads
+        // tempting but wrong — the payload is a nudge, not a permission, and
+        // the server decides what the member may see on the re-read.
+        () => onDelivered(),
+        () => onDead(),
+        onStateChange,
+      )
+      : null,
+  });
+
+  // Same (data, err) SHAPE as subscribeToTopic: 404/403 means "not visible
+  // to you" (renders the not-found card), anything else is a real error.
+  return poll.subscribe((stats, err) => {
+    if (!err) {
+      callback(stats, null);
     } else if (err?.status === 404 || err?.status === 403) {
       callback(null, null);
     } else {
