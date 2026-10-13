@@ -11,6 +11,7 @@ package pocketbase
 import (
 	"net/http"
 	"testing"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 func TestTopicContextCarriesTheCallerState(t *testing.T) {
