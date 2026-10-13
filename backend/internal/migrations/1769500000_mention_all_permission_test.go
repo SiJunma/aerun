@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"github.com/pocketbase/pocketbase/core"
 	"slices"
 	"testing"
 
@@ -9,6 +10,21 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
+// adminRole returns the roles row whose role_id matches roleID.
+func adminRole(t testing.TB, app *tests.TestApp, roleID string) *core.Record {
+	t.Helper()
+	records, err := app.FindAllRecords("roles")
+	if err != nil {
+		t.Fatalf("read roles: %v", err)
+	}
+	for _, r := range records {
+		if r.GetString("role_id") == roleID {
+			return r
+		}
+	}
+	t.Fatalf("no role row for %q", roleID)
+	return nil
+}
 func TestMentionAllPermissionRepairRestoresTheDictionaryAndSystemRoles(t *testing.T) {
 	app, err := tests.NewTestApp(t.TempDir())
 	if err != nil {
@@ -23,7 +39,7 @@ func TestMentionAllPermissionRepairRestoresTheDictionaryAndSystemRoles(t *testin
 	}
 
 	// Remove mention_all from admin row
-	adminRecord, err := app.FindRecordById("roles", string(auth.RoleAdmin))
+	adminRecord := adminRole(t, app, string(auth.RoleAdmin))
 	if err != nil {
 		t.Fatalf("find admin role: %v", err)
 	}
@@ -50,7 +66,7 @@ func TestMentionAllPermissionRepairRestoresTheDictionaryAndSystemRoles(t *testin
 	}
 
 	// Verify admin role has mention_all
-	reloadedAdmin, err := app.FindRecordById("roles", string(auth.RoleAdmin))
+	reloadedAdmin := adminRole(t, app, string(auth.RoleAdmin))
 	if err != nil {
 		t.Fatalf("reload admin role: %v", err)
 	}
