@@ -417,6 +417,36 @@ export const AuthProvider = ({ children }) => {
         console.warn('[loginWithGoogle] could not apply pending nickname', nickErr);
       }
     }
+    // One-time seed for a brand-new Google account (same contract as the
+    // email path): the OAuth flow has no settings body, so the guest-side
+    // theme/language snapshotted before the redirect are applied here — but
+    // ONLY when the account holds neither key yet. A returning member's
+    // stored choices are never touched.
+    if (isRegistering) {
+      try {
+        await pb.collection('users').authRefresh().catch(() => {});
+        const stored = pb.authStore.record?.settings || {};
+        const seed = {};
+        const pendingTheme = sessionStorage.getItem('pending_theme') || '';
+        const pendingLang = sessionStorage.getItem('pending_language') || '';
+        if (pendingTheme && stored.theme === undefined) seed.theme = pendingTheme;
+        if (pendingLang && stored.language === undefined) seed.language = pendingLang;
+        if (Object.keys(seed).length > 0) {
+          try {
+            await sendApi('/api/aerun/me/settings', {
+              method: 'PUT',
+              body: { ...stored, ...seed }
+            });
+          } catch (seedErr) {
+            console.warn('[loginWithGoogle] could not seed settings', seedErr);
+          }
+          await pb.collection('users').authRefresh().catch(() => {});
+        }
+      } finally {
+        sessionStorage.removeItem('pending_theme');
+        sessionStorage.removeItem('pending_language');
+      }
+    }
     sessionStorage.removeItem('is_registering');
     sessionStorage.removeItem('pending_nickname');
     sessionStorage.removeItem('pending_message');
@@ -429,14 +459,18 @@ export const AuthProvider = ({ children }) => {
     return authData;
   }, [syncUserFromAuthStore]);
 
-  const registerWithEmail = useCallback(async (email, password, nickname = '', adminMessage = '') => {
+  const registerWithEmail = useCallback(async (email, password, nickname = '', adminMessage = '', initialSettings = {}) => {
     const res = await sendApi('/api/aerun/auth/register', {
       method: 'POST',
       body: {
         email,
         password,
         nickname: nickname.trim() || email.split('@')[0],
-        admin_message: adminMessage || ''
+        admin_message: adminMessage || '',
+        // Guest-side seed: what the forum shows right now (theme/language).
+        // Server whitelists both keys; anything else is ignored server-side.
+        theme: initialSettings?.theme || '',
+        language: initialSettings?.language || ''
       }
     });
     const authData = await pb.collection('users').authWithPassword(email, password);

@@ -48,6 +48,34 @@ type registerForm struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Nickname string `json:"nickname"`
+	// Guest-side seeds for the fresh account. Whitelist-only: anything else
+	// the client sends here is ignored, never stored.
+	Theme    string `json:"theme"`
+	Language string `json:"language"`
+}
+
+// seedSettingsFromRegistration builds the fresh account's initial settings
+// from the guest-side values the registration form carries (what the forum
+// shows right now). `language` is validated against the two locales the
+// I18nProvider speaks; `theme` accepts any non-empty id up to 64 chars —
+// it may be a builtin ('dark'/'light'/'neutral') or a custom design id the
+// ThemeProvider renders via data-custom-design. An unknown id is harmless
+// (no design matches, the base theme renders), so the only cap is length.
+// An absent or invalid value simply leaves the key unset, exactly like the
+// old `{}` seed, and the live ThemeProvider/I18nProvider fallbacks keep
+// rendering.
+func seedSettingsFromRegistration(form registerForm) map[string]any {
+	seed := map[string]any{}
+	theme := strings.TrimSpace(form.Theme)
+	if theme != "" && len(theme) <= 64 {
+		seed["theme"] = theme
+	}
+	language := strings.ToLower(strings.TrimSpace(form.Language))
+	switch language {
+	case "en", "ru":
+		seed["language"] = language
+	}
+	return seed
 }
 
 // registerHandler creates a new forum account. Guests only: an
@@ -113,7 +141,7 @@ func registerHandler(e *core.RequestEvent) error {
 	record.Set("role", string(auth.RolePlayer))
 	record.Set("status", string(status))
 	record.Set("avatar_url", "")
-	record.Set("settings", map[string]any{})
+	record.Set("settings", seedSettingsFromRegistration(form))
 	// Registering is real activity, and it is the one moment we know for certain
 	// that the account was here. Seeding last_seen from the server clock makes
 	// the never-empty contract hold from the very first row: without this, an

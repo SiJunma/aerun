@@ -3,6 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
+import { useTheme } from '../contexts/ThemeProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2, Bell, Volume2, Mail } from 'lucide-react';
 import { playNotificationSound } from '../utils/notificationSound';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -30,6 +31,22 @@ import SecurityTab from '../components/profile/SecurityTab';
 
 
 import { usePageTitle } from '../contexts/TitleProvider';
+
+/**
+ * Which account-form key belongs to which tab. The two Save buttons below
+ * send only their own tab's keys (diffed against the last seed), so saving
+ * the profile can never overwrite theme/language and vice versa. A new
+ * field needs exactly one entry here — nothing else changes.
+ *
+ * `signature` is edited on the profile tab but STORED in settings, so it
+ * travels inside a settings-only patch; `avatar_url` is in NEITHER list —
+ * the avatar uploads instantly via PUT /me/avatar (see src/api/avatars.js),
+ * the profile command does not accept the column, and persisting it would
+ * write a resolved URL over the stored file path.
+ */
+const PROFILE_TAB_KEYS = ['nickname', 'status_line', 'bio', 'location', 'birthday', 'occupation', 'interests', 'contacts'];
+const PROFILE_TAB_SETTINGS_KEYS = ['signature'];
+const SETTINGS_TAB_KEYS = ['theme', 'language', 'rep_show_history', 'rep_show_comments', 'notif_topic_reply', 'notif_post_quoted', 'notif_reputation', 'notif_new_registration', 'email_notif_dms', 'email_notif_topic_replies', 'soundEnabled', 'soundVolume'];
 
 /**
  * Mints a throwaway Storage slot for a mask that has not been saved yet.
@@ -62,6 +79,9 @@ const ProfilePage = () => {
   const { profile, hasPermission, PERMISSIONS, settings, updateProfile, recordActivity, categories, scheduleForumStateRefresh } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
+  // Live theme for seeding the form when the account holds no stored theme
+  // (see buildAccountForm): never a hardcoded 'dark'.
+  const { theme: liveTheme } = useTheme() || {};
 
   const [characters, setCharacters] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -90,12 +110,16 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
   const [savingAccount, setSavingAccount] = useState(false);
 
   // Form State for User Account
+  //
+  // `theme`/`language` initial values are the LIVE values (what the forum
+  // shows right now), never hardcoded 'dark'/'en': the seed effect below
+  // re-seeds from buildAccountForm on mount, this only covers first paint.
   const [accountFormData, setAccountFormData] = useState({
     nickname: '',
     status_line: '',
     avatar_url: '',
-    theme: 'dark',
-    language: 'en',
+    theme: liveTheme || 'dark',
+    language: lang || 'en',
     signature: '',
     rep_show_history: true,
     rep_show_comments: true,
@@ -302,12 +326,16 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
   // know whether the server actually said anything new before it overwrites what
   // the reader is typing — and that comparison is only possible if both sides
   // come out of this one function.
+  // Seeding falls back to the LIVE theme/language (what the forum shows right
+  // now), never to hardcoded 'dark'/'en': a fresh account holds no stored
+  // theme/language, and the old `|| 'dark'` wrote 'dark' into the form state,
+  // so the next save on ANY tab persisted a theme the member never chose.
   const buildAccountForm = (source) => ({
     nickname: source.nickname || source.displayName || '',
     status_line: source.status_line || '',
     avatar_url: source.avatar_url || '',
-    theme: source.settings?.theme || 'dark',
-    language: source.settings?.language || 'en',
+    theme: source.settings?.theme || liveTheme || settings?.defaultDesignId || 'dark',
+    language: source.settings?.language || lang || 'en',
     signature: source.settings?.signature || '',
     rep_show_history: source.settings?.rep_show_history !== false,
     rep_show_comments: source.settings?.rep_show_comments !== false,
@@ -328,6 +356,57 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
   });
 
   const seedAccountForm = (source) => setAccountFormData(buildAccountForm(source));
+
+  // Diff of the form against its last seed, restricted to the keys the
+  // calling tab owns. `lastInitRef` already stores the seeded VALUES (key =
+  // JSON of buildAccountForm output), so the diff is structural, not textual:
+  // untouched fields compare equal and are never sent.
+  const seedSnapshotRef = useRef(null);
+  const diffTabFields = (keys) => {
+    const seed = seedSnapshotRef.current || {};
+    const diff = {};
+    for (const key of keys) {
+      if (JSON.stringify(accountFormData[key]) !== JSON.stringify(seed[key])) {
+        diff[key] = accountFormData[key];
+      }
+    }
+    return diff;
+  };
+
+  // Rebuilds the server-side settings patch from the diffed form keys (flat
+  // form → nested settings shape the settings command stores). Only changed
+  // keys are included; untouched groups are absent, never defaulted.
+  const buildSettingsPatch = (diff) => {
+    const patch = {};
+    if (diff.theme !== undefined) patch.theme = diff.theme;
+    if (diff.language !== undefined) patch.language = diff.language;
+    if (diff.signature !== undefined) patch.signature = diff.signature;
+    if (diff.rep_show_history !== undefined) patch.rep_show_history = diff.rep_show_history;
+    if (diff.rep_show_comments !== undefined) patch.rep_show_comments = diff.rep_show_comments;
+    const notifMap = { notif_topic_reply: 'topic_reply', notif_post_quoted: 'post_quoted', notif_reputation: 'reputation_change', notif_new_registration: 'new_registration' };
+    const notifPatch = {};
+    for (const [formKey, serverKey] of Object.entries(notifMap)) {
+      if (diff[formKey] !== undefined) notifPatch[serverKey] = { in_app: diff[formKey] };
+    }
+    if (Object.keys(notifPatch).length > 0) {
+      patch.notifications = { ...(profile?.settings?.notifications || {}), ...notifPatch };
+    }
+    const emailMap = { email_notif_dms: 'dms', email_notif_topic_replies: 'topic_replies' };
+    const emailPatch = {};
+    for (const [formKey, serverKey] of Object.entries(emailMap)) {
+      if (diff[formKey] !== undefined) emailPatch[serverKey] = diff[formKey];
+    }
+    if (Object.keys(emailPatch).length > 0) {
+      patch.email_notifications = { ...(profile?.settings?.email_notifications || {}), ...emailPatch };
+    }
+    if (diff.soundEnabled !== undefined || diff.soundVolume !== undefined) {
+      patch.sound = {
+        enabled: diff.soundEnabled !== undefined ? diff.soundEnabled : accountFormData.soundEnabled,
+        volume: diff.soundVolume !== undefined ? diff.soundVolume : accountFormData.soundVolume
+      };
+    }
+    return patch;
+  };
 
   // Sync form data with profile (own or if admin/mod is editing)
   //
@@ -353,6 +432,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
     if (last && last.uid === source.uid && last.key === key) return;
 
     lastInitRef.current = { uid: source.uid, key };
+    seedSnapshotRef.current = next;
     setAccountFormData(next);
   }, [profile, viewedProfile, uid, canEditAnyAccount]);
 
@@ -450,20 +530,42 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
 
 
 
-  const handleSaveAccount = async () => {
+  // Tab-scoped saves. Each button sends ONLY its own tab's keys, diffed
+  // against the last seed — so saving the profile tab can never persist
+  // theme/language, and saving settings can never rewrite bio/status.
+  // `handleSaveProfileTab` covers the "account" tab; `handleSaveSettingsTab`
+  // the "settings" tab. `handleSaveAccount` stays as the profile-tab entry
+  // point so existing call sites keep working.
+  const finishAccountSave = (savedProfile, nextLang) => {
+    if (savedProfile) {
+      seedAccountForm(savedProfile);
+      seedSnapshotRef.current = buildAccountForm(savedProfile);
+    }
+    scheduleForumStateRefresh();
+    if (uid === profile?.uid && nextLang && nextLang !== lang) {
+      setLang(nextLang);
+    }
+    showToast(lang === 'ru' ? 'Вам удалось обновить профиль' : 'Profile updated successfully!');
+  };
+
+  const handleSaveProfileTab = async () => {
     recordActivity();
     setSavingAccount(true);
 
     try {
-      const trimmedNickname = accountFormData.nickname?.trim();
-      if (!trimmedNickname) {
+      const seed = seedSnapshotRef.current || {};
+      const diff = diffTabFields(PROFILE_TAB_KEYS);
+      const settingsDiff = diffTabFields(PROFILE_TAB_SETTINGS_KEYS);
+      const trimmedNickname = (diff.nickname ?? seed.nickname ?? accountFormData.nickname ?? '').trim?.() ?? diff.nickname ?? accountFormData.nickname;
+
+      if (trimmedNickname !== undefined && !String(trimmedNickname).trim()) {
         setSavingAccount(false);
         return;
       }
 
-      // Check for uniqueness if the nickname has actually changed
-      if (trimmedNickname !== viewedProfile?.nickname) {
-        const isTaken = await checkNicknameExists(trimmedNickname, uid);
+      // Nickname uniqueness, only when it actually changed.
+      if (diff.nickname !== undefined && trimmedNickname !== viewedProfile?.nickname) {
+        const isTaken = await checkNicknameExists(String(trimmedNickname).trim(), uid);
         if (isTaken) {
           showToast(t('common.error_nickname_taken') || (lang === 'ru' ? 'Этот никнейм уже занят.' : 'This nickname is already taken.'), 'danger');
           setSavingAccount(false);
@@ -471,58 +573,30 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
         }
       }
 
-      const updates = {
-        nickname: trimmedNickname,
-        status_line: accountFormData.status_line?.trim() || '',
-        avatar_url: accountFormData.avatar_url,
-        bio: accountFormData.bio?.trim() || '',
-        location: accountFormData.location?.trim() || '',
-        birthday: accountFormData.birthday?.trim() || '',
-        occupation: accountFormData.occupation?.trim() || '',
-        interests: accountFormData.interests?.trim() || '',
-        contacts: accountFormData.contacts?.trim() || '',
-        settings: {
-          theme: accountFormData.theme,
-          language: accountFormData.language,
-          signature: accountFormData.signature,
-          rep_show_history: accountFormData.rep_show_history ?? true,
-          rep_show_comments: accountFormData.rep_show_comments ?? true,
-          notifications: {
-            topic_reply:       { in_app: accountFormData.notif_topic_reply },
-            post_quoted:       { in_app: accountFormData.notif_post_quoted },
-            reputation_change: { in_app: accountFormData.notif_reputation },
-            new_registration:  { in_app: accountFormData.notif_new_registration }
-          },
-          email_notifications: {
-            dms: accountFormData.email_notif_dms,
-            topic_replies: accountFormData.email_notif_topic_replies
-          },
-          sound: {
-            enabled: accountFormData.soundEnabled,
-            volume:  accountFormData.soundVolume
-          }
+      const updates = {};
+      for (const key of PROFILE_TAB_KEYS) {
+        if (diff[key] === undefined) continue;
+        if (key === 'nickname') {
+          updates.nickname = String(trimmedNickname).trim();
+          continue;
         }
-      };
+        // avatar_url is NOT a profile column the command accepts (avatar
+        // uploads instantly via PUT /me/avatar); sending it here would write
+        // a resolved URL over the stored file path.
+        if (key === 'avatar_url') continue;
+        updates[key] = typeof diff[key] === 'string' ? diff[key].trim() : diff[key];
+      }
+      const settingsPatch = buildSettingsPatch(settingsDiff);
+      if (Object.keys(settingsPatch).length > 0) updates.settings = settingsPatch;
+
+      if (Object.keys(updates).length === 0) {
+        showToast(lang === 'ru' ? 'Нет изменений для сохранения' : 'Nothing to save');
+        setSavingAccount(false);
+        return;
+      }
+
       const savedProfile = await updateProfile(updates, uid);
-      // Re-seed the form from what the SERVER confirmed, not from what was typed.
-      //
-      // Without this the inputs kept whatever was last typed, and a rejected or
-      // server-normalised value stayed on screen looking saved. More importantly it
-      // is the repair path for the reported "saved, re-opened, fields are old": the
-      // form is a snapshot, and the snapshot has to be refreshed from the profile
-      // the save just updated.
-      //
-      // `lastInitRef` is deliberately NOT cleared here. Clearing it would make the
-      // very next background event (a last_seen write, say) look like a change
-      // and re-seed the form, wiping edits the reader has started since.
-      if (savedProfile) {
-        seedAccountForm(savedProfile);
-      }
-      scheduleForumStateRefresh();
-      if (uid === profile?.uid && accountFormData.language !== lang) {
-        setLang(accountFormData.language);
-      }
-      showToast(lang === 'ru' ? 'Вам удалось обновить профиль' : 'Profile updated successfully!');
+      finishAccountSave(savedProfile, null);
     } catch (err) {
       console.error(err);
       showToast(lang === 'ru' ? 'Не удалось обновить профиль' : 'Failed to update profile', 'danger');
@@ -530,6 +604,30 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
       setSavingAccount(false);
     }
   };
+
+  const handleSaveSettingsTab = async () => {
+    recordActivity();
+    setSavingAccount(true);
+
+    try {
+      const diff = diffTabFields(SETTINGS_TAB_KEYS);
+      const settingsPatch = buildSettingsPatch(diff);
+      if (Object.keys(settingsPatch).length === 0) {
+        showToast(lang === 'ru' ? 'Нет изменений для сохранения' : 'Nothing to save');
+        setSavingAccount(false);
+        return;
+      }
+      const savedProfile = await updateProfile({ settings: settingsPatch }, uid);
+      finishAccountSave(savedProfile, settingsPatch.language);
+    } catch (err) {
+      console.error(err);
+      showToast(lang === 'ru' ? 'Не удалось обновить настройки' : 'Failed to update settings', 'danger');
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  const handleSaveAccount = handleSaveProfileTab;
 
   const handleRepVote = async () => {
     if (!profile || profile.uid === uid || profile.role_id === 'spectator') return;
@@ -1872,7 +1970,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                         <Volume2 size={14} /> {t('profile.sound_test')}
                       </Button>
 
-                      <Button variant="primary" onClick={handleSaveAccount} className="px-4">
+                      <Button variant="primary" onClick={handleSaveSettingsTab} className="px-4">
                         {t('common.save')}
                       </Button>
                     </Form>

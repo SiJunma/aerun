@@ -53,6 +53,20 @@ const RegisterForm = ({ onSuccess }) => {
     }
 
     sessionStorage.setItem('is_registering', 'true');
+    // Snapshot the guest-side theme/language BEFORE the OAuth redirect, so a
+    // brand-new Google account can be seeded once on return (same contract as
+    // the email path above). Only read here — never written back elsewhere.
+    try {
+      const guestTheme = localStorage.getItem('guest_theme') || '';
+      const guestLang = lang || localStorage.getItem('language') || '';
+      if (guestTheme) sessionStorage.setItem('pending_theme', guestTheme);
+      else sessionStorage.removeItem('pending_theme');
+      if (guestLang) sessionStorage.setItem('pending_language', guestLang);
+      else sessionStorage.removeItem('pending_language');
+    } catch {
+      // Storage may be unavailable (private mode) — seeding is best-effort,
+      // the live fallbacks keep rendering either way.
+    }
     if (lang) {
       sessionStorage.setItem('language', lang);
       localStorage.setItem('language', lang);
@@ -107,7 +121,12 @@ const RegisterForm = ({ onSuccess }) => {
         return;
       }
 
-      await registerWithEmail(email.trim(), password, nickname.trim(), adminMessage.trim());
+      await registerWithEmail(email.trim(), password, nickname.trim(), adminMessage.trim(), {
+        // Seed the fresh account with what the forum shows right now, so the
+        // first profile save never rewrites theme/language from a default.
+        theme: localStorage.getItem('guest_theme') || '',
+        language: lang || localStorage.getItem('language') || ''
+      });
       // Reset before closing: if the exit transition is ever interrupted and the
       // modal remounts, it must not reopen with a stuck spinner.
       setLoadingEmail(false);
