@@ -46,7 +46,7 @@ if (-not $NoBuild) {
   }
   Write-Host 'Build OK.'
 } elseif (-not (Test-Path $Exe)) {
-  throw "No $Exe — run without -NoBuild first."
+  throw "No $Exe - run without -NoBuild first."
 }
 
 Write-Host 'Starting aerun.exe (hidden)...'
