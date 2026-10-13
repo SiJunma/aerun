@@ -1201,6 +1201,19 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 }
 
 // clearConversationHandler marks a conversation cleared for the caller.
+//
+// The horizon is the conversation's OWN last-message timestamp, not the
+// wall clock. cleared_at is compared with strict `>` against message
+// `created` and `last_message_at`; stamping "now" breaks that the moment a
+// new message lands inside the same recorded instant — PocketBase DateTime
+// serialises to millisecond text, while an autodate `created` stamp can share
+// it — and the first message after a clear vanishes from both the list and
+// the thread until some later message moves the clock. Anchoring to the last
+// message's own timestamp makes "newer than the clear" true by construction:
+// anything appended afterwards carries a later instant.
+//
+// A conversation with no messages yet clears to "now" — there is nothing to
+// anchor to, and an empty thread has no boundary to defend.
 func clearConversationHandler(e *core.RequestEvent) error {
 	if e.Auth == nil {
 		return forbiddenError("authentication required")
@@ -1217,15 +1230,20 @@ func clearConversationHandler(e *core.RequestEvent) error {
 		return forbiddenError("you are not a participant in this conversation")
 	}
 
-	nowISO := types.NowDateTime().String()
-	member.Set("cleared_at", nowISO)
+	horizon := types.NowDateTime().String()
+	if conv, err := e.App.FindRecordById(dmConversationsCollectionName, convID); err == nil && conv != nil {
+		if lastAt := strings.TrimSpace(conv.GetString("last_message_at")); lastAt != "" {
+			horizon = lastAt
+		}
+	}
+	member.Set("cleared_at", horizon)
 	if err := e.App.Save(member); err != nil {
 		return internalError("failed to clear conversation", err)
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
 		"cleared":    true,
-		"cleared_at": nowISO,
+		"cleared_at": horizon,
 		"request_id": requestIDFrom(e),
 	})
 }

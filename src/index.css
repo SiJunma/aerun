@@ -293,6 +293,64 @@ body:not([data-theme]) .dm-bubble-peer a:hover {
   color: #d97706 !important;
 }
 
+/* DM bubble action buttons (Edit/Delete on own messages).
+ *
+ * They sit INSIDE the bubble, so they must contrast with the bubble — not with
+ * the page. Both buttons used to be `btn btn-link` with `color: inherit`, but
+ * the global `.btn-link { color: var(--link-color) !important }` wins over a
+ * non-important inline `inherit`, painting a dark slate link (#475569) onto the
+ * dark slate own-bubble (#1e293b): dark on dark. The fix is a dedicated class
+ * that keys off the bubble it lives in, with an explicit hover/focus so the
+ * affordance never melts into the background. */
+.dm-bubble-action {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+/* Own bubble is dark in light theme (var(--primary-color) = slate 800). */
+[data-theme='light'] .dm-bubble-me .dm-bubble-action,
+body:not([data-theme]) .dm-bubble-me .dm-bubble-action {
+  color: #7dd3fc !important;
+}
+
+[data-theme='light'] .dm-bubble-me .dm-bubble-action:hover,
+body:not([data-theme]) .dm-bubble-me .dm-bubble-action:hover,
+[data-theme='light'] .dm-bubble-me .dm-bubble-action:focus-visible,
+body:not([data-theme]) .dm-bubble-me .dm-bubble-action:focus-visible {
+  color: #e0f2fe !important;
+  opacity: 1;
+}
+
+/* Own bubble is near-white in dark theme (var(--primary-color) = slate 100). */
+[data-theme='dark'] .dm-bubble-me .dm-bubble-action {
+  color: #0e7490 !important;
+}
+
+[data-theme='dark'] .dm-bubble-me .dm-bubble-action:hover,
+[data-theme='dark'] .dm-bubble-me .dm-bubble-action:focus-visible {
+  color: #164e63 !important;
+  opacity: 1;
+}
+
+/* Own bubble is tan/gold in neutral theme. */
+[data-theme='neutral'] .dm-bubble-me .dm-bubble-action {
+  color: #ffffff !important;
+}
+
+[data-theme='neutral'] .dm-bubble-me .dm-bubble-action:hover,
+[data-theme='neutral'] .dm-bubble-me .dm-bubble-action:focus-visible {
+  color: #fef08a !important;
+  opacity: 1;
+}
+
 .btn-link {
   color: var(--link-color) !important;
   text-decoration: none !important;
@@ -3802,6 +3860,21 @@ a.rep-preview-name:hover {
     max-width: 90% !important;
     padding: 0.45rem 0.75rem !important;
     font-size: 0.95rem !important;
+  }
+
+  /* Inbox rows: the name truncates, the date keeps its width, nothing pushes
+   * the row wider than its container — no horizontal scroll at 360px. */
+  .dm-conversation-info {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+  }
+
+  .dm-conversation-name {
+    min-width: 0 !important;
+  }
+
+  .dm-conversation-date {
+    white-space: nowrap !important;
   }
 
   /* Compact editor strictly pinned to the bottom of the card and screen */

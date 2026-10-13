@@ -328,6 +328,124 @@ func TestFindConversationWithPeerDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+// TestClearedConversationShowsTheNextMessageImmediately pins the D5 fix.
+//
+// Clearing stamped cleared_at with the WALL CLOCK while the visibility filter
+// compares with strict `>` against message `created` / `last_message_at`. A
+// message sent in the same recorded instant as the clear compared EQUAL, not
+// greater — so the first message after a clear vanished from BOTH the inbox
+// list and the thread until some later message moved the clock. The old test
+// even carried `Sleep(10ms) // ensure timestamp > cleared_at` to step around
+// it.
+//
+// The clear now anchors to the conversation's own last-message timestamp, so
+// anything appended afterwards is greater by construction — no sleep, no wait.
+func TestClearedConversationShowsTheNextMessageImmediately(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	player1Token := tokens["player"]
+	player2ID, player2Token := seedSecondPlayer(t, app)
+
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	do := func(method, url, token, body, idemKey string) (int, []byte) {
+		t.Helper()
+		var reader *strings.Reader
+		if body == "" {
+			reader = strings.NewReader("")
+		} else {
+			reader = strings.NewReader(body)
+		}
+		req, _ := http.NewRequest(method, url, reader)
+		req.Header.Set("Authorization", token)
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if idemKey != "" {
+			req.Header.Set("Idempotency-Key", idemKey)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, b
+	}
+
+	// 1. Open the conversation.
+	body := fmt.Sprintf(`{"recipient_ids":["%s"],"text":"first word"}`, player2ID)
+	status, raw := do(http.MethodPost, ts.URL+"/api/aerun/dms", player1Token, body, "dm-clear-anchor-seed")
+	if status != http.StatusOK {
+		t.Fatalf("create dm: expected 200, got %d: %s", status, raw)
+	}
+	var created struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ConversationID == "" {
+		t.Fatal("create dm: empty conversation_id")
+	}
+
+	// 2. Player 2 clears it — deliberately NO sleep before step 3.
+	status, raw = do(http.MethodPost, ts.URL+"/api/aerun/dms/"+created.ConversationID+"/clear", player2Token, "", "dm-clear-anchor-clear")
+	if status != http.StatusOK {
+		t.Fatalf("clear: expected 200, got %d: %s", status, raw)
+	}
+
+	// 3. Player 1 replies immediately, inside the same recorded instant.
+	status, raw = do(http.MethodPost, ts.URL+"/api/aerun/dms/"+created.ConversationID+"/messages", player1Token, `{"text":"are you there?"}`, "dm-clear-anchor-reply")
+	if status != http.StatusOK {
+		t.Fatalf("reply: expected 200, got %d: %s", status, raw)
+	}
+
+	// 4. The thread must carry exactly that reply — not zero rows.
+	status, raw = do(http.MethodGet, ts.URL+"/api/aerun/dms/"+created.ConversationID+"/messages", player2Token, "", "")
+	if status != http.StatusOK {
+		t.Fatalf("list messages: expected 200, got %d: %s", status, raw)
+	}
+	var msgs struct {
+		Items []struct {
+			Sequence int    `json:"sequence"`
+			Text     string `json:"text"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &msgs); err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs.Items) != 1 || msgs.Items[0].Text != "are you there?" {
+		t.Fatalf("thread must show exactly the post-clear reply, got %s", raw)
+	}
+
+	// 5. And the inbox must list the conversation back — no reload, no wait.
+	status, raw = do(http.MethodGet, ts.URL+"/api/aerun/dms", player2Token, "", "")
+	if status != http.StatusOK {
+		t.Fatalf("list dms: expected 200, got %d: %s", status, raw)
+	}
+	var inbox struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &inbox); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, conv := range inbox.Items {
+		if conv.ID == created.ConversationID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("inbox must list the conversation right after the post-clear reply, got %s", raw)
+	}
+}
+
 // TestDMEditAndDeleteSignalTheOtherSide proves the mutation is VISIBLE to the
 // other participant, not merely stored.
 //

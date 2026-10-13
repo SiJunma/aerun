@@ -71,6 +71,13 @@ export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirP
 //
 // Keyed by account: the cached list must never be handed to a different member
 // after a sign-out, and a stale account's loop must not survive the switch.
+const dmListPolls = new Map();
+
+export const refreshDmList = (uid) => {
+  if (!uid) return;
+  dmListPolls.get(uid)?.refresh();
+};
+
 export const subscribeToDmList = (uid, callback, errorCallback) => {
   if (!uid) {
     callback([]);
@@ -100,6 +107,8 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
       )
       : null,
   });
+
+  dmListPolls.set(uid, poll);
 
   // The error travels WITH the last good list rather than replacing it, so a
   // failed refresh leaves the conversation list on screen.
@@ -491,14 +500,13 @@ export const markDmRead = async (conversationId, _uid) => {
 
 /**
  * Deletes / clears the conversation history for current user.
+ *
+ * Throws on failure: the caller decides what the member sees, and a delete
+ * that silently did nothing is how a row survives its own confirmation.
  */
 export const deleteConversation = async (conversationId, _uid) => {
   if (!conversationId) return;
-  try {
-    await sendApi(`/api/aerun/dms/${conversationId}/clear`, {
-      method: 'POST'
-    });
-  } catch (err) {
-    console.warn('[deleteConversation err]', err);
-  }
+  await sendApi(`/api/aerun/dms/${conversationId}/clear`, {
+    method: 'POST'
+  });
 };

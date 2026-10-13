@@ -16,6 +16,7 @@ import {
   sendDmMessage,
   editDmMessage,
   deleteDmMessage,
+  refreshDmList,
   refreshDmMessages,
   markDmRead,
   subscribeToPeerCard,
@@ -85,6 +86,16 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // must stop steering the button.
   const hasPrependedRef = useRef(false);
   const sentByMeRef = useRef(false); // flag to force scroll-to-bottom after sending own message
+  // In-flight get-or-create per peer: chat mode's auto-open effect re-fires
+  // when the peer card arrives (targetProfile flips from null to a card) and
+  // React StrictMode double-invokes effects in dev, so two openChat calls for
+  // the SAME peer can overlap. Both would miss in `known`, both would GET
+  // peer → empty, and both would POST /dms — two identical conversations with
+  // no console error. The guard makes the second caller join the first.
+  const openChatInflightRef = useRef(new Map());
+  // Peers already resolved to a conversation id this mount: a re-fire with the
+  // same targetUid (peer card tick, remount) reuses instead of re-asking.
+  const openChatDoneRef = useRef(new Map());
 
   const getScrollContainer = () => {
     return scrollContainerRef.current;
@@ -414,13 +425,39 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const openChat = async (peerUid, peerInfo) => {
     if (!myUid) return;
     setActivePeer(peerInfo);
-    try {
+    // Already resolved this mount: reuse, do not re-ask the server.
+    const done = openChatDoneRef.current.get(peerUid);
+    if (done) {
+      setActiveChatId(done);
+      return;
+    }
+    // An identical lookup is already running: join it instead of racing it.
+    const inflight = openChatInflightRef.current.get(peerUid);
+    if (inflight) {
+      try {
+        const convId = await inflight;
+        setActiveChatId(convId);
+      } catch (err) {
+        console.error('[openChat]', err);
+        showToast(lang === 'ru' ? 'Ошибка открытия диалога' : 'Failed to open conversation', 'danger');
+      }
+      return;
+    }
+    const pending = (async () => {
       // The inbox list is passed in so an existing thread is REUSED instead of a
       // duplicate being started — see getOrCreateConversation for why the lookup
       // cannot happen in the browser.
       const convId = await getOrCreateConversation(myUid, peerUid, profile, targetProfile || peerInfo, conversations);
+      openChatDoneRef.current.set(peerUid, convId);
+      return convId;
+    })();
+    openChatInflightRef.current.set(peerUid, pending);
+    try {
+      const convId = await pending;
+      openChatInflightRef.current.delete(peerUid);
       setActiveChatId(convId);
     } catch (err) {
+      openChatInflightRef.current.delete(peerUid);
       console.error('[openChat]', err);
       showToast(lang === 'ru' ? 'Ошибка открытия диалога' : 'Failed to open conversation', 'danger');
     }
@@ -575,8 +612,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     const convId = deleteConfirmConvId;
     setDeleteConfirmConvId(null);
 
+    // Optimistic: drop the row NOW so the member sees the delete land, then
+    // converge with the server. Without this the row sat on screen until the
+    // next 10s list tick (or a reload) — the exact shape of "deleted but
+    // still there". On failure the refresh below restores the row.
+    const previous = conversations;
+    setConversations(prev => prev.filter(c => c.id !== convId));
     try {
       await deleteConversation(convId, myUid);
+      refreshDmList(myUid);
       showToast(lang === 'ru' ? 'Диалог удален' : 'Conversation deleted', 'success');
       if (activeChatId === convId) {
         setActiveChatId(null);
@@ -585,6 +629,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
         navigate('/messages');
       }
     } catch (err) {
+      setConversations(previous);
       console.error('[handleDeleteConversation]', err);
       showToast(lang === 'ru' ? 'Ошибка удаления' : 'Delete error', 'danger');
     }
@@ -825,20 +870,18 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                             {isMe && !msg.deleted && editingMsgId !== msg.id && (
                               <div
                                 className="d-flex gap-2 justify-content-end mt-1"
-                                style={{ fontSize: '0.8rem', opacity: 0.75 }}
+                                style={{ fontSize: '0.8rem' }}
                               >
                                 <button
                                   type="button"
-                                  className="btn btn-link p-0"
-                                  style={{ color: 'inherit', fontSize: 'inherit' }}
+                                  className="dm-bubble-action"
                                   onClick={() => handleStartDmEdit(msg)}
                                 >
                                   {lang === 'ru' ? 'Изменить' : 'Edit'}
                                 </button>
                                 <button
                                   type="button"
-                                  className="btn btn-link p-0"
-                                  style={{ color: 'inherit', fontSize: 'inherit' }}
+                                  className="dm-bubble-action"
                                   onClick={() => handleDeleteDm(msg)}
                                 >
                                   {lang === 'ru' ? 'Удалить' : 'Delete'}
@@ -1043,17 +1086,34 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                       </Badge>
                     )}
                   </div>
-                  <div className="flex-grow-1 min-w-0">
-                    <div className="d-flex justify-content-between align-items-center">
-                      <span className={`fw-${unreadCount > 0 ? 'bold' : 'semibold'} text-truncate`} style={{ maxWidth: '180px', fontSize: '1rem' }}>
+                  <div className="flex-grow-1 min-w-0 dm-conversation-info" style={{ minWidth: 0 }}>
+                    <div className="d-flex justify-content-between align-items-baseline gap-2" style={{ minWidth: 0 }}>
+                      <span
+                        className={`fw-${unreadCount > 0 ? 'bold' : 'semibold'} text-truncate dm-conversation-name`}
+                        style={{ flex: '1 1 auto', minWidth: 0, fontSize: '1rem' }}
+                      >
                         {peerName}
                       </span>
-                      <span className="text-muted" style={{ fontSize: '0.875rem', flexShrink: 0 }}>
+                      {/* The date shares the FIRST line with the name and never
+                          overlaps it: the name shrinks (truncate) while the
+                          date keeps its width (flex-shrink 0, nowrap). */}
+                      <span
+                        className="text-muted dm-conversation-date flex-shrink-0"
+                        style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}
+                      >
                         {formatDate(conv.lastTimestamp)}
                       </span>
                     </div>
-                    <p className={`mb-0 text-truncate small ${unreadCount > 0 ? '' : 'text-muted'}`} style={{ maxWidth: '240px', fontSize: '0.875rem' }}>
-                      {conv.lastMessage || '…'}
+                    {/* Second line carries WHEN the last message arrived, not
+                        its words: on narrow screens a preview plus a pinned
+                        date overlapped the name, while a short labelled date
+                        always fits. */}
+                    <p
+                      className={`mb-0 text-truncate small dm-conversation-sub ${unreadCount > 0 ? '' : 'text-muted'}`}
+                      style={{ fontSize: '0.875rem' }}
+                    >
+                      {lang === 'ru' ? 'Последнее: ' : 'Last: '}
+                      {formatDate(conv.lastTimestamp)}
                     </p>
                   </div>
                   <Button
