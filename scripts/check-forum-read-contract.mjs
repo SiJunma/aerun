@@ -291,9 +291,15 @@ for (const [label, src] of [
   ['NotificationsPage.jsx', read('../src/pages/NotificationsPage.jsx')],
   ['TopicPage.jsx', topicPage],
 ]) {
+  // NotificationsPage keeps reading the list client-side (it renders rows);
+  // TopicPage reads topic-scoped notifications through the
+  // server-filtered subscribeToTopicNotifications instead.
+  const expected = label === 'TopicPage.jsx'
+    ? /subscribeToTopicNotifications/
+    : /subscribeToUserNotifications/;
   assert.match(
     stripComments(src),
-    /subscribeToUserNotifications/,
+    expected,
     `${label} renders notification ROWS, so it must keep reading the list — the counts endpoint cannot replace it`
   );
 }
