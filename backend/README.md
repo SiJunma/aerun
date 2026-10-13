@@ -309,6 +309,17 @@ passes against a stream that is open and permanently silent.
 - `POST /api/aerun/topics/:id/unsubscribe` & `DELETE /api/aerun/topics/:id/subscription` — unsubscribe from topic updates. Idempotent no-op if not subscribed.
 - `GET /api/aerun/topics/:id/subscription` — check caller's subscription status for a topic.
 - `GET /api/aerun/me/subscriptions` — list topics the caller is subscribed to with keyset pagination. Each item embeds the subscribed `topic` payload, so the browser renders the page from ONE request instead of one `GET /topics/:id` per subscription. The `topic` key is OMITTED when the topic is deleted or its category is no longer readable by the caller — the subscription row is still the caller's, but there is nothing there to read.
+- `GET /api/aerun/topics/:id/stats` — lightweight freshness read for the topic page's 15 s loop.
+  Returns only `{ topic_id, posts_count, last_post_id, last_post_at, locked, request_id }`.
+  Same `canViewTopic` guard as the full topic read; guest-safe. A member pays ~80 bytes per
+  tick instead of ~1.2 KB — the full topic payload is polled once on open, not on every tick.
+- `GET /api/aerun/topics/:id/context` — ONE caller-scoped read that replaces three separate
+  mount requests (`GET /topics/:id/draft`, `GET /topics/:id/subscription`,
+  `GET /me/votes?topic_id=`). All three are caller-scoped, read once on mount, and keyed by
+  (caller, topic) — the same shape as `/me/unread-counts` which §README justifies as *"one
+  question — all four belong on one endpoint"*. Guest contract: `200` with
+  `{ draft: null, subscribed: false, votes: [] }` — a `403` from a collapsed endpoint would
+  break the entire topic page. Banned caller: `403` before the visibility check.
 - `GET /api/aerun/admin/audit-logs` — keyset-paginated audit trail for administrative actions (`view_audit_log` permission: root/admin). Supports filtering by `action_type` and `performer_id`.
 
 ### Direct Messages, Notifications and Outbox (Sprint 5)
@@ -320,6 +331,11 @@ passes against a stream that is open and permanently silent.
 - `POST /api/aerun/dms/:id/read` — mark conversation as read, advancing member's read sequence to latest message and clearing unread state.
 - `POST /api/aerun/dms/:id/clear` — clear conversation history for caller (`cleared_at`).
 - `GET /api/aerun/me/notifications` — list in-app notifications with keyset pagination and `unread` filter.
+  Optional `type=quote` matches the whole quote/mention family (`post_quoted`, `post_mentioned`,
+  `POST_MENTIONED`, and future `@All` rows). Optional `topic_id=` filters on `payload.topic_id`.
+  The topic page subscribes to a SEPARATE named resource
+  (`notifications:${uid}:topic:${topicId}`) with `?unread=true&type=quote&topic_id=X` so it
+  never contaminates the NotificationsPage's unfiltered `notifications:${uid}` loop.
 - `PATCH /api/aerun/me/notifications/:id/read` — mark single notification as read.
 - `POST /api/aerun/me/notifications/read-all` — mark all caller's notifications as read.
 - `PATCH /api/aerun/me/notifications/:id/archive` — archive notification.

@@ -31,7 +31,7 @@ func TestTopicContextCarriesTheCallerState(t *testing.T) {
 		t.Fatalf("seed draft: got %d (%v)", status, payload)
 	}
 	subscribeToTopicForTest(t, app, topicID, fixPlayerID)
-	seedVote(t, app, fixPlayerID, fixPlayerID, openingPostID, 1)
+	seedTopicVote(t, app, fixPlayerID, fixPlayerID, openingPostID, topicID, 1)
 
 	status, payload := doJSON(t, server.URL, http.MethodGet,
 		"/api/aerun/topics/"+topicID+"/context", tokens["player"], "", "")
@@ -82,6 +82,12 @@ func TestTopicContextCarriesTheCallerState(t *testing.T) {
 	}
 	if value, _ := vote["value"].(float64); value != 1 {
 		t.Errorf("context vote value = %v, want 1", vote["value"])
+	}
+	if comment, _ := vote["comment"].(string); comment != "great post" {
+		t.Errorf("context vote comment = %v, want great post", vote["comment"])
+	}
+	if voterID, _ := vote["voter_id"].(string); voterID != fixPlayerID {
+		t.Errorf("context vote voter_id = %v, want %s", vote["voter_id"], fixPlayerID)
 	}
 }
 
@@ -187,6 +193,24 @@ func TestTopicContextMissingTopicIs404(t *testing.T) {
 		"/api/aerun/topics/nonexistent0001/context", tokens["player"], "", "")
 	if status != http.StatusNotFound {
 		t.Fatalf("context for a missing topic: got %d, want 404", status)
+	}
+}
+
+func seedTopicVote(t testing.TB, app core.App, voter, target, postID, topicID string, value int) {
+	t.Helper()
+	col, err := app.FindCollectionByNameOrId(reputationVotesCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vote := core.NewRecord(col)
+	vote.Set("voter_id", voter)
+	vote.Set("target_id", target)
+	vote.Set("post_id", postID)
+	vote.Set("topic_id", topicID)
+	vote.Set("value", value)
+	vote.Set("comment", "great post")
+	if err := app.Save(vote); err != nil {
+		t.Fatal(err)
 	}
 }
 

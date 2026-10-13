@@ -307,6 +307,20 @@ func listUserNotificationsHandler(e *core.RequestEvent) error {
 		query = query.AndWhere(dbx.HashExp{"archived": false})
 	}
 
+	typeFilter := strings.TrimSpace(e.Request.URL.Query().Get("type"))
+	if typeFilter == "quote" {
+		query = query.AndWhere(dbx.In("type", "post_quoted", "post_mentioned", "POST_MENTIONED"))
+	} else if typeFilter != "" {
+		query = query.AndWhere(dbx.HashExp{"type": typeFilter})
+	}
+
+	if topicID := strings.TrimSpace(e.Request.URL.Query().Get("topic_id")); topicID != "" {
+		query = query.AndWhere(dbx.NewExp(
+			"json_extract(payload, '$.topic_id') = {:topic_id}",
+			dbx.Params{"topic_id": topicID},
+		))
+	}
+
 	// Keyset pagination: created DESC, id DESC
 	if cursor != "" {
 		parts := strings.Split(cursor, "|")

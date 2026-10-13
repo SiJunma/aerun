@@ -233,3 +233,93 @@ func TestMentionResolvesThroughAMaskToItsOwner(t *testing.T) {
 		t.Errorf("the mentioning author received %d notifications, want 0", n)
 	}
 }
+
+func TestMentionAllRegexMatchesStandaloneOnly(t *testing.T) {
+	// Standalone matches
+	for _, text := range []string{"@All", "Привет @All!", "@All всем привет", "строка1\n@All\nстрока2"} {
+		if !mentionAllRegex.MatchString(text) {
+			t.Errorf("mentionAllRegex expected to match %q", text)
+		}
+	}
+
+	// Non-matching glued cases and lowercase
+	for _, text := range []string{"@all", "@Alliance", "mail@All.com", "not@Allhere", "all"} {
+		if mentionAllRegex.MatchString(text) {
+			t.Errorf("mentionAllRegex must not match %q", text)
+		}
+	}
+}
+
+func TestMentionAllDispatchesToAllUsersWhenAuthorPermitted(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	// fixRootID (holding PermMentionAll by default) posts with @All
+	reply, _ := seedNotificationPost(t, app, fixRootID, "Внимание @All общий сбор")
+
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		dispatchPostNotifications(txApp, fixRootID, reply, "Тема")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// All other users receive notification
+	if n := notificationCount(t, app, fixPlayerID); n != 1 {
+		t.Errorf("player received %d notifications for @All, want 1", n)
+	}
+	if n := notificationCount(t, app, fixModeratorID); n != 1 {
+		t.Errorf("moderator received %d notifications for @All, want 1", n)
+	}
+	// Author receives 0
+	if n := notificationCount(t, app, fixRootID); n != 0 {
+		t.Errorf("author received %d notifications about their own post, want 0", n)
+	}
+}
+
+func TestMentionAllDoesNotDispatchWhenAuthorLacksPermission(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	// fixPlayerID does NOT hold PermMentionAll by default
+	reply, _ := seedNotificationPost(t, app, fixPlayerID, "Привет @All я обычный игрок")
+
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		dispatchPostNotifications(txApp, fixPlayerID, reply, "Тема")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// No user should receive notifications for @All
+	if n := notificationCount(t, app, fixRootID); n != 0 {
+		t.Errorf("root received %d notifications from unpermitted @All, want 0", n)
+	}
+	if n := notificationCount(t, app, fixModeratorID); n != 0 {
+		t.Errorf("moderator received %d notifications from unpermitted @All, want 0", n)
+	}
+}
+
+func TestMentionAllDeduplicatesWithNamedMention(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	// fixRootID mentions both @All and [b]Player One[/b] (fixPlayerID)
+	reply, _ := seedNotificationPost(t, app, fixRootID, "@All привет особенно [b]Player One[/b]")
+
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		dispatchPostNotifications(txApp, fixRootID, reply, "Тема")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// fixPlayerID must receive exactly ONE post_mentioned notification, not two
+	if n := notificationCount(t, app, fixPlayerID); n != 1 {
+		t.Errorf("named player received %d notifications, want 1 (deduplicated)", n)
+	}
+}
+

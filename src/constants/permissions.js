@@ -73,7 +73,8 @@ export const PERMISSIONS = {
   USE_DICE: 'use_dice',
   VIEW_MASTER_DICE: 'view_master_dice',
   USE_DIRECT_MESSAGES: 'use_direct_messages',
-  BYPASS_HIDE_TAGS: 'bypass_hide_tags'
+  BYPASS_HIDE_TAGS: 'bypass_hide_tags',
+  MENTION_ALL: 'mention_all'
 };
 
 export const CHIEF_ADMIN_ID = 'root';
@@ -145,6 +146,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.VIEW_MASTER_DICE]: { en: 'View Master Dice', ru: 'Видеть мастерские кубики' },
   [PERMISSIONS.USE_DIRECT_MESSAGES]: { en: 'Use Direct Messages', ru: 'Личные сообщения' },
   [PERMISSIONS.BYPASS_HIDE_TAGS]: { en: 'Bypass [hide] Tags', ru: 'Видеть скрытый контент ([hide])' },
+  [PERMISSIONS.MENTION_ALL]: { en: 'Broadcast @All Mentions', ru: 'Уведомление всех (@All)' },
   
   // Legacy mappings for backward compatibility with Firestore data
   'manage_settings': { en: 'Forum Settings', ru: 'Настройки форума' },
@@ -236,7 +238,10 @@ export const PERMISSION_GROUPS = [
       PERMISSIONS.USE_DICE,
       PERMISSIONS.VIEW_MASTER_DICE,
       PERMISSIONS.USE_DIRECT_MESSAGES,
-      PERMISSIONS.BYPASS_HIDE_TAGS
+      PERMISSIONS.BYPASS_HIDE_TAGS,
+      // Broadcast @All — grantable from player upward; default off for everyone
+      // except admin/root (who hold AllPermissions). See Part 9 of the plan.
+      PERMISSIONS.MENTION_ALL
     ]
   }
 ];
@@ -464,7 +469,10 @@ spectator: [
     PERMISSIONS.EDIT_SELF_AVATAR,
     PERMISSIONS.EDIT_SELF_STATUS,
     PERMISSIONS.EDIT_SELF_PROFILE,
-    PERMISSIONS.EDIT_SELF_SIGNATURE
+    PERMISSIONS.EDIT_SELF_SIGNATURE,
+    // @All broadcast mention — ceiling for player upward (Part 9 owner ruling).
+    // Not in the player's DEFAULT set; must be granted explicitly in the role editor.
+    PERMISSIONS.MENTION_ALL
   ],
   moderator: [
     PERMISSIONS.ADMIN_ACCESS,
@@ -506,7 +514,8 @@ spectator: [
     PERMISSIONS.EDIT_SELF_REPUTATION,
     PERMISSIONS.DELETE_SELF_REPUTATION,
     PERMISSIONS.USE_DIRECT_MESSAGES,
-    PERMISSIONS.BYPASS_HIDE_TAGS
+    PERMISSIONS.BYPASS_HIDE_TAGS,
+    PERMISSIONS.MENTION_ALL
   ],
   admin: Object.values(PERMISSIONS)
 };

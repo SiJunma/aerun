@@ -13,13 +13,74 @@ one page, a new global modal and — since Part 9 — a permission key; nothing 
 it survives an agent change in chat history. Read `.agent/rules/AGENTS.md` before
 touching anything below.
 
-**Status: IN PROGRESS. Checkpoint 1 (B1 stats) SHIPPED 2026-10-12 — all five §7 questions resolved 2026-10-11 —
+**Status: IN PROGRESS → COMPLETE (2026-10-12). All items shipped.**
+Checkpoint 1 (B1 stats) SHIPPED 2026-10-12 — all five §7 questions resolved 2026-10-11 —
 §7.5 settled as Variant B (two notification resource names). Part 9 (`@All`
 mention tag) added the same day from owner rulings. Step 2 (F3 characters
 sharedPoll) SHIPPED 2026-10-12. Part 4 (F4 unsent-reply rescue) SHIPPED
-2026-10-12. Part 8 (F6 banned-member contract) SHIPPED 2026-10-12.**
+2026-10-12. Part 8 (F6 banned-member contract) SHIPPED 2026-10-12.
+B2 (`/context` backend), C1 (`fetchTopicContext` API), C2 (TopicPage collapsed),
+B3 (notification filters), C3 (`subscribeToTopicNotifications`),
+B5 (README §endpoints updated), Part 9 (B6 `PermMentionAll`, B7 migration
+`1769500000`, B8 delivery branch, C8 frontend constants) — all SHIPPED 2026-10-12.
 
 ## Progress log
+
+### Part 9 — B6/B7/B8/C8 `@All` broadcast mention (SHIPPED 2026-10-12)
+
+- **B6 — `PermMentionAll`** added to `backend/internal/auth/permission.go` const block
+  and `allPermissions` registry. Admin/root inherit it via `AllPermissions()`; player,
+  moderator, spectator and guest do not — default-off everywhere else, exactly per the
+  owner ruling (2026-10-11).
+- **B7 — Migration `1769500000_mention_all_permission.go`** in `backend/internal/migrations/`:
+  extends the `roles.permissions` SelectField dictionary and calls
+  `reconcileSystemRolePermissions` — the same two-step recipe as `1769400000`. Idempotent.
+  Covered by `1769500000_mention_all_permission_test.go`.
+- **B8 — Delivery branch** in `post_notifications.go`:
+  - `mentionAllRegex` (`(?:^|[^a-zA-Z0-9_])@All(?:[^a-zA-Z0-9_]|$)`) next to
+    `quoteRegex`/`mentionRegex`.
+  - Section 4 in `dispatchPostNotifications`: checks `mentionAllRegex.MatchString(content)`,
+    loads the author record, calls `accessForUser`, verifies `PermMentionAll`; on success
+    queries ALL users excluding the author and calls `deliver(u.Id, "post_mentioned")`.
+    The `seen` dedup map ensures a post that `@All`s AND names one member gives that member
+    exactly one row.
+  - Tests added: regex standalone-only, permitted dispatch (all users notified), unpermitted
+    no-op, dedup with named mention.
+- **C8 — `src/constants/permissions.js`**:
+  - `PERMISSIONS.MENTION_ALL = 'mention_all'`.
+  - `PERMISSION_LABELS` entry (en: 'Broadcast @All Mentions', ru: 'Уведомление всех (@All)').
+  - Added to `PERMISSION_GROUPS.features`.
+  - `MAX_ROLE_PERMISSIONS.player` and `.moderator` ceilings include `MENTION_ALL`
+    (admin picks it up from `Object.values(PERMISSIONS)` automatically).
+- **Go test** `TestMentionAllPermissionDefaultsAndStatusNarrowing` in `auth_test.go`: pins
+  the matrix — admin/root hold it, player/moderator/spectator/guest do not; pending and
+  banned accounts lose it via `NarrowForStatus`.
+
+### Steps B2/C1/C2/B3/C3/B5 — topic-open 7→4 consolidation (SHIPPED 2026-10-12)
+
+- **B2 — `topic_context.go`**: `getTopicContextHandler` (GET /api/aerun/topics/{id}/context)
+  returns `{ topic_id, draft, subscribed, votes, request_id }`. Votes carry full fields
+  (`id, post_id, topic_id, target_id, voter_id, value, comment, created_at`) so
+  `VoteInfoModal` can view/edit comments without a second request.
+  Banned caller: `403` before visibility check. Guest: `200` with empty shape.
+- **C1 — `src/api/forum.js`**: `fetchTopicContext(topicId)` exported. Normalises `votes`
+  into `{ [post_id]: voteObj }` so `setMyVotes` state setter stays unchanged.
+  Signal filter also fixed: DM signals and `topic.post` signals for OTHER topics no longer
+  trigger stats refresh.
+- **C2 — `src/pages/TopicPage.jsx`**: three separate mount effects (draft, votes,
+  subscription) collapsed into one `fetchTopicContext` call; notifications effect switched
+  from `subscribeToUserNotifications` with client-side filter to `subscribeToTopicNotifications`
+  (server-filtered). `subscribeToCharacters` separated into its own `[user?.uid]`-keyed
+  effect. Removed `getVotesInTopic`, `subscribeToTopicStatus`, `subscribeToUserNotifications`
+  imports and the now-redundant `getTopicDraft`.
+- **B3 — `notifications.go`**: `type=quote` filter expands to
+  `dbx.In("type", "post_quoted", "post_mentioned", "POST_MENTIONED")`. `topic_id=` param
+  filters on `json_extract(payload, '$.topic_id')`. Existing callers unaffected.
+- **C3 — `rtdb-notifications.js`**: `topicNotificationsResource(uid, topicId)` and
+  `subscribeToTopicNotifications(uid, topicId, cb)` exported (Variant B resource name
+  `notifications:${uid}:topic:${topicId}`). Re-exported through `notifications.js`.
+- **B5 — `backend/README.md`**: `/stats`, `/context`, and notification filter params
+  documented under the Sprint 4 route table with the "one question" justification.
 
 ### Part 8 — F6 the banned-member contract (SHIPPED 2026-10-12)
 

@@ -116,9 +116,14 @@ func getTopicContextHandler(e *core.RequestEvent) error {
 	votes := make([]map[string]any, 0, len(voteRows))
 	for _, rec := range voteRows {
 		votes = append(votes, map[string]any{
-			"id":      rec.Id,
-			"post_id": rec.GetString("post_id"),
-			"value":   rec.GetInt("value"),
+			"id":         rec.Id,
+			"post_id":    rec.GetString("post_id"),
+			"topic_id":   rec.GetString("topic_id"),
+			"target_id":  rec.GetString("target_id"),
+			"voter_id":   rec.GetString("voter_id"),
+			"value":      rec.GetInt("value"),
+			"comment":    rec.GetString("comment"),
+			"created_at": rec.GetDateTime("created").String(),
 		})
 	}
 

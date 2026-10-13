@@ -1,4 +1,4 @@
-﻿import { sendApi } from './pocketbase';
+import { sendApi } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
 import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
@@ -172,10 +172,12 @@ export const subscribeToTopicStats = (topicId, callback) => {
     onError: (err) => console.warn('[subscribeToTopicStats err]', err),
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
-        // Every signal re-reads the stats; the topic/entity filter reads
-        // tempting but wrong — the payload is a nudge, not a permission, and
-        // the server decides what the member may see on the re-read.
-        () => onDelivered(),
+        (signalTopic, entityId) => {
+          // Discard DM events or post events specifically targeted at other topics
+          if (signalTopic === 'topic.post' && entityId && entityId !== topicId) return;
+          if (signalTopic === 'dm.post') return;
+          onDelivered();
+        },
         () => onDead(),
         onStateChange,
       )
@@ -193,6 +195,32 @@ export const subscribeToTopicStats = (topicId, callback) => {
       callback(null, err);
     }
   });
+};
+
+// fetchTopicContext reads GET /api/aerun/topics/{id}/context — the topic
+// page's ONE caller-scoped read (draft, subscription, and votes).
+//
+// Replaces three separate mount calls: GET /topics/:id/draft,
+// GET /topics/:id/subscription, and GET /me/votes?topic_id=.
+// Normalises `votes` into a { [post_id]: voteObj } map, matching the
+// getVotesInTopic contract so TopicPage's state setter and renderers stay untouched.
+export const fetchTopicContext = async (topicId) => {
+  if (!topicId) return { draft: null, subscribed: false, votes: {} };
+  const res = await sendApi(`/api/aerun/topics/${topicId}/context`);
+  const votesMap = {};
+  (res?.votes || []).forEach((r) => {
+    if (r.post_id) {
+      votesMap[r.post_id] = {
+        id: r.id,
+        ...r,
+      };
+    }
+  });
+  return {
+    draft: res?.draft || null,
+    subscribed: !!res?.subscribed,
+    votes: votesMap,
+  };
 };
 
 // fetchSecuredTopics reads one page of a category's topics.

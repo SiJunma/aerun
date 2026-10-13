@@ -130,6 +130,7 @@ const (
 	PermViewMasterDice    Permission = "view_master_dice"
 	PermUseDirectMessages Permission = "use_direct_messages"
 	PermBypassHideTags    Permission = "bypass_hide_tags"
+	PermMentionAll        Permission = "mention_all"
 )
 
 // allPermissions is the sorted registry of every known permission key.
@@ -175,6 +176,7 @@ var allPermissions = func() []Permission {
 		PermManageDesigns,
 		PermManageForum,
 		PermManageRoles,
+		PermMentionAll,
 		PermModerateContent,
 		PermMoveTopics,
 		PermPinTopics,

@@ -57,6 +57,9 @@ var quoteRegex = regexp.MustCompile(`\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]
 // `[^[]+` is the legacy's guard: a bold span wrapping markup is not a name.
 var mentionRegex = regexp.MustCompile(`\[b\]([^[]+)\[\/b\]`)
 
+// mentionAllRegex matches standalone @All token (case-sensitive).
+var mentionAllRegex = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_])@All(?:[^a-zA-Z0-9_]|$)`)
+
 // dispatchPostNotifications writes every notification a new post produces.
 //
 // It runs INSIDE the caller's transaction and never returns an error to abort
@@ -115,6 +118,22 @@ func dispatchPostNotifications(txApp core.App, actorID string, post *core.Record
 	// ── 3. Mentions ─────────────────────────────────────────────────────────
 	for _, name := range mentionedNames(content) {
 		deliver(resolveMention(txApp, name), "post_mentioned")
+	}
+
+	// ── 4. Broadcast @All mention (Part 9) ──────────────────────────────────
+	if mentionAllRegex.MatchString(content) && actorID != "" {
+		if actorRecord, err := txApp.FindRecordById(usersCollectionName, actorID); err == nil && actorRecord != nil {
+			if auth.Has(accessForUser(txApp, actorRecord).Permissions, auth.PermMentionAll) {
+				var allUsers []*core.Record
+				if err := txApp.RecordQuery(usersCollectionName).
+					AndWhere(dbx.NewExp("id != {:actor}", dbx.Params{"actor": actorID})).
+					All(&allUsers); err == nil {
+					for _, u := range allUsers {
+						deliver(u.Id, "post_mentioned")
+					}
+				}
+			}
+		}
 	}
 }
 

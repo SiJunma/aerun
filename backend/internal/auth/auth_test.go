@@ -223,3 +223,31 @@ func TestAllStatusValues(t *testing.T) {
 		t.Fatal("unknown statuses must not be valid")
 	}
 }
+
+func TestMentionAllPermissionDefaultsAndStatusNarrowing(t *testing.T) {
+	// Owner ruling (2026-10-11, Part 9):
+	// PermMentionAll ("mention_all") is default ON for admin/root,
+	// default OFF for player, moderator, spectator, guest.
+	for _, role := range []Role{RoleRoot, RoleAdmin} {
+		if !Has(DefaultPermissions(role), PermMentionAll) {
+			t.Fatalf("%s must hold PermMentionAll by default", role)
+		}
+	}
+	for _, role := range []Role{RolePlayer, RoleModerator, RoleSpectator, RoleGuest} {
+		if Has(DefaultPermissions(role), PermMentionAll) {
+			t.Fatalf("%s must not hold PermMentionAll by default", role)
+		}
+	}
+
+	// Narrowing for status: pending strips PermMentionAll; banned strips everything.
+	adminPerms := DefaultPermissions(RoleAdmin)
+	pending := NarrowForStatus(adminPerms, StatusPending)
+	if Has(pending, PermMentionAll) {
+		t.Fatal("pending accounts must lose PermMentionAll")
+	}
+	banned := NarrowForStatus(adminPerms, StatusBanned)
+	if Has(banned, PermMentionAll) {
+		t.Fatal("banned accounts must lose PermMentionAll")
+	}
+}
+

@@ -1,5 +1,6 @@
 import {
   subscribeToUserNotifications,
+  subscribeToTopicNotifications,
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
@@ -8,6 +9,7 @@ import {
 
 export {
   subscribeToUserNotifications,
+  subscribeToTopicNotifications,
   markNotificationRead,
   deleteNotification,
   markAllNotificationsRead,

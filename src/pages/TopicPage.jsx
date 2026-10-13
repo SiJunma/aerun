@@ -7,7 +7,7 @@ import {
   fetchSecuredPosts, createPost, updatePost, deletePost,
   fetchTopic, fetchTopicStats, subscribeToTopicStats,
   updateTopic,
-  deleteTopics, moveTopics, movePosts, getTopicDraft, saveTopicDraft,
+  deleteTopics, moveTopics, movePosts, fetchTopicContext, saveTopicDraft,
   deleteDraft, publishDraft,
   locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
 } from '../api/forum';
@@ -37,10 +37,10 @@ import {
   Search, Filter, ChevronUp, ChevronDown, Heart, Flag, Share2, MoreHorizontal,
   Dices, User, FilePen, MessageSquareOff, Keyboard, Eye
 } from 'lucide-react';
-import { subscribeToUserNotifications, markNotificationRead } from '../api/notifications';
-import { voteOnPost, getVotesInTopic, updateReputationComment } from '../api/reputation';
+import { subscribeToTopicNotifications, markNotificationRead } from '../api/notifications';
+import { voteOnPost, updateReputationComment } from '../api/reputation';
 import PostVotersModal from '../components/common/PostVotersModal';
-import { subscribeToTopicStatus, toggleSubscription } from '../api/subscriptions';
+import { toggleSubscription } from '../api/subscriptions';
 import ForumPagination from '../components/common/ForumPagination';
 import { resolveField } from '../utils/text';
 import ForumAuthorName from '../components/common/ForumAuthorName';
@@ -572,26 +572,6 @@ const TopicPage = () => {
           last_post_at: data.last_post_at,
           last_post_id: data.last_post_id
         };
-        // The full read does not carry the freshest lock state by itself —
-        // refresh it once from the stats endpoint, which is the authority
-        // that closes the "moderator closed the topic" window.
-        fetchTopicStats(id).then((stats) => {
-          if (cancelled || !stats || stats.id !== data.id) return;
-          prevTopicStatsRef.current = {
-            id: stats.id,
-            posts_count: stats.posts_count,
-            last_post_at: stats.last_post_at,
-            last_post_id: stats.last_post_id
-          };
-          setTopic((prev) => {
-            if (!prev || prev.id !== stats.id) return prev;
-            if (prev.is_locked === stats.is_locked) return prev;
-            return { ...prev, is_locked: stats.is_locked };
-          });
-        }).catch(() => {
-          // A failed seed leaves the baseline from the full read — the stats
-          // loop will establish it on its first tick. Never a render error.
-        });
       } else {
         setTopic(null);
         setTopicNotFound(true);
@@ -703,23 +683,25 @@ const TopicPage = () => {
     };
   };
 
-  // Load this topic's draft for the signed-in member.
+  // Load this topic's caller-scoped context (draft, subscription, and votes).
   //
-  // This reads the SERVER, not a browser key. The previous localStorage
-  // subscription fired exactly once on mount and never again, which is why a
-  // freshly saved draft stayed invisible until a manual reload; here every
-  // write goes through saveTopicDraft and the handler updates state itself, so
-  // the load only has to establish the starting point.
+  // Folds three separate mount reads (GET /topics/:id/draft, GET /topics/:id/subscription,
+  // and GET /me/votes?topic_id=) into one GET /api/aerun/topics/{id}/context
+  // (F2 of INPROGRESS_TOPIC_OPEN_READS_AND_DRAFT_SAFETY_PLAN).
   useEffect(() => {
     if (!user?.uid || !id) return;
     let cancelled = false;
     (async () => {
       try {
-        const draft = await getTopicDraft(id);
-        if (!cancelled && isMountedRef.current) setMyDraft(decorateDraft(draft));
+        const ctx = await fetchTopicContext(id);
+        if (!cancelled && isMountedRef.current) {
+          setMyDraft(decorateDraft(ctx.draft));
+          setIsSubscribed(!!ctx.subscribed);
+          setMyVotes(ctx.votes || {});
+        }
       } catch {
-        // A draft read that fails is a missing draft, not a broken page: the
-        // reply box is still usable and saving will recreate the row.
+        // A context read that fails is treated gracefully: default state
+        // remains and the topic page stays usable.
       }
     })();
     return () => { cancelled = true; };
@@ -729,16 +711,13 @@ const TopicPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, id]);
 
-  // Track unread quote and mention notifications and clear them via IntersectionObserver
+  // Track unread quote and mention notifications for THIS topic (Variant B).
+  // Filtered on the server (?unread=true&type=quote&topic_id=id), so the callback
+  // directly yields active quotes without pulling the full 100-record user inbox.
   useEffect(() => {
     if (!user?.uid || !id) return;
-    const unsub = subscribeToUserNotifications(user.uid, (notifs) => {
-      const activeQuotes = notifs.filter(n =>
-        !n.read &&
-        n.payload?.topic_id === id &&
-        (n.type === 'post_quoted' || n.type === 'post_mentioned' || n.type === 'POST_MENTIONED')
-      );
-      setUnreadQuotes(activeQuotes);
+    const unsub = subscribeToTopicNotifications(user.uid, id, (activeQuotes) => {
+      setUnreadQuotes(activeQuotes || []);
     });
     return () => unsub();
   }, [user?.uid, id]);
@@ -780,18 +759,8 @@ const TopicPage = () => {
   useEffect(() => {
     if (!user?.uid) return;
     const unsub = subscribeToCharacters(user.uid, setCharacters);
-
-    // Fetch my votes in this topic
-    getVotesInTopic(user.uid, id).then(setMyVotes).catch(console.error);
-
     return () => unsub();
-  }, [user?.uid, id]);
-
-  useEffect(() => {
-    if (!user?.uid || !id || profile?.role_id === 'pending') return;
-    const unsub = subscribeToTopicStatus(id, user.uid, setIsSubscribed);
-    return () => unsub();
-  }, [user?.uid, id, profile?.role_id]);
+  }, [user?.uid]);
 
   // Set initial selectedCharacterId from profile.
   //
@@ -2224,7 +2193,7 @@ const TopicPage = () => {
 
   // ?draft=1 — what the drafts page's "Edit" links to.
   //
-  // The draft arrives asynchronously (the getTopicDraft effect above), so the
+  // The draft arrives asynchronously (the fetchTopicContext effect above), so the
   // editor is opened when the draft LANDS, not when the page mounts: opening on
   // mount would run against a null draft and never retry, which is the same class
   // of bug as the old localStorage subscription that fired once and never again.

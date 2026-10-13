@@ -82,6 +82,36 @@ export const subscribeToUserNotifications = (uid, callback) => {
   return notificationsResource(uid).subscribe((items) => callback(items));
 };
 
+// TopicPage's filtered notifications loop (Variant B):
+// reads ONLY unread quotes and mentions for THIS topic instead of the caller's
+// entire 100-record inbox. Two resource names ensure this filtered loop
+// never poisons or is poisoned by NotificationsPage's unfiltered loop.
+export const topicNotificationsResource = (uid, topicId) =>
+  sharedPoll(`notifications:${uid}:topic:${topicId}`, {
+    fetch: async () => {
+      const res = await sendApi(`/api/aerun/me/notifications?unread=true&type=quote&topic_id=${encodeURIComponent(topicId)}`);
+      return (res?.items || []).map(toNotification);
+    },
+    intervalMs: 15000,
+    initialValue: [],
+    onError: (err) => console.warn('[subscribeToTopicNotifications error]', err),
+    realtime: canReceiveSignals()
+      ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+        () => onDelivered(),
+        () => onDead(),
+        onStateChange,
+      )
+      : null,
+  });
+
+export const subscribeToTopicNotifications = (uid, topicId, callback) => {
+  if (!uid || !topicId) {
+    callback([]);
+    return () => {};
+  }
+  return topicNotificationsResource(uid, topicId).subscribe((items) => callback(items));
+};
+
 /**
  * Marks a notification as read.
  *
