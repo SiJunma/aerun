@@ -9,9 +9,9 @@ package pocketbase
 // "you simply have no draft".
 
 import (
+	"github.com/pocketbase/pocketbase/core"
 	"net/http"
 	"testing"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 func TestTopicContextCarriesTheCallerState(t *testing.T) {
@@ -91,7 +91,6 @@ func TestTopicContextCarriesTheCallerState(t *testing.T) {
 		t.Errorf("context vote voter_id = %v, want %s", vote["voter_id"], fixPlayerID)
 	}
 }
-
 
 func TestTopicContextIsGuestSafe(t *testing.T) {
 	app := newAerunTestApp(t)
@@ -214,4 +213,3 @@ func seedTopicVote(t testing.TB, app core.App, voter, target, postID, topicID st
 		t.Fatal(err)
 	}
 }
-

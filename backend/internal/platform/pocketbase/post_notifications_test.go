@@ -322,4 +322,3 @@ func TestMentionAllDeduplicatesWithNamedMention(t *testing.T) {
 		t.Errorf("named player received %d notifications, want 1 (deduplicated)", n)
 	}
 }
-

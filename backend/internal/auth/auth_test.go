@@ -250,4 +250,3 @@ func TestMentionAllPermissionDefaultsAndStatusNarrowing(t *testing.T) {
 		t.Fatal("banned accounts must lose PermMentionAll")
 	}
 }
-
