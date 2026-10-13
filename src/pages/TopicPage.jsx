@@ -5,7 +5,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
 import {
   fetchSecuredPosts, createPost, updatePost, deletePost,
-  fetchTopic, fetchTopicStats, subscribeToTopicStats,
+  subscribeToTopicStats,
   updateTopic,
   deleteTopics, moveTopics, movePosts, fetchTopicContext, saveTopicDraft,
   deleteDraft, publishDraft,
@@ -456,15 +456,22 @@ const TopicPage = () => {
     }
   }, [id, ITEMS_PER_PAGE, user?.uid, setSearchParams, updateLocalTopicLastPost, searchParams]);
 
-  // The freshness read is a SEPARATE, lighter loop (B1 stats): the full topic
-  // (title, decoration, pins) loads ONCE on mount below, while
-  // subscribeToTopicStats answers "did this topic change while I was reading
-  // it" every 15s (or on a `topic.post` realtime nudge) with six fields
-  // instead of ~1.2 KB. It merges into the SAME topic state — so the reply
-  // gate (is_locked), the counters and the title never disagree — and drives
-  // the same loadPosts() refresh the old full-poll drove.
+  const currentTopicIdRef = useRef(id);
+  const skipNextLoadForPageRef = useRef(null);
+
+  // Topic metadata and freshness are driven entirely by subscribeToTopicStats.
+  // Initial load delivers title, pins, counters and author info without the ~1.2 KB
+  // author decoration of the legacy getTopicHandler, and 15s ticks / realtime signals
+  // keep the reply gate (is_locked), counters and status synchronized.
   useEffect(() => {
     if (!id) return;
+
+    // Only clear topic if navigating to a DIFFERENT topic
+    if (currentTopicIdRef.current !== id) {
+      setTopic(null);
+      setTopicNotFound(false);
+      currentTopicIdRef.current = id;
+    }
 
     const unsubStats = subscribeToTopicStats(id, (stats, err) => {
       if (err) {
@@ -484,23 +491,29 @@ const TopicPage = () => {
         return;
       }
       setTopic((prev) => {
-        if (!prev || prev.id !== stats.id) return prev;
+        if (!prev || prev.id !== stats.id) {
+          prevTopicStatsRef.current = {
+            id: stats.id,
+            posts_count: stats.posts_count,
+            last_post_at: stats.last_post_at,
+            last_post_id: stats.last_post_id
+          };
+          return stats;
+        }
         // Nothing moved: keep the reference, so no render cascades.
         if (
           prev.posts_count === stats.posts_count &&
           prev.last_post_id === stats.last_post_id &&
           prev.last_post_at_ms === stats.last_post_at_ms &&
-          prev.is_locked === stats.is_locked
+          prev.is_locked === stats.is_locked &&
+          prev.is_pinned === stats.is_pinned &&
+          prev.title === stats.title
         ) {
           return prev;
         }
         return {
           ...prev,
-          posts_count: stats.posts_count,
-          last_post_id: stats.last_post_id,
-          last_post_at: stats.last_post_at,
-          last_post_at_ms: stats.last_post_at_ms,
-          is_locked: stats.is_locked,
+          ...stats,
         };
       });
       setTopicNotFound(false);
@@ -535,62 +548,6 @@ const TopicPage = () => {
       last_post_id: topic.last_post_id
     };
   }, [topic, setPageTitle, loadPosts, currentPage]);
-
-  const currentTopicIdRef = useRef(id);
-  const skipNextLoadForPageRef = useRef(null);
-
-  // The full topic document loads ONCE per topic id — not on a 15s loop.
-  // Freshness after that is subscribeToTopicStats above (six fields, not the
-  // whole payload). A one-shot fetchTopicStats right after the full read
-  // seeds prevTopicStatsRef, so the first stats tick compares against what
-  // the page actually rendered rather than against nothing.
-  useEffect(() => {
-    // Only clear topic if navigating to a DIFFERENT topic
-    if (currentTopicIdRef.current !== id) {
-      setTopic(null);
-      setTopicNotFound(false);
-      currentTopicIdRef.current = id;
-    }
-
-    let cancelled = false;
-    // A ONE-SHOT fetchTopic, not the subscribeToTopic loop: the full payload
-    // (~1.2 KB with decoration) is rendered, never re-polled. Freshness lives
-    // in the stats loop above. subscribeToTopic stays exported for its other
-    // caller (subscriptions.js fetchTopicById fallback) — TopicPage no longer
-    // pays for its timer.
-    fetchTopic(id).then((data) => {
-      if (cancelled) return;
-      if (data) {
-        setTopic(data);
-        setTopicNotFound(false);
-        // Seed the freshness baseline from the authoritative full read, so
-        // the stats loop's first tick cannot mistake "no baseline" for
-        // "the topic changed".
-        prevTopicStatsRef.current = {
-          id: data.id,
-          posts_count: data.posts_count,
-          last_post_at: data.last_post_at,
-          last_post_id: data.last_post_id
-        };
-      } else {
-        setTopic(null);
-        setTopicNotFound(true);
-        setIsPageLoading(false);
-      }
-    }).catch((err) => {
-      if (cancelled) return;
-      // fetchTopic already answers null for a 404/403 (forum.js), so this catch
-      // is a genuine read failure — the raw error is kept only so the rescue's
-      // classification sees the real status rather than a flattened sentence.
-      setAccessError(err.message || 'Access denied');
-      setAccessErrRaw(err);
-      setIsPageLoading(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
 
   // Load posts whenever topic id or page changes
   useEffect(() => {

@@ -131,20 +131,33 @@ export const fetchTopic = async (topicId) => {
 // flag a moderator closing the topic leaves readers at a live form.
 //
 // The wire shape is normalised onto the SAME field names the page compares
-// (last_post_created → last_post_at, locked → is_locked), so the consumer at
-// TopicPage.jsx:420-443 keeps comparing what it always compared.
+// and renders (title, category_id, is_locked, is_pinned, created_at, etc.),
+// so TopicPage can render and maintain freshness without the ~1.2 KB full topic read.
 export const fetchTopicStats = async (topicId) => {
   if (!topicId) return null;
   const res = await sendApi(`/api/aerun/topics/${topicId}/stats`);
   if (!res) return null;
-  const lastPostDate = res.last_post_at || res.last_post_created || null;
+  const createdDate = res.created || res.created_at || null;
+  const lastPostDate = res.last_post_at || res.last_post_created || createdDate;
   return {
+    ...res,
     id: res.topic_id || topicId,
+    category_id: res.category_id,
+    title: res.title,
+    author_id: res.author_id,
+    author_character_id: res.author_character_id || null,
+    author_name: res.author_name || null,
+    is_character: !!res.is_character,
     posts_count: res.posts_count ?? 0,
+    is_pinned: !!(res.pinned || res.is_pinned),
+    is_locked: !!(res.locked || res.is_locked),
+    first_post_pinned: !!res.first_post_pinned,
+    created: createdDate,
+    created_at: createdDate,
     last_post_id: res.last_post_id || null,
     last_post_at: lastPostDate,
+    created_at_ms: createdDate ? new Date(createdDate).getTime() : 0,
     last_post_at_ms: lastPostDate ? new Date(lastPostDate).getTime() : 0,
-    is_locked: !!res.locked,
   };
 };
 

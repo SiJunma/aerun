@@ -487,9 +487,11 @@ func listTopicsHandler(e *core.RequestEvent) error {
 // Guest-safe: the four facts are not caller-scoped, so a signed-out visitor
 // gets the same shape.
 //
-// Field contract (pinned by TestTopicStats*): topic_id, posts_count,
-// last_post_id, last_post_at, locked, request_id — and nothing else. Every
-// extra field is F1 happening again.
+// Field contract (pinned by TestTopicStats*): topic_id, title, category_id,
+// author_id, posts_count, last_post_id, last_post_at, locked, pinned,
+// first_post_pinned, created, request_id (+ author_name, is_character if present).
+// Carries essential metadata so topic open does not require the heavy ~1.2 KB full
+// topic read, while shedding heavy author/last_post decoration.
 func getTopicStatsHandler(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
 	acc := AccessFrom(e)
@@ -498,14 +500,40 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		return notFoundError("topic not found")
 	}
 
-	return e.JSON(http.StatusOK, map[string]any{
-		"topic_id":     topic.Id,
-		"posts_count":  topic.GetInt("posts_count"),
-		"last_post_id": topic.GetString("last_post_id"),
-		"last_post_at": topic.GetDateTime("last_post_created").String(),
-		"locked":       topic.GetBool("locked"),
-		"request_id":   requestIDFrom(e),
-	})
+	payload := map[string]any{
+		"topic_id":          topic.Id,
+		"title":             topic.GetString("title"),
+		"category_id":       topic.GetString("category_id"),
+		"author_id":         topic.GetString("author_id"),
+		"posts_count":       topic.GetInt("posts_count"),
+		"last_post_id":      topic.GetString("last_post_id"),
+		"last_post_at":      topic.GetDateTime("last_post_created").String(),
+		"locked":            topic.GetBool("locked"),
+		"pinned":            topic.GetBool("pinned"),
+		"first_post_pinned": topic.GetBool("first_post_pinned"),
+		"created":           topic.GetDateTime("created").String(),
+		"request_id":        requestIDFrom(e),
+	}
+	if charID := topic.GetString("author_character_id"); charID != "" {
+		payload["author_character_id"] = charID
+	}
+
+	authorID := topic.GetString("author_id")
+	if authorID != "" {
+		displays := loadAuthorDisplays(e.App, []string{authorID})
+		if d, ok := displays[authorID]; ok {
+			payload["author_name"] = d.Nickname
+		}
+		if charID := topic.GetString("author_character_id"); charID != "" {
+			masks := loadCharacterDisplays(e.App, []string{charID})
+			if mask, ok := masks[charID]; ok && mask.OwnerID == authorID {
+				payload["author_name"] = mask.Name
+				payload["is_character"] = true
+			}
+		}
+	}
+
+	return e.JSON(http.StatusOK, payload)
 }
 
 // getTopicHandler returns a single topic by ID.

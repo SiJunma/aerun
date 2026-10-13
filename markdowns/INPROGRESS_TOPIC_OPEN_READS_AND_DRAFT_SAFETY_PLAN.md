@@ -181,22 +181,25 @@ Files: `src/api/unsent-replies.js` (store, bus, list, lifecycle),
 Verified: 13/13 gate checks PASS, eslint clean (0 warnings) on all five touched
 frontend files, full `npm test` green.
 
-### Checkpoint 1 — B1 `GET /topics/{id}/stats` (SHIPPED 2026-10-12)
+### Checkpoint 1 — B1 `GET /topics/{id}/stats` (SHIPPED 2026-10-12, UPDATED 2026-10-13)
 
 Owner rulings taken during implementation (verified against the code, §B1):
 
 - `getTopicHandler` carries NO visibility check — the plan's "same check as
   getTopicHandler" describes a check that does not exist. `canViewTopic` added
   to BOTH handlers in one change; hidden thread answers `404` from both.
-- Full topic loads ONCE per open (`fetchTopic`); `stats` runs sequentially
-  after it as the freshness loop (15s + `topic.post` realtime nudge, polling
-  as fallback).
+- **Full topic open read eliminated (2026-10-13):** `stats` delivers topic
+  metadata (`title`, `category_id`, `author_id`, `author_name`, `pinned`,
+  `first_post_pinned`, `created`) alongside counters and locks (`posts_count`,
+  `last_post_id`, `last_post_at`, `locked`), completely eliminating the heavy
+  ~1.2 KB `GET /topics/{id}` call from the topic open flow. TopicPage initializes
+  and maintains freshness through `subscribeToTopicStats`.
 
-Files: `backend/.../forum_topics.go` (stats handler + canViewTopic in both),
+Files: `backend/.../forum_topics.go` (stats handler with metadata + canViewTopic in both),
 `run.go` (route), `topic_stats_test.go` (5 tests), `src/api/forum.js`
-(fetchTopic/fetchTopicStats/subscribeToTopicStats), `src/pages/TopicPage.jsx`
-(one-shot full read + stats-loop merge), `scripts/check-forum-read-contract.mjs`
-(B1 gate), `backend/README.md` (route docs).
+(fetchTopicStats/subscribeToTopicStats normalization), `src/pages/TopicPage.jsx`
+(stats-only initialization and freshness loop), `scripts/check-forum-read-contract.mjs`
+(B1 gate forbidding fetchTopic on open), `backend/README.md` (route docs).
 
 Verified: `gofmt -l` empty, `go vet` clean, 5/5 stats tests PASS, read-contract
 gate prints `OK topic freshness`, eslint clean.
@@ -494,17 +497,17 @@ topic the caller may not see.
 > check is the security boundary, and a direct `GET /stats` must refuse a
 > hidden thread on its own.
 >
-> **Sequencing (owner ruling 2026-10-12).** The full topic loads ONCE per
-> topic open (`fetchTopic`); `stats` runs sequentially after it as the
-> freshness loop (15s + `topic.post` realtime nudge, polling as fallback).
-> The one-shot `fetchTopicStats` right after the full read seeds
-> `prevTopicStatsRef`, so the first loop tick compares against what the page
-> rendered rather than against nothing.
+> **Sequencing (owner ruling 2026-10-13 update).** The full topic read
+> (`GET /topics/{id}`) is completely eliminated from the topic open flow.
+> `GET /topics/{id}/stats` delivers topic metadata and freshness: `topic_id`,
+> `title`, `category_id`, `author_id`, `author_name`, `pinned`, `first_post_pinned`,
+> `created`, `posts_count`, `last_post_id`, `last_post_at`, `locked`, `request_id`
+> (plus `author_character_id` and `is_character` if masked).
+> Sheds the ~1.2 KB heavy author and last-post list decoration while avoiding a
+> separate full-topic open request. TopicPage initializes and updates freshness
+> via `subscribeToTopicStats`.
 
-Fields: `posts_count`, `last_post_id`, `last_post_at`, `locked`, `topic_id`,
-`request_id`. Nothing else — every extra field is §F1 happening again.
-
-Guest-safe: a signed-out visitor gets the same shape, since these four facts are
+Guest-safe: a signed-out visitor gets the same shape, since these facts are
 not caller-scoped.
 
 ### B2. `GET /api/aerun/topics/{id}/context` (new file `topic_context.go`)

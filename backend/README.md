@@ -204,7 +204,7 @@ All errors return the machine-readable error contract:
 - `POST /api/aerun/topics` — create a new topic with its opening post (`sequence=1`) in one transaction. Requires `create_topic` permission.
 - `GET /api/aerun/topics` — list active topics with keyset pagination (`pinned DESC, last_post_created DESC, id DESC`).
 - `GET /api/aerun/topics/:id` — get topic details. A topic in a category the caller may not see answers `404`, byte-identical to a missing topic.
-- `GET /api/aerun/topics/:id/stats` — the topic page's freshness read: `topic_id`, `posts_count`, `last_post_id`, `last_post_at`, `locked`, `request_id` and nothing else. Same category-visibility rule as the full read (hidden thread reads as missing); guest-safe. The 15s loop polls this, not the full payload.
+- `GET /api/aerun/topics/:id/stats` — the topic page's metadata and freshness read: `topic_id`, `title`, `category_id`, `author_id`, `author_name`, `pinned`, `first_post_pinned`, `created`, `posts_count`, `last_post_id`, `last_post_at`, `locked`, `request_id` (plus `author_character_id` and `is_character` if masked). Sheds the heavy ~1.2 KB author and last-post list decoration of `GET /topics/:id`. Same category-visibility rule as the full read (hidden thread reads as missing); guest-safe. TopicPage loads this on open and polls it every 15s (with realtime nudge fallback), replacing the full topic read on open.
 - `PATCH /api/aerun/topics/:id` — update topic title, lock, or pin state.
 - `POST /api/aerun/topics/:id/move` — move topic to a different category (`move_topics` permission).
 - `DELETE /api/aerun/topics/:id` — soft delete a topic (`moderate_content` or author).

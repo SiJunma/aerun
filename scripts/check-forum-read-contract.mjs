@@ -1002,16 +1002,14 @@ console.log('OK  forum read contract: the members board refreshes, says so, and 
   );
 }
 console.log('OK  realtime client: signals are nudges, and the fallback is observable');
-// ── The topic page polls stats, not the whole topic (B1) ───────────────────
-// The 15s freshness loop ("did this topic change while I was reading it")
-// used to re-read GET /topics/{id} — ~1.2 KB of author decoration
-// TopicPage never reads — just to compare posts_count, last_post_id and
-// last_post_at. The loop now reads GET /topics/{id}/stats (six fields);
-// the full payload is fetched ONCE per topic open via fetchTopic.
+// ── The topic page reads stats, not the heavy full topic (B1) ─────────────
+// Opening and polling a topic used to read GET /topics/{id} — ~1.2 KB of author
+// decoration TopicPage never reads — just to compare posts_count, last_post_id and
+// last_post_at. /stats now delivers essential topic metadata (title, pins, counters)
+// and freshness, eliminating the ~1.2 KB payload from topic open entirely.
 //
-// These pin that split, because re-adding a full-topic loop "for freshness"
-// looks like a fix in review and silently restores the payload this step
-// exists to shed.
+// These pin that contract: stats handles freshness and metadata, and TopicPage
+// never calls fetchTopic on open.
 assert.match(
   forum,
   /export const fetchTopicStats = async \(topicId\)/,
@@ -1035,17 +1033,18 @@ assert.match(
 assert.match(
   forum,
   /export const fetchTopic = async \(topicId\)/,
-  'fetchTopic must exist — the full topic payload is a one-shot read per topic open, never a loop'
+  'fetchTopic must exist — general full topic read for other callers'
 );
 assert.match(
   topicPageCode,
   /subscribeToTopicStats\(id,/,
-  'TopicPage must drive its freshness loop from subscribeToTopicStats, not from the full topic read'
+  'TopicPage must drive its freshness loop and metadata from subscribeToTopicStats'
 );
-assert.match(
+forbid(
   topicPageCode,
-  /fetchTopic\(id\)\.then/,
-  'TopicPage must load the full topic once via fetchTopic — the stats loop carries no title or decoration'
+  'TopicPage.jsx',
+  /\bfetchTopic\(id\)/,
+  'TopicPage must not call fetchTopic on open — topic metadata and freshness are served by stats, shedding the ~1.2 KB author decoration payload'
 );
 forbid(
   topicPageCode,
@@ -1058,7 +1057,7 @@ assert.match(
   /realtime:\s*canReceiveSignals\(\)/,
   'the stats loop must ride realtime with polling as the fallback — a healthy member pays no polling, a degraded one is unchanged'
 );
-console.log('OK  topic freshness: the 15s loop reads /stats, the full topic loads once');
+console.log('OK  topic freshness: /stats delivers topic metadata and freshness; full-topic read eliminated from topic open');
 
 if (failures.length > 0) {
   for (const failure of failures) console.error(`FAIL: ${failure}`);

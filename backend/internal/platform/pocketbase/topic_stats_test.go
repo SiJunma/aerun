@@ -38,16 +38,23 @@ func TestTopicStatsReturnsOnlyItsContract(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"topic_id":     true,
-		"posts_count":  true,
-		"last_post_id": true,
-		"last_post_at": true,
-		"locked":       true,
-		"request_id":   true,
+		"topic_id":          true,
+		"title":             true,
+		"category_id":       true,
+		"author_id":         true,
+		"author_name":       true,
+		"pinned":            true,
+		"first_post_pinned": true,
+		"created":           true,
+		"posts_count":       true,
+		"last_post_id":      true,
+		"last_post_at":      true,
+		"locked":            true,
+		"request_id":        true,
 	}
 	for key := range payload {
 		if !want[key] {
-			t.Errorf("stats carried %q — every extra field is F1 happening again (%v)", key, payload)
+			t.Errorf("stats carried %q — unexpected field in stats contract (%v)", key, payload)
 		}
 	}
 	for key := range want {
@@ -58,8 +65,24 @@ func TestTopicStatsReturnsOnlyItsContract(t *testing.T) {
 	if payload["topic_id"] != topicID {
 		t.Errorf("stats topic_id = %v, want %s", payload["topic_id"], topicID)
 	}
-	if _, ok := payload["author_name"]; ok {
-		t.Error("stats must not carry author decoration — that payload is what this route exists to shed")
+	if payload["title"] != "A topic with stats" {
+		t.Errorf("stats title = %v, want 'A topic with stats'", payload["title"])
+	}
+	for _, forbidden := range []string{
+		"author_avatar",
+		"author_status_line",
+		"author_signature",
+		"author_role_id",
+		"author_reputation",
+		"author_posts_count",
+		"last_post_author",
+		"last_post_author_avatar",
+		"last_post_author_id",
+		"last_post_created",
+	} {
+		if _, ok := payload[forbidden]; ok {
+			t.Errorf("stats carried %q — stats must not carry heavy list decoration", forbidden)
+		}
 	}
 }
 
