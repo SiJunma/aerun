@@ -528,3 +528,73 @@ inbox: «User» без аватара (`DirectMessages.jsx:1058-1059`), тред
 - Общая политика C-b (I2): диалог живёт, пока существует ≥1 участник; удаление мусорного треда — через UI.
 - PocketBase БД не чистим вручную (I1-часть: чистка перенесена в момент миграции дампа; прямая чистка Firebase отменена).
 
+- PocketBase БД не чистим вручную (I1-часть: чистка перенесена в момент миграции дампа; прямая чистка Firebase отменена).
+
+---
+
+## N. ТОЧКА ОСТАНОВКИ I5 (сессия 2026-10-13, коммит для переноса на другую машину)
+
+> Коммит сделан по просьбе владельца БЕЗ прогона тестов (gofmt/go vet/go test/
+> eslint не запускались в этой сессии; `go build ./...` чистый — прогнан здесь же).
+
+### N1. В КОММИТЕ (бэкенд- и API-половина I5; правки из прошлой сессии, в рабочем дереве)
+- **Миграция `backend/internal/migrations/1769400000_identity_placeholder_settings.go` (новый):**
+  на singleton `forum_settings` добавляет FileField `deleted_avatar`/`guest_avatar`
+  (5 MB, jpeg/png/webp/gif) + Text `deleted_avatar_url`/`guest_avatar_url` (Max 512);
+  `ensureField` (идемпотентно), нормализация ссылок в `""`, revert убирает 4 колонки.
+- **Handler `backend/internal/platform/pocketbase/placeholder_upload.go` (новый):**
+  `PUT /api/aerun/admin/settings/placeholder/{kind}` (kind = `deleted`|`guest`),
+  дублирует паттерн `/me/avatar`: `readAvatarUpload` (2 MB) → `avatarFileName`
+  (сниффинг байтов) → запись файла → перезапись `*_avatar_url` через
+  `AvatarFilePath`; аудит `settings_updated`; повторная загрузка = replace.
+  Unknown kind → 400. Двойная проверка `PermAdminAccess` внутри хендлера.
+- **`run.go` (~260):** роут зарегистрирован с `RequirePermission(PermAdminAccess)`,
+  БЕЗ `enforceIdempotency` (multipart > 512 KB лимита конверта).
+- **`forum_settings.go`:** поля `DeletedAvatarURL`/`GuestAvatarURL` в структуре +
+  чтение в `loadForumSettings`.
+- **`global_settings.go`:** публичный snapshot отдаёт `deletedAvatar`/`guestAvatar`;
+  PATCH принимает оба ключа (пустая строка = сброс на дефолт, как logoUrl).
+- **`src/api/admin.js`:** `DEFAULT_GLOBAL_SETTINGS.deletedAvatar/guestAvatar` +
+  `uploadIdentityPlaceholder(kind, blob)` (multipart PUT, обновляет кэш и шлёт
+  подписчикам — форум сразу видит новую картинку).
+- **`src/utils/identity.js`:** хелпер `identityAvatar({name, avatar, customPlaceholder, size})`
+  (приоритет: свой аватар → кастомный плейсхолдер → дефолт); `deletedDisplayName(lang, name)`
+  принимает кастомное имя из настроек.
+
+### N2. ОСТАЛОСЬ (порядок продолжения)
+1. **UI-форма (D2) в `AdminPage.jsx` `renderSettings`:** секция загрузки двух
+   плейсхолдеров. Готовые кирпичи: `AvatarUploader` (onUpload получает
+   `(blob, filename) => …`, повторяет паттерн ProfilePage.jsx:1595) +
+   `uploadIdentityPlaceholder`. Якоря вставки: после блока `logoUrl`
+   (~строка 1144) или после секции `backgrounds` (~1231). Сброс к дефолту —
+   отдельной кнопкой через `updateGlobalSettings({deletedAvatar:''})`.
+2. **Подключить `customPlaceholder` в рендер-места** (источник — `settings` из
+   `useAuth()`, AuthProvider подписан на `getGlobalSettings`):
+   - `ForumAuthorAvatar.jsx` (~42-49): при пустом `fallbackName` →
+     `identityAvatar({customPlaceholder: settings.deletedAvatar, …})`;
+   - `DirectMessages.jsx`: inbox-строка (~1086), шапка чата (~712), баббл (~804);
+   - `ForumAuthorName.jsx` (~19): имя через `deletedDisplayName(lang, settings.deletedLabel?)`
+     — если имя тоже настраивается; иначе оставить локализованный дефолт.
+3. **i18n `src/i18n/dictionary.js`:** ключи `admin.settings.*` для секции
+   (EN-блок ~787, RU-блок ~1595): заголовок секции, названия двух картинок, help.
+4. **Backend-тест `placeholder_upload_test.go`** по образцу `avatar_upload_test.go`:
+   upload → файл + `/api/files/`-ссылка в snapshot; access matrix (аноним 401,
+   player 403, root 200); не-изображение → 400; неверный kind → 400; сброс через
+   PATCH `{"deletedAvatar":""}`.
+5. **Гонки перед слитием:** `gofmt -w`, `go build ./...`, `go vet ./...`,
+   `go test ./internal/platform/pocketbase/`; `npm run lint:js`;
+   `npm run test:endpoints` (роут зарегистрирован — аудит должен совпасть);
+   `npm run test:jsx-comments`; по желанию check-скрипт
+   `scripts/check-identity-placeholder.mjs` (рендер-места используют
+   `identityAvatar`, инлайновый `ui-avatars` в DM/форуме отсутствует).
+6. **Документация** (правило AGENTS.md): `PROJECT_CONTEXT.md`/`PROJECT_SPEC.md` —
+   новые поля настроек и эндпоинт.
+
+### N3. Решения/ограничения, зафиксированные в этой сессии
+- Фактический потолок загрузки — **2 MB** (`avatarUploadMaxBodyBytes` из
+  avatar_upload.go), хотя FileField декларирует 5 MB: хендлер переиспользует
+  `readAvatarUpload`. Так же у юзер-аватара — оставить, задокументировать.
+- Файлы плейсхолдеров публичны (`Protected=false`, как logo): плейсхолдер —
+  часть форума, которую должен видеть и гость.
+- Правки из N1 лежали в рабочем дереве ещё до этой сессии; сама сессия
+  только читала код (никаких новых правок в код кроме этого раздела нет).

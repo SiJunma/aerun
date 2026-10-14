@@ -21,6 +21,12 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   allowUserCustomDesign: true,
   defaultDesignId: '',
   logoUrl: '',
+  // Admin-uploaded identity placeholder images (plan I5/D2). Empty means "no
+  // custom image", and the frontend falls back to its neutral default. Read by
+  // every visitor from the public settings snapshot, so guests render a removed
+  // account the same way a signed-in member does.
+  deletedAvatar: '',
+  guestAvatar: '',
   bgLight: '',
   bgDark: '',
   bgNeutral: '',
@@ -80,6 +86,35 @@ export const updateGlobalSettings = async (settings, _performerId) => {
     console.warn('[updateGlobalSettings err]', err);
     throw err;
   }
+};
+
+/**
+ * uploadIdentityPlaceholder stores an admin-uploaded image as one of the two
+ * identity placeholder avatars and returns the new reference.
+ *
+ * `kind` is 'deleted' (shown for a removed account) or 'guest' (shown for an
+ * anonymous visitor). The bytes go to the server as multipart, exactly like a
+ * user avatar: the reference column is a short /api/files path and can never
+ * hold the bytes themselves, so a client-side data URL is never produced. The
+ * command is a replace, so a retried upload converges on one stored file.
+ */
+export const uploadIdentityPlaceholder = async (kind, blob, filename = `${kind}.png`) => {
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await sendApi(`/api/aerun/admin/settings/placeholder/${kind}`, {
+    method: 'PUT',
+    body: form
+    // No Content-Type: the browser sets it with the multipart boundary.
+  });
+  // Refresh the shared cache so every subscriber (including the forum chrome)
+  // sees the new placeholder without a second round trip.
+  if (res?.avatar_url) {
+    _settingsCache = { ...DEFAULT_GLOBAL_SETTINGS, ...(_settingsCache || {}), [kind === 'guest' ? 'guestAvatar' : 'deletedAvatar']: res.avatar_url };
+    _settingsSubscribers.forEach(cb => {
+      try { cb(_settingsCache); } catch (e) { console.error(e); }
+    });
+  }
+  return res?.avatar_url || '';
 };
 
 // --- Root handover ---

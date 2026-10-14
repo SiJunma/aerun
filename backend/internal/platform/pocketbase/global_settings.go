@@ -122,6 +122,8 @@ func globalSettingsSnapshot(app core.App) map[string]any {
 		"allowUserCustomDesign": settings.AllowUserCustomDesign,
 		"defaultDesignId":       settings.DefaultDesignID,
 		"logoUrl":               settings.LogoURL,
+		"deletedAvatar":         settings.DeletedAvatarURL,
+		"guestAvatar":           settings.GuestAvatarURL,
 		"bgLight":               settings.BgLight,
 		"bgDark":                settings.BgDark,
 		"bgNeutral":             settings.BgNeutral,
@@ -186,6 +188,8 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			AllowUserCustomDesign *bool          `json:"allowUserCustomDesign"`
 			DefaultDesignID       *string        `json:"defaultDesignId"`
 			LogoURL               *string        `json:"logoUrl"`
+			DeletedAvatarURL      *string        `json:"deletedAvatar"`
+			GuestAvatarURL        *string        `json:"guestAvatar"`
 			BgLight               *string        `json:"bgLight"`
 			BgDark                *string        `json:"bgDark"`
 			BgNeutral             *string        `json:"bgNeutral"`
@@ -311,6 +315,21 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			if body.LogoURL != nil {
 				v := strings.TrimSpace(*body.LogoURL)
 				set("logoUrl", func() { record.Set("logo_url", v) })
+			}
+			// The identity placeholder references are normally written by the
+			// dedicated upload endpoint (PUT /admin/settings/placeholder/{kind}),
+			// which owns the FileField; accepting the URL here lets an admin set
+			// or CLEAR a placeholder the same way they set the logo, without the
+			// panel needing a second write path. Empty clears it (fall back to
+			// the default); a non-empty string is trusted as an admin-supplied
+			// reference, exactly like logoUrl.
+			if body.DeletedAvatarURL != nil {
+				v := strings.TrimSpace(*body.DeletedAvatarURL)
+				set("deletedAvatar", func() { record.Set("deleted_avatar_url", v) })
+			}
+			if body.GuestAvatarURL != nil {
+				v := strings.TrimSpace(*body.GuestAvatarURL)
+				set("guestAvatar", func() { record.Set("guest_avatar_url", v) })
 			}
 			if body.BgLight != nil {
 				v := strings.TrimSpace(*body.BgLight)

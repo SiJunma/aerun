@@ -253,6 +253,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.PUT("/admin/settings", updateGlobalSettingsHandler(cfg)).
 		BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 
+	// Identity placeholder image upload (plan I5/D2). No enforceIdempotency:
+	// that middleware buffers the body and caps it at 512 KB, which a multipart
+	// image can never satisfy (same reasoning as /me/avatar). The write is a
+	// replace on a single-select FileField, so it is safe without the envelope.
+	group.PUT("/admin/settings/placeholder/{kind}", uploadIdentityPlaceholderHandler).
+		BindFunc(RequirePermission(auth.PermAdminAccess))
+
 	group.GET("/me", meHandler)
 	group.PUT("/me/settings", updateSettingsHandler)
 	// No enforceIdempotency: that middleware buffers the body and caps it at

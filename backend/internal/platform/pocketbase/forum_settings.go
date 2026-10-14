@@ -71,6 +71,16 @@ type forumSettings struct {
 	BgOpacityDark         float64
 	BgOpacityNeutral      float64
 
+	// DeletedAvatarURL and GuestAvatarURL are the host-agnostic /api/files
+	// references to the admin-uploaded placeholder images (migration
+	// 1769400000): the avatar shown for a removed account and the one shown for
+	// a guest. Empty means "no custom image uploaded", and the frontend falls
+	// back to its neutral default (identity.js). They live here rather than in a
+	// second struct so the public settings snapshot and the admin panel read the
+	// same row the rest of the settings come from.
+	DeletedAvatarURL string
+	GuestAvatarURL   string
+
 	// EmailTemplates is the raw JSON of forum_settings.email_templates
 	// (migration 1769300000): a map of mail type -> {subject, body}. The
 	// resolver loadEmailTemplates reads it from here rather than issuing a
@@ -137,6 +147,8 @@ func loadForumSettings(app core.App) forumSettings {
 	settings.AllowUserCustomDesign = record.GetBool("allow_user_custom_design")
 	settings.DefaultDesignID = record.GetString("default_design_id")
 	settings.LogoURL = record.GetString("logo_url")
+	settings.DeletedAvatarURL = record.GetString("deleted_avatar_url")
+	settings.GuestAvatarURL = record.GetString("guest_avatar_url")
 	settings.BgLight = record.GetString("bg_light")
 	settings.BgDark = record.GetString("bg_dark")
 	settings.BgNeutral = record.GetString("bg_neutral")
