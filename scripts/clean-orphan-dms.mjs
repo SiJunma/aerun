@@ -111,11 +111,13 @@ async function main() {
     return;
   }
 
-  const { recursiveDelete } = require('firebase-admin/firestore');
+  // firebase-admin v13 exposes recursiveDelete as an INSTANCE method, not as a
+  // named export from 'firebase-admin/firestore' (that yields undefined and
+  // throws at call time). db.recursiveDelete(ref) removes the doc + subcolls.
   console.log(`\nDeleting ${orphans.length} orphan conversation(s) (document + messages subcollection)...`);
   let done = 0;
   for (const o of orphans) {
-    await recursiveDelete(db.doc(`dms/${o.id}`));
+    await db.recursiveDelete(db.doc(`dms/${o.id}`));
     console.log(`  deleted dms/${o.id}`);
     done++;
   }
