@@ -517,9 +517,13 @@ func createDMHandler(e *core.RequestEvent) error {
 			recipientUsers[i] = u
 		}
 
-		nowISO := types.NowDateTime().String()
-
-		// 1. Create dm_conversations record
+		// 1. Create dm_conversations record.
+		//
+		// last_message_at is intentionally NOT set here: it is anchored to the
+		// seed message's OWN created instant once that row exists (step 3 below),
+		// never to a wall-clock sample. A leading last_message_at becomes
+		// cleared_at on the next clear and would then survive the
+		// `created > cleared_at` filter in listDMMessagesHandler.
 		convCol, err := txApp.FindCollectionByNameOrId(dmConversationsCollectionName)
 		if err != nil {
 			return 0, nil, internalError("dm_conversations collection unavailable", err)
@@ -528,7 +532,6 @@ func createDMHandler(e *core.RequestEvent) error {
 		conv := core.NewRecord(convCol)
 		conv.Set("title", cleanTitle)
 		conv.Set("last_message", cleanText)
-		conv.Set("last_message_at", nowISO)
 		conv.Set("messages_count", 1)
 
 		if err := txApp.Save(conv); err != nil {
@@ -579,6 +582,19 @@ func createDMHandler(e *core.RequestEvent) error {
 		}
 		if err := txApp.Save(msg); err != nil {
 			return 0, nil, internalError("failed to save message", err)
+		}
+
+		// Anchor the conversation's last_message_at to the seed message's OWN
+		// created instant. clearConversationHandler copies this value into the
+		// member's cleared_at, and listDMMessagesHandler keeps rows with
+		// `created > cleared_at`. If last_message_at were sampled a moment
+		// earlier than created (a wall-clock read taken before the row existed),
+		// the seed message would survive the clear filter by construction. Using
+		// the row's own timestamp makes the boundary exact: the seed is hidden
+		// after a clear, and the next reply is strictly greater.
+		conv.Set("last_message_at", msg.GetDateTime("created").String())
+		if err := txApp.Save(conv); err != nil {
+			return 0, nil, internalError("failed to update conversation", err)
 		}
 
 		// 4. Outbox email events for recipients.
@@ -686,7 +702,6 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 		}
 		// Monotonic sequence assignment within the conversation transaction
 		nextSeq := conv.GetInt("messages_count") + 1
-		nowISO := types.NowDateTime().String()
 
 		// 1. Create dm_messages record
 		msgCol, err := txApp.FindCollectionByNameOrId(dmMessagesCollectionName)
@@ -707,9 +722,17 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to save message", err)
 		}
 
-		// 2. Update conversation metadata
+		// 2. Update conversation metadata.
+		//
+		// last_message_at is anchored to the reply's OWN created instant, not a
+		// wall-clock sample. It becomes cleared_at on the next clear, and
+		// listDMMessagesHandler keeps rows with `created > cleared_at`. A sample
+		// taken before the row existed would be earlier than the reply's created,
+		// so the reply itself would survive its own clear boundary. The row's own
+		// timestamp makes the horizon exact and keeps the next reply strictly
+		// greater — no sleep required.
 		conv.Set("last_message", cleanText)
-		conv.Set("last_message_at", nowISO)
+		conv.Set("last_message_at", msg.GetDateTime("created").String())
 		conv.Set("messages_count", nextSeq)
 		if err := txApp.Save(conv); err != nil {
 			return 0, nil, internalError("failed to update conversation", err)
