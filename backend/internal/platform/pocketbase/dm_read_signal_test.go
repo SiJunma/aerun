@@ -14,9 +14,14 @@ import (
 // /dms/{id}/read, the server row moved — and nobody re-read it: the
 // unread-counts poll has no timer while realtime is connected, and no signal
 // was published for a read. So this test asserts that mark-read publishes a
-// dm.post nudge ADDRESSED TO THE READER (whose counters changed), and that a
+// dm.read nudge ADDRESSED TO THE READER (whose counters changed), and that a
 // peer with a live stream does NOT receive it (their counters did not move,
 // and a conversation id is not something a non-reader may learn).
+//
+// The topic is dm.read, NOT dm.post: both carry a conversation id, so reusing
+// the post topic would wake the thread as if a message had arrived. Every DM
+// resource re-reads on any signal anyway; only topic-stats filters DM topics
+// out (forum.js guards both).
 func TestDMReadSignalWakesOnlyTheReader(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -52,8 +57,8 @@ func TestDMReadSignalWakesOnlyTheReader(t *testing.T) {
 	if !ok {
 		t.Fatal("mark-read must publish a signal to the reader, or the badge keeps the last polled value")
 	}
-	if body := signalBody(t, msg); !strings.Contains(body, realtimeSignalDMPost) {
-		t.Errorf("the read signal must reuse the dm.post topic the counters already listen to: %s", body)
+	if body := signalBody(t, msg); !strings.Contains(body, realtimeSignalDMRead) {
+		t.Errorf("the read signal must use the dedicated dm.read topic, not dm.post: %s", body)
 	}
 
 	if extra, ok := awaitSignal(t, peer, 500*time.Millisecond); ok {

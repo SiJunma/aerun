@@ -55,6 +55,7 @@ func enqueueOutboxEvent(txApp core.App, dedupeKey, eventType string, payload any
 		dbx.Params{"key": dedupeKey},
 	)
 	if err == nil && existing != nil {
+		txApp.Logger().Debug("outbox event suppressed by deduplicator", "dedupe_key", dedupeKey, "event_type", eventType)
 		return nil
 	}
 

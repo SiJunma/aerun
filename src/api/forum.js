@@ -189,6 +189,10 @@ export const subscribeToTopicStats = (topicId, callback) => {
           // Discard DM events or post events specifically targeted at other topics
           if (signalTopic === 'topic.post' && entityId && entityId !== topicId) return;
           if (signalTopic === 'dm.post') return;
+          // A read receipt is counters-only: somebody catching up on their inbox
+          // changes no topic, so the stats re-read it would trigger is pure waste.
+          // Listed beside the dm.post guard — the two DM topics live and die together.
+          if (signalTopic === 'dm.read') return;
           onDelivered();
         },
         () => onDead(),

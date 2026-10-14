@@ -121,14 +121,21 @@ func emailNotificationsPref(user *core.Record, prefKey string) bool {
 // worker re-checks before sending: up to a minute passes between queue and
 // send, and the recipient may come online in between.
 func maybeEnqueueDMEmail(txApp core.App, conversationID string, recipient *core.Record, senderNick, text string) {
+	recipientId := ""
+	if recipient != nil {
+		recipientId = recipient.Id
+	}
 	if recipient == nil || !dmEmailEnabled(recipient) {
+		txApp.Logger().Debug("dm-email skipped: recipient nil or email disabled", "conversation_id", conversationID, "recipient_id", recipientId)
 		return
 	}
 	if isMemberOnline(recipient.Id, time.Now()) {
+		txApp.Logger().Debug("dm-email skipped: recipient is online", "conversation_id", conversationID, "recipient_id", recipient.Id)
 		return
 	}
 	tpl, ok := loadEmailTemplates(txApp)[emailTemplateDM]
 	if !ok {
+		txApp.Logger().Debug("dm-email skipped: template missing", "conversation_id", conversationID, "recipient_id", recipientId)
 		// The resolver guarantees the built-in default, so this only ever
 		// happens if the defaults themselves lose the key — better to skip
 		// one mail than to send an empty one.
@@ -1215,10 +1222,12 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 	// counters are untouched by somebody else catching up, and a conversation
 	// id is not something a non-member may learn from the stream.
 	//
-	// The thread treats every dm.post as "re-read me" without trusting the
-	// payload (dms.js subscribeToDmMessages), so reusing the topic is safe:
-	// no new row exists, the re-read just converges on the same state.
-	publishSignal(e.App, realtimeSignalDMPost, convID, e.Auth.Id)
+	// A dedicated dm.read topic, not dm.post: both carry a conversation id,
+	// so reusing the post topic would wake the thread as if a message had
+	// arrived. Every DM resource re-reads on any signal anyway, so the extra
+	// thread/inbox re-reads are harmless convergence — and topic-stats is the
+	// one resource that filters DM topics out (forum.js).
+	publishSignal(e.App, realtimeSignalDMRead, convID, e.Auth.Id)
 
 	// Reset the first-unread email dedupe: the conversation is fully read, so
 	// the NEXT unread message wave is a new "first unread" and must queue its own

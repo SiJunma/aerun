@@ -16,7 +16,7 @@ export const usePageTitle = () => useContext(TitleContext);
 
 export const TitleProvider = ({ children }) => {
   const [pageTitle, setPageTitle] = useState('');
-  const { user, profile, settings, hasPermission, PERMISSIONS, activeDmConvId, unreadTopicsCount } = useAuth();
+  const { user, profile, settings, hasPermission, PERMISSIONS, unreadTopicsCount } = useAuth();
   const { lang } = useI18n();
   const { activeDesign } = useDesign();
 
@@ -44,10 +44,16 @@ export const TitleProvider = ({ children }) => {
   // messages are already on screen, so counting them in the tab badge would
   // double-report them. `conversations` is empty when the member is not
   // eligible, which naturally yields dmCount 0.
-  const { total = 0, conversations = {} } = countsEligible ? dmUnreadData : {};
-  const dmCount = (activeDmConvId && conversations[activeDmConvId])
-    ? Math.max(0, total - (conversations[activeDmConvId]?.unread_count || 0))
-    : total;
+  const { total = 0 } = countsEligible ? dmUnreadData : {};
+
+  // The DM term is a single flag in the tab title: whether
+  // there are any unread messages at all (the navbar shows
+  // the same point). The old per-conversation subtraction is
+  // gone: an unread message in the conversation currently
+  // open on screen is reported as +1 for the tab, which is
+  // honest for a point badge — it says "you have messages", not
+  // "how many".
+  const hasDmUnread = total > 0 ? 1 : 0;
 
   // Combine counts into unreadCount (notifications + DMs + new topics/posts)
   //
@@ -56,7 +62,7 @@ export const TitleProvider = ({ children }) => {
   // caller server-side — so it polled the endpoint a second time and then ADDED
   // the identical rows, doubling both the tab badge and the sound that plays on
   // a new notification.
-  const unreadCount = (countsEligible ? userCount : 0) + dmCount + (unreadTopicsCount || 0);
+  const unreadCount = (countsEligible ? userCount : 0) + hasDmUnread + (unreadTopicsCount || 0);
 
   // The tab title's notification term is the SERVER's count.
   //

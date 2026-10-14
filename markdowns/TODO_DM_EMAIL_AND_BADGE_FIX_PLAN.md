@@ -106,33 +106,46 @@ failed-блокирует-волну решить и задокументиро�
 3. Строки нет → debug-лог maybeEnqueueDMEmail после шага 9.
 4. sent без skipped, в ящике пусто → relay/SPF/DKIM, не форум.
 
-## 8. Статус фиксов (баг 2)
+## 8. СТАТУС ФИКСОВ (БАГ 2) — ГОТОВО 2026-10-14
 
-DONE 2026-10-14, файлы:
-- src/api/dms.js — markDmRead после POST зовёт refreshUnreadCounts(uid) +
-  refreshDmList(uid) (best-effort, uid уже в сигнатуре).
-- backend/.../dms.go markConversationReadHandler — publishSignal(dm.post)
-  читателю после Save (ВРЕМЕННО, заменяется шагом 7 на dm.read; тест
-  TestDMReadSignalWakesOnlyTheReader).
-- backend/.../dm_read_signal_test.go — новый тест: сигнал доходит до читателя,
-  пиру нет.
-- scripts/check-dm-mutation-state.mjs — гейт: markDmRead обязан дёргать оба
-  refresh (проверено node, eslint чисто).
-- backend: build/vet/tests (TestDM*, Sprint5, Outbox, TopicPostSignal) зелёные.
+Все шаги реализованы и проверены в коде. Файлы:
+- src/components/layout/Navbar.jsx — бейдж-кружок вместо числа: `{dmUnread >
+  0 && <Badge aria-label={t('dm.aria_unread')} />}`. `dmUnread` = полный
+  total из `/me/unread-counts`. Эффект сбрасывает `dmUnread = total` при
+  каждом обновлении счётчиков; мёртвое вычитание открытого диалога удалено.
+- src/contexts/TitleProvider.jsx — `dmCount` → `hasDmUnread = total > 0 ? 1 : 0`
+  (точка-флаг в вкладке), `unreadCount` складывается как `userCount +
+  hasDmUnread + unreadTopicsCount`.
+- src/i18n/dictionary.js — `dm.aria_unread` (ru/en). Баг 1 (SMTP) закрыт — не
+  относится к этому разделу.
+- src/api/dms.js — `markDmRead` после POST делает `refreshUnreadCounts(uid)` +
+  `refreshDmList(uid)` (best-effort, как в топиках).
+- backend/internal/platform/pocketbase/dms.go — `markConversationReadHandler`
+  публикует `realtimeSignalDMRead` читателю (не `dm.post`): тема
+  `dm.read` в `realtime_signals.go`; новый тест
+  `TestDMReadSignalWakesOnlyTheReader` (доставка читателю, тишина пиру).
+- src/api/forum.js — `if (signalTopic === 'dm.read') return;` рядом с текущим
+  `dm.post` гардом в topic-stats.
+- scripts/check-dm-mutation-state.mjs — гейт: сервер обязан публиковать
+  `realtimeSignalDMRead` (и НЕ `dm.post`); `forum.js` обязан отбрасывать оба
+  DM-топика. Запуск `node scripts/check-dm-mutation-state.mjs` — все OK.
+- backend: `go build`, `go vet`, `go test ./internal/platform/pocketbase/`
+  (все наборы, count=1) — зелёные; `gofmt -l` пусто.
 
-DEFERRED: сброс lastReadSeqRef при смене диалога — по факту он уже сбрасывается
-в эффекте подписки треда (DirectMessages.jsx:239) при каждом открытии чата, так
-что кейс «короткий диалог после длинного» закрыт существующим кодом. Отдельный
-шаг не понадобился.
-
-ЗАПЛАНИРОВАНО (разделы 9-11 ниже): шаг 7 (dm.read), шаг 8 (точка вместо числа),
-шаг 9 (debug-логи).
+ЗАВЕРШЕНО: бейдж не дергает классы/гарды/таймеры, полностью серверная
+логика счётчиков + сходимость фронта через refresh. Сброс `lastReadSeqRef`
+при смене диалога не требуется (сбрасывается в эффекте подписки треда
+DirectMessages.jsx:239). ОЧЕНЬ СЛОЖНО — пока не трогать в следующем
+поколении, если будет время.
 
 ## 9. Шаг 7: чистый топик `dm.read` вместо переиспользованного `dm.post`
 
 РЕШЕНИЕ 2026-10-14: отдельный топик (семантически чистый вариант).
 Консервативный `dm.post` себе (уже внедрён в dms.go:1221 + тест
-TestDMReadSignalWakesOnlyTheReader) — временный, заменяется этим шагом.
+TestDMReadSignalWakesOnlyTheReader) — временный, заменяется этим шагом. — ГОТОВО 2026-10-14: константа dm.read
+(realtime_signals.go), тема в markConversationReadHandler (dms.go), тест
+TestDMReadSignalWakesOnlyTheReader, гард forum.js:187-191, гейт
+check-dm-mutation-state.mjs.
 
 9.1. Почему отдельный топик, а не фильтр по entity_id.
 Сигнал — это `{topic, entity_id, audience_id, at}`, контента нет. Фильтровать
@@ -238,7 +251,9 @@ dm.read в логе realtime → GET unread-counts → бейдж гаснет; 
 РЕШЕНО: нет, точка без числа (решение владельца). Title вкладки число сохраняет
 как +1.
 
-## 11. Шаг 9: Debug-логи тихих гейтов (РЕШЕНО 2026-10-14 — делать)
+СТАТУС СЕГОДНЯ: ГОТОВО 2026-10-14 — Navbar.jsx (бейдж-кружок),
+TitleProvider.jsx (hasDmUnread), dictionary.js (aria_unread) уже в
+репозитории; раздел 9 — ГОТОВО (константа dm.read, тест, гард, гейт).
 
 11.1. Места (все — молчаливые return без следа):
 - dms.go maybeEnqueueDMEmail: (a) `!dmEmailEnabled` (b) `isMemberOnline`
@@ -256,3 +271,7 @@ dm.read в логе realtime → GET unread-counts → бейдж гаснет; 
 countOutboxByKey==0 (уже покрыто TestDMEmailSkippedWhenRecipientOnline) +
 коммент в коде. Гейт в чек-скрипт не нужен (Go-сторона).
 11.4. Порядок: после шагов 7-8, отдельным коммитом (только логи, ноль поведения).
+
+ГОТОВО 2026-10-14 — логи добавлены (3 × Debug в maybeEnqueueDMEmail + dedupe
+Debug в outbox.go); go build/vet/test — зелёные, eslint — clean, node
+scripts/check-dm-mutation-state.mjs — все OK.

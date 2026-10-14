@@ -44,7 +44,14 @@ var realtimeSignalPruneCounter int
 const (
 	realtimeSignalNotificationNew = "notification.new"
 	realtimeSignalDMPost          = "dm.post"
-	realtimeSignalTopicPost       = "topic.post"
+	// realtimeSignalDMRead is the read-receipt nudge: somebody caught up on
+	// their inbox. Addressed to the READER, counters-only — it never renders
+	// content and never means "a message arrived". Separate from dm.post
+	// because the payload cannot tell them apart (both carry a conversation
+	// id), so the topic is the only honest divider; every DM resource re-reads
+	// on any signal, and only topic-stats filters DM topics out (forum.js).
+	realtimeSignalDMRead    = "dm.read"
+	realtimeSignalTopicPost = "topic.post"
 )
 
 // publishTopicSignal announces that a topic changed, to exactly the audience the

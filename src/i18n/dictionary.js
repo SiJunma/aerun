@@ -352,6 +352,7 @@ export const translations = {
     },
     dm: {
       tab_title: "Messages",
+      aria_unread: "Есть непрочитанные",
       inbox: "Inbox",
       no_conversations: "No messages yet. Start a conversation from another user's profile.",
       send_button: "Send",
@@ -1160,6 +1161,7 @@ export const translations = {
     },
     dm: {
       tab_title: "Сообщения",
+      aria_unread: "Есть непрочитанные",
       inbox: "Входящие",
       no_conversations: "Сообщений пока нет. Начните переписку из профиля пользователя.",
       send_button: "Отправить",

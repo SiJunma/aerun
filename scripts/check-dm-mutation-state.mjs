@@ -47,6 +47,8 @@ const signals = stripComments(read('../src/api/realtime-signals.js'));
 const sharedPollCode = stripComments(read('../src/api/shared-poll.js'));
 const peerCardGo = stripComments(read('../backend/internal/platform/pocketbase/user_profile.go'));
 const runGo = read('../backend/internal/platform/pocketbase/run.go');
+const markReadGo = stripComments(read('../backend/internal/platform/pocketbase/dms.go'));
+const forumApi = stripComments(read('../src/api/forum.js'));
 
 const failures = [];
 const check = (ok, message) => {
@@ -260,7 +262,12 @@ check(signalCallSites === stateForwarded,
 // the last POLLED value: the unread-counts poll has no timer while realtime
 // is connected, and no signal was published for a read. Both halves are
 // pinned: the client refreshes the counters off the committed read, and the
-// server wakes the reader's own counters with a dm.post nudge.
+// server wakes the reader's own counters with a dm.read nudge.
+//
+// The topic is dm.read, NOT dm.post: both carry a conversation id, so reusing
+// the post topic would wake the thread as if a message had arrived. Every DM
+// resource re-reads on any signal anyway; only topic-stats filters DM topics
+// out (forum.js guards both — see below).
 const markReadBody = dmsApi.match(
   /export const markDmRead = async[\s\S]*?\n};/
 );
@@ -273,6 +280,32 @@ if (markReadBody) {
     'markDmRead must refresh the inbox read — its preview carries per-row ' +
     'unread state that also goes stale');
 }
+
+// The read receipt rides its own topic. A mark-read that publishes dm.post
+// wakes the thread as if a message arrived; a mark-read that publishes nothing
+// leaves the badge on the last polled value while realtime is connected.
+const readHandler = markReadGo.match(
+  /func markConversationReadHandler[\s\S]*?\n}/
+);
+check(!!readHandler, 'the mark-read handler must exist');
+if (readHandler) {
+  check(/realtimeSignalDMRead/.test(readHandler[0]),
+    'markConversationReadHandler must publish the dedicated dm.read topic — ' +
+    'reusing dm.post wakes the thread as if a message arrived');
+  check(!/realtimeSignalDMPost/.test(readHandler[0]),
+    'markConversationReadHandler must NOT publish dm.post — that topic means ' +
+    '"a message arrived", and a read is not one');
+}
+
+// topic-stats is the one resource that filters DM topics: a read receipt
+// changes no topic, so without the guard every mark-read would trigger a
+// useless stats re-read.
+check(/signalTopic === 'dm\.read'/.test(forumApi),
+  'forum.js topic-stats must discard the dm.read topic — a read receipt moves ' +
+  'no topic, and the re-read it would trigger is pure waste');
+check(/signalTopic === 'dm\.post'/.test(forumApi),
+  'forum.js topic-stats must keep discarding dm.post — the two DM topics live ' +
+  'and die together');
 
 if (failures.length > 0) {
   console.error(`DM mutation-state regressions (${failures.length}):\n`);

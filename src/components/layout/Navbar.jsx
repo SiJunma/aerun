@@ -12,7 +12,7 @@ import { playNotificationSound } from '../../utils/notificationSound';
 import AuthModal from '../modals/AuthModal';
 
 const Navigation = () => {
-  const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, activeDmConvId, dmUnread: unreadCounts } = useAuth();
+  const { user, profile, settings, logout, unreadTopicsCount, hasPermission, PERMISSIONS, _activeDmConvId, dmUnread: unreadCounts } = useAuth();
   const { t, lang } = useI18n();
   const { theme, changeGuestTheme } = useTheme();
   const { activeDesign } = useDesign();
@@ -59,14 +59,9 @@ const Navigation = () => {
 
   // Exclude the currently open DM conversation from the badge
   React.useEffect(() => {
-    const { total = 0, conversations = {} } = dmUnreadData;
-    if (activeDmConvId && conversations[activeDmConvId]) {
-      const openConvCount = conversations[activeDmConvId]?.unread_count || 0;
-      setDmUnread(Math.max(0, total - openConvCount));
-    } else {
-      setDmUnread(total);
-    }
-  }, [dmUnreadData, activeDmConvId]);
+    const { total = 0 } = dmUnreadData;
+    setDmUnread(total);
+  }, [dmUnreadData]);
 
   const totalUnread = userUnread;
   const totalBadge = totalUnread + dmUnread;
@@ -206,9 +201,8 @@ const Navigation = () => {
                   pill
                   className="position-absolute"
                   style={{ top: '0px', right: '-3px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
-                >
-                  {dmUnread > 99 ? '99+' : dmUnread}
-                </Badge>
+                  aria-label={t('dm.aria_unread')}
+                />
               )}
             </Nav.Link>
           )}
