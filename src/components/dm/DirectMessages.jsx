@@ -577,9 +577,35 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       // ONE key per logical send, reused by anything that retries. Without it
       // sendApi mints a fresh random key per call, so a duplicate that escapes
       // the latch would be a genuinely second message.
-      await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid, newIdempotencyKey('dm'));
+      const sent = await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid, newIdempotencyKey('dm'));
       setMessageText('');
       editorRef.current?.focus();
+
+      // The server's answer is the ONLY thing that can paint the author's own
+      // bubble: a `dm.post` signal is addressed to the other participants
+      // (publishDMSignalToPeers excludes the caller), and shared-poll removes
+      // the fallback timer as soon as realtime CONNECTS — no event required.
+      // A send that discards the response leaves the words waiting for a tick
+      // that is never coming, which is the reported "I pressed send and nothing
+      // appeared until I reloaded" on EVERY conversation, not just cleared ones.
+      // Merge by id rather than blindly append: the refreshed thread read below
+      // may already have carried this row.
+      if (sent?.id) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === sent.id)) return prev;
+          return [...prev, sent].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+        });
+      }
+      // Settle the thread read (sidebar preview, counters, has_more) now — the
+      // same nudge edit and delete already give it.
+      refreshDmMessages(activeChatId);
+      // And the INBOX, which a send needs and edit/delete do not: the row moves
+      // to the top, its preview changes, and for a conversation that was
+      // CLEARED the row itself only comes back from the server once the new
+      // message carries last_message_at past cleared_at. Without this the row
+      // waits for a reload — the second half of the same report.
+      refreshDmList(myUid);
+
       const container = getScrollContainer();
       if (container) {
         container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
@@ -676,14 +702,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // ── Privacy notice ───────────────────────────────────────────────────────
   const PrivacyNotice = () => (
     <div
-      className="d-flex align-items-center gap-2 px-3 py-2 mb-3 rounded"
+      className="d-flex align-items-start gap-2 px-3 py-2 mb-3 rounded"
       style={{
         background: 'var(--block-bg)',
         border: '1px solid var(--border-color)',
         fontSize: '0.78rem',
       }}
     >
-      <Shield size={14} className="text-primary flex-shrink-0" />
+      <Shield size={14} className="text-primary flex-shrink-0" style={{ marginTop: '0.15rem' }} />
       <span className="text-muted">{t('dm.privacy_notice')}</span>
     </div>
   );
@@ -1109,7 +1135,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                       </span>
                       {/* The date shares the FIRST line with the name and never
                           overlaps it: the name shrinks (truncate) while the
-                          date keeps its width (flex-shrink 0, nowrap). */}
+                          date keeps its width (flex-shrink 0, nowrap). Below
+                          568px this span is hidden and the date moves to its
+                          own second line (.dm-conversation-date-mobile), so
+                          the timestamp is never printed twice. */}
                       <span
                         className="text-muted dm-conversation-date flex-shrink-0"
                         style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}
@@ -1117,15 +1146,24 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                         {formatDate(conv.lastTimestamp)}
                       </span>
                     </div>
-                    {/* Second line carries WHEN the last message arrived, not
-                        its words: on narrow screens a preview plus a pinned
-                        date overlapped the name, while a short labelled date
-                        always fits. */}
+                    {/* Second line on wider screens: the words of the last
+                        message, not a repeat of the date. Phones hide it —
+                        there the second line carries the timestamp instead. */}
+                    {conv.lastMessage && (
+                      <p
+                        className={`mb-0 text-truncate small dm-conversation-sub dm-conversation-preview ${unreadCount > 0 ? '' : 'text-muted'}`}
+                        style={{ fontSize: '0.875rem' }}
+                      >
+                        {conv.lastMessage}
+                      </p>
+                    )}
+                    {/* Second line on phones only: when the last message
+                        arrived. Hidden above 568px, where the same date is
+                        already on the first line. */}
                     <p
-                      className={`mb-0 text-truncate small dm-conversation-sub ${unreadCount > 0 ? '' : 'text-muted'}`}
+                      className="mb-0 text-truncate small dm-conversation-sub text-muted dm-conversation-date-mobile"
                       style={{ fontSize: '0.875rem' }}
                     >
-                      {lang === 'ru' ? 'Последнее: ' : 'Last: '}
                       {formatDate(conv.lastTimestamp)}
                     </p>
                   </div>

@@ -67,9 +67,9 @@ check(/const normalizeDmMessage\s*=/.test(dmsApi),
 // identifier, not by a call paren: the two read sites pass it to `.map`, which
 // is a reference and not a call.
 const normalizerUses = (dmsApi.match(/normalizeDmMessage/g) || []).length;
-check(normalizerUses >= 5,
+check(normalizerUses >= 6,
   `every DM message read and mutation must go through normalizeDmMessage — found ` +
-  `${normalizerUses} mentions, want at least 5 (definition, older page, poll, edit, delete)`);
+  `${normalizerUses} mentions, want at least 6 (definition, older page, poll, send, edit, delete)`);
 
 // Both READ sites must go through it too, or a message fetched from the list and
 // the same message returned by an edit have two different shapes and merge into
@@ -80,7 +80,13 @@ check(mappedReads >= 2,
   `found ${mappedReads}`);
 
 // ── The mutations must RETURN the row they wrote ──────────────────────────
-for (const fn of ['editDmMessage', 'deleteDmMessage']) {
+// Sending joins this list for the same reason edit and delete did, with one
+// extra sting: a send is the COMMON case, and its author has no delivery path
+// either — publishDMSignalToPeers addresses the other participants only, and
+// shared-poll drops the fallback timer the moment realtime connects. The
+// reported "I pressed send and nothing appeared until I reloaded" was this
+// loop's missing third entry.
+for (const fn of ['sendDmMessage', 'editDmMessage', 'deleteDmMessage']) {
   const body = dmsApi.match(
 
     new RegExp(`export const ${fn} = async[\\s\\S]*?\\n};`)
@@ -116,6 +122,36 @@ for (const fn of handlers) {
   check(/refreshDmMessages\(/.test(code),
     `${fn} must nudge the thread read, so the sidebar preview and counters settle ` +
     'now instead of on some later tick');
+}
+
+// ── Sending has the SAME contract, plus the inbox ─────────────────────────
+//
+// REPORTED: "I pressed send — nothing appeared in the thread. I went back to
+// the list — the conversation was not there either. Only a reload brought
+// both back. And it does this in EVERY conversation."
+//
+// The thread half is the edit/delete defect one call up. The inbox half is
+// send-specific: for a conversation that was CLEARED, the server's own list
+// filter (`last_message_at > cleared_at`) keeps the row invisible until the
+// new message moves the timestamp — and only a list READ can observe that, so
+// without the refresh the member's own resumed thread stays off the screen.
+{
+  const body = thread.match(/const handleSend = async[\s\S]*?\n  \};/);
+  check(!!body, 'DirectMessages must still define handleSend');
+  if (body) {
+    const code = body[0];
+    check(/=\s*await\s+sendDmMessage\(/.test(code),
+      'handleSend must capture the result of sendDmMessage — an awaited-and-discarded ' +
+      'response is a write with no visible outcome');
+    check(/setMessages\(/.test(code),
+      'handleSend must push the sent row into thread state; the author receives no ' +
+      'signal for their own message, so nothing else will ever paint the bubble');
+    check(/refreshDmMessages\(/.test(code),
+      'handleSend must nudge the thread read, so the preview and counters settle now');
+    check(/refreshDmList\(/.test(code),
+      'handleSend must nudge the inbox read — a cleared-then-resumed conversation ' +
+      'is excluded by the server list filter until this read observes the new message');
+  }
 }
 
 // applyMessageUpdate must REPLACE the row, not spread over it.
@@ -217,14 +253,37 @@ check(signalCallSites === stateForwarded,
   `every subscribeToRealtimeSignals call must forward onStateChange — found ` +
   `${stateForwarded} forwarded at ${signalCallSites} call sites`);
 
+// ── Mark-read must settle the badge, not just the row ───────────────
+//
+// REPORTED: "messages are on screen, the badge stays". The thread POSTed
+// /dms/{id}/read and the server row moved — but the navbar/tab badge kept
+// the last POLLED value: the unread-counts poll has no timer while realtime
+// is connected, and no signal was published for a read. Both halves are
+// pinned: the client refreshes the counters off the committed read, and the
+// server wakes the reader's own counters with a dm.post nudge.
+const markReadBody = dmsApi.match(
+  /export const markDmRead = async[\s\S]*?\n};/
+);
+check(!!markReadBody, 'dms.js must still export markDmRead');
+if (markReadBody) {
+  check(/refreshUnreadCounts\(/.test(markReadBody[0]),
+    'markDmRead must refresh the unread counters after the POST — a committed ' +
+    'read with no re-read leaves the badge on the last polled value');
+  check(/refreshDmList\(/.test(markReadBody[0]),
+    'markDmRead must refresh the inbox read — its preview carries per-row ' +
+    'unread state that also goes stale');
+}
+
 if (failures.length > 0) {
   console.error(`DM mutation-state regressions (${failures.length}):\n`);
   for (const f of failures) console.error(`  - ${f}`);
   process.exit(1);
 }
 
-console.log('OK  dms: edit/delete return the row they wrote');
+console.log('OK  dms: send/edit/delete return the row they wrote');
 console.log('OK  dms: the thread applies it and converges the read');
+console.log('OK  dms: a send also converges the inbox read');
+console.log('OK  dms: a read also converges the badge, not just the row');
 console.log('OK  dms: no Firestore date accessors on PocketBase datetimes');
 console.log('OK  dms: a conversation reads a peer card, never the profile page');
 console.log('OK  realtime: health is the connection, so a quiet thread stays live');

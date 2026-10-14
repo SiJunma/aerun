@@ -1207,6 +1207,19 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 		return internalError("failed to update read sequence", err)
 	}
 
+	// Wake the reader's own counters. The unread-counts poll has no timer
+	// while the reader's realtime stream is connected (shared-poll stops it),
+	// and nothing else publishes on a read — so without this nudge the
+	// navbar/tab badge keeps the last POLLED value after the thread already
+	// marked everything read. Addressed to the READER, not the peers: their
+	// counters are untouched by somebody else catching up, and a conversation
+	// id is not something a non-member may learn from the stream.
+	//
+	// The thread treats every dm.post as "re-read me" without trusting the
+	// payload (dms.js subscribeToDmMessages), so reusing the topic is safe:
+	// no new row exists, the re-read just converges on the same state.
+	publishSignal(e.App, realtimeSignalDMPost, convID, e.Auth.Id)
+
 	// Reset the first-unread email dedupe: the conversation is fully read, so
 	// the NEXT unread message wave is a new "first unread" and must queue its own
 	// email (Firebase parity: email notification per unread wave).

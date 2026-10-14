@@ -363,13 +363,13 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
 // `senderUid` / `recipientUid` are no longer read: the backend derives both
 // from the auth token and refuses to let a client post as somebody else.
 export const sendDmMessage = async (conversationId, _senderUid, text, _recipientUid, idempotencyKey) => {
-  if (!conversationId || !text) return;
+  if (!conversationId || !text) return null;
   // Sent alongside the text for the same reason as on the forum: without the
   // map the `[roll=<id>]` tag in the body is an unresolved pointer, and a DM
   // rendered the raw tag on both sides of the conversation.
   const { content: processedContent, rolls } = processDiceRolls(text);
 
-  return await sendApi(`/api/aerun/dms/${conversationId}/messages`, {
+  const res = await sendApi(`/api/aerun/dms/${conversationId}/messages`, {
     method: 'POST',
     // A stable key per logical send. sendApi otherwise mints a fresh random one
     // per call, so a double-click that escapes the in-flight latch is two posts.
@@ -379,6 +379,14 @@ export const sendDmMessage = async (conversationId, _senderUid, text, _recipient
       ...(rolls && Object.keys(rolls).length > 0 ? { rolls } : {})
     }
   });
+
+  // Return the row, like every other mutation here — the contract is "the
+  // write returns what it wrote". The AUTHOR needs it more than anybody: a
+  // `dm.post` signal is addressed to the other participants only
+  // (publishDMSignalToPeers excludes the caller), and shared-poll removes the
+  // fallback timer the moment realtime CONNECTS, so this response is the only
+  // thing that can paint the sender's own bubble.
+  return res?.message ? normalizeDmMessage(res.message) : null;
 };
 
 // ── The correspondent ──────────────────────────────────────────────────────────
@@ -486,13 +494,28 @@ export const deleteDmMessage = async (messageId) => {
 
 /**
  * Reset unread count for current user in conversation.
+ *
+ * The server row moves on POST, but nobody re-reads it: the unread-counts
+ * poll has no timer while realtime is connected (shared-poll stops it), and
+ * the server publishes no signal for a read — so without an explicit refresh
+ * the navbar/tab badge keeps the last POLLED value. Same staleness the topic
+ * reads already fix via refreshUnreadCounts in AuthProvider.
+ *
+ * Best effort: a missed refresh only delays the badge to the next tick, never
+ * fails the read itself. `uid` scopes the shared resource per account, like
+ * refreshDmList does — a bare global refresh would repaint a signed-out member.
  */
-export const markDmRead = async (conversationId, _uid) => {
+export const markDmRead = async (conversationId, uid) => {
   if (!conversationId) return;
   try {
     await sendApi(`/api/aerun/dms/${conversationId}/read`, {
       method: 'POST'
     });
+    // The POST above already committed the read; these settle the badge and
+    // the inbox preview off the new state instead of waiting for a tick that
+    // may never come while realtime is connected.
+    refreshUnreadCounts(uid);
+    refreshDmList(uid);
   } catch (err) {
     console.warn('[markDmRead err]', err);
   }

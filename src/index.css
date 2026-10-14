@@ -307,11 +307,9 @@ body:not([data-theme]) .dm-bubble-peer a:hover {
   border: none;
   padding: 0;
   font-size: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  font-weight: 400;
   cursor: pointer;
-  opacity: 0.85;
+  opacity: 0.5;
   transition: opacity 0.15s ease, color 0.15s ease;
 }
 
@@ -3793,6 +3791,33 @@ a.rep-preview-name:hover {
   min-height: 44px;
 }
 
+/* Inbox row line 2: on wide screens it shows the last-message preview and the
+ * date lives on line 1 next to the name. The timestamp-only second line exists
+ * purely in the phone layout (<568px), where line 1 drops its date — so the
+ * timestamp is never rendered twice. */
+.dm-conversation-date-mobile {
+  display: none;
+}
+
+@media (max-width: 567.98px) {
+  /* Line 1 = nick only, line 2 = timestamp. The preview gives its place to the
+   * timestamp so nothing is doubled and the name keeps the full row width. */
+  .dm-conversation-date,
+  .dm-conversation-preview {
+    display: none !important;
+  }
+
+  .dm-conversation-date-mobile {
+    display: block !important;
+  }
+
+  /* Deleting a conversation on a phone happens from the chat header only —
+   * the list row keeps its space for the name and the date. */
+  .dm-trash-btn {
+    display: none !important;
+  }
+}
+
 /* Mobile/Tablet: stack vertically with compact pinned bottom editor and maximized message area */
 @media (max-width: 991.98px) {
 
@@ -3808,14 +3833,18 @@ a.rep-preview-name:hover {
   }
 
   body:has(.dm-fullscreen-card) main>.container {
-    padding-left: 0.25rem !important;
-    padding-right: 0.25rem !important;
+    /* Edge-to-edge: the DM section takes 100% width on tablets and below —
+     * no leftover side gutters once the layout reflows. */
+    padding-left: 0 !important;
+    padding-right: 0 !important;
     padding-bottom: 0 !important;
     max-width: 100% !important;
   }
 
   .dm-fullscreen-card {
-    border-radius: 0.75rem 0.75rem 0 0 !important;
+    /* Same as the inbox list: the card and its header sit flush, no rounded
+     * corners on tablets and below. */
+    border-radius: 0 !important;
     border-bottom: none !important;
     /* Maximize vertical room: takes entire height from navbar to bottom of mobile screen */
     height: calc(100vh - 56px) !important;
@@ -3827,6 +3856,8 @@ a.rep-preview-name:hover {
 
   .dm-fullscreen-card .card-header {
     padding: 0.35rem 0.75rem !important;
+    /* Beats the global `.card-header { border-radius: 0.75rem 0.75rem }`. */
+    border-radius: 0 !important;
   }
 
   .dm-chat-body {
