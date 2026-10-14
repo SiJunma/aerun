@@ -694,7 +694,13 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			}
 			other, err := txApp.FindRecordById(usersCollectionName, member.GetString("user_id"))
 			if err != nil || other == nil {
-				continue
+				// The member's users row is gone — the account was deleted
+				// without a cascade (relations are plain TEXT ids, so no DB
+				// cascade runs) or is a ghost that never imported. The thread
+				// survives so its history stays readable, but there is nobody on
+				// the other side to receive a new message. Refuse the write
+				// rather than silently dropping the reply into a void (D3).
+				return 0, nil, forbiddenError("cannot send message to a removed user")
 			}
 			if other.GetString("status") == string(auth.StatusBanned) {
 				return 0, nil, forbiddenError("cannot send message to a banned user")
@@ -860,11 +866,11 @@ func loadConversationParticipants(e *core.RequestEvent, rows []convRow) (map[str
 	// simply never looked up below.
 	memberSQL := `
 		SELECT dm.conversation_id AS conversation_id,
-		       u.id AS user_id,
-		       u.nickname AS nickname,
-		       u.avatar_url AS avatar_url
+		       dm.user_id AS user_id,
+		       COALESCE(u.nickname, '') AS nickname,
+		       COALESCE(u.avatar_url, '') AS avatar_url
 		FROM ` + dmMembersCollectionName + ` dm
-		JOIN ` + usersCollectionName + ` u ON u.id = dm.user_id
+		LEFT JOIN ` + usersCollectionName + ` u ON u.id = dm.user_id
 		WHERE dm.conversation_id IN (
 			SELECT conversation_id FROM ` + dmMembersCollectionName + ` WHERE user_id = {:user}
 		)`
@@ -1002,6 +1008,16 @@ func listConversationsHandler(e *core.RequestEvent) error {
 			"participants":       participantUIDs(peers),
 			"participantNames":   participantNames(peers),
 			"participantAvatars": participantAvatars(peers),
+			// True when the caller is the ONLY resolvable member: the peer's
+			// dm_members row is either gone entirely (a migration ghost that
+			// never imported) so the LEFT JOIN yields no row, or every other
+			// membership is the caller. The inbox must not navigate into such a
+			// thread — there is nobody to read or write to — it offers deletion
+			// instead (bug M2). An orphaned row from a runtime delete still
+			// yields one peer with an empty nickname, so peers is non-empty and
+			// this stays false: that thread keeps its real history readable and
+			// shows the gone member as a placeholder.
+			"peer_missing": len(peers) == 0,
 			// Keyed by member rather than a bare number: the inbox reads it as
 			// conv.unread[myUid]. This listing only ever describes the caller, so
 			// their entry is the only one there is to give.
