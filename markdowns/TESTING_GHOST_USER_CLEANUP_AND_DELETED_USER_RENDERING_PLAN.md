@@ -364,3 +364,167 @@ inbox: «User» без аватара (`DirectMessages.jsx:1058-1059`), тред
   отправки, soft-delete не вводим сейчас).
 - ~~плейсхолдеры в спринте/бэклог~~ → решено (I5: форма в бэклог, заглушка сейчас).
 
+
+---
+
+## J. РЕАЛИЗАЦИЯ D1/D3/D4 — дизайн правок (2026-10-13)
+
+Решение **I6-b**: чиним M2 в **рантайме PocketBase + фронте**, импортёр `social.go`
+НЕ трогаем. Точные якоря (контекст-стабильно, не зависит от сжатия):
+
+### J1. Backend `backend/internal/platform/pocketbase/dms.go`
+1. **loadConversationParticipants (~861)** — `JOIN users` → **LEFT JOIN users**,
+   `u.id AS user_id` → `dm.user_id AS user_id`, `COALESCE(u.nickname,'')`,
+   `COALESCE(u.avatar_url,'')`.
+   Почему: INNER JOIN выбрасывает строку `dm_members` для удалённого юзера
+   (orphan после `adminDeleteUserHandler` без каскада; связи — plain TEXT id, не
+   RelationField) → `peers=[]` → inbox рисует «User». LEFT JOIN сохраняет строку,
+   uid известен, имя/аватар пустые → плейсхолдер на фронте. Покрывает
+   **рантайм-удаление**. (Миграционный ghost без строки `dm_members` → peers=[],
+   покрывается peer_missing ниже.)
+2. **listConversationsHandler (~1002)** — добавить поле
+   `"peer_missing": len(peers)==0` к item. Вырожденный тред (единственный
+   резолвящийся участник = сам caller) → фронт рисует плейсхолдер и не открывает.
+3. **sendDMMessageHandler (~695)** — `if err!=nil||other==nil { continue }` →
+   `return forbiddenError("cannot send message to a removed user")`.
+   **D3**: блокировка отправки в тред с удалённым собеседником (orphan-строка).
+
+### J2. Frontend `src/components/dm/DirectMessages.jsx` (1057-1066)
+- `peerName`: `|| 'User'` → плейсхолдер `(lang==='ru'?'Удалённый пользователь':'Deleted user')`.
+- `onClick` строки inbox → guard `if (peerUid) openInboxConversation(conv)`.
+  **D4**: вырожденный тред некликабелен (не `/messages/undefined`); удаление —
+  через trash `promptDeleteConversation(conv.id)` (уже работает, stopPropagation).
+
+### J3. Тест
+- Регресс: тред с orphan `dm_members` → `peer_missing:true`/плейсхолдер; send → 403.
+
+### J4. НЕ в этом спринте (бэклог)
+- Настраиваемые плейсхолдеры (форма в настройках форума) — I5.
+- soft-delete пользователей.
+
+---
+
+## K. РЕГРЕСС-ТЕСТ — точные сигнатуры и якоря (2026-10-13)
+
+Собиран по мелким кускам, контекст-стабильно. Кусок K1 — сигнатуры хелперов:
+- `seedIdentityFixtures(t testing.TB, app *tests.TestApp) map[string]string` — http_test.go:94
+- `createTestUser(t testing.TB, app *tests.TestApp, id, email, nickname string, role auth.Role, status auth.Status) string` — http_test.go:107
+- `seedSecondPlayer(t testing.TB, app *tests.TestApp) (string, string)` — sprint5_test.go:22  (возвращает id, token)
+
+Кусок K2 — паттерн прямого сидирования треда (образец: `account_isolation_test.go:395-426`):
+- Получить коллекции: `app.FindCollectionByNameOrId("dm_conversations")`,
+  `...("dm_members")`.
+- Создать запись: `rec := core.NewRecord(coll); rec.Set("conversation_id", id); ...`
+  `app.Save(rec)`.
+- Удалить `users`-запись (симуляция рантайм-удаления, чтобы получить orphan-строку
+  `dm_members`): `rec, _ := app.FindRecordById("users", uid); app.Delete(rec)`.
+- Таблица/ответ списка декодируется из JSON-тела `listConversationsHandler`
+  (`GET /api/aerun/dm/conversations`) — массив items, у каждого `peer_missing`
+  (bool), `participants`, `participant_names`, `participant_avatars`.
+
+### K3. Что должен ассертить регресс-тест (2 кейса + D3)
+- **Case B — рантайм-удалённый реальный юзер (orphan-строка `dm_members` осталась):**
+  удалить `users/{uid}` → `listConversations` для собеседника: тред виден,
+  `peers` содержит 1 участника с пустым ником → `peer_missing:false`, история
+  читается (LEFT JOIN не выбросил строку). `sendDMMessageHandler` → **403**
+  (`cannot send message to a removed user`).
+- **Case C — вырожденный тред (только строка вызывающего, второго участника нет):**
+  `listConversations` → `peer_missing:true`. Фронт рисует плейсхолдер и НЕ
+  открывает (`/messages/undefined` невозможен), только удаление через trash.
+- **Контроль (оба участника живы):** `peer_missing:false`, send → 200.
+
+---
+
+## L. СТАТУС РЕАЛИЗАЦИИ (2026-10-13, закругление по просьбе владельца)
+
+Решения владельца зафиксированы: **I6-b** (M2 закрываем в рантайме, импортёр
+`social.go` НЕ трогаем) + D1/D3/D4 + чистка перенесена в миграцию (Firebase
+прод не трогаем). Ветка `feature/pocketbase-migration`.
+
+### L1. СДЕЛАНО в коде (правки стоят, ещё НЕ закоммичены)
+- **Backend `dms.go`:**
+  - `loadConversationParticipants` — INNER→**LEFT JOIN** + `COALESCE` на
+    nickname/avatar → корень M2 (orphan-строка удалённого участника больше не
+    выпадает из выдачи). ✅
+  - `listConversationsHandler` — поле ответа **`peer_missing: len(peers)==0`**. ✅
+  - `sendDMMessageHandler` — отправка удалённому → **`forbiddenError("cannot
+    send message to a removed user")`** (D3). ✅
+  - `gofmt` применён, `go build ./...` и `go vet ./...` чистые (проверено ранее).
+- **Frontend `DirectMessages.jsx`:**
+  - `openInboxConversation` — guard от `undefined` (нет навигации в
+    `/messages/undefined`) (D4). ✅
+  - inbox-строка — плейсхолдер имени вместо «User»
+    (`Удалённый пользователь` / `Deleted user`) (D1). ✅
+  - клик по строке — guard `if (peerUid)`; удаление через trash `conv.id`
+    (`stopPropagation`) уже работает. ✅
+
+### L2. ОСТАЛОСЬ (единственный незавершённый пункт — регресс-тест J3/K)
+- Написать `TestInboxDeletedPeerPlaceholder` (или дописать в
+  `dm_inbox_participants_test.go`) по якорям K1–K3: сидировать тред, удалить
+  `users/{uid}` → ассерт `peer_missing` + плейсхолдера + send 403; контрольный
+  кейс — оба живы → 200.
+- Затем: `go test ./internal/platform/pocketbase/ -run <TestName>`, `gofmt -w`,
+  `go vet`, коммит.
+- Замечание для следующей сессии: **НЕ читать всё за раз** (контекст сжимается и
+  уходит в петлю). Писать тест сразу по K1–K3, компилятор/`go test` укажут на
+  неточности сигнатур.
+
+### L3. Задок. бэклог (вне этого спринта, см. I4/I5 + Archive_Claude Review I8)
+- `onUserDeleted` (functions/index.js) чистит только Auth/RTDB/forum_stats —
+  не чистит users-подколлекции/posts/topics/reputation_logs/subscriptions/dms.
+- `adminDeleteUserHandler` — чистый delete без каскадов (связи plain TEXT id).
+- Настраиваемые плейсхолдеры «удалён/гость» в настройках форума (форма загрузки).
+- soft-delete пользователей; «удалить все сообщения юзера» при удалении.
+- Каскад-чистка `dm_members` при удалении юзера (чтобы orphan-строки не копились).
+
+
+
+---
+
+## M. ИТОГ: что уже сделано в коде, что осталось (зафиксировано 2026-10-13)
+
+### M1. Правки УЖЕ применены (3 файла, build+vet чистые на момент сдачи)
+
+**Backend `backend/internal/platform/pocketbase/dms.go`**
+- `loadConversationParticipants` (~867): INNER JOIN → **LEFT JOIN** + `COALESCE(nickname,'')`/`COALESCE(avatar,'')`. Осиротевшая строка `dm_members` (реальный удалённый юзер) больше не выпадает — остаётся с пустым ником → история читается.
+- `listConversationsHandler` (~1020): в item добавлен флаг **`peer_missing: len(peers) == 0`**. Различает два кейса: M2-оболочку миграции (строки `dm_members` для ghost нет → `peers=[]` → `peer_missing=true`) от осиротевшей строки runtime-удалённого (`peers=1`, ник пустой → `peer_missing=false`).
+- `sendDMMessageHandler` (~696): гард отправки — если `other == nil` (собеседник удалён) → отказ вместо молчаливого пропуска. **D3 (backend-часть).**
+
+**Frontend `src/components/dm/DirectMessages.jsx`**
+- `openInboxConversation` (~467): guard от `undefined` — не навигируем в `/messages/undefined`. **D4.**
+- Строка inbox (~1063): если `peerUid` не резолвится → имя-плейсхолдер «Удалённый пользователь» вместо «User». **D1 (имя).**
+- Guard клика `if (peerUid)` (~1069): клик по вырожденной строке не открывает пустоту (удаление треда уже работает по `conv.id` через `promptDeleteConversation`). **D4.**
+
+### M2. СДЕЛАНО в этой сессии (2026-10-13) — регресс-тест + единый аватар-плейсхолдер
+
+1. **Регресс-тест (J3) ✅** — `backend/internal/platform/pocketbase/dm_deleted_peer_test.go`
+   (`TestInboxDeletedPeerPlaceholder`). Эталон сидирования — `account_isolation_test.go:405`
+   (прямой `core.NewRecord` в `dm_conversations`+`dm_members`), хелперы `seedIdentityFixtures`/
+   `seedSecondPlayer`/`createTestUser`. Три подкейса, все зелёные:
+   - **Case B (runtime-удалён):** сид треда на 2 участника → `app.Delete(users-record)` второго
+     → список собеседника: `peer_missing=false`, `participants=[peer]`, `participantNames[peer]=""`
+     (present-but-empty), `participantAvatars[peer]` есть; `GET .../messages` → 200 (история
+     читается); `POST .../messages` → **403** (D3).
+   - **Case C (ghost-оболочка):** тред только с `dm_members` вызывающего → `peer_missing=true`,
+     `participants=[]`.
+   - **Контроль (оба живы):** `peer_missing=false`, ник резолвится в «PlayerTwo», send → 200.
+   - Проверено: `gofmt`, `go vet`, полный пакет `go test ./internal/platform/pocketbase/` — `ok`.
+2. **Аватар-плейсхолдер (I3, D1-остаток) ✅ — единая точка `src/utils/identity.js`:**
+   - `deletedDisplayName(lang)` — локализуемое имя «Удалённый пользователь» / «Deleted user».
+   - `placeholderAvatarUrl(seed, size)` — единый `ui-avatars?name=U&background=666&color=fff`
+     (серый «U», не DiceBear-«Guest»), одинаковый во всех поверхностях.
+   - Подключён в **постах/миниатюрах** (`ForumAuthorName`: пустое имя → `deletedDisplayName`;
+     `ForumAuthorAvatar`: нет имени → `placeholderAvatarUrl`; живой без фото по-прежнему
+     DiceBear-by-name) и в **DM** (`DirectMessages.jsx`: inbox-строка имя+аватар, шапка чата,
+     баббл — все через хелперы, инлайновый `ui-avatars`/`default-avatar` убран).
+   - Признак кейса — **отсутствие имени** (forum_authors.go не декорирует удалённого → нет
+     `author_name`), а не пустой id: живой участник без аватара сохраняет свои инициалы.
+   - Форма загрузки кастом-плейсхолдеров в настройках форума → **бэклог (I5).**
+3. **Коммит** правок — см. историю (dms.go + DirectMessages.jsx + ForumAuthorName/Avatar +
+   identity.js + dm_deleted_peer_test.go + этот план).
+
+### M3. Принципы, зафиксированные решениями владельца
+- **I6-b:** M2 лечим в рантайме (плейсхолдер + блокировка + удаление), импортёр (`social.go`) НЕ трогаем. Правило «оба участника» (I6-a) — отложенная страховка.
+- Общая политика C-b (I2): диалог живёт, пока существует ≥1 участник; удаление мусорного треда — через UI.
+- PocketBase БД не чистим вручную (I1-часть: чистка перенесена в момент миграции дампа; прямая чистка Firebase отменена).
+

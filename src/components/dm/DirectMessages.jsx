@@ -28,6 +28,7 @@ import Timestamp from '../common/Timestamp';
 import ErrorCard from '../common/ErrorCard';
 import ConfirmModal from '../common/ConfirmModal';
 import { PERMISSIONS } from '../../constants/permissions';
+import { deletedDisplayName, placeholderAvatarUrl } from '../../utils/identity';
 
 /**
  * DirectMessages component
@@ -465,7 +466,12 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
   // ── Open chat from inbox click ───────────────────────────────────────────
   const openInboxConversation = (conv) => {
-    const peerUid = conv.participants.find(p => p !== myUid);
+    const peerUid = (conv.participants || []).find(p => p !== myUid);
+    // A degenerate thread (peer_missing / a migration ghost) has no participant
+    // to navigate to. Guard the read so the row never throws on undefined.find
+    // and never navigates to /messages/undefined (bug M2); the trash button
+    // still removes it.
+    if (!peerUid) return;
     navigate(`/messages/${peerUid}`);
   };
 
@@ -703,10 +709,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             <ArrowLeft size={18} color="#ffffff" />
           </Button>
           <Image
-            src={resolveAvatarUrl(activePeer.avatar) || `https://ui-avatars.com/api/?name=${encodeURIComponent(activePeer.name)}&background=random`}
+            src={resolveAvatarUrl(activePeer.avatar) || placeholderAvatarUrl(activePeer.name, 32)}
             roundedCircle
             style={{ width: '32px', height: '32px', objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.2)' }}
-            onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(activePeer.name)}&background=666&color=fff`; }}
+            onError={(e) => { e.target.onerror = null; e.target.src = placeholderAvatarUrl(activePeer.name, 32); }}
           />
           <div className="d-flex align-items-center gap-2 min-w-0">
             <Link
@@ -795,7 +801,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     >
                       {!isMe && (
                         <Image
-                          src={resolveAvatarUrl(activePeer?.avatar) || '/default-avatar.png'}
+                          src={resolveAvatarUrl(activePeer?.avatar) || placeholderAvatarUrl(activePeer?.name, 32)}
                           roundedCircle
                           className="me-2"
                           style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', flexShrink: 0, objectFit: 'cover' }}
@@ -1055,7 +1061,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
           <div className="d-flex flex-column gap-2">
             {visibleConversations.map((conv) => {
               const peerUid = conv.participants?.find(p => p !== myUid);
-              const peerName = conv.participantNames?.[peerUid] || 'User';
+              // peerName is what the row PRINTS (localized "Deleted user" when the
+              // peer is gone); peerRawName is the value the avatar is seeded from.
+              // The two must differ: seeding the avatar with the localized label
+              // would give a deleted account a language-dependent initial. The raw
+              // entry is empty for a removed peer, so the shared helper draws the
+              // one neutral "U" in every surface and language (plan D1).
+              const peerRawName = conv.participantNames?.[peerUid] || '';
+              const peerName = peerRawName || deletedDisplayName(lang);
               const peerAvatar = conv.participantAvatars?.[peerUid] || '';
               const unreadCount = conv.unread?.[myUid] || 0;
               return (
@@ -1063,17 +1076,17 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   key={conv.id}
                   className="d-flex align-items-center gap-3 p-2 rounded cursor-pointer"
                   style={{ cursor: 'pointer', transition: 'background 0.15s' }}
-                  onClick={() => openInboxConversation(conv)}
+                  onClick={() => { if (peerUid) openInboxConversation(conv); }}
                   onMouseEnter={(e) => e.currentTarget.style.background = 'var(--block-bg)'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   role="button"
                 >
                   <div className="position-relative">
                     <Image
-                      src={resolveAvatarUrl(peerAvatar) || `https://ui-avatars.com/api/?name=${encodeURIComponent(peerName)}&background=random`}
+                      src={resolveAvatarUrl(peerAvatar) || placeholderAvatarUrl(peerRawName, 44)}
                       roundedCircle
                       style={{ width: '44px', height: '44px', objectFit: 'cover', flexShrink: 0 }}
-                      onError={(e) => { e.target.onerror = null; e.target.src = `https://ui-avatars.com/api/?name=U&background=666&color=fff`; }}
+                      onError={(e) => { e.target.onerror = null; e.target.src = placeholderAvatarUrl(peerRawName, 44); }}
                     />
                     {unreadCount > 0 && (
                       <Badge

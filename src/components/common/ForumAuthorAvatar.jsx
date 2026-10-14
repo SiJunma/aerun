@@ -2,6 +2,7 @@ import React from 'react';
 import { Image } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
 import { resolveAvatarUrl } from '../../api/avatars';
+import { placeholderAvatarUrl } from '../../utils/identity';
 
 // In-memory cache for avatar URLs
 const avatarCache = new Map();
@@ -32,7 +33,15 @@ const ForumAuthorAvatar = ({
   }
 
   const cachedAvatar = cacheKey ? avatarCache.get(cacheKey) : null;
-  const placeholder = `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName || 'Guest')}&size=${size}`;
+  // A live member who simply never uploaded a photo keeps the initials-from-
+  // their-name avatar. An author with NO name at all is a REMOVED account
+  // (forum_authors.go leaves the payload undecorated), and it must draw the SAME
+  // placeholder the DM inbox draws — the single identity.js helper — so a
+  // deleted author reads identically everywhere (bug M2), not as a DiceBear
+  // "Guest" here and a gray "U" there.
+  const placeholder = fallbackName
+    ? `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName)}&size=${size}`
+    : placeholderAvatarUrl('U', size);
   // Every author snapshot (topics, posts, drafts, last-post info) arrives here,
   // so this is the single place that has to turn a stored avatar reference into
   // something loadable — the importer writes a host-agnostic /api/files path,
