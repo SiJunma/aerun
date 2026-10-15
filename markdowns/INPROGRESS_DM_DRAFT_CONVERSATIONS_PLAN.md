@@ -412,35 +412,25 @@ in-app записей в `notifications` у ЛС нет по дизайну (к�
   `startConversationWithMessage`, гейт `isDraftId`) — требование «расширить,
   не ослабить». Серверная защита от гонки — отдельно, S4.
 
-- [~] **S4. Сервер: гонка одновременной первой отправки — ЧАСТИЧНО,
-  ЗАМОРОЗКА ЗДЕСЬ.** Сделано в `backend/internal/platform/pocketbase/dms.go`:
+- [~] **S4. Сервер: гонка одновременной первой отправки — ГОТОВО (код + тест).**
+  В `backend/internal/platform/pocketbase/dms.go`:
   1) хелпер **`findPairConversationID(app, user, peer)`** — тот же SQL, что у
-  `findConversationWithPeerHandler`, вынесенный чтобы эндпоинт и re-check не
-  расходились; 2) хелпер **`appendMessageToConversation(txApp, conv, senderMem,
-  senderNick, cleanText, rolls)`** — единая реализация «дозаписи в
-  существующую конверсацию»: проверки других участников (removed/banned/
-  live-право `use_direct_messages`), `sequence = messages_count + 1`, правка
-  `last_message`/`last_message_at`/`messages_count`, `last_read_sequence`
-  автора, `publishSignal(dm.post)` + `maybeEnqueueDMEmail`; 3)
-  `sendDMMessageHandler` переведён на этот хелпер (тело ~L833-891 бывшего
-  inline-кода удалено, дублирование устранено). `go build ./...` зелёный.
-  **ОСТАЛОСЬ (точки входа найдены, порядок ниже):**
-  - в `createDMHandler` после цикла валидации `recipientUsers` (~L525) и ПЕРЕД
-    `// 1. Create dm_conversations record.` (~L527): `if len(recipients)==1` →
-    `findPairConversationID(txApp, e.Auth.Id, recipients[0])`; при непустом id →
-    `FindRecordById(conv)` + `FindFirstRecordByFilter(dm_members …user_id=e.Auth.Id)`
-    → `appendMessageToConversation(...)` → `return 200 {conversation_id, sequence,
-    message, request_id}` (ветка INSERT не выполняется);
-  - перевести `findConversationWithPeerHandler` (~L1063, СНАЧАЛА перечитать
-    весь хендлер — правило AGENTS про контекст-хаки) на `findPairConversationID(e.App, …)` —
-    сейчас хелпер НЕ используется, SQL продублирован;
-  - Go-тест по образцу `sprint5_test.go` L400+ (`TestSprint5DMConcurrency`):
-    два goroutine, `POST /dms` player→player2 и player2→player, разные
-    Idempotency-Key → assert: 1 конверсация, sequence {1,2}, оба текста в
-    ленте, `messages_count==2`. Имя теста обязано содержать `DM`
-    (`go test … -run DM`).
-  Чекпоинт: сценарий 7б; `go test ./internal/platform/pocketbase/ -run DM`
-  зелёный; CI `ci-report` зелёный после пуша.
+  `findConversationWithPeerHandler` (хендлер теперь вызывает хелпер, SQL не
+  дублируется); 2) хелпер **`appendMessageToConversation(txApp, conv, senderMem,
+  senderNick, cleanText, rolls)`** — единая реализация записи в существующую
+  конверсацию (проверки removed/banned/live-право, `sequence = messages_count +
+  1`, preview/count, watermark автора, `dm.post` + email); 3) re-check в
+  `createDMHandler` перед INSERT: при находке пары — `appendMessageToConversation`
+  и возврат 200 с `{conversation_id, sequence, message, request_id}`; 4)
+  `sendDMMessageHandler` переведён на общий хелпер (дублирование устранено).
+  Go-тест **`TestDMRaceTwoFirstSendsShareOneConversation`** (dm_race_test.go):
+  два параллельных `POST /dms` на одну пару, разные Idempotency-Key → одна
+  конверсация, sequence 1+2, оба текста, `messages_count==2`, корректные
+  watermarks. `go build`, `go vet`, `gofmt` (кроме предсуществующего
+  `category_commands.go`), полный `go test ./internal/platform/pocketbase/`
+  (308s) — зелёные.
+  Чекпоинт: сценарий 7б; `go test … -run DM` зелёный — ВЫПОЛНЕНО.
+  Остальное S4 — пуш + CI `ci-report` (S9).
 
 - [~] **S5. Inbox: строки драфтов, единая сортировка, client-only удаление —
   КОД ГОТОВ.** `inboxRows` собирается ПОСЛЕ `visibleConversations`
@@ -455,20 +445,16 @@ in-app записей в `notifications` у ЛС нет по дизайну (к�
   (`draft_badge`/`draft_preview`/`draft_deleted` — последний подключён к
   тосту `t('dm.draft_deleted')`); prune на каждом обновлении списка +
   гидратация `listDrafts` на маунте (F5, требование 2).
-  Чекпоинт: сценарии 2/4/6 вручную — НЕ гонялись; `npm test` — не гонялся.
+  Чекпоинт: сценарии 2/4/6 — `npm test` теперь зелёный (запущен полностью);
+  ручную матрицу два аккаунта — СМ. S9.
 
-- [ ] **S6. Дедуп повторных открытий (требование 5).** Частично заложено:
-  `openChatDoneRef` инвалидируется в `handleConfirmDelete` (`delete`),
-  `handleSend` (set real id) и supersede-эффекте (set real id).
-  **Открытая находка: в колбэке `subscribeToDmList` при
-  `setDrafts(pruneDrafts(...))` done-ref НЕ инвалидируется** — после prune
-  может остаться устаревший `draft_*` id; для открытого чата это чинит
-  supersede-эффект (краткий пустой рендер → подмена), для закрытого — при
-  навигации возможен такой же кадр. Решение: удалять из done-ref всех
-  pruned-пиров прямо в колбэке (или сверять с `listDrafts`). Далее проверить
-  все пути: двойной клик, повторный клик из профиля/участников, две вкладки,
-  открытие из inbox.
-  Чекпоинт: сценарий 5 — всегда одна строка, один id.
+- [~] **S6. Дедуп повторных открытий (требование 5) — ГОТОВО (код).**
+  `openChatDoneRef` инвалидируется в `handleConfirmDelete` (delete), `handleSend`
+  (set real id), supersede-эффекте (set real id), и теперь — в колбэке
+  `subscribeToDmList`: после `pruneDrafts` все draft-записи в done-ref, чей пир
+  появился в реальном списке, удаляются (только draft-`). Решение найденной
+  находки: не чистились done-ref при prune → могли оставить старый `draft_*`.
+  Чекпоинт: сценарий 5 — код заложен; ручная проверка — СМ. S9.
 
 - [~] **S7. Автосохранение композера (требование 8) — КОД ГОТОВ (в составе
   S3).** Wiring `loadComposerText`/`saveComposerText`/`clearComposerText` в
@@ -476,37 +462,33 @@ in-app записей в `notifications` у ЛС нет по дизайну (к�
   драфта), запись debounce 400ms, перенос текста под новый ключ при supersede
   draft→real, очистка только после успешной отправки, чистка ключа вместе с
   удалением драфта и при clear реального диалога.
-  Чекпоинт: сценарий 8 вручную (F5/навигация/supersede/неудачная отправка) —
-  НЕ гонялся; `npm test` — не гонялся.
+  Чекпоинт: `npm test` зелёный; ручная матрица — СМ. S9.
 
-- [ ] **S8. Бейдж на иконке ЛС (требование 7) — НЕ НАЧАТ.** Дописать в
-  `check-dm-draft-conversations.mjs` source-shape проверки:
-  - `src/api/dms.js` не содержит литерал `'Conversation started'` —
-    **ОБЯЗАТЕЛЬНО после `stripComments`** (готовый stripComments есть в
-    `check-dm-mutation-state.mjs`): в `dms.js` он остался в комментариях
-    (конвенция «comment quotes the offending expression»), проверка сырого
-    текста даст ложный срабатыватель;
-  - `POST /api/aerun/dms` встречается в `dms.js` только внутри
-    `startConversationWithMessage` и НЕ в `resolveConversation` (вырезать
-    тела функций regex-ом, как это делает `check-dm-mutation-state.mjs`);
-  - `DirectMessages.jsx`: эффект подписки, `handleConfirmDelete` и вызов
-    `markDmRead` защищены `isDraftId(` (все три уже есть в коде);
-  - по коду `openChat` и `handleConfirmDelete`: открытие/удаление драфта не
-    вызывает write-API (в `openChat` — только `resolveConversation`, в
-    draft-ветке удаления — `removeDraft`/`clearComposerText`, до
-    `return;` нет `deleteConversation`/`refreshDmList`);
-  - плюс прогнать ручной сценарий 7 (два аккаунта: бейдж и email у B —
-    только после первой реальной отправки; при открытии/удалении драфта —
-    никогда).
-  Чекпоинт: сценарий 7 зелёный, `npm test` зелёный.
+- [~] **S8. Бейдж на иконке ЛС (требование 7) — ГОТОВО (гейты).**
+  `check-dm-draft-conversations.mjs` расширен блоком source-shape (4 новые
+  проверки: нет литерала `'Conversation started'` в коде, `POST /api/aerun/dms`
+  только в `startConversationWithMessage`, эффект подписки и `markDmRead`
+  guardiaтся `isDraftId`, draft-удаление client-only, `openChat` резолвит но не
+  создаёт). `check-dm-mutation-state.mjs` расширен проверками ветки первой
+  отправки из драфта (`isDraftId(activeChatId)`, `startConversationWithMessage`,
+  `clearComposerText`, `removeDraft`). Оба гейта зелёные внутри `npm test`.
+  i18n `draft_badge`/`draft_preview`/`draft_deleted` (ru+en) добавлены и
+  подключены. Ручной сценарий 7 (два аккаунта, бейдж и email только после первой
+  реальной отправки) — СМ. S9.
 
-- [ ] **S9. Регресс — НЕ НАЧАТ.** Полный `npm test`, `npm run lint:js`,
-  `cd backend && gofmt -l . && go vet ./... && go test ./internal/platform/pocketbase/`,
-  ручной прогон всей матрицы (требования 1–8, включая 7б) + старые
-  DM-сценарии (edit/delete/tombstone, clear, бейдж непрочитанного).
-  После пуша: `git fetch origin ci-report && git show origin ci-report:report.json`.
-  Чекпоинт: всё зелёное + статус этого файла → `DONE_...` с датой и
-  результатами S1–S9.
+- [~] **S9. Регресс — АВТОМАТИКА ГОТОВА, ручная матрица pending (владелец).**
+  `npm test` — EXIT=0 (все 26 гейтов включая `test:dm-draft-conversations` и
+  `test:dm-mutation-state`, `lint:js` — 0 ошибок, 1 предупреждение в
+  `ProfilePage.jsx`, не связанное с изменениями). `cd backend && gofmt -l .`
+  чист (кроме предсуществующего `category_commands.go`, закоммичено в
+  `36d9737`, не трогалось), `go vet` чист, полный
+  `go test ./internal/platform/pocketbase/` — PASS.
+  Ручной прогон всей матрицы требований 1–8 (включая 7б) двумя аккаунтами +
+  старые DM-сценарии (edit/delete/tombstone, clear, бейдж непрочитанного) —
+  делает владелец на стенде. После пуша: `git fetch origin ci-report &&
+  git show origin ci-report:report.json` должно быть зелёным.
+  Чекпоинт: статус этого файла → `DONE_...` с датой и результатами S1–S9 —
+  после ручной приёмки владельцем.
 
 ## Edge cases (спроектировано, проверить при приёмке)
 

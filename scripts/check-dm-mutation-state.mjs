@@ -153,6 +153,19 @@ for (const fn of handlers) {
     check(/refreshDmList\(/.test(code),
       'handleSend must nudge the inbox read — a cleared-then-resumed conversation ' +
       'is excluded by the server list filter until this read observes the new message');
+    // ── Draft first-send branch (S3) ─────────────────────────────────────────
+    check(/isDraftId\(activeChatId\)/.test(code),
+      'handleSend must branch on isDraftId(activeChatId) — opening a draft writes ' +
+      'nothing, the first real message is the only write');
+    check(/startConversationWithMessage\(/.test(code),
+      'handleSend must use startConversationWithMessage for the draft first-send — ' +
+      'the real conversation is created together with the first real message');
+    check(/clearComposerText\(/.test(code),
+      'handleSend must clear the composer text only on success — a failed send ' +
+      'must leave the typed words in place');
+    check(/removeDraft\(/.test(code),
+      'handleSend must prune the draft when the thread becomes real — a draft ' +
+      'must not linger beside its real conversation');
   }
 }
 

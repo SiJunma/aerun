@@ -8,12 +8,19 @@
 // idempotency, its per-account isolation, its merge-on-real-conversation, its
 // healing of a corrupted blob, and the composer autosave helpers.
 //
-// The source-shape checks (no 'Conversation started' literal, POST only in
-// startConversationWithMessage, isDraftId guards) are added by later sprints as
-// the code they describe lands; this file owns the module behaviour.
+
+// The source-shape checks (see the contract block at the end of this file) are
+// what the execution tests above cannot pin: that opening or deleting a DRAFT
+// performs no write-API call. They run against the SHIPPED sources after
+// stripping comments — the 'Conversation started' phrase survives in
+// doc-comments BY DESIGN, so a raw grep would be a false positive.
 //
 // Run: node scripts/check-dm-draft-conversations.mjs
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
 
 // A localStorage stand-in shaped like the real Storage object, including
 // key(i)/length iteration, so a fake that leaned on a plain object cannot pass
@@ -172,8 +179,127 @@ const ok = (message) => { passed += 1; console.log(`  ok  ${message}`); };
     [...store._raw.keys()].every((k) => k.startsWith(COMPOSER_PREFIX) || k.startsWith(DRAFT_PREFIX)),
     'composer text lives under its own prefix',
   );
+
+// ── Source-shape contract: drafts never touch the server ───────────────────
+{
+  const failures = [];
+  const scheck = (cond, message) => { if (!cond) failures.push(message); };
+
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:"'`])\/\/.*$/gm, '$1');
+
+  const dmsApi = stripComments(read('../src/api/dms.js'));
+  const thread = stripComments(read('../src/components/dm/DirectMessages.jsx'));
+
+  // 1. No seed literal in executable code: opening must not know the phrase.
+  scheck(
+    !/'Conversation started'/.test(dmsApi),
+    'dms.js must not contain \'Conversation started\' outside comments — ' +
+    'the seed opens wrote before anybody typed',
+  );
+
+  // 2. The first send is the only write a new dialog makes, and it has one
+  // call site. The opener's path stays read-only.
+  const resolveBody = dmsApi.match(/export const resolveConversation = async[\s\S]*?\n\};/);
+  scheck(!!resolveBody, 'dms.js must still export resolveConversation');
+  if (resolveBody) {
+    scheck(
+      !/\/api\/aerun\/dms/.test(resolveBody[0]),
+      'resolveConversation must never touch /api/aerun/dms — known list, then ' +
+      'the peer lookup; the create branch is gone',
+    );
+  }
+  const startBody = dmsApi.match(/export const startConversationWithMessage = async[\s\S]*?\n\};/);
+  scheck(!!startBody, 'dms.js must still export startConversationWithMessage');
+  if (startBody) {
+    scheck(
+      /POST/.test(startBody[0]) && /\/api\/aerun\/dms/.test(startBody[0]),
+      'startConversationWithMessage must be the POST /api/aerun/dms call site',
+    );
+    scheck(
+      /res\?\.message/.test(startBody[0]),
+      'startConversationWithMessage must surface res.message — the author paints ' +
+      'their own bubble from the response, no signal exists for it',
+    );
+  }
+
+
+  // 3. Subscription branches drafts into an explicit empty feed: subscribing
+  // a draft id would GET .../draft_x/messages and draw a 403 every open.
+  const subscribeEffect = thread.match(/isDraftId\(activeChatId\)[\s\S]*?\}, \[activeChatId, myUid, messageLimit\]\);/);
+  scheck(!!subscribeEffect, 'DirectMessages must keep the message-subscription effect');
+  if (subscribeEffect) {
+    scheck(
+      /isDraftId\(activeChatId\)/.test(subscribeEffect[0]),
+      'the subscription effect must branch on isDraftId(activeChatId) — a draft ' +
+      'has no server thread, so it gets zero requests',
+    );
+  }
+
+  // 4. Delete takes a client-only branch: no deleteConversation, no refresh.
+  const deleteBody = thread.match(/const handleConfirmDelete = async[\s\S]*?\n  \};/);
+  scheck(!!deleteBody, 'DirectMessages must still define handleConfirmDelete');
+  if (deleteBody) {
+    scheck(
+      /isDraftId\(convId\)/.test(deleteBody[0]),
+      'handleConfirmDelete must branch on isDraftId(convId)',
+    );
+    const draftBranch = deleteBody[0].match(/if \(isDraftId\(convId\)\)[\s\S]*?return;/);
+    if (draftBranch) {
+      scheck(
+        !/deleteConversation\(/.test(draftBranch[0]),
+        'the draft branch must not call deleteConversation',
+      );
+      scheck(
+        !/refreshDmList\(/.test(draftBranch[0]),
+        'the draft branch must not refreshDmList — the draft was never in the list',
+      );
+    } else {
+      failures.push('handleConfirmDelete must return early from its isDraftId branch');
+    }
+  }
+
+  // 5. Mark-read never fires for a draft id: no server row exists to mark.
+  scheck(
+    /!isDraftId\(activeChatId\)[\s\S]{0,300}markDmRead\(/.test(thread),
+    'a markDmRead call must be guarded by !isDraftId(activeChatId)',
+  );
+
+  // 6. openChat resolves, never creates: creation belongs to handleSend only.
+  const openChatBody = thread.match(/const openChat = async \(peerUid, peerInfo\)[\s\S]*?\n  \};/);
+  scheck(!!openChatBody, 'DirectMessages must still define openChat');
+  if (openChatBody) {
+    scheck(
+      /resolveConversation\(/.test(openChatBody[0]),
+      'openChat must resolve through resolveConversation',
+    );
+    scheck(
+      !/startConversationWithMessage\(/.test(openChatBody[0]),
+      'openChat must not create — first send lives in handleSend only',
+    );
+    scheck(
+      !/sendApi\(/.test(openChatBody[0]),
+      'openChat must not call sendApi directly — resolve decisions live in dms.js',
+    );
+  }
+
+  if (failures.length > 0) {
+    console.error(`\ndraft-conversations source-shape contract BROKEN (${failures.length}):`);
+    for (const f of failures) console.error(`  - ${f}`);
+    process.exit(1);
+  }
+  ok('shape: no seed literal, POST only in startConversationWithMessage');
+  ok('shape: subscription effect and mark-read guard drafts');
+  ok('shape: draft delete is client-only');
+  ok('shape: openChat resolves, never creates');
+}
+
+console.log(`\n[OK] draft DM conversations: ${passed} checks passed (incl. source shape)`);
+
   ok('composer text is stored under the dedicated composer prefix');
 }
 
-console.log(`\n[OK] draft DM conversations: ${passed} checks passed`);
+// Execution contract lives above; the source-shape contract closes this file
+// (its final console.log is the gate's last line).
+console.log(`\n[OK] draft DM conversations: ${passed} module checks passed`);
 

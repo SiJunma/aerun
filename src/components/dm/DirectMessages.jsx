@@ -210,7 +210,19 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
         // peer's `dm.post` signal, which is addressed to the recipient) re-runs
         // pruneDrafts, so a draft whose peer now has a real conversation is
         // replaced by the real row instead of lingering beside it.
-        setDrafts(pruneDrafts(myUid, convs));
+        // A draft that disappears here must also drop out of the openChat
+        // cache: a stale `draft_*` id in openChatDoneRef would otherwise win
+        // over a fresh resolve and flash an empty draft row before the
+        // supersede effect converges it onto the real thread. Only draft
+        // entries are touched — a cached REAL id must never be evicted here.
+        const survivors = pruneDrafts(myUid, convs);
+        const survivorsPeers = new Set(survivors.map((d) => d.peerUid));
+        for (const [peerUid, cachedId] of openChatDoneRef.current.entries()) {
+          if (isDraftId(cachedId) && !survivorsPeers.has(peerUid)) {
+            openChatDoneRef.current.delete(peerUid);
+          }
+        }
+        setDrafts(survivors);
         setLoadingConvs(false);
       },
       (err) => {
