@@ -221,6 +221,32 @@ if (peerHandler) {
     'GET /peers/{id} must be registered, or the client call 404s');
 }
 
+// ── A migration ghost must be hidden, not shown as a nameless row ─────────
+//
+// REPORTED (M2): after migration a member saw an empty chat with a nameless
+// "User", no avatar, that would not open. That shape is a migration ghost —
+// the peer's dm_members row never imported, so the server resolves NO other
+// member and flags it `peer_missing: true`. The owner's call was explicit:
+// stop falling back to empty defaults, just don't show that junk.
+//
+// The inbox filter must drop peer_missing rows. A runtime-DELETED peer is a
+// DIFFERENT shape (its membership row survives with an empty nickname), so it
+// stays visible with the "Deleted user" placeholder — only the true ghost,
+// where the server found no other member at all, is filtered out.
+const visibleConvs = thread.match(/const visibleConversations = [\s\S]*?\n  \}\);/);
+check(!!visibleConvs, 'DirectMessages must keep the visibleConversations inbox filter');
+if (visibleConvs) {
+  check(/peer_missing/.test(visibleConvs[0]),
+    'visibleConversations must drop migration ghosts (peer_missing) — rendering one as a ' +
+    'nameless "User" with a dead avatar that will not open is the exact junk bug M2 asked ' +
+    'us to stop showing; a runtime-deleted peer (peer_missing=false) keeps its placeholder');
+
+  // The backend must keep producing the flag the filter depends on.
+  check(/"peer_missing":\s*len\(peers\)\s*==\s*0/.test(markReadGo),
+    'the list handler must still flag peer_missing = len(peers) == 0 — without it the ' +
+    'frontend filter has nothing to key on and the ghost rows come back');
+}
+
 // ── Realtime health must be CONNECTION, not delivery ─────────────────────
 //
 // REPORTED: "realtime keeps dying" on an open conversation.
@@ -319,4 +345,5 @@ console.log('OK  dms: a send also converges the inbox read');
 console.log('OK  dms: a read also converges the badge, not just the row');
 console.log('OK  dms: no Firestore date accessors on PocketBase datetimes');
 console.log('OK  dms: a conversation reads a peer card, never the profile page');
+console.log('OK  dms: a migration ghost (peer_missing) is hidden, not drawn as junk');
 console.log('OK  realtime: health is the connection, so a quiet thread stays live');

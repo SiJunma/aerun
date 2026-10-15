@@ -692,6 +692,16 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   });
 
   const visibleConversations = conversations.filter(c => {
+    // A migration ghost (peer_missing: the server found NO other resolvable
+    // member — the peer's dm_members row never imported) is not a conversation
+    // anyone can open, read or write to: there is nobody on the other side.
+    // Rendering it as a nameless "User" with a dead avatar is exactly the junk
+    // the owner asked us to stop falling back to (bug M2) — so hide the row
+    // outright instead of drawing a placeholder. A runtime-DELETED peer is a
+    // different shape: its membership row survives with an empty nickname, so
+    // peer_missing is false and the thread keeps its real history and the
+    // "Deleted user" placeholder. Only the true ghost is filtered here.
+    if (c.peer_missing) return false;
     const clearMs = toMillis(c.clearedAt?.[myUid]);
     if (clearMs === null) return true;
     const lastMs = toMillis(c.lastTimestamp);
