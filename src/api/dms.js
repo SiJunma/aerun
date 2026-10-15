@@ -2,66 +2,105 @@ import { sendApi } from './pocketbase';
 import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
 import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
+import { removeDraft, draftIdFor } from './dm-drafts';
 
 /**
- * Returns a deterministic conversation ID for two users.
- */
-export const getConversationId = (uid1, uid2) =>
-  [uid1, uid2].sort().join('_');
-
-/**
- * Find the conversation with `theirUid`, or start one.
+ * Resolve the conversation with `theirUid` — WITHOUT ever creating one.
  *
- * The existing thread is found among `knownConversations` — the list the server
- * already returns for the inbox, whose rows carry `participants`.
+ * This used to be `getOrCreateConversation`, which on a cache miss POSTed
+ * `/api/aerun/dms` with a literal `text: 'Conversation started'` seed. That is
+ * the whole bug this rename fixes: opening a DM wrote a real conversation, a
+ * real message and a real unread badge on the correspondent before the opener
+ * had typed anything. A new conversation is now client-only until its first
+ * real message (see dm-drafts.js), so opening one makes NO write request.
  *
- * The previous implementation read the `dm_members` collection straight from the
- * browser to ask the same question. That collection is server-only (every rule is
- * nil), so the read was refused with 403 on every attempt, and the error was
- * swallowed by the surrounding catch. Control therefore always fell through to
- * the create branch below, which meant opening a DM with somebody you had already
- * written to started a brand-new "Conversation started" thread every single time.
- * A 403 that silently becomes a duplicate row is worse than a visible failure,
- * so the lookup now uses data the client is actually allowed to have.
+ * Returns:
+ *   - the real conversation id when a thread already exists (known list first,
+ *     then the server's own peer lookup), pruning any now-stale draft for that
+ *     peer; or
+ *   - a deterministic DRAFT id (`draft_<theirUid>`) when there is genuinely no
+ *     thread yet — the caller persists it via upsertDraft; or
+ *   - `null` when the lookup FAILED. A failed lookup must NOT fall through to a
+ *     draft, or a draft would shadow a real thread that exists but could not be
+ *     read this tick (zero silent failures: the caller shows a toast instead).
+ *
+ * The server resolves the answer rather than the browser. The in-memory
+ * `knownConversations` list is consulted first purely to avoid a round trip on
+ * the common case, never as the answer: the inbox listing is paginated, so it
+ * stops containing older correspondents once a member has more threads than one
+ * page holds, and trusting it alone would start duplicating threads again.
+ *
+ * `myProfile`/`theirProfile` are no longer read (they fed the deleted create
+ * branch); kept in the signature is unnecessary, so the caller passes only what
+ * matters. Callers that still hold a profile object pass `theirProfile` for the
+ * draft snapshot.
  */
-export const getOrCreateConversation = async (myUid, theirUid, myProfile, theirProfile, knownConversations = []) => {
+export const resolveConversation = async (myUid, theirUid, knownConversations = []) => {
   if (!myUid || !theirUid) return null;
 
-  // The server resolves this rather than the browser.
-  //
-  // It used to be answered client-side by reading the `dm_members` collection
-  // directly. That collection is server-only (every rule is nil), so the read
-  // was refused with 403 on every attempt and the error was swallowed by the
-  // surrounding catch — control always fell through to the create branch below,
-  // so opening a DM with somebody you had already written to started a
-  // brand-new "Conversation started" thread every single time. A 403 that
-  // silently becomes a duplicate row is worse than a visible failure.
-  //
-  // The in-memory list is consulted first purely to avoid a round trip on the
-  // common case, never as the answer: the inbox listing is paginated, so it
-  // stops containing older correspondents once a member has more threads than
-  // one page holds, and that would start duplicating threads all over again.
   const known = (knownConversations || []).find(
     (conv) => Array.isArray(conv.participants) && conv.participants.includes(theirUid)
   );
-  if (known) return known.id;
+  if (known?.id) {
+    removeDraft(myUid, theirUid);
+    return known.id;
+  }
 
+  // The authoritative answer, from the server (a read, never a write). An empty
+  // conversation_id means "no thread yet" — the caller's cue to open a draft.
   const res = await sendApi(`/api/aerun/conversations/peer/${encodeURIComponent(theirUid)}`);
-  if (res?.conversation_id) return res.conversation_id;
+  if (res?.conversation_id) {
+    removeDraft(myUid, theirUid);
+    return res.conversation_id;
+  }
 
-  // No thread with this person yet, so start one.
-  const title = theirProfile?.nickname || 'Direct Message';
-  const created = await sendApi('/api/aerun/dms', {
+  return draftIdFor(theirUid);
+};
+
+/**
+ * Create the real conversation with its FIRST genuine message.
+ *
+ * This is the ONLY write a brand-new DM makes, and it happens the instant the
+ * opener actually presses send — never on open. It carries the real text, so
+ * the seed message the correspondent sees is the words the opener typed, not a
+ * `Conversation started` placeholder. Everything downstream (unread badge,
+ * `dm.post` signal, first-unread email) therefore fires only on a real send,
+ * which is the whole point (requirement 7).
+ *
+ * The server keeps the existing contract: `createDMForm.Text` is required and
+ * the write is idempotent through `enforceIdempotency`. If the peer raced the
+ * opener and created the conversation first, the server converges both sends
+ * onto one conversation (see `appendMessageToConversation` in dms.go), so this
+ * call still answers 200 with the shared conversation id and the caller's own
+ * message row.
+ *
+ * Returns the normalized `{ conversation_id, message }` — the "a mutation
+ * returns the row it wrote" contract, so the author's own bubble can paint from
+ * the response (publishDMSignalToPeers excludes the sender).
+ */
+export const startConversationWithMessage = async (peerUid, title, text, idempotencyKey) => {
+  if (!peerUid || !text) return null;
+  const { content: processedContent, rolls } = processDiceRolls(text);
+
+  const res = await sendApi('/api/aerun/dms', {
     method: 'POST',
+    // A stable key per logical send: sendApi otherwise mints a fresh random one
+    // per call, so a duplicate that escapes the in-flight latch would be a
+    // genuinely second message.
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
-      recipient_ids: [theirUid],
-      title,
-      text: 'Conversation started'
+      recipient_ids: [peerUid],
+      title: title || 'Direct Message',
+      text: processedContent.trim(),
+      ...(rolls && Object.keys(rolls).length > 0 ? { rolls } : {})
     }
   });
 
-  return created?.conversation?.id || created?.id || created?.conversation_id;
+  const conversationId = res?.conversation_id || res?.conversation?.id || res?.id || null;
+  const message = res?.message ? normalizeDmMessage(res.message) : null;
+  return conversationId ? { conversation_id: conversationId, message } : null;
 };
+
 
 // ── DM list ──────────────────────────────────────────────────────────────────
 //

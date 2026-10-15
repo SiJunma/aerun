@@ -362,6 +362,9 @@ export const translations = {
       empty_chat: "No messages in this conversation yet. Say hello!",
       write_to: "Write to {name}",
       back_to_inbox: "Back to Inbox",
+      draft_badge: "Draft",
+      draft_preview: "Draft — no messages yet",
+      draft_deleted: "Draft deleted",
     },
     notifications: {
       title: "Notifications",
@@ -1176,6 +1179,9 @@ export const translations = {
       empty_chat: "В этом диалоге пока нет сообщений. Скажите привет!",
       write_to: "Написать {name}",
       back_to_inbox: "К диалогам",
+      draft_badge: "Черновик",
+      draft_preview: "Черновик — сообщений нет",
+      draft_deleted: "Черновик удален",
     },
     notifications: {
       title: "Уведомления",

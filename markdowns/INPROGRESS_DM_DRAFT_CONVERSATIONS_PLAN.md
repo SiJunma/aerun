@@ -1,6 +1,13 @@
 # Драфтовые диалоги ЛС (черновик до первого сообщения)
 
-Статус: **план, не реализовано**. Файл: `TODO_DM_DRAFT_CONVERSATIONS_PLAN.md`.
+Статус: **IN PROGRESS — заморозка 2026-10-14 (сессия 1)**.
+Файл: `INPROGRESS_DM_DRAFT_CONVERSATIONS_PLAN.md` (переименован из `TODO_...`).
+Легенда чекбоксов: `[x]` — закрыт полностью; `[~]` — код сделан, чекпоинт не
+закрыт; `[ ]` — не начато/не сделано. Прогресс, находки и план следующей
+сессии — в конце файла, раздел «Прогресс сессии 2026-10-14».
+
+Код готов для S1, S2, S3, S5, S7 (+частично S4: хелперы уже в `dms.go`).
+Не сделано: доделка S4 (re-check в `createDMHandler` + Go-тест), S6, S8, S9.
 
 ## Проблема
 
@@ -363,77 +370,143 @@ in-app записей в `notifications` у ЛС нет по дизайну (к�
 
 Формат как в `TESTING_DM_FIX_PLAN.md`: пункт не закрывается без чекпоинта.
 
-- [ ] **S1. Драфт-стор + композер-хелперы.** Новый `src/api/dm-drafts.js`
-  (драфт-стор + `loadComposerText`/`saveComposerText`/`clearComposerText`) +
-  гейт `scripts/check-dm-draft-conversations.mjs` (исполняющая проверка
-  модуля), добавить скрипт в `package.json` (`test:dm-drafts` + в `test`).
-  Чекпоинт: `node scripts/check-dm-draft-conversations.mjs` зелёный,
-  `npm test` зелёный.
+- [~] **S1. Драфт-стор + композер-хелперы — КОД ГОТОВ.** Новый
+  `src/api/dm-drafts.js` (драфт-стор + `loadComposerText`/`saveComposerText`/
+  `clearComposerText` + `isDraftId`/`draftIdFor`) + гейт
+  `scripts/check-dm-draft-conversations.mjs` (исполняющая проверка модуля,
+  12 проверок зелёные), скрипт добавлен в `package.json` под именем
+  **`test:dm-draft-conversations`** (план предлагал `test:dm-drafts` —
+  взято более точное имя, отклонение зафиксировано) и влит в `test`.
+  Чекпоинт: `node scripts/check-dm-draft-conversations.mjs` зелёный —
+  ВЫПОЛНЕНО; `npm test` целиком — НЕ гонялся (осталось в S9).
 
-- [ ] **S2. Открытие диалога без записи в БД.** `resolveConversation`
-  вместо `getOrCreateConversation` (литерал `'Conversation started'` удалён),
-  draft-fallback в `openChat`, гейт эффекта подписки (`isDraftId` → пустая
-  лента + сброс стейта), guard'ы `markDmRead`/`fetchOlderDmMessages`.
-  Чекпоинт: открытие `/messages/:uid` не делает POST (DevTools), чат пустой
-  и стабильный после F5, `npm test` + `lint:js` зелёные.
+- [~] **S2. Открытие диалога без записи в БД — КОД ГОТОВ.**
+  `getOrCreateConversation` → `resolveConversation` (create-ветка и
+  `POST ... text:'Conversation started'` удалены из КОДА, включая
+  `getConversationId` — 0 использований в репо), draft-fallback в `openChat`
+  (`upsertDraft` + `setDrafts` при draft id, prune-состояние при реальном),
+  гейт эффекта подписки (`isDraftId` → `setMessages([])`/`setLoadingChat(false)`/
+  `setHasMoreOlder(false)` + полный сброс рефов, `return () => {}`), guard'ы
+  `markDmRead` (явный `!isDraftId(activeChatId)`), `fetchOlderDmMessages`
+  (`handleLoadOlder`), гидратация `listDrafts(myUid)` на маунте.
+  Чекпоинт: DevTools-прогон (только `GET peer`, ни одного `POST`), F5,
+  `npm test` + `lint:js` — НЕ гонялись целиком; `npx eslint` на изменённых
+  файлах — зелёный.
   - Существующие done/inflight-ref'ы (D4) остаются; **не** возвращать
     старый D4-баг: эффект L201 может сработать дважды — оба раза драфт-ид
-    детерминирован, дубля нет.
+    детерминирован, дубля нет. Закрыто структурно (upsert по peer).
 
-- [ ] **S3. Первая отправка из драфта (клиент).** Ветка `handleSend` +
-  `startConversationWithMessage` в `dms.js` + prune/смена id/инвалидация
-  done-ref + эффект supersede (драфт открыт, пир отправил первым) + очистка
-  ключа композера при успехе. Обновить `check-dm-mutation-state.mjs`
-  (расширить, не ослабить). Серверная защита от гонки — отдельно, S4.
-  Чекпоинт: сценарии 3а/3б из матрицы; пузырь рисуется сразу после отправки;
-  `npm test` зелёный.
+- [~] **S3. Первая отправка из драфта (клиент) — КОД ГОТОВ.** Ветка
+  `handleSend` при `isDraftId`: re-resolve через `resolveConversation`
+  (пир мог отправить первым → обычная `sendDmMessage`) либо
+  `startConversationWithMessage` (новая функция в `dms.js`, возвращает
+  `{conversation_id, message}` после `normalizeDmMessage`); prune +
+  `setActiveChatId(real)` + инвалидация `openChatDoneRef`; очистка ключа
+  композера ТОЛЬКО по успеху (`clearComposerText` в try). Добавлен
+  supersede-эффект (пир отправил первым → перенос текста под новый ключ,
+  prune, смена id) и эффекты автосохранения (restore по смене `activeChatId`
+  + запись с debounce 400ms) — по сути S7 тоже сделан здесь.
+  `check-dm-mutation-state.mjs` зелёный БЕЗ правок (regex матчится).
+  Чекпоинт: сценарии 3а/3б вручную — НЕ гонялись;
+  **осталось: расширить `check-dm-mutation-state.mjs`** (ветка
+  `startConversationWithMessage`, гейт `isDraftId`) — требование «расширить,
+  не ослабить». Серверная защита от гонки — отдельно, S4.
 
-- [ ] **S4. Сервер: гонка одновременной первой отправки.** В
-  `createDMHandler` перед INSERT — транзакционный re-check пары; при
-  находке — дозапись сообщения в существующую конверсацию через общий
-  helper `appendMessageToConversation` (вынести ветку из
-  `sendDMMessageHandler`, чтобы не расходились). Go-тест: два параллельных
-  `POST /dms` на одну пару → одна конверсация, оба сообщения.
-  Чекпоинт: сценарий 7б из матрицы; `go test ./internal/platform/pocketbase/ -run DM`
+- [~] **S4. Сервер: гонка одновременной первой отправки — ЧАСТИЧНО,
+  ЗАМОРОЗКА ЗДЕСЬ.** Сделано в `backend/internal/platform/pocketbase/dms.go`:
+  1) хелпер **`findPairConversationID(app, user, peer)`** — тот же SQL, что у
+  `findConversationWithPeerHandler`, вынесенный чтобы эндпоинт и re-check не
+  расходились; 2) хелпер **`appendMessageToConversation(txApp, conv, senderMem,
+  senderNick, cleanText, rolls)`** — единая реализация «дозаписи в
+  существующую конверсацию»: проверки других участников (removed/banned/
+  live-право `use_direct_messages`), `sequence = messages_count + 1`, правка
+  `last_message`/`last_message_at`/`messages_count`, `last_read_sequence`
+  автора, `publishSignal(dm.post)` + `maybeEnqueueDMEmail`; 3)
+  `sendDMMessageHandler` переведён на этот хелпер (тело ~L833-891 бывшего
+  inline-кода удалено, дублирование устранено). `go build ./...` зелёный.
+  **ОСТАЛОСЬ (точки входа найдены, порядок ниже):**
+  - в `createDMHandler` после цикла валидации `recipientUsers` (~L525) и ПЕРЕД
+    `// 1. Create dm_conversations record.` (~L527): `if len(recipients)==1` →
+    `findPairConversationID(txApp, e.Auth.Id, recipients[0])`; при непустом id →
+    `FindRecordById(conv)` + `FindFirstRecordByFilter(dm_members …user_id=e.Auth.Id)`
+    → `appendMessageToConversation(...)` → `return 200 {conversation_id, sequence,
+    message, request_id}` (ветка INSERT не выполняется);
+  - перевести `findConversationWithPeerHandler` (~L1063, СНАЧАЛА перечитать
+    весь хендлер — правило AGENTS про контекст-хаки) на `findPairConversationID(e.App, …)` —
+    сейчас хелпер НЕ используется, SQL продублирован;
+  - Go-тест по образцу `sprint5_test.go` L400+ (`TestSprint5DMConcurrency`):
+    два goroutine, `POST /dms` player→player2 и player2→player, разные
+    Idempotency-Key → assert: 1 конверсация, sequence {1,2}, оба текста в
+    ленте, `messages_count==2`. Имя теста обязано содержать `DM`
+    (`go test … -run DM`).
+  Чекпоинт: сценарий 7б; `go test ./internal/platform/pocketbase/ -run DM`
   зелёный; CI `ci-report` зелёный после пуша.
 
-- [ ] **S5. Inbox: строки драфтов, единая сортировка, client-only
-  удаление.** Merge после `visibleConversations` + единая сортировка по
-  свежести (драфт = `createdAt`, реальный = `last_message_at`, DESC — свежий
-  драфт сверху), строка драфта (i18n + CSS), ветка `handleConfirmDelete`
-  для draft id, prune при каждом обновлении списка.
-  Чекпоинт: сценарии 2/4/6; только что созданный драфт — первая строка при
-  любом числе реальных диалогов; удаление драфта не шлёт ни одного запроса;
-  `npm test` зелёный.
+- [~] **S5. Inbox: строки драфтов, единая сортировка, client-only удаление —
+  КОД ГОТОВ.** `inboxRows` собирается ПОСЛЕ `visibleConversations`
+  (draft-строки иначе отсеялись бы фильтром `lastMs === null`), защита от
+  дубля «пир уже в реальном списке», единая сортировка `_sort` DESC
+  (реальный = `lastTimestamp`, драфт = `createdAt`) — свежий драфт первая
+  строка; строка драфта: бейдж `dm.draft_badge` (CSS `.dm-draft-badge`) +
+  италик-превью `dm.draft_preview` (`.dm-draft-preview`), дата `createdAt`,
+  без счётчика непрочитанных; `handleConfirmDelete` draft-ветка
+  (только localStorage, ноль запросов, инвалидация done-ref, чистка ключа
+  композера); draft-вариант ConfirmModal (заголовок/текст); i18n ru+en
+  (`draft_badge`/`draft_preview`/`draft_deleted` — последний подключён к
+  тосту `t('dm.draft_deleted')`); prune на каждом обновлении списка +
+  гидратация `listDrafts` на маунте (F5, требование 2).
+  Чекпоинт: сценарии 2/4/6 вручную — НЕ гонялись; `npm test` — не гонялся.
 
-- [ ] **S6. Дедуп повторных открытий (требование 5).** Проверить все пути:
-  двойной клик, повторный клик из профиля/участников, две вкладки,
-  открытие из inbox. Инвалидация `openChatDoneRef` при prune/supersede.
-  Чекпоинт: сценарий 5 из матрицы — всегда одна строка, один id.
+- [ ] **S6. Дедуп повторных открытий (требование 5).** Частично заложено:
+  `openChatDoneRef` инвалидируется в `handleConfirmDelete` (`delete`),
+  `handleSend` (set real id) и supersede-эффекте (set real id).
+  **Открытая находка: в колбэке `subscribeToDmList` при
+  `setDrafts(pruneDrafts(...))` done-ref НЕ инвалидируется** — после prune
+  может остаться устаревший `draft_*` id; для открытого чата это чинит
+  supersede-эффект (краткий пустой рендер → подмена), для закрытого — при
+  навигации возможен такой же кадр. Решение: удалять из done-ref всех
+  pruned-пиров прямо в колбэке (или сверять с `listDrafts`). Далее проверить
+  все пути: двойной клик, повторный клик из профиля/участников, две вкладки,
+  открытие из inbox.
+  Чекпоинт: сценарий 5 — всегда одна строка, один id.
 
-- [ ] **S7. Автосохранение композера (требование 8).** Wiring
-  `loadComposerText`/`saveComposerText`/`clearComposerText` в
-  `DirectMessages.jsx`: запись с debounce на изменение `messageText`,
-  восстановление при смене `activeChatId` (включая открытие драфта),
-  перенос текста под новый ключ при supersede draft→real, очистка только
-  после успешной отправки; при удалении драфта (и clear реального диалога)
-  ключ композера чистится вместе с ним — «начать заново» значит начать
-  заново.
-  Чекпоинт: сценарий 8 из матрицы; текст не теряется при supersede;
-  `npm test` зелёный.
+- [~] **S7. Автосохранение композера (требование 8) — КОД ГОТОВ (в составе
+  S3).** Wiring `loadComposerText`/`saveComposerText`/`clearComposerText` в
+  `DirectMessages.jsx`: restore по смене `activeChatId` (включая открытие
+  драфта), запись debounce 400ms, перенос текста под новый ключ при supersede
+  draft→real, очистка только после успешной отправки, чистка ключа вместе с
+  удалением драфта и при clear реального диалога.
+  Чекпоинт: сценарий 8 вручную (F5/навигация/supersede/неудачная отправка) —
+  НЕ гонялся; `npm test` — не гонялся.
 
-- [ ] **S8. Бейдж на иконке ЛС (требование 7).** Дописать в
-  `check-dm-draft-conversations.mjs` проверки «открытие/удаление драфта не
-  вызывает write-API» (по коду openChat/handleConfirmDelete) и прогнать
-  ручной сценарий 7 (два аккаунта: бейдж на иконке ЛС и email у B — только
-  после первой реальной отправки; при открытии/удалении драфта — никогда).
+- [ ] **S8. Бейдж на иконке ЛС (требование 7) — НЕ НАЧАТ.** Дописать в
+  `check-dm-draft-conversations.mjs` source-shape проверки:
+  - `src/api/dms.js` не содержит литерал `'Conversation started'` —
+    **ОБЯЗАТЕЛЬНО после `stripComments`** (готовый stripComments есть в
+    `check-dm-mutation-state.mjs`): в `dms.js` он остался в комментариях
+    (конвенция «comment quotes the offending expression»), проверка сырого
+    текста даст ложный срабатыватель;
+  - `POST /api/aerun/dms` встречается в `dms.js` только внутри
+    `startConversationWithMessage` и НЕ в `resolveConversation` (вырезать
+    тела функций regex-ом, как это делает `check-dm-mutation-state.mjs`);
+  - `DirectMessages.jsx`: эффект подписки, `handleConfirmDelete` и вызов
+    `markDmRead` защищены `isDraftId(` (все три уже есть в коде);
+  - по коду `openChat` и `handleConfirmDelete`: открытие/удаление драфта не
+    вызывает write-API (в `openChat` — только `resolveConversation`, в
+    draft-ветке удаления — `removeDraft`/`clearComposerText`, до
+    `return;` нет `deleteConversation`/`refreshDmList`);
+  - плюс прогнать ручной сценарий 7 (два аккаунта: бейдж и email у B —
+    только после первой реальной отправки; при открытии/удалении драфта —
+    никогда).
   Чекпоинт: сценарий 7 зелёный, `npm test` зелёный.
 
-- [ ] **S9. Регресс.** Полный `npm test`, `npm run lint:js`, ручной прогон
-  всей матрицы (требования 1–8, включая 7б) + старые DM-сценарии
-  (edit/delete/tombstone, clear, бейдж непрочитанного). Go-тесты гонки (S4)
-  + CI `ci-report` зелёный.
-  Чекпоинт: всё зелёное + пометка в этом файле (статус → DONE).
+- [ ] **S9. Регресс — НЕ НАЧАТ.** Полный `npm test`, `npm run lint:js`,
+  `cd backend && gofmt -l . && go vet ./... && go test ./internal/platform/pocketbase/`,
+  ручной прогон всей матрицы (требования 1–8, включая 7б) + старые
+  DM-сценарии (edit/delete/tombstone, clear, бейдж непрочитанного).
+  После пуша: `git fetch origin ci-report && git show origin ci-report:report.json`.
+  Чекпоинт: всё зелёное + статус этого файла → `DONE_...` с датой и
+  результатами S1–S9.
 
 ## Edge cases (спроектировано, проверить при приёмке)
 
@@ -499,5 +572,101 @@ in-app записей в `notifications` у ЛС нет по дизайну (к�
 
 
 
+
+
+
+## Прогресс сессии 2026-10-14 (заморозка, сессия 1)
+
+Рабочая ветка: `feature/pocketbase-migration`. Коммит-хэш заморозки —
+см. `git log` (коммит `feat(dm): draft conversations until first message…`).
+
+### Что сделано (код в рабочем дереве, закоммичено)
+
+| Файл | Изменение |
+|---|---|
+| `src/api/dm-drafts.js` **(новый)** | Драфт-стор: `DRAFT_PREFIX`/`COMPOSER_PREFIX`, `isDraftId`, `draftIdFor`, `listDrafts`, `getDraft`, `upsertDraft`, `removeDraft`, `pruneDrafts`, `loadComposerText`, `saveComposerText`, `clearComposerText`. Только синхронный `globalThis.localStorage`, heal битого JSON через warn. |
+| `src/api/dms.js` | `getOrCreateConversation` → `resolveConversation` (без create-ветки; `removeDraft` при реальном id; `draftIdFor` при пустом; ошибка сети бросается); новая `startConversationWithMessage(peerUid, title, text, idempotencyKey)` → `POST /api/aerun/dms` с реальным текстом, возврат `{conversation_id, message}` (normalizeDmMessage). Удалены `getConversationId` и литерал из кода. |
+| `src/components/dm/DirectMessages.jsx` | Импорты dm-drafts; state `drafts`; `openChat` на `resolveConversation` + upsert/prune; гейт эффекта подписки по `isDraftId` (пустая лента + сброс); guard'ы `markDmRead`/`handleLoadOlder`; prune на каждом апдейте списка + гидратация `listDrafts` на маунте; supersede-эффект (draft→real с переносом текста); эффекты композера (restore + debounce 400ms); `handleSend` с веткой первой отправки (resolve → `sendDmMessage` либо `startConversationWithMessage`, prune/смена id/инвалидация done-ref, `clearComposerText` только по успеху); `handleConfirmDelete` draft-ветка (client-only, ноль запросов, чистка done-ref и ключа композера); `inboxRows` (merge после `visibleConversations`, единая сортировка DESC); строка драфта (бейдж + превью); draft-вариант ConfirmModal; тост `t('dm.draft_deleted')`. |
+| `src/i18n/dictionary.js` | `dm.draft_badge`, `dm.draft_preview`, `dm.draft_deleted` (ru + en). |
+| `src/index.css` | `.dm-draft-badge`, `.dm-draft-preview`. |
+| `scripts/check-dm-draft-conversations.mjs` **(новый)** | Исполняющий гейт модуля (fake localStorage): 12 проверок — isDraftId, идемпотентность upsert, пер-аккаунтная изоляция, coexistence, prune, битый JSON, композер-хелперы. |
+| `package.json` | `test:dm-draft-conversations` + вставка в цепочку `test`. |
+| `backend/.../dms.go` | Добавлены `findPairConversationID(app, user, peer)` и `appendMessageToConversation(txApp, conv, senderMem, senderNick, cleanText, rolls)`; `sendDMMessageHandler` переведён на общий хелпер (inline-дубль удалён). |
+
+### Что проверено на момент заморозки (все команды зелёные)
+
+```
+node scripts/check-dm-draft-conversations.mjs   → [OK] 12 checks passed
+node scripts/check-dm-mutation-state.mjs        → все OK (без правок)
+npx eslint src/components/dm/DirectMessages.jsx → EXIT=0
+npx eslint src/api/dms.js src/api/dm-drafts.js src/i18n/dictionary.js → EXIT=0
+cd backend && go build ./...                    → пусто (OK)
+```
+
+**НЕ гонялось:** полный `npm test`, `npm run lint:js` целиком, `go vet`,
+`go test` (включая существующие DM-тесты после рефакторинга
+`sendDMMessageHandler`), CI `ci-report`, ручная матрица требований 1–8.
+
+
+### Находки сессии (важно для продолжения)
+
+1. **Гонку на сервере закрывает не только re-check, но и `forumCommandMu`**
+   (`idempotency.go` L203): командные транзакции одного процесса
+   сериализуются, поэтому второй `POST /dms` гарантированно видит
+   закоммиченную конверсацию первого внутри своей транзакции — re-check
+   детерминирован в топологии «один процесс» (целевая по плану §1).
+   На уровне БД backstop — `UNIQUE(conversation_id, sequence)`; **UNIQUE на
+   пару участников НЕТ**, так что кросс-процессный дубль-создание теоретически
+   возможен (как и до плана) — вне топологии, фиксировать нечего, но знать.
+2. **`getConversationId` удалён** — grep по репо: 0 использований (проверено
+   перед удалением, правило AGENTS про use-site).
+3. **`sendApi` бросает `ApiError`** (сеть и `!res.ok`, `pocketbase.js` L56-92)
+   → при ошибке `GET peer` `resolveConversation` бросает → `openChat` ловит и
+   показывает тост, **драфт НЕ создаётся**. Edge-case «ошибка при открытии»
+   закрыт конструктивно (проверить вручную в S9).
+4. **Гидратация обязательна**: `drafts` state стартует пустым — после F5
+   строки драфтов не появились бы без `listDrafts(myUid)` на маунте
+   (реализовано в эффекте подписки на список).
+5. **`check-dm-mutation-state.mjs` проходит без правок** поверх нового
+   `handleSend` (обе ветки содержат `= await sendDmMessage(` и `setMessages(`).
+   Расширение плана (S3/S8) остаётся сделать, НЕ ослабляя текущие проверки.
+6. **Ловушка гейта `'Conversation started'`**: литерал остался в
+   комментариях `dms.js`/`dm-drafts.js`/`DirectMessages.jsx` (конвенция —
+   комментарий цитирует нарушение). Source-shape проверка S8 **обязана
+   идти после `stripComments`** — иначе ложный срабатыватель.
+7. **Открытая находка S6**: prune в колбэке `subscribeToDmList` не
+   инвалидирует `openChatDoneRef` (см. спринт S6) — краткий кадр пустого
+   чата при навигации; supersede-эффект спасает, но лучше чистить done-ref
+   для pruned-пиров.
+8. **Существующий Go-тест** `TestFindConversationWithPeerDoesNotDuplicate`
+   (`dm_inbox_participants_test.go` L256) и все DM-тесты после рефакторинга
+   `sendDMMessageHandler` ещё не гонялись — первым делом в S4/S9.
+9. **Инструментальная ловушка (для следующей сессии):** вставки в редактор
+   файлов >~6000 символов молча обрезаются — `dm-drafts.js` пришлось
+   пересобирать частями. Крупные правки — кусками, после каждой сверять
+   `wc -l`/`tail`.
+
+### План следующей сессии (свежий порядок)
+
+1. **Доделать S4** (точки входа в разделе S4 выше): re-check в
+   `createDMHandler` → рефактор `findConversationWithPeerHandler` на хелпер →
+   Go-тест параллельных POST → `gofmt -l . && go vet ./... &&
+   go test ./internal/platform/pocketbase/ -run DM` → затем весь пакет.
+2. **S6**: инвалидация done-ref при prune в колбэке подписки + ручные
+   пути дедупа (двойной клик, профиль, две вкладки, inbox).
+3. **S8**: расширить `check-dm-draft-conversations.mjs` (точный список
+   проверок в спринте S8) + расширить `check-dm-mutation-state.mjs` (ветка
+   `startConversationWithMessage` / `isDraftId`) — оба гейта зелёные.
+4. **S9**: полный `npm test` + `lint:js` + Go-тесты + ручная матрица 1–8
+   (два аккаунта) + старые DM-сценарии; пуш и `ci-report`; статус файла →
+   `DONE_DM_DRAFT_CONVERSATIONS_PLAN.md` (переименовать, убрав `INPROGRESS_`).
+
+### Проверочные команды (одна строка на запуск)
+
+```bash
+node scripts/check-dm-draft-conversations.mjs && node scripts/check-dm-mutation-state.mjs && npm run lint:js
+cd backend && gofmt -l . && go vet ./... && go test ./internal/platform/pocketbase/ -run DM
+git fetch origin ci-report && git show origin ci-report:report.json
+```
 
 

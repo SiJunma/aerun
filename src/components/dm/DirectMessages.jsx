@@ -9,19 +9,30 @@ import RichEditor from '../common/RichEditor';
 import { resolveAvatarUrl } from '../../api/avatars';
 import BBCode from '../common/BBCode';
 import {
-  getOrCreateConversation,
+  resolveConversation,
   subscribeToDmList,
   subscribeToDmMessages,
   fetchOlderDmMessages,
   sendDmMessage,
   editDmMessage,
   deleteDmMessage,
+  startConversationWithMessage,
   refreshDmList,
   refreshDmMessages,
   markDmRead,
   subscribeToPeerCard,
   deleteConversation,
 } from '../../api/dms';
+import {
+  isDraftId,
+  listDrafts,
+  upsertDraft,
+  removeDraft,
+  pruneDrafts,
+  loadComposerText,
+  saveComposerText,
+  clearComposerText,
+} from '../../api/dm-drafts';
 import { createInFlight, newIdempotencyKey } from '../../utils/inflight';
 import { playNotificationSound } from '../../utils/notificationSound';
 import Timestamp from '../common/Timestamp';
@@ -52,6 +63,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [conversations, setConversations] = useState([]);
   const [loadingConvs, setLoadingConvs] = useState(true);
   const [inboxError, setInboxError] = useState(null);
+  // Draft conversations (client-only, localStorage) merged into the inbox rows.
+  // Kept in state so opening/removing a draft re-renders the list without a
+  // server round trip; the server never knows these exist.
+  const [drafts, setDrafts] = useState([]);
 
   // ── Chat state ───────────────────────────────────────────────────────────
   const [activeChatId, setActiveChatId] = useState(null); // conversationId
@@ -183,10 +198,19 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     if (!myUid) return;
     setLoadingConvs(true);
     setInboxError(null);
+    // Hydrate drafts from localStorage on mount / account switch: they survive a
+    // reload by design (requirement 2 — "created but empty" after F5), and the
+    // store is keyed by this uid so no other account's drafts are visible.
+    setDrafts(listDrafts(myUid));
     const unsub = subscribeToDmList(
       myUid,
       (convs) => {
         setConversations(convs);
+        // Merge trigger #2 (requirement 3): every list refresh (10s poll or the
+        // peer's `dm.post` signal, which is addressed to the recipient) re-runs
+        // pruneDrafts, so a draft whose peer now has a real conversation is
+        // replaced by the real row instead of lingering beside it.
+        setDrafts(pruneDrafts(myUid, convs));
         setLoadingConvs(false);
       },
       (err) => {
@@ -227,7 +251,28 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // ── Subscribe to messages when a chat is open (with local cache) ─────────
   useEffect(() => {
     if (!activeChatId || !myUid) return;
-    
+
+    // A DRAFT conversation does not exist on the server. Subscribing to it would
+    // GET `/dms/draft_x/messages` and draw a 403 "not a participant" (the id is
+    // not a real conversation), which surfaces as toast/error spam on every
+    // open. So a draft id takes an explicit empty branch: no subscription, no
+    // request, an empty feed. The reset is load-bearing — without it, switching
+    // from a real thread to a draft would leave the previous thread's messages
+    // on screen. The empty chat (dm.empty_chat) is exactly the intended view.
+    if (isDraftId(activeChatId)) {
+      setChatError(null);
+      setMessages([]);
+      setLoadingChat(false);
+      setHasMoreOlder(false);
+      prevMessagesCountRef.current = 0;
+      firstUnreadIdRef.current = null;
+      lastReadSeqRef.current = 0;
+      hasPrependedRef.current = false;
+      setShowScrollBottom(false);
+      setUnreadBelowCount(0);
+      return () => {};
+    }
+
     setChatError(null);
     initialScrollDoneRef.current = false;
     prevMessagesCountRef.current = 0;
@@ -293,7 +338,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
         // request count on this page. The highest sequence seen from the peer is
         // the watermark: a tick that brings nothing newer does no write at all.
         const newest = msgs.length ? msgs[msgs.length - 1] : null;
-        if (newest && newest.sequence > lastReadSeqRef.current) {
+        if (!isDraftId(activeChatId) && newest && newest.sequence > lastReadSeqRef.current) {
           lastReadSeqRef.current = newest.sequence;
           markDmRead(activeChatId, myUid).catch(() => {});
         }
@@ -320,9 +365,62 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeChatId, myUid, messageLimit]);
 
+  // ── Supersede a draft when the peer creates the real conversation first ───
+  // Merge trigger #3 (requirement 3б): while THIS member holds a draft open and
+  // is (maybe) typing, the peer's first message creates the real conversation.
+  // The inbox list refresh (10s poll or the peer's dm.post signal) brings it
+  // into `conversations`; this observer swaps the active draft id onto the real
+  // one, so the thread switches to the real messages without a reload. The text
+  // already in the composer lives in `messageText` (separate state) and its
+  // saved key is carried over to the real id, so nothing is lost at the seam.
+  useEffect(() => {
+    if (!isDraftId(activeChatId) || !myUid) return;
+    const peerUid = activePeer?.uid || activeChatId.replace(/^draft_/, '');
+    const real = conversations.find(
+      (c) => Array.isArray(c.participants) && c.participants.includes(peerUid)
+    );
+    if (!real?.id) return;
+    // Carry the composer text under the new key before switching, so the draft
+    // key's contents are not orphaned (requirement 8, supersede boundary).
+    const carried = loadComposerText(activeChatId, myUid);
+    if (carried) saveComposerText(real.id, myUid, carried);
+    clearComposerText(activeChatId, myUid);
+    removeDraft(myUid, peerUid);
+    setDrafts(prev => prev.filter(d => d.peerUid !== peerUid));
+    // Invalidate the openChat cache so a later re-open resolves to the real id.
+    openChatDoneRef.current.set(peerUid, real.id);
+    setActiveChatId(real.id);
+  }, [activeChatId, activePeer?.uid, conversations, myUid]);
+
+  // ── Composer autosave (requirement 8) ────────────────────────────────────
+  // Restore the saved text whenever the active conversation changes — opening a
+  // draft, opening a real thread, or the supersede swap above. The id is stable
+  // (real id, or the deterministic draft_<peer>), so "the conversation with
+  // this peer" is addressable across a reload.
+  useEffect(() => {
+    if (!activeChatId || !myUid) return;
+    setMessageText(loadComposerText(activeChatId, myUid));
+  }, [activeChatId, myUid]);
+
+  // Persist on every change. Debounced so a fast typist does not write to
+  // localStorage on every keystroke — the same throttle TopicPage's reply draft
+  // relies on. An empty composer clears its key (nothing to restore).
+  useEffect(() => {
+    if (!activeChatId || !myUid) return;
+    const handle = setTimeout(() => {
+      saveComposerText(activeChatId, myUid, messageText);
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [messageText, activeChatId, myUid]);
+
+
+
   const handleLoadOlder = async () => {
     if (!activeChatId || loadingOlder || messages.length === 0) return;
-
+    // A draft has no server history to page through; fetching older messages for
+    // a draft id would 403 "not a participant" for a conversation that does not
+    // exist on the server.
+    if (isDraftId(activeChatId)) return;
     // Capture scroll container state before prepending older messages
     const container = getScrollContainer();
     scrollPosBeforeRef.current = {
@@ -445,10 +543,31 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       return;
     }
     const pending = (async () => {
-      // The inbox list is passed in so an existing thread is REUSED instead of a
-      // duplicate being started — see getOrCreateConversation for why the lookup
-      // cannot happen in the browser.
-      const convId = await getOrCreateConversation(myUid, peerUid, profile, targetProfile || peerInfo, conversations);
+      // resolveConversation READS only: it returns a real conversation id when a
+      // thread exists, or a deterministic draft id (`draft_<peer>`) when there is
+      // genuinely none yet. Opening a DM therefore makes NO write request — the
+      // correspondent sees nothing until the first real message is sent (S3).
+      // The inbox list is passed so an existing thread is REUSED rather than
+      // re-asked from the server on the common case.
+      const convId = await resolveConversation(myUid, peerUid, conversations);
+      if (isDraftId(convId)) {
+        // A brand-new conversation: persist it as a client-only draft so it
+        // renders "opened, but empty" on navigation and reload. The server is
+        // never told it exists.
+        upsertDraft(myUid, {
+          peerUid,
+          nickname: peerInfo?.name || targetProfile?.nickname || '',
+          avatar: peerInfo?.avatar || targetProfile?.avatar_url || '',
+        });
+        setDrafts(prev => {
+          const without = prev.filter(d => d.peerUid !== peerUid);
+          return [{ peerUid, nickname: peerInfo?.name || '', avatar: peerInfo?.avatar || '', createdAt: Date.now() }, ...without];
+        });
+      } else {
+        // A real thread: a stale draft for this peer (if any) is dropped by
+        // resolveConversation's own removeDraft; reflect that in the inbox state.
+        setDrafts(prev => prev.filter(d => d.peerUid !== peerUid));
+      }
       openChatDoneRef.current.set(peerUid, convId);
       return convId;
     })();
@@ -574,11 +693,65 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     setSending(true);
     sentByMeRef.current = true; // flag to force scroll when the message arrives
     try {
-      // ONE key per logical send, reused by anything that retries. Without it
-      // sendApi mints a fresh random key per call, so a duplicate that escapes
-      // the latch would be a genuinely second message.
-      const sent = await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid, newIdempotencyKey('dm'));
+      // The conversation this send will land in. For a real thread it is
+      // activeChatId; for a draft it is resolved below (the peer may already
+      // have created the real thread — the race the server also converges).
+      let realConvId = activeChatId;
+      let sent = null;
+
+      if (isDraftId(activeChatId)) {
+        // FIRST send from a draft. Re-resolve the truth just before writing:
+        // the peer may have created the real conversation in the window since
+        // this draft was opened (requirement 3а). resolveConversation reads the
+        // known list then the server peer lookup, never a write.
+        const resolved = await resolveConversation(myUid, activePeer.uid, conversations);
+        if (resolved && !isDraftId(resolved)) {
+          // A real thread already exists (the peer sent first). Send into it
+          // through the ordinary path — no second conversation is created.
+          realConvId = resolved;
+          // resolveConversation already dropped the draft from the store; mirror
+          // that in the inbox state so the draft row does not linger.
+          removeDraft(myUid, activePeer.uid);
+          setDrafts(prev => prev.filter(d => d.peerUid !== activePeer.uid));
+          openChatDoneRef.current.set(activePeer.uid, realConvId);
+          sent = await sendDmMessage(realConvId, myUid, messageText, activePeer.uid, newIdempotencyKey('dm'));
+        } else {
+          // No thread yet anywhere. Create it WITH this first genuine message:
+          // the seed the correspondent sees is the words just typed, never a
+          // "Conversation started" placeholder. The server creates the
+          // conversation + members + this message and publishes the badge/
+          // signal/email — the ONLY write a brand-new DM makes.
+          const started = await startConversationWithMessage(
+            activePeer.uid,
+            activePeer.name,
+            messageText,
+            newIdempotencyKey('dm'),
+          );
+          if (!started?.conversation_id) {
+            throw new Error('failed to start conversation');
+          }
+          realConvId = started.conversation_id;
+          sent = started.message;
+          // The draft is now a real conversation: drop it from the store, move
+          // the active id onto the real one, and invalidate the openChat cache
+          // so a re-open resolves to the real thread instead of the draft.
+          removeDraft(myUid, activePeer.uid);
+          setDrafts(prev => prev.filter(d => d.peerUid !== activePeer.uid));
+          setActiveChatId(realConvId);
+          openChatDoneRef.current.set(activePeer.uid, realConvId);
+        }
+      } else {
+        // ONE key per logical send, reused by anything that retries. Without it
+        // sendApi mints a fresh random key per call, so a duplicate that escapes
+        // the latch would be a genuinely second message.
+        sent = await sendDmMessage(activeChatId, myUid, messageText, activePeer.uid, newIdempotencyKey('dm'));
+      }
+
+      // Clear the composer's saved text ONLY on success (requirement 8): a
+      // failed send leaves the key so the words survive a reload. For a draft
+      // the key was the draft id; for a real thread it is the real id.
       setMessageText('');
+      clearComposerText(activeChatId, myUid);
       editorRef.current?.focus();
 
       // The server's answer is the ONLY thing that can paint the author's own
@@ -598,7 +771,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       }
       // Settle the thread read (sidebar preview, counters, has_more) now — the
       // same nudge edit and delete already give it.
-      refreshDmMessages(activeChatId);
+      refreshDmMessages(realConvId);
       // And the INBOX, which a send needs and edit/delete do not: the row moves
       // to the top, its preview changes, and for a conversation that was
       // CLEARED the row itself only comes back from the server once the new
@@ -644,6 +817,27 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     const convId = deleteConfirmConvId;
     setDeleteConfirmConvId(null);
 
+    // A DRAFT is client-only: deleting it is a localStorage remove and NOTHING
+    // else. No deleteConversation, no refreshDmList, no optimistic filter of the
+    // server `conversations` — the draft was never in any of them. Deleting a
+    // draft therefore issues ZERO write requests (requirement 4, gate S8).
+    if (isDraftId(convId)) {
+      const peerUid = convId.replace(/^draft_/, '');
+      removeDraft(myUid, peerUid);
+      clearComposerText(convId, myUid);
+      // Invalidate the openChat cache so re-opening re-creates the draft fresh.
+      openChatDoneRef.current.delete(peerUid);
+      setDrafts(prev => prev.filter(d => d.peerUid !== peerUid));
+      showToast(t('dm.draft_deleted'), 'success');
+      if (activeChatId === convId) {
+        setActiveChatId(null);
+        setActivePeer(null);
+        setMessages([]);
+        navigate('/messages');
+      }
+      return;
+    }
+
     // Optimistic: drop the row NOW so the member sees the delete land, then
     // converge with the server. Without this the row sat on screen until the
     // next 10s list tick (or a reload) — the exact shape of "deleted but
@@ -652,6 +846,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     setConversations(prev => prev.filter(c => c.id !== convId));
     try {
       await deleteConversation(convId, myUid);
+      clearComposerText(convId, myUid);
       refreshDmList(myUid);
       showToast(lang === 'ru' ? 'Диалог удален' : 'Conversation deleted', 'success');
       if (activeChatId === convId) {
@@ -708,6 +903,45 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     if (lastMs === null) return false;
     return lastMs > clearMs;
   });
+
+  // ── Inbox rows: real conversations merged with client-only drafts ─────────
+  //
+  // Drafts are added AFTER visibleConversations on purpose: that filter returns
+  // false for a row with no `lastTimestamp`, and a draft has none (it is not a
+  // server row), so feeding drafts through it would hide every one of them.
+  //
+  // The whole list is then sorted by ONE freshness key (owner ruling
+  // 2026-10-14): a real conversation by its `last_message_at`, a draft by its
+  // `createdAt` (which plays the role of "time of last activity"), the entire
+  // list DESC. A just-created draft is therefore the FIRST row, however many
+  // real conversations exist — it does not sink to the bottom. Each row carries
+  // `__draft: true` so the renderer below can draw the draft affordances.
+  const inboxRows = (() => {
+    // A peer that already has a real (visible) conversation must not also show a
+    // draft row; pruneDrafts normally prevents this, but a draft created in the
+    // same tick as the peer's first message could still race it. Defensive.
+    const peersWithReal = new Set();
+    for (const c of visibleConversations) {
+      for (const p of c.participants || []) {
+        if (p && p !== myUid) peersWithReal.add(p);
+      }
+    }
+    const draftRows = drafts
+      .filter(d => !peersWithReal.has(d.peerUid))
+      .map(d => ({
+        __draft: true,
+        id: `draft_${d.peerUid}`,
+        peerUid: d.peerUid,
+        participants: [myUid, d.peerUid],
+        participantNames: { [d.peerUid]: d.nickname || '' },
+        participantAvatars: { [d.peerUid]: d.avatar || '' },
+        lastTimestamp: d.createdAt,
+        lastMessage: '',
+      }));
+    const realRows = visibleConversations.map(c => ({ ...c, __draft: false, _sort: toMillis(c.lastTimestamp) || 0 }));
+    return [...realRows, ...draftRows.map(d => ({ ...d, _sort: toMillis(d.lastTimestamp) || 0 }))]
+      .sort((a, b) => (b._sort || 0) - (a._sort || 0));
+  })();
 
   // ── Privacy notice ───────────────────────────────────────────────────────
   const PrivacyNotice = () => (
@@ -1095,14 +1329,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
           <div className="text-center py-5">
             <Spinner animation="border" size="sm" />
           </div>
-        ) : visibleConversations.length === 0 ? (
+        ) : inboxRows.length === 0 ? (
           <div className="text-center py-5 text-muted">
             <MessageCircle size={40} className="mb-3 opacity-25" />
             <p className="mb-0">{t('dm.no_conversations')}</p>
           </div>
         ) : (
           <div className="d-flex flex-column gap-2">
-            {visibleConversations.map((conv) => {
+            {inboxRows.map((conv) => {
               const peerUid = conv.participants?.find(p => p !== myUid);
               // peerName is what the row PRINTS (localized "Deleted user" when the
               // peer is gone); peerRawName is the value the avatar is seeded from.
@@ -1154,6 +1388,17 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                         style={{ flex: '1 1 auto', minWidth: 0, fontSize: '1rem' }}
                       >
                         {peerName}
+                        {/* A draft says so inline, right after the name, so the
+                            member never confuses an unsent draft for a real
+                            thread with an empty preview. */}
+                        {conv.__draft && (
+                          <span
+                            className="dm-draft-badge ms-2"
+                            style={{ fontSize: '0.7rem', fontWeight: 600 }}
+                          >
+                            {t('dm.draft_badge')}
+                          </span>
+                        )}
                       </span>
                       {/* The date shares the FIRST line with the name and never
                           overlaps it: the name shrinks (truncate) while the
@@ -1171,13 +1416,22 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     {/* Second line on wider screens: the words of the last
                         message, not a repeat of the date. Phones hide it —
                         there the second line carries the timestamp instead. */}
-                    {conv.lastMessage && (
+                    {conv.__draft ? (
                       <p
-                        className={`mb-0 text-truncate small dm-conversation-sub dm-conversation-preview ${unreadCount > 0 ? '' : 'text-muted'}`}
+                        className="mb-0 text-truncate small dm-conversation-sub dm-conversation-preview dm-draft-preview text-muted fst-italic"
                         style={{ fontSize: '0.875rem' }}
                       >
-                        {conv.lastMessage}
+                        {t('dm.draft_preview')}
                       </p>
+                    ) : (
+                      conv.lastMessage && (
+                        <p
+                          className={`mb-0 text-truncate small dm-conversation-sub dm-conversation-preview ${unreadCount > 0 ? '' : 'text-muted'}`}
+                          style={{ fontSize: '0.875rem' }}
+                        >
+                          {conv.lastMessage}
+                        </p>
+                      )
                     )}
                     {/* Second line on phones only: when the last message
                         arrived. Hidden above 568px, where the same date is
@@ -1210,10 +1464,16 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       show={!!deleteConfirmConvId}
       onHide={() => setDeleteConfirmConvId(null)}
       onConfirm={handleConfirmDelete}
-      title={lang === 'ru' ? 'Удалить переписку?' : 'Delete conversation?'}
-      message={lang === 'ru'
-        ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?'
-        : 'Are you sure you want to permanently delete this conversation for yourself?'}
+      title={isDraftId(deleteConfirmConvId)
+        ? (lang === 'ru' ? 'Удалить черновик?' : 'Delete draft?')
+        : (lang === 'ru' ? 'Удалить переписку?' : 'Delete conversation?')}
+      message={isDraftId(deleteConfirmConvId)
+        ? (lang === 'ru'
+            ? 'Этот черновик ещё не отправлен. Удалить его? Сообщение не будет создано.'
+            : 'This draft has not been sent yet. Delete it? No message will be created.')
+        : (lang === 'ru'
+          ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?'
+          : 'Are you sure you want to permanently delete this conversation for yourself?')}
       confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
       cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
       variant="danger"

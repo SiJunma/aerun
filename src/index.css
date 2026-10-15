@@ -349,6 +349,29 @@ body:not([data-theme]) .dm-bubble-me .dm-bubble-action:focus-visible {
   opacity: 1;
 }
 
+/* Draft conversation row in the inbox.
+ *
+ * A draft is a conversation that exists only in this browser (localStorage)
+ * until its first real message is sent. The row must read as "started, but
+ * nothing sent yet" so a member never mistakes it for a live thread: a small
+ * pill after the name, and an italic muted preview line instead of message
+ * words. No unread badge, because the server knows nothing about it. */
+.dm-draft-badge {
+  display: inline-block;
+  padding: 0.05em 0.5em;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--block-bg);
+  color: var(--text-muted, var(--text-color));
+  vertical-align: middle;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.dm-draft-preview {
+  opacity: 0.75;
+}
+
 .btn-link {
   color: var(--link-color) !important;
   text-decoration: none !important;

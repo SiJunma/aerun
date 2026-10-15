@@ -638,6 +638,155 @@ func createDMHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
+// findPairConversationID returns the id of the conversation that contains BOTH
+// `user` and `peer`, or "" when there is none. It is the same query
+// findConversationWithPeerHandler answers over the wire, extracted so the
+// read-only endpoint and the create-time race re-check can never diverge on
+// what "the conversation with this peer" means.
+//
+// `app` may be the top-level app (a plain read) or a transaction-bound txApp
+// (the create-time re-check), because both expose the same DB(). The ORDER BY
+// resolves the ambiguity when more than one shared conversation exists: the
+// most recently active one wins, exactly as the endpoint reports it.
+func findPairConversationID(app core.App, user, peer string) (string, error) {
+	query := `
+		SELECT c.id AS id
+		FROM ` + dmConversationsCollectionName + ` c
+		JOIN ` + dmMembersCollectionName + ` mine
+			ON mine.conversation_id = c.id AND mine.user_id = {:user}
+		JOIN ` + dmMembersCollectionName + ` theirs
+			ON theirs.conversation_id = c.id AND theirs.user_id = {:peer}
+		ORDER BY c.last_message_at DESC, c.id DESC
+		LIMIT 1
+	`
+	var rows []struct {
+		ID string `db:"id"`
+	}
+	if err := app.DB().NewQuery(query).
+		Bind(dbx.Params{"user": user, "peer": peer}).
+		All(&rows); err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return rows[0].ID, nil
+}
+
+
+
+// appendMessageToConversation writes ONE message into an EXISTING conversation
+// and returns the saved row with its sequence. It is the single implementation
+// of "send a message into a thread", shared by sendDMMessageHandler (the
+// ordinary reply) and the race fallback in createDMHandler (two members sent
+// their first message at nearly the same instant, so the loser appends into the
+// winner's conversation instead of opening a duplicate) — one body means the
+// two paths cannot drift apart.
+//
+// It performs, in order: the other-participant checks (removed, banned, and the
+// live `use_direct_messages` re-check — a permission revoked after the thread
+// opened must still take effect), the monotonic sequence assignment, the
+// conversation preview/count update, the sender's own read-watermark advance,
+// and delivery (per-recipient `dm.post` signal + first-unread email).
+//
+// Everything runs inside the caller's transaction: any returned error rolls the
+// whole append back, so a failed check never leaves a half-written message.
+// `senderMem` is the caller's already-loaded dm_members row (it is also what the
+// caller used to assert participation); `senderNick` feeds the email body.
+func appendMessageToConversation(
+	txApp core.App,
+	conv *core.Record,
+	senderMem *core.Record,
+	senderNick string,
+	cleanText string,
+	rolls map[string]any,
+) (*core.Record, int, error) {
+	senderID := senderMem.GetString("user_id")
+
+	// The counterparties: every participant except the sender. Group threads
+	// exist, so a single removed/banned/permission-less member is enough to make
+	// the whole thread unwritable — hence a per-member check, not just the peer.
+	otherMembers, err := txApp.FindRecordsByFilter(
+		dmMembersCollectionName,
+		"conversation_id = {:conv} && user_id != {:user}",
+		"created",
+		100,
+		0,
+		dbx.Params{"conv": conv.Id, "user": senderID},
+	)
+	if err != nil {
+		return nil, 0, internalError("failed to load conversation members", err)
+	}
+	for _, m := range otherMembers {
+		other, oErr := txApp.FindRecordById(usersCollectionName, m.GetString("user_id"))
+		if oErr != nil || other == nil {
+			// The member's users row is gone (deleted without a cascade, or a
+			// ghost that never imported). Refuse the write rather than dropping
+			// the reply into a void (D3).
+			return nil, 0, forbiddenError("cannot send message to a removed user")
+		}
+		if other.GetString("status") == string(auth.StatusBanned) {
+			return nil, 0, forbiddenError("cannot send message to a banned user")
+		}
+		if !auth.Has(accessForUser(txApp, other).Permissions, auth.PermUseDirectMessages) {
+			return nil, 0, forbiddenError("a participant can no longer receive direct messages")
+		}
+	}
+
+	// Monotonic sequence assignment within the conversation transaction.
+	nextSeq := conv.GetInt("messages_count") + 1
+
+	msgCol, err := txApp.FindCollectionByNameOrId(dmMessagesCollectionName)
+	if err != nil {
+		return nil, 0, internalError("dm_messages collection unavailable", err)
+	}
+	msg := core.NewRecord(msgCol)
+	msg.Set("conversation_id", conv.Id)
+	msg.Set("sender_id", senderID)
+	msg.Set("sequence", nextSeq)
+	msg.Set("text", cleanText)
+	if err := writeRolls(msg, cleanText, rolls); err != nil {
+		return nil, 0, validationError(err.Error())
+	}
+	if err := txApp.Save(msg); err != nil {
+		return nil, 0, internalError("failed to save message", err)
+	}
+
+	// last_message_at is anchored to the reply's OWN created instant, not a
+	// wall-clock sample: it becomes cleared_at on the next clear, and a sample
+	// taken before the row existed would let the reply survive its own clear
+	// boundary. The row's own timestamp makes the horizon exact (see
+	// createDMHandler's seed anchoring for the same reasoning).
+	conv.Set("last_message", cleanText)
+	conv.Set("last_message_at", msg.GetDateTime("created").String())
+	conv.Set("messages_count", nextSeq)
+	if err := txApp.Save(conv); err != nil {
+		return nil, 0, internalError("failed to update conversation", err)
+	}
+
+	// The sender has read their own message.
+	senderMem.Set("last_read_sequence", nextSeq)
+	if err := txApp.Save(senderMem); err != nil {
+		return nil, 0, internalError("failed to update sender read sequence", err)
+	}
+
+	// Delivery to each counterpart. The DM list is a SEPARATE resource from the
+	// notification list, so the `dm.post` nudge keeps the badge/inbox fresh
+	// without a poll; the email is first-unread only and offline only (Firebase
+	// parity). Addressed per recipient, because a conversation id is not
+	// something a non-member may learn from the stream.
+	for _, m := range otherMembers {
+		rID := m.GetString("user_id")
+		publishSignal(txApp, realtimeSignalDMPost, msg.Id, rID)
+		if u, uErr := txApp.FindRecordById(usersCollectionName, rID); uErr == nil && u != nil {
+			maybeEnqueueDMEmail(txApp, conv.Id, u, senderNick, cleanText)
+		}
+	}
+
+	return msg, nextSeq, nil
+}
+
+
 // sendDMMessageHandler sends a reply message within an existing conversation.
 func sendDMMessageHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
@@ -681,129 +830,15 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("conversation not found")
 		}
 
-		// Nobody may message a suspended account, and createDMHandler already
-		// says so — but only for conversations opened AFTER the ban. A thread
-		// started while everybody was still active kept accepting messages
-		// forever, which is how a ban quietly stops applying to the one channel
-		// people actually talk in.
-		//
-		// Every OTHER participant is checked, not just the counterpart: group
-		// conversations exist, so one suspended member is enough to make the
-		// whole thread unwritable.
-		others, err := txApp.FindAllRecords(dmMembersCollectionName,
-			dbx.HashExp{"conversation_id": convID})
-		if err != nil {
-			return 0, nil, internalError("failed to read conversation members", err)
-		}
-		for _, member := range others {
-			if member.GetString("user_id") == e.Auth.Id {
-				continue
-			}
-			other, err := txApp.FindRecordById(usersCollectionName, member.GetString("user_id"))
-			if err != nil || other == nil {
-				// The member's users row is gone — the account was deleted
-				// without a cascade (relations are plain TEXT ids, so no DB
-				// cascade runs) or is a ghost that never imported. The thread
-				// survives so its history stays readable, but there is nobody on
-				// the other side to receive a new message. Refuse the write
-				// rather than silently dropping the reply into a void (D3).
-				return 0, nil, forbiddenError("cannot send message to a removed user")
-			}
-			if other.GetString("status") == string(auth.StatusBanned) {
-				return 0, nil, forbiddenError("cannot send message to a banned user")
-			}
-		}
-		// Monotonic sequence assignment within the conversation transaction
-		nextSeq := conv.GetInt("messages_count") + 1
-
-		// 1. Create dm_messages record
-		msgCol, err := txApp.FindCollectionByNameOrId(dmMessagesCollectionName)
-		if err != nil {
-			return 0, nil, internalError("dm_messages collection unavailable", err)
-		}
-
-		msg := core.NewRecord(msgCol)
-		msg.Set("conversation_id", convID)
-		msg.Set("sender_id", e.Auth.Id)
-		msg.Set("sequence", nextSeq)
-		msg.Set("text", cleanText)
-		if err := writeRolls(msg, cleanText, form.Rolls); err != nil {
-			return 0, nil, validationError(err.Error())
-		}
-
-		if err := txApp.Save(msg); err != nil {
-			return 0, nil, internalError("failed to save message", err)
-		}
-
-		// 2. Update conversation metadata.
-		//
-		// last_message_at is anchored to the reply's OWN created instant, not a
-		// wall-clock sample. It becomes cleared_at on the next clear, and
-		// listDMMessagesHandler keeps rows with `created > cleared_at`. A sample
-		// taken before the row existed would be earlier than the reply's created,
-		// so the reply itself would survive its own clear boundary. The row's own
-		// timestamp makes the horizon exact and keeps the next reply strictly
-		// greater — no sleep required.
-		conv.Set("last_message", cleanText)
-		conv.Set("last_message_at", msg.GetDateTime("created").String())
-		conv.Set("messages_count", nextSeq)
-		if err := txApp.Save(conv); err != nil {
-			return 0, nil, internalError("failed to update conversation", err)
-		}
-
-		// 3. Update sender's last_read_sequence
-		member.Set("last_read_sequence", nextSeq)
-		if err := txApp.Save(member); err != nil {
-			return 0, nil, internalError("failed to update sender read sequence", err)
-		}
-
-		// 4. Find other members to notify, and check each may still receive DMs.
-		//
-		// The recipient's permission is re-checked HERE, not only when the
-		// conversation was opened. A conversation created while the recipient
-		// held `use_direct_messages` outlives the role change that removed it —
-		// demote a member afterwards and the send path would keep working
-		// forever, because the gate at conversation creation already passed.
-		// Re-checking on every send is what makes a permission take effect on the
-		// member it was actually changed for.
-		otherMembers, err := txApp.FindRecordsByFilter(
-			dmMembersCollectionName,
-			"conversation_id = {:conv} && user_id != {:user}",
-			"created",
-			100,
-			0,
-			dbx.Params{"conv": convID, "user": e.Auth.Id},
-		)
-		if err != nil {
-			return 0, nil, internalError("failed to load conversation members", err)
-		}
-		for _, m := range otherMembers {
-			recipient, rErr := txApp.FindRecordById(usersCollectionName, m.GetString("user_id"))
-			if rErr != nil || recipient == nil {
-				return 0, nil, internalError("failed to load conversation member", rErr)
-			}
-			if !auth.Has(accessForUser(txApp, recipient).Permissions, auth.PermUseDirectMessages) {
-				return 0, nil, forbiddenError("a participant can no longer receive direct messages")
-			}
-		}
-
-		senderNick := e.Auth.GetString("nickname")
-		for _, m := range otherMembers {
-			rID := m.GetString("user_id")
-			// The DM list is a SEPARATE resource from the notification list —
-			// so without this nudge the conversation preview waits for a poll
-			// while the badge updates instantly.
-			//
-			// Addressed to each recipient individually rather than to the
-			// conversation: a conversation id is not something a non-member
-			// may learn from the stream.
-			publishSignal(txApp, realtimeSignalDMPost, msg.Id, rID)
-
-			// Email, first-unread only, offline only (Firebase parity).
-			u, _ := txApp.FindRecordById(usersCollectionName, rID)
-			if u != nil {
-				maybeEnqueueDMEmail(txApp, conv.Id, u, senderNick, cleanText)
-			}
+		// The whole append — the removed/banned/permission re-checks, the
+		// monotonic sequence, the preview/count update, the sender's read
+		// watermark and delivery — lives in appendMessageToConversation, shared
+		// with createDMHandler's race fallback so the two send paths cannot
+		// diverge on what a send leaves behind.
+		msg, nextSeq, appendErr := appendMessageToConversation(
+			txApp, conv, member, e.Auth.GetString("nickname"), cleanText, form.Rolls)
+		if appendErr != nil {
+			return 0, nil, appendErr
 		}
 
 		return http.StatusOK, map[string]any{
