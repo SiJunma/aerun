@@ -998,7 +998,12 @@ const TopicPage = () => {
   const lastTargetRef = useRef('');
   const initialVisitRef = useRef({}); // { topicId: timestamp } - capture when user arrives
   const alreadyJumpedRef = useRef(false);
-  const { key: locationKey } = useLocation();
+  // Stores the jump intent ({ id, post, goLast, hash }) observed on the last
+  // effect run. React Router v7 issues a brand-new location.key even for
+  // REPLACE navigation, so an informational page=N write (goLast / ?post=
+  // resolution via setSearchParams(replace)) must NOT be treated as a new jump —
+  // otherwise the skeleton overlay flashes back on screen.
+  const lastJumpIntentRef = useRef(null);
 
   // `isJumping` below is derived from alreadyJumpedRef during render, but the
   // flag is flipped from effects, promise callbacks and setTimeout callbacks.
@@ -1014,10 +1019,22 @@ const TopicPage = () => {
     forceJumpRender();
   }, []);
 
-  // Reset jump flag when navigating to a DIFFERENT topic or clicking a new link
+  const postParam = searchParams.get('post');
+  const goLastParam = searchParams.get('goLast');
+
+  // Reset jump flag when the jump *intent* changes: a different topic, a
+  // different post link, or a different anchor. An informational page=N write
+  // (goLast / ?post= page resolution) keeps the same intent and must NOT reset
+  // the flag — React Router v7 issues a fresh location.key even for replace
+  // navigation, and that was the root cause of the skeleton flash.
   useEffect(() => {
-    setAlreadyJumped(false);
-  }, [id, locationKey, setAlreadyJumped]);
+    const intent = { id, post: postParam, goLast: goLastParam, hash };
+    const prev = lastJumpIntentRef.current;
+    if (!prev || prev.id !== id || prev.post !== intent.post || prev.goLast !== intent.goLast || prev.hash !== intent.hash) {
+      setAlreadyJumped(false);
+    }
+    lastJumpIntentRef.current = intent;
+  }, [id, postParam, goLastParam, hash, setAlreadyJumped]);
 
   // Reset locatingPostIdRef ONLY when the topic changes
   useEffect(() => {
@@ -1036,7 +1053,6 @@ const TopicPage = () => {
     if (!topic) {
       return;
     }
-
     // If posts are not loaded, we can only proceed if a jump is requested (to resolve the page)
     // A freshly created post awaiting confirmation (Post IDs never go into the
     // address bar, so ?post= in a search input can only be a real jump link).
@@ -1212,7 +1228,7 @@ const TopicPage = () => {
     }
 
     // 2. Perform the actual scroll
-    const fullTargetKey = `${id}_${targetPage}_${targetId}_${queryPostId || ''}_${locationKey}`;
+    const fullTargetKey = `${id}_${targetPage}_${targetId}_${queryPostId || ''}`;
     if (targetId && lastTargetRef.current !== fullTargetKey) {
       lastTargetRef.current = fullTargetKey;
 
@@ -1251,7 +1267,7 @@ const TopicPage = () => {
         setIsPageLoading(false);
       }
     }
-  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, locationKey, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped, loadPosts]);
+  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped, loadPosts]);
   // The badge tooltip names the ACCOUNT behind a mask ("Player: …"), so it must
   // resolve for every post, not only for the viewer's own.
   //
