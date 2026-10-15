@@ -34,6 +34,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	"github.com/pocketbase/pocketbase/tools/security"
+	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
@@ -76,6 +77,7 @@ func categoryRecordPayload(r *core.Record) map[string]any {
 		"group_id":      r.GetString("group_id"),
 		"sort_order":    r.GetInt("sort_order"),
 		"allowed_roles": roles,
+		"permissions":   decodePermissionsMap(r.Get("permissions")),
 		"created":       r.GetDateTime("created").String(),
 		"updated":       r.GetDateTime("updated").String(),
 	}
@@ -279,11 +281,12 @@ func nextGroupSortOrder(app core.App, provided *int) int {
 // ---------------------------------------------------------------------------
 
 type categoryForm struct {
-	Name         labelInput `json:"name"`
-	Description  labelInput `json:"description"`
-	GroupID      *string    `json:"group_id"`
-	SortOrder    *int       `json:"sort_order"`
-	AllowedRoles []string   `json:"allowed_roles"`
+	Name         labelInput       `json:"name"`
+	Description  labelInput       `json:"description"`
+	GroupID      *string          `json:"group_id"`
+	SortOrder    *int             `json:"sort_order"`
+	AllowedRoles []string         `json:"allowed_roles"`
+	Permissions  map[string][]string `json:"permissions"`
 }
 
 func createCategoryHandler(e *core.RequestEvent) error {
@@ -323,6 +326,11 @@ func createCategoryHandler(e *core.RequestEvent) error {
 		}
 
 		roles, err := validateAllowedRoles(txApp, form.AllowedRoles)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		permissions, err := validatePermissions(txApp, form.Permissions)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -371,6 +379,9 @@ func createCategoryHandler(e *core.RequestEvent) error {
 		}
 		rec.Set("slug", slug)
 		rec.Set("allowed_roles", roles)
+		if len(permissions) > 0 {
+			rec.Set("permissions", permissions)
+		}
 
 		if err := txApp.Save(rec); err != nil {
 			return 0, nil, mapSlugConflict(err)
@@ -463,6 +474,15 @@ func updateCategoryHandler(e *core.RequestEvent) error {
 				return 0, nil, err
 			}
 			rec.Set("allowed_roles", roles)
+		}
+		// Same nil/non-nil distinction for the permissions map: absent key
+		// leaves the current map alone, a present map (even empty) replaces it.
+		if form.Permissions != nil {
+			permissions, err := validatePermissions(txApp, form.Permissions)
+			if err != nil {
+				return 0, nil, err
+			}
+			rec.Set("permissions", permissions)
 		}
 
 		if err := txApp.Save(rec); err != nil {
@@ -589,6 +609,101 @@ func validateAllowedRoles(app core.App, input []string) ([]string, error) {
 		return nil, validationError("unknown role_id(s): " + strings.Join(unknown, ", "))
 	}
 	return cleaned, nil
+}
+
+// validatePermissions checks every role id in every permission's role list
+// against the roles registry and removes duplicates. An empty map or a map
+// whose lists are all empty is legal (no per-category overrides). Unknown
+// permission keys are accepted — the key itself is not validated, only the
+// role ids it names. The inherit marker is allowed as the sole entry of a
+// permission's role list and means "inherit from the global role setting".
+func validatePermissions(app core.App, input map[string][]string) (map[string][]string, error) {
+	if len(input) == 0 {
+		return map[string][]string{}, nil
+	}
+
+	records, err := app.FindAllRecords(rolesCollectionName, nil)
+	if err != nil {
+		return nil, internalError("roles collection unavailable", err)
+	}
+	known := make(map[string]bool, len(records))
+	for _, rec := range records {
+		known[rec.GetString("role_id")] = true
+	}
+
+	cleaned := make(map[string][]string, len(input))
+	for perm, roleIDs := range input {
+		seen := make(map[string]bool, len(roleIDs))
+		var cleanRoles []string
+		for _, roleID := range roleIDs {
+			roleID = strings.TrimSpace(roleID)
+			if roleID == "" || seen[roleID] {
+				continue
+			}
+			seen[roleID] = true
+			if roleID == auth.CategoryInheritMarker {
+				// The inherit marker must be the only entry: combine it with
+				// real roles would be ambiguous ("inherit AND restrict").
+				if len(roleIDs) > 1 {
+					return nil, validationError(
+						"the inherit marker cannot be combined with explicit roles in permission " + perm,
+					)
+				}
+				cleanRoles = append(cleanRoles, roleID)
+				continue
+			}
+			if !known[roleID] {
+				return nil, validationError("unknown role_id(s) in permission " + perm + ": " + roleID)
+			}
+			cleanRoles = append(cleanRoles, roleID)
+		}
+		cleaned[perm] = cleanRoles
+	}
+	return cleaned, nil
+}
+
+// decodePermissionsMap normalises a stored permissions JSON value into a
+// map of permission key -> role id list. Anything that isn't a usable object
+// decodes to an empty map.
+func decodePermissionsMap(raw any) map[string][]string {
+	switch value := raw.(type) {
+	case nil:
+		return map[string][]string{}
+	case types.JSONRaw:
+		if len(value) == 0 {
+			return map[string][]string{}
+		}
+		var decoded map[string][]string
+		if err := json.Unmarshal(value, &decoded); err != nil {
+			return map[string][]string{}
+		}
+		return decoded
+	case string:
+		if value == "" || value == "{}" {
+			return map[string][]string{}
+		}
+		var decoded map[string][]string
+		if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+			return map[string][]string{}
+		}
+		return decoded
+	case map[string]any:
+		result := make(map[string][]string, len(value))
+		for k, v := range value {
+			if arr, ok := v.([]any); ok {
+				roles := make([]string, 0, len(arr))
+				for _, item := range arr {
+					if s, ok := item.(string); ok {
+						roles = append(roles, s)
+					}
+				}
+				result[k] = roles
+			}
+		}
+		return result
+	default:
+		return map[string][]string{}
+	}
 }
 
 // normalizeGroupReference validates the optional group reference. "unassigned"

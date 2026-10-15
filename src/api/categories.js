@@ -1,5 +1,6 @@
 import { sendApi } from './pocketbase';
 import { subscribeToRefetch } from './connection';
+import { PERMISSIONS } from '../constants/permissions';
 
 // Category and category-group access.
 //
@@ -154,6 +155,17 @@ const toViewOverride = (allowedRoles) => {
   return allowedRoles.includes(INHERIT_ROLES) ? null : allowedRoles;
 };
 
+// toPermissionOverride maps a single permission's stored role list onto the
+// admin form's tri-state: an array means "override on, these roles", undefined
+// means "inherit from the global role setting". The server stores the inherit
+// marker ([INHERIT_ROLES]) for a switched-off override, so it decodes to
+// undefined rather than an array that would look like root-only.
+const toPermissionOverride = (roles) => {
+  if (!Array.isArray(roles)) return undefined;
+  if (roles.includes(INHERIT_ROLES)) return undefined;
+  return roles;
+};
+
 const toCategory = (d) => ({
   id: d.id,
   slug: d.slug,
@@ -161,7 +173,13 @@ const toCategory = (d) => ({
   description: toTitleMap(d.description),
   group_id: d.group_id || '',
   order: d.sort_order ?? 0,
-  permissions: { [VIEW_FORUM]: toViewOverride(d.allowed_roles) },
+  permissions: {
+    [VIEW_FORUM]: toViewOverride(d.allowed_roles),
+    [PERMISSIONS.CREATE_TOPIC]: toPermissionOverride(d.permissions?.[PERMISSIONS.CREATE_TOPIC]),
+    [PERMISSIONS.POST_REPLY]: toPermissionOverride(d.permissions?.[PERMISSIONS.POST_REPLY]),
+    [PERMISSIONS.USE_MASKS]: toPermissionOverride(d.permissions?.[PERMISSIONS.USE_MASKS]),
+    [PERMISSIONS.USE_DICE]: toPermissionOverride(d.permissions?.[PERMISSIONS.USE_DICE]),
+  },
   // Counters are already numbers server-side; `?? 0` covers only a category the
   // server sent without them (an older backend), never a real 0.
   topics_count: d.topics_count ?? 0,
@@ -431,6 +449,23 @@ const toCategoryPayload = (catData) => {
   body.allowed_roles = Array.isArray(override)
     ? [...new Set(override)]
     : [INHERIT_ROLES];
+
+  // The permissions map carries the four non-view category-level overrides.
+  // view_forum is governed by allowed_roles (with its own inherit marker) and
+  // is not duplicated here. A switched-off override stores the inherit marker,
+  // so it is read back as "inherit" rather than being dropped silently.
+  const perms = catData?.permissions || {};
+  const permissions = {};
+  [PERMISSIONS.CREATE_TOPIC, PERMISSIONS.POST_REPLY, PERMISSIONS.USE_MASKS, PERMISSIONS.USE_DICE].forEach((permKey) => {
+    const val = perms[permKey];
+    if (val === undefined || val === null) {
+      permissions[permKey] = [INHERIT_ROLES];
+    } else {
+      permissions[permKey] = [...new Set(val)];
+    }
+  });
+  body.permissions = permissions;
+
   return body;
 };
 

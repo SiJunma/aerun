@@ -23,6 +23,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { PERMISSIONS } from '../src/constants/permissions.js';
 
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
 
@@ -752,6 +753,7 @@ const toCategoryPayload = new Function(
   'normalizeOrder',
   'VIEW_FORUM',
   'INHERIT_ROLES',
+  'PERMISSIONS',
   `${payloadSource[0]}; return toCategoryPayload;`
 )(
   pickLabel,
@@ -760,7 +762,8 @@ const toCategoryPayload = new Function(
     return Number.isFinite(value) ? value : null;
   },
   'view_forum',
-  MARKER
+  MARKER,
+  PERMISSIONS
 );
 
 const form = (permissions) => ({ title: 'X', description: '', order: 1, group_id: 'g', permissions });

@@ -20,6 +20,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { PERMISSIONS } from '../src/constants/permissions.js';
 
 const src = fs.readFileSync(new URL('../src/api/categories.js', import.meta.url), 'utf8');
 
@@ -58,6 +59,7 @@ const sandbox = {
   String,
   Promise,
   Object,
+  PERMISSIONS,
 };
 
 const ctx = vm.createContext(sandbox);

@@ -32,20 +32,19 @@ func TestSprint4MigrationSchema(t *testing.T) {
 
 	// 2. Check the category visibility field.
 	//
-	// This assertion used to require the legacy `permissions` JSON map. TASK-1
-	// (ADR-1) made `allowed_roles` the single visibility input and migration
-	// 1767400000 dropped `permissions` once every row was backfilled, so the
-	// check is inverted: the old field must be GONE, or two readers of one rule
-	// would still coexist and the next backfill would have nothing to read.
+	// allowed_roles is the single visibility input for view_forum (ADR-1).
+	// Migration 1767400000 dropped the legacy categories.permissions map once
+	// every row was backfilled into allowed_roles. Migration 1769700000 then
+	// re-adds categories.permissions as a JSON map holding the NON-view
+	// per-category overrides (create_topic, post_reply, use_masks, use_dice);
+	// view_forum stays governed by allowed_roles alone. The old field is
+	// therefore expected to be present again after the newer migration runs.
 	categories, err := app.FindCollectionByNameOrId("categories")
 	if err != nil {
 		t.Fatalf("categories collection missing: %v", err)
 	}
 	if categories.Fields.GetByName("allowed_roles") == nil {
 		t.Fatal("expected allowed_roles field on categories collection")
-	}
-	if categories.Fields.GetByName("permissions") != nil {
-		t.Fatal("categories.permissions must be removed after the allowed_roles backfill")
 	}
 	if categories.Fields.GetByName("group_id") == nil {
 		t.Fatal("expected group_id field on categories collection (1767500000)")

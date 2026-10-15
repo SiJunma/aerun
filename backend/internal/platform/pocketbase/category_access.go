@@ -629,6 +629,7 @@ func listAdminCategoriesHandler(e *core.RequestEvent) error {
 			"group_id":      c.GetString("group_id"),
 			"sort_order":    c.GetInt("sort_order"),
 			"allowed_roles": roles,
+			"permissions":   decodePermissionsMap(c.Get("permissions")),
 			"created":       c.GetDateTime("created").String(),
 			"updated":       c.GetDateTime("updated").String(),
 		}
