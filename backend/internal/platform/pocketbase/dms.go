@@ -524,6 +524,53 @@ func createDMHandler(e *core.RequestEvent) error {
 			recipientUsers[i] = u
 		}
 
+		// Race guard for the first message (owner ruling 2026-10-14): the pair
+		// may already have a thread because the other member's own first send
+		// is running concurrently. Each request, looked at alone, finds "no
+		// thread yet" and would INSERT its own — leaving BOTH members with two
+		// threads and one message each. So before any write, re-check for the
+		// pair's conversation inside THIS transaction (the command mutex
+		// serialises it behind the first request, whose writes are committed
+		// by the time this read runs). Found → append this message into the
+		// existing conversation and return 200 with its id and the caller's
+		// own row: one conversation, both messages, in both inboxes.
+		//
+		// Scoped to the 1:1 case (`len(recipients) == 1`): the pair query is
+		// inherently a pair query, and the draft first-send flow is always
+		// single-recipient. Group creates keep the creation path as before.
+		if len(recipients) == 1 {
+			if existingID, qErr := findPairConversationID(txApp, e.Auth.Id, recipients[0]); qErr != nil {
+				return 0, nil, internalError("failed to look up conversation", qErr)
+			} else if existingID != "" {
+				existing, fErr := txApp.FindRecordById(dmConversationsCollectionName, existingID)
+				if fErr != nil || existing == nil {
+					return 0, nil, notFoundError("conversation not found")
+				}
+				// The pair query only matches conversations the caller belongs
+				// to, so the sender's membership row must exist; a missing one
+				// is a contradiction, not a silent pass.
+				senderMem, mErr := txApp.FindFirstRecordByFilter(
+					dmMembersCollectionName,
+					"conversation_id = {:conv} && user_id = {:user}",
+					dbx.Params{"conv": existingID, "user": e.Auth.Id},
+				)
+				if mErr != nil || senderMem == nil {
+					return 0, nil, forbiddenError("you are not a participant in this conversation")
+				}
+				msg, nextSeq, aErr := appendMessageToConversation(
+					txApp, existing, senderMem, e.Auth.GetString("nickname"), cleanText, form.Rolls)
+				if aErr != nil {
+					return 0, nil, aErr
+				}
+				return http.StatusOK, map[string]any{
+					"conversation_id": existing.Id,
+					"sequence":        nextSeq,
+					"message":         dmMessagePayload(msg),
+					"request_id":      requestIDFrom(e),
+				}, nil
+			}
+		}
+
 		// 1. Create dm_conversations record.
 		//
 		// last_message_at is intentionally NOT set here: it is anchored to the
@@ -673,8 +720,6 @@ func findPairConversationID(app core.App, user, peer string) (string, error) {
 	return rows[0].ID, nil
 }
 
-
-
 // appendMessageToConversation writes ONE message into an EXISTING conversation
 // and returns the saved row with its sequence. It is the single implementation
 // of "send a message into a thread", shared by sendDMMessageHandler (the
@@ -785,7 +830,6 @@ func appendMessageToConversation(
 
 	return msg, nextSeq, nil
 }
-
 
 // sendDMMessageHandler sends a reply message within an existing conversation.
 func sendDMMessageHandler(e *core.RequestEvent) error {
@@ -1108,31 +1152,14 @@ func findConversationWithPeerHandler(e *core.RequestEvent) error {
 		return validationError("a conversation with yourself is not a conversation")
 	}
 
-	query := `
-		SELECT c.id AS id
-		FROM ` + dmConversationsCollectionName + ` c
-		JOIN ` + dmMembersCollectionName + ` mine
-			ON mine.conversation_id = c.id AND mine.user_id = {:user}
-		JOIN ` + dmMembersCollectionName + ` theirs
-			ON theirs.conversation_id = c.id AND theirs.user_id = {:peer}
-		ORDER BY c.last_message_at DESC, c.id DESC
-		LIMIT 1
-	`
-	var rows []struct {
-		ID string `db:"id"`
-	}
-	if err := e.App.DB().NewQuery(query).
-		Bind(dbx.Params{"user": e.Auth.Id, "peer": peerID}).
-		All(&rows); err != nil {
+	pairID, err := findPairConversationID(e.App, e.Auth.Id, peerID)
+	if err != nil {
 		return internalError("failed to look up conversation", err)
 	}
 
 	resp := map[string]any{
-		"conversation_id": "",
+		"conversation_id": pairID,
 		"request_id":      requestIDFrom(e),
-	}
-	if len(rows) > 0 {
-		resp["conversation_id"] = rows[0].ID
 	}
 	return e.JSON(http.StatusOK, resp)
 }
