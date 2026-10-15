@@ -330,16 +330,23 @@ const TopicPage = () => {
     setPostsLoadError(null);
     const hasPageParam = searchParams.has('page');
     const isGoLast = searchParams.get('goLast') === '1';
+    const queryPostId = searchParams.get('post');
 
     let pageToFetch = overridePage !== undefined ? overridePage : currentPageRef.current;
     let lastVisitMs = null;
+    let targetPostId = null;
 
-    if (overridePage === undefined && isGoLast && !hasPageParam) {
-      pageToFetch = 'last';
-      const lastVisitRaw = initialVisitRef.current[id] ?? readMapRef.current[id];
-      const lastVisitVal = lastVisitRaw?.timestamp || lastVisitRaw;
-      const floored = unreadFloor(lastVisitVal, profileRef.current?.created_at);
-      lastVisitMs = floored || null;
+    if (overridePage === undefined && !hasPageParam) {
+      if (queryPostId) {
+        targetPostId = queryPostId;
+        pageToFetch = 1;
+      } else if (isGoLast) {
+        pageToFetch = 'last';
+        const lastVisitRaw = initialVisitRef.current[id] ?? readMapRef.current[id];
+        const lastVisitVal = lastVisitRaw?.timestamp || lastVisitRaw;
+        const floored = unreadFloor(lastVisitVal, profileRef.current?.created_at);
+        lastVisitMs = floored || null;
+      }
     }
 
     // Идентификатор текущего запроса для предотвращения гонки состояний
@@ -347,7 +354,8 @@ const TopicPage = () => {
     isFetchingPostsRef.current = pageToFetch;
 
     try {
-      const { posts: data, pinnedPost, page: resolvedPage, lastPost, readCutoff } = await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE, lastVisitMs);
+      const { posts: data, pinnedPost, page: resolvedPage, lastPost, readCutoff, targetFound, movedToTopicId } =
+        await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE, lastVisitMs, targetPostId);
 
       // Если стартовал более свежий запрос, отбрасываем старый ответ!
       if (currentFetchId !== activeFetchIdRef.current) {
@@ -362,7 +370,31 @@ const TopicPage = () => {
         updateLocalTopicLastPost(id, topicRef.current.category_id, topicRef.current.title, lastPost, topicRef.current.posts_count);
       }
 
-      if (resolvedPage && pageToFetch === 'last') {
+      if (targetPostId) {
+        if (movedToTopicId && movedToTopicId !== id) {
+          locatingPostIdRef.current = null;
+          navigate(`/topic/${movedToTopicId}?post=${targetPostId}`);
+          return [];
+        }
+        if (targetFound === false) {
+          locatingPostIdRef.current = null;
+          showToast(lang === 'ru' ? 'Исходное сообщение было удалено' : 'The original post was deleted', 'warning');
+          setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.delete('post');
+            return next;
+          }, { replace: true, preventScrollReset: true });
+        } else if (resolvedPage) {
+          skipNextLoadForPageRef.current = resolvedPage;
+          setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            if (next.get('page') !== resolvedPage.toString()) {
+              next.set('page', resolvedPage.toString());
+            }
+            return next;
+          }, { replace: true, preventScrollReset: true });
+        }
+      } else if (resolvedPage && pageToFetch === 'last') {
         skipNextLoadForPageRef.current = resolvedPage;
         setSearchParams(prev => {
           const next = new URLSearchParams(prev);
@@ -375,7 +407,7 @@ const TopicPage = () => {
 
       const activePage = resolvedPage || (typeof pageToFetch === 'number' ? pageToFetch : 1);
 
-      if (currentPageRef.current === activePage || pageToFetch === 'last') {
+      if (currentPageRef.current === activePage || pageToFetch === 'last' || targetPostId) {
         const curTopic = topicRef.current;
         if (data.length === 0 && activePage > 1 && curTopic) {
           const validMaxPage = Math.max(1, Math.ceil((curTopic.posts_count || 1) / ITEMS_PER_PAGE));
@@ -454,7 +486,7 @@ const TopicPage = () => {
       }
       if (isMountedRef.current) setIsPageLoading(false);
     }
-  }, [id, ITEMS_PER_PAGE, user?.uid, setSearchParams, updateLocalTopicLastPost, searchParams]);
+  }, [id, ITEMS_PER_PAGE, user?.uid, setSearchParams, updateLocalTopicLastPost, searchParams, navigate, showToast, lang]);
 
   const currentTopicIdRef = useRef(id);
   const skipNextLoadForPageRef = useRef(null);
@@ -577,7 +609,9 @@ const TopicPage = () => {
     }
 
     // Если запрошен прыжок к конкретному посту (?post=ID или #post-ID), но номера страницы еще нет:
-    if ((hasPostJump || hasHashJump) && !hasExplicitPage) {
+    // ?post=ID теперь обрабатывается сервером напрямую за 1 запрос через loadPosts(?post=).
+    // Только хэш-ссылки без ?post (#post-ID) ждут разрешения через локатор.
+    if ((hasPostJump || hasHashJump) && !hasExplicitPage && !hasPostJump) {
       setPosts([]);
       return;
     }
@@ -1052,7 +1086,7 @@ const TopicPage = () => {
         // Ставим замок
         locatingPostIdRef.current = queryPostId;
 
-        locatePost(queryPostId, ITEMS_PER_PAGE).then(result => {
+        locatePost(queryPostId, ITEMS_PER_PAGE, id).then(result => {
           // locatePost resolves to `{ topicId, page, postId }` on a hit and
           // `null` on a miss (forum.js) — there is no `.found` flag any more.
           // Branching on `result` itself (not a boolean on it) is what keeps a
@@ -1108,7 +1142,7 @@ const TopicPage = () => {
           return;
         }
         locatingPostIdRef.current = postId;
-        locatePost(postId, ITEMS_PER_PAGE).then(result => {
+        locatePost(postId, ITEMS_PER_PAGE, id).then(result => {
           // Same contract as Priority 1: an object on a hit, `null` on a miss.
           if (result && result.topicId === id) {
             if (result.page !== currentPage) {

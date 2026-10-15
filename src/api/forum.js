@@ -385,11 +385,20 @@ export const subscribeToPostRemovalsRtdb = (_topicId, _callback) => {
 // `per_page` for the page size. The old `res.posts` read is why an existing
 // topic rendered with no messages: the key is never present, so every page came
 // back as an empty array regardless of what the topic held.
-export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null) => {
-  // `lastVisit` rides along ONLY for the goLast modes: the backend resolves
-  // `page=last|unread` against it to land on the first unread post. Dropping
-  // the argument (the old `_lastVisit`) left `?goLast=1` resolving to page 1.
-  let qs = `page=${encodeURIComponent(page)}&limit=${pageSize}`;
+//
+// If `targetPostId` is provided, the server resolves the exact page holding that
+// post using an index-backed SQL COUNT and immediately returns that page's items,
+// avoiding client-side loops or separate locate round-trips.
+export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVisit = null, targetPostId = null) => {
+  let qs = `limit=${pageSize}`;
+  if (targetPostId) {
+    qs += `&post=${encodeURIComponent(targetPostId)}`;
+    if (page && !['last', 'latest', 'unread'].includes(String(page))) {
+      qs += `&page=${encodeURIComponent(page)}`;
+    }
+  } else {
+    qs += `&page=${encodeURIComponent(page || 1)}`;
+  }
   if (lastVisit && ['last', 'latest', 'unread'].includes(String(page))) {
     qs += `&last_visit=${encodeURIComponent(lastVisit)}`;
   }
@@ -398,11 +407,15 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVi
   return {
     posts: items,
     total: res?.posts_count ?? items.length,
-    page: res?.page || page,
+    page: res?.page || page || 1,
     limit: res?.per_page || pageSize,
     // Present only in the goLast modes: the read cutoff the SERVER resolved the
     // page against (its own topic_read_states row, not our localStorage map).
-    readCutoff: res?.read_cutoff || null
+    readCutoff: res?.read_cutoff || null,
+    targetPostId: res?.target_post_id || null,
+    targetFound: res?.target_found ?? null,
+    movedToTopicId: res?.moved_to_topic_id || null,
+    pinnedPost: res?.pinned_post ? normalizePost(res.pinned_post) : null
   };
 };
 
@@ -578,47 +591,29 @@ export const publishDraft = async (draftId) => {
 // locatePost finds which page holds a post, so a deep link can open the exact
 // topic, page and post.
 //
-// It CANNOT be an arithmetic lookup any more. The old version read the post's
-// `sequence` and divided it by the page size, which was only correct while
-// every post had a stable ordinal — and a hard delete destroys that property:
-// removing one post shifts every later ordinal, so a link built before a delete
-// would open the wrong page afterwards.
-//
-// So the page is DISCOVERED by walking the topic's pages and looking for the
-// id. `startPage` is the page the reader is already on, and it is searched
-// first: the common case is a link to a post in the thread being read, and
-// starting there makes it one request instead of a walk from page 1.
-//
-// The walk is bounded by `maxPages` so a stale link to a deleted post cannot
-// page through an entire 5000-post topic before giving up.
-export const locatePost = async (postId, itemsPerPage = 20, startPage = 1, maxPages = 40) => {
+// Powered by the unified server endpoint `GET /api/aerun/topics/:id/posts?post=:postId`,
+// which computes the page server-side via SQL COUNT in a single fast query rather than
+// walking pages from the browser.
+export const locatePost = async (postId, itemsPerPage = 20, knownTopicId = null) => {
   try {
-    // Resolving the post to its topic used to be `pb.collection('posts').getOne`,
-    // which lockBrowserRules answers with 403 for every non-superuser — so the
-    // deep link this function exists to serve could never resolve a topic at all
-    // and the walk below never ran. GET /api/aerun/posts/{id} is the public
-    // single-post read the command layer already owns, and it answers `post`.
-    const res = await sendApi(`/api/aerun/posts/${postId}`);
-    const postRecord = res?.post;
-    if (!postRecord) return null;
-
-    const topicId = postRecord.topic_id;
-    if (!topicId) return null;
-
-    const first = Math.max(1, startPage || 1);
-    for (let page = first; page < first + maxPages; page += 1) {
-      const res = await sendApi(
-        `/api/aerun/topics/${topicId}/posts?limit=${itemsPerPage}&page=${page}`
-      );
-      // The Go command layer answers with `items` (forum_posts.go
-      // listPostsHandler). Read that, not the PocketBase SDK shape.
-      const items = res?.items || [];
-      if (items.length === 0) break;
-      if (items.some((p) => p && p.id === postId)) {
-        return { topicId, page, postId };
-      }
+    let topicId = knownTopicId;
+    if (!topicId) {
+      const res = await sendApi(`/api/aerun/posts/${postId}`);
+      const postRecord = res?.post;
+      if (!postRecord) return null;
+      topicId = postRecord.topic_id;
+      if (!topicId) return null;
     }
-    return null;
+
+    const res = await fetchSecuredPosts(topicId, 1, itemsPerPage, null, postId);
+    if (!res || res.targetFound === false) {
+      if (res?.movedToTopicId) {
+        return locatePost(postId, itemsPerPage, res.movedToTopicId);
+      }
+      return null;
+    }
+    const page = res.page;
+    return { topicId, page, postId };
   } catch (err) {
     console.error('[locatePost error]', err);
     return null;

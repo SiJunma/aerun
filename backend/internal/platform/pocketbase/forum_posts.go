@@ -277,15 +277,17 @@ func createPostHandler(e *core.RequestEvent) error {
 // construction: a post either has a row and is counted, or it does not exist.
 func listPostsHandler(e *core.RequestEvent) error {
 	topicID := e.Request.PathValue("id")
-	settings := loadForumSettings(e.App)
-	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.PostsPerPage), settings.PostsPerPage)
-	page, readCutoff := resolveListPage(e, limit)
-	if page < 1 {
-		page = 1
-	}
 	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
 	if err != nil || topic == nil {
 		return notFoundError("topic not found")
+	}
+
+	settings := loadForumSettings(e.App)
+	limit := forum.ClampLimit(parseIntParam(e.Request.URL.Query().Get("limit"), settings.PostsPerPage), settings.PostsPerPage)
+	resolution := resolveListPage(e, topicID, limit)
+	page := resolution.page
+	if page < 1 {
+		page = 1
 	}
 
 	query := e.App.RecordQuery(postsCollectionName).
@@ -347,52 +349,122 @@ func listPostsHandler(e *core.RequestEvent) error {
 	// Echoed only in the goLast modes: the instant the resolved page was
 	// computed against. The client uses it to aim the scroll at the first
 	// unread post without consulting any browser-localStorage read map.
-	if readCutoff != "" {
-		resp["read_cutoff"] = readCutoff
+	if resolution.readCutoff != "" {
+		resp["read_cutoff"] = resolution.readCutoff
+	}
+	if resolution.targetPostID != "" {
+		resp["target_post_id"] = resolution.targetPostID
+	}
+	if resolution.targetFound != nil {
+		resp["target_found"] = *resolution.targetFound
+	}
+	if resolution.movedToTopicID != "" {
+		resp["moved_to_topic_id"] = resolution.movedToTopicID
 	}
 	return e.JSON(http.StatusOK, resp)
 }
 
-// resolveListPage turns the `page` query parameter into a page number and
-// reports the read cutoff it used (`read_cutoff`, empty for a numeric page).
+type listPageResolution struct {
+	page           int
+	readCutoff     string
+	targetPostID   string
+	targetFound    *bool
+	movedToTopicID string
+}
+
+// resolveListPage turns the `page` or `post` query parameter into a page number and
+// reports the read cutoff or target post resolution details.
 //
-// Besides the plain numeric page it honours the goLast contract the retired
-// Firebase callable (`getSecuredPosts`) served and the Go port had silently
-// dropped: `page=last|latest|unread`. The dropped mode meant
-// `/topic/<id>?goLast=1` always landed on page 1 — `parseIntParam("last", 1)`
-// — and the client's scroll effect then jumped to the bottom of that first
-// page instead of the first unread post.
-//
-// THE CUTOFF IS SERVER-SIDE FIRST. For an authenticated caller the read
-// position comes from their own `topic_read_states.last_read_at` row (ADR-12)
-// — the same table the unread badge counts — so the jump is correct on any
-// device and never depends on a browser-localStorage map. The client's
-// `last_visit` parameter is only a FALLBACK for a caller the table knows
-// nothing about yet. The math mirrors the old callable:
-//   - with a cutoff, count the posts created up to and AT that instant
-//     (already read). If unread posts exist, serve the page holding the FIRST
-//     unread one; otherwise serve the last page.
-//   - without any cutoff (a guest, or no read state), serve the last page.
-//
-// Both counts carry the same draft predicate the feed query does, so the
-// resolved page can never disagree with the pagination window it is computed
-// from. An unparseable cutoff degrades to the no-cutoff case rather than
-// failing the request: "go to the end" is still correct, just not unread-aware.
-func resolveListPage(e *core.RequestEvent, limit int) (int, string) {
+// MODES:
+//  1. Target post (?post=<id> or ?post_id=<id>): locates the page holding that post
+//     using an optimized SQL COUNT of preceding posts in the topic. Echoes target_post_id
+//     and target_found (plus moved_to_topic_id if the post was re-filed elsewhere).
+//  2. goLast contract (?page=last|latest|unread): resolves the page holding the FIRST
+//     unread post against topic_read_states (or last_visit fallback), or the last page.
+//  3. Numeric page (?page=N): standard 1-based page number.
+func resolveListPage(e *core.RequestEvent, topicID string, limit int) listPageResolution {
+	targetPostID := strings.TrimSpace(e.Request.URL.Query().Get("post"))
+	if targetPostID == "" {
+		targetPostID = strings.TrimSpace(e.Request.URL.Query().Get("post_id"))
+	}
+
+	if targetPostID != "" {
+		targetFoundFalse := false
+		targetFoundTrue := true
+		fallbackPage := parseIntParam(e.Request.URL.Query().Get("page"), 1)
+		if fallbackPage < 1 {
+			fallbackPage = 1
+		}
+
+		post, err := e.App.FindRecordById(postsCollectionName, targetPostID)
+		if err != nil || post == nil {
+			return listPageResolution{
+				page:         fallbackPage,
+				targetPostID: targetPostID,
+				targetFound:  &targetFoundFalse,
+			}
+		}
+
+		postTopicID := post.GetString("topic_id")
+		if postTopicID != topicID {
+			return listPageResolution{
+				page:           fallbackPage,
+				targetPostID:   targetPostID,
+				targetFound:    &targetFoundFalse,
+				movedToTopicID: postTopicID,
+			}
+		}
+
+		// Drafts are private to their author and cannot be publicly located.
+		if post.GetBool("is_draft") {
+			return listPageResolution{
+				page:         fallbackPage,
+				targetPostID: targetPostID,
+				targetFound:  &targetFoundFalse,
+			}
+		}
+
+		// Count how many published posts precede or equal this post in the canonical order (created ASC, id ASC).
+		targetCreated := post.GetString("created")
+		draftVisible := dbx.NewExp("is_draft = false OR is_draft IS NULL")
+		countBefore, err := e.App.CountRecords(postsCollectionName,
+			dbx.HashExp{"topic_id": topicID},
+			draftVisible,
+			dbx.NewExp("(created < {:cut}) OR (created = {:cut} AND id <= {:pid})",
+				dbx.Params{"cut": targetCreated, "pid": post.Id}))
+		if err != nil || countBefore < 1 {
+			countBefore = 1
+		}
+
+		resolved := int((countBefore-1)/int64(limit)) + 1
+		if resolved < 1 {
+			resolved = 1
+		}
+
+		return listPageResolution{
+			page:         resolved,
+			targetPostID: targetPostID,
+			targetFound:  &targetFoundTrue,
+		}
+	}
+
 	pageRaw := strings.TrimSpace(e.Request.URL.Query().Get("page"))
 	switch pageRaw {
 	case "last", "latest", "unread":
 	default:
-		return parseIntParam(pageRaw, 1), ""
+		p := parseIntParam(pageRaw, 1)
+		if p < 1 {
+			p = 1
+		}
+		return listPageResolution{page: p}
 	}
-	topicID := e.Request.PathValue("id")
 
 	draftVisible := dbx.NewExp("is_draft = false OR is_draft IS NULL")
 	total, err := e.App.CountRecords(postsCollectionName,
 		dbx.HashExp{"topic_id": topicID},
 		draftVisible)
 	if err != nil {
-		return 1, ""
+		return listPageResolution{page: 1}
 	}
 	resolved := int((total + int64(limit) - 1) / int64(limit))
 	if resolved < 1 {
@@ -421,7 +493,7 @@ func resolveListPage(e *core.RequestEvent, limit int) (int, string) {
 		}
 	}
 	if cutoffEcho == "" {
-		return resolved, ""
+		return listPageResolution{page: resolved}
 	}
 
 	countBefore, err := e.App.CountRecords(postsCollectionName,
@@ -429,14 +501,14 @@ func resolveListPage(e *core.RequestEvent, limit int) (int, string) {
 		draftVisible,
 		dbx.NewExp("created <= {:cut}", dbx.Params{"cut": cutoff}))
 	if err != nil {
-		return resolved, cutoffEcho
+		return listPageResolution{page: resolved, readCutoff: cutoffEcho}
 	}
 	if countBefore < total {
 		// Zero-based index of the first unread post is `countBefore`; its page
 		// is that index divided by the page size, plus one.
 		resolved = int(countBefore/int64(limit)) + 1
 	}
-	return resolved, cutoffEcho
+	return listPageResolution{page: resolved, readCutoff: cutoffEcho}
 }
 
 // parseVisitCutoff accepts the client's last-visit instant as unix milliseconds
