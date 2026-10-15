@@ -940,6 +940,11 @@ const TopicPage = () => {
   const hydratedAuthorsRef = useRef(new Set());
   useEffect(() => {
     if (posts.length === 0) return;
+    // A signed-out visitor has no `uid`, so there is no "own profile" to skip
+    // and no reason to issue a per-author profile read just to fill in a
+    // signature. Guests render whatever signatures the server already
+    // denormalised on the posts — nothing extra is fetched for them.
+    if (!user?.uid) return;
     const missingUids = new Set();
 
     posts.forEach(p => {
