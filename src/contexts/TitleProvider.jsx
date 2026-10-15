@@ -16,7 +16,7 @@ export const usePageTitle = () => useContext(TitleContext);
 
 export const TitleProvider = ({ children }) => {
   const [pageTitle, setPageTitle] = useState('');
-  const { user, profile, settings, hasPermission, PERMISSIONS, unreadTopicsCount } = useAuth();
+  const { user, profile, settings, hasPermission, PERMISSIONS } = useAuth();
   const { lang } = useI18n();
   const { activeDesign } = useDesign();
 
@@ -55,14 +55,26 @@ export const TitleProvider = ({ children }) => {
   // "how many".
   const hasDmUnread = total > 0 ? 1 : 0;
 
-  // Combine counts into unreadCount (notifications + DMs + new topics/posts)
+  // Combine counts into unreadCount (notifications + DMs) — what signals a badge
+  // in the tab title AND on the favicon.
+  //
+  // `unreadTopicsCount` (new replies in topics the member already follows) is
+  // deliberately NOT part of this sum. The favicon badge and the `(N)` in the tab
+  // title read as "someone is trying to reach you" — a private message or a
+  // notification — and a new reply in an ordinary topic is not that. Folding the
+  // topic count in made the favicon flash a red `(1)` on a member who had no DM
+  // and no notification, only one unread reply somewhere on the board, which
+  // trains them to ignore the badge for the things that actually matter. The
+  // topic count keeps its own, clearly-labelled home: the "Active Topics (N)"
+  // navbar link and the /new-replies page, both fed straight from AuthProvider's
+  // `unreadTopicsCount` and untouched here.
   //
   // There is no separate admin term any more. The admin feed was the SAME
   // request as the member's own — `/me/notifications` is already scoped to the
   // caller server-side — so it polled the endpoint a second time and then ADDED
   // the identical rows, doubling both the tab badge and the sound that plays on
   // a new notification.
-  const unreadCount = (countsEligible ? userCount : 0) + hasDmUnread + (unreadTopicsCount || 0);
+  const unreadCount = (countsEligible ? userCount : 0) + hasDmUnread;
 
   // The tab title's notification term is the SERVER's count.
   //
