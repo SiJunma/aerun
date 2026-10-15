@@ -3,7 +3,7 @@ import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown } 
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
-  getGlobalSettings, updateGlobalSettings, approveUser, rejectUser, deleteUser, banUser, unbanUser,
+  getGlobalSettings, updateGlobalSettings, uploadIdentityPlaceholder, approveUser, rejectUser, deleteUser, banUser, unbanUser,
   updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
@@ -31,6 +31,7 @@ import { useToast } from '../contexts/ToastProvider';
 import { pb } from '../api/pocketbase';
 import DesignsTab from '../components/admin/DesignsTab';
 import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
+import AvatarUploader from '../components/common/AvatarUploader';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const ROLE_LEVELS = {
@@ -310,6 +311,8 @@ const AdminPage = () => {
     whitelistMode: true,
     requireApproval: true,
     logoUrl: '',
+    deletedAvatar: '',
+    guestAvatar: '',
     bgLight: 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
     bgDark: 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
     bgNeutral: 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop'
@@ -352,6 +355,8 @@ const AdminPage = () => {
           allowUserCustomDesign: data.allowUserCustomDesign ?? true,
           defaultDesignId: data.defaultDesignId || '',
           logoUrl: data.logoUrl || '',
+          deletedAvatar: data.deletedAvatar || '',
+          guestAvatar: data.guestAvatar || '',
           bgLight: data.bgLight || 'https://images.unsplash.com/photo-1458668383970-8ddd3927deed?q=80&w=1400&auto=format&fit=crop',
           bgDark: data.bgDark || 'https://images.unsplash.com/photo-1656077217715-bdaeb06bd01f?q=80&w=1400&auto=format&fit=crop',
           bgNeutral: data.bgNeutral || 'https://images.unsplash.com/photo-1675636173835-657f72144c77?q=80&w=1400&auto=format&fit=crop'
@@ -446,6 +451,39 @@ const AdminPage = () => {
     setSaving(true);
     try {
       await updateGlobalSettings(settings, user.uid);
+      showToast(t('admin.settings.success'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast(t('admin.settings.error'), 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Identity placeholder upload (plan I5/D2). The bytes go straight to the
+  // dedicated upload endpoint, which owns the FileField and rewrites the
+  // *_avatar_url reference — the same split the user avatar uses, so the URL
+  // column never holds image data. uploadIdentityPlaceholder already refreshes
+  // the shared settings cache and notifies subscribers, so the whole forum sees
+  // the new image at once; we mirror it into local state for the preview.
+  const handleUploadPlaceholder = async (kind, blob, filename) => {
+    const url = await uploadIdentityPlaceholder(kind, blob, filename);
+    if (url) {
+      setSettings(prev => ({ ...prev, [kind === 'guest' ? 'guestAvatar' : 'deletedAvatar']: url }));
+    }
+    return url;
+  };
+
+  // Reset a placeholder to the neutral default: an empty reference, sent through
+  // the same PATCH the rest of the settings use (an empty string clears it, just
+  // like logoUrl). This only clears the reference — the stored file is left for
+  // the schema, harmless and never served once the reference is empty.
+  const handleResetPlaceholder = async (kind) => {
+    const key = kind === 'guest' ? 'guestAvatar' : 'deletedAvatar';
+    setSaving(true);
+    try {
+      await updateGlobalSettings({ [key]: '' }, user.uid);
+      setSettings(prev => ({ ...prev, [key]: '' }));
       showToast(t('admin.settings.success'), 'success');
     } catch (err) {
       console.error(err);
@@ -1294,6 +1332,62 @@ const AdminPage = () => {
                     <span className="small fw-bold" style={{ width: '40px', textAlign: 'right' }}>{Math.round((settings.bgOpacityNeutral ?? 0.5) * 100)}%</span>
                   </div>
                 </div>
+              </Form.Group>
+            </Col>
+          </Row>
+
+          <hr className="my-5" />
+          <h5 className="mb-4 text-primary">{t('admin.settings.identity_placeholders')}</h5>
+          <p className="small text-muted mb-3">{t('admin.settings.identity_placeholders_help')}</p>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3" controlId="deletedAvatar">
+                <Form.Label className="fw-bold">{t('admin.settings.placeholder_deleted')}</Form.Label>
+                <AvatarUploader
+                  value={settings.deletedAvatar || ''}
+                  onChange={(url) => setSettings({ ...settings, deletedAvatar: url })}
+                  onUpload={(blob, filename) => handleUploadPlaceholder('deleted', blob, filename)}
+                  allowGifs={settings.allowGifAvatars !== false}
+                  size={80}
+                  canUpload={true}
+                  disabled={saving}
+                />
+                {settings.deletedAvatar && (
+                  <Button
+                    variant="outline-secondary"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => handleResetPlaceholder('deleted')}
+                    disabled={saving}
+                  >
+                    {t('admin.settings.placeholder_reset')}
+                  </Button>
+                )}
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3" controlId="guestAvatar">
+                <Form.Label className="fw-bold">{t('admin.settings.placeholder_guest')}</Form.Label>
+                <AvatarUploader
+                  value={settings.guestAvatar || ''}
+                  onChange={(url) => setSettings({ ...settings, guestAvatar: url })}
+                  onUpload={(blob, filename) => handleUploadPlaceholder('guest', blob, filename)}
+                  allowGifs={settings.allowGifAvatars !== false}
+                  size={80}
+                  canUpload={true}
+                  disabled={saving}
+                />
+                {settings.guestAvatar && (
+                  <Button
+                    variant="outline-secondary"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => handleResetPlaceholder('guest')}
+                    disabled={saving}
+                  >
+                    {t('admin.settings.placeholder_reset')}
+                  </Button>
+                )}
               </Form.Group>
             </Col>
           </Row>

@@ -95,6 +95,8 @@ This file serves as the master context for AI interaction, combining the current
             "bgLight": "string",
             "bgDark": "string",
             "bgNeutral": "string",
+            "deletedAvatar": "string (host-agnostic /api/files reference to the admin-uploaded avatar shown for a REMOVED account; empty = neutral default). PocketBase-native on the forum_settings singleton (migration 1769400000), served on the public settings snapshot; uploaded via PUT /api/aerun/admin/settings/placeholder/deleted, cleared via PATCH /api/aerun/admin/settings {\"deletedAvatar\":\"\"}.",
+            "guestAvatar": "string (same as deletedAvatar, for an anonymous GUEST; uploaded via .../placeholder/guest). Read by src/utils/identity.js (identityAvatar) and drawn identically in posts, last-post thumbnails and the DM inbox/chat.",
             "enableDice": "boolean",
             "enableCharacters": "boolean",
             "enableReputation": "boolean",

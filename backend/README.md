@@ -610,6 +610,30 @@ multipart avatar can never satisfy it. The command is safe without the envelope
 because it replaces rather than accumulates — PocketBase deletes the previous
 file when a single-select `FileField` is overwritten.
 
+### Identity placeholder upload
+
+`forum_settings.deleted_avatar` / `guest_avatar` are `FileField`s on the settings
+singleton (migration `1769400000`), each paired with a `*_avatar_url` reference
+holding the host-agnostic `/api/files/...` path — the same two-column shape the
+user avatar uses. They are the images shown for identities with no account of
+their own: a removed member (`deleted`) and an anonymous visitor (`guest`).
+`src/utils/identity.js` (`identityAvatar`) resolves them the same way it resolves
+any avatar, so posts, last-post thumbnails and the DM inbox/chat draw one
+consistent placeholder; an empty reference falls back to the neutral gray "U".
+
+`PUT /api/aerun/admin/settings/placeholder/{kind}` (`kind` = `deleted` | `guest`)
+writes both: multipart `file` part, ≤2 MB (the shared `readAvatarUpload` cap),
+PNG/JPEG/WebP/GIF, admin-only. An unknown kind is refused (`400`) rather than
+silently defaulted. The format is sniffed from the bytes, never the client.
+
+Like the user-avatar route it is **not** bound to `enforceIdempotency` (a
+multipart body cannot satisfy the 512 KB envelope), and is safe without it
+because the write is a replace on a single-select `FileField`. The reference can
+also be set or cleared through the ordinary `PATCH /api/aerun/admin/settings`
+(the `deletedAvatar` / `guestAvatar` keys, empty string = reset to default),
+exactly like `logoUrl`. Files are stored with the default `Protected=false`, so a
+guest can load the placeholder the same way they load the logo.
+
 ### Legacy avatar import
 
 The bytes come out of the verified Sprint 0 export

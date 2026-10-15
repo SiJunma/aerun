@@ -41,6 +41,7 @@
     "test:forum-read-contract": "node scripts/check-forum-read-contract.mjs",
     "test:drafts-and-settings": "node scripts/check-drafts-and-settings.mjs",
     "test:identity-refresh": "node scripts/check-identity-refresh.mjs",
+    "test:identity-placeholder": "node scripts/check-identity-placeholder.mjs",
     "test:user-profile-normalization": "node scripts/check-user-profile-normalization.mjs",
     "test:security-tab": "node scripts/check-security-tab-credentials.mjs",
     "test:last-selected-mask": "node scripts/check-last-selected-mask.mjs",
@@ -51,7 +52,7 @@
     "test:no-firebase-storage": "node scripts/check-no-firebase-storage.mjs",
     "test:no-raw-modal": "node scripts/check-no-raw-modal.mjs",
     "test:unsent-reply-rescue": "node scripts/check-unsent-reply-rescue.mjs",
-    "test": "npm run test:first-post-guard && npm run test:topic-delete-cleanup && npm run test:golast-overlay && npm run test:inflight-guard && npm run test:shared-poll && npm run test:dm-mutation-state && npm run test:jsx-comments && npm run test:category-subscriber && npm run test:manage-mode-affordance && npm run test:date-accessors && npm run test:unread-floor && npm run test:audit-action-labels && npm run test:admin-empty-state && npm run test:forum-empty-state && npm run test:admin-form-validation && npm run test:error-classification && npm run test:forum-read-contract && npm run test:drafts-and-settings && npm run test:identity-refresh && npm run test:user-profile-normalization && npm run test:security-tab && npm run test:last-selected-mask && npm run test:roles-live-update && npm run test:account-status-axis && npm run test:endpoints && npm run test:mask-avatar-isolation && npm run test:no-firebase-storage && npm run test:no-raw-modal && npm run test:unsent-reply-rescue && npm run lint:js",
+    "test": "npm run test:first-post-guard && npm run test:topic-delete-cleanup && npm run test:golast-overlay && npm run test:inflight-guard && npm run test:shared-poll && npm run test:dm-mutation-state && npm run test:jsx-comments && npm run test:category-subscriber && npm run test:manage-mode-affordance && npm run test:date-accessors && npm run test:unread-floor && npm run test:audit-action-labels && npm run test:admin-empty-state && npm run test:forum-empty-state && npm run test:admin-form-validation && npm run test:error-classification && npm run test:forum-read-contract && npm run test:drafts-and-settings && npm run test:identity-refresh && npm run test:identity-placeholder && npm run test:user-profile-normalization && npm run test:security-tab && npm run test:last-selected-mask && npm run test:roles-live-update && npm run test:account-status-axis && npm run test:endpoints && npm run test:mask-avatar-isolation && npm run test:no-firebase-storage && npm run test:no-raw-modal && npm run test:unsent-reply-rescue && npm run lint:js",
     "lint:rules": "firebase emulators:exec --project demo-test --only firestore \"node -e \\\"console.log('Firestore rules OK')\\\"\"",
     "lint": "npm run lint:js && npm run lint:rules",
     "preview": "vite preview"

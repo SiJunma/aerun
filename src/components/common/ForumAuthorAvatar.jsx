@@ -1,8 +1,9 @@
 import React from 'react';
 import { Image } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
+import { useAuth } from '../../contexts/AuthProvider';
 import { resolveAvatarUrl } from '../../api/avatars';
-import { placeholderAvatarUrl } from '../../utils/identity';
+import { identityAvatar } from '../../utils/identity';
 
 // In-memory cache for avatar URLs
 const avatarCache = new Map();
@@ -23,6 +24,7 @@ const ForumAuthorAvatar = ({
   isOnline = false,
 }) => {
   const { lang } = useI18n();
+  const { settings } = useAuth();
 
   const validCharId = isCharacter && characterId && typeof characterId === 'string' && characterId.trim() !== '' ? characterId.trim() : null;
   const validUserId = userId && typeof userId === 'string' && userId.trim() !== '' ? userId.trim() : null;
@@ -41,7 +43,7 @@ const ForumAuthorAvatar = ({
   // "Guest" here and a gray "U" there.
   const placeholder = fallbackName
     ? `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName)}&size=${size}`
-    : placeholderAvatarUrl('U', size);
+    : identityAvatar({ name: '', avatar: '', customPlaceholder: settings?.deletedAvatar, size });
   // Every author snapshot (topics, posts, drafts, last-post info) arrives here,
   // so this is the single place that has to turn a stored avatar reference into
   // something loadable — the importer writes a host-agnostic /api/files path,

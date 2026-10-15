@@ -291,6 +291,18 @@ conversations/{conv_id}/messages/{msg_id}: {
 }
 ```
 
+> **Плейсхолдеры идентичности (PocketBase, миграция `1769400000`).** На синглтоне
+> `forum_settings` добавлены `deleted_avatar` / `guest_avatar` (FileField) и
+> `deleted_avatar_url` / `guest_avatar_url` (host-agnostic ссылка `/api/files/...`).
+> Это кастомные аватары для сущностей без своего аккаунта — удалённого участника
+> и гостя. Загружаются через `PUT /api/aerun/admin/settings/placeholder/{kind}`
+> (`kind` = `deleted` | `guest`, только admin), сбрасываются через
+> `PATCH /api/aerun/admin/settings` (`{"deletedAvatar":""}`). Читаются из публичного
+> снапшота настроек и резолвятся единым хелпером `src/utils/identity.js`
+> (`identityAvatar`) — в постах, миниатюрах последних сообщений и DM рисуются
+> одинаково; пустая ссылка = нейтральный «U» по умолчанию. Форма загрузки — в
+> Настройках админки (секция «Плейсхолдеры идентичности»).
+
 ### 2.13 Коллекция `notifications` (in-app)
 ```
 {

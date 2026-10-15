@@ -28,7 +28,7 @@ import Timestamp from '../common/Timestamp';
 import ErrorCard from '../common/ErrorCard';
 import ConfirmModal from '../common/ConfirmModal';
 import { PERMISSIONS } from '../../constants/permissions';
-import { deletedDisplayName, placeholderAvatarUrl } from '../../utils/identity';
+import { deletedDisplayName, identityAvatar, placeholderAvatarUrl } from '../../utils/identity';
 
 /**
  * DirectMessages component
@@ -725,6 +725,13 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   );
 
   if (activeChatId && activePeer) {
+    // A peer removed while the thread is open (peerStatus flips to 'deleted')
+    // must draw the admin's custom "deleted" placeholder, not the stale name and
+    // avatar captured when the chat opened. A live peer keeps their own picture
+    // or their initials — the deleted image is only for a gone identity (I3).
+    const peerAvatarSrc = peerStatus === 'deleted'
+      ? identityAvatar({ name: '', avatar: '', customPlaceholder: settings?.deletedAvatar, size: 32 })
+      : (resolveAvatarUrl(activePeer.avatar) || placeholderAvatarUrl(activePeer.name, 32));
     return (
       <>
         <Card
@@ -745,7 +752,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
             <ArrowLeft size={18} color="#ffffff" />
           </Button>
           <Image
-            src={resolveAvatarUrl(activePeer.avatar) || placeholderAvatarUrl(activePeer.name, 32)}
+            src={peerAvatarSrc}
             roundedCircle
             style={{ width: '32px', height: '32px', objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.2)' }}
             onError={(e) => { e.target.onerror = null; e.target.src = placeholderAvatarUrl(activePeer.name, 32); }}
@@ -837,7 +844,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     >
                       {!isMe && (
                         <Image
-                          src={resolveAvatarUrl(activePeer?.avatar) || placeholderAvatarUrl(activePeer?.name, 32)}
+                          src={peerAvatarSrc}
                           roundedCircle
                           className="me-2"
                           style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', flexShrink: 0, objectFit: 'cover' }}
@@ -1119,7 +1126,12 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 >
                   <div className="position-relative">
                     <Image
-                      src={resolveAvatarUrl(peerAvatar) || placeholderAvatarUrl(peerRawName, 44)}
+                      src={identityAvatar({
+                        name: peerRawName,
+                        avatar: peerAvatar,
+                        customPlaceholder: peerRawName ? undefined : settings?.deletedAvatar,
+                        size: 44,
+                      })}
                       roundedCircle
                       style={{ width: '44px', height: '44px', objectFit: 'cover', flexShrink: 0 }}
                       onError={(e) => { e.target.onerror = null; e.target.src = placeholderAvatarUrl(peerRawName, 44); }}
