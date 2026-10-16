@@ -121,7 +121,7 @@ const Navigation = () => {
               className="me-2 border-0 p-1"
               onClick={() => setExpanded(!expanded)}
             />
-            {(unreadTopicsCount > 0 || totalBadge > 0) && (
+            {unreadTopicsCount > 0 && (
               <span 
                 className="position-absolute rounded-circle bg-warning shadow-sm" 
                 style={{ 

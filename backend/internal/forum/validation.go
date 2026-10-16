@@ -16,6 +16,8 @@ var (
 	ErrReputationInvalidValue          = errors.New("reputation value must be 1 or -1")
 	ErrReputationCommentTooLong        = errors.New("reputation comment must not exceed 1024 characters")
 	ErrReputationVoterOrTargetRequired = errors.New("voter and target are required")
+	ErrGuestNicknameRequired           = errors.New("guest nickname is required")
+	ErrGuestNicknameTooLong            = errors.New("guest nickname must not exceed 64 characters")
 )
 
 // ValidateReputationVote validates voter vs target, vote value and comment length.
@@ -56,6 +58,18 @@ func ValidatePostContent(content string) (string, error) {
 	}
 	if utf8.RuneCountInString(trimmed) > MaxPostContentLen {
 		return "", ErrPostContentTooLong
+	}
+	return trimmed, nil
+}
+
+// ValidateGuestNickname validates a guest's display name.
+func ValidateGuestNickname(nickname string) (string, error) {
+	trimmed := strings.TrimSpace(nickname)
+	if trimmed == "" {
+		return "", ErrGuestNicknameRequired
+	}
+	if utf8.RuneCountInString(trimmed) > MaxGuestNicknameLen {
+		return "", ErrGuestNicknameTooLong
 	}
 	return trimmed, nil
 }

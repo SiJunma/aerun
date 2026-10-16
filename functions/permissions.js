@@ -56,7 +56,7 @@ function normaliseAllowedRoles(raw) {
  * A missing category denies (getSecuredPosts used to allow it — decide once).
  */
 function hasViewForum(rawRole, categoryId, ctx) {
-  if (rawRole === "root" || rawRole === "admin") return true;
+  if (rawRole === "root") return true;
   if (!categoryId) return false;
 
   const role = effectiveRole(rawRole, ctx.settings);
@@ -91,7 +91,7 @@ async function getRequester(db, uid) {
  * check, exactly like request.auth.token.role_id in firestore.rules.
  */
 function isRuleAdmin(rawRole) {
-  return rawRole === "admin" || rawRole === "root";
+  return rawRole === "root";
 }
 
 /**

@@ -24,7 +24,7 @@ export const PERMISSIONS = {
   MANAGE_CATEGORIES: 'manage_categories',
   DELETE_USERS: 'delete_users',
   VIEW_AUDIT_LOG: 'view_audit_log',
-  
+
   // Content Moderation
   MODERATE_CONTENT: 'moderate_content',
   MOVE_TOPICS: 'move_topics',
@@ -48,12 +48,12 @@ export const PERMISSIONS = {
   // it is handed out per custom role. Removing a topic that holds nothing but
   // your own opening post needs no permission at all.
   DELETE_OWN_TOPIC_WITH_REPLIES: 'delete_own_topic_with_replies',
-  
+
   // General Usage
   VIEW_FORUM: 'view_forum',
   POST_REPLY: 'post_reply',
   CREATE_TOPIC: 'create_topic',
-  
+
   // Specific Features
   USE_REPUTATION: 'use_reputation',
   // Reputation actions are split by action (edit/delete) and by subject (your
@@ -147,7 +147,7 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.USE_DIRECT_MESSAGES]: { en: 'Use Direct Messages', ru: 'Личные сообщения' },
   [PERMISSIONS.BYPASS_HIDE_TAGS]: { en: 'Bypass [hide] Tags', ru: 'Видеть скрытый контент ([hide])' },
   [PERMISSIONS.MENTION_ALL]: { en: 'Broadcast @All Mentions', ru: 'Уведомление всех (@All)' },
-  
+
   // Legacy mappings for backward compatibility with Firestore data
   'manage_settings': { en: 'Forum Settings', ru: 'Настройки форума' },
   'edit_profiles': { en: 'Edit Profiles', ru: 'Правка профилей' },
@@ -396,7 +396,6 @@ export const DEFAULT_ROLES = [
     is_system: true,
     permissions: []
     // Guests have no global permissions. Access to specific categories is granted
-    // Guests have no global permissions. Access to specific categories is granted
     // via category-level VIEW_FORUM overrides that include the 'guest' role.
   }
 ];
@@ -421,14 +420,14 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.EDIT_SELF_PROFILE
   ],
   // A spectator is a viewer. `create_topic` and `post_reply` are gone so the
-// system role means exactly what its name says, and masks and dice went with
-// them: a role that can watch but not speak has no business carrying the
-// authoring features.
-//
-// `use_reputation` and `use_direct_messages` are deliberately LEFT in — they
-// are receiving capabilities, not authoring ones, and removing them was not
-// part of the ask. Say the word if a spectator should be fully inert.
-spectator: [
+  // system role means exactly what its name says, and masks and dice went with
+  // them: a role that can watch but not speak has no business carrying the
+  // authoring features.
+  //
+  // `use_reputation` and `use_direct_messages` are deliberately LEFT in — they
+  // are receiving capabilities, not authoring ones, and removing them was not
+  // part of the ask. Say the word if a spectator should be fully inert.
+  spectator: [
     PERMISSIONS.VIEW_FORUM,
     PERMISSIONS.USE_REPUTATION,
     PERMISSIONS.USE_DIRECT_MESSAGES,
@@ -541,7 +540,7 @@ export const isChiefAdmin = (userEmail, roleId) => {
 export const getRoleVisuals = (roleId, roles = []) => {
   const targetId = roleId === CHIEF_ADMIN_ID ? 'admin' : roleId;
   const role = roles.find(r => r.id === targetId) || DEFAULT_ROLES.find(r => r.id === targetId) || DEFAULT_ROLES.find(r => r.id === 'player');
-  
+
   const color = role?.color || 'primary';
   return {
     name: role?.name || 'Player',

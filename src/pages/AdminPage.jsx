@@ -1028,15 +1028,15 @@ const AdminPage = () => {
     setRoleAttempted(false);
     if (role) {
       setEditingRole(role);
+      // A role's OWN permissions must never exceed its own ceiling — otherwise
+      // an imported/stale role can show checkboxes above its allowed set
+      // (e.g. guest carrying every player permission because its base_role_id
+      // is empty and falls back to 'player'). Clamp to MAX_ROLE_PERMISSIONS.
+      const allowedForRole = MAX_ROLE_PERMISSIONS[role.id] || [];
       setRoleForm({
         name: role.name,
-        permissions: normalizePermissions(role.permissions || []),
+        permissions: normalizePermissions(role.permissions || []).filter(p => allowedForRole.includes(p)),
         color: role.color || 'primary',
-        // `adminRoles`, never `role.id`. normalizeRole maps `id` to the ROLE id,
-        // so the old `role.base_role_id || role.id` fallback resolved to the
-        // role's OWN id and proposed it as its own base — the self-reference the
-        // server rejects, which is what left an imported role stuck and
-        // uneditable. A role with no base genuinely has none.
         base_role_id: role.base_role_id || ''
       });
     } else {
@@ -2433,7 +2433,9 @@ const AdminPage = () => {
 
           <h6 className="fw-bold mb-3">{t('admin.roles.modal_perms')}</h6>
           {PERMISSION_GROUPS.map(group => {
-            const currentBaseRole = roleForm.base_role_id || 'player';
+            // A role's own id is its ceiling — guest with empty base_role_id
+            // must NOT fall back to 'player' and show every player permission.
+            const currentBaseRole = roleForm.base_role_id || (editingRole?.id === 'guest' ? 'guest' : 'player');
             const allowedPerms = MAX_ROLE_PERMISSIONS[currentBaseRole] || Object.values(PERMISSIONS);
             const visiblePerms = group.permissions.filter(p => allowedPerms.includes(p));
 

@@ -39,6 +39,7 @@ const normalizePost = (p) => {
     id: p.id,
     topic_id: p.topic_id,
     author_id: p.author_id,
+    guest_nickname: p.guest_nickname || '',
     content: p.content || '',
     created_at: p.created,
     updated_at: p.updated,
@@ -324,6 +325,7 @@ export const createTopic = async (topicData, firstPostData) => {
       // else's character by editing this request.
       character_id: topicData.character_id || '',
       pin_first_post: !!topicData.pin_first_post,
+      guest_nickname: topicData.guest_nickname || ''
     }
   });
 
@@ -503,6 +505,9 @@ export const createPost = async (postData, idempotencyKey) => {
       // form's is. Empty falls back to the mask stored on the profile, which is
       // what the picker writes when the author selects one.
       character_id: postData.character_id || '',
+      // Guests post without an account; their display name travels here so the
+      // server can store it on the post row (guest_nickname column).
+      guest_nickname: postData.guest_nickname || '',
     }
   });
 

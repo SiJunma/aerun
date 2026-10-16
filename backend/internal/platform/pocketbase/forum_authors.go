@@ -311,6 +311,13 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 // credit, or blame, for something the account did not write.
 func decoratePostAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
 	id, _ := payload["author_id"].(string)
+	if id == "" {
+		// Guest post: author_id is empty, use guest_nickname as the display name.
+		if nick, _ := payload["guest_nickname"].(string); nick != "" {
+			payload["author_name"] = nick
+		}
+		return
+	}
 	display, ok := displays[id]
 	if !ok {
 		return
@@ -354,34 +361,25 @@ func decoratePostAuthors(app core.App, payloads []map[string]any) {
 // topic opener and the last replier picked their masks independently, and the
 // list row renders both names.
 func decorateTopicAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
-	if id, _ := payload["author_id"].(string); id != "" {
-		if display, ok := displays[id]; ok {
-			payload["author_name"] = display.Nickname
-			payload["author_avatar"] = display.AvatarURL
-			payload["author_status_line"] = display.StatusLine
-			payload["author_role_id"] = display.Role
-			payload["author_reputation"] = display.Reputation
-			payload["author_posts_count"] = display.PostsCount
-			payload["author_signature"] = display.Signature
-
-			applyMask(payload, "author_character_id", id, masks)
+	id, _ := payload["author_id"].(string)
+	if id == "" {
+		// Guest topic: use guest_nickname as the author name.
+		if nick, _ := payload["guest_nickname"].(string); nick != "" {
+			payload["author_name"] = nick
 		}
+		return
 	}
+	if display, ok := displays[id]; ok {
+		payload["author_name"] = display.Nickname
+		payload["author_avatar"] = display.AvatarURL
+		payload["author_status_line"] = display.StatusLine
+		payload["author_role_id"] = display.Role
+		payload["author_reputation"] = display.Reputation
+		payload["author_posts_count"] = display.PostsCount
+		payload["author_signature"] = display.Signature
 
-	lastID, _ := payload["last_post_author_id"].(string)
-	if lastID == "" {
-		return
+		applyMask(payload, "author_character_id", id, masks)
 	}
-	display, ok := displays[lastID]
-	if !ok {
-		return
-	}
-	payload["last_post_author"] = display.Nickname
-	payload["last_post_author_avatar"] = display.AvatarURL
-	// Same rule as the topic author, and the same implementation: the mask
-	// renames the LAST POSTER only, and the unread dot and reputation stay the
-	// account's.
-	applyLastPostMask(payload, lastID, masks)
 }
 
 // decorateTopicAuthors resolves and applies the author projection to a page of

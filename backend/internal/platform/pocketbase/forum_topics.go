@@ -36,6 +36,9 @@ type createTopicForm struct {
 	// reference processDiceRolls wrote into the content. Dropped before, so a
 	// new topic with a throw in it showed the raw tag to every reader.
 	Rolls map[string]any `json:"rolls"`
+	// GuestNickname is the display name a guest picks when posting without an
+	// account. Empty for authenticated users.
+	GuestNickname string `json:"guest_nickname"`
 }
 
 type updateTopicForm struct {
@@ -59,6 +62,7 @@ func topicPayload(record *core.Record) map[string]any {
 		"id":                  record.Id,
 		"category_id":         record.GetString("category_id"),
 		"author_id":           record.GetString("author_id"),
+		"guest_nickname":      record.GetString("guest_nickname"),
 		"title":               record.GetString("title"),
 		"posts_count":         record.GetInt("posts_count"),
 		"locked":              record.GetBool("locked"),
@@ -122,11 +126,23 @@ func createTopicHandler(e *core.RequestEvent) error {
 		return validationError(err.Error())
 	}
 
+	acc := AccessFrom(e)
+
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		// Verify category exists
 		category, err := txApp.FindRecordById(categoriesCollectionName, form.CategoryID)
 		if err != nil || category == nil {
 			return 0, nil, notFoundError("category not found")
+		}
+
+		// A category-level override can GRANT `create_topic` to a role that lacks
+		// it globally; an explicit role list that excludes the caller denies it.
+		allowed, err := categoryWriteAllowed(txApp, acc, form.CategoryID, auth.PermCreateTopic)
+		if err != nil {
+			return 0, nil, internalError("failed to resolve category permission", err)
+		}
+		if !allowed {
+			return 0, nil, forbiddenError("you cannot create topics in this category")
 		}
 
 		topicsCol, err := txApp.FindCollectionByNameOrId(topicsCollectionName)
@@ -141,7 +157,17 @@ func createTopicHandler(e *core.RequestEvent) error {
 		// 1. Create topic record
 		topic := core.NewRecord(topicsCol)
 		topic.Set("category_id", form.CategoryID)
-		topic.Set("author_id", e.Auth.Id)
+		if e.Auth != nil {
+			topic.Set("author_id", e.Auth.Id)
+		} else {
+			// Guest: empty author_id; display name lives in guest_nickname
+			topic.Set("author_id", "")
+			guestNickname, err := forum.ValidateGuestNickname(form.GuestNickname)
+			if err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+			topic.Set("last_post_guest_nickname", guestNickname)
+		}
 		topic.Set("title", title)
 		topic.Set("posts_count", 1)
 		topic.Set("locked", false)
@@ -149,9 +175,12 @@ func createTopicHandler(e *core.RequestEvent) error {
 
 		// Resolved before the first Save so a forbidden mask aborts the whole
 		// command rather than leaving a half-written topic behind.
-		characterID, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
-		if err != nil {
-			return 0, nil, err
+		var characterID string
+		if e.Auth != nil {
+			characterID, err = resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
+			if err != nil {
+				return 0, nil, err
+			}
 		}
 		topic.Set("author_character_id", characterID)
 
@@ -163,7 +192,12 @@ func createTopicHandler(e *core.RequestEvent) error {
 		// and this post is by construction the earliest in the topic.
 		post := core.NewRecord(postsCol)
 		post.Set("topic_id", topic.Id)
-		post.Set("author_id", e.Auth.Id)
+		if e.Auth != nil {
+			post.Set("author_id", e.Auth.Id)
+		} else {
+			post.Set("author_id", "")
+			post.Set("guest_nickname", topic.GetString("last_post_guest_nickname"))
+		}
 		post.Set("content", content)
 		// The topic and its opening message are always the same voice, so the
 		// mask is resolved ONCE and written to both rows.
@@ -190,6 +224,7 @@ func createTopicHandler(e *core.RequestEvent) error {
 		topic.Set("last_post_created", post.GetDateTime("created"))
 		topic.Set("last_post_author_id", post.GetString("author_id"))
 		topic.Set("last_post_author_character_id", characterID)
+		topic.Set("last_post_guest_nickname", form.GuestNickname)
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
@@ -198,15 +233,19 @@ func createTopicHandler(e *core.RequestEvent) error {
 		// The opening post is a post like any other, so it notifies like any
 		// other: subscribers of a brand-new topic (only the author, who is
 		// skipped), quoted authors, mentions.
-		dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
+		if e.Auth != nil {
+			dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
+		}
 
 		// 4. The author gains one topic AND its opening post. Both counters move
 		// here, in the same transaction as the rows that justify them.
-		if err := adjustUserPostCount(txApp, e.Auth.Id, 1); err != nil {
-			return 0, nil, err
-		}
-		if err := adjustUserTopicCount(txApp, e.Auth.Id, 1); err != nil {
-			return 0, nil, err
+		if e.Auth != nil {
+			if err := adjustUserPostCount(txApp, e.Auth.Id, 1); err != nil {
+				return 0, nil, err
+			}
+			if err := adjustUserTopicCount(txApp, e.Auth.Id, 1); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		// The author display fields are resolved BEFORE the transaction commits,
@@ -1014,4 +1053,46 @@ func parseIntParam(val string, defaultVal int) int {
 		return defaultVal
 	}
 	return n
+}
+
+// repairGuestNicknameSchema ensures topics.guest_nickname exists at boot.
+//
+// The migration (1769800000) adds the column to BOTH posts and topics, but a
+// database restored from a snapshot taken before that migration — while the
+// migration tracker still records it as applied — will never re-run it on
+// restart. PocketBase's Record.Set on a missing field is a SILENT no-op, so
+// without this repair every guest post writes its nickname to the post row
+// (which has the column) but the topic row silently drops it, and the forum
+// index reads topics.guest_nickname as empty — rendering "Deleted user" for
+// every guest.
+//
+// Called from OnServe, after apis.Serve applied RunAllMigrations. Unlike
+// verifyPresenceSchema (which refuses to start), this REPAIRS: the column is
+// optional text with an empty default, the migration itself is idempotent
+// (checks GetByName before adding), and adding it here simply realises the
+// same intent the migration already declared. A failure to repair is logged
+// and left to the next boot; it must not take the forum down.
+func repairGuestNicknameSchema(app core.App) {
+	topics, err := app.FindCachedCollectionByNameOrId(topicsCollectionName)
+	if err != nil {
+		app.Logger().Warn("guest_nickname repair: topics collection unavailable", "error", err)
+		return
+	}
+	needSave := false
+	if topics.Fields.GetByName("guest_nickname") == nil {
+		topics.Fields.Add(&core.TextField{Name: "guest_nickname", Max: 64})
+		needSave = true
+		app.Logger().Info("guest_nickname repair: added missing topics.guest_nickname column")
+	}
+	if topics.Fields.GetByName("last_post_guest_nickname") == nil {
+		topics.Fields.Add(&core.TextField{Name: "last_post_guest_nickname", Max: 64})
+		needSave = true
+		app.Logger().Info("guest_nickname repair: added missing topics.last_post_guest_nickname column")
+	}
+	if needSave {
+		if err := app.Save(topics); err != nil {
+			app.Logger().Warn("guest_nickname repair: failed to add topics columns", "error", err)
+			return
+		}
+	}
 }

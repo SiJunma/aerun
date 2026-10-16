@@ -192,7 +192,12 @@ const toCategory = (d) => ({
     last_post_topic_title: d.last_post_topic_title,
     last_post_at: d.last_post_at,
     last_post_author_id: d.last_post_author_id,
-    last_post_author: d.last_post_author,
+    // Registered authors carry last_post_author; guests have empty author_id
+    // and their chosen display name travels in last_post_guest_nickname.
+    // Use || (not ??) so that an empty string from an older backend is skipped
+    // too, and the final fallback is undefined (not ""), so ForumAuthorName
+    // falls back to deletedDisplayName only when there truly is no name at all.
+    last_post_author: d.last_post_author || d.last_post_guest_nickname || undefined,
     last_post_author_avatar: d.last_post_author_avatar,
     last_post_topic_posts_count: d.last_post_topic_posts_count,
     // Server-authoritative unread flag (listForumIndexHandler → unreadTopicIDs),
@@ -215,7 +220,7 @@ const VIEW_FORUM = 'view_forum';
 // one side writing a value the other cannot recognise would silently restore
 // the snapshot behaviour this replaced, and the mismatch is invisible in review
 // because both sides look like plain strings.
-const INHERIT_ROLES = '__aerun_inherit_roles__';
+export const INHERIT_ROLES = '__aerun_inherit_roles__';
 
 export const fetchSecuredCategories = async () => {
   try {

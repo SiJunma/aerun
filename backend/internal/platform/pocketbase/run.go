@@ -64,6 +64,14 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := verifyPresenceSchema(se.App); err != nil {
 			return err
 		}
+		// topics.guest_nickname is the column the forum index reads to name a
+		// guest's last post. A database restored from a pre-176980000 snapshot
+		// (with the migration already tracked as applied) silently lacks it, and
+		// Record.Set on a missing field is a no-op — so every guest post would
+		// render as "Deleted user" on the index. Repair it at boot rather than
+		// refusing to start: the column is optional text and the migration itself
+		// is idempotent.
+		repairGuestNicknameSchema(se.App)
 		// Sprint 2 task 3: the Google login follows the environment on every
 		// startup (same defense-in-depth idea as the SMTP reset in OnBootstrap
 		// below). It runs here — after apis.Serve applied RunAllMigrations —
@@ -375,7 +383,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/presence/online-users", listOnlineUsersHandler)
 
 	// Sprint 3 forum command layer.
-	group.POST("/topics", createTopicHandler).BindFunc(RequirePermission(auth.PermCreateTopic)).BindFunc(enforceIdempotency)
+	group.POST("/topics", createTopicHandler).BindFunc(enforceIdempotency)
 	group.GET("/topics", listTopicsHandler)
 	group.GET("/topics/{id}", getTopicHandler)
 	group.GET("/topics/{id}/stats", getTopicStatsHandler)
@@ -384,7 +392,7 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.POST("/topics/{id}/move", moveTopicHandler).BindFunc(RequirePermission(auth.PermMoveTopics)).BindFunc(enforceIdempotency)
 	group.DELETE("/topics/{id}", deleteTopicHandler).BindFunc(enforceIdempotency)
 
-	group.POST("/topics/{id}/posts", createPostHandler).BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
+	group.POST("/topics/{id}/posts", createPostHandler).BindFunc(enforceIdempotency)
 	group.GET("/topics/{id}/posts", listPostsHandler)
 	group.GET("/posts/{id}", getPostHandler)
 	group.PATCH("/posts/{id}", editPostHandler).BindFunc(enforceIdempotency)

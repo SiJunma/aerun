@@ -43,6 +43,22 @@ const TopicFormPage = () => {
   }
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [pinFirstPost, setPinFirstPost] = useState(false);
+  const [guestNickname, setGuestNickname] = useState(() => {
+    try {
+      return localStorage.getItem('aerun_guest_nickname') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  // Persist the guest nickname so it is pre-filled on the next visit.
+  useEffect(() => {
+    try {
+      localStorage.setItem('aerun_guest_nickname', guestNickname);
+    } catch {
+      // localStorage may be unavailable in private mode; degrade gracefully.
+    }
+  }, [guestNickname]);
 
   // Start on the mask the author last posted as, like the reply form does.
   //
@@ -54,18 +70,25 @@ const TopicFormPage = () => {
     if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
       setSelectedCharacterId(profile.last_selected_character_id || '');
     }
+    // Masks forbidden in this category → reset the selection so a new topic
+    // is posted under the account, not a mask carried over from another topic.
+    const cat = categories.find(c => c.id === categoryId);
+    if (cat && !hasPermission(PERMISSIONS.USE_MASKS, { category: cat }) && selectedCharacterId !== '') {
+      setSelectedCharacterId('');
+      if (user) setLastSelectedMask('');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.last_selected_character_id]);
+  }, [profile?.last_selected_character_id, categoryId, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask]);
 
   const DRAFT_KEY = `topic_draft_${categoryId}`;
 
   useEffect(() => {
+    // Find category from context — independent of user (guests need it too).
+    const found = categories.find(c => c.id === categoryId);
+    if (found) setCategory(found);
+
     if (user) {
       const unsubChars = subscribeToCharacters(user.uid, setCharacters);
-
-      // Find category from context
-      const found = categories.find(c => c.id === categoryId);
-      if (found) setCategory(found);
 
       // Load draft once on mount
       if (!draftLoaded) {
@@ -134,51 +157,52 @@ const TopicFormPage = () => {
 
     setSubmitting(true);
     recordActivity();
+
+    // Category-level permission check: guest may create topics in this
+    // category only if the admin granted `create_topic` there.
+    const cat = categories.find(c => c.id === categoryId);
+    if (!hasPermission(PERMISSIONS.CREATE_TOPIC, { category: cat })) {
+      showToast(lang === 'ru' ? 'У вас нет прав для создания тем в этой категории.' : 'You do not have permission to create topics in this category.', 'danger');
+      return;
+    }
+
     try {
       const selectedChar = characters.find(c => c.id === selectedCharacterId);
 
       const authorName = selectedChar
         ? selectedChar.name
-        : (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User');
+        : (user ? (profile?.nickname || user.displayName || profile?.email?.split('@')[0] || 'User') : (guestNickname || 'Guest'));
 
       const topicData = {
         category_id: categoryId,
         title,
         description,
-        // The two keys the server actually reads. The block below this used to
-        // assemble a full optimistic author projection (`author_name`,
-        // `author_avatar`, `is_character`, `author_character_id`,
-        // `first_post_pinned`, ...) and then throw it away, because createTopic
-        // sends only category_id/title/content/character_id/pin_first_post. The
-        // mask and the pin lived in that discarded object and nowhere else,
-        // which is precisely why neither took effect.
         character_id: selectedCharacterId || '',
         pin_first_post: pinFirstPost,
-        // Local echo for the optimistic first render only. The server
-        // re-derives every one of these from the stored rows (decoratePostAuthor
-        // / decorateTopicAuthor), so nothing here is trusted for persistence.
-        author_id: user.uid,
+        author_id: user?.uid || '',
         author_name: authorName,
         author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
         author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-        author_role_id: profile?.role_id || 'player',
+        author_role_id: user ? (profile?.role_id || 'player') : 'guest',
         is_character: !!selectedChar,
         author_character_id: selectedCharacterId || null,
         first_post_pinned: pinFirstPost,
-        is_pinned: false
+        is_pinned: false,
+        guest_nickname: guestNickname || ''
       };
 
       const firstPostData = {
         content,
-        author_id: user.uid,
+        author_id: user?.uid || '',
         author_name: authorName,
         author_avatar: topicData.author_avatar,
         author_status_line: topicData.author_status_line,
-        author_role_id: topicData.author_role_id,
+        author_role_id: user ? (profile?.role_id || 'player') : 'guest',
         is_character: topicData.is_character,
         author_character_id: topicData.author_character_id,
         character_title: selectedChar?.title || '',
-        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || '')
+        author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
+        guest_nickname: guestNickname || ''
       };
 
       const newTopic = await createTopic(topicData, firstPostData);
@@ -339,6 +363,19 @@ const TopicFormPage = () => {
               </Form.Group>
             )}
 
+            {!user && (
+              <Form.Group className="mb-3" controlId="guestNickname">
+                <Form.Label className="fw-bold h6">{lang === 'ru' ? 'Ваш никнейм' : 'Your Nickname'} <span className="text-danger">*</span></Form.Label>
+                <Form.Control
+                  type="text"
+                  placeholder={lang === 'ru' ? 'Введите имя...' : 'Enter your name...'}
+                  value={guestNickname}
+                  onChange={(e) => setGuestNickname(e.target.value)}
+                  required
+                  className="w-auto"
+                />
+              </Form.Group>
+            )}
             <Form.Group className="mb-3">
               <Form.Label className="fw-bold h6">{lang === 'ru' ? 'Содержание' : 'Content'}</Form.Label>
               <RichEditor

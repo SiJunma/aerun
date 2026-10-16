@@ -12,4 +12,5 @@ const (
 	MaxReputationCommentLen = 1024
 	MinReputationValue      = -1
 	MaxReputationValue      = 1
+	MaxGuestNicknameLen     = 64
 )

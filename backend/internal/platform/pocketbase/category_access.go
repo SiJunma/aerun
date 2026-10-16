@@ -202,18 +202,38 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		// May be NULL/empty, which is correct: the last post may have been
 		// written as the account. The column is a text field, so a missing value
 		// scans as "" rather than failing the row.
-		CharacterID string `db:"last_post_author_character_id"`
-		PostsCount  int    `db:"posts_count"`
+		CharacterID   string `db:"last_post_author_character_id"`
+		PostsCount    int    `db:"posts_count"`
+		GuestNickname string `db:"last_post_guest_nickname"`
 	}
 	var latest []latestTopic
-	if err := app.DB().NewQuery(
+	// The full query reads `last_post_author_character_id` (1768000000) and
+	// `guest_nickname` (1769800000), both added after the topics table was
+	// created. Against a database restored from an older snapshot those columns
+	// may not exist yet; fall back to a simplified query that leaves them blank
+	// rather than 500-ing the whole forum index.
+	fullQuery :=
 		"SELECT category_id, id AS topic_id, title, last_post_created, last_post_author_id, " +
-			"COALESCE(last_post_author_character_id, '') AS last_post_author_character_id, posts_count FROM (" +
+			"COALESCE(last_post_author_character_id, '') AS last_post_author_character_id, " +
+			"last_post_guest_nickname, COALESCE(posts_count, 0) FROM (" +
 			"SELECT category_id, id, title, last_post_created, last_post_author_id, " +
-			"last_post_author_character_id, posts_count, " +
+			"last_post_author_character_id, posts_count, last_post_guest_nickname, " +
 			"ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY last_post_created DESC, id DESC) AS rn " +
-			"FROM " + topicsCollectionName + ") WHERE rn = 1",
-	).All(&latest); err != nil {
+			"FROM " + topicsCollectionName + ") WHERE rn = 1"
+	simpleQuery :=
+		"SELECT category_id, id AS topic_id, title, last_post_created, last_post_author_id, " +
+			"'' AS last_post_author_character_id, " +
+			"'' AS last_post_guest_nickname, COALESCE(posts_count, 0) FROM (" +
+			"SELECT category_id, id, title, last_post_created, last_post_author_id, " +
+			"'' AS last_post_author_character_id, posts_count, '' AS last_post_guest_nickname, " +
+			"ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY last_post_created DESC, id DESC) AS rn " +
+			"FROM " + topicsCollectionName + ") WHERE rn = 1"
+	if err := app.DB().NewQuery(fullQuery).All(&latest); err != nil && isMissingColumnErr(err) {
+		app.Logger().Warn("categoryForumProjections: optional columns missing, using fallback query", "error", err)
+		if err := app.DB().NewQuery(simpleQuery).All(&latest); err != nil {
+			return nil, err
+		}
+	} else if err != nil {
 		return nil, err
 	}
 	for _, row := range latest {
@@ -227,7 +247,14 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		projection["last_post_at"] = row.Created
 		projection["last_post_author_id"] = row.AuthorID
 		projection["last_post_author_character_id"] = row.CharacterID
-		projection["last_post_topic_posts_count"] = row.PostsCount
+		projection["last_post_guest_nickname"] = row.GuestNickname
+
+		// Guest posts have empty author_id; keep the guest nickname under its
+		// own key. The frontend reads last_post_guest_nickname as a fallback in
+		// toCategory, so the backend does not need to rename the column.
+		if row.AuthorID == "" && row.GuestNickname != "" {
+			projection["last_post_author_name"] = row.GuestNickname
+		}
 	}
 
 	// One lookup for every last-post author named above, and one for every mask
@@ -247,6 +274,20 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 	}
 
 	return projections, nil
+}
+
+// isMissingColumnErr reports whether err is SQLite saying a column is not
+// there. Needed because categoryForumProjections reads optional columns
+// (last_post_author_character_id, guest_nickname) that may be absent on a
+// database restored from an older snapshot.
+func isMissingColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no such column") ||
+		strings.Contains(msg, "has no column") ||
+		strings.Contains(msg, "no field named")
 }
 
 // listForumStatsHandler answers GET /api/aerun/forum-stats.
@@ -464,6 +505,7 @@ func listCategoriesHandler(e *core.RequestEvent) error {
 			"description": labelFromRecord(c, "description_i18n", "description"),
 			"group_id":    c.GetString("group_id"),
 			"sort_order":  c.GetInt("sort_order"),
+			"permissions": decodePermissionsMap(c.Get("permissions")),
 		}
 		// Counters default to zero so a category that never held a topic still
 		// renders "0" rather than a blank cell, while the last_post_* keys stay
@@ -542,6 +584,7 @@ func listForumIndexHandler(e *core.RequestEvent) error {
 			"description": labelFromRecord(c, "description_i18n", "description"),
 			"group_id":    c.GetString("group_id"),
 			"sort_order":  c.GetInt("sort_order"),
+			"permissions": decodePermissionsMap(c.Get("permissions")),
 		}
 		// Counters default to zero so a category that never held a topic still
 		// renders "0" rather than a blank cell, while the last_post_* keys stay
@@ -643,4 +686,51 @@ func listAdminCategoriesHandler(e *core.RequestEvent) error {
 		"items":      items,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// categoryWriteAllowed reports whether the caller may perform `perm` inside
+// `categoryID`. A category-level override is the decisive factor:
+//   - an explicit role list GRANTS access to its members even without the
+//     global permission (the whole point of per-category overrides), and
+//   - an explicit role list DENIES access to anyone not in it — even when the
+//     caller holds the global permission — except root, who bypasses.
+//
+// If the category carries no override for `perm` at all (key absent, or the
+// inherit marker), the caller falls back to their global permission.
+// Resolution order:
+//   1. root is always allowed; banned is always denied.
+//   2. an explicit category role list: membership grants, non-membership denies.
+//   3. absent key or inherit marker → fall back to the global permission.
+func categoryWriteAllowed(app core.App, acc AccessContext, categoryID string, perm auth.Permission) (bool, error) {
+	if acc.Role == auth.RoleRoot {
+		return true, nil
+	}
+	if acc.Status == auth.StatusBanned {
+		return false, nil
+	}
+	if categoryID == "" {
+		return false, nil
+	}
+
+	category, err := app.FindRecordById(categoriesCollectionName, categoryID)
+	if err != nil || category == nil {
+		return false, err
+	}
+
+	perms := decodePermissionsMap(category.Get("permissions"))
+	override, hasOverride := perms[string(perm)]
+	if !hasOverride {
+		// No override for this permission at all → fall back to the global right.
+		return auth.Has(acc.Permissions, perm), nil
+	}
+
+	if len(override) == 0 {
+		// Explicit empty list → root-only (ADR-1): nobody but root may act here.
+		return false, nil
+	}
+	if slices.Contains(override, auth.CategoryInheritMarker) {
+		// Inherit → follow the caller's global permission for this action.
+		return auth.Has(acc.Permissions, perm), nil
+	}
+	return slices.Contains(override, string(acc.Role)), nil
 }

@@ -105,7 +105,22 @@ const TopicPage = () => {
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
   const [replyContent, setReplyContent] = useState('');
-  const [guestNickname, setGuestNickname] = useState('');
+  const [guestNickname, setGuestNickname] = useState(() => {
+    try {
+      return localStorage.getItem('aerun_guest_nickname') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  // Persist the guest nickname so it is pre-filled on the next visit.
+  useEffect(() => {
+    try {
+      localStorage.setItem('aerun_guest_nickname', guestNickname);
+    } catch {
+      // localStorage may be unavailable in private mode; degrade gracefully.
+    }
+  }, [guestNickname]);
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
   const [characters, setCharacters] = useState([]);
   const [topic, setTopic] = useState(null);
@@ -764,8 +779,15 @@ const TopicPage = () => {
     if (profile?.last_selected_character_id !== undefined && selectedCharacterId === '') {
       setSelectedCharacterId(profile.last_selected_character_id || '');
     }
+    // Masks forbidden in this category → reset the selection so a reply is
+    // posted under the account, not a mask carried over from another topic.
+    const cat = categories.find(c => c.id === topic?.category_id);
+    if (cat && !hasPermission(PERMISSIONS.USE_MASKS, { category: cat }) && selectedCharacterId !== '') {
+      setSelectedCharacterId('');
+      if (user) setLastSelectedMask('');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.last_selected_character_id]);
+  }, [profile?.last_selected_character_id, topic?.category_id, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask]);
 
   useEffect(() => {
     if (topic?.category_id) {
@@ -1891,6 +1913,9 @@ const TopicPage = () => {
       category_id: topic?.category_id,
       content: replyContent.trim(),
       author_id: user?.uid || null,
+      // Guests post without an account; their nickname travels here so the
+      // server can store it on the post row (guest_nickname column).
+      guest_nickname: guestNickname || '',
       // `character_id` is the key createPost actually transmits. Everything below
       // it is a local echo for the optimistic render only: the server re-derives
       // the display from the stored rows and ownership-checks the mask, so
@@ -2299,6 +2324,14 @@ const TopicPage = () => {
       }
 
       const editResult = await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id, topicUpdates);
+
+      // First-post title/description/pin changes are topic-level: they must be
+      // sent to PATCH /topics/{id} separately. updatePost ignores topicUpdates
+      // (the Go backend derives the actor from the auth token), so we call
+      // updateTopic explicitly when editing the first post.
+      if (editingFirstPost && topicUpdates) {
+        await updateTopic(id, topicUpdates, user.uid, originalPost?.author_id);
+      }
 
       // Keep the main page correct even if the user navigates away before the
       // asynchronous onPostUpdated trigger recalculates the category metadata.
@@ -3211,7 +3244,7 @@ const TopicPage = () => {
                             )}
                             <div className="mb-2">
                               <div className="d-flex align-items-center justify-content-between mb-2">
-                                {post.author_id === user?.uid && (
+                                {post.author_id === user?.uid && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
                                   <Dropdown className="w-auto">
                                     <Dropdown.Toggle
                                       variant="outline-management"

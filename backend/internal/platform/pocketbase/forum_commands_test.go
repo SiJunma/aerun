@@ -15,6 +15,8 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/types"
+
+	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
 // helper to get seeded category id (General)
@@ -118,8 +120,8 @@ func TestCreateTopicValidationAndPermissions(t *testing.T) {
 			bodyFn: func(catID string) string {
 				return fmt.Sprintf(`{"category_id":"%s","title":"Guest Topic","content":"Hello"}`, catID)
 			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedMsg:    "Authentication is required for this action.",
+			expectedStatus: http.StatusForbidden,
+			expectedMsg:    "You cannot create topics in this category.",
 		},
 		{
 			name:    "missing idempotency key is rejected",
@@ -888,4 +890,182 @@ func TestErrorContractEnvelope(t *testing.T) {
 	if errResp.Data.RequestID == "" {
 		t.Fatal("expected non-empty request_id in error contract data")
 	}
+}
+
+// TestCategoryWritePermissionGranting checks that category-level permission
+// overrides can GRANT create_topic / post_reply to roles that lack them
+// globally (e.g. spectator holds only view_forum), while global rights still
+// work when a category does not list the role.
+func TestCategoryWritePermissionGranting(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	col, err := app.FindCollectionByNameOrId(categoriesCollectionName)
+	if err != nil {
+		t.Fatalf("categories collection missing: %v", err)
+	}
+
+	closedCat := core.NewRecord(col)
+	closedCat.Set("name", "closed-topic-cat")
+	closedCat.Set("slug", "closed-topic-cat")
+	closedCat.Set("allowed_roles", []string{auth.CategoryInheritMarker})
+	closedCat.Set("permissions", types.JSONRaw([]byte(`{"create_topic":["moderator"]}`)))
+	if err := app.Save(closedCat); err != nil {
+		t.Fatalf("save closed category: %v", err)
+	}
+
+	openCat := core.NewRecord(col)
+	openCat.Set("name", "open-topic-cat")
+	openCat.Set("slug", "open-topic-cat")
+	openCat.Set("allowed_roles", []string{auth.CategoryInheritMarker})
+	openCat.Set("permissions", types.JSONRaw([]byte(`{"create_topic":["spectator"]}`)))
+	if err := app.Save(openCat); err != nil {
+		t.Fatalf("save open category: %v", err)
+	}
+
+	// plainCat: NO permissions field at all → global rights apply as-is
+	plainCat := core.NewRecord(col)
+	plainCat.Set("name", "plain-topic-cat")
+	plainCat.Set("slug", "plain-topic-cat")
+	plainCat.Set("allowed_roles", []string{auth.CategoryInheritMarker})
+	if err := app.Save(plainCat); err != nil {
+		t.Fatalf("save plain category: %v", err)
+	}
+
+	noReplyCat := core.NewRecord(col)
+	noReplyCat.Set("name", "no-reply-cat")
+	noReplyCat.Set("slug", "no-reply-cat")
+	noReplyCat.Set("allowed_roles", []string{auth.CategoryInheritMarker})
+	noReplyCat.Set("permissions", types.JSONRaw([]byte(`{"post_reply":["moderator"]}`)))
+	if err := app.Save(noReplyCat); err != nil {
+		t.Fatalf("save no-reply category: %v", err)
+	}
+
+	replyCat := core.NewRecord(col)
+	replyCat.Set("name", "reply-cat")
+	replyCat.Set("slug", "reply-cat")
+	replyCat.Set("allowed_roles", []string{auth.CategoryInheritMarker})
+	replyCat.Set("permissions", types.JSONRaw([]byte(`{"post_reply":["spectator"]}`)))
+	if err := app.Save(replyCat); err != nil {
+		t.Fatalf("save reply category: %v", err)
+	}
+
+	// ── Create topic ──
+	t.Run("spectator cannot create topic without category grant", func(t *testing.T) {
+		body := fmt.Sprintf(`{"category_id":"%s","title":"No Grant","content":"Hello"}`, closedCat.Id)
+		status, _ := doJSON(t, server.URL, http.MethodPost, "/api/aerun/topics", tokens["spectator"], "idem-closed-1", body)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", status)
+		}
+	})
+
+	t.Run("spectator can create topic with category grant", func(t *testing.T) {
+		body := fmt.Sprintf(`{"category_id":"%s","title":"Granted","content":"Hello"}`, openCat.Id)
+		status, _ := doJSON(t, server.URL, http.MethodPost, "/api/aerun/topics", tokens["spectator"], "idem-open-1", body)
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", status)
+		}
+	})
+
+	t.Run("player can create topic in plain category via global right", func(t *testing.T) {
+		body := fmt.Sprintf(`{"category_id":"%s","title":"Player Global","content":"Hello"}`, plainCat.Id)
+		status, _ := doJSON(t, server.URL, http.MethodPost, "/api/aerun/topics", tokens["player"], "idem-player-1", body)
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", status)
+		}
+	})
+
+	// Категория с явным списком ЗАПРЕЩАЕТ действие даже при наличии глобального права.
+	t.Run("player cannot create topic in closedCat despite global right", func(t *testing.T) {
+		body := fmt.Sprintf(`{"category_id":"%s","title":"Blocked","content":"Hello"}`, closedCat.Id)
+		status, _ := doJSON(t, server.URL, http.MethodPost, "/api/aerun/topics", tokens["player"], "idem-player-blocked", body)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", status)
+		}
+	})
+
+	// Модератор с глобальным create_topic не в списке openCat → категория запрещает.
+	t.Run("moderator cannot create topic in openCat despite global right", func(t *testing.T) {
+		body := fmt.Sprintf(`{"category_id":"%s","title":"Mod Blocked","content":"Hello"}`, openCat.Id)
+		status, _ := doJSON(t, server.URL, http.MethodPost, "/api/aerun/topics", tokens["moderator"], "idem-mod-blocked", body)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", status)
+		}
+	})
+
+	// ── Seed topics in noReplyCat and replyCat (moderator has post_reply globally) ──
+	topicsCol, err := app.FindCollectionByNameOrId(topicsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	postsCol, err := app.FindCollectionByNameOrId(postsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seedTopic := func(catID, title string) string {
+		topic := core.NewRecord(topicsCol)
+		topic.Set("category_id", catID)
+		topic.Set("author_id", fixModeratorID)
+		topic.Set("title", title)
+		topic.Set("posts_count", 1)
+		topic.Set("locked", false)
+		topic.Set("pinned", false)
+		if err := app.Save(topic); err != nil {
+			t.Fatalf("seed topic: %v", err)
+		}
+		p := core.NewRecord(postsCol)
+		p.Set("topic_id", topic.Id)
+		p.Set("author_id", fixModeratorID)
+		p.Set("content", "Opening")
+		if err := app.Save(p); err != nil {
+			t.Fatalf("seed post: %v", err)
+		}
+		topic.Set("last_post_id", p.Id)
+		if err := app.Save(topic); err != nil {
+			t.Fatalf("update topic projection: %v", err)
+		}
+		return topic.Id
+	}
+
+	noReplyTopicID := seedTopic(noReplyCat.Id, "No reply grant")
+	replyTopicID := seedTopic(replyCat.Id, "Reply grant")
+
+	// ── Create post (reply) ──
+	t.Run("spectator cannot reply without category post_reply grant", func(t *testing.T) {
+		body := `{"content":"No reply grant"}`
+		status, _ := doJSON(t, server.URL, http.MethodPost, fmt.Sprintf("/api/aerun/topics/%s/posts", noReplyTopicID), tokens["spectator"], "idem-reply-no-grant", body)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", status)
+		}
+	})
+
+	t.Run("spectator can reply with category post_reply grant", func(t *testing.T) {
+		body := `{"content":"With reply grant"}`
+		status, _ := doJSON(t, server.URL, http.MethodPost, fmt.Sprintf("/api/aerun/topics/%s/posts", replyTopicID), tokens["spectator"], "idem-reply-grant", body)
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", status)
+		}
+	})
+
+	t.Run("moderator can reply in noReplyCat (listed in category)", func(t *testing.T) {
+		body := `{"content":"Moderator listed"}`
+		status, _ := doJSON(t, server.URL, http.MethodPost, fmt.Sprintf("/api/aerun/topics/%s/posts", noReplyTopicID), tokens["moderator"], "idem-reply-mod-listed", body)
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", status)
+		}
+	})
+
+	// Модератор с глобальным post_reply НЕ в списке replyCat → категория запрещает.
+	t.Run("moderator cannot reply in replyCat despite global right", func(t *testing.T) {
+		body := `{"content":"Moderator blocked"}`
+		status, _ := doJSON(t, server.URL, http.MethodPost, fmt.Sprintf("/api/aerun/topics/%s/posts", replyTopicID), tokens["moderator"], "idem-reply-mod-blocked", body)
+		if status != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", status)
+		}
+	})
 }

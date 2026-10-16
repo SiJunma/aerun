@@ -21,7 +21,7 @@ import {
   removeRtdbGuestPresence
 } from '../api/rtdb-presence';
 import { subscribeToUnreadCounts, refreshUnreadCounts } from '../api/dms';
-import { fetchSecuredMainPageData } from '../api/categories';
+import { fetchSecuredMainPageData, INHERIT_ROLES } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
 
@@ -1007,7 +1007,48 @@ export const AuthProvider = ({ children }) => {
   // visitor on every load. With subscribeToEffectivePermissions mounted it is a
   // genuine edge case rather than the normal path, which is what makes it safe to
   // trim the matrix out of GET /roles.
-  const hasPermission = useCallback((perm) => {
+  const hasPermission = useCallback((perm, { category } = {}) => {
+    // A category-level override can GRANT an action to a role that lacks it
+    // globally: an admin enables posting in a specific category without
+    // enabling it board-wide for the role. Without this, enabling a role's
+    // right would force turning it off in every category individually — bad
+    // UX. An absent override or the inherit marker means "follow the global
+    // role setting"; root bypasses entirely.
+    //
+    // view_forum is excluded: the server already filters categories through
+    // canViewCategory before they reach the client, so a client-side category
+    // check for view_forum is redundant and can wrongly hide categories whose
+    // permissions map lacks the key (e.g. empty categories). If the category
+    // is in our list, the server already approved it — trust the server and
+    // return true without any client-side right lookup.
+    if (perm === PERMISSIONS.VIEW_FORUM && category) {
+      return true;
+    }
+    if (category) {
+      const catId = typeof category === 'string' ? category : category?.id;
+      if (catId) {
+        const cat = categories.find(c => c.id === catId);
+        const override = cat?.permissions?.[perm];
+        if (
+          override !== undefined &&
+          override !== null &&
+          Array.isArray(override) &&
+          !override.includes(INHERIT_ROLES)
+        ) {
+          // Explicit category role list: membership grants, non-membership
+          // denies, even when the global right differs. An empty list is
+          // root-only.
+          const effectiveRoleId = user ? profile?.role_id || 'player' : 'guest';
+          const isRoot = effectiveRoleId === 'root' || effectiveRoleId === CHIEF_ADMIN_ID;
+          if (override.length === 0) {
+            return isRoot; // root-only override
+          }
+          return override.includes(effectiveRoleId);
+        }
+        // No override or inherit marker → fall through to the global check.
+      }
+    }
+
     if (effectivePermissions.length > 0) {
       return effectivePermissions.includes(perm);
     }
@@ -1022,7 +1063,7 @@ export const AuthProvider = ({ children }) => {
 
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
-  }, [user, profile, roles, effectivePermissions]);
+  }, [user, profile, roles, effectivePermissions, categories]);
 
   const isUserOnline = useCallback((uid) => {
     if (!uid) return false;

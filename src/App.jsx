@@ -134,7 +134,7 @@ const App = () => {
         <Route path="/drafts" element={<ProtectedRoute><Layout><DraftsPage /></Layout></ProtectedRoute>} />
 
         {/* Posting-required Routes (spectators blocked) */}
-        <Route path="/category/:categoryId/new-topic" element={<ProtectedRoute requirePosting><Layout><TopicFormPage /></Layout></ProtectedRoute>} />
+        <Route path="/category/:categoryId/new-topic" element={<ProtectedRoute requirePosting allowGuest><Layout><TopicFormPage /></Layout></ProtectedRoute>} />
 
         {/* Admin-only Routes */}
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Layout><AdminPage /></Layout></ProtectedRoute>} />

@@ -33,6 +33,9 @@ type createPostForm struct {
 	// means "use the one stored on my profile" — see resolveAuthorCharacter,
 	// which is what actually decides the value that gets written.
 	CharacterID string `json:"character_id"`
+	// GuestNickname is the display name a guest picks when posting without an
+	// account. Empty for authenticated users.
+	GuestNickname string `json:"guest_nickname"`
 }
 
 type editPostForm struct {
@@ -60,11 +63,12 @@ type movePostsForm struct {
 
 func postPayload(record *core.Record) map[string]any {
 	payload := map[string]any{
-		"id":        record.Id,
-		"topic_id":  record.GetString("topic_id"),
-		"author_id": record.GetString("author_id"),
-		"created":   record.GetDateTime("created").String(),
-		"updated":   record.GetDateTime("updated").String(),
+		"id":             record.Id,
+		"topic_id":       record.GetString("topic_id"),
+		"author_id":      record.GetString("author_id"),
+		"guest_nickname": record.GetString("guest_nickname"),
+		"created":        record.GetDateTime("created").String(),
+		"updated":        record.GetDateTime("updated").String(),
 	}
 
 	// `rolls` is the RESULT of the post's dice throws, and it is what turns
@@ -151,6 +155,16 @@ func createPostHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("topic not found")
 		}
 
+		// A category-level override can GRANT `post_reply` to a role that lacks
+		// it globally; an explicit role list that excludes the caller denies it.
+		allowed, err := categoryWriteAllowed(txApp, acc, topic.GetString("category_id"), auth.PermPostReply)
+		if err != nil {
+			return 0, nil, internalError("failed to resolve category permission", err)
+		}
+		if !allowed {
+			return 0, nil, forbiddenError("you cannot post in this category")
+		}
+
 		// Replying into a locked topic is bypassed by `close_topics`, the same
 		// key that grants the right to close a topic in the first place: one
 		// capability, not two. The post limit is NOT bypassed by it — that is a
@@ -180,7 +194,18 @@ func createPostHandler(e *core.RequestEvent) error {
 
 		post := core.NewRecord(postsCol)
 		post.Set("topic_id", topicID)
-		post.Set("author_id", e.Auth.Id)
+		if e.Auth != nil {
+			post.Set("author_id", e.Auth.Id)
+		} else {
+			// Guest: no account, empty author_id; the display name lives in
+			// guest_nickname (validated below).
+			post.Set("author_id", "")
+			guestNickname, err := forum.ValidateGuestNickname(form.GuestNickname)
+			if err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+			post.Set("guest_nickname", guestNickname)
+		}
 		post.Set("content", content)
 
 		// The dice results are validated against the body that references them
@@ -195,9 +220,12 @@ func createPostHandler(e *core.RequestEvent) error {
 		// pinned flag: pinning is a property of a topic's opening message, and
 		// letting it ride on an arbitrary reply would produce a second banner
 		// that the unique index then rejects as a 500.
-		characterID, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
-		if err != nil {
-			return 0, nil, err
+		var characterID string
+		if e.Auth != nil {
+			characterID, err = resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
+			if err != nil {
+				return 0, nil, err
+			}
 		}
 		post.Set("author_character_id", characterID)
 
@@ -210,6 +238,7 @@ func createPostHandler(e *core.RequestEvent) error {
 		topic.Set("last_post_id", post.Id)
 		topic.Set("last_post_created", post.GetDateTime("created"))
 		topic.Set("last_post_author_id", post.GetString("author_id"))
+		topic.Set("last_post_guest_nickname", post.GetString("guest_nickname"))
 		// The topic's last-post projection carries the mask too, so a topic LIST
 		// row can render "Rough" in the last-post column without loading the
 		// post. This is the denormalisation the column exists for: it is written
@@ -222,15 +251,21 @@ func createPostHandler(e *core.RequestEvent) error {
 
 		// The author's own counter moves in the same transaction, for the same
 		// reason: a member list that lags a reply by one is a visible lie.
-		if err := adjustUserPostCount(txApp, e.Auth.Id, 1); err != nil {
-			return 0, nil, err
+		// Guests have no account counter.
+		if e.Auth != nil {
+			if err := adjustUserPostCount(txApp, e.Auth.Id, 1); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		// Notifications are a CONSEQUENCE of the post, written in the same
 		// transaction: topic subscribers, quoted authors and mentions. A
 		// notification that cannot be delivered must not cost somebody their
 		// reply, so the dispatcher reports nothing and the post stands.
-		dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
+		// Guests have no account to notify from.
+		if e.Auth != nil {
+			dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
+		}
 
 		// The nudge for the topic itself, in the same transaction as the reply.
 		// PublishTopicSignal decides the audience against the GUEST baseline,
@@ -928,9 +963,11 @@ func deletePostHandler(e *core.RequestEvent) error {
 				topic.Set("last_post_id", latest.Id)
 				topic.Set("last_post_created", latest.GetDateTime("created"))
 				topic.Set("last_post_author_id", latest.GetString("author_id"))
+				topic.Set("last_post_guest_nickname", latest.GetString("guest_nickname"))
 			} else {
 				topic.Set("last_post_id", "")
 				topic.Set("last_post_author_id", "")
+				topic.Set("last_post_guest_nickname", "")
 			}
 		}
 
@@ -1073,9 +1110,11 @@ func recalcTopicProjection(txApp core.App, topic *core.Record) {
 		topic.Set("last_post_id", latest.Id)
 		topic.Set("last_post_created", latest.GetDateTime("created"))
 		topic.Set("last_post_author_id", latest.GetString("author_id"))
+		topic.Set("last_post_guest_nickname", latest.GetString("guest_nickname"))
 	} else {
 		topic.Set("last_post_id", "")
 		topic.Set("last_post_author_id", "")
+		topic.Set("last_post_guest_nickname", "")
 	}
 	_ = txApp.Save(topic)
 }

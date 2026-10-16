@@ -34,7 +34,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   if (!user) {
     // More permissive check: if whitelistMode is missing or explicitly false, allow guests
     const isWhitelistOff = !settings.whitelistMode;
-    if (allowGuest && isWhitelistOff && !requireAdmin && !requirePosting) {
+    if (allowGuest && isWhitelistOff && !requireAdmin) {
       return children;
     }
 

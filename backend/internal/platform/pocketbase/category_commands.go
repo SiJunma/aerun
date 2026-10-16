@@ -90,7 +90,6 @@ func categoryGroupPayload(r *core.Record) map[string]any {
 		"title":      labelFromRecord(r, "title_i18n", "title"),
 		"sort_order": r.GetInt("sort_order"),
 		"created":    r.GetDateTime("created").String(),
-		"updated":    r.GetDateTime("updated").String(),
 	}
 }
 
@@ -281,11 +280,11 @@ func nextGroupSortOrder(app core.App, provided *int) int {
 // ---------------------------------------------------------------------------
 
 type categoryForm struct {
-	Name         labelInput       `json:"name"`
-	Description  labelInput       `json:"description"`
-	GroupID      *string          `json:"group_id"`
-	SortOrder    *int             `json:"sort_order"`
-	AllowedRoles []string         `json:"allowed_roles"`
+	Name         labelInput          `json:"name"`
+	Description  labelInput          `json:"description"`
+	GroupID      *string             `json:"group_id"`
+	SortOrder    *int                `json:"sort_order"`
+	AllowedRoles []string            `json:"allowed_roles"`
 	Permissions  map[string][]string `json:"permissions"`
 }
 
