@@ -298,6 +298,26 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 	payload["author_profile_id"] = authorID
 }
 
+// syncAuthorDTO copies the RESOLVED flat display fields into the nested
+// AuthorRef DTO, so both representations are written by one adapter and can
+// never disagree. It runs after the flat decoration pass; the identity fields
+// (kind/user_id/profile_id/character_id) were already set from the stored
+// record, so only the display fields are copied here. An empty flat value
+// leaves the DTO's stored display_name (guest) or null (deleted account)
+// untouched.
+func syncAuthorDTO(payload map[string]any, dtoKey, nameKey, avatarKey string) {
+	dto, ok := payload[dtoKey].(map[string]any)
+	if !ok || dto == nil {
+		return
+	}
+	if name, _ := payload[nameKey].(string); name != "" {
+		dto["display_name"] = name
+	}
+	if avatar, _ := payload[avatarKey].(string); avatar != "" {
+		dto["avatar_url"] = avatar
+	}
+}
+
 // decoratePostAuthor adds the author_* fields a post card renders.
 //
 // These are the legacy flat names the page components already read, so no
@@ -316,10 +336,16 @@ func decoratePostAuthor(payload map[string]any, displays map[string]authorDispla
 		if nick, _ := payload["guest_nickname"].(string); nick != "" {
 			payload["author_name"] = nick
 		}
+		// The nested DTO already carries the stored guest display_name; sync
+		// the flat copy over it so the two agree even if they ever diverge.
+		syncAuthorDTO(payload, "author", "author_name", "author_avatar")
 		return
 	}
 	display, ok := displays[id]
 	if !ok {
+		// Deleted account: leave the nested DTO's display_name/avatar_url null
+		// so the reader renders the deleted-account placeholder, exactly as the
+		// empty flat fields do today.
 		return
 	}
 	payload["author_name"] = display.Nickname
@@ -331,6 +357,9 @@ func decoratePostAuthor(payload map[string]any, displays map[string]authorDispla
 	payload["author_signature"] = display.Signature
 
 	applyMask(payload, "author_character_id", id, masks)
+	// After the mask swap, so a masked author's nested display matches the
+	// mask — the single source of the label the card renders.
+	syncAuthorDTO(payload, "author", "author_name", "author_avatar")
 }
 
 // decoratePostAuthors resolves and applies the author projection to a page of
@@ -349,12 +378,6 @@ func decoratePostAuthors(app core.App, payloads []map[string]any) {
 // decorateTopicAuthor adds the author_* and last_post_author_* fields a topic
 // row and the forum index render.
 //
-// The last-post author is resolved from the SAME map as the topic author: a
-// page of topics usually names a handful of accounts, so the second lookup is
-// a map hit rather than a query.
-// decorateTopicAuthor adds the author_* and last_post_author_* fields a topic
-// row and the forum index render.
-//
 // The last-post author is resolved from the SAME maps as the topic author: a
 // page of topics usually names a handful of accounts and a couple of masks, so
 // the second lookup is a map hit rather than a query. Both may be masks — the
@@ -367,9 +390,7 @@ func decorateTopicAuthor(payload map[string]any, displays map[string]authorDispl
 		if nick, _ := payload["guest_nickname"].(string); nick != "" {
 			payload["author_name"] = nick
 		}
-		return
-	}
-	if display, ok := displays[id]; ok {
+	} else if display, ok := displays[id]; ok {
 		payload["author_name"] = display.Nickname
 		payload["author_avatar"] = display.AvatarURL
 		payload["author_status_line"] = display.StatusLine
@@ -380,6 +401,16 @@ func decorateTopicAuthor(payload map[string]any, displays map[string]authorDispl
 
 		applyMask(payload, "author_character_id", id, masks)
 	}
+	// Keep the nested opener DTO in step with the flat fields just written, so
+	// a reader of `author` and a reader of `author_*` cannot disagree.
+	syncAuthorDTO(payload, "author", "author_name", "author_avatar")
+
+	// The last-post author is decorated HERE too, through the same shared helper
+	// the category index uses. decorateTopicAuthors already loaded the last-post
+	// ids and masks into these maps; without this call a topic list row never
+	// resolved its last poster and the client fell back to the opener — the
+	// exact divergence the audit flagged.
+	decorateLastPostAuthor(payload, displays, masks)
 }
 
 // decorateTopicAuthors resolves and applies the author projection to a page of
@@ -434,6 +465,11 @@ func applyLastPostMask(payload map[string]any, authorID string, masks map[string
 func decorateLastPostAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
 	id, _ := payload["last_post_author_id"].(string)
 	if id == "" {
+		// Guest last-poster (or an empty projection): the nested
+		// last_post_author_ref DTO already carries the stored guest display
+		// name, and the flat last_post_author string is left for the client's
+		// last_post_guest_nickname fallback — exactly the category-index
+		// behaviour. Nothing to sync here.
 		return
 	}
 	if display, ok := displays[id]; ok {
@@ -441,6 +477,10 @@ func decorateLastPostAuthor(payload map[string]any, displays map[string]authorDi
 		payload["last_post_author_avatar"] = display.AvatarURL
 	}
 	applyLastPostMask(payload, id, masks)
+	// Mirror the resolved flat last-post display into the nested DTO, so the
+	// two representations are written by one adapter. No-op on the category
+	// index, whose projection map has no nested object yet.
+	syncAuthorDTO(payload, "last_post_author_ref", "last_post_author", "last_post_author_avatar")
 }
 
 // signatureFromSettings reads users.settings.signature.

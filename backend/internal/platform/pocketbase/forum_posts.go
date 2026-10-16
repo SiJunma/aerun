@@ -70,6 +70,10 @@ func postPayload(record *core.Record) map[string]any {
 		"created":        record.GetDateTime("created").String(),
 		"updated":        record.GetDateTime("updated").String(),
 	}
+	// Nested AuthorRef DTO (ADR contract). The flat author_id/guest_nickname
+	// above stay as deprecated compatibility copies emitted from this single
+	// adapter; new readers must use payload["author"].
+	payload["author"] = authorDTOFromRecord(record)
 
 	// `rolls` is the RESULT of the post's dice throws, and it is what turns
 	// `[roll=roll_…]` back into a number. It travels with the payload because
@@ -233,17 +237,12 @@ func createPostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to save post", err)
 		}
 
-		// Update topic counters and projection
+		// Update topic counters and projection through the single writer, so a
+		// topic LIST row renders "who spoke last" from the same columns the
+		// rebuild produces. The mask rides along because the column exists for
+		// exactly this denormalisation, written in the same transaction.
 		topic.Set("posts_count", topic.GetInt("posts_count")+1)
-		topic.Set("last_post_id", post.Id)
-		topic.Set("last_post_created", post.GetDateTime("created"))
-		topic.Set("last_post_author_id", post.GetString("author_id"))
-		topic.Set("last_post_guest_nickname", post.GetString("guest_nickname"))
-		// The topic's last-post projection carries the mask too, so a topic LIST
-		// row can render "Rough" in the last-post column without loading the
-		// post. This is the denormalisation the column exists for: it is written
-		// in the same transaction as the reply it describes.
-		topic.Set("last_post_author_character_id", characterID)
+		setLastPostProjection(topic, post)
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
@@ -746,9 +745,11 @@ func editPostHandler(e *core.RequestEvent) error {
 
 			// The post may also be the topic's last post, and that row is
 			// denormalised. Leaving it stale is what makes a topic list disagree
-			// with the topic page about who spoke last.
+			// with the topic page about who spoke last. The mask is copied from
+			// the edited post row through the single writer, so the kind and
+			// the legacy copies stay consistent with the new mask.
 			if topic.GetString("last_post_id") == postID {
-				topic.Set("last_post_author_character_id", characterID)
+				setLastPostProjection(topic, post)
 				if err := txApp.Save(topic); err != nil {
 					return 0, nil, internalError("failed to update topic projection", err)
 				}
@@ -933,46 +934,12 @@ func deletePostHandler(e *core.RequestEvent) error {
 
 		// Recount AFTER the delete, so the projection reflects what is actually
 		// there. There is no deleted flag left to filter on, which is exactly why
-		// the counter and the feed can no longer disagree.
-		type countResult struct {
-			Cnt int `db:"cnt"`
-		}
-		var cRes countResult
-		if err := txApp.DB().NewQuery(
-			"SELECT COUNT(*) AS cnt FROM " + postsCollectionName +
-				" WHERE topic_id = {:topic_id} AND (is_draft = false OR is_draft IS NULL)",
-		).Bind(dbx.Params{"topic_id": topic.Id}).One(&cRes); err != nil {
-			return 0, nil, internalError("failed to recount topic posts", err)
-		}
-		topic.Set("posts_count", cRes.Cnt)
-
-		// If this was the last_post_id on topic, find the latest remaining post
-		if topic.GetString("last_post_id") == post.Id {
-			var latestPosts []*core.Record
-			err = txApp.RecordQuery(postsCollectionName).
-				AndWhere(dbx.HashExp{"topic_id": topic.Id}).
-				AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
-				OrderBy("created DESC", "id DESC").
-				Limit(1).
-				All(&latestPosts)
-			if err != nil {
-				return 0, nil, internalError("failed to find the new last post", err)
-			}
-			if len(latestPosts) > 0 {
-				latest := latestPosts[0]
-				topic.Set("last_post_id", latest.Id)
-				topic.Set("last_post_created", latest.GetDateTime("created"))
-				topic.Set("last_post_author_id", latest.GetString("author_id"))
-				topic.Set("last_post_guest_nickname", latest.GetString("guest_nickname"))
-			} else {
-				topic.Set("last_post_id", "")
-				topic.Set("last_post_author_id", "")
-				topic.Set("last_post_guest_nickname", "")
-			}
-		}
-
-		if err := txApp.Save(topic); err != nil {
-			return 0, nil, internalError("failed to update topic metadata after post deletion", err)
+		// the counter and the feed can no longer disagree. The single rebuild
+		// recomputes posts_count AND the full last-post AuthorRef — a failed
+		// rebuild fails the whole delete, because a deleted post with the old
+		// projection still pointing at it is corruption, not a partial success.
+		if err := rebuildTopicProjection(txApp, topic); err != nil {
+			return 0, nil, internalError("failed to rebuild topic projection after post deletion", err)
 		}
 
 		return http.StatusOK, map[string]any{
@@ -1060,9 +1027,16 @@ func movePostsHandler(e *core.RequestEvent) error {
 			}
 		}
 
-		// Recalculate projections for both source and target
-		recalcTopicProjection(txApp, sourceTopic)
-		recalcTopicProjection(txApp, targetTopic)
+		// Recalculate projections for both source and target through the single
+		// rebuild: posts_count AND the full last-post AuthorRef. A failed
+		// rebuild fails the whole move — a moved post with the old projection
+		// still pointing at it is corruption, not a partial success.
+		if err := rebuildTopicProjection(txApp, sourceTopic); err != nil {
+			return 0, nil, internalError("failed to rebuild source topic projection", err)
+		}
+		if err := rebuildTopicProjection(txApp, targetTopic); err != nil {
+			return 0, nil, internalError("failed to rebuild target topic projection", err)
+		}
 
 		if err := recordAuditLog(txApp, "posts_move", e.Auth.Id, map[string]any{
 			"source_topic_id": sourceTopic.Id,
@@ -1081,40 +1055,4 @@ func movePostsHandler(e *core.RequestEvent) error {
 	})
 
 	return writeCommandResult(e, outcome, err)
-}
-
-func recalcTopicProjection(txApp core.App, topic *core.Record) {
-	type countResult struct {
-		Cnt int `db:"cnt"`
-	}
-	var cRes countResult
-	// No deleted filter: a deleted post has no row. Drafts are excluded because
-	// they are authored-but-unpublished and never occupy a slot in the feed.
-	_ = txApp.DB().NewQuery(
-		"SELECT COUNT(*) AS cnt FROM " + postsCollectionName +
-			" WHERE topic_id = {:topic_id} AND (is_draft = false OR is_draft IS NULL)",
-	).Bind(dbx.Params{"topic_id": topic.Id}).One(&cRes)
-	topic.Set("posts_count", cRes.Cnt)
-
-	var latestPosts []*core.Record
-	// Latest = newest by `created`, id breaking a tie. Same order as the feed,
-	// so "the last post" and "the bottom of page N" can never disagree.
-	err := txApp.RecordQuery(postsCollectionName).
-		AndWhere(dbx.HashExp{"topic_id": topic.Id}).
-		AndWhere(dbx.NewExp("is_draft = false OR is_draft IS NULL")).
-		OrderBy("created DESC", "id DESC").
-		Limit(1).
-		All(&latestPosts)
-	if err == nil && len(latestPosts) > 0 {
-		latest := latestPosts[0]
-		topic.Set("last_post_id", latest.Id)
-		topic.Set("last_post_created", latest.GetDateTime("created"))
-		topic.Set("last_post_author_id", latest.GetString("author_id"))
-		topic.Set("last_post_guest_nickname", latest.GetString("guest_nickname"))
-	} else {
-		topic.Set("last_post_id", "")
-		topic.Set("last_post_author_id", "")
-		topic.Set("last_post_guest_nickname", "")
-	}
-	_ = txApp.Save(topic)
 }

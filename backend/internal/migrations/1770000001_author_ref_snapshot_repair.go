@@ -56,30 +56,32 @@ func ensureAuthorRefSnapshotColumns(app core.App) (int, error) {
 			return added, err
 		}
 		changed := false
-		if collectionName == topicsCollectionTable {
-			for _, field := range []struct {
-				name string
-				max  int
-			}{
-				{"guest_nickname", 64},
-				{"last_post_guest_nickname", 64},
-			} {
-				if collection.Fields.GetByName(field.name) == nil {
-					collection.Fields.Add(&core.TextField{Name: field.name, Max: field.max})
-					changed = true
-					added++
-				}
-			}
-		} else {
-			if collection.Fields.GetByName("guest_nickname") == nil {
-				collection.Fields.Add(&core.TextField{Name: "guest_nickname", Max: 64})
+		addText := func(name string, max int) {
+			if collection.Fields.GetByName(name) == nil {
+				collection.Fields.Add(&core.TextField{Name: name, Max: max})
 				changed = true
 				added++
 			}
 		}
+		if collectionName == topicsCollectionTable {
+			addText("guest_nickname", 64)
+			addText("last_post_guest_nickname", 64)
+			addText(lastPostGuestDisplayNameField, 64)
+		} else {
+			addText("guest_nickname", 64)
+		}
 		if collection.Fields.GetByName(authorKindField) == nil {
 			collection.Fields.Add(&core.SelectField{
 				Name:      authorKindField,
+				MaxSelect: 1,
+				Values:    []string{authorKindAccount, authorKindGuest},
+			})
+			changed = true
+			added++
+		}
+		if collectionName == topicsCollectionTable && collection.Fields.GetByName(lastPostAuthorKindField) == nil {
+			collection.Fields.Add(&core.SelectField{
+				Name:      lastPostAuthorKindField,
 				MaxSelect: 1,
 				Values:    []string{authorKindAccount, authorKindGuest},
 			})
@@ -93,6 +95,9 @@ func ensureAuthorRefSnapshotColumns(app core.App) (int, error) {
 		}
 		if changed {
 			collection.AddIndex("idx_"+collectionName+"_author_kind", false, authorKindField, "")
+			if collectionName == topicsCollectionTable {
+				collection.AddIndex("idx_topics_last_post_author_kind", false, lastPostAuthorKindField, "")
+			}
 			if err := app.Save(collection); err != nil {
 				return added, err
 			}

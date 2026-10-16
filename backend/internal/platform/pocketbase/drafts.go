@@ -347,20 +347,18 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		// text was written under. It is NOT re-read from the profile here: the
 		// author may have switched masks since saving, and a post that silently
 		// changed its author identity on publication is exactly the bug that made
-		// "publish my draft" drop the mask.
-		characterID := post.GetString("author_character_id")
+		// "publish my draft" drop the mask. setLastPostProjection below copies
+		// the mask from the post row, so no local copy is needed here.
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to publish draft", err)
 		}
 
 		topic.Set("posts_count", topic.GetInt("posts_count")+1)
-		topic.Set("last_post_id", post.Id)
-		topic.Set("last_post_created", post.GetDateTime("created"))
-		topic.Set("last_post_author_id", post.GetString("author_id"))
-		// Same denormalisation createPostHandler writes: a topic list row renders
-		// "who spoke last" without loading the post, so leaving this out made the
-		// published mask show in the topic but not in the list.
-		topic.Set("last_post_author_character_id", characterID)
+		// Same denormalisation createPostHandler writes, through the same
+		// single writer: a topic list row renders "who spoke last" without
+		// loading the post, so leaving this out made the published mask show
+		// in the topic but not in the list.
+		setLastPostProjection(topic, post)
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
 		}

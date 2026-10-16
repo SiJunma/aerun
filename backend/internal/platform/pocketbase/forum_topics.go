@@ -69,10 +69,22 @@ func topicPayload(record *core.Record) map[string]any {
 		"pinned":              record.GetBool("pinned"),
 		"last_post_id":        record.GetString("last_post_id"),
 		"last_post_created":   record.GetDateTime("last_post_created").String(),
-		"last_post_author_id": record.GetString("last_post_author_id"),
-		"created":             record.GetDateTime("created").String(),
-		"updated":             record.GetDateTime("updated").String(),
+		"last_post_author_id":       record.GetString("last_post_author_id"),
+		"last_post_guest_nickname":  record.GetString("last_post_guest_nickname"),
+		"created":                   record.GetDateTime("created").String(),
+		"updated":                   record.GetDateTime("updated").String(),
 	}
+	// Nested AuthorRef DTOs (ADR contract). The flat author_id/guest_nickname
+	// and last_post_author_* fields above stay as deprecated compatibility
+	// copies emitted from this single adapter; new readers use
+	// payload["author"] and payload["last_post_author_ref"]. The last-post
+	// object is keyed `_ref` because the flat STRING `last_post_author` is
+	// still actively read by the frontend during the rollout window — reusing
+	// that key for an object would collide with the value decorateLastPostAuthor
+	// writes. It can be renamed to `last_post_author` once the flat field is
+	// removed.
+	payload["author"] = authorDTOFromRecord(record)
+	payload["last_post_author_ref"] = lastPostDTOFromRecord(record)
 	// Both mask references are emitted RAW; decorateTopicAuthor resolves and
 	// ownership-checks them. They are omitted when empty so a topic written
 	// without a mask is indistinguishable from one that never had the option.
@@ -215,19 +227,15 @@ func createTopicHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to create initial post", err)
 		}
 
-		// "Pin first post on all pages" lives on the TOPIC (legacy schema,
-		// PROJECT_SPEC.md:107), and "the pinned post" is therefore a rule — the
-		// earliest post — rather than a flag on some arbitrary message. Storing
-		// it per-post would have silently lost the pin on every imported legacy
-		// topic and broken the topic editor's round-trip.
+		// The topic and its opening message are always the same voice, so the
+		// opener AuthorRef is a projection of the post row — never a separately
+		// validated nickname. setTopicOpener copies the post's stored variant.
+		setTopicOpener(topic, post)
 		topic.Set("first_post_pinned", form.PinFirstPost)
 
-		// 3. Update topic's last_post projection
-		topic.Set("last_post_id", post.Id)
-		topic.Set("last_post_created", post.GetDateTime("created"))
-		topic.Set("last_post_author_id", post.GetString("author_id"))
-		topic.Set("last_post_author_character_id", characterID)
-		topic.Set("last_post_guest_nickname", post.GetString(guestDisplayNameField))
+		// 3. Update topic's last_post projection through the single writer, so
+		// the id, timestamp, kind, account id, guest name and mask agree.
+		setLastPostProjection(topic, post)
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)

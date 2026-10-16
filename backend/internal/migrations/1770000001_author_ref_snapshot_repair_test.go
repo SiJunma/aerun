@@ -29,6 +29,9 @@ func TestAuthorRefSnapshotRepairRestoresSnapshotColumns(t *testing.T) {
 		}
 		if collectionName == topicsCollectionTable {
 			collection.Fields.RemoveByName("last_post_guest_nickname")
+			collection.Fields.RemoveByName(lastPostAuthorKindField)
+			collection.Fields.RemoveByName(lastPostGuestDisplayNameField)
+			collection.RemoveIndex("idx_topics_last_post_author_kind")
 		}
 		collection.RemoveIndex("idx_" + collectionName + "_author_kind")
 		if err := app.Save(collection); err != nil {
@@ -57,8 +60,10 @@ func TestAuthorRefSnapshotRepairRestoresSnapshotColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if topics.Fields.GetByName("last_post_guest_nickname") == nil {
-		t.Fatal("topics.last_post_guest_nickname must exist after the operator repair")
+	for _, field := range []string{"last_post_guest_nickname", lastPostAuthorKindField, lastPostGuestDisplayNameField} {
+		if topics.Fields.GetByName(field) == nil {
+			t.Fatalf("topics.%s must exist after the operator repair", field)
+		}
 	}
 
 	// Second run must be a no-op report: nothing left to restore.
