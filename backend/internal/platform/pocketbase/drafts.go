@@ -119,7 +119,7 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 			}
 			post = core.NewRecord(postsCol)
 			post.Set("topic_id", topicID)
-			post.Set("author_id", e.Auth.Id)
+			setAccountAuthorRef(post, e.Auth.Id)
 		}
 		post.Set("is_draft", true)
 		post.Set("content", content)

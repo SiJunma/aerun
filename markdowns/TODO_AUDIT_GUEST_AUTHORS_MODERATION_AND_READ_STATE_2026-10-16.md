@@ -1,7 +1,7 @@
 # Аудит: гостевое авторство, модерация и непрочитанное
 
 **Дата:** 2026-10-16  
-**Статус:** архитектурный аудит незакоммиченного состояния; код намеренно не менялся.  
+**Статус:** Этап 1.3 закрыт (fail-fast verifier + операторская snapshot-migration); следующий шаг — Этап 2 (единый доменный слой автора).
 **Вердикт:** не наращивать отдельные `*_guest_*` поля. Нужна единая модель *автора контента* и один серверный read-cursor. Текущая попытка с `guest_nickname` полезна как аварийное направление, но в нынешнем виде она создаёт новые расходящиеся проекции.
 
 ## Журнал выполнения
@@ -15,13 +15,28 @@
 | 2026-10-16 | Находка | `createTopicHandler` валидирует guest nickname, но записывает его только в `last_post_guest_nickname`; `topics.guest_nickname` остаётся пустым. При финальном обновлении last-post используется исходный `form.GuestNickname`, а не нормализованное значение. Это подтверждает разрыв opener-author / last-post projection. |
 | 2026-10-16 | Проверка | `go test ./internal/platform/pocketbase -run '^(TestGuest(CreateTopic|Reply)ProjectsNickname|Test.*(Guest|Unread|Read))' -count=1 -v` завершён успешно: `PASS`, 36.100 s. Набор защищает guest last-post и server unread, но не проверяет `topics.guest_nickname`, nested `AuthorRef`, moderator edit/delete guest reply, opening-post policy и read cursor. |
 | 2026-10-16 | Препятствие | Этап 0 требует решения владельца по политике продукта. Нельзя безопасно выбрать его из кода: текущая реализация запрещает ownership гостя по умолчанию, а вопрос удаления opening post и различения гостей влияет на права, каскад и модель данных. До ответа не будут изменены схема, права или публичный API. |
+| 2026-10-16 | Решение владельца | Гость не может редактировать или удалять собственные публикации. Не создаём guest ownership/capability в этой поставке. Возможная отдельная future-feature — time-limited edit/delete через неперезаписываемую HttpOnly cookie и server-side hashed capability; nickname никогда не является credential. |
+| 2026-10-16 | Решение владельца | Права не зависят от вида автора: удаление topic требует topic-permission, удаление обычного post — post-permission. Opening post является телом topic и удаляется только как вся topic; текущий server `409` и UI topic-delete flow — верный инвариант. |
+| 2026-10-16 | Решение владельца | Любые guest-публикации считаются публикациями разных авторов для будущего ownership/cascade flow, даже при совпадающем nickname. В текущем flow это не является основанием для special-case: стабильного guest principal пока нет. |
+| 2026-10-16 | Решение владельца | Votes и комментарии к reputation разрешены для guest content на уровне post. Сохраняется только post-level reputation; общий рейтинг гостя не создаётся без устойчивого principal. |
+| 2026-10-16 | Завершено | Контракт принят как [ADR AuthorRef и ReadCursor](ADR_GUEST_AUTHOR_AND_READ_CURSOR_CONTRACT_2026-10-16.md). Этап 0 закрыт для author/reputation/read-cursor; следующий change-set начинается с migration/backfill. |
+| 2026-10-16 | Решение владельца | Уточнён final rule для opening post: он никогда не удаляется отдельно и не заменяется следующей репликой. `DELETE /posts/{opening}` остаётся `409`; только `DELETE /topics/{id}` с topic-permission выполняет hard-delete topic, posts и residue. |
+| 2026-10-16 | В работе | Добавлена новая migration `1770000000_author_ref_schema`: поля `author_kind` (`account`/`guest`) и `guest_display_name` для `posts`/`topics`, индекс по variant и idempotent backfill. Уже применённые `1769800000/1769900000` не изменялись. |
+| 2026-10-16 | Находка и исправление | Первый migration-test дал ложный fail: он читал объекты `core.Record`, загруженные до `app.Save`, вместо строк после backfill. Тест исправлен повторным чтением по id; это проверяет именно persisted state, а не память handler-а. |
+| 2026-10-16 | Проверка | `go test ./internal/migrations -run '^(TestAuthorRefSchemaBackfillsKnownAuthorsWithoutInventingGuests|TestMigrationsProduceHealthyApp|TestMigrationsAdoptPopulatedDataDir)$' -count=1 -v` — `PASS`, 7.432 s. Backfill назначает account/guest только доказуемым legacy-строкам, trims guest display name и оставляет строку без id/name unclassified. |
+| 2026-10-16 | Выполнено | New-write paths `create topic`, `create reply`, draft и forum import переведены на единые helpers `setAccountAuthorRef`/`setGuestAuthorRef`. Guest topic теперь также записывает нормализованное имя в `topics.guest_nickname`; final last-post legacy projection получает значение из сохранённого AuthorRef, а не из сырого request body. |
+| 2026-10-16 | Проверка | `go test ./internal/platform/pocketbase -run '^(TestGuestCreateTopicProjectsNickname|TestGuestReplyProjectsNickname)$' -count=1 -v` — `PASS`, 9.768 s. Тесты расширены: guest topic, opening post и reply обязаны иметь persisted `author_kind=guest` и `guest_display_name`. |
+| 2026-10-16 | Проверка | `go test ./internal/migrations -count=1` — `PASS`, 18.370 s; import/draft regression-набор — `PASS`, 11.076 s; `go build ./...` и `go vet ./...` из `backend` завершились успешно. `git diff --check` чист; Git сообщает только о будущей конвертации LF→CRLF в TODO-файле. |
+| 2026-10-16 | Выполнено | Этап 1.3 закрыт: silent `repairGuestNicknameSchema` удалён из `forum_topics.go` и `run.go`. Boot теперь fail-fast через `verifyAuthorRefSchema` в `forum_author_ref.go`: проверяются `author_id`, `guest_nickname`, `last_post_guest_nickname` (topics), `author_kind`, `guest_display_name` на posts/topics. Разовый snapshot-repair вынесен в явную операторскую миграцию `1770000001_author_ref_snapshot_repair` с отчётом (restored columns + unclassified rows), revert — deliberate no-op. |
+| 2026-10-16 | Проверка | `go build ./...` — успешно; `go vet ./internal/migrations/ ./internal/platform/pocketbase/` — чисто; `go test ./internal/migrations -run '^(TestAuthorRefSchemaBackfillsKnownAuthorsWithoutInventingGuests|TestAuthorRefSnapshotRepairRestoresSnapshotColumns|TestMigrationsProduceHealthyApp|TestMigrationsAdoptPopulatedDataDir)$' -count=1 -v` — `PASS`, 10.133 s; `go test ./internal/platform/pocketbase -run '^(TestVerifyAuthorRefSchemaRejectsAnUnmigratedDataDir|TestGuestCreateTopicProjectsNickname|TestGuestReplyProjectsNickname)$' -count=1 -v` — `PASS`, 9.543 s. |
+| 2026-10-16 | В работе | Следующий шаг — Этап 2: единый доменный слой автора (`AuthorRef`, `authorFromRequest`, `resolveAuthor`, `setTopicOpener`, `setLastPostProjection`/`rebuildTopicProjection`) и перевод `topicPayload`/`postPayload`/category projection на nested `author`/`last_post_author`. |
 
-### Реестр решений этапа 0 — ожидает владельца
+### Реестр решений этапа 0 — принят 2026-10-16
 
-1. Могут ли гости редактировать/удалять **свои** публикации? Если да, требуется отдельный защищённый owner capability; nickname не будет использоваться как credential.
-2. Имеет ли модератор с `delete_others_posts` право удалять opening post гостевой темы, или для этого обязательно `delete_others_topics`?
-3. Считаются ли два guest-поста с разными nickname разными авторами для правила удаления темы с replies? Рекомендуемый безопасный ответ: да, без guest ownership capability их следует считать другими авторами.
-4. Разрешены ли votes/reputation для guest content на уровне поста? Рекомендуемый ответ: да, без агрегирования общего рейтинга гостя.
+1. Гости не редактируют и не удаляют собственные публикации. Возможный future-flow со сроком (например, до часа) потребует отдельной server-side capability; HttpOnly cookie хранит лишь неперезаписываемый секрет/идентификатор, на сервере хранится hash. Это не часть текущей миграции.
+2. Удаление topic регулируется topic-permission; удаление обычного post — post-permission, вне зависимости от того, гость это, пользователь или администратор. Opening post — тело topic и удаляется только через topic delete.
+3. Любые гостевые публикации считаются разными авторами независимо от nickname; nickname не уникален и не является identity. До появления отдельного guest principal это не меняет текущий cascade flow.
+4. Votes, comments и post-level reputation для guest content разрешены. Никакого cross-post guest reputation без устойчивого guest principal.
 
 ## Краткий вывод
 
@@ -62,7 +77,7 @@ read DTO (одна форма для UI)
 | Пересчёт last post | `deletePostHandler` и `recalcTopicProjection` обновляют id/date/account id/guest name, но не обновляют/очищают `last_post_author_character_id`. | После удаления или переноса последнего masked-поста список может показывать маску удалённого автора либо не показать маску реального последнего автора. |
 | Миграции | `1769800000` добавляет два поля в topics и одно в posts; down-path удаляет только `guest_nickname`, оставляя `last_post_guest_nickname`. Runtime `repairGuestNicknameSchema` тихо меняет схему при старте и только логирует ошибку. | Миграция несимметрична; applied-migration + snapshot уже не должен лечиться silent runtime-mutation. При ошибке получится работающий сервер с повреждённым контрактом. |
 | Модерация guest reply | Для guest `isAuthor == false`; moderator с `edit_others_posts`/`delete_others_posts` проходит ветку «other». Пустой id безопасно игнорируется в user counters. | Редактирование и удаление обычного guest reply логически должны работать; отдельного интеграционного теста нет. |
-| Первый пост гостевой темы | `DELETE /posts/:id` намеренно отвечает 409 для первого поста. У moderator нет `delete_others_topics`; удалить тему может admin/root (либо роль с этим правом). | Если «модерировать контент гостя» включает удаление стартового поста, заявленное требование сейчас не выполнено для модератора. Нужна явная продуктовая политика. |
+| Первый пост гостевой темы | `DELETE /posts/:id` намеренно отвечает 409 для первого post, а `DELETE /topics/:id` требует `delete_others_topics` для чужой topic. | Подтверждено владельцем: это корректный инвариант. Opening post — тело topic; его удаление означает hard-delete всей topic и требует topic-permission независимо от вида автора. |
 | Каскад guest topic | `countOtherAuthorsInTopic` сравнивает только `author_id`. Для owner guest это пустая строка, поэтому все guest replies считаются тем же «автором», а разные гости неотличимы. | Можно удалить тему с репликами других гостей без `delete_own_topic_with_replies`; это следствие отсутствия author-kind/guest principal. |
 | Unread backend | `topic_read_states` и единый `unreadTopicsPredicate` уже есть; index и topic list передают server `unread`. | Это правильная база: badge/feed/index согласованы на сервере. |
 | Unread client | `readMap` в localStorage всё ещё обновляется и используется fallback-ом. `apiRecordTopicVisit` глотает ошибку серверной записи, а list handler молча пропускает ошибку `unreadTopicIDs`. | Ошибка API маскируется локальным «прочитано», а устаревший fallback способен снова зажечь точку. Нет гарантии немедленной инвалидации уже загруженного topic list. |
@@ -186,7 +201,7 @@ post mutation
 | Операция | Серверная транзакция | Счётчики и затронутые категории | Инвалидация клиента |
 |---|---|---|---|
 | Delete reply | Если удалён last post — rebuild source topic по `(created,id)`, включая полный AuthorRef. | `source.posts_count - 1`; category source при следующем read пересчитывает `posts_count`. Author's `users.posts_count - 1` только для account. Удалить votes, а их net sum снять с `users.reputation` target account. | topic, список этой категории, forum index, unread views. |
-| Delete opening post / topic | Удалить topic/posts и residue; category query выберет следующий topic. | Donor: `topics_count - 1`, `posts_count - N`; для каждого account-автора удалить его N постов, для topic account-author — одну тему. Суммировать votes по target account и один раз снять соответствующую reputation до удаления vote rows. | donor list/index, counters/stats, deleted topic. |
+| Delete opening post / topic | Opening post не удаляется отдельно: `DELETE /topics` с topic-permission удаляет topic/posts и residue; category query выберет следующий topic. | Donor: `topics_count - 1`, `posts_count - N`; для каждого account-автора удалить его N постов, для topic account-author — одну тему. Суммировать votes по target account и один раз снять соответствующую reputation до удаления vote rows. | donor list/index, counters/stats, deleted topic. |
 | Move reply A → B | Переместить post и связанные refs/votes; rebuild **обеих** тем. | `A.posts_count - 1`, `B.posts_count + 1`; суммарный category posts count не меняется, если категория одна, иначе donor −1/recipient +1. User post count **и reputation** не меняются; vote rows только получают новый `topic_id`. | оба topic, обе category lists, index. |
 | Move whole topic C1 → C2 | Last-post AuthorRef самой темы и `topic.posts_count` не меняются; меняется `category_id`. | C1: `topics −1`, `posts − topic.posts_count`; C2 получает те же значения. User post/topic counters и reputation не меняются. | обе category lists/index и counters/stats. |
 
@@ -204,7 +219,7 @@ post mutation
 
 - edit чужого guest post: `edit_others_posts`; проставить moderator/editor и audit event;
 - delete чужого guest reply: `delete_others_posts`; удалить votes/проекции/счётчики в одной транзакции;
-- delete гостевого opening post: это delete topic, и право должно быть отдельно решено (`delete_others_topics` либо специально сформулированное moderation policy);
+- delete guest opening post: это delete topic и требует `delete_others_topics` для чужой topic; `DELETE /posts/{opening}` остаётся 409;
 - audit log хранит `author_ref` (kind + nullable user id + guest display name), а не лишь пустой `author_id`.
 
 Для `author_kind=guest` account-level `users.posts_count`, `users.topics_count` и `users.reputation` — strict no-op по типу автора, а не по случайной пустой строке. Однако **репутация гостевого поста должна быть доступна**: `posts.reputation` и vote rows сохраняются, а список оценок открывается с карточки поста. Это даёт оценку конкретного контента без выдуманного user profile. Если нужен общий рейтинг гостя между разными постами, сначала требуется стабильный guest principal/capability; один nickname для этого небезопасен.
@@ -233,15 +248,15 @@ topic_read_states(user_id, topic_id,
 
 ### Этап 0 — зафиксировать решения
 
-1. Подтвердить продуктовую политику: могут ли гости редактировать свои сообщения; может ли модератор удалять guest opening post; считаются ли разные гости «другими авторами» при каскаде; разрешены ли reputation votes для guest content.
-2. Зафиксировать public JSON-contract `AuthorRef` и `ReadCursor` как ADR/API schema до переписывания UI.
+1. [x] Подтверждена продуктовая политика: гости не редактируют/удаляют свои сообщения; guest opening post удаляется только как topic по topic-permission; guest publications различаются независимо от nickname; reputation votes разрешены для guest content.
+2. [x] Public JSON-contract `AuthorRef` и `ReadCursor` зафиксирован в [ADR](ADR_GUEST_AUTHOR_AND_READ_CURSOR_CONTRACT_2026-10-16.md) до переписывания UI.
 
 ### Этап 1 — schema и безопасная совместимость
 
-1. Добавить **новую** миграцию (не изменять уже применённые `1769800000/1769900000`) с `author_kind`, nullable account id и guest display name на posts/topics, constraints/indexes.
-2. Backfill: `author_id != '' -> account`; `author_id == '' AND guest_nickname != '' -> guest`; строки без обоих значений — отдельный отчёт/`legacy_unknown`, не молчаливое guest-присвоение.
-3. Убрать runtime `repairGuestNicknameSchema`; заменить startup verifier, который fail-fast с понятной диагностикой, если mandatory schema не применена. Разовая snapshot repair — явная operator migration/command с отчётом.
-4. Исправить down-path новых миграций симметрично либо явно объявить migration irreversible.
+1. [x] Добавлена **новая** migration `1770000000` (без изменения применённых `1769800000/1769900000`) с `author_kind`, `guest_display_name` и индексом на posts/topics. Полная cross-field enforcement/mandatory verifier ещё впереди: на переходный период поля nullable, чтобы не потерять legacy unknown rows.
+2. [x] Backfill: `author_id != '' -> account`; `author_id == '' AND guest_nickname != '' -> guest`; строки без обоих значений остаются unclassified и логируются, а не получают молчаливое guest-присвоение.
+3. [x] Убран runtime `repairGuestNicknameSchema`; добавлен startup verifier `verifyAuthorRefSchema` (fail-fast, если mandatory schema не применена). Разовая snapshot repair — явная операторская migration `1770000001_author_ref_snapshot_repair` с отчётом.
+4. [x] Down-path `1770000000` симметрично удаляет новые поля и их индексы; legacy поля не меняются.
 
 ### Этап 2 — единый доменный слой автора
 

@@ -195,15 +195,15 @@ func createPostHandler(e *core.RequestEvent) error {
 		post := core.NewRecord(postsCol)
 		post.Set("topic_id", topicID)
 		if e.Auth != nil {
-			post.Set("author_id", e.Auth.Id)
+			setAccountAuthorRef(post, e.Auth.Id)
 		} else {
-			// Guest: no account, empty author_id; the display name lives in
-			// guest_nickname (validated below).
-			post.Set("author_id", "")
+			// Guest display name is immutable content data; guest_nickname remains
+			// a legacy compatibility field during the AuthorRef rollout.
 			guestNickname, err := forum.ValidateGuestNickname(form.GuestNickname)
 			if err != nil {
 				return 0, nil, validationError(err.Error())
 			}
+			setGuestAuthorRef(post, guestNickname)
 			post.Set("guest_nickname", guestNickname)
 		}
 		post.Set("content", content)

@@ -158,14 +158,16 @@ func createTopicHandler(e *core.RequestEvent) error {
 		topic := core.NewRecord(topicsCol)
 		topic.Set("category_id", form.CategoryID)
 		if e.Auth != nil {
-			topic.Set("author_id", e.Auth.Id)
+			setAccountAuthorRef(topic, e.Auth.Id)
 		} else {
-			// Guest: empty author_id; display name lives in guest_nickname
-			topic.Set("author_id", "")
+			// Guest display name is an immutable content snapshot. The legacy
+			// guest_nickname remains populated during the compatibility rollout.
 			guestNickname, err := forum.ValidateGuestNickname(form.GuestNickname)
 			if err != nil {
 				return 0, nil, validationError(err.Error())
 			}
+			setGuestAuthorRef(topic, guestNickname)
+			topic.Set("guest_nickname", guestNickname)
 			topic.Set("last_post_guest_nickname", guestNickname)
 		}
 		topic.Set("title", title)
@@ -193,10 +195,11 @@ func createTopicHandler(e *core.RequestEvent) error {
 		post := core.NewRecord(postsCol)
 		post.Set("topic_id", topic.Id)
 		if e.Auth != nil {
-			post.Set("author_id", e.Auth.Id)
+			setAccountAuthorRef(post, e.Auth.Id)
 		} else {
-			post.Set("author_id", "")
-			post.Set("guest_nickname", topic.GetString("last_post_guest_nickname"))
+			guestNickname := topic.GetString(guestDisplayNameField)
+			setGuestAuthorRef(post, guestNickname)
+			post.Set("guest_nickname", guestNickname)
 		}
 		post.Set("content", content)
 		// The topic and its opening message are always the same voice, so the
@@ -224,7 +227,7 @@ func createTopicHandler(e *core.RequestEvent) error {
 		topic.Set("last_post_created", post.GetDateTime("created"))
 		topic.Set("last_post_author_id", post.GetString("author_id"))
 		topic.Set("last_post_author_character_id", characterID)
-		topic.Set("last_post_guest_nickname", form.GuestNickname)
+		topic.Set("last_post_guest_nickname", post.GetString(guestDisplayNameField))
 
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic projection", err)
@@ -1053,46 +1056,4 @@ func parseIntParam(val string, defaultVal int) int {
 		return defaultVal
 	}
 	return n
-}
-
-// repairGuestNicknameSchema ensures topics.guest_nickname exists at boot.
-//
-// The migration (1769800000) adds the column to BOTH posts and topics, but a
-// database restored from a snapshot taken before that migration — while the
-// migration tracker still records it as applied — will never re-run it on
-// restart. PocketBase's Record.Set on a missing field is a SILENT no-op, so
-// without this repair every guest post writes its nickname to the post row
-// (which has the column) but the topic row silently drops it, and the forum
-// index reads topics.guest_nickname as empty — rendering "Deleted user" for
-// every guest.
-//
-// Called from OnServe, after apis.Serve applied RunAllMigrations. Unlike
-// verifyPresenceSchema (which refuses to start), this REPAIRS: the column is
-// optional text with an empty default, the migration itself is idempotent
-// (checks GetByName before adding), and adding it here simply realises the
-// same intent the migration already declared. A failure to repair is logged
-// and left to the next boot; it must not take the forum down.
-func repairGuestNicknameSchema(app core.App) {
-	topics, err := app.FindCachedCollectionByNameOrId(topicsCollectionName)
-	if err != nil {
-		app.Logger().Warn("guest_nickname repair: topics collection unavailable", "error", err)
-		return
-	}
-	needSave := false
-	if topics.Fields.GetByName("guest_nickname") == nil {
-		topics.Fields.Add(&core.TextField{Name: "guest_nickname", Max: 64})
-		needSave = true
-		app.Logger().Info("guest_nickname repair: added missing topics.guest_nickname column")
-	}
-	if topics.Fields.GetByName("last_post_guest_nickname") == nil {
-		topics.Fields.Add(&core.TextField{Name: "last_post_guest_nickname", Max: 64})
-		needSave = true
-		app.Logger().Info("guest_nickname repair: added missing topics.last_post_guest_nickname column")
-	}
-	if needSave {
-		if err := app.Save(topics); err != nil {
-			app.Logger().Warn("guest_nickname repair: failed to add topics columns", "error", err)
-			return
-		}
-	}
 }

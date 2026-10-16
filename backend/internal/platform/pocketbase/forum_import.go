@@ -347,7 +347,7 @@ func validateForumUpserts(topics []TopicUpsert, posts []PostUpsert) error {
 // applyTopicUpsert writes the desired state onto a topic record.
 func applyTopicUpsert(rec *core.Record, u TopicUpsert) {
 	rec.Set("category_id", u.CategoryID)
-	rec.Set("author_id", u.AuthorID)
+	setAccountAuthorRef(rec, u.AuthorID)
 	rec.Set("title", u.Title)
 	rec.Set("locked", u.Locked)
 	rec.Set("pinned", u.Pinned)
@@ -378,7 +378,7 @@ func applyTopicUpsert(rec *core.Record, u TopicUpsert) {
 // applyPostUpsert writes the desired state onto a post record.
 func applyPostUpsert(rec *core.Record, u PostUpsert, carryCharacter bool) {
 	rec.Set("topic_id", u.TopicID)
-	rec.Set("author_id", u.AuthorID)
+	setAccountAuthorRef(rec, u.AuthorID)
 	rec.Set("sequence", u.Sequence)
 	rec.Set("is_draft", u.IsDraft)
 	rec.Set("reputation", u.Reputation)

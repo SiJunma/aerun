@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/types"
@@ -66,8 +67,24 @@ func TestGuestCreateTopicProjectsNickname(t *testing.T) {
 	if got := topic.GetString("last_post_author_id"); got != "" {
 		t.Fatalf("topic.last_post_author_id = %q, want empty for a guest", got)
 	}
+	if got := topic.GetString(authorKindField); got != authorKindGuest {
+		t.Fatalf("topic.author_kind = %q, want guest", got)
+	}
+	if got := topic.GetString(guestDisplayNameField); got != "TestGuest" {
+		t.Fatalf("topic.guest_display_name = %q, want TestGuest", got)
+	}
 	if topic.GetString("last_post_id") == "" {
 		t.Fatal("topic.last_post_id must point at the opening post")
+	}
+	opening, err := app.FindRecordById(postsCollectionName, topic.GetString("last_post_id"))
+	if err != nil || opening == nil {
+		t.Fatalf("guest opening post missing: %v", err)
+	}
+	if got := opening.GetString(authorKindField); got != authorKindGuest {
+		t.Fatalf("opening post.author_kind = %q, want guest", got)
+	}
+	if got := opening.GetString(guestDisplayNameField); got != "TestGuest" {
+		t.Fatalf("opening post.guest_display_name = %q, want TestGuest", got)
 	}
 
 	// The forum index must name the guest.
@@ -126,6 +143,16 @@ func TestGuestReplyProjectsNickname(t *testing.T) {
 	}
 	if got := topic.GetString("last_post_author_id"); got != "" {
 		t.Fatalf("topic.last_post_author_id = %q, want empty for a guest reply", got)
+	}
+	guestPost, err := app.FindFirstRecordByFilter(postsCollectionName, "topic_id = {:topic} && guest_display_name = {:name}", dbx.Params{
+		"topic": topic.Id,
+		"name":  "GuestReplier",
+	})
+	if err != nil || guestPost == nil {
+		t.Fatalf("guest reply with AuthorRef missing: %v", err)
+	}
+	if got := guestPost.GetString(authorKindField); got != authorKindGuest {
+		t.Fatalf("guest reply.author_kind = %q, want guest", got)
 	}
 
 	// The forum index must name the guest replier.
