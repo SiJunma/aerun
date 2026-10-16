@@ -26,15 +26,11 @@ export const PERMISSIONS = {
   VIEW_AUDIT_LOG: 'view_audit_log',
 
   // Content Moderation
-  MODERATE_CONTENT: 'moderate_content',
   MOVE_TOPICS: 'move_topics',
   CLOSE_TOPICS: 'close_topics',
   PIN_TOPICS: 'pin_topics',
 
   // Post and topic moderation, split by subject and by ownership (2026-10-02).
-  // MODERATE_CONTENT used to gate all of these at once, which made "a moderator
-  // who edits but never deletes" unrepresentable. An `_others_` key widens WHO
-  // may act; it never substitutes for an ownership check the server makes.
   EDIT_SELF_POST: 'edit_self_post',
   EDIT_OTHERS_POSTS: 'edit_others_posts',
   DELETE_SELF_POST: 'delete_self_post',
@@ -100,7 +96,6 @@ export const PERMISSION_LABELS = {
   [PERMISSIONS.MANAGE_CATEGORIES]: { en: 'Manage Categories', ru: 'Управление категориями' },
   [PERMISSIONS.DELETE_USERS]: { en: 'Delete Users', ru: 'Удаление пользователей' },
   [PERMISSIONS.VIEW_AUDIT_LOG]: { en: 'View Audit Log', ru: 'Просмотр журнала' },
-  [PERMISSIONS.MODERATE_CONTENT]: { en: 'Moderate Content', ru: 'Модерация (правка/удаление)' },
   [PERMISSIONS.MOVE_TOPICS]: { en: 'Move Topics', ru: 'Перемещение тем' },
   [PERMISSIONS.CLOSE_TOPICS]: { en: 'Close/Open Topics', ru: 'Закрытие/Открытие тем' },
   [PERMISSIONS.PIN_TOPICS]: { en: 'Pin Topics', ru: 'Закрепление тем' },
@@ -151,7 +146,6 @@ export const PERMISSION_LABELS = {
   // Legacy mappings for backward compatibility with Firestore data
   'manage_settings': { en: 'Forum Settings', ru: 'Настройки форума' },
   'edit_profiles': { en: 'Edit Profiles', ru: 'Правка профилей' },
-  'moderate_content': { en: 'Moderate Posts', ru: 'Модерация постов' }
 };
 
 export const PERMISSION_GROUPS = [
@@ -193,7 +187,6 @@ export const PERMISSION_GROUPS = [
     id: 'content',
     name: { en: 'Content Management', ru: 'Управление контентом' },
     permissions: [
-      PERMISSIONS.MODERATE_CONTENT,
       PERMISSIONS.MOVE_TOPICS,
       PERMISSIONS.CLOSE_TOPICS,
       PERMISSIONS.PIN_TOPICS,
@@ -285,7 +278,6 @@ export const DEFAULT_ROLES = [
       PERMISSIONS.MANAGE_CATEGORIES,
       PERMISSIONS.DELETE_USERS,
       PERMISSIONS.VIEW_AUDIT_LOG,
-      PERMISSIONS.MODERATE_CONTENT,
       PERMISSIONS.MOVE_TOPICS,
       PERMISSIONS.CLOSE_TOPICS,
       PERMISSIONS.PIN_TOPICS,
@@ -316,7 +308,6 @@ export const DEFAULT_ROLES = [
     is_system: true,
     permissions: [
       PERMISSIONS.VIEW_AUDIT_LOG,
-      PERMISSIONS.MODERATE_CONTENT,
       PERMISSIONS.MOVE_TOPICS,
       PERMISSIONS.CLOSE_TOPICS,
       PERMISSIONS.PIN_TOPICS,
@@ -478,7 +469,6 @@ export const MAX_ROLE_PERMISSIONS = {
     PERMISSIONS.VIEW_AUDIT_LOG,
     PERMISSIONS.APPROVE_USERS,
     PERMISSIONS.BAN_USERS,
-    PERMISSIONS.MODERATE_CONTENT,
     PERMISSIONS.MOVE_TOPICS,
     PERMISSIONS.CLOSE_TOPICS,
     PERMISSIONS.PIN_TOPICS,

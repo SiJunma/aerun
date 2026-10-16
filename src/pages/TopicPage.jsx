@@ -2759,7 +2759,7 @@ const TopicPage = () => {
             {/* Actions & Pagination Group (Right Side) */}
             <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
               {/* Admin Management Dropdown */}
-              {(hasPermission(PERMISSIONS.MODERATE_CONTENT) ||
+              {(
                 hasPermission(PERMISSIONS.PIN_TOPICS) ||
                 hasPermission(PERMISSIONS.CLOSE_TOPICS) ||
                 hasPermission(PERMISSIONS.MOVE_TOPICS)) && (
@@ -2828,7 +2828,7 @@ const TopicPage = () => {
                           {t('forum.move_topic')}
                         </Dropdown.Item>
                       )}
-                      {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
+                      {hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS) && (
                         <Dropdown.Item
                           onClick={() => setShowMovePostsModal(true)}
                           className="d-flex align-items-center gap-2"
@@ -2837,7 +2837,7 @@ const TopicPage = () => {
                           {t('forum.move_posts')}
                         </Dropdown.Item>
                       )}
-                      {hasPermission(PERMISSIONS.MODERATE_CONTENT) && (
+                      {hasPermission(PERMISSIONS.DELETE_OTHERS_TOPICS) && (
                         <>
                           <Dropdown.Divider />
                           <Dropdown.Item

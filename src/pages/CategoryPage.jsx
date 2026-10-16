@@ -44,7 +44,7 @@ const CategoryPage = () => {
   const ITEMS_PER_PAGE = settings?.topicsPerPage || 20;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
-  const isStaff = hasPermission(PERMISSIONS.MODERATE_CONTENT);
+  const isStaff = hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS) || hasPermission(PERMISSIONS.DELETE_OTHERS_POSTS) || hasPermission(PERMISSIONS.EDIT_OTHERS_TOPICS) || hasPermission(PERMISSIONS.DELETE_OTHERS_TOPICS);
 
   const loadTopics = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);

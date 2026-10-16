@@ -2435,7 +2435,7 @@ const AdminPage = () => {
           {PERMISSION_GROUPS.map(group => {
             // A role's own id is its ceiling — guest with empty base_role_id
             // must NOT fall back to 'player' and show every player permission.
-            const currentBaseRole = roleForm.base_role_id || (editingRole?.id === 'guest' ? 'guest' : 'player');
+            const currentBaseRole = roleForm.base_role_id || editingRole?.id || 'player';
             const allowedPerms = MAX_ROLE_PERMISSIONS[currentBaseRole] || Object.values(PERMISSIONS);
             const visiblePerms = group.permissions.filter(p => allowedPerms.includes(p));
 
