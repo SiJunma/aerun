@@ -18,9 +18,21 @@ To achieve basic functionality required for roleplaying, forum owners are forced
 
 **Aerun was created to solve this once and for all.** 
 
-It combines my 15+ years of roleplay community experience with a modern, high-performance tech stack (**Go + PocketBase + React**). Aerun provides all essential roleplay tools—masks, dice, granular access controls, custom design sandboxes, and economy features—**native out of the box, zero ad-monetization, and zero third-party performance penalties.**
+It combines my 15+ years of roleplay community experience with a modern, high-performance tech stack (**Go + PocketBase + React**). Aerun provides all essential roleplay tools — masks, dice, granular access controls, custom design sandboxes, and economy features — **native out of the box, zero ad-monetization, and zero third-party performance penalties.**
 
 ---
+
+## ⚖️ Why Aerun? (Comparison)
+
+While modern forum engines like **NodeBB** or **Discourse** are great for standard corporate communities, they fall short for niche roleplay communities (FRPG):
+
+| Feature / Metric | Legacy Engines (MyBB / RusFF) | Modern Engines (NodeBB / Discourse) | 🚀 **Aerun** |
+| :--- | :--- | :--- | :--- |
+| **Resource Footprint** | Low, but bloated by JS | High (Node.js/Ruby + MongoDB/Redis) | **Ultra-Low** (Go + Single SQLite binary) |
+| **RPG Mechanics** | Third-party JS scripts | Non-existent / Custom plugins required | **Native** (Masks, Dice, Economy in core) |
+| **Theme Customization** | Fragile CSS overrides | Complex template systems | **Theme Sandbox** (Isolated Storybook-like preview) |
+| **Deployment** | Legacy PHP hosting | Heavy container setups | **One-Click CLI** / Single Executable |
+| **Monetization** | Intrusive ads / Ransom fees | Varies | **100% Free & Open Source (MIT)** |
 
 ## ✨ Key Features
 
@@ -38,7 +50,7 @@ It combines my 15+ years of roleplay community experience with a modern, high-pe
 
 ### 🛡️ Granular Permissions & Security
 * **Multi-Tiered Access Control:** Differentiated global, category-level, and topic-level permissions.
-* **Server-Side Enforcement:** Every action (editing, deleting, viewing) is validated strictly on the server—not just hidden in the frontend UI.
+* **Server-Side Enforcement:** Every action (editing, deleting, viewing) is validated strictly on the server — not just hidden in the frontend UI.
 * **Audit Logs & Moderation:** Full action history for administrators, soft-deletes with restore capabilities, registration pre-moderation, and maintenance mode.
 
 ---
