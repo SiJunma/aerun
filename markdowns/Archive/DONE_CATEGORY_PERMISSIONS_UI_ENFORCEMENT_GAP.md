@@ -1,6 +1,6 @@
 # Настройки разрешений категории: сохранено, но интерфейс им не следует
 
-**Статус:** выявлен пробел (gap) — нужно доработать frontend  
+**Статус:** реализовано (бэкенд + frontend). Категория теперь сужает глобальное право и на сервере, и на клиенте. Выдача права за пределом глобального (scenario 1) не поддерживается — см. §6.  
 **Ветка:** `feature/pocketbase-migration` (коммит `eab0609`, локально на 5 коммитов впереди origin)  
 **Коммиты/файлы исправления:** `backend/internal/migrations/1769700000_category_permissions_restore.go`, `backend/internal/platform/pocketbase/category_commands.go`, `backend/internal/platform/pocketbase/category_access.go`, `src/api/categories.js`, `src/pages/AdminPage.jsx`  
 **Автор отчёта:** Cline (по запросу пользователя)
@@ -129,3 +129,67 @@ const hasPermission = useCallback((perm) => {
 - `backend/internal/platform/pocketbase/category_commands.go` — валидация и сохранение `permissions`
 - `backend/internal/platform/pocketbase/category_access.go:55` — `canViewCategory` (серверная проверка чтения, работает)
 - `backend/internal/platform/pocketbase/run.go:378,387` — глобальные `RequirePermission` для создания тем и ответов (без категорийной проверки)
+
+
+## 6. Реализовано (закрытие пробела UI enforcement)
+
+### Семантика (почему так)
+
+Категорийное переопределение — **десисвный фактор**. Оно может и **выдавать** право тому, у кого его нет глобально (гостю/спектатору), и **запрещать** тому, у кого оно есть глобально (модератору, игроку), если роль не внесена в список категории. Исключение — root, который всегда проходит.
+
+По дефолту у гостя и спектатора нет права создавать темы и писать посты. Если админ специально включил право в категории — гость получает возможность писать там, даже если глобально у него нет `post_reply`. Это сделано намеренно: обратная схема (сначала включить у роли, затем выключать в каждой категории отдельно) была бы плохим UX.
+
+Обратная сторона той же монеты: если админ явно перечислил роли в категории, то все, кто не в списке, получают отказ — даже при наличии глобального права. Это не лазейка, а защита: категория может сузить доступ.
+
+### Бэкенд
+- `backend/internal/platform/pocketbase/category_access.go` — в публичный список категорий (`listForumIndexHandler`) добавлено поле `permissions` (`decodePermissionsMap(c.Get("permissions"))`), чтобы AuthProvider видел карту разрешений каждой категории. Ранее поле отдавалось только в админском списке (`listAdminCategoriesHandler`), поэтому клиент не знал о категорийных overrides и не мог проинициализировать `hasPermission`.
+- `backend/internal/platform/pocketbase/category_access.go` — добавлен хелпер `categoryWriteAllowed(app, acc, categoryID, perm)`:
+  1. root — всегда разрешено; banned — всегда запрещено.
+  2. глобальное право (из `/me`, суженное по статусу) — разрешено.
+  3. явный список ролей категории для `perm` — разрешено членам списка, даже без глобального права.
+  4. отсутствие/пустой список/маркер наследования (`__aerun_inherit_roles__`) — fallback на глобальный результат (шаг 2).
+- `backend/internal/platform/pocketbase/forum_topics.go` (`createTopicHandler`) — проверяется `categoryWriteAllowed(..., PermCreateTopic)` → 403 "You cannot create topics in this category.".
+- `backend/internal/platform/pocketbase/forum_posts.go` (`createPostHandler`) — проверяется `categoryWriteAllowed(..., PermPostReply)` по `topic.category_id` → 403 "You cannot post in this category.".
+- `backend/internal/platform/pocketbase/run.go` — убран глобальный `RequirePermission` с `POST /topics` и `POST /topics/{id}/posts`; право теперь решается внутри хендлеров категорически-aware, чтобы категория могла выдать право тому, у кого его нет глобально.
+
+Обе проверки **расширяют** глобальное право: категория может выдать действие_account-у, у которого его нет глобально, но не может отнять у того, у кого оно есть глобально (если только не запрещено явно в категории).
+
+### Фронтенд
+- `src/api/categories.js` — константа `INHERIT_ROLES` (`__aerun_inherit_roles__`, байт-в-байт как `auth.CategoryInheritMarker`) теперь экспортируется.
+- `src/contexts/AuthProvider.jsx` — `hasPermission(perm, { category } = {})` учитывает категорийное переопределение: при явном не-наследующем списке ролей член в списке → `true` (даже без глобального права), не в списке → `false`; пустой список — только для root. **`view_forum` исключён**: сервер уже отфильтровал категории через `canViewCategory` перед отправкой клиенту, поэтому если категория есть в клиентском списке — доступ подтверждён сервером и клиент возвращает `true` без дополнительных проверок. Это исправляет баг, когда пустая категория показывалась как "access denied".
+
+**Гостевая роль:** для неавторизованного пользователя (`user === null`) категорийная проверка использует роль `'guest'` (а не `'player'`), чтобы категорийный список ролей (например, `["guest", "player", ...]`) соответствовал реальному гостю. `categories` добавлен в зависимости `useCallback`.
+- Все существующие точки вызова (`TopicPage`, `CategoryPage`, `TopicFormPage`, `ActiveTopicsPage`, `MovePostsModal`, `MoveTopicsModal`) уже передавали `{ category }` (объект категории), поэтому автоматически начали учитывать категорию — отдельных правок в компонентах не требуется.
+
+### use_masks и use_dice на фронтенде
+- `TopicPage.jsx` форма ответа: выпадающий список маски показывается только если `hasPermission(PERMISSIONS.USE_MASKS, { category })`; `showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}` скрывает кости при запрете.
+- `TopicPage.jsx` редактирование поста: выпадающий список маски показывается только если автор + `hasPermission(PERMISSIONS.USE_MASKS, { category })`; `showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}`.
+- `TopicFormPage.jsx` создание темы: поле «Представляться как» (маска) показывается только если `hasPermission(PERMISSIONS.USE_MASKS, { category })`; `showDice={hasPermission(PERMISSIONS.USE_DICE, { category })}`.
+- **Сброс преффила маски:** в `TopicPage.jsx` и `TopicFormPage.jsx` при загрузке/смене категории, если `use_masks` запрещён, `selectedCharacterId` сбрасывается на `''` и вызывается `setLastSelectedMask('')`, поэтому ответ/тема постится от имени основного аккаунта, даже если маска была preselected в другой теме.
+
+### Ограничения (см. §3 рекомендаций из отчёта)
+- Parity-тест / скрипт (§4 п.4 отчёта) не добавлен — остаётся на будущее.
+- Гостя в админ-модалке редактирования прав показывало все права игрока, потому что `base_role_id` у гостя пуст и код падал на 'player'. Исправлено в `src/pages/AdminPage.jsx`:
+  1. `handleOpenRoleModal` — права гостя фильтруются через `MAX_ROLE_PERMISSIONS['guest']` при открытии модалки.
+  2. Рендеринг чекбоксов — `currentBaseRole` для гостя определяется как `'guest'`, а не `'player'`, поэтому показываются только права из `MAX_ROLE_PERMISSIONS['guest']` (VIEW_FORUM, POST_REPLY, USE_DICE).
+
+- Гость не мог создать тему, даже с категорийным грантом на `create_topic`, потому что:
+  1. Маршрут `POST /topics/{id}/posts` и `POST /topics` в `run.go` были обернуты в `RequirePermission` без `allowGuest`, и клиентская страница создания темы (`/category/:id/new-topic`) была обёрнута в `ProtectedRoute requirePosting` без `allowGuest`. Гостя редиректило на главную перед тем, как он мог отправить форму.
+  2. Исправлено: убран глобальный `RequirePermission` с роутов, добавлен `allowGuest` к ProtectedRoute для new-topic, и в `TopicFormPage.jsx` добавлена категорийная проверка `hasPermission(PERMISSIONS.CREATE_TOPIC, { category })` перед сабмитом.
+  3. Гость теперь может указать гостевой никнейм (`guest_nickname`) в форме ответа/создания темы — он сохраняется в `localStorage` под ключом `aerun_guest_nickname` и предзаполняется при повторном посещении. Сервер хранит `guest_nickname` в колонке `posts.guest_nickname` и использует его как `author_name` при рендере (вместо "Deleted user").
+- Гость теперь может публиковать посты в категории с grant:
+  - Миграция `1769800000_post_guest_nickname.go` добавляет колонку `guest_nickname` (текст, 64) в коллекцию `posts`.
+  - Миграция `1769900000_post_author_id_optional.go` делает `posts.author_id` необязательным (Required: true → false), чтобы гость мог publicar без аккаунта.
+  - Клиент отправляет `guest_nickname` в `createPost` (`src/api/forum.js`, `src/pages/TopicPage.jsx`).
+  - Последний введенный никнейм гостя запоминается в `localStorage` под ключом `aerun_guest_nickname` и подставляется в поле «Ваш никнейм» при повторном открытии формы ответа.
+  - Бэкенд (`createPostHandler` в `forum_posts.go`) для гостя: `author_id = ""`, сохраняет `guest_nickname`, не вызывает `adjustUserPostCount` и `dispatchPostNotifications` (нет аккаунта).
+- Добавлен серверный интеграционный тест `TestCategoryWritePermissionGranting` в `backend/internal/platform/pocketbase/forum_commands_test.go` (9 саб-тестов): проверяет, что категорийное переопределение — десисвный фактор:
+  - spectator (только `view_forum` глобально) не может создать тему/ответить без grant категории → 403;
+  - spectator может создать тему/ответить с grant категории → 201;
+  - игрок с глобальным правом может создать тему в категории без переопределения → 201;
+  - игрок с глобальным правом **не может** создать тему в категории, где явно запрещено (не в списке) → 403;
+  - модератор с глобальным правом **не может** создать тему/ответить в категории, где не в списке → 403;
+  - модератор в списке категории → 201.
+
+### §3 (дополнительно из отчёта) — серверная категорийная проверка записи
+Реализовано полностью:  в  используется в  () и  (). Глобальный  убран с роутов  и , чтобы категория могла выдать право тому, у кого его нет глобально.
