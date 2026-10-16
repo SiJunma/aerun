@@ -11,26 +11,27 @@
 
 I have been an active participant and administrator in text-based roleplay communities (FRPG) since 2009. For over a decade, thousands of roleplay forums have been forced to rely on outdated legacy engines like MyBB or hosted services like RusFF. 
 
-To achieve basic functionality required for roleplaying, forum owners are forced to inject dozens of third-party JavaScript scripts. This leads to:
-* 📉 **Severe performance degradation:** Pages load slowly, lag, and crash on modern mobile devices.
-* 💸 **Subscription traps & paywalls:** Third-party script developers demand recurring fees for essential features processed on external servers.
+When looking at modern alternatives like Discourse, NodeBB, or Flarum, a major issue arises: **they no longer feel like classic forums.** Out of the box, they look like endless social media feeds or comment streams rather than structured, category-driven discussion spaces. Restoring a familiar, structured forum experience requires installing yet another layer of complex plugins.
+
+On the other hand, sticking with legacy engines leads to severe bottlenecks:
+* 📉 **Severe performance degradation:** To get basic roleplay features, owners inject dozens of third-party JavaScript scripts that cause lag and mobile crashes.
+* 💸 **Subscription traps & paywalls:** Script developers demand recurring fees for essential features processed on external servers.
 * 📢 **Intrusive advertising:** Hosted solutions force forums to pay ransom fees just to remove banner ads.
 
-**Aerun was created to solve this once and for all.** 
+**Aerun was created to combine the best of both worlds.** 
 
-It combines my 15+ years of roleplay community experience with a modern, high-performance tech stack (**Go + PocketBase + React**). Aerun provides all essential roleplay tools — masks, dice, granular access controls, custom design sandboxes, and economy features — **native out of the box, zero ad-monetization, and zero third-party performance penalties.**
+It keeps the **familiar, structured, category-driven forum experience** that communities love, while powering it with a modern, high-performance tech stack (**Go + PocketBase + React**). Aerun provides all essential roleplay tools — masks, dice, granular access controls, custom design sandboxes, and economy features — **native out of the box, zero ad-monetization, and zero third-party performance penalties.**
 
 ---
 
 ## ⚖️ Why Aerun? (Comparison)
 
-While modern forum engines like **NodeBB** or **Discourse** are great for standard corporate communities, they fall short for niche roleplay communities (FRPG):
-
-| Feature / Metric | Legacy Engines (MyBB / RusFF) | Modern Engines (NodeBB / Discourse) | 🚀 **Aerun** |
+| Feature / Metric | Legacy Engines (MyBB / RusFF) | Modern Alternatives (NodeBB / Discourse / Flarum) | 🚀 **Aerun** |
 | :--- | :--- | :--- | :--- |
-| **Resource Footprint** | Low, but bloated by JS | High (Node.js/Ruby + MongoDB/Redis) | **Ultra-Low** (Go + Single SQLite binary) |
+| **UX & Layout** | Classic Forum Structure | Feed / Chat-like UX (Requires plugins for classic layout) | **Classic Forum Structure Native** |
+| **Resource Footprint**| Low, but bloated by JS | High (Node.js/Ruby + MongoDB/Redis) | **Ultra-Low** (Go + Single SQLite binary) |
 | **RPG Mechanics** | Third-party JS scripts | Non-existent / Custom plugins required | **Native** (Masks, Dice, Economy in core) |
-| **Theme Customization** | Fragile CSS overrides | Complex template systems | **Theme Sandbox** (Isolated Storybook-like preview) |
+| **Theme Customization**| Fragile CSS overrides | Complex template systems | **Theme Sandbox** (Isolated Storybook-like preview) |
 | **Deployment** | Legacy PHP hosting | Heavy container setups | **One-Click CLI** / Single Executable |
 | **Monetization** | Intrusive ads / Ransom fees | Varies | **100% Free & Open Source (MIT)** |
 
@@ -84,25 +85,56 @@ While modern forum engines like **NodeBB** or **Discourse** are great for standa
 ## ⚙️ Getting Started (Local Development)
 
 ### Prerequisites
-* **Node.js** >= 18.x
-* **Go** >= 1.22
+* **Node.js** 20.19+ or 22.12+
+* **Go** 1.27+
+* Git
+
+PocketBase is compiled into the Go backend; it does not need to be installed
+separately. A clean local launch also works without an `.env` file or any
+secrets.
 
 ### Quick Start
 
-1. **Clone the repository:**
+1. **Clone the repository and install the frontend dependencies:**
+
    ```bash
    git clone https://github.com/SiJunma/aerun.git
    cd aerun
-
-2. **Install dependencies:**
-   ```bash
-   npm install
+   npm ci
    ```
 
-3. **Run the development server:**
+2. **Start the backend first.** Keep this terminal open. On Windows, run:
+
+   ```powershell
+   npm run dev:backend
+   ```
+
+   If PowerShell blocks `npm.ps1`, use `npm.cmd run dev:backend` instead.
+   On macOS/Linux, run the backend directly:
+
+   ```bash
+   cd backend && go run ./cmd/aerun
+   ```
+
+   The server is ready when `http://127.0.0.1:8090/api/aerun/health` returns
+   JSON with `"status": "ok"`. The first launch creates the local SQLite
+   database in `backend/pb_data/` and prints a one-time PocketBase administrator
+   setup URL; open that URL to create the first administrator account.
+
+3. **In a second terminal, start the frontend from the repository root:**
+
    ```bash
    npm run dev
    ```
+
+   In PowerShell with the same execution-policy issue, use `npm.cmd run dev`.
+
+4. Open the address shown by Vite (normally
+   [http://localhost:5173](http://localhost:5173)). The frontend uses the
+   local backend at `http://127.0.0.1:8090` by default.
+
+To stop the local backend on Windows, run `npm run dev:backend:stop`. For
+deployment and operational commands, see [DEPLOY.md](DEPLOY.md).
 
 ### License
 
