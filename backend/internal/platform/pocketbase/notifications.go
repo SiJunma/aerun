@@ -227,9 +227,9 @@ func markAllTopicsReadHandler(e *core.RequestEvent) error {
 			return forbiddenError("you do not have permission to view one of these categories")
 		}
 		lastReadPostID := topic.GetString("last_post_id")
-			lastReadCreated := topic.GetDateTime("last_post_created").String()
+		lastReadCreated := topic.GetDateTime("last_post_created").String()
 
-			if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, lastReadPostID, lastReadCreated, lastReadPostID); err != nil {
+		if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, lastReadPostID, lastReadCreated, lastReadPostID); err != nil {
 			return internalError("failed to save read state", err)
 		}
 		marked++
@@ -527,8 +527,8 @@ func archiveAllNotificationsHandler(e *core.RequestEvent) error {
 //
 // The predicate is the one the unread feed shares (unreadTopicsPredicate):
 //
-//last post after the read cursor (last_read_created, last_read_post_id),
-//fallback to the last_read_at timestamp for rows written before the cursor
+// last post after the read cursor (last_read_created, last_read_post_id),
+// fallback to the last_read_at timestamp for rows written before the cursor
 //
 // with two differences only the server can settle. The cursor comes from a
 // per-user read-state table rather than a localStorage map, so the count follows
@@ -714,7 +714,7 @@ func unreadTopicsPredicate(e *core.RequestEvent) (string, dbx.Params, error) {
 		params[key] = id
 	}
 
-		where := `
+	where := `
 		t.category_id IN (` + strings.Join(placeholders, ", ") + `)
 		AND COALESCE(t.last_post_author_id, '') != {:user}
 		AND (

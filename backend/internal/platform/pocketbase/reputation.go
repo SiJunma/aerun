@@ -188,10 +188,15 @@ func votePostHandler(e *core.RequestEvent) error {
 		}
 
 		return http.StatusOK, map[string]any{
-			"vote":              repVotePayload(voteRecord),
-			"post_reputation":   post.GetInt("reputation"),
-			"target_reputation": func() int { if targetUser == nil { return 0 }; return targetUser.GetInt("reputation") }(),
-			"request_id":        requestIDFrom(e),
+			"vote":            repVotePayload(voteRecord),
+			"post_reputation": post.GetInt("reputation"),
+			"target_reputation": func() int {
+				if targetUser == nil {
+					return 0
+				}
+				return targetUser.GetInt("reputation")
+			}(),
+			"request_id": requestIDFrom(e),
 		}, nil
 	})
 
@@ -332,9 +337,14 @@ func voteUserHandler(e *core.RequestEvent) error {
 		}
 
 		return http.StatusOK, map[string]any{
-			"vote":              repVotePayload(voteRecord),
-			"target_reputation": func() int { if targetUser == nil { return 0 }; return targetUser.GetInt("reputation") }(),
-			"request_id":        requestIDFrom(e),
+			"vote": repVotePayload(voteRecord),
+			"target_reputation": func() int {
+				if targetUser == nil {
+					return 0
+				}
+				return targetUser.GetInt("reputation")
+			}(),
+			"request_id": requestIDFrom(e),
 		}, nil
 	})
 

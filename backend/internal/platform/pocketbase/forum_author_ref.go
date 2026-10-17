@@ -16,8 +16,8 @@ const (
 	authorKindGuest       = "guest"
 	// Last-post projection carries its own AuthorRef variant: the topic row
 	// stores who spoke last independently of the opener columns above.
-	lastPostAuthorKindField         = "last_post_author_kind"
-	lastPostGuestDisplayNameField   = "last_post_guest_display_name"
+	lastPostAuthorKindField       = "last_post_author_kind"
+	lastPostGuestDisplayNameField = "last_post_guest_display_name"
 )
 
 func setAccountAuthorRef(record *core.Record, userID string) {
@@ -199,7 +199,7 @@ func rebuildTopicProjection(txApp core.App, topic *core.Record) error {
 	}
 	var cRes countResult
 	if err := txApp.DB().NewQuery(
-		"SELECT COUNT(*) AS cnt FROM "+postsCollectionName+
+		"SELECT COUNT(*) AS cnt FROM " + postsCollectionName +
 			" WHERE topic_id = {:topic_id} AND (is_draft = false OR is_draft IS NULL)",
 	).Bind(dbx.Params{"topic_id": topic.Id}).One(&cRes); err != nil {
 		return fmt.Errorf("count topic posts: %w", err)
@@ -246,9 +246,9 @@ func rebuildTopicProjection(txApp core.App, topic *core.Record) error {
 // explicit operator migration with a report, never in silent runtime code.
 func verifyAuthorRefSchema(app core.App) error {
 	required := map[string][]string{
-		postsCollectionName:             {"author_id", authorKindField, guestDisplayNameField, "guest_principal_id"},
-		topicsCollectionName:            {"author_id", authorKindField, guestDisplayNameField, lastPostAuthorKindField, lastPostGuestDisplayNameField, "guest_principal_id"},
-		guestPrincipalsCollectionName:   {"guest_id", "capability_hash", "last_used_at"},
+		postsCollectionName:           {"author_id", authorKindField, guestDisplayNameField, "guest_principal_id"},
+		topicsCollectionName:          {"author_id", authorKindField, guestDisplayNameField, lastPostAuthorKindField, lastPostGuestDisplayNameField, "guest_principal_id"},
+		guestPrincipalsCollectionName: {"guest_id", "capability_hash", "last_used_at"},
 	}
 	for _, collectionName := range []string{postsCollectionName, topicsCollectionName, guestPrincipalsCollectionName} {
 		collection, err := app.FindCachedCollectionByNameOrId(collectionName)

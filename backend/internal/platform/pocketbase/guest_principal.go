@@ -248,4 +248,3 @@ func createGuestPrincipalHandler(e *core.RequestEvent) error {
 		"reissued":   true,
 	})
 }
-

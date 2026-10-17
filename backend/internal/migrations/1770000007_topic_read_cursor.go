@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	lastReadPostIDField        = "last_read_post_id"
-	lastReadCreatedField       = "last_read_created"
+	lastReadPostIDField         = "last_read_post_id"
+	lastReadCreatedField        = "last_read_created"
 	lastReadPostTiebreakIDField = "last_read_post_tiebreak_id"
 )
 

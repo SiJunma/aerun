@@ -202,8 +202,8 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		// May be NULL/empty, which is correct: the last post may have been
 		// written as the account. The column is a text field, so a missing value
 		// scans as "" rather than failing the row.
-		CharacterID   string `db:"last_post_author_character_id"`
-		PostsCount    int    `db:"posts_count"`
+		CharacterID      string `db:"last_post_author_character_id"`
+		PostsCount       int    `db:"posts_count"`
 		GuestDisplayName string `db:"last_post_guest_display_name"`
 	}
 	var latest []latestTopic
@@ -698,9 +698,9 @@ func listAdminCategoriesHandler(e *core.RequestEvent) error {
 // If the category carries no override for `perm` at all (key absent, or the
 // inherit marker), the caller falls back to their global permission.
 // Resolution order:
-//   1. root is always allowed; banned is always denied.
-//   2. an explicit category role list: membership grants, non-membership denies.
-//   3. absent key or inherit marker → fall back to the global permission.
+//  1. root is always allowed; banned is always denied.
+//  2. an explicit category role list: membership grants, non-membership denies.
+//  3. absent key or inherit marker → fall back to the global permission.
 func categoryWriteAllowed(app core.App, acc AccessContext, categoryID string, perm auth.Permission) (bool, error) {
 	if acc.Role == auth.RoleRoot {
 		return true, nil

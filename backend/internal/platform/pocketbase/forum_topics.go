@@ -68,9 +68,9 @@ func topicPayload(record *core.Record) map[string]any {
 		"pinned":              record.GetBool("pinned"),
 		"last_post_id":        record.GetString("last_post_id"),
 		"last_post_created":   record.GetDateTime("last_post_created").String(),
-		"last_post_author_id":       record.GetString("last_post_author_id"),
-		"created":                   record.GetDateTime("created").String(),
-		"updated":                   record.GetDateTime("updated").String(),
+		"last_post_author_id": record.GetString("last_post_author_id"),
+		"created":             record.GetDateTime("created").String(),
+		"updated":             record.GetDateTime("updated").String(),
 	}
 	// Nested AuthorRef DTOs (ADR contract). The flat author_id and
 	// last_post_author_id fields above stay as deprecated compatibility

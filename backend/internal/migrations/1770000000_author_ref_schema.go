@@ -70,9 +70,9 @@ func backfillAuthorRefs(app core.App) error {
 
 			authorID := strings.TrimSpace(record.GetString("author_id"))
 			guestName := strings.TrimSpace(record.GetString(guestDisplayNameField))
-		if guestName == "" {
-			guestName = strings.TrimSpace(record.GetString("guest_nickname"))
-		}
+			if guestName == "" {
+				guestName = strings.TrimSpace(record.GetString("guest_nickname"))
+			}
 			switch {
 			case authorID != "":
 				record.Set(authorKindField, authorKindAccount)

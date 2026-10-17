@@ -45,10 +45,10 @@ func TestNestedAuthorDTOsCarryTheAdrContract(t *testing.T) {
 	}
 	var resp struct {
 		Topic struct {
-			Author           map[string]any `json:"author"`
+			Author            map[string]any `json:"author"`
 			LastPostAuthorRef map[string]any `json:"last_post_author_ref"`
-			AuthorID         string         `json:"author_id"`
-			GuestNickname    string         `json:"guest_nickname"`
+			AuthorID          string         `json:"author_id"`
+			GuestNickname     string         `json:"guest_nickname"`
 		} `json:"topic"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
