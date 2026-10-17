@@ -21,6 +21,7 @@ import {
   removeRtdbGuestPresence
 } from '../api/rtdb-presence';
 import { subscribeToUnreadCounts, refreshUnreadCounts } from '../api/dms';
+import { subscribeToRealtimeSignals, canReceiveSignals } from '../api/realtime-signals';
 import { fetchSecuredMainPageData, INHERIT_ROLES } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -71,6 +72,10 @@ export const AuthProvider = ({ children }) => {
   const [readMap, setReadMap] = useState({});
   const [readMapReady] = useState(true);
   const [categories, setCategories] = useState([]);
+  const categoriesRef = useRef(categories);
+  useEffect(() => {
+    categoriesRef.current = categories;
+  }, [categories]);
   // The folders the index renders categories inside. They come from the SAME read
   // as the categories (forum-index), so the two can never disagree about which
   // group a category belongs to.
@@ -810,7 +815,7 @@ export const AuthProvider = ({ children }) => {
   const forumRefreshInFlightRef = useRef(false);
   const forumRefreshQueuedRef = useRef(false);
 
-  const refreshForumState = useCallback(async (force = false) => {
+  const refreshForumState = useCallback(async (force = false, showLoading = false) => {
     const now = Date.now();
     if (!force && now - lastForumRefreshTimeRef.current < FORUM_REFRESH_COOLDOWN_MS) {
       return;
@@ -823,7 +828,12 @@ export const AuthProvider = ({ children }) => {
     }
     forumRefreshInFlightRef.current = true;
 
-    setForumStateLoading(true);
+    // Only display full-page skeleton if requested or if initial categories are not loaded yet.
+    // Background polling / realtime signal refreshes must never flash skeletons.
+    const shouldShowLoading = showLoading || (!categoriesRef.current || categoriesRef.current.length === 0);
+    if (shouldShowLoading) {
+      setForumStateLoading(true);
+    }
     setForumStateError(null);
 
     try {
@@ -840,7 +850,9 @@ export const AuthProvider = ({ children }) => {
       setForumStateError(err);
     } finally {
       forumRefreshInFlightRef.current = false;
-      setForumStateLoading(false);
+      if (shouldShowLoading) {
+        setForumStateLoading(false);
+      }
     }
   }, []);
 
@@ -896,6 +908,118 @@ export const AuthProvider = ({ children }) => {
     forumRefreshTimersRef.current.add(timer);
   }, [refreshForumState]);
 
+  // Realtime updates for forum state (categories, last posts, counters, stats).
+  //
+  // When another member posts in a topic, the backend emits `realtimeSignalTopicPost`
+  // ("topic.post") through `realtime_signals`.
+  //
+  // To avoid spamming network reads during active multi-topic conversations,
+  // incoming signals coalesce with a 3.5s trailing debounce and an 8s max-wait cap.
+  // Inactive (hidden) tabs do not poll or fetch; they perform a single quiet
+  // refresh on return.
+  const forumDebounceTimerRef = useRef(null);
+  const forumMaxWaitTimerRef = useRef(null);
+  const needsForumRefreshOnVisibleRef = useRef(false);
+
+  useEffect(() => {
+    const triggerDebouncedForumRefresh = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        needsForumRefreshOnVisibleRef.current = true;
+        return;
+      }
+
+      if (!forumMaxWaitTimerRef.current) {
+        forumMaxWaitTimerRef.current = setTimeout(() => {
+          if (forumDebounceTimerRef.current) {
+            clearTimeout(forumDebounceTimerRef.current);
+            forumDebounceTimerRef.current = null;
+          }
+          forumMaxWaitTimerRef.current = null;
+          refreshForumState(true, false);
+        }, 8000);
+      }
+
+      if (forumDebounceTimerRef.current) {
+        clearTimeout(forumDebounceTimerRef.current);
+      }
+      forumDebounceTimerRef.current = setTimeout(() => {
+        if (forumMaxWaitTimerRef.current) {
+          clearTimeout(forumMaxWaitTimerRef.current);
+          forumMaxWaitTimerRef.current = null;
+        }
+        forumDebounceTimerRef.current = null;
+        refreshForumState(true, false);
+      }, 3500);
+    };
+
+    const onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && needsForumRefreshOnVisibleRef.current) {
+        needsForumRefreshOnVisibleRef.current = false;
+        refreshForumState(true, false);
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    let pollInterval = null;
+    const startFallbackPolling = () => {
+      if (pollInterval) return;
+      pollInterval = setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+          return;
+        }
+        refreshForumState(true, false);
+      }, 60000);
+    };
+
+    const stopFallbackPolling = () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
+    let unsubRealtime = null;
+    if (canReceiveSignals()) {
+      unsubRealtime = subscribeToRealtimeSignals(
+        (topic) => {
+          if (topic === 'topic.post') {
+            triggerDebouncedForumRefresh();
+          }
+        },
+        () => {
+          startFallbackPolling();
+        },
+        (connected) => {
+          if (connected) {
+            stopFallbackPolling();
+          } else {
+            startFallbackPolling();
+          }
+        }
+      );
+    } else {
+      startFallbackPolling();
+    }
+
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+      if (forumDebounceTimerRef.current) {
+        clearTimeout(forumDebounceTimerRef.current);
+        forumDebounceTimerRef.current = null;
+      }
+      if (forumMaxWaitTimerRef.current) {
+        clearTimeout(forumMaxWaitTimerRef.current);
+        forumMaxWaitTimerRef.current = null;
+      }
+      stopFallbackPolling();
+      unsubRealtime?.();
+    };
+  }, [user?.uid, refreshForumState]);
+
   const applyForumState = useCallback((data) => {
     if (!data) return;
     if (Array.isArray(data.categories)) setCategories(data.categories);
@@ -919,6 +1043,9 @@ export const AuthProvider = ({ children }) => {
     if (!user?.uid || !topicId) return;
     const now = Date.now();
     setReadMap(prev => ({ ...prev, [topicId]: now }));
+    setCategories(prev => (Array.isArray(prev) ? prev.map(c => (
+      c.last_post_topic_id === topicId ? { ...c, unread: false } : c
+    )) : prev));
     await apiRecordTopicVisit(user.uid, topicId, offset);
     // The server state already moved, but the navbar badge, the tab title and
     // the /new-replies tab render the last POLLED values (15s / 20s ticks).
@@ -968,6 +1095,7 @@ export const AuthProvider = ({ children }) => {
         ids.forEach(id => { next[id] = now; });
         return next;
       });
+      setCategories(prev => (Array.isArray(prev) ? prev.map(c => ({ ...c, unread: false })) : prev));
       apiRecordAllTopicVisits(user.uid, ids);
       // Same staleness as the single read above: the badge counts the whole
       // board server-side, so re-read it instead of waiting for the next tick.

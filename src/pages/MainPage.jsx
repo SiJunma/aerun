@@ -163,15 +163,19 @@ const MainPage = () => {
                     const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
                     const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
                     const lastPostMs = toMillis(cat.last_post_at);
-                    // The server owns read state now: `cat.unread` is the SAME
-                    // unreadTopicIDs predicate that drives the badge and
-                    // /new-replies, so when it is present it wins. The
-                    // localStorage predicate stays only as a fallback for a
-                    // payload that did not carry the flag (guest, or a stale
-                    // index), and it remains behind the same `!!user` / role /
-                    // own-post gates.
+                    // The server owns read state, but local session visits
+                    // (effectiveLastVisitMs >= lastPostMs) take immediate precedence
+                    // over a stale server-side snapshot. A category is unread only if
+                    // the server considers it unread AND this device has not visited
+                    // it since the last post.
                     const serverUnread = typeof cat.unread === 'boolean' ? cat.unread : null;
-                    const hasUnread = !!user && profile?.role_id !== 'pending' && cat.last_post_author_id !== user?.uid && (serverUnread ?? lastPostMs > effectiveLastVisitMs);
+                    const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
+                    const isUnreadByServer = serverUnread !== null ? serverUnread : true;
+                    const hasUnread = !!user &&
+                      profile?.role_id !== 'pending' &&
+                      cat.last_post_author_id !== user?.uid &&
+                      isUnreadByServer &&
+                      !isLocallyRead;
 
                     return (
                       <LastPostInfo
