@@ -762,9 +762,13 @@ func editPostHandler(e *core.RequestEvent) error {
 
 		if isModerated {
 			if err := recordAuditLog(txApp, "post_edit", e.Auth.Id, map[string]any{
-				"post_id":   postID,
-				"topic_id":  topic.Id,
-				"author_id": post.GetString("author_id"),
+				"post_id":            postID,
+				"topic_id":           topic.Id,
+				"author_id":          post.GetString("author_id"),
+				// A guest post's author_id is empty BY DESIGN; the kind and the
+				// display name are what keep a moderated guest edit attributable.
+				"author_kind":        post.GetString(authorKindField),
+				"guest_display_name": post.GetString(guestDisplayNameField),
 			}); err != nil {
 				return 0, nil, err
 			}
@@ -867,6 +871,12 @@ func deletePostHandler(e *core.RequestEvent) error {
 		// first, then mutate — a loop that reads after its parent is gone is how
 		// the original decrement lost its owner.
 		authorID := post.GetString("author_id")
+		// The author's ACCOUNT counters move only for an account author. A
+		// guest has no users row, and the ADR makes the account-level no-op a
+		// decision by author_kind — not an accident of an empty id that a
+		// future refactor could silently turn into a write to whoever the
+		// empty string happens to resolve to.
+		isAccountAuthor := post.GetString(authorKindField) == authorKindAccount
 
 		// Reputation earned on a post that is about to stop existing must be paid
 		// back — be6ca82's exact fix, for the same reason: on Firestore the logs
@@ -878,6 +888,10 @@ func deletePostHandler(e *core.RequestEvent) error {
 		// orphaned vote is exactly the residue the incident was about. Removing
 		// them also makes the payout exactly-once by construction — a second pass
 		// finds no rows left to sum, so no claim document is needed.
+		//
+		// A guest post's votes still die with the post (post-level reputation has
+		// no account to pay back to), which is the owner ruling: post-level
+		// reputation exists, account-level aggregation for guests does not.
 		type voteTotal struct {
 			Total int `db:"total"`
 		}
@@ -888,7 +902,7 @@ func deletePostHandler(e *core.RequestEvent) error {
 		).Bind(dbx.Params{"post": post.Id}).One(&voteSum); err != nil {
 			return 0, nil, internalError("failed to sum reputation votes for post deletion", err)
 		}
-		if voteSum.Total != 0 {
+		if voteSum.Total != 0 && isAccountAuthor {
 			if err := adjustUserReputation(txApp, authorID, -voteSum.Total); err != nil {
 				return 0, nil, err
 			}
@@ -897,8 +911,10 @@ func deletePostHandler(e *core.RequestEvent) error {
 		// The post's AUTHOR loses a post, not the caller: a moderator deleting
 		// someone else's post must not move their own counter. The row is about
 		// to stop existing, so the count drops by exactly one.
-		if err := adjustUserPostCount(txApp, authorID, -1); err != nil {
-			return 0, nil, err
+		if isAccountAuthor {
+			if err := adjustUserPostCount(txApp, authorID, -1); err != nil {
+				return 0, nil, err
+			}
 		}
 
 		// The audit row goes in the same transaction and carries the TEXT. The
@@ -909,14 +925,21 @@ func deletePostHandler(e *core.RequestEvent) error {
 		// EVERY delete is logged, not only staff ones. The previous guard
 		// (`if !isAuthor`) meant an ordinary player deleting their own post left
 		// no trace at all, which is precisely the traffic worth watching.
+		//
+		// The stored AuthorRef rides along: a guest post's author_id is empty BY
+		// DESIGN, so an audit entry keyed on it alone would record "nobody wrote
+		// this" — the kind and the display name are what make a moderation act
+		// on guest content attributable after the row is gone.
 		if err := recordAuditLog(txApp, "post_delete", e.Auth.Id, map[string]any{
-			"post_id":     post.Id,
-			"topic_id":    topic.Id,
-			"topic_title": topic.GetString("title"),
-			"author_id":   authorID,
-			"created":     post.GetDateTime("created").String(),
-			"by_author":   isAuthor,
-			"content":     post.GetString("content"),
+			"post_id":            post.Id,
+			"topic_id":           topic.Id,
+			"topic_title":        topic.GetString("title"),
+			"author_id":          authorID,
+			"author_kind":        post.GetString(authorKindField),
+			"guest_display_name": post.GetString(guestDisplayNameField),
+			"created":            post.GetDateTime("created").String(),
+			"by_author":          isAuthor,
+			"content":            post.GetString("content"),
 		}); err != nil {
 			return 0, nil, err
 		}
