@@ -200,7 +200,7 @@ func createTopicHandler(e *core.RequestEvent) error {
 		topic.Set("author_character_id", characterID)
 
 		if err := txApp.Save(topic); err != nil {
-			return 0, nil, internalError("failed to create topic", err)
+			return 0, nil, internalError(fmt.Sprintf("failed to create topic: %v", err), err)
 		}
 
 		// 2. The opening post. It carries no sequence: ordering is by `created`,

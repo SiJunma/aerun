@@ -330,3 +330,129 @@ topic_read_states(user_id, topic_id,
 3. Исправить единый writer/rebuilder last-post (включая character id) либо временно не использовать маску в last-post DTO.
 4. Исправить topic-list contract: сервер обязан вернуть last-post `AuthorRef`, а не рассчитывать, что клиент подменит его opener-ом.
 5. После этого выбрать: короткий совместимый patch или сразу Этапы 1–2. При заявленной цели «сделать правильно» рекомендуется сразу начать с ADR + новой schema migration, а не расширять `GUEST_PROJECTION_MAP.md` ещё одним полем.
+
+## Дополнительные выводы после сверки с кодом (2026-10-17)
+
+### 1. Новые `*_guest_*` поля — резонно ли их добавление
+
+**Да, добавление обосновано как переходная мера, но оно должно быть временным.**
+
+Что фактически добавлено (миграции `1770000000`–`1770000005`):
+- `author_kind` / `last_post_author_kind` — дискриминатор `account`|`guest`, без него пустой `author_id` не distingueт гостя от удалённого account или битой legacy-строки.
+- `guest_display_name` / `last_post_guest_display_name` — отображаемое имя гостя, снимок на момент публикации.
+- `guest_principal_id` — ссылка на коллекцию `guest_principals` для стабильной браузерной идентичности гостя (HttpOnly cookie, capability_hash).
+
+Поля остаются **рядом** с legacy `guest_nickname` / `last_post_guest_nickname` / `author_id` / `last_post_author_id`, которые пока не удалены. Flat-копии в DTO (`topicPayload`, `postPayload`) emit-ся как deprecated-компатибельность.
+
+**Почему нельзя было обойтись без них:** без `author_kind` сервер не может надёжно определить variant автора; без `guest_principal_id` нельзя различить гостей для ownership/cascade и голосов. ADR (`ADR_GUEST_AUTHOR_AND_READ_CURSOR_CONTRACT_2026-10-16.md`) явно предписывает удалить legacy поля отдельной миграцией после backfill и подтверждения нуля legacy rows — это ещё не сделано.
+
+### 2. Устаревшие поля, от которых надо избавиться
+
+Пользователь прав: от legacy-полей нужно смело избавиться, локалка — песочница, новую БД можно накатить по новым скриптам.
+
+Поля под удаление после перехода на AuthorRef:
+- `posts.guest_nickname`, `topics.guest_nickname`, `topics.last_post_guest_nickname` — legacy копии display name гостя.
+- `posts.author_id`, `topics.author_id`, `topics.last_post_author_id` — legacy account id, дискриминатором теперь служит `author_kind`.
+- `posts.sequence` — изобретённый заранее per-topic ordinal. Уже **не используется**: сортировка по `created ASC, id ASC` (см. `listPostsHandler` и `getPostHandler` комментарии: "`posts.sequence` was an invented per-topic counter and is being removed"). Поле всё ещё `Required: true` в миграции `1766100000` и имеет уникальный индекс `idx_posts_topic_sequence`. Нужно убрать поле и индекс миграцией.
+
+Что уже не является устаревшим (оставить):
+- `posts.author_character_id`, `topics.last_post_author_character_id` — маска account-автора, часть AuthorRef, актуальна.
+- `topics.first_post_pinned` — флаг закрепления opening post, актуален.
+
+### 3. Opening-post policy и разрешения на удаление тем
+
+Код в `deleteTopicHandler` (`forum_topics.go:791`) реализует три сценария, соответствующие заявленным разрешениям:
+
+| Сценарий | Требуемое разрешение | Код |
+|----------|---------------------|-----|
+| Чужая тема | `delete_others_topics` (админы/root) | `!isAuthor && !Has(delete_others_topics)` → 403 |
+| Своя тема без чужих ответов | без разрешения | `isAuthor` и `countOtherAuthorsInTopic == 0` → разрешено |
+| Своя тема с чужими ответами | `delete_own_topic_with_replies` | `isAuthor` и `countOtherAuthorsInTopic > 0` и `!Has(delete_own_topic_with_replies)` → 409 |
+
+**Нюанс с гостями:** для гостя `e.Auth == nil`, следовательно `isAuthor == false` всегда. Гость попадает в ветку `!isAuthor` и нуждается в `delete_others_topics`, которого у гостя нет. Гость **не может удалить свою тему ни при каких условиях** — это соответствует политике «гость не редактирует и не удаляет собственные публикации», но стоит зафиксировать явно: гостевые темы удаляются только модератором/админом через `delete_others_topics`.
+
+**Нюанс с `countOtherAuthorsInTopic`:** функция считает `COUNT(DISTINCT author_id) WHERE author_id != excludeAuthorID`. Для гостевой темы все посты (и opening, и ответы) имеют `author_id = ""`, поэтому `author_id != ""` отфильтровывает их все — функция возвращает 0. Это корректно для подсчёта *account*-участников, но для гостевых топиков «чужие ответы» от других гостей не учитываются. Поскольку гости и так не могут удалять темы, это не создаёт лазейки, но стоит иметь в виду.
+
+### 4. Ошибка «Failed to create topic.» у гостя — причина найдена
+
+Ошибка confirma: `author_id: cannot be blank` — поле `author_id` в коллекции `topics` имеет `Required: true` (установлено в миграции `1766100000_forum_command_layer.go`). Для гостя `createTopicHandler` пишет `author_id = ""` через `setGuestAuthorRef`, и PocketBase отвергает запись.
+
+Исправление уже есть в коде: миграция `1769900000_post_author_id_optional.go` ставит `textField.Required = false` для `author_id` на обеих коллекциях (`posts` и `topics`). Она **должна быть применена к локальной БД** перед проверкой гостевого создания топика.
+
+Что нужно сделать:
+- Перезапустить PocketBase сервер — он автоматически применит pending-миграцию `1769900000`, если она ещё не отработала на этой БД.
+- Проверить, что `author_id` на `topics` и `posts` имеет `Required = false` (через PocketBase admin UI или код).
+
+После этого `setGuestAuthorRef(topic, …)` с `author_id = ""` пройдёт валидацию, и создание топика гостем заработает.
+
+**Что проверено в коде гостевой ветки `createTopicHandler`:**
+- `setGuestAuthorRef(topic, guestNickname)` — устанавливает `author_id=""`, `author_kind="guest"`, `guest_display_name=guestNickname`.
+- Legacy поля `topic.Set("guest_nickname", …)`, `topic.Set("last_post_guest_nickname", …)` — заполняются.
+- `topic.Set("guest_principal_id", guestPrincipalIDFromRequest(e))` — может быть `""`, если гость ещё не вызвал `POST /api/aerun/guest/principal`. Поле не Required, пустая строка допустима.
+- `topic.Set("author_character_id", "")` — для гостя пусто, корректно.
+
+**Почему post creation works, а topic creation fails:** в коде пути почти идентичны, но в topic creation перед первым `txApp.Save(topic)` вызывается `categoryWriteAllowed` — если категория не выдана гостю, возвращается `forbiddenError`, а не `internalError`. Ошибка `author_id: cannot be blank` подтверждает, что проблема именно в схеме (Required=true), а не в правах доступа.
+
+**Статус 2026-10-17: ошибка решена.** Добавлена миграция `1770000006_fix_author_id_required`, которая безусловно ставит `author_id.Required = false` на обеих коллекциях (`posts`, `topics`). После применения миграции гостевое создание топика работает. Оставшаяся причина неудачи на некоторыхデーта-дирах — база восстановлена из снимка, где миграция `1769900000` числится как применённая, но поле реально осталось Required; миграция `1770000006` исправляет это.
+
+### 5. Триггеры обновления last-post при удалении/переносе/редактировании/смене маски/никнейма
+
+Проверено по коду (`forum_author_ref.go`, `forum_posts.go`, `forum_topics.go`):
+
+| Событие | Обработка | Статус |
+|---------|-----------|--------|
+| Удаление последнего поста в теме | `deletePostHandler` → `rebuildTopicProjection(txApp, topic)` — пересобирает полную проекцию (id, created, kind, account id, guest name, mask, posts_count). Ошибка ребилда откатывает весь delete. | ✅ Реализовано |
+| Перенос поста между темами | `movePostsHandler` → `rebuildTopicProjection` для source и target topic. | ✅ Реализовано |
+| Перенос whole topic между категориями | `last_post` темы не меняется (меняется только `category_id`), category index пересобирается через `categoryForumProjections` | ✅ Реализовано |
+| Редактирование последнего поста со сменой маски | `editPostHandler`: если `topic.last_post_id == postID`, вызывает `setLastPostProjection(topic, post)` — маска копируется из post row через единый writer. | ✅ Реализовано |
+| Смена никнейма account-автора (профиль) | **Триггер не требуется.** Имя аккаунта не хранится в посте/топике: `category_access.go` пишет в проекцию только `last_post_author_id` (ID, не имя), а имя резолвится из `users` при чтении (`decorateTopicAuthors` / фронтенд). Статы форума (онлайн, активные за сутки) считаются по `users.last_seen` (`category_access.go:dailyActiveMembers`), не по именам в постах. Смена ника в профиле автоматически отражается на всех поверхностях при следующем чтении. | ✅ Не требуется |
+| Смена никнейма гостя | Неприменим — гостевой nickname immutable, снимок на момент публикации, его нет в `editPostForm`. | — |
+| Редактирование тайтла opening post / топика | `updateTopicHandler` (`forum_topics.go:654-673`) — валидация + `topic.Set("title", newTitle)` + `txApp.Save(topic)`. Category index читает `title` прямо из `topics` через SQL (`category_access.go:216`), нет отдельного кэшированного документа, который нужно инвалидировать. Бэкенд-триггер не требуется; stale-данные возможны только во фронтенд-кэше (уже загруженная страница у конкретного пользователя). | ✅ Реализовано (read-through) |
+| Редактирование последнего поста (не opening) | `editPostHandler`: если отредактированный пост — последний в теме, `setLastPostProjection` обновит last-post проекцию топика. Тайтл топика не меняется. | ✅ Реализовано |
+
+**Вывод:**
+
+Триггеры на удаление, перенос и смену маски последнего поста присутствуют и работают через `setLastPostProjection`/`rebuildTopicProjection`.
+
+**Смена никнейма account-автора не требует триггера ни на категории, ни на статы:**
+- Category index хранит `last_post_author_id` (ID, не имя) — имя резолвится из `users` при чтении.
+- Статы (онлайн/активные за сутки) считаются по `users.last_seen`, не по именам в постах.
+- Гостевой nickname immutable — его нельзя сменить, триггер не применим.
+
+**Редактирование тайтла топика не требует отдельного бэкенд-триггера инвалидации:**
+- Category index читает `topics.title` напрямую через SQL при каждом построении проекции (`categoryForumProjections`). Нет отдельного кэшированного документа категории, который нужно было бы инвалидировать при смене тайтла.
+- Stale-данные возможны только на фронтенде (уже загруженная страница у конкретного пользователя) — это проблема клиентского кэша, не бэкенд-триггера.
+
+**Что стоит иметь в виду:** если в будущем добавится возможность гостю сменить nickname, понадобится триггер, который пройдёт по всем topic-строкам, где этот гость является `last_post` автором, и обновит `last_post_guest_nickname`. Сейчас такой возможности нет.
+
+### Build version в серверных ошибках
+
+Добавлено в `backend/internal/platform/pocketbase/errors.go`:
+
+- Переменная `buildVersion` (по умолчанию `"dev"`), инжектится при сборке через `-ldflags "-X github.com/SiJunma/aerun/backend/internal/platform/pocketbase.buildVersion=1.2.3"`.
+- В `applyErrorContract` (единая точка входа для всех `/api/aerun` ошибок) в каждый ответ ошибки добавляется поле `apiErr.Data["build"] = buildVersion`.
+
+Теперь каждая серверная ошибка выглядит примерно так:
+
+```json
+{
+  "data": {
+    "kind": "internal",
+    "retryable": true,
+    "conflict": false,
+    "forbidden": false,
+    "validation": false,
+    "request_id": "WUKM5ehluiuXITki",
+    "build": "1.2.3"
+  },
+  "message": "author_id: cannot be blank.",
+  "status": 500
+}
+```
+
+Это позволяет мгновенно отличить ошибку в коде от ошибки из-за того, что сервер запущен со старой сборкой (не применились миграции, схема не синхронизирована и т.п.).
+
+### Коммиты вне плана (не отражены в статусе документа)
+
+- `a2c4102` `fix(forum): dispatch quote and reply notifications for guest posts` — нотификации гостевых постов, не в статусе документа.
+- `43307f3` `fix(forum): sync category and topic unread indicators with local visits and realtime signals` — фронтенд: `AuthProvider.jsx`, `MainPage.jsx`, `TopicRow.jsx` + перемещение `ARCHIVE_FINDINGS_GUEST_PROJECTION_MAP.md`. Не в статусе документа, относится к клиентской части read-state (Этап 4).

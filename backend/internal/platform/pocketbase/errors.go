@@ -38,6 +38,12 @@ const (
 	errKindUnknown      = "error"
 )
 
+// buildVersion is injected at link time via -ldflags "-X ...buildVersion=...".
+// It ships with every server error so an operator can tell at a glance
+// whether a failure comes from the running binary code or from a stale
+// build / unapplied schema. Defaults to "dev" for local runs.
+var buildVersion = "dev"
+
 // newContractError builds an ApiError with an explicit contract kind. The
 // four boolean flags are derived from the kind by errorContractMiddleware,
 // so constructors only describe *what* went wrong, never how to flag it.
@@ -120,6 +126,7 @@ func applyErrorContract(e *core.RequestEvent, err error) error {
 		apiErr.Data["validation"] = kind == errKindValidation
 	}
 	apiErr.Data["request_id"] = requestIDFrom(e)
+	apiErr.Data["build"] = buildVersion
 	return apiErr
 }
 
