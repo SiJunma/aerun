@@ -71,15 +71,52 @@ func markTopicReadHandler(e *core.RequestEvent) error {
 		return forbiddenError("you do not have permission to view this category")
 	}
 
-	now := types.NowDateTime()
-	if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, now); err != nil {
+	var body struct {
+		// last_visible_post_id is the id of the post the client last rendered.
+		// The server validates it belongs to this topic and pins the read
+		// cursor to that post's (created, id), so a post created between page
+		// load and this write cannot be marked read without being seen.
+		LastVisiblePostID string `json:"last_visible_post_id"`
+	}
+	if e.Request.Body != nil {
+		if err := json.NewDecoder(e.Request.Body).Decode(&body); err != nil {
+			return validationError("invalid request body")
+		}
+	}
+
+	var lastReadPostID, lastReadCreated, lastReadTiebreakID string
+	if body.LastVisiblePostID != "" {
+		post, err := e.App.FindRecordById(postsCollectionName, body.LastVisiblePostID)
+		if err != nil || post == nil {
+			return notFoundError("post not found")
+		}
+		if post.GetString("topic_id") != topicID {
+			return forbiddenError("post does not belong to this topic")
+		}
+		lastReadPostID = post.Id
+		lastReadCreated = post.GetDateTime("created").String()
+		lastReadTiebreakID = post.Id
+	} else {
+		// No post id supplied: fall back to "now" so legacy clients still
+		// advance the read position, but without a post cursor the topic can
+		// never be proven fully read against individual posts.
+		lastReadCreated = types.NowDateTime().String()
+	}
+
+	if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, lastReadPostID, lastReadCreated, lastReadTiebreakID); err != nil {
 		return internalError("failed to save read state", err)
 	}
 
+	// Invalidation version: the topic's own last-post timestamp lets clients
+	// know when the read state may have become stale (a new reply landed).
+	invalidationVersion := topic.GetDateTime("last_post_created").String()
+
 	return e.JSON(http.StatusOK, map[string]any{
-		"topic_id":     topicID,
-		"last_read_at": now.String(),
-		"request_id":   requestIDFrom(e),
+		"topic_id":             topicID,
+		"last_read_post_id":    lastReadPostID,
+		"last_read_created":    lastReadCreated,
+		"invalidation_version": invalidationVersion,
+		"request_id":           requestIDFrom(e),
 	})
 }
 
@@ -88,14 +125,16 @@ func markTopicReadHandler(e *core.RequestEvent) error {
 // Extracted because markTopicReadHandler and markAllTopicsReadHandler must not be
 // able to disagree about what a read position is — the same reasoning that made
 // both notification paths share one helper.
-func upsertTopicReadState(app core.App, userID, topicID string, at types.DateTime) error {
+func upsertTopicReadState(app core.App, userID, topicID, lastReadPostID, lastReadCreated, lastReadTiebreakID string) error {
 	existing, err := app.FindFirstRecordByFilter(
 		topicReadStatesCollectionName,
 		"user_id = {:user} && topic_id = {:topic}",
 		dbx.Params{"user": userID, "topic": topicID},
 	)
 	if err == nil && existing != nil {
-		existing.Set("last_read_at", at)
+		existing.Set("last_read_post_id", lastReadPostID)
+		existing.Set("last_read_created", lastReadCreated)
+		existing.Set("last_read_post_tiebreak_id", lastReadTiebreakID)
 		return app.Save(existing)
 	}
 
@@ -106,7 +145,9 @@ func upsertTopicReadState(app core.App, userID, topicID string, at types.DateTim
 	rec := core.NewRecord(col)
 	rec.Set("user_id", userID)
 	rec.Set("topic_id", topicID)
-	rec.Set("last_read_at", at)
+	rec.Set("last_read_post_id", lastReadPostID)
+	rec.Set("last_read_created", lastReadCreated)
+	rec.Set("last_read_post_tiebreak_id", lastReadTiebreakID)
 	if err := app.Save(rec); err != nil {
 		// The concurrent writer's row already says the same thing. Two tabs
 		// opening the same topic race here, and the loser must not see an error.
@@ -154,7 +195,6 @@ func markAllTopicsReadHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
-	now := types.NowDateTime()
 
 	topicIDs := body.TopicIDs
 	if body.All {
@@ -186,7 +226,10 @@ func markAllTopicsReadHandler(e *core.RequestEvent) error {
 		if !allowed {
 			return forbiddenError("you do not have permission to view one of these categories")
 		}
-		if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, now); err != nil {
+		lastReadPostID := topic.GetString("last_post_id")
+			lastReadCreated := topic.GetDateTime("last_post_created").String()
+
+			if err := upsertTopicReadState(e.App, e.Auth.Id, topicID, lastReadPostID, lastReadCreated, lastReadPostID); err != nil {
 			return internalError("failed to save read state", err)
 		}
 		marked++
@@ -482,15 +525,16 @@ func archiveAllNotificationsHandler(e *core.RequestEvent) error {
 // aggregate over rows the caller can already see, and it cannot be capped by a
 // page size: this counts every unread topic, not the first fifty.
 //
-// The predicate is the one the client applied (NewRepliesPage):
+// The predicate is the one the unread feed shares (unreadTopicsPredicate):
 //
-//	last_post_created > max(last_read_at, registration)
+//last post after the read cursor (last_read_created, last_read_post_id),
+//fallback to the last_read_at timestamp for rows written before the cursor
 //
-// with two differences only the server can settle. `last_read_at` comes from a
+// with two differences only the server can settle. The cursor comes from a
 // per-user read-state table rather than a localStorage map, so the count follows
 // the member to another browser; and the category filter is `canViewCategory`,
 // so a topic in a category the caller may not read does not merely stay out of
-// the list — it does not inflate the badge, which is how a count ends up larger
+// the list - it does not inflate the badge, which is how a count ends up larger
 // than the list it summarises.
 //
 // Topics whose last post is the caller's own are excluded, matching the client,
@@ -670,12 +714,16 @@ func unreadTopicsPredicate(e *core.RequestEvent) (string, dbx.Params, error) {
 		params[key] = id
 	}
 
-	where := `
+		where := `
 		t.category_id IN (` + strings.Join(placeholders, ", ") + `)
 		AND COALESCE(t.last_post_author_id, '') != {:user}
-		AND t.last_post_created > COALESCE(
-			r.last_read_at,
-			CASE WHEN {:registered} = '' THEN t.last_post_created ELSE {:registered} END
+		AND (
+			t.last_post_created > COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created)
+			OR (
+				t.last_post_created = COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created)
+				AND COALESCE(r.last_read_post_id, '') <> ''
+				AND t.last_post_id > r.last_read_post_id
+			)
 		)`
 	return where, params, nil
 }

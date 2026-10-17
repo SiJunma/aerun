@@ -209,7 +209,7 @@ All errors return the machine-readable error contract:
 - `POST /api/aerun/topics/:id/move` — move topic to a different category (`move_topics` permission).
 - `DELETE /api/aerun/topics/:id` — soft delete a topic (`moderate_content` or author).
 - `POST /api/aerun/topics/:id/posts` — create a reply. Monotonically assigns sequence inside the topic transaction, verifies max post limit and locked state, and advances topic metadata atomically (`post_reply` permission).
-- `GET /api/aerun/topics/:id/posts` — list posts ordered by `created ASC, id ASC` (page pagination: `page`, `limit`). `page=last|latest|unread` resolves the page holding the first unread post: for an authenticated caller the read cutoff comes from their server-side `topic_read_states.last_read_at` row (the `last_visit` query param is only a fallback), otherwise the last page is served. The response echoes the cutoff used as `read_cutoff` — this is what `?goLast=1` topic links rely on.
+- `GET /api/aerun/topics/:id/posts` — list posts ordered by `created ASC, id ASC` (page pagination: `page`, `limit`). `page=last|latest|unread` resolves the page holding the first unread post: for an authenticated caller the read cutoff comes from their server-side `topic_read_states` cursor (`last_read_created`/`last_read_post_id`, falling back to `last_read_at` for legacy rows; the `last_visit` query param is only a fallback), otherwise the last page is served. The response echoes the cutoff used as `read_cutoff` — this is what `?goLast=1` topic links rely on.
 - `GET /api/aerun/topics/:id/posts/by-sequence/:sequence` — deep-link lookup by topic sequence number.
 - `PATCH /api/aerun/posts/:id` — edit post content (`moderate_content` or author).
 - `DELETE /api/aerun/posts/:id` — soft delete post, updates visible post count and topic `last_post_*` fallback.
@@ -349,11 +349,17 @@ passes against a stream that is open and permanently silent.
   previously computed in the browser from a `topics?limit=50` list, which made it
   capped (a member with 60 unread was told 50) and per-device (the read map lived
   in localStorage, so the desktop and the phone disagreed about the same account).
-  The predicate is `last_post_created > max(last_read_at, users.created)`, filtered
+  The predicate compares the topic's last post against the reader's cursor
+  (`last_read_created`/`last_read_post_id`, falling back to `last_read_at` and
+  then `users.created`), filtered
   by `canViewCategory` so the count never exceeds the list it summarises, and
   excluding topics whose last post is the caller's own.
 - `POST /api/aerun/topics/:id/read` — move the caller's read position for one
-  topic. Upsert, so revisiting advances the position. A GET is deliberately not a
+  topic. The body carries `{ "last_visible_post_id": "<post id>" }`; the server
+  validates the post belongs to the topic and pins the cursor to that post's
+  `(created, id)`, so a reply that landed after the page load stays unread. A
+  legacy body (no post id) falls back to an "now" timestamp bound. Upsert, so
+  revisiting advances the position. A GET is deliberately not a
   read: the topic is fetched constantly, and marking on every fetch would clear the
   badge as soon as the member looked at their own inbox.
 - `POST /api/aerun/me/topics/read-all` — the same for a list of ids, behind the

@@ -1,7 +1,7 @@
 # Аудит: гостевое авторство, модерация и непрочитанное
 
 **Дата:** 2026-10-16  
-**Статус:** Этап 1 (`6652923`), Этап 2 (`2e1c0e6`+`b4dedaf`), Этап 3.1 (`36766ac`) и Этап 3.2 закоммичены. Следующий шаг — Этап 4 (read cursor: `topic_read_states`, `last_visible_post_id`, `(created,id)` компаратор, инвалидация, удаление browser `aerun_readmap_<uid>`).
+**Статус:** Этап 1 (`6652923`), Этап 2 (`2e1c0e6`+`b4dedaf`), Этап 3.1 (`36766ac`), Этап 3.2, гостевое создание темы (миграция `1770000006`) и Этап 4.1–4.3 (read cursor: миграция `1770000007`, `last_visible_post_id`, `(created,id)` компаратор) закоммичены. Остаток: удаление browser `aerun_readmap_<uid>` после rollout, удаление legacy-полей (`guest_nickname`, `last_post_guest_nickname`, `author_id`, `last_post_author_id`, `sequence`).
 **Вердикт:** не наращивать отдельные `*_guest_*` поля. Нужна единая модель *автора контента* и один серверный read-cursor. Текущая попытка с `guest_nickname` полезна как аварийное направление, но в нынешнем виде она создаёт новые расходящиеся проекции.
 
 ## Журнал выполнения
@@ -286,10 +286,10 @@ topic_read_states(user_id, topic_id,
 
 ### Этап 4 — read cursor
 
-1. Добавить cursor-поля в `topic_read_states`; backfill существующих timestamp-строк как временный lower bound.
-2. Изменить `POST /topics/:id/read` на `last_visible_post_id`; сервер валидирует пост и возвращает authoritative state + invalidation version.
-3. Переписать unread SQL, `?goLast=1`, mark-all и topic/index DTO на один comparator `(created,id)`.
-4. Удалить persisted `aerun_readmap_<uid>` после rollout. Не переносить его как факт сервера.
+1. [x] Добавлены cursor-поля в `topic_read_states` (миграция `1770000007`: `last_read_post_id`, `last_read_created`, `last_read_post_tiebreak_id`). Legacy timestamp-строки без cursor-полей читаются как временный lower bound через fallback `COALESCE(last_read_created, last_read_at)`.
+2. [x] `POST /topics/:id/read` принимает `last_visible_post_id`; сервер валидирует принадлежность поста топику, пинит курсор к `(created, id)` поста, возвращает authoritative state + `invalidation_version` (`topics.last_post_created`). Пустое тело (legacy-клиент) фоллбэчится на timestamp «now».
+3. [x] Unread SQL (`unreadTopicsPredicate`), `?goLast=1` (`resolveListPage`) и mark-all переведены на один comparator `(created,id)`; fallback-цепочка `COALESCE(last_read_created, last_read_at, users.created, t.last_post_created)` сохраняет legacy-семантику для строк без курсора. Фронтенд (`recordTopicVisit`/`markTopicRead`) отправляет `last_visible_post_id` последнего реального (не оптимистического) поста страницы.
+4. [ ] Удалить persisted `aerun_readmap_<uid>` после rollout. Не переносить его как факт сервера. Остаётся как краткий optimistic cache для row-indicators.
 
 ## Обязательная тестовая матрица
 

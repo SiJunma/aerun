@@ -84,13 +84,20 @@ export const normalizeUserProfile = (rec) => {
 
 const getReadMapKey = (uid) => `aerun_readmap_${uid}`;
 
-export const recordTopicVisit = async (uid, topicId, offset = null) => {
+export const recordTopicVisit = async (uid, topicId, offset = null, lastVisiblePostId = null) => {
   if (!uid || !topicId) return;
   try {
     // Server first: this is the write that makes the badge correct elsewhere. It is
     // awaited but not allowed to block the caller — a failed read-state write must
     // never stop a member from opening a topic.
-    await sendApi(`/api/aerun/topics/${topicId}/read`, { method: 'POST', body: {} });
+    //
+    // last_visible_post_id pins the server-side read cursor to the post this
+    // screen actually rendered (ADR ReadCursor). Without it the server falls
+    // back to a timestamp bound, which can mark a post read that no one saw.
+    await sendApi(`/api/aerun/topics/${topicId}/read`, {
+      method: 'POST',
+      body: { last_visible_post_id: lastVisiblePostId || '' },
+    });
   } catch (err) {
     console.warn('[recordTopicVisit] server read state failed', err);
   }

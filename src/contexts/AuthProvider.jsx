@@ -1039,14 +1039,14 @@ export const AuthProvider = ({ children }) => {
 
   const updateLocalTopicPostsCount = useCallback((_topicId, _delta) => {}, []);
 
-  const markTopicRead = useCallback(async (topicId, offset = null) => {
+  const markTopicRead = useCallback(async (topicId, offset = null, lastVisiblePostId = null) => {
     if (!user?.uid || !topicId) return;
     const now = Date.now();
     setReadMap(prev => ({ ...prev, [topicId]: now }));
     setCategories(prev => (Array.isArray(prev) ? prev.map(c => (
       c.last_post_topic_id === topicId ? { ...c, unread: false } : c
     )) : prev));
-    await apiRecordTopicVisit(user.uid, topicId, offset);
+    await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
     // The server state already moved, but the navbar badge, the tab title and
     // the /new-replies tab render the last POLLED values (15s / 20s ticks).
     // Without an explicit re-read they stay stale — the exact "clears itself

@@ -656,10 +656,16 @@ const TopicPage = () => {
       const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + posts.length - 1;
       if (lastMarkedOffsetRef.current !== lastMessageIndex) {
         lastMarkedOffsetRef.current = lastMessageIndex;
-        markTopicRead(id, lastMessageIndex);
+        // The read cursor is pinned to the id of the last post this screen
+        // rendered, so a reply that landed after the load stays unread
+        // (ADR ReadCursor) instead of being swallowed by a "now" timestamp.
+        // Optimistic (not-yet-confirmed) posts are skipped: their temp ids
+        // would 404 server-side and the cursor must only hold persisted rows.
+        const lastRealPost = [...posts].reverse().find(p => !p._isOptimistic && p.id);
+        markTopicRead(id, lastMessageIndex, lastRealPost?.id);
       }
     }
-  }, [posts.length, id, user?.uid, markTopicRead, currentPage, profile?.role_id, ITEMS_PER_PAGE]);
+  }, [posts, id, user?.uid, markTopicRead, currentPage, profile?.role_id, ITEMS_PER_PAGE]);
 
   // decorateDraft adapts a server draft to the shape the draft card renders.
   //

@@ -508,44 +508,57 @@ func resolveListPage(e *core.RequestEvent, topicID string, limit int) listPageRe
 		resolved = 1
 	}
 
-	// Server-side read state first (ADR-12); the query param is the fallback.
-	var cutoff time.Time
-	cutoffEcho := ""
-	if e.Auth != nil {
-		state, err := e.App.FindFirstRecordByFilter(topicReadStatesCollectionName,
-			"user_id = {:user} && topic_id = {:topic}",
-			dbx.Params{"user": e.Auth.Id, "topic": topicID},
-		)
-		if err == nil && state != nil {
-			if dt, perr := types.ParseDateTime(state.GetString("last_read_at")); perr == nil && !dt.IsZero() {
-				cutoff = dt.Time()
-				cutoffEcho = dt.String()
-			}
-		}
-	}
-	if cutoffEcho == "" {
-		if paramCut, ok := parseVisitCutoff(e.Request.URL.Query().Get("last_visit")); ok {
-			cutoff = paramCut
-			cutoffEcho = paramCut.UTC().Format("2006-01-02 15:04:05.000Z")
-		}
-	}
-	if cutoffEcho == "" {
-		return listPageResolution{page: resolved}
-	}
+// Server-side read state first (ADR-12); the query param is the fallback.
+// Read cursor is (created, id): find the first post AFTER the reader's
+// cursor, then compute its page.
+var cutoffCreated, cutoffPostID string
+cutoffEcho := ""
+if e.Auth != nil {
+        state, err := e.App.FindFirstRecordByFilter(topicReadStatesCollectionName,
+                "user_id = {:user} && topic_id = {:topic}",
+                dbx.Params{"user": e.Auth.Id, "topic": topicID},
+        )
+        if err == nil && state != nil {
+                cutoffCreated = state.GetString("last_read_created")
+                cutoffPostID = state.GetString("last_read_post_id")
+                // Backfill: old rows only have last_read_at (timestamp lower bound).
+                if cutoffCreated == "" {
+                        if dt, perr := types.ParseDateTime(state.GetString("last_read_at")); perr == nil && !dt.IsZero() {
+                                cutoffCreated = dt.String()
+                        }
+                }
+                if cutoffCreated != "" {
+                        cutoffEcho = cutoffCreated
+                }
+        }
+}
+if cutoffEcho == "" {
+        if paramCut, ok := parseVisitCutoff(e.Request.URL.Query().Get("last_visit")); ok {
+                cutoffCreated = paramCut.UTC().Format("2006-01-02 15:04:05.000Z")
+                cutoffEcho = cutoffCreated
+        }
+}
+if cutoffEcho == "" {
+        return listPageResolution{page: resolved}
+}
 
-	countBefore, err := e.App.CountRecords(postsCollectionName,
-		dbx.HashExp{"topic_id": topicID},
-		draftVisible,
-		dbx.NewExp("created <= {:cut}", dbx.Params{"cut": cutoff}))
-	if err != nil {
-		return listPageResolution{page: resolved, readCutoff: cutoffEcho}
-	}
-	if countBefore < total {
-		// Zero-based index of the first unread post is `countBefore`; its page
-		// is that index divided by the page size, plus one.
-		resolved = int(countBefore/int64(limit)) + 1
-	}
-	return listPageResolution{page: resolved, readCutoff: cutoffEcho}
+// Count posts at or before the read cursor: created < cut
+// OR (created = cut AND id <= pid). The legacy fallback (no post id, only a
+// timestamp bound) treats every post in that instant as read.
+countBefore, err := e.App.CountRecords(postsCollectionName,
+        dbx.HashExp{"topic_id": topicID},
+        draftVisible,
+        dbx.NewExp("(created < {:cut}) OR (created = {:cut} AND ({:pid} = '' OR id <= {:pid}))",
+                dbx.Params{"cut": cutoffCreated, "pid": cutoffPostID}))
+if err != nil {
+        return listPageResolution{page: resolved, readCutoff: cutoffEcho}
+}
+if countBefore < total {
+        // Zero-based index of the first unread post is `countBefore`; its page
+        // is that index divided by the page size, plus one.
+        resolved = int(countBefore/int64(limit)) + 1
+}
+return listPageResolution{page: resolved, readCutoff: cutoffEcho}
 }
 
 // parseVisitCutoff accepts the client's last-visit instant as unix milliseconds
