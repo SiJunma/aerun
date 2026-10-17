@@ -74,9 +74,8 @@ func lastPostRefFromRecord(record *core.Record) AuthorRef {
 // topics row from its STORED variant columns. This is the single adapter that
 // turns storage into the ADR public shape: account => user_id, guest =>
 // display name, unclassified => explicit null (never an invented guest).
-// The legacy flat copies (author_id/guest_nickname) are still emitted by the
-// payload builders for compatibility, but they are derived from the same
-// record — never re-resolved from another source.
+// The flat author_id is still emitted by the payload builders for compatibility,
+// but it is derived from the same record — never re-resolved from another source.
 func authorDTOFromRecord(record *core.Record) map[string]any {
 	return authorRefDTO(authorRefFromRecord(record))
 }
@@ -150,8 +149,6 @@ func setTopicOpener(topic, post *core.Record) {
 		topic.Set(guestDisplayNameField, "")
 	}
 	topic.Set("author_character_id", ref.CharacterID)
-	// Legacy compatibility copy during the AuthorRef rollout.
-	topic.Set("guest_nickname", post.GetString("guest_nickname"))
 }
 
 // setLastPostProjection copies a post row's stored AuthorRef onto the topic's
@@ -178,7 +175,6 @@ func setLastPostProjection(topic, post *core.Record) {
 		topic.Set(lastPostGuestDisplayNameField, "")
 	}
 	topic.Set("last_post_author_character_id", ref.CharacterID)
-	topic.Set("last_post_guest_nickname", post.GetString("guest_nickname"))
 }
 
 // clearLastPostProjection empties the last-post projection of a topic that
@@ -190,7 +186,6 @@ func clearLastPostProjection(topic *core.Record) {
 	topic.Set(lastPostAuthorKindField, "")
 	topic.Set(lastPostGuestDisplayNameField, "")
 	topic.Set("last_post_author_character_id", "")
-	topic.Set("last_post_guest_nickname", "")
 }
 
 // rebuildTopicProjection recomputes a topic's posts_count and its full
@@ -251,8 +246,8 @@ func rebuildTopicProjection(txApp core.App, topic *core.Record) error {
 // explicit operator migration with a report, never in silent runtime code.
 func verifyAuthorRefSchema(app core.App) error {
 	required := map[string][]string{
-		postsCollectionName:             {"author_id", "guest_nickname", authorKindField, guestDisplayNameField, "guest_principal_id"},
-		topicsCollectionName:            {"author_id", "guest_nickname", "last_post_guest_nickname", authorKindField, guestDisplayNameField, lastPostAuthorKindField, lastPostGuestDisplayNameField, "guest_principal_id"},
+		postsCollectionName:             {"author_id", authorKindField, guestDisplayNameField, "guest_principal_id"},
+		topicsCollectionName:            {"author_id", authorKindField, guestDisplayNameField, lastPostAuthorKindField, lastPostGuestDisplayNameField, "guest_principal_id"},
 		guestPrincipalsCollectionName:   {"guest_id", "capability_hash", "last_used_at"},
 	}
 	for _, collectionName := range []string{postsCollectionName, topicsCollectionName, guestPrincipalsCollectionName} {

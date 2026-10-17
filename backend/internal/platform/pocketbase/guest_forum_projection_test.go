@@ -1,8 +1,8 @@
 package pocketbase
 
 // Guest posting must project the guest's display name onto the TOPIC row, not
-// just the post row: the forum index reads topics.guest_nickname via
-// categoryForumProjections, so a topic whose guest_nickname was never written
+// just the post row: the forum index reads topics.last_post_guest_display_name via
+// categoryForumProjections, so a topic whose last_post_guest_display_name was never written
 // renders "Deleted user" on the index even though the post itself carries the
 // name. These tests pin the topic projection for both the create-topic path
 // and the create-post path.
@@ -61,8 +61,8 @@ func TestGuestCreateTopicProjectsNickname(t *testing.T) {
 	if err != nil || topic == nil {
 		t.Fatalf("guest topic not created: %v", err)
 	}
-	if got := topic.GetString("last_post_guest_nickname"); got != "TestGuest" {
-		t.Fatalf("topic.guest_nickname = %q, want %q — the forum index reads this column", got, "TestGuest")
+	if got := topic.GetString(lastPostGuestDisplayNameField); got != "TestGuest" {
+		t.Fatalf("topic.last_post_guest_display_name = %q, want %q — the forum index reads this column", got, "TestGuest")
 	}
 	if got := topic.GetString("last_post_author_id"); got != "" {
 		t.Fatalf("topic.last_post_author_id = %q, want empty for a guest", got)
@@ -92,8 +92,8 @@ func TestGuestCreateTopicProjectsNickname(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("forum-index: status=%d body=%s", status, body2)
 	}
-	if !bytes.Contains(body2, []byte(`"last_post_guest_nickname":"TestGuest"`)) {
-		t.Fatalf("forum-index must carry last_post_guest_nickname=TestGuest: %s", body2)
+	if !bytes.Contains(body2, []byte(`"last_post_author_name":"TestGuest"`)) {
+		t.Fatalf("forum-index must carry last_post_author_name=TestGuest: %s", body2)
 	}
 }
 
@@ -121,8 +121,8 @@ func TestGuestReplyProjectsNickname(t *testing.T) {
 	if err != nil || topic == nil {
 		t.Fatalf("topic not created: %v", err)
 	}
-	if got := topic.GetString("last_post_guest_nickname"); got != "" {
-		t.Fatalf("topic.guest_nickname = %q before any guest reply, want empty", got)
+	if got := topic.GetString(lastPostGuestDisplayNameField); got != "" {
+		t.Fatalf("topic.last_post_guest_display_name = %q before any guest reply, want empty", got)
 	}
 
 	// A guest replies.
@@ -138,8 +138,8 @@ func TestGuestReplyProjectsNickname(t *testing.T) {
 	if err != nil || topic == nil {
 		t.Fatalf("topic missing after reply: %v", err)
 	}
-	if got := topic.GetString("last_post_guest_nickname"); got != "GuestReplier" {
-		t.Fatalf("topic.guest_nickname = %q after guest reply, want %q", got, "GuestReplier")
+	if got := topic.GetString(lastPostGuestDisplayNameField); got != "GuestReplier" {
+		t.Fatalf("topic.last_post_guest_display_name = %q after guest reply, want %q", got, "GuestReplier")
 	}
 	if got := topic.GetString("last_post_author_id"); got != "" {
 		t.Fatalf("topic.last_post_author_id = %q, want empty for a guest reply", got)
@@ -160,8 +160,8 @@ func TestGuestReplyProjectsNickname(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("forum-index: status=%d body=%s", status, body2)
 	}
-	if !bytes.Contains(body2, []byte(`"last_post_guest_nickname":"GuestReplier"`)) {
-		t.Fatalf("forum-index must carry last_post_guest_nickname=GuestReplier: %s", body2)
+	if !bytes.Contains(body2, []byte(`"last_post_author_name":"GuestReplier"`)) {
+		t.Fatalf("forum-index must carry last_post_author_name=GuestReplier: %s", body2)
 	}
 }
 

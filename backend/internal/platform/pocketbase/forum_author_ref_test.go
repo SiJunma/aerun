@@ -67,9 +67,9 @@ func TestNestedAuthorDTOsCarryTheAdrContract(t *testing.T) {
 	if resp.Topic.Author["character_id"] != nil {
 		t.Errorf("author.character_id = %v, want null for a guest", resp.Topic.Author["character_id"])
 	}
-	// The deprecated flat copies must agree with the nested object.
-	if resp.Topic.AuthorID != "" || resp.Topic.GuestNickname != "DTOGuest" {
-		t.Errorf("flat copies author_id=%q guest_nickname=%q, want empty/DTOGuest", resp.Topic.AuthorID, resp.Topic.GuestNickname)
+	// The deprecated flat copy author_id must agree with the nested object.
+	if resp.Topic.AuthorID != "" {
+		t.Errorf("flat copy author_id=%q, want empty", resp.Topic.AuthorID)
 	}
 	if resp.Topic.LastPostAuthorRef["kind"] != "guest" {
 		t.Errorf("last_post_author_ref.kind = %v, want guest", resp.Topic.LastPostAuthorRef["kind"])

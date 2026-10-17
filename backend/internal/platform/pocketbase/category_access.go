@@ -204,28 +204,28 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		// scans as "" rather than failing the row.
 		CharacterID   string `db:"last_post_author_character_id"`
 		PostsCount    int    `db:"posts_count"`
-		GuestNickname string `db:"last_post_guest_nickname"`
+		GuestDisplayName string `db:"last_post_guest_display_name"`
 	}
 	var latest []latestTopic
 	// The full query reads `last_post_author_character_id` (1768000000) and
-	// `guest_nickname` (1769800000), both added after the topics table was
+	// `last_post_guest_display_name` (1770000002), both added after the topics table was
 	// created. Against a database restored from an older snapshot those columns
 	// may not exist yet; fall back to a simplified query that leaves them blank
 	// rather than 500-ing the whole forum index.
 	fullQuery :=
 		"SELECT category_id, id AS topic_id, title, last_post_created, last_post_author_id, " +
 			"COALESCE(last_post_author_character_id, '') AS last_post_author_character_id, " +
-			"last_post_guest_nickname, COALESCE(posts_count, 0) FROM (" +
+			"last_post_guest_display_name, COALESCE(posts_count, 0) FROM (" +
 			"SELECT category_id, id, title, last_post_created, last_post_author_id, " +
-			"last_post_author_character_id, posts_count, last_post_guest_nickname, " +
+			"last_post_author_character_id, posts_count, last_post_guest_display_name, " +
 			"ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY last_post_created DESC, id DESC) AS rn " +
 			"FROM " + topicsCollectionName + ") WHERE rn = 1"
 	simpleQuery :=
 		"SELECT category_id, id AS topic_id, title, last_post_created, last_post_author_id, " +
 			"'' AS last_post_author_character_id, " +
-			"'' AS last_post_guest_nickname, COALESCE(posts_count, 0) FROM (" +
+			" AS last_post_guest_display_name, COALESCE(posts_count, 0) FROM (" +
 			"SELECT category_id, id, title, last_post_created, last_post_author_id, " +
-			"'' AS last_post_author_character_id, posts_count, '' AS last_post_guest_nickname, " +
+			" AS last_post_author_character_id, posts_count,  AS last_post_guest_display_name, " +
 			"ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY last_post_created DESC, id DESC) AS rn " +
 			"FROM " + topicsCollectionName + ") WHERE rn = 1"
 	if err := app.DB().NewQuery(fullQuery).All(&latest); err != nil && isMissingColumnErr(err) {
@@ -247,13 +247,13 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		projection["last_post_at"] = row.Created
 		projection["last_post_author_id"] = row.AuthorID
 		projection["last_post_author_character_id"] = row.CharacterID
-		projection["last_post_guest_nickname"] = row.GuestNickname
+		projection["last_post_guest_display_name"] = row.GuestDisplayName
 
-		// Guest posts have empty author_id; keep the guest nickname under its
-		// own key. The frontend reads last_post_guest_nickname as a fallback in
+		// Guest posts have empty author_id; keep the guest display name under its
+		// own key. The frontend reads last_post_author_name as a fallback in
 		// toCategory, so the backend does not need to rename the column.
-		if row.AuthorID == "" && row.GuestNickname != "" {
-			projection["last_post_author_name"] = row.GuestNickname
+		if row.AuthorID == "" && row.GuestDisplayName != "" {
+			projection["last_post_author_name"] = row.GuestDisplayName
 		}
 	}
 

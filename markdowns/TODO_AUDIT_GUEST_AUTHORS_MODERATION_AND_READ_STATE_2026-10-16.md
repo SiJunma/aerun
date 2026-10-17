@@ -350,15 +350,18 @@ topic_read_states(user_id, topic_id,
 
 Пользователь прав: от legacy-полей нужно смело избавиться, локалка — песочница, новую БД можно накатить по новым скриптам.
 
-Поля под удаление после перехода на AuthorRef:
-- `posts.guest_nickname`, `topics.guest_nickname`, `topics.last_post_guest_nickname` — legacy копии display name гостя.
-- `posts.author_id`, `topics.author_id`, `topics.last_post_author_id` — legacy account id, дискриминатором теперь служит `author_kind`.
-- `posts.sequence` — изобретённый заранее per-topic ordinal. Уже **не используется**: сортировка по `created ASC, id ASC` (см. `listPostsHandler` и `getPostHandler` комментарии: "`posts.sequence` was an invented per-topic counter and is being removed"). Поле всё ещё `Required: true` в миграции `1766100000` и имеет уникальный индекс `idx_posts_topic_sequence`. Нужно убрать поле и индекс миграцией.
+Поля под удаление после перехода на AuthorRef — удалены миграцией `1770000008_drop_legacy_columns` (закоммичена):
 
-Что уже не является устаревшим (оставить):
-- `posts.author_character_id`, `topics.last_post_author_character_id` — маска account-автора, часть AuthorRef, актуальна.
-- `topics.first_post_pinned` — флаг закрепления opening post, актуален.
+- `posts.guest_nickname`, `topics.guest_nickname` — заменены на `posts.guest_display_name` / `topics.guest_display_name` (AuthorRef).
+- `topics.last_post_guest_nickname` — заменён на `topics.last_post_guest_display_name` (AuthorRef).
+- `posts.sequence` — заменён на сортировку по `created ASC, id ASC`; убран уникальный индекс `idx_posts_topic_sequence`.
 
+**Не удалялись** (живая часть AuthorRef-модели по ADR):
+- `posts.author_id`, `topics.author_id`, `topics.last_post_author_id` — несут account id для account-авторов; `author_kind` — дискриминатор, `author_id` — значение.
+- `posts.author_character_id`, `topics.last_post_author_character_id` — маска account-автора.
+- `topics.first_post_pinned` — флаг закрепления opening post.
+
+`verifyAuthorRefSchema` обновлён: больше не требует удалённых колонок `guest_nickname` / `last_post_guest_nickname`. `backfillAuthorRefs` (миграция 1770000000) читает `guest_display_name` с фоллбэком на `guest_nickname` для совместимости со старыми снимками.
 ### 3. Opening-post policy и разрешения на удаление тем
 
 Код в `deleteTopicHandler` (`forum_topics.go:791`) реализует три сценария, соответствующие заявленным разрешениям:

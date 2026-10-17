@@ -92,9 +92,6 @@ func TestRebuildTopicProjectionRestoresGuestAfterMaskedDelete(t *testing.T) {
 	if got := topic.GetString(lastPostGuestDisplayNameField); got != "RebuildGuest" {
 		t.Fatalf("last_post_guest_display_name = %q, want RebuildGuest", got)
 	}
-	if got := topic.GetString("last_post_guest_nickname"); got != "RebuildGuest" {
-		t.Fatalf("last_post_guest_nickname = %q, want RebuildGuest legacy copy", got)
-	}
 	if got := topic.GetString("last_post_author_id"); got != "" {
 		t.Fatalf("last_post_author_id = %q, want empty for a guest", got)
 	}

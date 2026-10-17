@@ -305,7 +305,6 @@ func validateForumUpserts(topics []TopicUpsert, posts []PostUpsert) error {
 	}
 
 	postIDs := make(map[string]bool, len(posts))
-	sequences := make(map[string]map[int]string, len(posts))
 	for _, p := range posts {
 		if p.TargetID == "" {
 			return fmt.Errorf("post upsert without a target id")
@@ -320,26 +319,9 @@ func validateForumUpserts(topics []TopicUpsert, posts []PostUpsert) error {
 		if p.AuthorID == "" {
 			return fmt.Errorf("post %s: author_id is required", p.TargetID)
 		}
-		// A draft carries sequence 0 and is excluded from the uniqueness check:
-		// the index is partial on sequence > 0 precisely so drafts can coexist.
 		if p.IsDraft {
-			if p.Sequence != 0 {
-				return fmt.Errorf("draft %s must carry sequence 0, got %d", p.TargetID, p.Sequence)
-			}
 			continue
 		}
-		if p.Sequence <= 0 {
-			return fmt.Errorf("post %s: a published post needs a positive sequence, got %d",
-				p.TargetID, p.Sequence)
-		}
-		if sequences[p.TopicID] == nil {
-			sequences[p.TopicID] = map[int]string{}
-		}
-		if other, taken := sequences[p.TopicID][p.Sequence]; taken {
-			return fmt.Errorf("posts %s and %s both claim sequence %d in topic %s",
-				other, p.TargetID, p.Sequence, p.TopicID)
-		}
-		sequences[p.TopicID][p.Sequence] = p.TargetID
 	}
 	return nil
 }

@@ -124,7 +124,7 @@ func TestCategoryIndexLastPostRefGuest(t *testing.T) {
 	topic.Set("posts_count", 1)
 	topic.Set("last_post_id", "")
 	topic.Set("last_post_author_id", "")
-	topic.Set("last_post_guest_nickname", "Гость из категории")
+	topic.Set("last_post_guest_display_name", "Гость из категории")
 	topic.Set("last_post_author_name", "Гость из категории")
 	if err := app.Save(topic); err != nil {
 		t.Fatalf("failed to seed topic: %v", err)

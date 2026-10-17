@@ -59,7 +59,12 @@ func TestLastPostAuthorRefBackfillInheritsPostVariant(t *testing.T) {
 	}
 	accountTopic := newTopic("topic-account", accountPost.Id, "account-id", "")
 	guestTopic := newTopic("topic-guest", guestPost.Id, "", "Guest name")
-	legacyGuestTopic := newTopic("topic-legacy-guest", "missing-post", "", "Legacy Guest")
+	legacyGuestTopic := newTopic("topic-legacy-guest", "missing-post", "", "")
+legacyGuestTopic.Set(lastPostAuthorKindField, authorKindGuest)
+legacyGuestTopic.Set(lastPostGuestDisplayNameField, "Legacy Guest")
+if err := app.Save(legacyGuestTopic); err != nil {
+    t.Fatal(err)
+}
 	legacyAccountTopic := newTopic("topic-legacy-account", "missing-post", "legacy-account", "")
 	unknownTopic := newTopic("topic-unknown", "missing-post", "", "")
 

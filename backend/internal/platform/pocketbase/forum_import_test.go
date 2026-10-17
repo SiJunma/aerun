@@ -31,7 +31,6 @@ func TestImportForumWritesSequenceAndProjections(t *testing.T) {
 			TargetID:  "pos000000000001",
 			TopicID:   "top000000000001",
 			AuthorID:  fixPlayerID,
-			Sequence:  1,
 			Content:   "first",
 			CreatedAt: "2026-01-01 01:00:00.000Z",
 		},
@@ -39,7 +38,6 @@ func TestImportForumWritesSequenceAndProjections(t *testing.T) {
 			TargetID:  "pos000000000002",
 			TopicID:   "top000000000001",
 			AuthorID:  fixPlayerID,
-			Sequence:  2,
 			Content:   "second",
 			CreatedAt: "2026-01-02 03:04:05.000Z",
 		},
@@ -76,9 +74,6 @@ func TestImportForumWritesSequenceAndProjections(t *testing.T) {
 	if err != nil || post == nil {
 		t.Fatalf("post not written: %v", err)
 	}
-	if post.GetInt("sequence") != 2 {
-		t.Fatalf("sequence must be written, got %d", post.GetInt("sequence"))
-	}
 	if post.GetBool("is_draft") {
 		t.Fatal("a published post must not be flagged as a draft")
 	}
@@ -95,41 +90,7 @@ func TestImportForumWritesSequenceAndProjections(t *testing.T) {
 // TestImportForumRefusesDuplicateSequence is the pre-transaction check. Without
 // it, the UNIQUE index would abort the batch mid-way with an error that names a
 // constraint rather than the two documents that collided.
-func TestImportForumRefusesDuplicateSequence(t *testing.T) {
-	app := newAerunTestApp(t)
-	defer app.Cleanup()
-	_, categoryID := seedImportFixture(t, app)
 
-	topics := []TopicUpsert{{
-		TargetID: "top000000000002", CategoryID: categoryID, AuthorID: fixPlayerID,
-		Title: "T", PostsCount: 2, LastPostCreated: "2026-01-01 00:00:00.000Z",
-	}}
-	posts := []PostUpsert{
-		{TargetID: "pos000000000011", TopicID: "top000000000002", AuthorID: fixPlayerID,
-			Sequence: 1, Content: "a"},
-		{TargetID: "pos000000000012", TopicID: "top000000000002", AuthorID: fixPlayerID,
-			Sequence: 1, Content: "b"},
-	}
-
-	_, err := ImportForum(app, topics, posts)
-	if err == nil {
-		t.Fatal("two posts claiming one sequence must be refused")
-	}
-
-	count, err := app.CountRecords(postsCollectionName, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("a rejected batch must write nothing, got %d posts", count)
-	}
-	if _, err := app.FindRecordById(topicsCollectionName, "top000000000002"); err == nil {
-		t.Fatal("a rejected batch must not leave its topic behind")
-	}
-}
-
-// TestImportForumRefusesUnresolvedReferences pins the FK guard for both a topic
-// and a post.
 func TestImportForumRefusesUnresolvedReferences(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -176,9 +137,9 @@ func TestImportForumWritesDraftWithoutSequence(t *testing.T) {
 		}},
 		[]PostUpsert{
 			{TargetID: "pos000000000031", TopicID: "top000000000005", AuthorID: fixPlayerID,
-				Sequence: 1, Content: "live"},
+				Content: "live"},
 			{TargetID: "pos000000000032", TopicID: "top000000000005", AuthorID: fixPlayerID,
-				IsDraft: true, Sequence: 0, Content: "unsent"},
+				IsDraft: true, Content: "unsent"},
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -190,9 +151,6 @@ func TestImportForumWritesDraftWithoutSequence(t *testing.T) {
 	}
 	if !draft.GetBool("is_draft") {
 		t.Fatal("the draft flag must be stored")
-	}
-	if draft.GetInt("sequence") != 0 {
-		t.Fatalf("a draft must carry sequence 0, got %d", draft.GetInt("sequence"))
 	}
 	if draft.GetString("content") != "unsent" {
 		t.Fatal("a draft keeps its text: it is authored content that must survive")
@@ -222,9 +180,9 @@ func TestImportForumKeepsEveryPostsText(t *testing.T) {
 		}},
 		[]PostUpsert{
 			{TargetID: "pos000000000041", TopicID: "top000000000006", AuthorID: fixPlayerID,
-				Sequence: 1, Content: "opening"},
+				Content: "opening"},
 			{TargetID: "pos000000000042", TopicID: "top000000000006", AuthorID: fixPlayerID,
-				Sequence: 2, Content: "still here"},
+				Content: "still here"},
 		}); err != nil {
 		t.Fatal(err)
 	}

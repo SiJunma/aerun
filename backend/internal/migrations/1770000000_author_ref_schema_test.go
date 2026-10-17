@@ -36,7 +36,7 @@ func TestAuthorRefSchemaBackfillsKnownAuthorsWithoutInventingGuests(t *testing.T
 	}
 	guest := core.NewRecord(posts)
 	guest.Set("topic_id", "topic-guest")
-	guest.Set("guest_nickname", "  Guest name  ")
+	guest.Set(guestDisplayNameField, "  Guest name  ")
 	guest.Set("content", "guest post")
 	if err := app.Save(guest); err != nil {
 		t.Fatal(err)

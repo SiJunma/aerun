@@ -62,7 +62,6 @@ func topicPayload(record *core.Record) map[string]any {
 		"id":                  record.Id,
 		"category_id":         record.GetString("category_id"),
 		"author_id":           record.GetString("author_id"),
-		"guest_nickname":      record.GetString("guest_nickname"),
 		"title":               record.GetString("title"),
 		"posts_count":         record.GetInt("posts_count"),
 		"locked":              record.GetBool("locked"),
@@ -70,12 +69,11 @@ func topicPayload(record *core.Record) map[string]any {
 		"last_post_id":        record.GetString("last_post_id"),
 		"last_post_created":   record.GetDateTime("last_post_created").String(),
 		"last_post_author_id":       record.GetString("last_post_author_id"),
-		"last_post_guest_nickname":  record.GetString("last_post_guest_nickname"),
 		"created":                   record.GetDateTime("created").String(),
 		"updated":                   record.GetDateTime("updated").String(),
 	}
-	// Nested AuthorRef DTOs (ADR contract). The flat author_id/guest_nickname
-	// and last_post_author_* fields above stay as deprecated compatibility
+	// Nested AuthorRef DTOs (ADR contract). The flat author_id and
+	// last_post_author_id fields above stay as deprecated compatibility
 	// copies emitted from this single adapter; new readers use
 	// payload["author"] and payload["last_post_author_ref"]. The last-post
 	// object is keyed `_ref` because the flat STRING `last_post_author` is
@@ -85,6 +83,12 @@ func topicPayload(record *core.Record) map[string]any {
 	// removed.
 	payload["author"] = authorDTOFromRecord(record)
 	payload["last_post_author_ref"] = lastPostDTOFromRecord(record)
+	// A guest last poster's name travels under last_post_author_name, the
+	// same key the category index uses, so decorateLastPostAuthor resolves
+	// topic lists and index through one branch.
+	if ref := lastPostRefFromRecord(record); ref.Kind == authorKindGuest && ref.DisplayName != "" {
+		payload["last_post_author_name"] = ref.DisplayName
+	}
 	// Both mask references are emitted RAW; decorateTopicAuthor resolves and
 	// ownership-checks them. They are omitted when empty so a topic written
 	// without a mask is indistinguishable from one that never had the option.
@@ -172,15 +176,13 @@ func createTopicHandler(e *core.RequestEvent) error {
 		if e.Auth != nil {
 			setAccountAuthorRef(topic, e.Auth.Id)
 		} else {
-			// Guest display name is an immutable content snapshot. The legacy
-			// guest_nickname remains populated during the compatibility rollout.
+			// Guest display name is an immutable content snapshot
+			// stored on the AuthorRef columns (guest_display_name).
 			guestNickname, err := forum.ValidateGuestNickname(form.GuestNickname)
 			if err != nil {
 				return 0, nil, validationError(err.Error())
 			}
 			setGuestAuthorRef(topic, guestNickname)
-			topic.Set("guest_nickname", guestNickname)
-			topic.Set("last_post_guest_nickname", guestNickname)
 			topic.Set("guest_principal_id", guestPrincipalIDFromRequest(e))
 		}
 		topic.Set("title", title)
@@ -212,7 +214,6 @@ func createTopicHandler(e *core.RequestEvent) error {
 		} else {
 			guestNickname := topic.GetString(guestDisplayNameField)
 			setGuestAuthorRef(post, guestNickname)
-			post.Set("guest_nickname", guestNickname)
 			post.Set("guest_principal_id", guestPrincipalIDFromRequest(e))
 		}
 		post.Set("content", content)
