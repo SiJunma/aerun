@@ -181,6 +181,7 @@ func createTopicHandler(e *core.RequestEvent) error {
 			setGuestAuthorRef(topic, guestNickname)
 			topic.Set("guest_nickname", guestNickname)
 			topic.Set("last_post_guest_nickname", guestNickname)
+			topic.Set("guest_principal_id", guestPrincipalIDFromRequest(e))
 		}
 		topic.Set("title", title)
 		topic.Set("posts_count", 1)
@@ -212,6 +213,7 @@ func createTopicHandler(e *core.RequestEvent) error {
 			guestNickname := topic.GetString(guestDisplayNameField)
 			setGuestAuthorRef(post, guestNickname)
 			post.Set("guest_nickname", guestNickname)
+			post.Set("guest_principal_id", guestPrincipalIDFromRequest(e))
 		}
 		post.Set("content", content)
 		// The topic and its opening message are always the same voice, so the

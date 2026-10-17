@@ -67,8 +67,10 @@ func ensureAuthorRefSnapshotColumns(app core.App) (int, error) {
 			addText("guest_nickname", 64)
 			addText("last_post_guest_nickname", 64)
 			addText(lastPostGuestDisplayNameField, 64)
+			addText("guest_principal_id", 64)
 		} else {
 			addText("guest_nickname", 64)
+			addText("guest_principal_id", 64)
 		}
 		if collection.Fields.GetByName(authorKindField) == nil {
 			collection.Fields.Add(&core.SelectField{

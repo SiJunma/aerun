@@ -209,6 +209,7 @@ func createPostHandler(e *core.RequestEvent) error {
 			}
 			setGuestAuthorRef(post, guestNickname)
 			post.Set("guest_nickname", guestNickname)
+			post.Set("guest_principal_id", guestPrincipalIDFromRequest(e))
 		}
 		post.Set("content", content)
 
@@ -873,10 +874,10 @@ func deletePostHandler(e *core.RequestEvent) error {
 		authorID := post.GetString("author_id")
 		// The author's ACCOUNT counters move only for an account author. A
 		// guest has no users row, and the ADR makes the account-level no-op a
-		// decision by author_kind — not an accident of an empty id that a
-		// future refactor could silently turn into a write to whoever the
-		// empty string happens to resolve to.
-		isAccountAuthor := post.GetString(authorKindField) == authorKindAccount
+		// decision by author — author_id != "" marks an account post (including
+		// legacy rows whose author_kind variant column has not been backfilled
+		// yet); author_id == "" marks a guest post.
+		isAccountAuthor := post.GetString("author_id") != ""
 
 		// Reputation earned on a post that is about to stop existing must be paid
 		// back — be6ca82's exact fix, for the same reason: on Firestore the logs

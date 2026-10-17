@@ -22,7 +22,7 @@ var (
 
 // ValidateReputationVote validates voter vs target, vote value and comment length.
 func ValidateReputationVote(voterID, targetID string, value int, comment string) (int, string, error) {
-	if voterID == "" || targetID == "" {
+	if voterID == "" {
 		return 0, "", ErrReputationVoterOrTargetRequired
 	}
 	if voterID == targetID {

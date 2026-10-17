@@ -251,10 +251,11 @@ func rebuildTopicProjection(txApp core.App, topic *core.Record) error {
 // explicit operator migration with a report, never in silent runtime code.
 func verifyAuthorRefSchema(app core.App) error {
 	required := map[string][]string{
-		postsCollectionName:  {"author_id", "guest_nickname", authorKindField, guestDisplayNameField},
-		topicsCollectionName: {"author_id", "guest_nickname", "last_post_guest_nickname", authorKindField, guestDisplayNameField, lastPostAuthorKindField, lastPostGuestDisplayNameField},
+		postsCollectionName:             {"author_id", "guest_nickname", authorKindField, guestDisplayNameField, "guest_principal_id"},
+		topicsCollectionName:            {"author_id", "guest_nickname", "last_post_guest_nickname", authorKindField, guestDisplayNameField, lastPostAuthorKindField, lastPostGuestDisplayNameField, "guest_principal_id"},
+		guestPrincipalsCollectionName:   {"guest_id", "capability_hash", "last_used_at"},
 	}
-	for _, collectionName := range []string{postsCollectionName, topicsCollectionName} {
+	for _, collectionName := range []string{postsCollectionName, topicsCollectionName, guestPrincipalsCollectionName} {
 		collection, err := app.FindCachedCollectionByNameOrId(collectionName)
 		if err != nil {
 			return fmt.Errorf("%s collection unavailable: %w", collectionName, err)

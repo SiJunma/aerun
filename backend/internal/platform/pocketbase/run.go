@@ -381,6 +381,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/presence/guests", listGuestsHandler)
 	group.GET("/presence/online-users", listOnlineUsersHandler)
 
+	// Guest principal. Not re-issued: a browser that already carries a valid
+	// principal cookie gets a 200 no-op rather than a fresh identity.
+	group.POST("/guest/principal", createGuestPrincipalHandler).BindFunc(enforceIdempotency)
+
 	// Sprint 3 forum command layer.
 	group.POST("/topics", createTopicHandler).BindFunc(enforceIdempotency)
 	group.GET("/topics", listTopicsHandler)

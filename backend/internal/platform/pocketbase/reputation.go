@@ -104,15 +104,31 @@ func votePostHandler(e *core.RequestEvent) error {
 			return 0, nil, forbiddenError("you do not have permission to vote in this category")
 		}
 
+		// Target is the post's author for account content, or the visitor's stable
+		// guest principal for guest content. A guest post has no account to pay
+		// reputation to — posts.reputation is updated at post level only
+		// (adjustUserReputation is skipped for guests in the delete path).
+		//
+		// author_id != "" marks an account post (including legacy rows whose
+		// author_kind variant column has not been backfilled yet); author_id == ""
+		// marks a guest post.
 		targetUserID := post.GetString("author_id")
+		if post.GetString("author_id") == "" {
+			targetUserID = guestPrincipalIDFromRequest(e)
+		}
 		val, comment, err := forum.ValidateReputationVote(e.Auth.Id, targetUserID, form.Value, form.Comment)
 		if err != nil {
 			return 0, nil, validationError(err.Error())
 		}
 
-		targetUser, err := txApp.FindRecordById(usersCollectionName, targetUserID)
-		if err != nil || targetUser == nil {
-			return 0, nil, notFoundError("target user not found")
+		// Only account targets have a users row; guest targets are resolved to
+		// their principal and have no account reputation to pay out.
+		var targetUser *core.Record
+		if post.GetString("author_id") != "" {
+			targetUser, err = txApp.FindRecordById(usersCollectionName, targetUserID)
+			if err != nil || targetUser == nil {
+				return 0, nil, notFoundError("target user not found")
+			}
 		}
 
 		// Look up existing vote on this post by this voter
@@ -129,7 +145,9 @@ func votePostHandler(e *core.RequestEvent) error {
 			delta := val - oldVal
 			if delta != 0 {
 				post.Set("reputation", post.GetInt("reputation")+delta)
-				targetUser.Set("reputation", targetUser.GetInt("reputation")+delta)
+				if targetUser != nil {
+					targetUser.Set("reputation", targetUser.GetInt("reputation")+delta)
+				}
 			}
 			existingVote.Set("value", val)
 			existingVote.Set("comment", comment)
@@ -154,21 +172,25 @@ func votePostHandler(e *core.RequestEvent) error {
 				return 0, nil, internalError("failed to create vote", err)
 			}
 			post.Set("reputation", post.GetInt("reputation")+val)
-			targetUser.Set("reputation", targetUser.GetInt("reputation")+val)
+			if targetUser != nil {
+				targetUser.Set("reputation", targetUser.GetInt("reputation")+val)
+			}
 			voteRecord = newVote
 		}
 
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to update post reputation", err)
 		}
-		if err := txApp.Save(targetUser); err != nil {
-			return 0, nil, internalError("failed to update user reputation", err)
+		if targetUser != nil {
+			if err := txApp.Save(targetUser); err != nil {
+				return 0, nil, internalError("failed to update user reputation", err)
+			}
 		}
 
 		return http.StatusOK, map[string]any{
 			"vote":              repVotePayload(voteRecord),
 			"post_reputation":   post.GetInt("reputation"),
-			"target_reputation": targetUser.GetInt("reputation"),
+			"target_reputation": func() int { if targetUser == nil { return 0 }; return targetUser.GetInt("reputation") }(),
 			"request_id":        requestIDFrom(e),
 		}, nil
 	})
@@ -311,7 +333,7 @@ func voteUserHandler(e *core.RequestEvent) error {
 
 		return http.StatusOK, map[string]any{
 			"vote":              repVotePayload(voteRecord),
-			"target_reputation": targetUser.GetInt("reputation"),
+			"target_reputation": func() int { if targetUser == nil { return 0 }; return targetUser.GetInt("reputation") }(),
 			"request_id":        requestIDFrom(e),
 		}, nil
 	})
