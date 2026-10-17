@@ -192,13 +192,12 @@ const toCategory = (d) => ({
     last_post_topic_title: d.last_post_topic_title,
     last_post_at: d.last_post_at,
     last_post_author_id: d.last_post_author_id,
-    // Registered authors carry last_post_author; guests have empty author_id
-    // and their chosen display name travels in last_post_guest_nickname.
-    // Use || (not ??) so that an empty string from an older backend is skipped
-    // too, and the final fallback is undefined (not ""), so ForumAuthorName
-    // falls back to deletedDisplayName only when there truly is no name at all.
-    last_post_author: d.last_post_author || d.last_post_guest_nickname || undefined,
-    last_post_author_avatar: d.last_post_author_avatar,
+    // `last_post_author_ref` is the server-authoritative nested AuthorRef
+    // (account => user_id/display_name, guest => display_name, null => none).
+    // Read it instead of the `||` chain over flat fields: a deleted account
+    // renders the placeholder rather than an invented guest, and the category
+    // index can never disagree with a topic list about who spoke last.
+    ...(d.last_post_author_ref ? { last_post_author_ref: d.last_post_author_ref } : {}),
     last_post_topic_posts_count: d.last_post_topic_posts_count,
     // Server-authoritative unread flag (listForumIndexHandler → unreadTopicIDs),
     // the SAME predicate behind the badge and /new-replies. Propagated only when

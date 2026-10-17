@@ -171,7 +171,7 @@ assert.match(
   /posts_count:\s*d\.posts_count/,
   'toCategory must carry posts_count through — MainPage renders `cat.posts_count`'
 );
-for (const key of ['last_post_topic_id', 'last_post_topic_title', 'last_post_at', 'last_post_author']) {
+for (const key of ['last_post_topic_id', 'last_post_topic_title', 'last_post_at', 'last_post_author_ref']) {
   assert.match(
     categories,
     new RegExp(`${key}: d\\.${key}`),

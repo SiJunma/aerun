@@ -461,26 +461,62 @@ func applyLastPostMask(payload map[string]any, authorID string, masks map[string
 }
 
 // decorateLastPostAuthor applies only the last_post_author_* pair, for the
-// category index whose payload names a last-post author but no topic author.
+// category index whose payload names a last-post author but no topic author,
+// and for topic-list rows whose nested `last_post_author_ref` came from the
+// stored variant and now needs the resolved display fields.
+//
+// It is the SINGLE place that builds the public last-post AuthorRef DTO, so
+// the category index and the topic lists can never disagree about who spoke
+// last. A guest last-poster resolves to {kind: guest, display_name}; a deleted
+// account resolves to explicit null; an account keeps user_id/profile_id and
+// the resolved (possibly mask-renamed) display name.
 func decorateLastPostAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
 	id, _ := payload["last_post_author_id"].(string)
 	if id == "" {
-		// Guest last-poster (or an empty projection): the nested
-		// last_post_author_ref DTO already carries the stored guest display
-		// name, and the flat last_post_author string is left for the client's
-		// last_post_guest_nickname fallback — exactly the category-index
-		// behaviour. Nothing to sync here.
+		// Guest last-poster (or an empty projection). The guest's chosen name
+		// travels in last_post_author_name (category index) or
+		// last_post_guest_nickname (topic lists); neither invents an account.
+		name, _ := payload["last_post_author_name"].(string)
+		if name == "" {
+			name, _ = payload["last_post_guest_nickname"].(string)
+		}
+		if name == "" {
+			payload["last_post_author_ref"] = nil
+			return
+		}
+		payload["last_post_author_ref"] = map[string]any{
+			"kind":         authorKindGuest,
+			"user_id":      nil,
+			"profile_id":   nil,
+			"display_name": name,
+			"character_id": nil,
+			"avatar_url":   nil,
+		}
 		return
 	}
 	if display, ok := displays[id]; ok {
 		payload["last_post_author"] = display.Nickname
 		payload["last_post_author_avatar"] = display.AvatarURL
+	} else {
+		// Deleted account: leave the flat fields empty and the nested ref null
+		// so the reader renders the deleted-account placeholder.
+		payload["last_post_author_ref"] = nil
+		return
 	}
 	applyLastPostMask(payload, id, masks)
-	// Mirror the resolved flat last-post display into the nested DTO, so the
-	// two representations are written by one adapter. No-op on the category
-	// index, whose projection map has no nested object yet.
-	syncAuthorDTO(payload, "last_post_author_ref", "last_post_author", "last_post_author_avatar")
+	// Build the nested ref from the RESOLVED flat fields (mask-aware), so the
+	// nested object and the flat string are written by one adapter.
+	name, _ := payload["last_post_author"].(string)
+	avatar, _ := payload["last_post_author_avatar"].(string)
+	characterID, _ := payload["last_post_author_character_id"].(string)
+	payload["last_post_author_ref"] = map[string]any{
+		"kind":         authorKindAccount,
+		"user_id":      id,
+		"profile_id":   id,
+		"display_name": name,
+		"character_id": characterID,
+		"avatar_url":   avatar,
+	}
 }
 
 // signatureFromSettings reads users.settings.signature.

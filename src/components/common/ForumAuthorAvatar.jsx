@@ -13,6 +13,7 @@ const avatarCache = new Map();
  * Uses the frozen/provided avatar directly without spawning real-time Firestore listeners.
  */
 const ForumAuthorAvatar = ({
+  author,          // nested AuthorRef DTO: preferred avatar_url + ids
   userId,
   characterId,
   isCharacter,
@@ -26,8 +27,12 @@ const ForumAuthorAvatar = ({
   const { lang } = useI18n();
   const { settings } = useAuth();
 
-  const validCharId = isCharacter && characterId && typeof characterId === 'string' && characterId.trim() !== '' ? characterId.trim() : null;
-  const validUserId = userId && typeof userId === 'string' && userId.trim() !== '' ? userId.trim() : null;
+  // The DTO carries the resolved ids; fall back to the explicit props so
+  // existing call sites keep working unchanged.
+  const authorCharId = author?.character_id && typeof author.character_id === 'string' && author.character_id.trim() !== '' ? author.character_id.trim() : null;
+  const authorUserId = author?.user_id && typeof author.user_id === 'string' && author.user_id.trim() !== '' ? author.user_id.trim() : null;
+  const validCharId = isCharacter && characterId && typeof characterId === 'string' && characterId.trim() !== '' ? characterId.trim() : (isCharacter ? authorCharId : null);
+  const validUserId = userId && typeof userId === 'string' && userId.trim() !== '' ? userId.trim() : authorUserId;
   const cacheKey = validCharId ? `char_${validCharId}` : (validUserId ? `user_${validUserId}` : null);
 
   if (initialAvatar && cacheKey) {
@@ -36,19 +41,18 @@ const ForumAuthorAvatar = ({
 
   const cachedAvatar = cacheKey ? avatarCache.get(cacheKey) : null;
   // A live member who simply never uploaded a photo keeps the initials-from-
-  // their-name avatar. An author with NO name at all is a REMOVED account
-  // (forum_authors.go leaves the payload undecorated), and it must draw the SAME
-  // placeholder the DM inbox draws — the single identity.js helper — so a
-  // deleted author reads identically everywhere (bug M2), not as a DiceBear
-  // "Guest" here and a gray "U" there.
-  const placeholder = fallbackName
-    ? `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(fallbackName)}&size=${size}`
+  // their-name avatar. An author with NO name at all is a REMOVED account and
+  // must draw the SAME placeholder the DM inbox draws — the single
+  // identity.js helper — so a deleted author reads identically everywhere.
+  const placeholderName = fallbackName ?? author?.display_name;
+  const placeholder = placeholderName
+    ? `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(placeholderName)}&size=${size}`
     : identityAvatar({ name: '', avatar: '', customPlaceholder: settings?.deletedAvatar, size });
-  // Every author snapshot (topics, posts, drafts, last-post info) arrives here,
-  // so this is the single place that has to turn a stored avatar reference into
-  // something loadable — the importer writes a host-agnostic /api/files path,
-  // while DiceBear and legacy data URLs are already absolute.
-  const finalAvatar = resolveAvatarUrl(initialAvatar || cachedAvatar) || placeholder;
+  // The DTO's avatar_url (resolved server-side) leads, then the explicit
+  // initialAvatar, then the cache; anything unresolved degrades to the
+  // placeholder rather than a broken image.
+  const avatarSource = author?.avatar_url ?? initialAvatar ?? cachedAvatar;
+  const finalAvatar = resolveAvatarUrl(avatarSource) || placeholder;
 
   // Dot size scales with avatar: small avatars get a smaller dot
   const dotSize = size >= 80 ? 12 : size >= 48 ? 10 : 8;

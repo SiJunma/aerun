@@ -120,6 +120,7 @@ const TopicRow = ({
             <div className="d-none d-md-block mt-1">
               <AuthorMeta
                 date={topic.created_at}
+                author={topic.author}
                 authorId={topic.author_id}
                 authorCharacterId={topic.author_character_id}
                 isCharacter={!!topic.is_character}
@@ -163,10 +164,11 @@ const TopicRow = ({
         <LastPostInfo
           topicId={topic.id}
           lastPostAt={topic.last_post_at}
+          author={topic.last_post_author_ref}
           authorId={topic.last_post_author_id}
           authorCharacterId={topic.last_post_author_character_id}
           isCharacter={!!topic.last_post_is_character}
-          authorName={topic.last_post_author || topic.author_name}
+          authorName={topic.last_post_author}
           authorAvatar={topic.last_post_author_avatar}
           hasUnread={hasUnread}
           lastReadOffset={lastReadOffset}

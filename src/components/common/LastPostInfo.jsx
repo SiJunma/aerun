@@ -5,6 +5,7 @@ import AuthorMeta from './AuthorMeta';
 const LastPostInfo = ({
   topicId,
   lastPostAt,
+  author,          // nested last-post AuthorRef DTO {kind, user_id, display_name, avatar_url, character_id}
   authorId,
   authorCharacterId,
   isCharacter,
@@ -41,6 +42,7 @@ const LastPostInfo = ({
       )}
       <AuthorMeta
         date={lastPostAt}
+        author={author}
         authorId={authorId}
         authorCharacterId={authorCharacterId}
         isCharacter={isCharacter}

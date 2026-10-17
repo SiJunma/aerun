@@ -7,16 +7,19 @@ import { deletedDisplayName } from '../../utils/identity';
  * Uses the frozen/provided name directly without spawning real-time Firestore listeners.
  */
 const ForumAuthorName = ({
-  fallbackName,
+  author,          // nested AuthorRef DTO {kind, user_id, display_name, avatar_url, character_id}
+  fallbackName,    // backward-compat: flat resolved name
   className = '',
   onClick
 }) => {
   const { lang } = useI18n();
-  // A post/topic whose author was removed carries no author_name in the payload
-  // (forum_authors.go leaves it undecorated), so an empty name IS the removed
-  // case. Fall through to the shared placeholder rather than a bare em-dash, so
-  // a deleted author reads the same here as it does in the DM inbox (bug M2).
-  const name = fallbackName || deletedDisplayName(lang);
+  // author?.display_name is the single source of truth: the guest's chosen
+  // name, the account's resolved (mask-aware) nickname, or null for a deleted
+  // account. ?? (nullish coalescing, not truthiness) so an empty name never
+  // masquerades as "no author", and deletedDisplayName only appears when there
+  // is no name at all — replacing the old `fallbackName || deletedDisplayName`
+  // chain.
+  const name = author?.display_name ?? fallbackName ?? deletedDisplayName(lang);
 
   return (
     <span 

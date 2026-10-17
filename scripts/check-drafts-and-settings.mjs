@@ -145,9 +145,11 @@ check(
     'response repaints the just-published post without its mask'
 );
 check(
-  /func publishDraftHandler[\s\S]*topic\.Set\("last_post_author_character_id"/.test(draftsGo),
-  'publishDraftHandler must write topics.last_post_author_character_id — createPostHandler does, ' +
-    'and a topic list row renders the last speaker from that column alone'
+  /func publishDraftHandler[\s\S]*setLastPostProjection\(topic, post\)/.test(draftsGo),
+  'publishDraftHandler must advance the topic last-post projection through ' +
+    'setLastPostProjection — the single writer that keeps id/timestamp/kind/' +
+    'account-id/guest-name/mask in agreement (a bare topic.Set of one column ' +
+    'let the others drift)'
 );
 check(
   /await saveTopicDraft\(id, draftContent, selectedCharacterId, rolls\)/.test(code.topicPage),

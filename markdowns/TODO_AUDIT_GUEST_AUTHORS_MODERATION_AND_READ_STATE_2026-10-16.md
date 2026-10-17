@@ -1,7 +1,7 @@
 # Аудит: гостевое авторство, модерация и непрочитанное
 
 **Дата:** 2026-10-16  
-**Статус:** Этап 1 закрыт и закоммичен (`6652923`); Этап 2.2 закрыт (единый writer проекции); Этап 2.3 закрыт (nested `author`/`last_post_author_ref` в `topicPayload`/`postPayload`, `syncAuthorDTO`, декор LastPost в списке тем); следующий шаг — Этап 2.4 (frontend normalizers `toCategory`/`toTopic`/`toPost` + компоненты `ForumAuthorAvatar`/`ForumAuthorName`/`AuthorMeta`/`LastPostInfo`/`TopicRow`/`MainPage` → DTO).
+**Статус:** Этап 1 (`6652923`) и Этап 2 (`2e1c0e6`: 2.2 единый writer + 2.3 nested DTO; 2.4 frontend DTO закоммичен следом) закрыты. Следующий шаг — Этап 3: AuthorRef через audit log/delete-residue/user-counter helpers, политика guest-модерации, затем Этап 4 (read cursor).
 **Вердикт:** не наращивать отдельные `*_guest_*` поля. Нужна единая модель *автора контента* и один серверный read-cursor. Текущая попытка с `guest_nickname` полезна как аварийное направление, но в нынешнем виде она создаёт новые расходящиеся проекции.
 
 ## Журнал выполнения
@@ -36,6 +36,8 @@
 | 2026-10-16 | Выполнено | Этап 2.2 закрыт: введён единый доменный слой в `forum_author_ref.go` — `AuthorRef`, `authorRefFromRecord`/`lastPostRefFromRecord`, `setTopicOpener`, `setLastPostProjection`, `clearLastPostProjection`, `rebuildTopicProjection` (возвращает error). Все 7 writer-ов переведены: create topic/reply, publish draft, edit mask, delete (inline-recalc удалён), move source/target (старый `recalcTopicProjection` с `_ =` удалён). Новая migration `1770000002_last_post_author_ref_schema` (`last_post_author_kind` + `last_post_guest_display_name` + backfill от post-варианта), verifier и snapshot-repair расширены на новые поля. |
 | 2026-10-16 | Выполнено | Этап 2.3 закрыт: `topicPayload`/`postPayload` отдают nested DTO `author` и `last_post_author_ref` (ADR контракт); `syncAuthorDTO` зеркалит resolución flat→nested (один адаптер, disagreement невозможен); `decorateTopicAuthor` теперь декорирует last-post автора (исправлен дефект topic-листа: fallback к opener); `decorateLastPostAuthor` зеркалит resolved nickname в nested DTO. Тест `TestNestedAuthorDTOsCarryTheAdrContract` (гость-открыл топик → reply.account: opener=guest, last-post=account с user_id и display_name). |
 | 2026-10-16 | Проверка | `go build ./...` и `go vet ./...` — чисто; `go test ./internal/migrations -count=1` — `PASS`; `go test ./internal/platform/pocketbase -count=1` (включая TestNestedAuthorDTOsCarryTheAdrContract, TestRebuildTopicProjectionRestoresGuestAfterMaskedDelete, TestCategoryIndexNamesTheMaskOfTheLastPost, TestMovePostsBetweenTopics, TestGuestCreateTopicProjectsNickname, TestVerifyAuthorRefSchema) — `PASS`, 23.4–84.4 s. |
+| 2026-10-16 | Выполнено | Этап 2.4 закрыт. Backend: `decorateLastPostAuthor` — единственное место, строящее публичный nested `last_post_author_ref` (guest → `{kind, display_name}`, deleted → `null`, account → `{kind, user_id, profile_id, display_name (mask-aware), character_id, avatar_url}`), так что category index и topic-листы не могут разойтись; добавлены `TestCategoryIndexLastPostRefGuest` и account-assertions в mask-тест. Frontend: `toCategory` читает nested `last_post_author_ref` вместо `|| last_post_guest_nickname`; `ForumAuthorName`/`ForumAuthorAvatar`/`AuthorMeta`/`LastPostInfo` принимают `author` DTO (flat props — backward-compat), `||`-цепочки заменены на `??`; `TopicRow`/`MainPage` передают `topic.author`/`last_post_author_ref`. Гейты `check-forum-read-contract.mjs` (`last_post_author` → `last_post_author_ref`) и `check-drafts-and-settings.mjs` (publish должен звать `setLastPostProjection` — механизм изменился в 2.2, намерение то же) обновлены вместе с контрактом. |
+| 2026-10-16 | Проверка | Go: `go build ./...`, `go vet` — чисто; `go test ./internal/platform/pocketbase -run 'TestCategoryIndex...'` — `PASS`, 8.8 s. Frontend: `npm run test` (полный набор, ~20 гейтов + `lint:js`) — exit 0; eslint по всем изменённым файлам — exit 0; `node scripts/check-forum-read-contract.mjs` — все OK. |
 
 ### Реестр решений этапа 0 — принят 2026-10-16
 
@@ -266,10 +268,10 @@ topic_read_states(user_id, topic_id,
 
 ### Этап 2 — единый доменный слой автора
 
-1. Ввести `AuthorRef`, `authorFromRequest`, `resolveAuthor`, `setTopicOpener`, `setLastPostProjection`/`rebuildTopicProjection`.
-2. Провести через них create topic, create reply, edit mask, delete last post, move post, publish draft, import/rebuild. Удалить ручные присваивания `last_post_*`.
-3. Перевести `topicPayload`, `postPayload`, category projection и frontend normalizers на nested `author`/`last_post_author`; временно можно отдавать deprecated flat fields из одного adapter-а.
-4. Перевести `ForumAuthorAvatar`, `ForumAuthorName`, `AuthorMeta`, `LastPostInfo`, `TopicRow`, `MainPage` на DTO; убрать `||`-цепочки и логику «empty id = Deleted user» из компонентов.
+1. [x] Введены `AuthorRef`, `authorRefFromRecord`/`lastPostRefFromRecord`, `setTopicOpener`, `setLastPostProjection`/`rebuildTopicProjection` (возвращает error) в `forum_author_ref.go`.
+2. [x] Все 7 writer-ов переведены: create topic/reply, publish draft, edit mask, delete (inline-recalc удалён), move source/target, import/rebuild. Ручные присваивания `last_post_*` удалены; migration `1770000002` добавила `last_post_author_kind`/`last_post_guest_display_name` с backfill.
+3. [x] `topicPayload`/`postPayload` отдают nested `author`/`last_post_author_ref`; `categoryForumProjections` строит тот же nested ref через `decorateLastPostAuthor` (единый адаптер); flat-поля остаются deprecated-копиями. `normalizeTopic`/`normalizePost` прокидывают nested через spread.
+4. [x] `ForumAuthorAvatar`/`ForumAuthorName`/`AuthorMeta`/`LastPostInfo` принимают `author` DTO (flat props — backward-compat fallback); `||`-цепочки заменены на `??` (`author?.display_name ?? fallbackName ?? deletedDisplayName(lang)`); `TopicRow`/`MainPage` читают `last_post_author_ref` вместо `last_post_author || author_name`.
 
 ### Этап 3 — модерация и целостность
 

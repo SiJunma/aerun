@@ -80,6 +80,83 @@ func TestCategoryIndexNamesTheMaskOfTheLastPost(t *testing.T) {
 	if isChar, _ := projection["last_post_is_character"].(bool); !isChar {
 		t.Fatal("last_post_is_character must be set when the last post carried a mask")
 	}
+
+	// The nested last-post AuthorRef must agree with the flat fields: one
+	// adapter writes both, so the client never sees a divergent last-post
+	// author between the category index and a topic list.
+	ref, _ := projection["last_post_author_ref"].(map[string]any)
+	if ref == nil {
+		t.Fatal("last_post_author_ref must be set on the category projection")
+	}
+	if got, _ := ref["kind"].(string); got != "account" {
+		t.Fatalf("last_post_author_ref.kind = %v, want account", got)
+	}
+	if got, _ := ref["user_id"].(string); got != fixPlayerID {
+		t.Fatalf("last_post_author_ref.user_id = %v, want %s", got, fixPlayerID)
+	}
+	if got, _ := ref["display_name"].(string); got != "Kyle Haze" {
+		t.Fatalf("last_post_author_ref.display_name = %v, want Kyle Haze", got)
+	}
+	if got, _ := ref["character_id"].(string); got != "charlastpost001" {
+		t.Fatalf("last_post_author_ref.character_id = %v, want charlastpost001", got)
+	}
+}
+
+// TestCategoryIndexLastPostRefGuest: a guest's last post in a category must
+// expose a guest AuthorRef (kind, display_name) rather than an empty account id,
+// so the index renders the guest's chosen name instead of falling through to
+// the deleted-account placeholder.
+func TestCategoryIndexLastPostRefGuest(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+	catID := seedGuestCategory(t, app)
+
+	col, err := app.FindCollectionByNameOrId(topicsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := core.NewRecord(col)
+	topic.Set("category_id", catID)
+	topic.Set("author_id", "") // guest opener
+	topic.Set("title", "Guest Last-Post Topic")
+	topic.Set("posts_count", 1)
+	topic.Set("last_post_id", "")
+	topic.Set("last_post_author_id", "")
+	topic.Set("last_post_guest_nickname", "Гость из категории")
+	topic.Set("last_post_author_name", "Гость из категории")
+	if err := app.Save(topic); err != nil {
+		t.Fatalf("failed to seed topic: %v", err)
+	}
+
+	projections, err := categoryForumProjections(app)
+	if err != nil {
+		t.Fatalf("categoryForumProjections: %v", err)
+	}
+	projection, ok := projections[catID]
+	if !ok {
+		t.Fatalf("no projection for category %s: %v", catID, projections)
+	}
+	ref, _ := projection["last_post_author_ref"].(map[string]any)
+	if ref == nil {
+		t.Fatal("last_post_author_ref must be set for a guest last-poster")
+	}
+	if got, _ := ref["kind"].(string); got != "guest" {
+		t.Fatalf("last_post_author_ref.kind = %v, want guest", got)
+	}
+	if got, _ := ref["user_id"].(string); got != "" {
+		t.Fatalf("last_post_author_ref.user_id = %v, want empty for a guest", got)
+	}
+	if got, _ := ref["display_name"].(string); got != "Гость из категории" {
+		t.Fatalf("last_post_author_ref.display_name = %v, want Гость из категории", got)
+	}
+	if got, _ := ref["character_id"].(string); got != "" {
+		t.Fatalf("last_post_author_ref.character_id = %v, want empty for a guest", got)
+	}
+	if got, _ := projection["last_post_author_id"].(string); got != "" {
+		t.Fatalf("last_post_author_id = %v, want empty for a guest last-poster", got)
+	}
 }
 
 // TestCategoryIndexFallsBackToTheAccount covers the other branch. Without it,
