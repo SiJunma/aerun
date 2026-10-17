@@ -262,10 +262,12 @@ func createPostHandler(e *core.RequestEvent) error {
 		// transaction: topic subscribers, quoted authors and mentions. A
 		// notification that cannot be delivered must not cost somebody their
 		// reply, so the dispatcher reports nothing and the post stands.
-		// Guests have no account to notify from.
+		// For guest authors (e.Auth == nil), actorID is empty.
+		var actorID string
 		if e.Auth != nil {
-			dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
+			actorID = e.Auth.Id
 		}
+		dispatchPostNotifications(txApp, actorID, post, topic.GetString("title"))
 
 		// The nudge for the topic itself, in the same transaction as the reply.
 		// PublishTopicSignal decides the audience against the GUEST baseline,

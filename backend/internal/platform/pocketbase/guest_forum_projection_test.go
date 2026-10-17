@@ -164,3 +164,60 @@ func TestGuestReplyProjectsNickname(t *testing.T) {
 		t.Fatalf("forum-index must carry last_post_guest_nickname=GuestReplier: %s", body2)
 	}
 }
+
+// TestGuestReplyQuotesUserReceivesNotificationViaHttp: when a guest quotes a user's
+// post in a reply via HTTP POST, the quoted user must receive a post_quoted notification.
+func TestGuestReplyQuotesUserReceivesNotificationViaHttp(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	catID := seedGuestCategory(t, app)
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	// A member creates the topic.
+	topicBody := fmt.Sprintf(`{"category_id":"%s","title":"Quoted Topic","content":"Original user message"}`, catID)
+	status, resp := postAerunWithHeaders(t, server.URL+"/api/aerun/topics", topicBody, map[string]string{
+		"Authorization":   tokens["player"],
+		"Idempotency-Key": "idem-quoted-topic-opener",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("player topic create: status=%d body=%s", status, resp)
+	}
+	topic, err := app.FindFirstRecordByFilter(topicsCollectionName, "title = 'Quoted Topic'")
+	if err != nil || topic == nil {
+		t.Fatalf("topic not created: %v", err)
+	}
+	openerPostID := topic.GetString("last_post_id")
+	if openerPostID == "" {
+		t.Fatal("topic missing last_post_id")
+	}
+
+	// Guest replies, quoting the opener post of fixPlayerID.
+	quoteText := fmt.Sprintf(`[quote="#p%s,t%s,Player One"]Original user message[/quote] Guest response`, openerPostID, topic.Id)
+	replyBody := fmt.Sprintf(`{"content":%q,"guest_nickname":"GuestQuoteTester"}`, quoteText)
+	status, resp = postAerunWithHeaders(t, server.URL+"/api/aerun/topics/"+topic.Id+"/posts", replyBody, map[string]string{
+		"Idempotency-Key": "idem-guest-quote-reply",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("guest quote reply: status=%d body=%s", status, resp)
+	}
+
+	// Player One must receive 1 post_quoted notification.
+	if n := notificationCount(t, app, fixPlayerID); n != 1 {
+		t.Fatalf("quoted user received %d notifications, want 1", n)
+	}
+
+	notif, err := app.FindFirstRecordByFilter(notificationsCollectionName, "recipient_id = {:u}", dbx.Params{"u": fixPlayerID})
+	if err != nil || notif == nil {
+		t.Fatalf("notification not found: %v", err)
+	}
+	if got := notif.GetString("type"); got != "post_quoted" {
+		t.Errorf("notification type = %q, want post_quoted", got)
+	}
+	payload := notificationPayload(notif)["payload"].(map[string]any)
+	if got := payload["author_nickname"]; got != "GuestQuoteTester" {
+		t.Errorf("payload.author_nickname = %v, want GuestQuoteTester", got)
+	}
+}

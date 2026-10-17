@@ -246,9 +246,11 @@ func createTopicHandler(e *core.RequestEvent) error {
 		// The opening post is a post like any other, so it notifies like any
 		// other: subscribers of a brand-new topic (only the author, who is
 		// skipped), quoted authors, mentions.
+		var actorID string
 		if e.Auth != nil {
-			dispatchPostNotifications(txApp, e.Auth.Id, post, topic.GetString("title"))
+			actorID = e.Auth.Id
 		}
+		dispatchPostNotifications(txApp, actorID, post, topic.GetString("title"))
 
 		// 4. The author gains one topic AND its opening post. Both counters move
 		// here, in the same transaction as the rows that justify them.

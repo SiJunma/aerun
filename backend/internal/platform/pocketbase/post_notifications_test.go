@@ -322,3 +322,132 @@ func TestMentionAllDeduplicatesWithNamedMention(t *testing.T) {
 		t.Errorf("named player received %d notifications, want 1 (deduplicated)", n)
 	}
 }
+
+func TestGuestQuoteNotifiesQuotedAuthor(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	// fixPlayerID writes the post that will be quoted.
+	quoted, topicID := seedNotificationPost(t, app, fixPlayerID, "сообщение юзера")
+
+	// A guest replies quoting fixPlayerID's post.
+	postsCol, err := app.FindCollectionByNameOrId(postsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	replyContent := `[quote="#p` + quoted.Id + `,t` + topicID + `,Player One"]цитата юзера[/quote] ответ гостя`
+	var reply *core.Record
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		post := core.NewRecord(postsCol)
+		post.Set("topic_id", topicID)
+		setGuestAuthorRef(post, "GuestTester")
+		post.Set("guest_nickname", "GuestTester")
+		post.Set("content", replyContent)
+		post.Set("is_draft", false)
+		if err := txApp.Save(post); err != nil {
+			return err
+		}
+		reply = post
+		dispatchPostNotifications(txApp, "", reply, "Тема")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := notificationCount(t, app, fixPlayerID); n != 1 {
+		t.Fatalf("the quoted post's author received %d notifications, want 1", n)
+	}
+
+	notif, err := app.FindFirstRecordByFilter(notificationsCollectionName, "recipient_id = {:u}", dbx.Params{"u": fixPlayerID})
+	if err != nil || notif == nil {
+		t.Fatalf("notification not found for quoted author: %v", err)
+	}
+	if got := notif.GetString("type"); got != "post_quoted" {
+		t.Errorf("notification type = %q, want post_quoted", got)
+	}
+	if got := notif.GetString("sender_id"); got != "" {
+		t.Errorf("notification sender_id = %q, want empty for guest author", got)
+	}
+	payload := notificationPayload(notif)["payload"].(map[string]any)
+	if got := payload["author_nickname"]; got != "GuestTester" {
+		t.Errorf("payload.author_nickname = %v, want GuestTester", got)
+	}
+	if got := payload["post_id"]; got != reply.Id {
+		t.Errorf("payload.post_id = %v, want %s", got, reply.Id)
+	}
+}
+
+func TestGuestReplyNotifiesSubscribers(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	_, topicID := seedNotificationPost(t, app, fixPlayerID, "оригинальный пост")
+
+	subCol, err := app.FindCollectionByNameOrId(topicSubscriptionsCollectionName)
+	if err != nil {
+		t.Fatalf("topic_subscriptions collection missing: %v", err)
+	}
+	sub := core.NewRecord(subCol)
+	sub.Set("topic_id", topicID)
+	sub.Set("user_id", fixBannedID)
+	if err := app.Save(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	// A guest replies to the topic.
+	postsCol, err := app.FindCollectionByNameOrId(postsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		post := core.NewRecord(postsCol)
+		post.Set("topic_id", topicID)
+		setGuestAuthorRef(post, "GuestSub")
+		post.Set("guest_nickname", "GuestSub")
+		post.Set("content", "ответ гостя подписчикам")
+		post.Set("is_draft", false)
+		if err := txApp.Save(post); err != nil {
+			return err
+		}
+		dispatchPostNotifications(txApp, "", post, "Тема")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := notificationCount(t, app, fixBannedID); n != 1 {
+		t.Errorf("subscriber received %d notifications for guest reply, want 1", n)
+	}
+}
+
+func TestQuoteRegexMatchesVariants(t *testing.T) {
+	cases := []struct {
+		input string
+		want  []string
+	}{
+		{`[quote="#p12345,t67890,Author"]text[/quote]`, []string{"12345"}},
+		{`[quote=#p12345,t67890,Author]text[/quote]`, []string{"12345"}},
+		{`[quote="#p12345,Author"]text[/quote]`, []string{"12345"}},
+		{`[quote="#p12345"]text[/quote]`, []string{"12345"}},
+		{`[quote = "#p12345"]text[/quote]`, []string{"12345"}},
+		{`[quote="#p12345,t67890,John "The Beast" Doe"]text[/quote]`, []string{"12345"}},
+		{`[quote="#pAAA,t1,A"]one[/quote] some text [quote="#pBBB,t1,B"]two[/quote]`, []string{"AAA", "BBB"}},
+		{`[quote]plain quote without post id[/quote]`, nil},
+	}
+
+	for _, tc := range cases {
+		got := quotePostIDs(tc.input)
+		if len(got) != len(tc.want) {
+			t.Errorf("quotePostIDs(%q) = %v, want %v", tc.input, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("quotePostIDs(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
+			}
+		}
+	}
+}

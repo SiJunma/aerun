@@ -157,6 +157,15 @@ func maybeEnqueueTopicReplyEmail(txApp core.App, recipientID, authorID, topicID,
 	title := notificationTitle(emailTemplateTopicReply, topicTitle)
 	recipientNick := user.GetString("nickname")
 	authorNick := authorNickname(txApp, authorID)
+	if authorNick == "" && postID != "" {
+		if post, err := txApp.FindRecordById(postsCollectionName, postID); err == nil && post != nil {
+			if name := post.GetString(guestDisplayNameField); name != "" {
+				authorNick = name
+			} else if name := post.GetString("guest_nickname"); name != "" {
+				authorNick = name
+			}
+		}
+	}
 	snippet := postEmailSnippet(content)
 	topicURL := topicEmailURL(txApp, topicID, postID)
 

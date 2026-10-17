@@ -49,9 +49,9 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
-// quoteRegex captures the POST id only. The author id and nickname are parsed
-// so the pattern matches the legacy markup, but groups 2 and 3 are unused.
-var quoteRegex = regexp.MustCompile(`\[quote="#p([a-zA-Z0-9_-]+),t([a-zA-Z0-9_-]+),([^\]]+)"\]`)
+// quoteRegex captures the POST id. The author id and nickname are optional
+// in the pattern so it matches both legacy and hand-typed markup.
+var quoteRegex = regexp.MustCompile(`\[quote\s*=\s*"?#p([a-zA-Z0-9_-]+)(?:,[^\]]*?)?"?\]`)
 
 // mentionRegex matches bold text containing no further opening bracket. The
 // `[^[]+` is the legacy's guard: a bold span wrapping markup is not a name.
@@ -89,7 +89,7 @@ func dispatchPostNotifications(txApp core.App, actorID string, post *core.Record
 			"topic_id":        topicID,
 			"topic_title":     topicTitle,
 			"post_id":         post.Id,
-			"author_nickname": authorNickname(txApp, actorID),
+			"author_nickname": postAuthorNickname(txApp, actorID, post),
 		}
 		_, _ = createNotification(txApp, recipientID, actorID, notifType, notificationTitle(notifType, topicTitle), payload)
 
@@ -222,6 +222,26 @@ func topicSubscribers(txApp core.App, topicID string) []string {
 func authorNickname(txApp core.App, userID string) string {
 	if user, err := txApp.FindRecordById(usersCollectionName, userID); err == nil && user != nil {
 		return user.GetString("nickname")
+	}
+	return ""
+}
+
+func postAuthorNickname(txApp core.App, actorID string, post *core.Record) string {
+	if actorID == "" && post != nil {
+		actorID = post.GetString("author_id")
+	}
+	if actorID != "" {
+		if user, err := txApp.FindRecordById(usersCollectionName, actorID); err == nil && user != nil {
+			return user.GetString("nickname")
+		}
+	}
+	if post != nil {
+		if name := post.GetString(guestDisplayNameField); name != "" {
+			return name
+		}
+		if name := post.GetString("guest_nickname"); name != "" {
+			return name
+		}
 	}
 	return ""
 }
