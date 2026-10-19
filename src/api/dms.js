@@ -112,9 +112,21 @@ export const startConversationWithMessage = async (peerUid, title, text, idempot
 // after a sign-out, and a stale account's loop must not survive the switch.
 const dmListPolls = new Map();
 
+// ONE list, ONE resource (owner's ruling, 2026-10-19).
+//
+// The "Deleted" folder is gone from the interface: a chat the member removed
+// is not somewhere they browse, it is simply out of their inbox until the
+// peer writes again — at which point it RETURNS to the inbox as a new
+// dialogue, holding only what came after the removal.
+//
+// The poll is keyed by account: the cached list must never be handed to a
+// different member after a sign-out, and a stale account's loop must not
+// survive the switch.
+const dmListKey = (uid) => `dm-list:${uid}`;
+
 export const refreshDmList = (uid) => {
   if (!uid) return;
-  dmListPolls.get(uid)?.refresh();
+  dmListPolls.get(dmListKey(uid))?.refresh();
 };
 
 export const subscribeToDmList = (uid, callback, errorCallback) => {
@@ -122,7 +134,7 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
     callback([]);
     return () => {};
   }
-  const poll = sharedPoll(`dm-list:${uid}`, {
+  const poll = sharedPoll(dmListKey(uid), {
     fetch: async () => {
       const res = await sendApi('/api/aerun/dms');
       return (res?.items || []).map(conv => ({
@@ -147,7 +159,7 @@ export const subscribeToDmList = (uid, callback, errorCallback) => {
       : null,
   });
 
-  dmListPolls.set(uid, poll);
+  dmListPolls.set(dmListKey(uid), poll);
 
   // The error travels WITH the last good list rather than replacing it, so a
   // failed refresh leaves the conversation list on screen.
@@ -561,14 +573,34 @@ export const markDmRead = async (conversationId, uid) => {
 };
 
 /**
- * Deletes / clears the conversation history for current user.
+ * Hides the conversation history from the current user (the "mark as read"
+ * of a chat). The chat stays in the inbox and comes back when a new message
+ * arrives.
  *
  * Throws on failure: the caller decides what the member sees, and a delete
  * that silently did nothing is how a row survives its own confirmation.
  */
-export const deleteConversation = async (conversationId, _uid) => {
+export const clearConversation = async (conversationId, _uid) => {
   if (!conversationId) return;
   await sendApi(`/api/aerun/dms/${conversationId}/clear`, {
     method: 'POST'
+  });
+};
+
+/**
+ * Deletes the conversation FOR THE CURRENT USER (owner's ruling, 2026-10-19).
+ *
+ * The chat is a personal projection of a message stream, so this says only:
+ * "I will not read this conversation again". The messages stay in the database
+ * and the peer keeps reading them; the rows go away later, when the collector
+ * finds that no participant can read them any more.
+ *
+ * It ALWAYS succeeds — there is no state in which the server refuses to let a
+ * member stop reading a conversation.
+ */
+export const eraseConversation = async (conversationId, _uid) => {
+  if (!conversationId) return;
+  await sendApi(`/api/aerun/dms/${conversationId}`, {
+    method: 'DELETE'
   });
 };

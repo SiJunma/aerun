@@ -22,6 +22,21 @@ const (
 	maxDMBodyBytes                = 128 * 1024
 )
 
+// THE TWO FOLDERS of the direct-message list (owner's model, 2026-10-19).
+//
+// "Inbox" is the chats the member still has. "Deleted" is the chats they
+// explicitly removed: the history still exists, and a second, explicit step
+// there erases it for good — but only the parts no participant can read
+// any more.
+//
+// The split is per-member (both markers live in dm_members), so two
+// participants can hold the same conversation in different folders at the same
+// time — which is exactly the state the owner's rule has to survive.
+const (
+	dmFolderInbox   = "inbox"
+	dmFolderDeleted = "deleted"
+)
+
 type createDMForm struct {
 	RecipientIDs []string `json:"recipient_ids"`
 	Title        string   `json:"title"`
@@ -607,6 +622,12 @@ func createDMHandler(e *core.RequestEvent) error {
 		senderMem.Set("user_id", e.Auth.Id)
 		senderMem.Set("last_read_sequence", 1)
 		senderMem.Set("cleared_at", "")
+		senderMem.Set("cleared_sequence", 0)
+		senderMem.Set("deleted", false)
+		senderMem.Set("erased_sequence", 0)
+		// A new conversation starts at its first message: the member's window
+		// opens at the beginning of the stream.
+		senderMem.Set("visible_from_sequence", 1)
 		if err := txApp.Save(senderMem); err != nil {
 			return 0, nil, internalError("failed to create sender member record", err)
 		}
@@ -618,6 +639,10 @@ func createDMHandler(e *core.RequestEvent) error {
 			rMem.Set("user_id", rID)
 			rMem.Set("last_read_sequence", 0)
 			rMem.Set("cleared_at", "")
+			rMem.Set("cleared_sequence", 0)
+			rMem.Set("deleted", false)
+			rMem.Set("erased_sequence", 0)
+			rMem.Set("visible_from_sequence", 1)
 			if err := txApp.Save(rMem); err != nil {
 				return 0, nil, internalError("failed to create recipient member record", err)
 			}
@@ -821,6 +846,32 @@ func appendMessageToConversation(
 		return nil, 0, internalError("failed to update sender read sequence", err)
 	}
 
+	// A NEW MESSAGE TO A MEMBER WHO DELETED THE CHAT (owner ruling 2026-10-19).
+	//
+	// The chat is a personal projection: the recipient had removed it, and
+	// their projection of it starts again from THIS message. So their window's
+	// lower edge moves to the new message's sequence, and the archive marker
+	// is cleared — the chat is in their inbox again, holding only what came
+	// after it, with the previous history still behind their horizon.
+	//
+	// Without this the chat would stay invisible to them forever: their
+	// horizon hides the old messages, and the inbox query skips deleted chats,
+	// so a conversation they are still a member of would simply never appear
+	// again — while the peer keeps writing into it.
+	//
+	// Only the RECIPIENT's projection moves. The sender keeps their own view of
+	// the whole conversation: they were not the one who deleted it.
+	for _, m := range otherMembers {
+		if !m.GetBool("deleted") {
+			continue
+		}
+		m.Set("deleted", false)
+		m.Set("visible_from_sequence", nextSeq)
+		if err := txApp.Save(m); err != nil {
+			return nil, 0, internalError("failed to restore a deleted conversation for a recipient", err)
+		}
+	}
+
 	// Delivery to each counterpart. The DM list is a SEPARATE resource from the
 	// notification list, so the `dm.post` nudge keeps the badge/inbox fresh
 	// without a poll; the email is first-unread only and offline only (Firebase
@@ -915,8 +966,20 @@ type convRow struct {
 	MessagesCount    int    `db:"messages_count"`
 	LastReadSequence int    `db:"last_read_sequence"`
 	ClearedAt        string `db:"cleared_at"`
-	Created          string `db:"created"`
-	Updated          string `db:"updated"`
+	ClearedSequence  int    `db:"cleared_sequence"`
+	Deleted          bool   `db:"deleted"`
+	ErasedSequence   int    `db:"erased_sequence"`
+	// VisibleFromSequence is the member's LOWER visibility edge: the first
+	// message they still see. It is 1 for everyone who has not removed the
+	// chat, and jumps to the newest message when a chat they removed comes
+	// back as a new dialogue.
+	VisibleFromSequence int `db:"visible_from_sequence"`
+	// UnreadCount is COUNTED in SQL (see the listing query) rather than
+	// derived from the two counters, which stopped being equivalent once a
+	// member's window could hide rows the conversation counter still held.
+	UnreadCount int    `db:"unread_count"`
+	Created     string `db:"created"`
+	Updated     string `db:"updated"`
 }
 
 // conversationPeer is one member of a conversation as the inbox renders them.
@@ -1029,6 +1092,23 @@ func listConversationsHandler(e *core.RequestEvent) error {
 			c.messages_count AS messages_count,
 			m.last_read_sequence AS last_read_sequence,
 			m.cleared_at AS cleared_at,
+			m.cleared_sequence AS cleared_sequence,
+			m.deleted AS deleted,
+			m.erased_sequence AS erased_sequence,
+			m.visible_from_sequence AS visible_from_sequence,
+			-- The unread count is COUNTED, not derived (owner ruling 2026-10-19).
+			-- The difference of two counters was only correct while every
+			-- message was still a row: a removed chat holds messages the member
+			-- can no longer see but the conversation counter still counted them,
+			-- and a chat that came back as a new dialogue counted the history
+			-- behind its lower edge. Counting the rows the member can actually
+			-- see answers both: an archived chat is 0, and a revived one is 1.
+			(
+				SELECT COUNT(*) FROM dm_messages msg
+				WHERE msg.conversation_id = c.id
+				  AND msg.sequence > m.last_read_sequence
+				  AND msg.sequence >= m.visible_from_sequence
+			) AS unread_count,
 			c.created AS created,
 			c.updated AS updated
 		FROM dm_members m
@@ -1037,8 +1117,24 @@ func listConversationsHandler(e *core.RequestEvent) error {
 	`
 	params := dbx.Params{"user": e.Auth.Id}
 
-	// Filter out conversations cleared by user if no new messages arrived
-	query += " AND (m.cleared_at = '' OR m.cleared_at IS NULL OR c.last_message_at > m.cleared_at)"
+	// ONE LIST, ONE FOLDER (owner ruling 2026-10-19).
+	//
+	// The "Deleted" folder is gone from the interface: a chat the member
+	// removed is not somewhere they browse, it is simply out of their inbox
+	// until the peer writes again — at which point it RETURNS to the inbox as
+	// a new dialogue (see appendMessageToConversation), holding only what
+	// came after the removal.
+	//
+	// So the list is the inbox, and a chat is in it when the member has not
+	// removed it. The marker is per-member because it lives in `dm_members`:
+	// two participants can hold the SAME conversation differently at the same
+	// time, and that is exactly the state the owner's rule describes ("if the
+	// users deleted the chats at different moments...").
+	//
+	// A chat that was merely CLEARED (read up to N) stays in the inbox: the
+	// member has not removed it, they have caught up with it. That is the
+	// difference between "mark as read" and "delete".
+	query += " AND m.deleted = false"
 
 	if cursor != "" {
 		parts := strings.Split(cursor, "|")
@@ -1080,10 +1176,6 @@ func listConversationsHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, len(rows))
 	for i, r := range rows {
-		unread := r.MessagesCount - r.LastReadSequence
-		if unread < 0 {
-			unread = 0
-		}
 		peers := participantsByConv[r.ID]
 		items[i] = map[string]any{
 			"id":                 r.ID,
@@ -1092,7 +1184,7 @@ func listConversationsHandler(e *core.RequestEvent) error {
 			"last_message_at":    r.LastMessageAt,
 			"messages_count":     r.MessagesCount,
 			"last_read_sequence": r.LastReadSequence,
-			"unread_count":       unread,
+			"unread_count":       r.UnreadCount,
 			"created":            r.Created,
 			"updated":            r.Updated,
 			// A private conversation is addressed by the other participants, so
@@ -1113,7 +1205,7 @@ func listConversationsHandler(e *core.RequestEvent) error {
 			// Keyed by member rather than a bare number: the inbox reads it as
 			// conv.unread[myUid]. This listing only ever describes the caller, so
 			// their entry is the only one there is to give.
-			"unread": map[string]int{e.Auth.Id: unread},
+			"unread": map[string]int{e.Auth.Id: r.UnreadCount},
 		}
 	}
 
@@ -1194,9 +1286,49 @@ func listDMMessagesHandler(e *core.RequestEvent) error {
 	query := e.App.RecordQuery(dmMessagesCollectionName).
 		AndWhere(dbx.HashExp{"conversation_id": convID})
 
-	clearedAt := member.GetString("cleared_at")
-	if clearedAt != "" {
-		query = query.AndWhere(dbx.NewExp("created > {:cleared_at}", dbx.Params{"cleared_at": clearedAt}))
+	// The horizon is an ORDINAL, not a timestamp.
+	//
+	// It used to be `created > cleared_at`, a strict comparison of two
+	// millisecond-resolution timestamps. Two messages written inside the same
+	// millisecond carry the same value, so a reply that followed the clear in
+	// that millisecond compared EQUAL and vanished from the thread until some
+	// later message moved the clock — a race that failed roughly one run in
+	// thirty (TestClearedConversationShowsTheNextMessageImmediately).
+	//
+	// `sequence` is monotonic within the conversation and has no resolution
+	// limit, so "hidden up to and including N" is exact.
+	//
+	// BOTH horizons apply. `cleared_sequence` is the read/unread boundary
+	// (what the member has consumed); `erased_sequence` is the point past
+	// which the member has ERASED the chat for themselves — they will never
+	// read those messages again, and that is what the hard-delete rule counts.
+	//
+	// A member who erased reads nothing of the chat, and a member who merely
+	// cleared it reads everything after their read horizon.
+	hiddenUpTo := member.GetInt("cleared_sequence")
+	if erased := member.GetInt("erased_sequence"); erased > hiddenUpTo {
+		hiddenUpTo = erased
+	}
+	if hiddenUpTo > 0 {
+		query = query.AndWhere(dbx.NewExp("sequence > {:seq}", dbx.Params{"seq": hiddenUpTo}))
+	}
+
+	// The LOWER EDGE of this member's window (owner ruling 2026-10-19).
+	//
+	// The horizon above is the upper edge — what the member has consumed or
+	// erased. This is the lower one — the first message they still see, and
+	// it is what makes "a new message in an archived chat arrives as a NEW
+	// dialogue" work: the previous history stays behind the edge, so the
+	// chat reappears in the inbox holding only what came after it.
+	//
+	// It is a separate column rather than a reuse of the horizon because the
+	// two edges move for different reasons and in different directions: the
+	// horizon only ever moves forward as the member reads or erases, while
+	// this edge jumps FORWARD on a new message to a member who had deleted
+	// the chat. Deriving one from the other would make an archived chat's
+	// history reappear the moment a new message arrives.
+	if visibleFrom := member.GetInt("visible_from_sequence"); visibleFrom > 0 {
+		query = query.AndWhere(dbx.NewExp("sequence >= {:seq}", dbx.Params{"seq": visibleFrom}))
 	}
 
 	if afterSeq > 0 {
@@ -1278,6 +1410,17 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 
 	maxSeq := conv.GetInt("messages_count")
 	member.Set("last_read_sequence", maxSeq)
+	// Reading the chat moves the READ horizon too.
+	//
+	// The read horizon is "what I have consumed": it decides which messages
+	// the thread still shows me and where the "new since" line falls. Reading
+	// a chat is what makes "something new" stop being new, so the horizon has
+	// to follow the read sequence — otherwise a chat the member has read to
+	// the end would show its whole history again on the next open.
+	//
+	// `erased_sequence` is NOT touched: an erased chat stays erased for them
+	// whatever they read afterwards.
+	member.Set("cleared_sequence", maxSeq)
 	if err := e.App.Save(member); err != nil {
 		return internalError("failed to update read sequence", err)
 	}
@@ -1329,18 +1472,27 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 	})
 }
 
-// clearConversationHandler marks a conversation cleared for the caller.
+// clearConversationHandler hides from the caller everything they have already
+// seen — it is the "mark as read" of a conversation.
 //
-// When every OTHER participant of the conversation is a soft-deleted account,
-// there are no live readers left: the conversation, its membership rows and
-// its messages are hard-deleted instead of merely clearing the caller's
-// horizon. The history with a deleted member is readable until the survivor
-// chooses to remove it — clearing is that choice.
+// THE HORIZON IS AN ORDINAL, NOT A TIMESTAMP.
 //
-// Otherwise the horizon is the conversation's OWN last-message timestamp,
-// not the wall clock (cleared_at is compared with strict `>` against message
-// `created` and `last_message_at`; anchoring to the row's own timestamp makes
-// "newer than the clear" true by construction).
+// It used to be `cleared_at` — the `created` instant of the last message the
+// member had seen — and the message list filtered on it with a STRICT
+// comparison, `created > cleared_at`. `created` is millisecond-resolution, so
+// two messages written inside the same millisecond carry the same value; the
+// reply that followed the clear in that millisecond compared EQUAL and
+// vanished from the thread until some later message moved the clock. The
+// test pinning that contract failed roughly one run in thirty, on the parent
+// commit as much as on this one.
+//
+// `sequence` is monotonic within the conversation and has no resolution limit,
+// so "hidden up to and including N" is exact — the race disappears rather
+// than becoming rarer.
+//
+// A chat cleared this way STAYS IN THE INBOX: a new message grows the
+// conversation past the horizon, and the chat comes back. Moving a chat out
+// of the inbox for good is a different action (deleteConversationHandler).
 func clearConversationHandler(e *core.RequestEvent) error {
 	if e.Auth == nil {
 		return forbiddenError("authentication required")
@@ -1357,97 +1509,116 @@ func clearConversationHandler(e *core.RequestEvent) error {
 		return forbiddenError("you are not a participant in this conversation")
 	}
 
-	if dropped, derr := dropConversationWithDeletedPeer(e.App, convID, e.Auth.Id); derr != nil {
-		return derr
-	} else if dropped {
-		return e.JSON(http.StatusOK, map[string]any{
-			"cleared":    true,
-			"deleted":    true,
-			"request_id": requestIDFrom(e),
-		})
+	// The horizon is the highest sequence the conversation holds: everything
+	// up to and including it is now hidden from the caller.
+	conv, err := e.App.FindRecordById(dmConversationsCollectionName, convID)
+	if err != nil || conv == nil {
+		return notFoundError("conversation not found")
 	}
+	horizon := conv.GetInt("messages_count")
 
-	horizon := types.NowDateTime().String()
-	if conv, err := e.App.FindRecordById(dmConversationsCollectionName, convID); err == nil && conv != nil {
-		if lastAt := strings.TrimSpace(conv.GetString("last_message_at")); lastAt != "" {
-			horizon = lastAt
-		}
-	}
-	member.Set("cleared_at", horizon)
+	member.Set("cleared_sequence", horizon)
+	// `cleared_at` is kept in step for the legacy import path and for the
+	// down-migration of the schema change; the runtime reads the ordinals.
+	member.Set("cleared_at", types.NowDateTime().String())
 	if err := e.App.Save(member); err != nil {
 		return internalError("failed to clear conversation", err)
 	}
 
 	return e.JSON(http.StatusOK, map[string]any{
-		"cleared":    true,
-		"cleared_at": horizon,
-		"request_id": requestIDFrom(e),
+		"cleared":          true,
+		"cleared_sequence": horizon,
+		"request_id":       requestIDFrom(e),
 	})
 }
 
-// dropConversationWithDeletedPeer hard-deletes a conversation whose every
-// participant except callerID is a soft-deleted account (or has no users row
-// at all — the pre-soft-delete orphan shape). It reports whether it dropped
-// anything: false means the thread has live readers and the caller just
-// clears it.
+// eraseConversationHandler erases the conversation FOR THE CALLER (owner's
+// ruling, 2026-10-19).
 //
-// Group threads need EVERY other member gone, not just one: a single deleted
-// member does not end a conversation the living still use.
-func dropConversationWithDeletedPeer(app core.App, convID, callerID string) (bool, error) {
-	members, err := app.FindAllRecords(
+// IT IS ALWAYS SUCCESSFUL, AND IT DELETES NOTHING FROM THE DATABASE.
+//
+// The owner ruled this on 2026-10-19, and the reason is the difference
+// between a MESSAGE STREAM and a record: the chat is a personal projection of
+// a stream of events, and a participant's own decision to stop reading it is
+// expressed in their own projection — not by removing rows everybody shares.
+//
+// So this handler writes exactly one thing: the caller's ERASE POINT, the
+// sequence past which they will never read this conversation again. That is
+// the marker the Min-Watermark collector later reads to decide what may
+// physically disappear (see dm_collector.go).
+//
+// It does NOT ask whether the peer can still read the conversation, and it
+// does NOT delete a single row. An earlier version of this handler did both,
+// and refused with 409 while a living peer had not erased yet — which made
+// the step impossible to take: nobody could be first, because being first is
+// exactly what the 409 forbade.
+//
+// The physical removal happens in the collector, once every participant has
+// erased past the same point (or their account is gone).
+func eraseConversationHandler(e *core.RequestEvent) error {
+	if e.Auth == nil {
+		return forbiddenError("authentication required")
+	}
+
+	convID := e.Request.PathValue("id")
+
+	member, err := e.App.FindFirstRecordByFilter(
 		dmMembersCollectionName,
-		dbx.NewExp("conversation_id = {:conv}", dbx.Params{"conv": convID}),
+		"conversation_id = {:conv} && user_id = {:user}",
+		dbx.Params{"conv": convID, "user": e.Auth.Id},
 	)
+	if err != nil || member == nil {
+		return forbiddenError("you are not a participant in this conversation")
+	}
+
+	claim, err := claimFrom(e)
 	if err != nil {
-		return false, internalError("failed to load conversation members", err)
+		return err
 	}
-	others := 0
-	for _, m := range members {
-		if m.GetString("user_id") == callerID {
-			continue
-		}
-		others++
-		peer, err := app.FindRecordById(usersCollectionName, m.GetString("user_id"))
-		if err != nil || peer == nil || isUserDeleted(peer) {
-			continue
-		}
-		return false, nil
-	}
-	if others == 0 {
-		return false, nil
-	}
-	if err := app.RunInTransaction(func(txApp core.App) error {
-		msgs, err := txApp.FindAllRecords(
-			dmMessagesCollectionName,
-			dbx.NewExp("conversation_id = {:conv}", dbx.Params{"conv": convID}),
-		)
-		if err != nil {
-			return err
-		}
-		for _, msg := range msgs {
-			if err := txApp.Delete(msg); err != nil {
-				return err
-			}
-		}
-		rows, err := txApp.FindAllRecords(
-			dmMembersCollectionName,
-			dbx.NewExp("conversation_id = {:conv}", dbx.Params{"conv": convID}),
-		)
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			if err := txApp.Delete(row); err != nil {
-				return err
-			}
-		}
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		conv, err := txApp.FindRecordById(dmConversationsCollectionName, convID)
 		if err != nil || conv == nil {
-			return err
+			return 0, nil, notFoundError("conversation not found")
 		}
-		return txApp.Delete(conv)
-	}); err != nil {
-		return false, internalError("failed to delete conversation with a deleted peer", err)
-	}
-	return true, nil
+		total := conv.GetInt("messages_count")
+
+		// The caller's own erase, and the ONLY thing this handler writes.
+		//
+		// It is recorded as a SEQUENCE, not a flag, because "erased up to N"
+		// is what the rule needs: a member who erases a chat holding five
+		// messages has discarded exactly those five, and a message that
+		// arrives in the same chat afterwards is not covered by it.
+		//
+		// The read horizon moves to the same point, so the messages stop being
+		// shown to them in the thread — which is what "can no longer read
+		// them" means in the UI.
+		//
+		// The archive marker goes with it: the chat leaves the member's inbox
+		// and comes back only when the peer writes again — and then it returns
+		// as a NEW dialogue (see appendMessageToConversation).
+		horizon := total
+		if erased := member.GetInt("erased_sequence"); erased > horizon {
+			horizon = erased
+		}
+		member.Set("erased_sequence", horizon)
+		member.Set("cleared_sequence", horizon)
+		member.Set("deleted", true)
+		if err := txApp.Save(member); err != nil {
+			return 0, nil, internalError("failed to erase conversation", err)
+		}
+
+		return http.StatusOK, map[string]any{
+			"erased": true,
+			// The caller's own erase point — the point past which THEY will
+			// never read this conversation.
+			"erased_up_to": horizon,
+			// The conversation itself is untouched: it stays readable for the
+			// peer until the peer erases it too (or their account is deleted),
+			// and the collector removes the rows afterwards.
+			"request_id": requestIDFrom(e),
+		}, nil
+	})
+
+	return writeCommandResult(e, outcome, err)
 }

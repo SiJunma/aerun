@@ -21,7 +21,7 @@ import {
   refreshDmMessages,
   markDmRead,
   subscribeToPeerCard,
-  deleteConversation,
+  eraseConversation,
 } from '../../api/dms';
 import {
   isDraftId,
@@ -63,6 +63,12 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [conversations, setConversations] = useState([]);
   const [loadingConvs, setLoadingConvs] = useState(true);
   const [inboxError, setInboxError] = useState(null);
+  // The direct-message list (owner's model, 2026-10-19): ONE list, no folders.
+  //
+  // A chat the member removed leaves the inbox and stays gone until the peer
+  // writes again — at which point it RETURNS as a new dialogue holding only
+  // what came after the removal. The server decides what is in the list; this
+  // component only renders it.
   // Draft conversations (client-only, localStorage) merged into the inbox rows.
   // Kept in state so opening/removing a draft re-renders the list without a
   // server round trip; the server never knows these exist.
@@ -816,6 +822,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   };
 
   // ── Deletion handler ─────────────────────────────────────────────────────
+  //
+  // ONE ACTION (owner's ruling, 2026-10-19): "удалить у себя" — the member
+  // stops reading this conversation. The messages stay in the database and
+  // the peer keeps reading them; the rows go away later, when the collector
+  // finds that no participant can read them any more.
+  //
+  // There is no second step and no refusal: the server always accepts this,
+  // because it is a statement about the caller's own view of the chat.
   const promptDeleteConversation = (convId, e) => {
     if (e) {
       e.stopPropagation();
@@ -857,10 +871,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     const previous = conversations;
     setConversations(prev => prev.filter(c => c.id !== convId));
     try {
-      await deleteConversation(convId, myUid);
+      await eraseConversation(convId, myUid);
+      showToast(lang === 'ru' ? 'Переписка удалена у вас' : 'Conversation removed for you', 'success');
       clearComposerText(convId, myUid);
       refreshDmList(myUid);
-      showToast(lang === 'ru' ? 'Диалог удален' : 'Conversation deleted', 'success');
       if (activeChatId === convId) {
         setActiveChatId(null);
         setActivePeer(null);
@@ -870,7 +884,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     } catch (err) {
       setConversations(previous);
       console.error('[handleDeleteConversation]', err);
-      showToast(lang === 'ru' ? 'Ошибка удаления' : 'Delete error', 'danger');
+      showToast(
+        lang === 'ru' ? 'Ошибка удаления' : 'Delete error',
+        'danger'
+      );
     }
   };
 
@@ -909,6 +926,10 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     // peer_missing is false and the thread keeps its real history and the
     // "Deleted user" placeholder. Only the true ghost is filtered here.
     if (c.peer_missing) return false;
+    // The SERVER decides what is in the list (owner's model, 2026-10-19): a
+    // chat the member removed is out of the inbox, and it comes back as a new
+    // dialogue when the peer writes again. The client filter must not
+    // second-guess that.
     const clearMs = toMillis(c.clearedAt?.[myUid]);
     if (clearMs === null) return true;
     const lastMs = toMillis(c.lastTimestamp);
@@ -1460,7 +1481,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     className="text-muted p-2 mx-1 shadow-none dm-trash-btn"
                     style={{ opacity: 0.6 }}
                     onClick={(e) => promptDeleteConversation(conv.id, e)}
-                    title={lang === 'ru' ? 'Удалить переписку' : 'Delete conversation'}
+                    title={lang === 'ru' ? 'Удалить у себя' : 'Remove for me'}
                   >
                     <Trash2 size={16} />
                   </Button>
@@ -1478,15 +1499,17 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       onConfirm={handleConfirmDelete}
       title={isDraftId(deleteConfirmConvId)
         ? (lang === 'ru' ? 'Удалить черновик?' : 'Delete draft?')
-        : (lang === 'ru' ? 'Удалить переписку?' : 'Delete conversation?')}
+        : (lang === 'ru' ? 'Удалить переписку у себя?' : 'Remove this conversation for you?')}
       message={isDraftId(deleteConfirmConvId)
         ? (lang === 'ru'
             ? 'Этот черновик ещё не отправлен. Удалить его? Сообщение не будет создано.'
             : 'This draft has not been sent yet. Delete it? No message will be created.')
         : (lang === 'ru'
-          ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?'
-          : 'Are you sure you want to permanently delete this conversation for yourself?')}
-      confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+            ? 'Переписка исчезнет у вас, и вы больше её не прочтёте. У собеседника переписка сохранится, пока он сам её не удалит.'
+            : 'The conversation disappears for you and you will not read it again. Your contact keeps it until they remove it too.')}
+      confirmText={isDraftId(deleteConfirmConvId)
+        ? (lang === 'ru' ? 'Удалить' : 'Delete')
+        : (lang === 'ru' ? 'Удалить у себя' : 'Remove for me')}
       cancelText={lang === 'ru' ? 'Отмена' : 'Cancel'}
       variant="danger"
     />

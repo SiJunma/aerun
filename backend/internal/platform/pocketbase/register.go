@@ -135,7 +135,7 @@ func registerHandler(e *core.RequestEvent) error {
 	var nickConflict []*core.Record
 	if err := e.App.RecordQuery(usersCollectionName).
 		AndWhere(dbx.HashExp{"nickname_normalized": auth.NormalizeNickname(nickname)}).
-		AndWhere(dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false})).
+		AndWhere(notDeletedUsersExpr()).
 		Limit(1).
 		All(&nickConflict); err != nil {
 		return router.NewInternalServerError("nickname check failed", err)

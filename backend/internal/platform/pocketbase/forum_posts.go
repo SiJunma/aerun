@@ -63,10 +63,10 @@ type movePostsForm struct {
 
 func postPayload(record *core.Record) map[string]any {
 	payload := map[string]any{
-		"id":        record.Id,
-		"topic_id":  record.GetString("topic_id"),
-		"created":   record.GetDateTime("created").String(),
-		"updated":   record.GetDateTime("updated").String(),
+		"id":       record.Id,
+		"topic_id": record.GetString("topic_id"),
+		"created":  record.GetDateTime("created").String(),
+		"updated":  record.GetDateTime("updated").String(),
 	}
 	// Nested AuthorRef DTO (ADR contract) is the single source of truth for
 	// the post author. New readers must use payload["author"].

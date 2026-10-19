@@ -57,6 +57,13 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := registerOutboxWorkerCron(se.App); err != nil {
 			return err
 		}
+		// The Min-Watermark collector for direct messages, for the same
+		// reason: a user's own delete is a per-member projection, and the
+		// physical removal is a separate job that runs after every participant
+		// has released the messages.
+		if err := registerDMCollectorCron(se.App); err != nil {
+			return err
+		}
 		// Fail fast on a binary/data-directory mismatch. touchMemberLastSeen
 		// cannot report this: it is best-effort by design, so a missing column
 		// would degrade the members table to registration dates with a 200 on
@@ -243,6 +250,13 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group := se.Router.Group("/api/aerun")
 	group.BindFunc(errorContractMiddleware)
 	group.BindFunc(resolver.Middleware())
+	// A soft-deleted account is out of circulation. The gate is here, on the
+	// group, rather than in a list of handlers: a list is a promise the next
+	// handler breaks, and the handlers that consult the status already do so
+	// for their own reasons (the author branch, the recipient check). It runs
+	// AFTER the resolver, because the status it reads comes from the resolved
+	// access context.
+	group.BindFunc(requireLiveAccount)
 
 	group.GET("/health", func(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, map[string]any{
@@ -475,6 +489,11 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/dms/{id}/messages", listDMMessagesHandler)
 	group.POST("/dms/{id}/read", markConversationReadHandler)
 	group.POST("/dms/{id}/clear", clearConversationHandler)
+	// The TWO steps of the conversation delete (owner's model, 2026-10-19):
+	// the clear above hides what the member has seen, the delete below moves
+	// the chat into their "Deleted" folder, and the DELETE erases it for good
+	// — but only the messages no participant can read any more.
+	group.DELETE("/dms/{id}", eraseConversationHandler).BindFunc(enforceIdempotency)
 	// Message lifecycle. No RequirePermission: authority here is MEMBERSHIP and
 	// authorship, both checked in the handler, because `edit_others_posts` must
 	// not extend into a private conversation.

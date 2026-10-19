@@ -221,7 +221,7 @@ func listUsersHandler(e *core.RequestEvent) error {
 	// belong there.
 	records := make([]*core.Record, 0, perPage)
 	if err := e.App.RecordQuery(usersCollectionName).
-		AndWhere(dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false})).
+		AndWhere(notDeletedUsersExpr()).
 		OrderBy("nickname ASC", "id ASC").
 		Limit(int64(perPage)).
 		Offset(int64((page - 1) * perPage)).
@@ -229,8 +229,7 @@ func listUsersHandler(e *core.RequestEvent) error {
 		return internalError("failed to query accounts", err)
 	}
 
-	total, err := e.App.CountRecords(usersCollectionName,
-		dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false}))
+	total, err := e.App.CountRecords(usersCollectionName, notDeletedUsersExpr())
 	if err != nil {
 		return internalError("failed to count accounts", err)
 	}
@@ -299,7 +298,7 @@ func checkNicknameHandler(e *core.RequestEvent) error {
 	var found []*core.Record
 	if err := e.App.RecordQuery(usersCollectionName).
 		AndWhere(dbx.HashExp{"nickname_normalized": key}).
-		AndWhere(dbx.NewExp("(is_deleted = false OR is_deleted IS NULL)")).
+		AndWhere(notDeletedUsersExpr()).
 		Limit(1).
 		All(&found); err != nil {
 		return internalError("failed to check nickname", err)
@@ -344,7 +343,7 @@ func searchUsersHandler(e *core.RequestEvent) error {
 	// offered by the mention picker as a living member.
 	if err := e.App.RecordQuery(usersCollectionName).
 		AndWhere(dbx.Like("nickname", raw)).
-		AndWhere(dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false})).
+		AndWhere(notDeletedUsersExpr()).
 		OrderBy("nickname ASC", "id ASC").
 		Limit(int64(limit)).
 		All(&records); err != nil {

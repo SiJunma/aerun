@@ -25,6 +25,31 @@ export class ApiError extends Error {
   }
 }
 
+// A session that the server has stopped honouring.
+//
+// A SOFT-DELETED account's tokens stop verifying the moment the delete
+// rotates the account's tokenKey, so every request the browser still holds a
+// token for comes back 401. Without this the member sits on a forum that
+// silently refuses everything: the shell renders, the lists come back empty,
+// and nothing says the account is gone.
+//
+// The flag is the same one the ban path writes, so the same modal explains
+// it. The auth store is cleared here rather than in the provider: this is the
+// FIRST sign the session is dead, and waiting for the next profile refresh
+// would leave the member clicking on a forum that answers nothing.
+const DEAD_SESSION_STATUSES = [401];
+
+function endDeadSession() {
+  try {
+    sessionStorage.setItem('deleted_logout', 'true');
+  } catch {
+    // A browser with storage disabled (private mode, blocked cookies) cannot
+    // hold the flag. The session is still cleared, and the provider's own
+    // status check explains the state on the next profile read.
+  }
+  pb.authStore.clear();
+}
+
 /**
  * sendApi sends an HTTP request to the Aerun domain API (/api/aerun/...)
  * using PocketBase's auth token and error contract.
@@ -70,6 +95,18 @@ export async function sendApi(path, options = {}) {
     if (!res.ok) {
       const errData = data?.data || {};
       const message = data?.message || data?.error || res.statusText || 'Request failed';
+      // A dead session ends HERE, not on the next profile refresh: the member
+      // is clicking on a forum that refuses everything and says nothing.
+      //
+      // The 401 is the ordinary case: the server rotated the account's
+      // tokenKey, so the token no longer verifies. The 403 carries an
+      // explicit `account_deleted` marker, because a DELETED account is a
+      // different reason from an ordinary forbidden and the member deserves
+      // to be told which one it is.
+      const accountDeleted = errData.account_deleted === true;
+      if (accountDeleted || DEAD_SESSION_STATUSES.includes(res.status)) {
+        endDeadSession();
+      }
       throw new ApiError(message, {
         status: res.status,
         code: errData.kind || 'api_error',

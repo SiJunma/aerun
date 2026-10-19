@@ -1,7 +1,7 @@
 package pocketbase
 
 // user_soft_delete_test.go — the soft-delete contract from
-// markdowns/INPROGRESS_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md.
+// markdowns/DONE_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md.
 //
 // Deleting an account no longer removes the users row: the row is taken out
 // of circulation (flag + status + released nickname key) so the profile page
@@ -23,20 +23,20 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
-// softDeleteUserDirectly mirrors the three coordinated writes of
+// softDeleteUserDirectly mirrors the coordinated writes of
 // adminDeleteUserHandler, for tests whose subject is everything AROUND the
 // delete command (DM threads, vote blocks, decorators).
 //
-// nickname_normalized is cleared by raw UPDATE for the same reason the
-// command does it: the field is a REQUIRED text field, so a record save with
-// an empty value is refused by validation.
+// It deliberately does NOT rotate the tokenKey: the point of this helper is
+// to produce a deleted account whose token STILL VALIDATES — the state a
+// delete performed by another binary leaves behind. The gate that refuses such
+// an account is what those tests are about.
 func softDeleteUserDirectly(t testing.TB, app *tests.TestApp, id string) {
 	t.Helper()
 	u, err := app.FindRecordById(usersCollectionName, id)
@@ -45,20 +45,14 @@ func softDeleteUserDirectly(t testing.TB, app *tests.TestApp, id string) {
 	}
 	u.Set(userIsDeletedField, true)
 	u.Set("status", string(auth.StatusDeleted))
+	u.Set("nickname_normalized", "")
 	if err := app.Save(u); err != nil {
 		t.Fatalf("soft-delete save for %s: %v", id, err)
-	}
-	if _, err := app.DB().NewQuery(
-		"UPDATE " + usersCollectionName + " SET nickname_normalized = '' WHERE id = {:id}",
-	).Bind(dbx.Params{"id": id}).Execute(); err != nil {
-		t.Fatalf("release nickname for %s: %v", id, err)
 	}
 }
 
 // TestAdminSoftDeleteKeepsTheRowAndFreesTheNickname is the core contract:
 // the row survives with the baked profile (п.1-2 концепта), the nickname key
-// is released for reuse (п.5), and the profile answers 200-with-deleted
-// instead of 404.
 func TestAdminSoftDeleteKeepsTheRowAndFreesTheNickname(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -147,6 +141,17 @@ func TestAdminSoftDeleteKeepsTheRowAndFreesTheNickname(t *testing.T) {
 		t.Errorf("the admin list with status=deleted must carry the row, got %v", payload)
 	}
 
+	// …but the staff TABLE does not: a deleted account cannot act, so it has
+	// no row next to the accounts that can (owner's ruling, 2026-10-19).
+	status, payload = doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/admin/users", tokens["root"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("admin list = %d: %v", status, payload)
+	}
+	if listContainsID(payload, fixPendingID) {
+		t.Errorf("the admin table must not list a deleted account, got %v", payload)
+	}
+
 	// …while the PUBLIC members board does not: it lists people you can meet.
 	status, payload = doJSON(t, ts.URL, http.MethodGet, "/api/aerun/users", "", "", "")
 	if status != http.StatusOK {
@@ -176,8 +181,8 @@ func TestAdminDeleteWithDeletePostsPurgesContent(t *testing.T) {
 	// Residue that must die with the content: a vote cast BY the deleted
 	// member (voter_id), a vote ON their content (target_id with a post), a
 	// profile-level vote on them (target_id, no post) and a subscription.
-	castPostVote(t, app, fixPlayerID, fixPendingID, replyInTopic1, topic1ID, 4)          // player→pending reply: pending +4
-	castPostVote(t, app, fixPendingID, fixPlayerID, replyByPlayerInTopic2, topic2ID, 5)  // pending→player reply: player +5
+	castPostVote(t, app, fixPlayerID, fixPendingID, replyInTopic1, topic1ID, 4)         // player→pending reply: pending +4
+	castPostVote(t, app, fixPendingID, fixPlayerID, replyByPlayerInTopic2, topic2ID, 5) // pending→player reply: player +5
 	castPostVote(t, app, fixPendingID, fixPlayerID, "", "", 2)                          // profile vote: player +2
 	subscribeUserToTopic(t, app, fixPendingID, topic1ID)
 
@@ -358,9 +363,20 @@ func listContainsID(payload map[string]any, id string) bool {
 	return false
 }
 
-// TestClearDropsThreadWhosePeerIsDeleted pins п.8: clearing a conversation
-// whose every other participant is deleted hard-drops the whole thread
-// instead of merely stamping the caller's horizon.
+// TestClearDropsThreadWhosePeerIsDeleted pins the owner's three-step
+// conversation delete (2026-10-19) for the case where the only other
+// participant is a soft-deleted account.
+//
+// The steps are: clear (hide what you have seen) → delete (move the chat to
+// the "Deleted" folder) → erase (remove it for good). The third step is the
+// only irreversible one, and it is allowed exactly when no participant can
+// still read the conversation — which is the case here: the peer is a
+// soft-deleted account, so it can never log in and read anything.
+//
+// The chat is NOT dropped on the spot any more. It used to be, and that
+// contradicted the repository rule that a direct message is deleted SOFT
+// (tombstone) — the peer could no longer read the history at all, and the
+// erase happened without the member asking for it explicitly.
 func TestClearDropsThreadWhosePeerIsDeleted(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -374,25 +390,69 @@ func TestClearDropsThreadWhosePeerIsDeleted(t *testing.T) {
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	// Clearing drops the thread wholesale because no live reader remains.
+	// Step 1: clear. Soft — the chat is still there.
 	status, payload := doJSON(t, ts.URL, http.MethodPost,
 		"/api/aerun/dms/"+convID+"/clear", tokens["player"], "clear-deleted-peer-1", "")
 	if status != http.StatusOK {
 		t.Fatalf("clear a thread whose peer is deleted = %d: %v", status, payload)
 	}
-	if dropped, _ := payload["deleted"].(bool); !dropped {
-		t.Errorf("clear with a deleted peer must report deleted=true, got %v", payload)
+	if _, err := app.FindRecordById(dmConversationsCollectionName, convID); err != nil {
+		t.Error("a clear must not drop the conversation — the erase is a separate, explicit step")
 	}
-	// The conversation row, its membership rows and its messages are all gone.
+
+	// Step 2: delete — the chat moves into the caller's "Deleted" folder.
+	status, payload = doJSON(t, ts.URL, http.MethodPost,
+		"/api/aerun/dms/"+convID+"/delete", tokens["player"], "delete-deleted-peer-1", "")
+	if status != http.StatusOK {
+		t.Fatalf("delete a thread whose peer is deleted = %d: %v", status, payload)
+	}
+	if folder, _ := payload["folder"].(string); folder != "deleted" {
+		t.Errorf("delete must report the deleted folder, got %v", payload)
+	}
+
+	// The chat is in the folder, not in the inbox.
+	status, payload = doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/dms?folder=deleted", tokens["player"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("list the deleted folder = %d: %v", status, payload)
+	}
+	if !listContainsID(payload, convID) {
+		t.Errorf("the deleted folder must carry the chat, got %v", payload)
+	}
+	status, payload = doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/dms", tokens["player"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("list the inbox = %d: %v", status, payload)
+	}
+	if listContainsID(payload, convID) {
+		t.Errorf("a deleted chat must not be in the inbox, got %v", payload)
+	}
+
+	// Step 3: erase. The peer is a soft-deleted account, so it can never log in
+	// and read anything — the erasure is allowed and removes everything.
+	//
+	// The peer being a DELETED ACCOUNT is what releases the hold here (its
+	// membership row survives, but nobody can read through it any more). A
+	// LIVING peer would have to ERASE the chat too, and only then.
+	status, payload = doJSON(t, ts.URL, http.MethodDelete,
+		"/api/aerun/dms/"+convID, tokens["player"], "erase-deleted-peer-1", "")
+	if status != http.StatusOK {
+		t.Fatalf("erase a thread whose peer is deleted = %d: %v", status, payload)
+	}
 	if _, err := app.FindRecordById(dmConversationsCollectionName, convID); err == nil {
-		t.Error("the conversation row must be hard-deleted")
+		t.Error("the conversation row must be gone after the erase")
 	}
 	if n := countRows(t, app, dmMembersCollectionName, "conversation_id = {:c}",
 		map[string]any{"c": convID}); n != 0 {
 		t.Errorf("membership rows must die with the conversation, %d remain", n)
 	}
+	if n := countRows(t, app, dmMessagesCollectionName, "conversation_id = {:c}",
+		map[string]any{"c": convID}); n != 0 {
+		t.Errorf("messages must die with the conversation, %d remain", n)
+	}
 
-	// Control: a thread with a living peer still clears normally (no deleted key).
+	// Control: a thread with a LIVING peer cannot be erased — the other
+	// member can still read it.
 	app2 := newAerunTestApp(t)
 	defer app2.Cleanup()
 	tokens2 := seedIdentityFixtures(t, app2)
@@ -403,15 +463,17 @@ func TestClearDropsThreadWhosePeerIsDeleted(t *testing.T) {
 	defer ts2.Close()
 
 	status, payload = doJSON(t, ts2.URL, http.MethodPost,
-		"/api/aerun/dms/"+convID2+"/clear", tokens2["player"], "clear-live-peer-1", "")
+		"/api/aerun/dms/"+convID2+"/delete", tokens2["player"], "delete-live-peer-1", "")
 	if status != http.StatusOK {
-		t.Fatalf("clear a live thread = %d: %v", status, payload)
+		t.Fatalf("delete a live thread = %d: %v", status, payload)
 	}
-	if dropped, _ := payload["deleted"].(bool); dropped {
-		t.Errorf("clear with a live peer must NOT report deleted, got %v", payload)
+	status, payload = doJSON(t, ts2.URL, http.MethodDelete,
+		"/api/aerun/dms/"+convID2, tokens2["player"], "erase-live-peer-1", "")
+	if status != http.StatusConflict {
+		t.Errorf("erasing a chat a living peer can still read must be refused, got %d: %v", status, payload)
 	}
-	if got, _ := payload["cleared_at"].(string); got == "" {
-		t.Error("a normal clear must stamp cleared_at")
+	if _, err := app2.FindRecordById(dmConversationsCollectionName, convID2); err != nil {
+		t.Error("a refused erase must leave the conversation in place")
 	}
 }
 
@@ -508,5 +570,236 @@ func TestMigratedUsersCollectionHoldsIsDeleted(t *testing.T) {
 		t.Fatal("users.status must be a select field")
 	} else if !slices.Contains(statusSel.Values, string(auth.StatusDeleted)) {
 		t.Fatalf("the status select must hold deleted, got %v", statusSel.Values)
+	}
+}
+
+// TestSoftDeletedAccountStaysWritable pins the D1 fix.
+//
+// The soft delete releases the nickname key by writing "" into
+// nickname_normalized. While that column was REQUIRED, the write had to be a
+// raw UPDATE — and the row was then UNSAVABLE: every later write was
+// refused with "nickname_normalized: cannot be blank". That killed every
+// counter move on the deleted account (adjustUserReputation,
+// adjustUserPostCount, adjustUserTopicCount all end in a record save), so a
+// moderator deleting one of the deleted member's posts afterwards got a 500
+// and RecomputeUserCounters could never repair the account.
+//
+// The column is optional now (migration 1770000010), so the row accepts
+// writes again.
+func TestSoftDeletedAccountStaysWritable(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+
+	u, err := app.FindRecordById(usersCollectionName, fixPendingID)
+	if err != nil || u == nil {
+		t.Fatalf("user missing: %v", err)
+	}
+	u.Set(userIsDeletedField, true)
+	u.Set("status", string(auth.StatusDeleted))
+	u.Set("nickname_normalized", "")
+	if err := app.Save(u); err != nil {
+		t.Fatalf("soft delete save: %v", err)
+	}
+
+	// A later counter move on the deleted account must succeed.
+	if err := adjustUserPostCount(app, fixPendingID, -1); err != nil {
+		t.Fatalf("the deleted account must stay writable: %v", err)
+	}
+	if err := adjustUserReputation(app, fixPendingID, -5); err != nil {
+		t.Fatalf("reputation move on the deleted account must succeed: %v", err)
+	}
+	if got := userCounter(t, app, fixPendingID, "posts_count"); got != 0 {
+		t.Errorf("posts_count = %d, want 0", got)
+	}
+}
+
+// TestPurgeSettlesThePostReputationOfSurvivingPosts pins the D5 fix.
+//
+// A vote carries TWO denormalized copies of its value: the target's
+// users.reputation and the posts.reputation of the post it was cast on. The
+// ordinary retract path (deleteReputationHandler) moves both. The purge
+// moved only the first, so a post whose voter was deleted kept a score
+// whose vote row no longer existed — the post and its author disagreed, and
+// a recompute pass would have separated them further.
+func TestPurgeSettlesThePostReputationOfSurvivingPosts(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+
+	// A topic by the pending account, with the pending account's own post in
+	// it. The player (the member to be deleted) votes on it, so the POST
+	// SURVIVES the purge while the vote does not.
+	topicID, survivingPostID, _ := seedResidueFixture(t, app, fixPendingID, fixPendingID)
+	castPostVote(t, app, fixPlayerID, fixPendingID, survivingPostID, topicID, 5)
+
+	post, err := app.FindRecordById(postsCollectionName, survivingPostID)
+	if err != nil || post == nil {
+		t.Fatalf("post missing: %v", err)
+	}
+	if got := post.GetInt("reputation"); got != 5 {
+		t.Fatalf("fixture: post reputation = %d, want 5", got)
+	}
+
+	if err := purgeUserContent(app, fixPlayerID); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+
+	post, err = app.FindRecordById(postsCollectionName, survivingPostID)
+	if err != nil || post == nil {
+		t.Fatalf("the post must survive the purge: %v", err)
+	}
+	if got := post.GetInt("reputation"); got != 0 {
+		t.Errorf("post reputation = %d, want 0 — the vote row is gone, so the score must be too", got)
+	}
+	if got := userCounter(t, app, fixPendingID, "reputation"); got != 0 {
+		t.Errorf("author reputation = %d, want 0", got)
+	}
+}
+
+// TestDeletedAccountSessionIsDead pins the D4 fix.
+//
+// A deleted account is out of circulation. The status used to be checked in a
+// fixed list of handlers, and the list had holes: the content-creating
+// commands, the profile/settings/avatar writers, the draft commands and the
+// DM message editors never consulted it, and categoryWriteAllowed grants
+// write access from the category's own role list — so it answered even when
+// the narrowed permission set was empty.
+//
+// The delete also rotates the account's tokenKey, which invalidates every
+// token it holds: the browser session dies with the account instead of
+// lingering until the token expires.
+func TestDeletedAccountSessionIsDead(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// The account still holds a valid token when it is deleted.
+	status, payload := doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/me", tokens["pending"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("the pending account must be signed in before the delete: %d %v", status, payload)
+	}
+
+	status, payload = doJSON(t, ts.URL, http.MethodDelete,
+		"/api/aerun/admin/users/"+fixPendingID, tokens["root"], "adm-del-mutate-1", "")
+	if status != http.StatusOK {
+		t.Fatalf("admin delete = %d: %v", status, payload)
+	}
+
+	// The token is dead: the delete rotated its tokenKey, so the bearer token
+	// no longer authenticates. The route answers as a guest, and what matters
+	// is that the response no longer carries the deleted account's identity.
+	status, payload = doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/me", tokens["pending"], "", "")
+	if status == http.StatusOK {
+		if id, _ := payload["id"].(string); id == fixPendingID {
+			t.Errorf("the deleted account's token must not authenticate any more, got %v", payload)
+		}
+	}
+}
+
+// TestDeletedAccountWithAValidTokenCannotMutate pins the D4 gate itself.
+//
+// The token rotation kills the session of an account deleted by THIS binary.
+// This test covers the other case: a deleted account whose token still
+// validates — the state a delete performed by another binary leaves behind,
+// and the state the group-level gate exists for.
+func TestDeletedAccountWithAValidTokenCannotMutate(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// The token is valid before the delete.
+	status, payload := doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/me", tokens["pending"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("the pending account must be signed in: %d %v", status, payload)
+	}
+
+	softDeleteUserDirectly(t, app, fixPendingID)
+
+	// The token still validates, so the request reaches the gate.
+	status, payload = doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/me", tokens["pending"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("the token must still resolve for this test to be meaningful: %d %v", status, payload)
+	}
+
+	// Every mutation is refused.
+	status, payload = doJSON(t, ts.URL, http.MethodPost,
+		"/api/aerun/topics", tokens["pending"], "del-gate-topic", `{"category_id":"x","title":"t","content":"c"}`)
+	if status != http.StatusForbidden {
+		t.Errorf("a deleted account must not create a topic, got %d: %v", status, payload)
+	}
+	status, payload = doJSON(t, ts.URL, http.MethodPatch,
+		"/api/aerun/me/profile", tokens["pending"], "del-gate-profile", `{"bio":"x"}`)
+	if status != http.StatusForbidden {
+		t.Errorf("a deleted account must not edit its profile, got %d: %v", status, payload)
+	}
+}
+
+// TestAdminListHidesDeletedAccounts pins the D8 fix.
+//
+// The owner's ruling (2026-10-19): a deleted account is NOT in the staff
+// table. It cannot act — no permissions, dead session — so a row for it next
+// to the accounts that can is a row the staff can do nothing with.
+//
+// The account stays reachable through the deliberate `?status=deleted` query
+// (a check that nothing was left behind), and the payload still carries the
+// verdict (`deleted: true`, `status: "deleted"`) so that query answers
+// unambiguously.
+func TestAdminListHidesDeletedAccounts(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, payload := doJSON(t, ts.URL, http.MethodDelete,
+		"/api/aerun/admin/users/"+fixPendingID, tokens["root"], "adm-del-role-1", "")
+	if status != http.StatusOK {
+		t.Fatalf("admin delete = %d: %v", status, payload)
+	}
+
+	// The staff TABLE does not carry the row.
+	status, payload = doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/admin/users", tokens["root"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("admin list = %d: %v", status, payload)
+	}
+	if listContainsID(payload, fixPendingID) {
+		t.Errorf("the admin table must not list a deleted account, got %v", payload)
+	}
+
+	// The deliberate query does, with the verdict attached.
+	status, payload = doJSON(t, ts.URL, http.MethodGet,
+		"/api/aerun/admin/users?status=deleted", tokens["root"], "", "")
+	if status != http.StatusOK {
+		t.Fatalf("admin list status=deleted = %d: %v", status, payload)
+	}
+	items, _ := payload["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("the deleted account must be listed, got %v", payload)
+	}
+	item, _ := items[0].(map[string]any)
+	// The staff list keeps the STORED role: it is the history of what the
+	// account held while it could act, and the role editor reads it. What it
+	// must carry is the deleted verdict, so the query never answers
+	// ambiguously about the row it returns.
+	if deleted, _ := item["deleted"].(bool); !deleted {
+		t.Error("admin list must carry deleted=true")
+	}
+	if status, _ := item["status"].(string); status != string(auth.StatusDeleted) {
+		t.Errorf("admin list status = %q, want %q", status, auth.StatusDeleted)
 	}
 }

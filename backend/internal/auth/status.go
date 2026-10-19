@@ -17,7 +17,7 @@ const (
 	// StatusBanned is an account stripped of every permission.
 	StatusBanned Status = "banned"
 	// StatusDeleted marks a soft-deleted account (see
-	// markdowns/INPROGRESS_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md).
+	// markdowns/DONE_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md).
 	//
 	// A deleted account keeps its users row (nickname, avatar, counters stay
 	// baked in for rendering), but it is out of circulation: NarrowForStatus

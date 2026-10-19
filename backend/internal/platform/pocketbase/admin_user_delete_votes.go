@@ -17,7 +17,7 @@ func purgeSinglePostForUserDeletion(txApp core.App, post *core.Record) error {
 		Total int `db:"total"`
 	}
 	if err := txApp.DB().NewQuery(
-		"SELECT COALESCE(SUM(value), 0) AS total FROM "+reputationVotesCollectionName+
+		"SELECT COALESCE(SUM(value), 0) AS total FROM " + reputationVotesCollectionName +
 			" WHERE post_id = {:post}",
 	).Bind(dbx.Params{"post": post.Id}).One(&voteSum); err != nil {
 		return internalError("failed to sum reputation votes for user deletion", err)
@@ -57,7 +57,7 @@ func purgeSinglePostForUserDeletion(txApp core.App, post *core.Record) error {
 	}
 
 	if _, err := txApp.DB().NewQuery(
-		"DELETE FROM "+reputationVotesCollectionName+" WHERE post_id = {:post}",
+		"DELETE FROM " + reputationVotesCollectionName + " WHERE post_id = {:post}",
 	).Bind(dbx.Params{"post": post.Id}).Execute(); err != nil {
 		return internalError("failed to delete votes for user deletion", err)
 	}
@@ -72,9 +72,16 @@ func purgeSinglePostForUserDeletion(txApp core.App, post *core.Record) error {
 	return nil
 }
 
-// purgeUserProfileVotes deletes the profile-level reputation votes touching
-// userID — votes the member cast (voter_id) and votes on the member's profile
-// (target_id with empty post_id) — paying each back to the profile it moved.
+// purgeUserProfileVotes deletes the reputation votes touching userID — votes
+// the member cast (voter_id) and votes on the member's profile (target_id
+// with empty post_id) — paying each back to the profile it moved.
+//
+// A vote carries TWO denormalized copies of its value: the target's
+// `users.reputation` AND the `posts.reputation` of the post it was cast on.
+// The ordinary retract path (deleteReputationHandler) moves BOTH, and so must
+// this one: leaving the post's counter behind would strand a score whose
+// vote row no longer exists, and the post would disagree with itself and with
+// the user it belongs to until the next recompute pass.
 //
 // Post-level votes where the member is the target are NOT touched here: they
 // were already paid back when their posts were deleted above, and paying them
@@ -91,6 +98,17 @@ func purgeUserProfileVotes(txApp core.App, userID string) error {
 		if targetID := vote.GetString("target_id"); targetID != "" {
 			if err := adjustUserReputation(txApp, targetID, -vote.GetInt("value")); err != nil {
 				return err
+			}
+		}
+		// The post's own counter, when the vote was cast on a post that
+		// SURVIVED the purge (a vote on somebody else's post). A post that
+		// went with the purge has no counter left to settle.
+		if postID := vote.GetString("post_id"); postID != "" {
+			if post, err := txApp.FindRecordById(postsCollectionName, postID); err == nil && post != nil {
+				post.Set("reputation", post.GetInt("reputation")-vote.GetInt("value"))
+				if err := txApp.Save(post); err != nil {
+					return internalError("failed to settle post reputation for user deletion", err)
+				}
 			}
 		}
 		if err := txApp.Delete(vote); err != nil {

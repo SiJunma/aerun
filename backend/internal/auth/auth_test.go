@@ -247,6 +247,54 @@ func TestDeletedStatusIsStoredButNotAssignable(t *testing.T) {
 	}
 }
 
+// TestStatusVocabulariesStayConsistent pins the INVARIANT between the two
+// status vocabularies, which is what keeps "deleted" from meaning two
+// different things.
+//
+// AllStatuses is the ASSIGNABLE set: what a status form may write.
+// AllStatusValues is the STORED set: what the users.status select may hold
+// and what the admin filter may search for. They differ by exactly one
+// value — the soft-delete marker — and the difference must stay exactly one.
+//
+// If a future change adds a stored value without adding it to the
+// assignable set, that value becomes writable by a status form and the row
+// it produces is half-written (no coordinated is_deleted / nickname release
+// with it). If a change adds a value to the assignable set without adding
+// it to the stored set, the select refuses to hold it and every write of
+// that status fails validation.
+func TestStatusVocabulariesStayConsistent(t *testing.T) {
+	assignable := AllStatuses()
+	stored := AllStatusValues()
+
+	// Everything assignable must be storable: the select has to hold every
+	// value a form may write, or the record save is refused.
+	for _, status := range assignable {
+		if !slices.Contains(stored, string(status)) {
+			t.Errorf("the assignable status %q is missing from the stored vocabulary %v", status, stored)
+		}
+	}
+
+	// The stored set is the assignable set plus the soft-delete marker, and
+	// nothing else.
+	for _, value := range stored {
+		if slices.Contains(assignable, Status(value)) {
+			continue
+		}
+		if value != string(StatusDeleted) {
+			t.Errorf("the stored vocabulary holds %q, which is neither assignable nor the soft-delete marker", value)
+		}
+	}
+
+	// The marker itself must be in exactly one of the two: stored, not
+	// assignable. A marker in both would let a status form write it.
+	if !slices.Contains(stored, string(StatusDeleted)) {
+		t.Error("the soft-delete marker must be storable")
+	}
+	if slices.Contains(assignable, StatusDeleted) {
+		t.Error("the soft-delete marker must not be assignable")
+	}
+}
+
 func TestMentionAllPermissionDefaultsAndStatusNarrowing(t *testing.T) {
 	// Owner ruling (2026-10-11, Part 9):
 	// PermMentionAll ("mention_all") is default ON for admin/root,

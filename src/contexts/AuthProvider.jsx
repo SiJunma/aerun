@@ -641,6 +641,33 @@ export const AuthProvider = ({ children }) => {
     logout(true);
   }, [user, profile, loading, logout]);
 
+  // THE DELETED-MEMBER EVICTION.
+  //
+  // A soft-deleted account is out of circulation, and the server enforces that
+  // hard: the delete rotates the account's tokenKey, so every token it holds
+  // stops verifying, and a group-level gate refuses every mutating request
+  // with 403. What the server CANNOT do is clear the browser's copy of the
+  // session.
+  //
+  // Without this the member sits on a forum that silently refuses everything:
+  // the shell renders, the lists come back empty, the composer 403s on submit,
+  // and nothing says why. That is the "silent failure" AGENTS.md forbids, and
+  // it is exactly the failure the BAN path above already learned to avoid.
+  //
+  // The flag is written BEFORE the eviction and is NOT cleared on mount (the
+  // modal removes it on hide), so the explanation survives the redirect and
+  // the page transitions in between.
+  //
+  // `logout(true)` skips the presence cleanup: the account has lost every
+  // permission, so the offline write would be a permission-denied request
+  // whose only output is an error loop.
+  useEffect(() => {
+    if (!user || !profile || loading) return;
+    if (profile.status !== 'deleted') return;
+    sessionStorage.setItem('deleted_logout', 'true');
+    logout(true);
+  }, [user, profile, loading, logout]);
+
   // updateProfile saves the profile form.
   //
   // It used to merge everything into local state and call nothing for your own

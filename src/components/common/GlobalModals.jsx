@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthProvider';
 import MaintenanceLogoutModal from '../modals/MaintenanceLogoutModal';
 import BannedLogoutModal from '../modals/BannedLogoutModal';
+import DeletedLogoutModal from '../modals/DeletedLogoutModal';
 
 const GlobalModals = () => {
   const { hasPermission, PERMISSIONS } = useAuth();
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
   const [showBannedModal, setShowBannedModal] = useState(false);
+  const [showDeletedModal, setShowDeletedModal] = useState(false);
 
   useEffect(() => {
     // Check flags whenever the component mounts or permissions load
@@ -27,6 +29,13 @@ const GlobalModals = () => {
       // We don't remove the banned flag here; it's cleared on onHide,
       // so the modal survives page transitions until manually acknowledged.
     }
+
+    // Same shape as the ban: the flag survives until the member acknowledges
+    // the modal, so the explanation is not lost to a redirect.
+    const isDeletedRedirect = sessionStorage.getItem('deleted_logout') === 'true';
+    if (isDeletedRedirect) {
+      setTimeout(() => setShowDeletedModal(true), 0);
+    }
   }, [hasPermission, PERMISSIONS.ADMIN_ACCESS]);
 
   return (
@@ -41,6 +50,14 @@ const GlobalModals = () => {
         onHide={() => {
           setShowBannedModal(false);
           sessionStorage.removeItem('banned_logout');
+        }}
+      />
+
+      <DeletedLogoutModal
+        show={showDeletedModal}
+        onHide={() => {
+          setShowDeletedModal(false);
+          sessionStorage.removeItem('deleted_logout');
         }}
       />
     </>

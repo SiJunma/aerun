@@ -88,6 +88,22 @@ func rateLimitedError(message string) error {
 	return newContractError(http.StatusTooManyRequests, errKindRateLimited, message, nil)
 }
 
+// accountDeletedError reports that the caller's own account was deleted.
+//
+// It is a FORBIDDEN with a machine-readable marker, because the client has to
+// end the session on the strength of the response itself (owner ruling
+// 2026-10-19) rather than wait for the next 401 to tell it what happened.
+// A deleted account and an ordinary forbidden look identical on the wire
+// without the marker, and the member deserves to be told which one it is.
+func accountDeletedError(message string) error {
+	apiErr := newContractError(http.StatusForbidden, errKindForbidden, message, nil)
+	if apiErr.Data == nil {
+		apiErr.Data = map[string]any{}
+	}
+	apiErr.Data["account_deleted"] = true
+	return apiErr
+}
+
 // errorContractMiddleware wraps the whole /api/aerun group: it converts the
 // error returned by the inner chain into the contract envelope. It is bound
 // after the AccessResolver and before the idempotency middleware, so both

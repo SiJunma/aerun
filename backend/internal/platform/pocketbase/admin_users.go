@@ -68,6 +68,21 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 			return e.BadRequestError("unknown status filter", nil)
 		}
 		where = append(where, dbx.HashExp{"status": status})
+	} else {
+		// A DELETED account is not in the members table.
+		//
+		// The owner's ruling (2026-10-19): the staff table lists the accounts
+		// that can still act. A soft-deleted account cannot act at all — it
+		// holds no permissions, its session is dead, and its content is either
+		// kept as history or purged with it — so a row for it in the table is
+		// a row the staff cannot do anything with, next to rows they can.
+		//
+		// The account is still reachable, and still auditable: the
+		// `?status=deleted` filter below is the deliberate way to ask for
+		// exactly those rows (a check that nothing was left behind, a look at
+		// what a given member's history still holds). It is a targeted query,
+		// not the list the table draws.
+		where = append(where, notDeletedUsersExpr())
 	}
 
 	total, err := e.App.CountRecords(usersCollectionName, where...)
@@ -92,8 +107,18 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		items = append(items, map[string]any{
-			"id":         record.Id,
-			"nickname":   record.GetString("nickname"),
+			"id":       record.Id,
+			"nickname": record.GetString("nickname"),
+			// The role stays the STORED role here, on purpose: this is the
+			// staff view, and the original role of a deleted account is
+			// history the staff may need (it is what the account held while
+			// it could act). The public profile is the surface that paints
+			// "Deleted" instead (see profileRole).
+			//
+			// What the staff view must NOT do is present a deleted account
+			// as living: the `deleted` flag and `status` below carry that
+			// verdict, and the admin table renders a "Deleted" badge from
+			// them.
 			"role":       record.GetString("role"),
 			"status":     record.GetString("status"),
 			"deleted":    isUserDeleted(record),
@@ -436,7 +461,7 @@ func customRoleIDFor(app core.App, role string) string {
 // SOFT DELETE. The users row is never removed: it is taken out of
 // circulation in one transaction so the profile page and the author's posts
 // keep rendering with the baked nickname/avatar/counters instead of 404ing.
-// See markdowns/INPROGRESS_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md.
+// See markdowns/DONE_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md.
 //
 // The three coordinated writes:
 //   - is_deleted = true (the explicit flag from 1770000009);
@@ -480,24 +505,47 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 
 		targetUser.Set(userIsDeletedField, true)
 		targetUser.Set("status", string(auth.StatusDeleted))
+		// nickname_normalized is cleared through the RECORD, not through a raw
+		// UPDATE.
+		//
+		// The empty key is what releases the nickname for reuse: the partial
+		// UNIQUE index (`nickname_normalized != ''`) only constrains non-empty
+		// keys. It used to need a raw UPDATE because the column was REQUIRED
+		// and a record save with an empty value is refused by validation
+		// ("cannot be blank") — but that left the row UNSAVABLE, so every
+		// later counter move on the deleted account (adjustUserReputation,
+		// adjustUserPostCount, adjustUserTopicCount) died with a 500.
+		// Migration 1770000010 makes the column optional, which is what the
+		// partial index always assumed; the row stays writable, and the
+		// release commits in the same transaction as the flag above.
+		targetUser.Set("nickname_normalized", "")
+		// The session dies with the account. A PocketBase auth token is signed
+		// with `tokenKey + AuthToken.Secret` and verified against the CURRENT
+		// tokenKey on every request, so rotating the key invalidates every
+		// token this account holds — the one in the browser and any refresh
+		// token it could mint. Without this the account keeps a live session
+		// until the token expires on its own; the auth hook only refuses a NEW
+		// sign-in.
+		//
+		// This is the same mechanism PocketBase itself uses when a password is
+		// reset (core/record_model_auth.go), and it needs no extra column.
+		targetUser.RefreshTokenKey()
 		if err := txApp.Save(targetUser); err != nil {
 			return 0, nil, internalError("failed to delete user", err)
 		}
-		// nickname_normalized = "" by raw UPDATE, after the record save.
+
+		// A DELETED ACCOUNT CAN NEVER READ ANOTHER MESSAGE of its direct
+		// messages, so it must not hold the collector's watermark back
+		// (owner ruling 2026-10-19).
 		//
-		// Two reasons, both load-bearing. The field is a REQUIRED text field
-		// (1766000000), so a record save with an empty value is refused by
-		// validation — "cannot be blank" — which would make every admin delete
-		// fail. And the column must hold "" for the partial UNIQUE index
-		// (`nickname_normalized != ''`) to release the nickname for reuse.
-		// A raw UPDATE is exactly how migration backfills write columns the
-		// validator would reject (see backfillUserLastSeen), and it runs in
-		// the SAME transaction as the Save above, so the flag and the released
-		// key commit together or not at all.
-		if _, err := txApp.DB().NewQuery(
-			"UPDATE " + usersCollectionName + " SET nickname_normalized = '' WHERE id = {:id}",
-		).Bind(dbx.Params{"id": userID}).Execute(); err != nil {
-			return 0, nil, internalError("failed to release the nickname", err)
+		// The erase point becomes INT_MAX — "this participant will never read
+		// anything" — so the watermark of every conversation this account was
+		// in is decided by the members who are still around. A survivor who
+		// then erases their own side of such a chat has, by that alone, taken
+		// the watermark to their own point, and the collector removes the
+		// rows.
+		if err := markUserDMErasesForever(txApp, userID); err != nil {
+			return 0, nil, err
 		}
 
 		_ = recordAuditLog(txApp, "admin_user_delete", e.Auth.Id, map[string]any{
