@@ -90,13 +90,16 @@ const ProfilePage = () => {
   const setActiveTab = (k) => setSearchParams({ tab: k }, { replace: true });
   const [viewedProfile, setViewedProfile] = useState(null);
 
-  // `pending` and `banned` are ACCOUNT STATUSES, not roles (internal/auth), so
-// they are read from the status column; only `spectator` is a role. Testing
-// them against role_id could never match, which left a banned member with a
-// full profile — the messaging button and the reputation controls included.
-const isLimitedProfile = viewedProfile?.status === 'pending'
-  || viewedProfile?.status === 'banned'
-  || viewedProfile?.role_id === 'spectator';
+  // `pending`, `banned` and `deleted` are ACCOUNT STATUSES, not roles
+  // (internal/auth), so they are read from the status column; only `spectator`
+  // is a role. Testing them against role_id could never match, which left a
+  // banned member with a full profile — the messaging button and the
+  // reputation controls included.
+  const isDeletedProfile = viewedProfile?.deleted === true;
+  const isLimitedProfile = viewedProfile?.status === 'pending'
+    || viewedProfile?.status === 'banned'
+    || viewedProfile?.role_id === 'spectator'
+    || isDeletedProfile;
   const isOwn = profile?.uid === uid;
   const canEditNickname = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_NICKNAME) : hasPermission(PERMISSIONS.EDIT_OTHERS_NICKNAMES);
   const canEditAvatar = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_AVATAR) : hasPermission(PERMISSIONS.EDIT_OTHERS_AVATARS);
@@ -294,9 +297,11 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
     }
   }, [activeTab, loadingRepLogs, repLogs, searchParams]);
 
-  // Fetch user posts when on 'posts' tab, page changes, or filter changes
+  // Fetch user posts when on 'posts' tab, page changes, or filter changes.
+  // A deleted account has no posts tab — its baked posts_count still shows in
+  // the sidebar, but nothing is fetched.
   useEffect(() => {
-    if (!uid || activeTab !== 'posts') return;
+    if (!uid || activeTab !== 'posts' || isDeletedProfile) return;
     
     let isMounted = true;
     const fetchPosts = async () => {
@@ -757,13 +762,18 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
 
                 {/* Info block */}
                 <div className="flex-grow-1 min-w-0 w-100 profile-sidebar-info">
-                  {/* Name & status */}
+                  {/* Name & status (deleted account shows a deletion notice instead)} */}
                   <div className="mb-2 mb-lg-3 text-lg-center">
                     {!viewedProfile ? (
                       <>
                         <Skeleton width="140px" height="1.5rem" className="d-block mb-1 mx-lg-auto" />
                         <Skeleton width="100px" height="0.85rem" className="d-block mx-lg-auto" />
                       </>
+                    ) : isDeletedProfile ? (
+                      <div className="d-flex flex-column align-items-center justify-content-center text-center">
+                        <span className="badge bg-danger text-white mb-2">{t('profile.account_deleted')}</span>
+                        <h5 className="mb-1 text-truncate">{viewedProfile?.nickname || 'No Nickname'}</h5>
+                      </div>
                     ) : (
                       <>
                         <h5 className="mb-1 text-truncate">{viewedProfile?.nickname || 'No Nickname'}</h5>
@@ -775,7 +785,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                   </div>
 
                   {/* Send Message button */}
-                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && viewedProfile?.status !== 'banned' && uid !== profile?.uid && (
+                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && !isDeletedProfile && viewedProfile?.status !== 'banned' && uid !== profile?.uid && (
                     <div className="mb-2 text-lg-center">
                       <Button
                         as={Link}
@@ -1548,7 +1558,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
 
 
 
-              {canEditAnyAccount && (
+              {canEditAnyAccount && !isDeletedProfile && (
               <Tab eventKey="account" title={t('profile.tab_profile')}>
                 <Card className="shadow-sm border-0 bg-card">
                   <Card.Header className="py-3">

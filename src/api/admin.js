@@ -160,11 +160,12 @@ export const approveUser = async (uid, performerId) => {
   await logAdminAction('user_approved', performerId, { targetId: uid });
 };
 
-export const deleteUser = async (uid, performerId) => {
+export const deleteUser = async (uid, performerId, { deletePosts = false } = {}) => {
   await sendApi(`/api/aerun/admin/users/${uid}`, {
-    method: 'DELETE'
+    method: 'DELETE',
+    body: { delete_posts: deletePosts }
   });
-  await logAdminAction('user_deleted', performerId, { targetId: uid });
+  await logAdminAction('user_deleted', performerId, { targetId: uid, delete_posts: deletePosts });
 };
 
 export const rejectUser = async (uid, performerId) => {

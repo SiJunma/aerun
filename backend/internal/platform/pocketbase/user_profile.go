@@ -75,9 +75,10 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]any{
 		"id":             record.Id,
 		"nickname":       record.GetString("nickname"),
-		"role":           record.GetString("role"),
+		"role":           profileRole(record),
 		"custom_role_id": record.GetString("custom_role_id"),
 		"status":         record.GetString("status"),
+		"deleted":        isUserDeleted(record),
 		"verified":       record.GetBool("verified"),
 		"avatar":         record.GetString("avatar"),
 		"avatar_url":     record.GetString("avatar_url"),
@@ -111,6 +112,16 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		"settings":   publicSettings,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// profileRole reports the role a profile response carries. A soft-deleted
+// account reads as "Deleted" regardless of the stored role value: the baked
+// role is staff history, not a badge the forum should keep painting.
+func profileRole(record *core.Record) string {
+	if isUserDeleted(record) {
+		return "Deleted"
+	}
+	return record.GetString("role")
 }
 
 // getPeerCardHandler serves GET /api/aerun/peers/{id}.
@@ -151,6 +162,7 @@ func getPeerCardHandler(e *core.RequestEvent) error {
 		"avatar":     record.GetString("avatar"),
 		"avatar_url": record.GetString("avatar_url"),
 		"status":     record.GetString("status"),
+		"deleted":    isUserDeleted(record),
 		"request_id": requestIDFrom(e),
 	})
 }
@@ -203,8 +215,13 @@ func listUsersHandler(e *core.RequestEvent) error {
 	query := e.Request.URL.Query()
 	page, perPage := parseAdminPagination(query.Get("page"), query.Get("perPage"))
 
+	// The members board lists living members. A soft-deleted account keeps its
+	// row for its profile page and its posts, but the board is a directory of
+	// people you can meet — a baked nickname with no one behind it does not
+	// belong there.
 	records := make([]*core.Record, 0, perPage)
 	if err := e.App.RecordQuery(usersCollectionName).
+		AndWhere(dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false})).
 		OrderBy("nickname ASC", "id ASC").
 		Limit(int64(perPage)).
 		Offset(int64((page - 1) * perPage)).
@@ -212,13 +229,17 @@ func listUsersHandler(e *core.RequestEvent) error {
 		return internalError("failed to query accounts", err)
 	}
 
-	total, err := e.App.CountRecords(usersCollectionName)
+	total, err := e.App.CountRecords(usersCollectionName,
+		dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false}))
 	if err != nil {
 		return internalError("failed to count accounts", err)
 	}
 
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
+		if isUserDeleted(record) {
+			continue
+		}
 		items = append(items, map[string]any{
 			"id":           record.Id,
 			"nickname":     record.GetString("nickname"),
@@ -278,6 +299,7 @@ func checkNicknameHandler(e *core.RequestEvent) error {
 	var found []*core.Record
 	if err := e.App.RecordQuery(usersCollectionName).
 		AndWhere(dbx.HashExp{"nickname_normalized": key}).
+		AndWhere(dbx.NewExp("(is_deleted = false OR is_deleted IS NULL)")).
 		Limit(1).
 		All(&found); err != nil {
 		return internalError("failed to check nickname", err)
@@ -317,8 +339,12 @@ func searchUsersHandler(e *core.RequestEvent) error {
 	// The needle is BOUND, never interpolated: a nickname may contain `"`, `%`
 	// and `_`, and a LIKE built by concatenation is both an injection point and a
 	// way to match every account. `dbx.Like` renders `%?%` with the value bound.
+	//
+	// Soft-deleted accounts are excluded: their baked nickname must not be
+	// offered by the mention picker as a living member.
 	if err := e.App.RecordQuery(usersCollectionName).
 		AndWhere(dbx.Like("nickname", raw)).
+		AndWhere(dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false})).
 		OrderBy("nickname ASC", "id ASC").
 		Limit(int64(limit)).
 		All(&records); err != nil {
@@ -327,6 +353,9 @@ func searchUsersHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
+		if isUserDeleted(record) {
+			continue
+		}
 		items = append(items, map[string]any{
 			"id":         record.Id,
 			"nickname":   record.GetString("nickname"),

@@ -39,6 +39,10 @@ type authorDisplay struct {
 	Reputation int
 	PostsCount int
 	Signature  string
+	// IsDeleted marks a soft-deleted account: the row survives with its baked
+	// nickname/avatar/counters, but no mask may render through it and the role
+	// badge reads "Deleted".
+	IsDeleted bool
 }
 
 // loadAuthorDisplays resolves the display projection for every id in userIDs.
@@ -78,14 +82,20 @@ func loadAuthorDisplays(app core.App, userIDs []string) map[string]authorDisplay
 	}
 
 	for _, rec := range records {
+		role := rec.GetString("role")
+		deleted := isUserDeleted(rec)
+		if deleted {
+			role = "Deleted"
+		}
 		out[rec.Id] = authorDisplay{
 			Nickname:   rec.GetString("nickname"),
 			AvatarURL:  rec.GetString("avatar_url"),
 			StatusLine: rec.GetString("status_line"),
-			Role:       rec.GetString("role"),
+			Role:       role,
 			Reputation: rec.GetInt("reputation"),
 			PostsCount: rec.GetInt("posts_count"),
 			Signature:  signatureFromSettings(rec.Get("settings")),
+			IsDeleted:  deleted,
 		}
 	}
 	return out
@@ -448,6 +458,9 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 	dto["reputation"] = display.Reputation
 	dto["posts_count"] = display.PostsCount
 	dto["is_character"] = false
+	if display.IsDeleted {
+		dto["deleted"] = true
+	}
 
 	payload["author_name"] = display.Nickname
 	payload["author_avatar"] = display.AvatarURL
@@ -458,6 +471,13 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 	}
 	payload["author_reputation"] = display.Reputation
 	payload["author_posts_count"] = display.PostsCount
+	if display.IsDeleted {
+		payload["author_deleted"] = true
+		// No mask may render through a deleted account: the mask is content
+		// of a living member, and the baked account identity is what stays.
+		payload["author_profile_id"] = id
+		return
+	}
 
 	applyMask(payload, "author_character_id", id, masks)
 }
@@ -516,9 +536,19 @@ func decorateTopicAuthor(app core.App, payload map[string]any, displays map[stri
 	dto["display_name"] = display.Nickname
 	dto["avatar_url"] = display.AvatarURL
 	dto["is_character"] = false
+	if display.IsDeleted {
+		dto["deleted"] = true
+	}
 
 	payload["author_name"] = display.Nickname
 	payload["author_avatar"] = display.AvatarURL
+	if display.IsDeleted {
+		payload["author_deleted"] = true
+		payload["author_profile_id"] = id
+		// No mask may render through a deleted account (see decoratePostAuthor).
+		decorateLastPostAuthor(app, payload, displays, masks)
+		return
+	}
 
 	applyMask(payload, "author_character_id", id, masks)
 
@@ -601,9 +631,10 @@ func applyLastPostMask(payload map[string]any, authorID string, masks map[string
 //
 // It is the SINGLE place that builds the public last-post AuthorRef DTO, so
 // the category index and the topic lists can never disagree about who spoke
-// last. A guest last-poster resolves to {kind: guest, display_name}; a deleted
-// account resolves to explicit null; an account keeps user_id/profile_id and
-// the resolved (possibly mask-renamed) display name.
+// last. A guest last-poster resolves to {kind: guest, display_name}; a
+// missing account resolves to explicit null; a soft-deleted account keeps its
+// baked display name with deleted:true (no mask rename); an account keeps
+// user_id/profile_id and the resolved (possibly mask-renamed) display name.
 func decorateLastPostAuthor(app core.App, payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
 	// Try nested DTO first (from topicPayload), fall back to flat fields
 	// (from category_access.go projection).
@@ -702,6 +733,9 @@ func decorateLastPostAuthor(app core.App, payload map[string]any, displays map[s
 	dto["display_name"] = display.Nickname
 	dto["avatar_url"] = display.AvatarURL
 	dto["is_character"] = false
+	if display.IsDeleted {
+		dto["deleted"] = true
+	}
 
 	// Character ID: prefer nested DTO, fall back to flat field.
 	characterID, _ := dto["character_id"].(string)
@@ -714,6 +748,11 @@ func decorateLastPostAuthor(app core.App, payload map[string]any, displays map[s
 
 	payload["last_post_author"] = display.Nickname
 	payload["last_post_author_avatar"] = display.AvatarURL
+	if display.IsDeleted {
+		payload["last_post_author_deleted"] = true
+		// No mask may rename the last poster through a deleted account.
+		return
+	}
 
 	applyLastPostMask(payload, id, masks)
 }

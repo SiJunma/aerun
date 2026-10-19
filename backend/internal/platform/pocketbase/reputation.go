@@ -187,6 +187,11 @@ func votePostHandler(e *core.RequestEvent) error {
 			if err != nil || targetUser == nil {
 				return 0, nil, notFoundError("target user not found")
 			}
+			// A deleted account's reputation is baked history: new votes on
+			// its posts are blocked the same way profile votes are.
+			if isUserDeleted(targetUser) {
+				return 0, nil, forbiddenError("cannot vote for a deleted user")
+			}
 		}
 
 		// Look up existing vote on this post by this voter
@@ -372,6 +377,9 @@ func voteUserHandler(e *core.RequestEvent) error {
 		// while showing the post would be incoherent.
 		if targetUser.GetString("status") == string(auth.StatusBanned) {
 			return 0, nil, forbiddenError("cannot vote for a banned user")
+		}
+		if isUserDeleted(targetUser) {
+			return 0, nil, forbiddenError("cannot vote for a deleted user")
 		}
 
 		existingVote, err := txApp.FindFirstRecordByFilter(

@@ -47,6 +47,10 @@ const (
 	// this endpoint feeds a table that the client paginates, and a larger
 	// page would let one caller pull the whole table into one response.
 	adminListMaxPerPage = 30
+	// adminDeleteBodyBytes bounds the admin user delete body. The payload is
+	// one flag; the limit is generous rather than tight so a client sending
+	// extra fields is not rejected for the wrong reason.
+	adminDeleteBodyBytes = 8 * 1024
 )
 
 func adminListUsersHandler(e *core.RequestEvent) error {
@@ -56,6 +60,10 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 	var where []dbx.Expression
 	status := strings.TrimSpace(query.Get("status"))
 	if status != "" {
+		// AllStatusValues is the STORED vocabulary (it carries the "deleted"
+		// soft-delete marker), so staff can FIND deleted rows here without the
+		// value ever becoming assignable — assignment validates separately
+		// through Status.IsValid().
 		if !slices.Contains(auth.AllStatusValues(), status) {
 			return e.BadRequestError("unknown status filter", nil)
 		}
@@ -88,6 +96,7 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 			"nickname":   record.GetString("nickname"),
 			"role":       record.GetString("role"),
 			"status":     record.GetString("status"),
+			"deleted":    isUserDeleted(record),
 			"verified":   record.GetBool("verified"),
 			"avatar_url": record.GetString("avatar_url"),
 			// The one-line status MembersPage renders under the nickname. It was
@@ -212,6 +221,12 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 		if err != nil || targetUser == nil {
 			return 0, nil, notFoundError("user not found")
 		}
+		if isUserDeleted(targetUser) {
+			// A soft-deleted row is a finished state: role/status forms must
+			// not rewrite it back into circulation without the coordinated
+			// undelete writes that do not exist.
+			return 0, nil, conflictError("user is already deleted")
+		}
 
 		oldRole := targetUser.GetString("role")
 		roleChanged := false
@@ -242,7 +257,11 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 
 		if form.Status != nil {
 			status := strings.TrimSpace(*form.Status)
-			if !slices.Contains(auth.AllStatusValues(), status) {
+			// Status, not AllStatusValues: the stored vocabulary carries the
+			// "deleted" soft-delete marker, but ASSIGNING it here would create
+			// a half-deleted row (status without is_deleted and without the
+			// released nickname key). IsValid reads the assignable set only.
+			if !auth.Status(status).IsValid() {
 				return 0, nil, validationError("invalid status value")
 			}
 			targetUser.Set("status", status)
@@ -413,6 +432,29 @@ func customRoleIDFor(app core.App, role string) string {
 
 // adminDeleteUserHandler is registered after adminUpdateUserHandler in
 // registerRoutes.
+//
+// SOFT DELETE. The users row is never removed: it is taken out of
+// circulation in one transaction so the profile page and the author's posts
+// keep rendering with the baked nickname/avatar/counters instead of 404ing.
+// See markdowns/INPROGRESS_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md.
+//
+// The three coordinated writes:
+//   - is_deleted = true (the explicit flag from 1770000009);
+//   - status = "deleted" (auth.StatusDeleted — outside AllStatuses, so the
+//     permission narrowing denies everything and the row can never act;
+//     users.status is a TextField since 1766500000, so no schema change is
+//     needed to hold the value);
+//   - nickname_normalized = "" (the partial UNIQUE index only constrains
+//     non-empty keys, so a fresh registration may reuse the nickname; the
+//     display nickname stays baked for rendering).
+//
+// delete_posts (body {"delete_posts": true} or ?delete_posts=1, default
+// false) additionally hard-deletes the member's content in the SAME
+// transaction: every owned topic (with its posts, votes and subscriptions,
+// through the same purgeTopicResidue/deleteTopicPosts path the topic delete
+// uses) plus every remaining owned post, plus the profile-level reputation
+// votes in both directions. Without the flag the posts stay and their author
+// decorates as Deleted.
 func adminDeleteUserHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -420,26 +462,73 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 	}
 
 	userID := e.Request.PathValue("id")
+	deletePosts := adminDeletePostsRequested(e)
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		targetUser, err := txApp.FindRecordById(usersCollectionName, userID)
 		if err != nil || targetUser == nil {
 			return 0, nil, notFoundError("user not found")
 		}
+		if isUserDeleted(targetUser) {
+			return 0, nil, conflictError("user is already deleted")
+		}
 
-		if err := txApp.Delete(targetUser); err != nil {
+		if deletePosts {
+			if err := purgeUserContent(txApp, userID); err != nil {
+				return 0, nil, err
+			}
+		}
+
+		targetUser.Set(userIsDeletedField, true)
+		targetUser.Set("status", string(auth.StatusDeleted))
+		if err := txApp.Save(targetUser); err != nil {
 			return 0, nil, internalError("failed to delete user", err)
+		}
+		// nickname_normalized = "" by raw UPDATE, after the record save.
+		//
+		// Two reasons, both load-bearing. The field is a REQUIRED text field
+		// (1766000000), so a record save with an empty value is refused by
+		// validation — "cannot be blank" — which would make every admin delete
+		// fail. And the column must hold "" for the partial UNIQUE index
+		// (`nickname_normalized != ''`) to release the nickname for reuse.
+		// A raw UPDATE is exactly how migration backfills write columns the
+		// validator would reject (see backfillUserLastSeen), and it runs in
+		// the SAME transaction as the Save above, so the flag and the released
+		// key commit together or not at all.
+		if _, err := txApp.DB().NewQuery(
+			"UPDATE " + usersCollectionName + " SET nickname_normalized = '' WHERE id = {:id}",
+		).Bind(dbx.Params{"id": userID}).Execute(); err != nil {
+			return 0, nil, internalError("failed to release the nickname", err)
 		}
 
 		_ = recordAuditLog(txApp, "admin_user_delete", e.Auth.Id, map[string]any{
-			"target_id": userID,
+			"target_id":    userID,
+			"delete_posts": deletePosts,
 		})
 
 		return http.StatusOK, map[string]any{
-			"deleted":    true,
-			"id":         userID,
-			"request_id": requestIDFrom(e),
+			"deleted":      true,
+			"delete_posts": deletePosts,
+			"id":           userID,
+			"request_id":   requestIDFrom(e),
 		}, nil
 	})
 
 	return writeCommandResult(e, outcome, err)
+}
+
+// adminDeletePostsRequested reads the delete_posts flag for the admin user
+// delete: a JSON body {"delete_posts": true} wins, otherwise the
+// ?delete_posts=1 query parameter. Anything else — absent body, malformed
+// JSON, any other value — means "account only".
+func adminDeletePostsRequested(e *core.RequestEvent) bool {
+	if raw, err := readBodyLimited(e, adminDeleteBodyBytes); err == nil && len(raw) > 0 {
+		var form struct {
+			DeletePosts *bool `json:"delete_posts"`
+		}
+		if err := json.Unmarshal(raw, &form); err == nil && form.DeletePosts != nil {
+			return *form.DeletePosts
+		}
+	}
+	query := strings.TrimSpace(e.Request.URL.Query().Get("delete_posts"))
+	return query == "1" || strings.EqualFold(query, "true")
 }

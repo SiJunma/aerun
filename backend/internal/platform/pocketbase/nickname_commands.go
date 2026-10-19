@@ -236,7 +236,7 @@ func applyNickname(txApp core.App, record *core.Record, nickname, actorID string
 		usersCollectionName,
 		"nickname_normalized = {:nickname}",
 		dbx.Params{"nickname": normalised},
-	); err == nil && existing != nil && existing.Id != record.Id {
+	); err == nil && existing != nil && existing.Id != record.Id && !isUserDeleted(existing) {
 		return conflictError("this nickname is already taken")
 	}
 

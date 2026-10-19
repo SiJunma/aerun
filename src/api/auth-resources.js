@@ -48,6 +48,10 @@ export const normalizeUserProfile = (rec) => {
     ...rec,
     uid: rec.uid || rec.id,
     displayName: rec.nickname || rec.displayName || '',
+    // `deleted` is the soft-delete flag the backend sets when an account is
+    // removed (see backend soft-delete). A deleted account keeps its baked
+    // nickname/avatar/counters so its profile and posts keep rendering.
+    deleted: rec.deleted ?? false,
     // The join key on `users` is `role`; `role_id` only exists on `roles`.
     role_id: rec.role ?? rec.role_id ?? 'player',
     // `custom_role_id` is the derived-role companion column. Exposed under the

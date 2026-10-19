@@ -64,6 +64,9 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := verifyPresenceSchema(se.App); err != nil {
 			return err
 		}
+		if err := verifyDeletedUserSchema(se.App); err != nil {
+			return err
+		}
 		// Guest authorship columns are mandatory: a missing column means Record.Set
 		// silently drops the guest identity and the index renders "Deleted user".
 		// Snapshot restores that predate migration 1770000000 are repaired by an

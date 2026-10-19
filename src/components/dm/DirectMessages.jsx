@@ -170,7 +170,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   useEffect(() => {
     if (!activePeer?.uid) return;
     const unsub = subscribeToPeerCard(activePeer.uid, (card) => {
-      if (!card) {
+      if (!card || card.deleted) {
         setPeerStatus('deleted');
       } else if (card.status === 'banned') {
         setPeerStatus('banned');

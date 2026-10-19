@@ -227,6 +227,9 @@ const AdminPage = () => {
     title: '',
     message: ''
   });
+  // Whether "delete all posts by this user" is checked in the user-delete
+  // confirmation dialog. Defaults off: delete only the account.
+  const [deleteUserPosts, setDeleteUserPosts] = useState(false);
 
   // A delete the SERVER would refuse, caught before the request is made.
   //
@@ -977,6 +980,7 @@ const AdminPage = () => {
   };
 
   const handleDeleteUser = (uid) => {
+    setDeleteUserPosts(false);
     setConfirmState({
       show: true,
       title: t('admin.users.confirm_delete_title'),
@@ -984,7 +988,7 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
-          await deleteUser(uid, user.uid);
+          await deleteUser(uid, user.uid, { deletePosts: deleteUserPosts });
           // The stats panel (ForumStats) reads forumStats from AuthProvider —
           // total members, newest member, today's visitors — NOT from this
           // board's local `users` array. Filtering the row here left the shared
@@ -2752,9 +2756,28 @@ const AdminPage = () => {
         )}
       </ForumModal>
 
+      {confirmState.show && confirmState.title === t('admin.users.confirm_delete_title') && (
+        <>
+          <label className="d-block mb-2">
+            <input
+              type="checkbox"
+              checked={deleteUserPosts}
+              onChange={e => setDeleteUserPosts(e.target.checked)}
+              className="form-check-input me-2"
+            />
+            {t('admin.users.delete_posts_label')}
+          </label>
+          <p className="text-muted small mb-3">
+            {t('admin.users.delete_posts_hint')}
+          </p>
+        </>
+      )}
       <ConfirmModal
         show={confirmState.show}
-        onHide={() => setConfirmState(prev => ({ ...prev, show: false }))}
+        onHide={() => {
+          setDeleteUserPosts(false);
+          setConfirmState(prev => ({ ...prev, show: false }));
+        }}
         onConfirm={confirmState.onConfirm}
         title={confirmState.title}
         message={confirmState.message}

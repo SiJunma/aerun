@@ -2,6 +2,7 @@ package pocketbase
 
 import (
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
@@ -34,6 +35,9 @@ import (
 // (recordAuthResponse), so one hook covers password, OAuth2 and auth-refresh.
 func registerAccountActivationHook(app core.App) {
 	app.OnRecordAuthRequest().BindFunc(func(e *core.RecordAuthRequestEvent) error {
+		if e.Record != nil && e.Record.Collection().Name == usersCollectionName && isUserDeleted(e.Record) {
+			return router.NewForbiddenError("this account has been deleted", nil)
+		}
 		activateAccountIfApprovalDisabled(e.App, e.Record)
 		return e.Next()
 	})

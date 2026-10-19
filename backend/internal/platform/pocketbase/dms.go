@@ -516,6 +516,9 @@ func createDMHandler(e *core.RequestEvent) error {
 			if u.GetString("status") == string(auth.StatusBanned) {
 				return 0, nil, forbiddenError("cannot send message to a banned user")
 			}
+			if isUserDeleted(u) {
+				return 0, nil, forbiddenError("cannot send message to a deleted user")
+			}
 			recipientAcc := accessForUser(txApp, u)
 			if !auth.Has(recipientAcc.Permissions, auth.PermUseDirectMessages) {
 				return 0, nil, forbiddenError(
@@ -772,6 +775,9 @@ func appendMessageToConversation(
 		}
 		if other.GetString("status") == string(auth.StatusBanned) {
 			return nil, 0, forbiddenError("cannot send message to a banned user")
+		}
+		if isUserDeleted(other) {
+			return nil, 0, forbiddenError("cannot send message to a deleted user")
 		}
 		if !auth.Has(accessForUser(txApp, other).Permissions, auth.PermUseDirectMessages) {
 			return nil, 0, forbiddenError("a participant can no longer receive direct messages")
@@ -1325,18 +1331,16 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 
 // clearConversationHandler marks a conversation cleared for the caller.
 //
-// The horizon is the conversation's OWN last-message timestamp, not the
-// wall clock. cleared_at is compared with strict `>` against message
-// `created` and `last_message_at`; stamping "now" breaks that the moment a
-// new message lands inside the same recorded instant — PocketBase DateTime
-// serialises to millisecond text, while an autodate `created` stamp can share
-// it — and the first message after a clear vanishes from both the list and
-// the thread until some later message moves the clock. Anchoring to the last
-// message's own timestamp makes "newer than the clear" true by construction:
-// anything appended afterwards carries a later instant.
+// When every OTHER participant of the conversation is a soft-deleted account,
+// there are no live readers left: the conversation, its membership rows and
+// its messages are hard-deleted instead of merely clearing the caller's
+// horizon. The history with a deleted member is readable until the survivor
+// chooses to remove it — clearing is that choice.
 //
-// A conversation with no messages yet clears to "now" — there is nothing to
-// anchor to, and an empty thread has no boundary to defend.
+// Otherwise the horizon is the conversation's OWN last-message timestamp,
+// not the wall clock (cleared_at is compared with strict `>` against message
+// `created` and `last_message_at`; anchoring to the row's own timestamp makes
+// "newer than the clear" true by construction).
 func clearConversationHandler(e *core.RequestEvent) error {
 	if e.Auth == nil {
 		return forbiddenError("authentication required")
@@ -1351,6 +1355,16 @@ func clearConversationHandler(e *core.RequestEvent) error {
 	)
 	if err != nil || member == nil {
 		return forbiddenError("you are not a participant in this conversation")
+	}
+
+	if dropped, derr := dropConversationWithDeletedPeer(e.App, convID, e.Auth.Id); derr != nil {
+		return derr
+	} else if dropped {
+		return e.JSON(http.StatusOK, map[string]any{
+			"cleared":    true,
+			"deleted":    true,
+			"request_id": requestIDFrom(e),
+		})
 	}
 
 	horizon := types.NowDateTime().String()
@@ -1369,4 +1383,71 @@ func clearConversationHandler(e *core.RequestEvent) error {
 		"cleared_at": horizon,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// dropConversationWithDeletedPeer hard-deletes a conversation whose every
+// participant except callerID is a soft-deleted account (or has no users row
+// at all — the pre-soft-delete orphan shape). It reports whether it dropped
+// anything: false means the thread has live readers and the caller just
+// clears it.
+//
+// Group threads need EVERY other member gone, not just one: a single deleted
+// member does not end a conversation the living still use.
+func dropConversationWithDeletedPeer(app core.App, convID, callerID string) (bool, error) {
+	members, err := app.FindAllRecords(
+		dmMembersCollectionName,
+		dbx.NewExp("conversation_id = {:conv}", dbx.Params{"conv": convID}),
+	)
+	if err != nil {
+		return false, internalError("failed to load conversation members", err)
+	}
+	others := 0
+	for _, m := range members {
+		if m.GetString("user_id") == callerID {
+			continue
+		}
+		others++
+		peer, err := app.FindRecordById(usersCollectionName, m.GetString("user_id"))
+		if err != nil || peer == nil || isUserDeleted(peer) {
+			continue
+		}
+		return false, nil
+	}
+	if others == 0 {
+		return false, nil
+	}
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		msgs, err := txApp.FindAllRecords(
+			dmMessagesCollectionName,
+			dbx.NewExp("conversation_id = {:conv}", dbx.Params{"conv": convID}),
+		)
+		if err != nil {
+			return err
+		}
+		for _, msg := range msgs {
+			if err := txApp.Delete(msg); err != nil {
+				return err
+			}
+		}
+		rows, err := txApp.FindAllRecords(
+			dmMembersCollectionName,
+			dbx.NewExp("conversation_id = {:conv}", dbx.Params{"conv": convID}),
+		)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if err := txApp.Delete(row); err != nil {
+				return err
+			}
+		}
+		conv, err := txApp.FindRecordById(dmConversationsCollectionName, convID)
+		if err != nil || conv == nil {
+			return err
+		}
+		return txApp.Delete(conv)
+	}); err != nil {
+		return false, internalError("failed to delete conversation with a deleted peer", err)
+	}
+	return true, nil
 }

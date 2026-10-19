@@ -124,12 +124,23 @@ func registerHandler(e *core.RequestEvent) error {
 	if _, err := e.App.FindAuthRecordByEmail(users, email); err == nil {
 		return router.NewApiError(http.StatusConflict, "an account with this email already exists", nil)
 	}
-	_, err = e.App.FindFirstRecordByFilter(
-		users,
-		"nickname_normalized = {:nickname}",
-		dbx.Params{"nickname": auth.NormalizeNickname(nickname)},
-	)
-	if err == nil {
+	// A soft-deleted account's nickname is reusable: its nickname_normalized
+	// was cleared to "" at deletion (the partial UNIQUE index only constrains
+	// non-empty keys), and the belt-and-braces filter below ignores any row
+	// that still reads as deleted.
+	//
+	// RecordQuery, not FindFirstRecordByFilter: the PocketBase filter language
+	// has no IS NULL, so the string form cannot express "no flag yet" for a
+	// row written before the is_deleted column existed.
+	var nickConflict []*core.Record
+	if err := e.App.RecordQuery(usersCollectionName).
+		AndWhere(dbx.HashExp{"nickname_normalized": auth.NormalizeNickname(nickname)}).
+		AndWhere(dbx.NewExp("(is_deleted = {:no} OR is_deleted IS NULL)", dbx.Params{"no": false})).
+		Limit(1).
+		All(&nickConflict); err != nil {
+		return router.NewInternalServerError("nickname check failed", err)
+	}
+	if len(nickConflict) > 0 {
 		return router.NewApiError(http.StatusConflict, "nickname is already taken", nil)
 	}
 

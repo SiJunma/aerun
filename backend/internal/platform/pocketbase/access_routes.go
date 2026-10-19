@@ -46,9 +46,19 @@ func RequirePermission(permission auth.Permission) func(e *core.RequestEvent) er
 // moderator is looking at when they ban somebody. The status is checked here
 // instead of at every call site so the rule has one name.
 //
+// A soft-deleted account is refused by the same gate for the same reason: its
+// token may still validate until the next refresh, and the author branch above
+// would otherwise let it keep editing its own posts from a session that should
+// already be over. NarrowForStatus denies every permission for `deleted`, but
+// these handlers never consult permissions in the author branch — the status
+// is what they do read.
+//
 // The message names the action: a bare "forbidden" left the admin wondering
 // whether the post was theirs.
 func requireNotBanned(acc AccessContext, action string) error {
+	if acc.Status == auth.StatusDeleted {
+		return forbiddenError("this account has been deleted; it cannot " + action)
+	}
 	if acc.Status == auth.StatusBanned {
 		return forbiddenError("banned accounts cannot " + action)
 	}

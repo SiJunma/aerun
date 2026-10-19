@@ -1,7 +1,63 @@
 # Концепт: Удалённый пользователь (Deleted User) — профиль, посты, репутация, ЛС
 
 **Дата:** 2026-10-18  
-**Статус:** Черновик (на утверждение)
+**Статус:** В реализации (бэкенд-ядро готово, сборка чистая)
+
+## Прогресс реализации (2026-10-19)
+
+### Сделано (бэкенд)
+- `auth.StatusDeleted = "deleted"` — вне `AllStatuses()`, т.е. deny-by-default
+  через `NarrowForStatus`; в фильтры/селекты не попадает.
+- Миграция `1770000009_user_soft_delete`: `users.is_deleted` (Bool).
+- `isUserDeleted()` — предикат по `status == "deleted"` OR `is_deleted`
+  (работает и без новой колонки); `verifyDeletedUserSchema` на старте.
+- `adminDeleteUserHandler` — soft-delete в одной транзакции
+  (`is_deleted=true`, `status="deleted"`, `nickname_normalized=""`),
+  повторное удаление → 409; `delete_posts` из body или `?delete_posts=1`.
+- `purgeUserContent` — хард-удаление тем/постов/голосов через те же
+  `purgeTopicResidue`/`deleteTopicPosts`/выплаты репутации, что и обычные
+  удаления; audit `post_delete` с `reason=admin_user_delete_delete_posts`.
+- `getUserProfileHandler` — `role: "Deleted"` + `deleted: true` для удалённого;
+  `getPeerCardHandler` — `deleted: true`.
+- `checkNicknameHandler`/`registerHandler`/`applyNickname`/`searchUsersHandler` —
+  удалённые игнорируются (ник reusable).
+- `voteUserHandler`/`votePostHandler` — 403 на удалённого.
+- `createDMHandler`/`appendMessageToConversation` — 403 на удалённого.
+- `clearConversationHandler` — hard-drop диалога, если все остальные участники
+  удалены/без строк (`deleted: true` в ответе).
+- Auth-хук — вход/refresh удалённого → 403.
+- `loadAuthorDisplays`/`decorate*` — удалённый автор: запеченные имя/аватар,
+  `Role="Deleted"`, `deleted:true`/`author_deleted:true`, без масок.
+
+### Осталось
+- [x] Списки: `listUsersHandler` скрывает deleted (публичная доска — живые), `adminListUsersHandler` показывает с `deleted: true` и фильтром `status=deleted`.
+- [x] Живые сессии удалённого: `requireNotBanned` теперь отказывает с 403 на любую мутацию (пост/тема/почта) — сессия мёртва.
+- [x] Go-тесты: soft-delete + delete_posts + vote/DM-блоки + nickname-reuse + вход-блок + clear-drop + миграция — `PASS`.
+- [x] Фронт (пп. 10–13概念та + чекбокс delete_posts).
+- [x] `npm run build` — проходит.
+- [x] Скрипты-контракты — все `check-*.mjs` проходят (EXIT=0).
+- [x] `npm run build` — проходит.
+- [x] `go build ./...` — чисто.
+- [x] Go-тесты soft-delete — все 6 `PASS`; `TestDeletedStatusIsStoredButNotAssignable`, `TestAllStatusValues`, `TestMigratedUsersCollectionHoldsIsDeleted` — `PASS`.
+- [ ] Полный `go test ./internal/...` выполняется в фоне (длительный набор, ключевые тесты уже зелёные).
+
+## Фронтенд (пп. 10–13概念та) — ВЫПОЛНЕНО
+- `src/api/auth-resources.js`: `normalizeUserProfile` добавляет `deleted: rec.deleted ?? false`.
+- `ProfilePage.jsx`: `isDeletedProfile` из `viewedProfile.deleted`; в `isLimitedProfile`; инфоблок `profile.account_deleted` + запеченное имя; кнопка ЛС скрыта; `fetchUserPosts` не вызывается; вкладка account скрыта.
+- `TopicPage.jsx`: `onClick` у имени автора убран для `post.author.deleted`; кнопка ЛС (`profile.pm`) скрыта для `post.author.deleted` (оба места).
+- `DirectMessages.jsx`: `subscribeToPeerCard` считает `card.deleted` → `peerStatus='deleted'`; форма ответа уже скрыта для non-active peers.
+- `AdminPage.jsx`: состояние `deleteUserPosts`; чекбокс `admin.users.delete_posts_label` в диалоге удаления пользователя; `deleteUser(uid, user.uid, { deletePosts: deleteUserPosts })`; сброс флага при открытии/закрытии модала.
+- `src/api/admin.js`: `deleteUser(uid, performerId, { deletePosts })` отправляет тело `{ delete_posts }` и пишет аудит.
+- `src/i18n/dictionary.js`: ключи `delete_posts_label` / `delete_posts_hint` (en + ru); `profile.account_deleted` (en + ru).
+
+## Фронтенд (пп. 10–13概念та) — ВЫПОЛНЕНО
+- `src/api/auth-resources.js`: `normalizeUserProfile` добавляет `deleted: rec.deleted ?? false`.
+- `ProfilePage.jsx`: `isDeletedProfile` из `viewedProfile.deleted`; в `isLimitedProfile`; инфоблок `profile.account_deleted` + запеченное имя; кнопка ЛС скрыта; `fetchUserPosts` не вызывается; вкладка account скрыта.
+- `TopicPage.jsx`: `onClick` у имени автора убран для `post.author.deleted`; кнопка ЛС (`profile.pm`) скрыта для `post.author.deleted` (оба места).
+- `DirectMessages.jsx`: `subscribeToPeerCard` считает `card.deleted` → `peerStatus='deleted'`; форма ответа уже скрыта для non-active peers.
+- `AdminPage.jsx`: состояние `deleteUserPosts`; чекбокс `admin.users.delete_posts_label` в диалоге удаления пользователя; `deleteUser(uid, user.uid, { deletePosts: deleteUserPosts })`; сброс флага при открытии/закрытии модала.
+- `src/api/admin.js`: `deleteUser(uid, performerId, { deletePosts })` отправляет тело `{ delete_posts }` и пишет аудит.
+- `src/i18n/dictionary.js`: ключи `delete_posts_label` / `delete_posts_hint` (en + ru); `profile.account_deleted` (en + ru).
 
 ## Проблема
 

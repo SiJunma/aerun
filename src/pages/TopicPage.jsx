@@ -3116,7 +3116,7 @@ const TopicPage = () => {
                             <Link to={`/profile/${post.author?.user_id}`} className="footer-link text-decoration-none px-0">
                               {t('profile.view_profile')}
                             </Link>
-                            {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid && (
+                            {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && !post.author?.deleted && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid && (
                               <Link to={`/messages/${post.author?.user_id}`} className="footer-link text-decoration-none px-0">
                                 {t('profile.pm')}
                               </Link>
@@ -3150,7 +3150,9 @@ const TopicPage = () => {
                             characterId={post.author_character_id}
                             isCharacter={!!post.is_character}
                             author={post.author}
-                            onClick={handleQuoteAuthor}
+                            // A deleted account keeps its baked name but must not
+                            // link to its (soft-deleted) profile.
+                            onClick={post.author?.deleted ? undefined : handleQuoteAuthor}
                           />
                         </div>
                         {getLiveAuthorStatus(post) && (
@@ -3479,7 +3481,7 @@ const TopicPage = () => {
                                     // the key while granting it to one that does not —
                                     // the admin panel's whole point is that roles are
                                     // editable and the code keeps up.
-                                    hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && (
+                                    hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && !post.author?.deleted && (
                                     <Link to={`/messages/${post.author?.user_id}`} className="author-res-footer-link">
                                       {t('profile.pm')}
                                     </Link>

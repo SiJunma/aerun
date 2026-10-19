@@ -208,10 +208,12 @@ func TestEffectivePermissionsNarrowedByStatus(t *testing.T) {
 
 func TestAllStatusValues(t *testing.T) {
 	values := AllStatusValues()
-	if len(values) != 3 {
-		t.Fatalf("expected 3 statuses, got %v", values)
+	// 4 stored statuses: the three assignable lifecycle states plus the
+	// soft-delete marker. The SPLIT is the contract — see TestDeletedStatusIsStoredButNotAssignable.
+	if len(values) != 4 {
+		t.Fatalf("expected 4 stored status values, got %v", values)
 	}
-	for _, value := range []string{"active", "pending", "banned"} {
+	for _, value := range []string{"active", "pending", "banned", "deleted"} {
 		if !slices.Contains(values, value) {
 			t.Fatalf("missing status %q in %v", value, values)
 		}
@@ -221,6 +223,27 @@ func TestAllStatusValues(t *testing.T) {
 	}
 	if (Status("gone")).IsValid() {
 		t.Fatal("unknown statuses must not be valid")
+	}
+}
+
+// TestDeletedStatusIsStoredButNotAssignable pins the split the soft-delete
+// feature depends on: `deleted` is a value the users.status select must HOLD
+// (so a record save of a soft-deleted row passes validation) and the admin
+// filter must FIND, but no status form may ASSIGN it — assigning it without
+// the coordinated is_deleted/nickname_normalized writes would produce a
+// half-deleted row the command layer cannot reason about.
+func TestDeletedStatusIsStoredButNotAssignable(t *testing.T) {
+	if !slices.Contains(AllStatusValues(), string(StatusDeleted)) {
+		t.Fatalf("the select must hold deleted, got %v", AllStatusValues())
+	}
+	if StatusDeleted.IsValid() {
+		t.Fatal("deleted must not be assignable: only the admin delete command may write it")
+	}
+	// The narrowing must deny everything for it — same class as an unknown
+	// status, on purpose: a deleted account is out of circulation.
+	perms := NarrowForStatus(DefaultPermissions(RoleModerator), StatusDeleted)
+	if len(perms) != 0 {
+		t.Fatalf("deleted must deny every permission, got %v", perms)
 	}
 }
 

@@ -16,6 +16,20 @@ const (
 	StatusPending Status = "pending"
 	// StatusBanned is an account stripped of every permission.
 	StatusBanned Status = "banned"
+	// StatusDeleted marks a soft-deleted account (see
+	// markdowns/INPROGRESS_DELETED_USER_PROFILE_AND_POSTS_2026-10-18.md).
+	//
+	// A deleted account keeps its users row (nickname, avatar, counters stay
+	// baked in for rendering), but it is out of circulation: NarrowForStatus
+	// denies every permission for it, auth hooks refuse its sign-in, and the
+	// command layer blocks votes/DMs/nickname claims against it.
+	//
+	// Deliberately NOT part of AllStatuses(): it is not an assignable
+	// lifecycle state — only the admin delete command writes it (IsValid()
+	// must keep refusing it in status forms). AllStatusValues() adds it back
+	// for the two consumers that need to HOLD or FIND the value: the select
+	// field schema and the admin status filter.
+	StatusDeleted Status = "deleted"
 )
 
 // AllStatuses returns every known account status.
@@ -32,10 +46,18 @@ func StatusValues(statuses []Status) []string {
 	return values
 }
 
-// AllStatusValues returns every account status as plain strings (sorted),
-// ready for select fields.
+// AllStatusValues returns every status the COLUMN may store, ready for the
+// select field (identity contract: the admin filter and the schema share it).
+//
+// It includes StatusDeleted, which is deliberately NOT in AllStatuses(): the
+// soft-delete marker is written only by the admin delete command and must
+// never be assignable through a status form (that would produce a half-deleted
+// row with no is_deleted flag). Assignment validation therefore uses
+// Status.IsValid(), which reads AllStatuses — while the select field and the
+// admin status filter read this list, because both must be able to HOLD and
+// FIND every value a row can legally carry.
 func AllStatusValues() []string {
-	return StatusValues(AllStatuses())
+	return append(StatusValues(AllStatuses()), string(StatusDeleted))
 }
 
 // IsValid reports whether the status is one of the known values.

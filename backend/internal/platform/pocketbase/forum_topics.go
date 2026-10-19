@@ -570,12 +570,19 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		displays := loadAuthorDisplays(e.App, []string{authorID})
 		if d, ok := displays[authorID]; ok {
 			payload["author_name"] = d.Nickname
+			if d.IsDeleted {
+				// A deleted opener keeps the baked account name: no mask may
+				// rename it (see decoratePostAuthor — same rule, same reason).
+				payload["author_deleted"] = true
+			}
 		}
 		if charID := topic.GetString("author_character_id"); charID != "" {
 			masks := loadCharacterDisplays(e.App, []string{charID})
 			if mask, ok := masks[charID]; ok && mask.OwnerID == authorID {
-				payload["author_name"] = mask.Name
-				payload["is_character"] = true
+				if d, ok := displays[authorID]; !ok || !d.IsDeleted {
+					payload["author_name"] = mask.Name
+					payload["is_character"] = true
+				}
 			}
 		}
 	} else {
