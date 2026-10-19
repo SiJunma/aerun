@@ -96,8 +96,10 @@ func TestMaskIsAppliedToTheStoredPost(t *testing.T) {
 
 	// ...but NOT ownership. A mask must never let somebody take credit, or
 	// blame, for something the account did not write.
-	if got, _ := firstPost["author_id"].(string); got != fixPlayerID {
-		t.Errorf("first_post.author_id = %q, want %q — a mask must not change ownership", got, fixPlayerID)
+	if authorDTO, ok := firstPost["author"].(map[string]any); !ok {
+		t.Errorf("first_post has no nested author DTO")
+	} else if got, _ := authorDTO["user_id"].(string); got != fixPlayerID {
+		t.Errorf("first_post.author.user_id = %q, want %q — a mask must not change ownership", got, fixPlayerID)
 	}
 	if role, _ := firstPost["author_role_id"].(string); role == "" {
 		t.Error("author_role_id was emptied by the mask; role and reputation belong to the account")

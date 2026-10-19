@@ -223,9 +223,9 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 	simpleQuery :=
 		"SELECT category_id, id AS topic_id, title, last_post_created, last_post_author_id, " +
 			"'' AS last_post_author_character_id, " +
-			" AS last_post_guest_display_name, COALESCE(posts_count, 0) FROM (" +
+			"'' AS last_post_guest_display_name, COALESCE(posts_count, 0) FROM (" +
 			"SELECT category_id, id, title, last_post_created, last_post_author_id, " +
-			" AS last_post_author_character_id, posts_count,  AS last_post_guest_display_name, " +
+			"'' AS last_post_author_character_id, posts_count, '' AS last_post_guest_display_name, " +
 			"ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY last_post_created DESC, id DESC) AS rn " +
 			"FROM " + topicsCollectionName + ") WHERE rn = 1"
 	if err := app.DB().NewQuery(fullQuery).All(&latest); err != nil && isMissingColumnErr(err) {
@@ -245,15 +245,34 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		projection["last_post_topic_id"] = row.TopicID
 		projection["last_post_topic_title"] = row.Title
 		projection["last_post_at"] = row.Created
-		projection["last_post_author_id"] = row.AuthorID
 		projection["last_post_author_character_id"] = row.CharacterID
 		projection["last_post_guest_display_name"] = row.GuestDisplayName
 
-		// Guest posts have empty author_id; keep the guest display name under its
-		// own key. The frontend reads last_post_author_name as a fallback in
-		// toCategory, so the backend does not need to rename the column.
-		if row.AuthorID == "" && row.GuestDisplayName != "" {
+		if row.AuthorID != "" {
+			ref := map[string]any{
+				"kind":         authorKindAccount,
+				"user_id":      row.AuthorID,
+				"profile_id":   row.AuthorID,
+				"display_name": nil,
+				"character_id": nil,
+				"is_character": false,
+				"avatar_url":   nil,
+			}
+			if row.CharacterID != "" {
+				ref["character_id"] = row.CharacterID
+			}
+			projection["last_post_author_ref"] = ref
+		} else if row.GuestDisplayName != "" {
 			projection["last_post_author_name"] = row.GuestDisplayName
+			projection["last_post_author_ref"] = map[string]any{
+				"kind":         authorKindGuest,
+				"user_id":      nil,
+				"profile_id":   nil,
+				"display_name": row.GuestDisplayName,
+				"character_id": nil,
+				"is_character": false,
+				"avatar_url":   nil,
+			}
 		}
 	}
 
@@ -269,7 +288,7 @@ func categoryForumProjections(app core.App) (map[string]map[string]any, error) {
 		displays := loadAuthorDisplays(app, collectAuthorIDs(authorPayloads, "last_post_author_id"))
 		masks := loadCharacterDisplays(app, collectCharacterIDs(authorPayloads, "last_post_author_character_id"))
 		for _, payload := range authorPayloads {
-			decorateLastPostAuthor(payload, displays, masks)
+			decorateLastPostAuthor(app, payload, displays, masks)
 		}
 	}
 

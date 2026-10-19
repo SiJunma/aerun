@@ -1522,7 +1522,7 @@ const isLimitedProfile = viewedProfile?.status === 'pending'
                                     )}
                                   </div>
                                   <div className="post-preview text-muted small text-break line-clamp-4">
-                                    <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
+                                    <BBCode rolls={post.rolls} authorId={post.author?.user_id}>{post.content}</BBCode>
                                   </div>
                                 </div>
                               );

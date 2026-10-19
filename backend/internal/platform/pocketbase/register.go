@@ -52,6 +52,11 @@ type registerForm struct {
 	// the client sends here is ignored, never stored.
 	Theme    string `json:"theme"`
 	Language string `json:"language"`
+	// A note the newcomer leaves for the moderators ("who are you, where did
+	// you hear about the forum"). It is never rendered on the public profile
+	// (see 1766900000): it travels only inside the new_registration notice to
+	// the staff. Whitelist-only like the seeds above.
+	AdminMessage string `json:"admin_message"`
 }
 
 // seedSettingsFromRegistration builds the fresh account's initial settings
@@ -97,6 +102,13 @@ func registerHandler(e *core.RequestEvent) error {
 
 	email := strings.ToLower(strings.TrimSpace(form.Email))
 	nickname := strings.TrimSpace(form.Nickname)
+	adminMessage := strings.TrimSpace(form.AdminMessage)
+	// A note, not a novel: cap the moderator message so it cannot bloat the
+	// notice payload. The client already hints at a short intro; the server
+	// enforces the ceiling.
+	if len([]rune(adminMessage)) > 2000 {
+		return router.NewApiError(http.StatusBadRequest, "the message to the moderator is too long", nil)
+	}
 	if err := validateRegistration(email, form.Password, nickname); err != nil {
 		return err
 	}
@@ -162,6 +174,11 @@ func registerHandler(e *core.RequestEvent) error {
 		return e.BadRequestError("registration failed", err)
 	}
 
+	// Tell the staff a newcomer arrived — the Firebase onUserCreated parity
+	// (functions/index.js). Best-effort: the account already exists, so a
+	// failed notice is logged and the 201 still goes out.
+	notifyStaffOfRegistration(e.App, record, adminMessage)
+
 	// Trigger the verification mail through PocketBase's own sender, so it
 	// goes through the same stack as every other auth mail: the Aerun
 	// template from configureAuthTemplates, the global wrapper from
@@ -196,6 +213,125 @@ func registerHandler(e *core.RequestEvent) error {
 		"mail_error": mailError,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// registrationStaffPerms are the keys that make a role a "user manager" in
+// the Firebase onUserCreated parity: anyone holding one of these reads the
+// new_registration notice. Root is always included on top (see below).
+var registrationStaffPerms = []string{
+	string(auth.PermApproveUsers),
+	string(auth.PermBanUsers),
+	string(auth.PermDeleteUsers),
+}
+
+// notifyStaffOfRegistration fans a new_registration notice out to the staff.
+// It mirrors the legacy onUserCreated trigger (functions/index.js): roles
+// holding a user-management permission plus root, one notice per active
+// member, payload {uid, nickname, email, admin_message}. The caller skips
+// themselves (an admin registering while signed in is impossible today, but
+// the guard costs nothing), and members who switched the notice off are
+// skipped the way the reputation gate does it. Any single failure is logged
+// and skipped — the account registration already succeeded before this ran.
+func notifyStaffOfRegistration(app core.App, newcomer *core.Record, adminMessage string) {
+	roleRows, err := app.FindAllRecords(rolesCollectionName, nil)
+	if err != nil {
+		app.Logger().Warn("new registration notices skipped: roles unavailable",
+			"error", err, "userId", newcomer.Id)
+		return
+	}
+
+	eligible := map[string]bool{string(auth.RoleRoot): true}
+	for _, row := range roleRows {
+		perms := row.GetStringSlice("permissions")
+		for _, p := range perms {
+			for _, want := range registrationStaffPerms {
+				if p == want {
+					eligible[row.GetString("role_id")] = true
+					break
+				}
+			}
+			if eligible[row.GetString("role_id")] {
+				break
+			}
+		}
+	}
+
+	params := dbx.Params{}
+	placeholders := make([]string, 0, len(eligible))
+	i := 0
+	for id := range eligible {
+		// dbx binds named placeholders ({:role0}); the key is positional
+		// only, the role id travels as the bound value, so no id text ever
+		// enters the SQL string.
+		key := "role" + string(rune('0'+i))
+		placeholders = append(placeholders, "{:"+key+"}")
+		params[key] = id
+		i++
+	}
+	staff, err := app.FindAllRecords(usersCollectionName,
+		dbx.NewExp("role IN ("+strings.Join(placeholders, ", ")+")", params))
+	if err != nil {
+		app.Logger().Warn("new registration notices skipped: staff lookup failed",
+			"error", err, "userId", newcomer.Id)
+		return
+	}
+
+	payload := map[string]any{
+		"uid":           newcomer.Id,
+		"nickname":      newcomer.GetString("nickname"),
+		"email":         newcomer.Email(),
+		"admin_message": nil,
+	}
+	if adminMessage != "" {
+		payload["admin_message"] = adminMessage
+	}
+
+	_ = app.RunInTransaction(func(txApp core.App) error {
+		for _, member := range staff {
+			if member.Id == newcomer.Id {
+				continue
+			}
+			if member.GetString("status") != string(auth.StatusActive) {
+				continue
+			}
+			// A staffer who switched the notice off keeps the quiet they
+			// asked for — same contract as the reputation_change gate.
+			if wants, ok := newRegistrationWanted(member); ok && !wants {
+				continue
+			}
+			if _, err := createNotification(txApp, member.Id, newcomer.Id,
+				"new_registration", "New registration", payload); err != nil {
+				txApp.Logger().Warn("new registration notice failed for one staffer; continuing",
+					"error", err, "recipientId", member.Id, "userId", newcomer.Id)
+				continue
+			}
+		}
+		return nil
+	})
+}
+
+// newRegistrationWanted reads the member's in-app switch for the
+// new_registration notice. It returns (want, understood): understood is false
+// when the settings carry nothing usable, and the caller treats that as
+// "send". Only an explicit false suppresses the notice — the same default-on
+// contract ProfilePage renders (`…in_app !== false`).
+func newRegistrationWanted(member *core.Record) (bool, bool) {
+	settings, err := decodeSettings(member)
+	if err != nil {
+		return true, false
+	}
+	notifications, ok := settings["notifications"].(map[string]any)
+	if !ok {
+		return true, false
+	}
+	entry, ok := notifications["new_registration"].(map[string]any)
+	if !ok {
+		return true, false
+	}
+	if inApp, ok := entry["in_app"].(bool); ok {
+		return inApp, true
+	}
+	return true, false
 }
 
 // resendVerificationHandler re-sends the verification mail to the CALLER.

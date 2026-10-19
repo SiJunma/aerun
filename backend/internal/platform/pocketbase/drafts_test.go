@@ -257,8 +257,10 @@ func TestDraftKeepsItsMaskThroughPublish(t *testing.T) {
 	if isChar, _ := published["is_character"].(bool); !isChar {
 		t.Errorf("published is_character = %v, want true", isChar)
 	}
-	if got, _ := published["author_id"].(string); got != fixPlayerID {
-		t.Errorf("published author_id = %q, want %q — a mask must not change ownership",
+	if authorDTO, ok := published["author"].(map[string]any); !ok {
+		t.Errorf("published post has no nested author DTO")
+	} else if got, _ := authorDTO["user_id"].(string); got != fixPlayerID {
+		t.Errorf("published author.user_id = %q, want %q — a mask must not change ownership",
 			got, fixPlayerID)
 	}
 	if got, _ := payload["post_id"].(string); got != draftID {

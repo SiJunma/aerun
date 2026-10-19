@@ -17,6 +17,7 @@ import ForumPagination from '../components/common/ForumPagination';
 import ForumEmptyState from '../components/common/ForumEmptyState';
 import Timestamp from '../components/common/Timestamp';
 import { useToast } from '../contexts/ToastProvider';
+import { refreshUnreadCounts } from '../api/dms';
 
 const TYPE_META = {
   new_registration: {
@@ -40,6 +41,11 @@ const TYPE_META = {
     // Dynamic icon, set in render
     labelKey: 'notifications.types.reputation_change',
     color: 'success'
+  },
+  role_change: {
+    icon: <UserCheck size={18} />,
+    labelKey: 'notifications.types.role_change',
+    color: 'warning'
   },
   post_mentioned: {
     icon: <AtSign size={18} />,
@@ -125,6 +131,13 @@ const NotificationsPage = () => {
     setUserActive(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
 
     markNotificationRead(id)
+      .then(() => {
+        // The navbar bell and the tab title render the SERVER's
+        // /me/unread-counts number, not this page's list — without an explicit
+        // re-read the badge keeps the last polled value until the next tick
+        // (or a reload). Same refresh topics and DMs already do after a read.
+        refreshUnreadCounts(profile?.uid);
+      })
       .catch(err => {
         console.error('[markNotificationRead]', err);
         showToast(err.message, 'danger');
@@ -170,6 +183,9 @@ const NotificationsPage = () => {
     try {
       if (profile?.uid && userActive.length > 0) {
         await markAllNotificationsRead(profile.uid, userActive);
+        // Same staleness as the single read above: the badge counts the whole
+        // inbox server-side, so re-read it instead of waiting for the tick.
+        refreshUnreadCounts(profile.uid);
       }
       showToast(t('notifications.all_read_toast', 'Все уведомления прочитаны'));
     } catch (err) {
@@ -449,6 +465,34 @@ const NotificationsPage = () => {
                       <Button 
                         variant="link" 
                         size="sm" 
+                        className="p-0 ms-auto text-decoration-none small fw-bold text-muted transition-all d-flex align-items-center"
+                        onClick={(e) => handleMarkRead(e, n.id)}
+                      >
+                        <CheckCheck size={14} className="me-1" />
+                        {t('notifications.mark_as_read')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {n.type === 'role_change' && payload && (
+                <div className="ps-0 ps-md-1">
+                  <div className="mt-2 text-muted small">
+                    {t('notifications.role_changed_to', { role: payload.new_role_name || payload.new_role }).replace('{role}', payload.new_role_name || payload.new_role)}
+                  </div>
+                  <div className="mt-3 d-flex align-items-center">
+                    <Link
+                      to={`/profile/${profile?.uid}`}
+                      className="text-decoration-none small fw-bold text-primary"
+                      onClick={() => !n.read && handleMarkRead(null, n.id)}
+                    >
+                      {t('notifications.view_profile')}
+                    </Link>
+
+                    {!n.read && (
+                      <Button
+                        variant="link"
+                        size="sm"
                         className="p-0 ms-auto text-decoration-none small fw-bold text-muted transition-all d-flex align-items-center"
                         onClick={(e) => handleMarkRead(e, n.id)}
                       >

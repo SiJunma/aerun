@@ -124,7 +124,7 @@ const NewRepliesPage = () => {
   const registrationMs = toMillis(profile?.created_at);
   const unreadTopics = topics.filter(topic => {
     if (!user) return false;
-    if (topic.last_post_author_id === user.uid) return false;
+    if (topic.last_post_author_ref?.user_id === user.uid) return false;
     const entry = readMap[topic.id];
     const effectiveLastVisitMs = unreadFloor(entry?.timestamp || entry, registrationMs);
     return toMillis(topic.last_post_at) > effectiveLastVisitMs;

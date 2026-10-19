@@ -173,7 +173,7 @@ const MainPage = () => {
                     const isUnreadByServer = serverUnread !== null ? serverUnread : true;
                     const hasUnread = !!user &&
                       profile?.role_id !== 'pending' &&
-                      cat.last_post_author_id !== user?.uid &&
+                      cat.last_post_author_ref?.user_id !== user?.uid &&
                       isUnreadByServer &&
                       !isLocallyRead;
 
@@ -182,11 +182,6 @@ const MainPage = () => {
                         topicId={cat.last_post_topic_id}
                         lastPostAt={cat.last_post_at}
                         author={cat.last_post_author_ref}
-                        authorId={cat.last_post_author_id}
-                        authorCharacterId={cat.last_post_author_character_id}
-                        isCharacter={!!cat.last_post_is_character}
-                        authorName={cat.last_post_author}
-                        authorAvatar={cat.last_post_author_avatar}
                         hasUnread={hasUnread}
                         lastReadOffset={lastReadOffset}
                         postsCount={cat.last_post_topic_posts_count || null}

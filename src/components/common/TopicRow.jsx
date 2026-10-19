@@ -40,7 +40,7 @@ const TopicRow = ({
   const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
   const isUnreadByServer = serverUnread !== null ? serverUnread : true;
   const isUnreadByState = isUnreadByServer && !isLocallyRead;
-  const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_id !== user?.uid && isUnreadByState;
+  const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_ref?.user_id !== user?.uid && isUnreadByState;
 
   const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
   const totalPages = Math.ceil((topic.posts_count || 1) / ITEMS_PER_PAGE);
@@ -119,11 +119,6 @@ const TopicRow = ({
               <AuthorMeta
                 date={topic.created_at}
                 author={topic.author}
-                authorId={topic.author_id}
-                authorCharacterId={topic.author_character_id}
-                isCharacter={!!topic.is_character}
-                authorName={topic.author_name}
-                authorAvatar={topic.author_avatar}
                 showAvatar={false}
                 lang={lang}
               />
@@ -163,11 +158,6 @@ const TopicRow = ({
           topicId={topic.id}
           lastPostAt={topic.last_post_at}
           author={topic.last_post_author_ref}
-          authorId={topic.last_post_author_id}
-          authorCharacterId={topic.last_post_author_character_id}
-          isCharacter={!!topic.last_post_is_character}
-          authorName={topic.last_post_author}
-          authorAvatar={topic.last_post_author_avatar}
           hasUnread={hasUnread}
           lastReadOffset={lastReadOffset}
           postsCount={topic.posts_count}

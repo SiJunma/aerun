@@ -65,13 +65,11 @@ func postPayload(record *core.Record) map[string]any {
 	payload := map[string]any{
 		"id":        record.Id,
 		"topic_id":  record.GetString("topic_id"),
-		"author_id": record.GetString("author_id"),
 		"created":   record.GetDateTime("created").String(),
 		"updated":   record.GetDateTime("updated").String(),
 	}
-	// Nested AuthorRef DTO (ADR contract). The flat author_id
-	// above stays as a deprecated compatibility copy emitted from this single
-	// adapter; new readers must use payload["author"].
+	// Nested AuthorRef DTO (ADR contract) is the single source of truth for
+	// the post author. New readers must use payload["author"].
 	payload["author"] = authorDTOFromRecord(record)
 
 	// `rolls` is the RESULT of the post's dice throws, and it is what turns

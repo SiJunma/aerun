@@ -18,7 +18,6 @@ export const normalizeTopic = (t) => {
     id: t.id,
     category_id: t.category_id,
     title: t.title,
-    author_id: t.author_id,
     posts_count: t.posts_count || 1,
     is_pinned: !!(t.pinned || t.is_pinned),
     is_locked: !!(t.locked || t.is_locked),
@@ -38,7 +37,7 @@ const normalizePost = (p) => {
     ...p,
     id: p.id,
     topic_id: p.topic_id,
-    author_id: p.author_id,
+    guest_nickname: p.guest_nickname || '',
     content: p.content || '',
     created_at: p.created,
     updated_at: p.updated,
@@ -144,7 +143,6 @@ export const fetchTopicStats = async (topicId) => {
     id: res.topic_id || topicId,
     category_id: res.category_id,
     title: res.title,
-    author_id: res.author_id,
     author_character_id: res.author_character_id || null,
     author_name: res.author_name || null,
     is_character: !!res.is_character,
@@ -324,6 +322,10 @@ export const createTopic = async (topicData, firstPostData) => {
       // else's character by editing this request.
       character_id: topicData.character_id || '',
       pin_first_post: !!topicData.pin_first_post,
+      // A guest posts without an account, so their chosen display name travels
+      // here for the server to store on the topic and opening post. Empty for
+      // authenticated users.
+      guest_nickname: topicData.guest_nickname || '',
     }
   });
 

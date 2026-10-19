@@ -200,10 +200,12 @@ export const unbanUser = async (uid, performerId) => {
 
 // The role and the status are separate axes. Only a change to the ROLE implies
 // a status flip; assigning a real role never implies banning anyone.
-export const updateUserRole = async (uid, roleId, performerId) => {
+// notifyRoleChange defaults to true (the AdminPage checkbox is checked by
+// default); omitting the flag still notifies the member.
+export const updateUserRole = async (uid, roleId, performerId, notifyRoleChange = true) => {
   await sendApi(`/api/aerun/admin/users/${uid}`, {
     method: 'PATCH',
-    body: { role: roleId }
+    body: { role: roleId, notify_role_change: notifyRoleChange }
   });
   await logAdminAction('user_role_updated', performerId, { targetId: uid, roleId });
 };

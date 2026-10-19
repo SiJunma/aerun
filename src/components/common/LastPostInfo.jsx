@@ -6,11 +6,6 @@ const LastPostInfo = ({
   topicId,
   lastPostAt,
   author,          // nested last-post AuthorRef DTO {kind, user_id, display_name, avatar_url, character_id}
-  authorId,
-  authorCharacterId,
-  isCharacter,
-  authorName,
-  authorAvatar,
   hasUnread,
   lang,
   className = ""
@@ -43,11 +38,6 @@ const LastPostInfo = ({
       <AuthorMeta
         date={lastPostAt}
         author={author}
-        authorId={authorId}
-        authorCharacterId={authorCharacterId}
-        isCharacter={isCharacter}
-        authorName={authorName}
-        authorAvatar={authorAvatar}
         lang={lang}
         className="w-100"
       />

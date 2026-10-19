@@ -180,6 +180,11 @@ func parseAdminPagination(pageRaw, perPageRaw string) (int, int) {
 type adminUpdateUserForm struct {
 	Role   *string `json:"role"`
 	Status *string `json:"status"`
+	// NotifyRoleChange asks the server to tell the target member that their
+	// role was changed. A missing field means true (see the handler): the
+	// AdminPage checkbox is checked by default, and callers that do not send
+	// the field at all still produce the notification.
+	NotifyRoleChange *bool `json:"notify_role_change"`
 }
 
 func adminUpdateUserHandler(e *core.RequestEvent) error {
@@ -208,6 +213,9 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("user not found")
 		}
 
+		oldRole := targetUser.GetString("role")
+		roleChanged := false
+
 		if form.Role != nil {
 			role := strings.TrimSpace(*form.Role)
 			// The role column holds legacy custom role ids verbatim
@@ -227,6 +235,9 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 			}
 			targetUser.Set("role", role)
 			targetUser.Set("custom_role_id", customRoleIDFor(txApp, role))
+			if role != oldRole {
+				roleChanged = true
+			}
 		}
 
 		if form.Status != nil {
@@ -239,6 +250,31 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 
 		if err := txApp.Save(targetUser); err != nil {
 			return 0, nil, internalError("failed to update user", err)
+		}
+
+		// Tell the member their role changed, unless the admin unchecked the
+		// "notify user" box. The box is checked by default and a caller that
+		// sends no flag at all gets the notification too (missing == true).
+		// A failed notification must not roll back the role change itself:
+		// the write is done and audited, so the best-effort notice is logged
+		// and the command still succeeds — the same reasoning that keeps a
+		// failed post notification from costing the author their reply.
+		if roleChanged && (form.NotifyRoleChange == nil || *form.NotifyRoleChange) {
+			newRole := targetUser.GetString("role")
+			if _, err := createNotification(txApp, userID, e.Auth.Id, "role_change",
+				"Your role has been changed",
+				map[string]any{
+					"target_id":     userID,
+					"old_role":      oldRole,
+					"old_role_name": roleDisplayName(txApp, oldRole),
+					"new_role":      newRole,
+					"new_role_name": roleDisplayName(txApp, newRole),
+					"changed_by":    e.Auth.Id,
+				},
+			); err != nil {
+				txApp.Logger().Warn("role change notification failed; the role change itself succeeded",
+					"error", err, "targetId", userID, "actorId", e.Auth.Id, "oldRole", oldRole, "newRole", newRole)
+			}
 		}
 
 		_ = recordAuditLog(txApp, "admin_user_update", e.Auth.Id, map[string]any{
@@ -256,6 +292,26 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 	})
 
 	return writeCommandResult(e, outcome, err)
+}
+
+// roleDisplayName resolves a role id to the human-readable name from the
+// roles registry (the same `name` roleBadgePayload publishes for badges).
+// It falls back to the id itself so the notice never renders an empty slot
+// when the registry row is missing.
+func roleDisplayName(app core.App, roleID string) string {
+	if roleID == "" {
+		return ""
+	}
+	if rec, err := app.FindFirstRecordByFilter(
+		rolesCollectionName,
+		"role_id = {:rid}",
+		dbx.Params{"rid": roleID},
+	); err == nil && rec != nil {
+		if name := rec.GetString("name"); name != "" {
+			return name
+		}
+	}
+	return roleID
 }
 
 // checkRoleChange is the authority rule for changing an account's role.

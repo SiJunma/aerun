@@ -102,7 +102,6 @@ func authorRefDTO(ref AuthorRef) map[string]any {
 		dto := map[string]any{
 			"kind":         authorKindAccount,
 			"user_id":      ref.UserID,
-			"profile_id":   ref.UserID,
 			"display_name": nil,
 		}
 		if ref.CharacterID != "" {

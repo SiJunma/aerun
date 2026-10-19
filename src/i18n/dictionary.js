@@ -395,8 +395,10 @@ export const translations = {
         post_quoted: "Your post was quoted in {topic}",
         post_mentioned: "You were mentioned in {topic}",
         dm: "Direct message",
-        reputation_change: "Reputation change"
+        reputation_change: "Reputation change",
+        role_change: "Role change"
       },
+      role_changed_to: "Your site role was changed to {role}",
       reputation_increased: "Your reputation was increased by {user}",
       reputation_decreased: "Your reputation was decreased by {user}",
       view_post: "View post →",
@@ -571,7 +573,8 @@ export const translations = {
         toast_deleted: "User account deleted",
         delete: "Delete",
         edit_user_title: "Manage User Settings",
-        change_role_label: "Change Site Role"
+        change_role_label: "Change Site Role",
+        notify_role_change_label: "Notify the user about the role change"
       },
       roles: {
         title: "Role Permissions (RBAC)",
@@ -1212,8 +1215,10 @@ export const translations = {
         post_quoted: "Ваш пост процитировали в {topic}",
         post_mentioned: "Вас упомянули в {topic}",
         dm: "Личное сообщение",
-        reputation_change: "Изменение репутации"
+        reputation_change: "Изменение репутации",
+        role_change: "Изменение роли"
       },
+      role_changed_to: "Ваша роль на сайте изменена на «{role}»",
       reputation_increased: "Вам повысили репутацию. Автор: {user}",
       reputation_decreased: "Вам понизили репутацию. Автор: {user}",
       view_post: "Посмотреть сообщение →",
@@ -1389,7 +1394,8 @@ export const translations = {
         toast_deleted: "Аккаунт пользователя удален",
         delete: "Удалить",
         edit_user_title: "Управление участником",
-        change_role_label: "Изменить роль на сайте"
+        change_role_label: "Изменить роль на сайте",
+        notify_role_change_label: "Уведомить пользователя о смене роли"
       },
       roles: {
         title: "Разрешения ролей (RBAC)",

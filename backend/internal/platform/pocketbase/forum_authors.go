@@ -157,8 +157,39 @@ func loadCharacterDisplays(app core.App, characterIDs []string) map[string]chara
 func collectCharacterIDs(payloads []map[string]any, field string) []string {
 	out := make([]string, 0, len(payloads))
 	for _, payload := range payloads {
-		if id, _ := payload[field].(string); id != "" {
-			out = append(out, id)
+		if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+			if id, _ := dto["character_id"].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+		if dto, ok := payload["last_post_author_ref"].(map[string]any); ok && dto != nil {
+			if id, _ := dto["character_id"].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+		if field != "" {
+			if id, _ := payload[field].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// collectLastPostCharacterIDs returns the non-empty character_id values of the
+// nested last_post_author_ref DTO or flat field across payloads.
+func collectLastPostCharacterIDs(payloads []map[string]any, field string) []string {
+	out := make([]string, 0, len(payloads))
+	for _, payload := range payloads {
+		if dto, ok := payload["last_post_author_ref"].(map[string]any); ok && dto != nil {
+			if id, _ := dto["character_id"].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+		if field != "" {
+			if id, _ := payload[field].(string); id != "" {
+				out = append(out, id)
+			}
 		}
 	}
 	return out
@@ -230,13 +261,45 @@ func resolveAuthorCharacter(app core.App, ownerID string, requested string) (str
 	return stored, nil
 }
 
-// collectAuthorIDs returns the non-empty values of idField across payloads,
-// which is the input loadAuthorDisplays wants. loadAuthorDisplays deduplicates.
+// collectAuthorIDs returns the non-empty user_id values of the nested
+// AuthorRef DTO across payloads, which is the input loadAuthorDisplays wants.
+// loadAuthorDisplays deduplicates.
 func collectAuthorIDs(payloads []map[string]any, idField string) []string {
 	out := make([]string, 0, len(payloads))
 	for _, payload := range payloads {
-		if id, _ := payload[idField].(string); id != "" {
-			out = append(out, id)
+		if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+			if id, _ := dto["user_id"].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+		if dto, ok := payload["last_post_author_ref"].(map[string]any); ok && dto != nil {
+			if id, _ := dto["user_id"].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+		if idField != "" {
+			if id, _ := payload[idField].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// collectLastPostAuthorIDs returns the non-empty user_id values of the nested
+// last_post_author_ref DTO across payloads.
+func collectLastPostAuthorIDs(payloads []map[string]any, idField string) []string {
+	out := make([]string, 0, len(payloads))
+	for _, payload := range payloads {
+		if dto, ok := payload["last_post_author_ref"].(map[string]any); ok && dto != nil {
+			if id, _ := dto["user_id"].(string); id != "" {
+				out = append(out, id)
+			}
+		}
+		if idField != "" {
+			if id, _ := payload[idField].(string); id != "" {
+				out = append(out, id)
+			}
 		}
 	}
 	return out
@@ -257,11 +320,29 @@ func collectAuthorIDs(payloads []map[string]any, idField string) []string {
 func applyMask(payload map[string]any, field string, authorID string, masks map[string]characterDisplay) {
 	id, _ := payload[field].(string)
 	if id == "" {
+		if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+			id, _ = dto["character_id"].(string)
+		}
+	}
+	if id == "" || authorID == "" {
 		return
 	}
 	mask, ok := masks[id]
 	if !ok || mask.OwnerID != authorID {
 		return
+	}
+
+	// Update AuthorRef DTO directly so the DTO is the complete single source of truth.
+	accountName := ""
+	if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+		accountName, _ = dto["display_name"].(string)
+		dto["display_name"] = mask.Name
+		dto["avatar_url"] = mask.AvatarURL
+		dto["is_character"] = true
+		dto["character_id"] = id
+		if accountName != "" {
+			dto["owner_name"] = accountName
+		}
 	}
 
 	// The ACCOUNT nickname is captured here, before the mask takes the display
@@ -282,7 +363,12 @@ func applyMask(payload map[string]any, field string, authorID string, masks map[
 	// account (author_profile_id) and the post's counters are already stamped
 	// with it. A mask is a display layer over an identity the forum already
 	// publishes, not an anonymity feature.
-	if accountName, _ := payload["author_name"].(string); accountName != "" {
+	if accountName == "" {
+		if cur, _ := payload["author_name"].(string); cur != "" {
+			accountName = cur
+		}
+	}
+	if accountName != "" {
 		payload["owner_name"] = accountName
 	}
 
@@ -329,37 +415,51 @@ func syncAuthorDTO(payload map[string]any, dtoKey, nameKey, avatarKey string) {
 // the reputation counters stay the human's. Ownership and credit are not
 // display settings, and letting a mask shadow them would let a member take
 // credit, or blame, for something the account did not write.
-func decoratePostAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
-	id, _ := payload["author_id"].(string)
+func decoratePostAuthor(app core.App, payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
+	dto, _ := payload["author"].(map[string]any)
+	if dto == nil {
+		return
+	}
+	id, _ := dto["user_id"].(string)
 	if id == "" {
-		// Guest post: author_id is empty, use guest_nickname as the display name.
-		if nick, _ := payload["guest_nickname"].(string); nick != "" {
-			payload["author_name"] = nick
+		// Guest post
+		if dto["kind"] == authorKindGuest {
+			if s := loadForumSettings(app); s.GuestAvatarURL != "" {
+				dto["avatar_url"] = s.GuestAvatarURL
+			}
+			if name, _ := dto["display_name"].(string); name != "" {
+				payload["author_name"] = name
+			}
 		}
-		// The nested DTO already carries the stored guest display_name; sync
-		// the flat copy over it so the two agree even if they ever diverge.
-		syncAuthorDTO(payload, "author", "author_name", "author_avatar")
 		return
 	}
 	display, ok := displays[id]
 	if !ok {
 		// Deleted account: leave the nested DTO's display_name/avatar_url null
-		// so the reader renders the deleted-account placeholder, exactly as the
-		// empty flat fields do today.
+		dto["display_name"] = nil
+		dto["avatar_url"] = nil
+		dto["is_character"] = false
 		return
 	}
+
+	// Write the resolved display fields into the nested AuthorRef DTO
+	dto["display_name"] = display.Nickname
+	dto["avatar_url"] = display.AvatarURL
+	dto["reputation"] = display.Reputation
+	dto["posts_count"] = display.PostsCount
+	dto["is_character"] = false
+
 	payload["author_name"] = display.Nickname
 	payload["author_avatar"] = display.AvatarURL
-	payload["author_status_line"] = display.StatusLine
 	payload["author_role_id"] = display.Role
+	payload["author_status_line"] = display.StatusLine
+	if display.Signature != "" {
+		payload["author_signature"] = display.Signature
+	}
 	payload["author_reputation"] = display.Reputation
 	payload["author_posts_count"] = display.PostsCount
-	payload["author_signature"] = display.Signature
 
 	applyMask(payload, "author_character_id", id, masks)
-	// After the mask swap, so a masked author's nested display matches the
-	// mask — the single source of the label the card renders.
-	syncAuthorDTO(payload, "author", "author_name", "author_avatar")
 }
 
 // decoratePostAuthors resolves and applies the author projection to a page of
@@ -371,7 +471,7 @@ func decoratePostAuthors(app core.App, payloads []map[string]any) {
 	displays := loadAuthorDisplays(app, collectAuthorIDs(payloads, "author_id"))
 	masks := loadCharacterDisplays(app, collectCharacterIDs(payloads, "author_character_id"))
 	for _, payload := range payloads {
-		decoratePostAuthor(payload, displays, masks)
+		decoratePostAuthor(app, payload, displays, masks)
 	}
 }
 
@@ -383,34 +483,51 @@ func decoratePostAuthors(app core.App, payloads []map[string]any) {
 // the second lookup is a map hit rather than a query. Both may be masks — the
 // topic opener and the last replier picked their masks independently, and the
 // list row renders both names.
-func decorateTopicAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
-	id, _ := payload["author_id"].(string)
-	if id == "" {
-		// Guest topic: use guest_nickname as the author name.
-		if nick, _ := payload["guest_nickname"].(string); nick != "" {
-			payload["author_name"] = nick
-		}
-	} else if display, ok := displays[id]; ok {
-		payload["author_name"] = display.Nickname
-		payload["author_avatar"] = display.AvatarURL
-		payload["author_status_line"] = display.StatusLine
-		payload["author_role_id"] = display.Role
-		payload["author_reputation"] = display.Reputation
-		payload["author_posts_count"] = display.PostsCount
-		payload["author_signature"] = display.Signature
-
-		applyMask(payload, "author_character_id", id, masks)
+func decorateTopicAuthor(app core.App, payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
+	dto, _ := payload["author"].(map[string]any)
+	if dto == nil {
+		return
 	}
-	// Keep the nested opener DTO in step with the flat fields just written, so
-	// a reader of `author` and a reader of `author_*` cannot disagree.
-	syncAuthorDTO(payload, "author", "author_name", "author_avatar")
+	id, _ := dto["user_id"].(string)
+	if id == "" {
+		// Guest topic: the display name is already in the nested AuthorRef DTO
+		if dto["kind"] == authorKindGuest {
+			if s := loadForumSettings(app); s.GuestAvatarURL != "" {
+				dto["avatar_url"] = s.GuestAvatarURL
+			}
+			if name, _ := dto["display_name"].(string); name != "" {
+				payload["author_name"] = name
+			}
+		}
+		decorateLastPostAuthor(app, payload, displays, masks)
+		return
+	}
+	display, ok := displays[id]
+	if !ok {
+		// Deleted account: leave the nested DTO's display_name/avatar_url null
+		dto["display_name"] = nil
+		dto["avatar_url"] = nil
+		dto["is_character"] = false
+		decorateLastPostAuthor(app, payload, displays, masks)
+		return
+	}
+
+	// Write the resolved display fields into the nested AuthorRef DTO
+	dto["display_name"] = display.Nickname
+	dto["avatar_url"] = display.AvatarURL
+	dto["is_character"] = false
+
+	payload["author_name"] = display.Nickname
+	payload["author_avatar"] = display.AvatarURL
+
+	applyMask(payload, "author_character_id", id, masks)
 
 	// The last-post author is decorated HERE too, through the same shared helper
 	// the category index uses. decorateTopicAuthors already loaded the last-post
 	// ids and masks into these maps; without this call a topic list row never
 	// resolved its last poster and the client fell back to the opener — the
 	// exact divergence the audit flagged.
-	decorateLastPostAuthor(payload, displays, masks)
+	decorateLastPostAuthor(app, payload, displays, masks)
 }
 
 // decorateTopicAuthors resolves and applies the author projection to a page of
@@ -420,15 +537,15 @@ func decorateTopicAuthors(app core.App, payloads []map[string]any) {
 		return
 	}
 	ids := collectAuthorIDs(payloads, "author_id")
-	ids = append(ids, collectAuthorIDs(payloads, "last_post_author_id")...)
+	ids = append(ids, collectLastPostAuthorIDs(payloads, "last_post_author_id")...)
 	displays := loadAuthorDisplays(app, ids)
 
 	maskIDs := collectCharacterIDs(payloads, "author_character_id")
-	maskIDs = append(maskIDs, collectCharacterIDs(payloads, "last_post_author_character_id")...)
+	maskIDs = append(maskIDs, collectLastPostCharacterIDs(payloads, "last_post_author_character_id")...)
 	masks := loadCharacterDisplays(app, maskIDs)
 
 	for _, payload := range payloads {
-		decorateTopicAuthor(payload, displays, masks)
+		decorateTopicAuthor(app, payload, displays, masks)
 	}
 }
 
@@ -446,6 +563,11 @@ func decorateTopicAuthors(app core.App, payloads []map[string]any) {
 // post. A deleted mask leaves the account identity standing.
 func applyLastPostMask(payload map[string]any, authorID string, masks map[string]characterDisplay) {
 	maskID, _ := payload["last_post_author_character_id"].(string)
+	if maskID == "" {
+		if dto, ok := payload["last_post_author_ref"].(map[string]any); ok && dto != nil {
+			maskID, _ = dto["character_id"].(string)
+		}
+	}
 	if maskID == "" || authorID == "" {
 		return
 	}
@@ -453,6 +575,18 @@ func applyLastPostMask(payload map[string]any, authorID string, masks map[string
 	if !ok || mask.OwnerID != authorID {
 		return
 	}
+
+	if dto, ok := payload["last_post_author_ref"].(map[string]any); ok && dto != nil {
+		accountName, _ := dto["display_name"].(string)
+		dto["display_name"] = mask.Name
+		dto["avatar_url"] = mask.AvatarURL
+		dto["is_character"] = true
+		dto["character_id"] = maskID
+		if accountName != "" {
+			dto["owner_name"] = accountName
+		}
+	}
+
 	// The mask renames the LAST POSTER only. The unread dot and the reputation
 	// stay the account's.
 	payload["last_post_author"] = mask.Name
@@ -470,53 +604,118 @@ func applyLastPostMask(payload map[string]any, authorID string, masks map[string
 // last. A guest last-poster resolves to {kind: guest, display_name}; a deleted
 // account resolves to explicit null; an account keeps user_id/profile_id and
 // the resolved (possibly mask-renamed) display name.
-func decorateLastPostAuthor(payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
-	id, _ := payload["last_post_author_id"].(string)
+func decorateLastPostAuthor(app core.App, payload map[string]any, displays map[string]authorDisplay, masks map[string]characterDisplay) {
+	// Try nested DTO first (from topicPayload), fall back to flat fields
+	// (from category_access.go projection).
+	id := ""
+	dto, _ := payload["last_post_author_ref"].(map[string]any)
+	if dto != nil {
+		id, _ = dto["user_id"].(string)
+	}
 	if id == "" {
-		// Guest last-poster (or an empty projection). The guest's chosen name
-		// travels in last_post_author_name (category index) or
-		// last_post_guest_nickname (topic lists); neither invents an account.
-		name, _ := payload["last_post_author_name"].(string)
+		id, _ = payload["last_post_author_id"].(string)
+	}
+	if id == "" {
+		// Guest last-poster: the display name travels in last_post_author_name
+		// (category index) or last_post_guest_nickname (topic lists); neither
+		// invents an account.
+		name := ""
+		if dto != nil {
+			name, _ = dto["display_name"].(string)
+		}
+		if name == "" {
+			name, _ = payload["last_post_author_name"].(string)
+		}
 		if name == "" {
 			name, _ = payload["last_post_guest_nickname"].(string)
+		}
+		if name == "" {
+			name, _ = payload["last_post_guest_display_name"].(string)
 		}
 		if name == "" {
 			payload["last_post_author_ref"] = nil
 			return
 		}
-		payload["last_post_author_ref"] = map[string]any{
-			"kind":         authorKindGuest,
-			"user_id":      nil,
-			"profile_id":   nil,
-			"display_name": name,
-			"character_id": nil,
-			"avatar_url":   nil,
+		var avatarVal any = nil
+		if s := loadForumSettings(app); s.GuestAvatarURL != "" {
+			avatarVal = s.GuestAvatarURL
+		}
+		if dto == nil {
+			dto = map[string]any{
+				"kind":         authorKindGuest,
+				"user_id":      nil,
+				"profile_id":   nil,
+				"display_name": name,
+				"character_id": nil,
+				"is_character": false,
+				"avatar_url":   avatarVal,
+			}
+			payload["last_post_author_ref"] = dto
+		} else {
+			dto["kind"] = authorKindGuest
+			dto["display_name"] = name
+			dto["is_character"] = false
+			dto["avatar_url"] = avatarVal
+		}
+		payload["last_post_author"] = name
+		if avatarVal != nil {
+			payload["last_post_author_avatar"] = avatarVal
 		}
 		return
 	}
-	if display, ok := displays[id]; ok {
-		payload["last_post_author"] = display.Nickname
-		payload["last_post_author_avatar"] = display.AvatarURL
-	} else {
-		// Deleted account: leave the flat fields empty and the nested ref null
+	display, ok := displays[id]
+	if !ok {
+		// Deleted account: leave the nested DTO's display_name/avatar_url null
 		// so the reader renders the deleted-account placeholder.
-		payload["last_post_author_ref"] = nil
+		if dto == nil {
+			dto = map[string]any{
+				"kind":         authorKindAccount,
+				"user_id":      id,
+				"profile_id":   nil,
+				"display_name": nil,
+				"character_id": nil,
+				"is_character": false,
+				"avatar_url":   nil,
+			}
+			payload["last_post_author_ref"] = dto
+		} else {
+			dto["display_name"] = nil
+			dto["avatar_url"] = nil
+			dto["is_character"] = false
+		}
 		return
 	}
-	applyLastPostMask(payload, id, masks)
-	// Build the nested ref from the RESOLVED flat fields (mask-aware), so the
-	// nested object and the flat string are written by one adapter.
-	name, _ := payload["last_post_author"].(string)
-	avatar, _ := payload["last_post_author_avatar"].(string)
-	characterID, _ := payload["last_post_author_character_id"].(string)
-	payload["last_post_author_ref"] = map[string]any{
-		"kind":         authorKindAccount,
-		"user_id":      id,
-		"profile_id":   id,
-		"display_name": name,
-		"character_id": characterID,
-		"avatar_url":   avatar,
+
+	// Write the resolved display fields into the nested AuthorRef DTO.
+	if dto == nil {
+		dto = map[string]any{
+			"kind":         authorKindAccount,
+			"user_id":      id,
+			"profile_id":   id,
+			"display_name": nil,
+			"character_id": nil,
+			"is_character": false,
+			"avatar_url":   nil,
+		}
+		payload["last_post_author_ref"] = dto
 	}
+	dto["display_name"] = display.Nickname
+	dto["avatar_url"] = display.AvatarURL
+	dto["is_character"] = false
+
+	// Character ID: prefer nested DTO, fall back to flat field.
+	characterID, _ := dto["character_id"].(string)
+	if characterID == "" {
+		characterID, _ = payload["last_post_author_character_id"].(string)
+	}
+	if characterID != "" {
+		dto["character_id"] = characterID
+	}
+
+	payload["last_post_author"] = display.Nickname
+	payload["last_post_author_avatar"] = display.AvatarURL
+
+	applyLastPostMask(payload, id, masks)
 }
 
 // signatureFromSettings reads users.settings.signature.

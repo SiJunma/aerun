@@ -72,6 +72,64 @@ func getUserSettingBool(user *core.Record, key string, defaultVal bool) bool {
 	return defaultVal
 }
 
+// reputationChangeWanted reports whether the target member wants in-app
+// reputation notices. The frontend treats a missing key as enabled
+// (ProfilePage maps `…in_app !== false`), so the server does the same:
+// only an explicit false suppresses the notification.
+func reputationChangeWanted(targetUser *core.Record) bool {
+	if targetUser == nil {
+		return false
+	}
+	settings, err := decodeSettings(targetUser)
+	if err != nil {
+		return true
+	}
+	notifications, ok := settings["notifications"].(map[string]any)
+	if !ok {
+		return true
+	}
+	entry, ok := notifications["reputation_change"].(map[string]any)
+	if !ok {
+		return true
+	}
+	if inApp, ok := entry["in_app"].(bool); ok {
+		return inApp
+	}
+	return true
+}
+
+// notifyReputationChange records a reputation_change notice for the member
+// whose score just moved. It never aborts the vote: a notice that cannot be
+// written is logged and the command still succeeds — the same reasoning that
+// keeps a failed post notification from costing the author their reply.
+func notifyReputationChange(txApp core.App, recipientID, voterID string, val, delta int, comment string, postID, topicID, topicTitle, voterNickname string) {
+	if recipientID == "" || recipientID == voterID {
+		return
+	}
+	title := "Your reputation changed"
+	if delta > 0 {
+		title = "Your reputation increased"
+	} else if delta < 0 {
+		title = "Your reputation decreased"
+	}
+	if _, err := createNotification(txApp, recipientID, voterID, "reputation_change", title,
+		map[string]any{
+			"voter_id":       voterID,
+			"voter_nickname": voterNickname,
+			"target_id":      recipientID,
+			"value":          val,
+			"delta":          delta,
+			"post_id":        postID,
+			"topic_id":       topicID,
+			"topic_title":    topicTitle,
+			"comment":        comment,
+		},
+	); err != nil {
+		txApp.Logger().Warn("reputation change notification failed; the vote itself succeeded",
+			"error", err, "recipientId", recipientID, "voterId", voterID)
+	}
+}
+
 // votePostHandler casts or updates a vote on a post.
 func votePostHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
@@ -139,10 +197,15 @@ func votePostHandler(e *core.RequestEvent) error {
 		)
 
 		var voteRecord *core.Record
+		// scoreDelta is how far this call moves the author's score: the new
+		// value for a fresh vote, the difference for an edit, zero for a
+		// same-value resubmit. Only a non-zero move is notice-worthy.
+		scoreDelta := 0
 		if err == nil && existingVote != nil {
 			// Controlled replacement
 			oldVal := existingVote.GetInt("value")
 			delta := val - oldVal
+			scoreDelta = delta
 			if delta != 0 {
 				post.Set("reputation", post.GetInt("reputation")+delta)
 				if targetUser != nil {
@@ -175,6 +238,7 @@ func votePostHandler(e *core.RequestEvent) error {
 			if targetUser != nil {
 				targetUser.Set("reputation", targetUser.GetInt("reputation")+val)
 			}
+			scoreDelta = val
 			voteRecord = newVote
 		}
 
@@ -185,6 +249,23 @@ func votePostHandler(e *core.RequestEvent) error {
 			if err := txApp.Save(targetUser); err != nil {
 				return 0, nil, internalError("failed to update user reputation", err)
 			}
+		}
+
+		// The score moved through a post: the post author (when there is an
+		// account behind the post) gets a notice. Same-value resubmits move
+		// nothing, so they stay silent; guest posts have no member to tell.
+		if scoreDelta != 0 && targetUser != nil && reputationChangeWanted(targetUser) {
+			voterNickname := ""
+			if voter, err := txApp.FindRecordById(usersCollectionName, e.Auth.Id); err == nil && voter != nil {
+				voterNickname = voter.GetString("nickname")
+			}
+			topicTitle := post.GetString("topic_id")
+			if topic != nil {
+				topicTitle = topic.GetString("title")
+			}
+			notifyReputationChange(txApp, targetUser.Id, e.Auth.Id, voteRecord.GetInt("value"),
+				scoreDelta, voteRecord.GetString("comment"), post.Id, post.GetString("topic_id"),
+				topicTitle, voterNickname)
 		}
 
 		return http.StatusOK, map[string]any{
@@ -300,9 +381,14 @@ func voteUserHandler(e *core.RequestEvent) error {
 		)
 
 		var voteRecord *core.Record
+		// profileDelta is how far this call moves the member's score: the new
+		// value for a fresh vote, the difference for an edit, zero for a
+		// same-value resubmit. Only a non-zero move is notice-worthy.
+		profileDelta := 0
 		if err == nil && existingVote != nil {
 			oldVal := existingVote.GetInt("value")
 			delta := val - oldVal
+			profileDelta = delta
 			if delta != 0 {
 				targetUser.Set("reputation", targetUser.GetInt("reputation")+delta)
 			}
@@ -329,11 +415,23 @@ func voteUserHandler(e *core.RequestEvent) error {
 				return 0, nil, internalError("failed to create profile vote", err)
 			}
 			targetUser.Set("reputation", targetUser.GetInt("reputation")+val)
+			profileDelta = val
 			voteRecord = newVote
 		}
 
 		if err := txApp.Save(targetUser); err != nil {
 			return 0, nil, internalError("failed to update user reputation", err)
+		}
+
+		// The profile score moved: tell the member, unless they switched the
+		// notice off. Same-value resubmits move nothing, so they stay silent.
+		if profileDelta != 0 && reputationChangeWanted(targetUser) {
+			voterNickname := ""
+			if voter, err := txApp.FindRecordById(usersCollectionName, e.Auth.Id); err == nil && voter != nil {
+				voterNickname = voter.GetString("nickname")
+			}
+			notifyReputationChange(txApp, targetUser.Id, e.Auth.Id, voteRecord.GetInt("value"),
+				profileDelta, voteRecord.GetString("comment"), "", "", "", voterNickname)
 		}
 
 		return http.StatusOK, map[string]any{

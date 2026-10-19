@@ -59,28 +59,20 @@ type moveTopicForm struct {
 // is what the fixtures and tests assert on.
 func topicPayload(record *core.Record) map[string]any {
 	payload := map[string]any{
-		"id":                  record.Id,
-		"category_id":         record.GetString("category_id"),
-		"author_id":           record.GetString("author_id"),
-		"title":               record.GetString("title"),
-		"posts_count":         record.GetInt("posts_count"),
-		"locked":              record.GetBool("locked"),
-		"pinned":              record.GetBool("pinned"),
-		"last_post_id":        record.GetString("last_post_id"),
-		"last_post_created":   record.GetDateTime("last_post_created").String(),
-		"last_post_author_id": record.GetString("last_post_author_id"),
-		"created":             record.GetDateTime("created").String(),
-		"updated":             record.GetDateTime("updated").String(),
+		"id":                record.Id,
+		"category_id":       record.GetString("category_id"),
+		"title":             record.GetString("title"),
+		"posts_count":       record.GetInt("posts_count"),
+		"locked":            record.GetBool("locked"),
+		"pinned":            record.GetBool("pinned"),
+		"last_post_id":      record.GetString("last_post_id"),
+		"last_post_created": record.GetDateTime("last_post_created").String(),
+		"created":           record.GetDateTime("created").String(),
+		"updated":           record.GetDateTime("updated").String(),
 	}
-	// Nested AuthorRef DTOs (ADR contract). The flat author_id and
-	// last_post_author_id fields above stay as deprecated compatibility
-	// copies emitted from this single adapter; new readers use
-	// payload["author"] and payload["last_post_author_ref"]. The last-post
-	// object is keyed `_ref` because the flat STRING `last_post_author` is
-	// still actively read by the frontend during the rollout window — reusing
-	// that key for an object would collide with the value decorateLastPostAuthor
-	// writes. It can be renamed to `last_post_author` once the flat field is
-	// removed.
+	// Nested AuthorRef DTOs (ADR contract) are the single source of truth for
+	// topic authors. New readers must use payload["author"] and
+	// payload["last_post_author_ref"].
 	payload["author"] = authorDTOFromRecord(record)
 	payload["last_post_author_ref"] = lastPostDTOFromRecord(record)
 	// A guest last poster's name travels under last_post_author_name, the
@@ -585,6 +577,14 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 				payload["author_name"] = mask.Name
 				payload["is_character"] = true
 			}
+		}
+	} else {
+		// Guest topic: the chosen display name travels in guest_display_name
+		// (AuthorRef columns, migration 1770000000). Carry it so the topic
+		// page header can render the guest's name without the heavy full
+		// topic read.
+		if name := topic.GetString("guest_display_name"); name != "" {
+			payload["author_name"] = name
 		}
 	}
 

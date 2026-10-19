@@ -191,7 +191,6 @@ const toCategory = (d) => ({
     last_post_topic_id: d.last_post_topic_id,
     last_post_topic_title: d.last_post_topic_title,
     last_post_at: d.last_post_at,
-    last_post_author_id: d.last_post_author_id,
     // `last_post_author_ref` is the server-authoritative nested AuthorRef
     // (account => user_id/display_name, guest => display_name, null => none).
     // Read it instead of the `||` chain over flat fields: a deleted account

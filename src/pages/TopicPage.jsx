@@ -38,6 +38,7 @@ import {
   Dices, User, FilePen, MessageSquareOff, Keyboard, Eye
 } from 'lucide-react';
 import { subscribeToTopicNotifications, markNotificationRead } from '../api/notifications';
+import { refreshUnreadCounts } from '../api/dms';
 import { voteOnPost, updateReputationComment } from '../api/reputation';
 import PostVotersModal from '../components/common/PostVotersModal';
 import { toggleSubscription } from '../api/subscriptions';
@@ -257,12 +258,12 @@ const TopicPage = () => {
       });
 
       // ── Автоматически обогащаем и обновляем метаданные автора ──────────────────
-      if (newPost.author_id) {
+      if (newPost.author?.user_id) {
         const curUser = userRef.current;
         const curProfile = profileRef.current;
         setAuthorStats(prev => {
           // 1. Если автор — это текущий юзер (своё сообщение уже обработано в handleReply)
-          if (newPost.author_id === curUser?.uid && curProfile) {
+          if (newPost.author?.user_id === curUser?.uid && curProfile) {
             return {
               ...prev,
               [curUser.uid]: {
@@ -277,17 +278,17 @@ const TopicPage = () => {
           }
 
           // 2. Если автор — ЧУЖОЙ пользователь:
-          const existingAuthorStats = prev[newPost.author_id];
-          const currentPostCount = existingAuthorStats?.post_count ?? newPost.author_posts_count ?? 0;
+          const existingAuthorStats = prev[newPost.author?.user_id];
+          const currentPostCount = existingAuthorStats?.post_count ?? newPost.author?.posts_count ?? 0;
           const updatedPostCount = currentPostCount + 1;
           const postSig = newPost.author_signature || newPost.signature || newPost.settings?.signature || '';
 
           return {
             ...prev,
-            [newPost.author_id]: {
+            [newPost.author?.user_id]: {
               ...existingAuthorStats,
               post_count: updatedPostCount,
-              reputation: existingAuthorStats?.reputation ?? newPost.author_reputation ?? 0,
+              reputation: existingAuthorStats?.reputation ?? newPost.author?.reputation ?? 0,
               role_id: existingAuthorStats?.role_id || newPost.author_role_id || 'player',
               status_line: existingAuthorStats?.status_line ?? newPost.author_status_line ?? '',
               settings: postSig
@@ -450,22 +451,22 @@ const TopicPage = () => {
         setAuthorStats(prev => {
           const next = { ...prev };
           data.forEach(p => {
-            if (p.author_id) {
-              const serverPostCount = p.author_posts_count ?? 0;
-              const cachedPostCount = next[p.author_id]?.post_count ?? 0;
-              const postCount = p.author_id === user?.uid
+            if (p.author?.user_id) {
+              const serverPostCount = p.author?.posts_count ?? 0;
+              const cachedPostCount = next[p.author?.user_id]?.post_count ?? 0;
+              const postCount = p.author?.user_id === user?.uid
                 ? Math.max(serverPostCount, cachedPostCount)
                 : serverPostCount || cachedPostCount;
               const sig = p.author_signature || p.signature || p.settings?.signature || '';
-              next[p.author_id] = {
-                ...(next[p.author_id] || {}),
+              next[p.author?.user_id] = {
+                ...(next[p.author?.user_id] || {}),
                 post_count: postCount,
-                reputation: p.author_reputation ?? next[p.author_id]?.reputation ?? 0,
-                status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author_id]?.status_line ?? ''),
-                role_id: p.author_role_id || next[p.author_id]?.role_id || 'player',
+                reputation: p.author?.reputation ?? next[p.author?.user_id]?.reputation ?? 0,
+                status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author?.user_id]?.status_line ?? ''),
+                role_id: p.author_role_id || next[p.author?.user_id]?.role_id || 'player',
                 settings: sig
-                  ? { ...(next[p.author_id]?.settings || {}), signature: sig }
-                  : (next[p.author_id]?.settings || { signature: '' })
+                  ? { ...(next[p.author?.user_id]?.settings || {}), signature: sig }
+                  : (next[p.author?.user_id]?.settings || { signature: '' })
               };
             }
           });
@@ -750,7 +751,13 @@ const TopicPage = () => {
             // `me/notifications/<accountId>/read` and 404'd: scrolling a quoted
             // post into view marked nothing while the row below it stopped
             // rendering as unread.
-            matchingNotifs.forEach(n => markNotificationRead(n.id));
+            //
+            // The bell renders the server's /me/unread-counts, not this list,
+            // so wake it explicitly — same refresh NotificationsPage does.
+            matchingNotifs.forEach(n => markNotificationRead(n.id).then(
+              () => refreshUnreadCounts(user?.uid),
+              () => {},
+            ));
             setUnreadQuotes(prev => prev.filter(p => !matchingNotifs.some(m => m.id === p.id)));
           }
         }
@@ -925,8 +932,8 @@ const TopicPage = () => {
     if (posts.length === 0) return;
     const uniqueChars = new Map();
     posts.forEach(p => {
-      if (p.author_id && p.author_character_id && maskStats[p.author_character_id] === undefined) {
-        uniqueChars.set(p.author_character_id, p.author_id);
+      if (p.author?.user_id && p.author_character_id && maskStats[p.author_character_id] === undefined) {
+        uniqueChars.set(p.author_character_id, p.author?.user_id);
       }
     });
 
@@ -976,14 +983,14 @@ const TopicPage = () => {
     const missingUids = new Set();
 
     posts.forEach(p => {
-      if (p.author_id && p.author_id !== user?.uid && !hydratedAuthorsRef.current.has(p.author_id)) {
-        const stats = authorStats[p.author_id];
+      if (p.author?.user_id && p.author?.user_id !== user?.uid && !hydratedAuthorsRef.current.has(p.author?.user_id)) {
+        const stats = authorStats[p.author?.user_id];
         const hasSig = (stats?.settings?.signature !== undefined && stats.settings.signature !== '') ||
           (stats?.signature !== undefined && stats.signature !== '') ||
           (p.author_signature && p.author_signature !== '') ||
           (p.signature && p.signature !== '');
         if (!hasSig) {
-          missingUids.add(p.author_id);
+          missingUids.add(p.author?.user_id);
         }
       }
     });
@@ -1314,10 +1321,10 @@ const TopicPage = () => {
   // rendered a tooltip on your own posts and on nobody else's.
   const getLiveOwnerName = (post) => {
     if (post.owner_name) return post.owner_name;
-    if (post.author_id === user?.uid) {
+    if (post.author?.user_id === user?.uid) {
       return profile?.nickname || '';
     }
-    return authorStats[post.author_id]?.nickname || '';
+    return authorStats[post.author?.user_id]?.nickname || '';
   };
 
   const handleQuoteAuthor = (authorName) => {
@@ -1356,7 +1363,7 @@ const TopicPage = () => {
   };
 
   const getLiveAuthorName = (post) => {
-    if (post.author_id === user?.uid) {
+    if (post.author?.user_id === user?.uid) {
       if (post.is_character) {
         const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
         return char?.name || post.author_name;
@@ -1364,14 +1371,14 @@ const TopicPage = () => {
       return profile?.nickname || post.author_name;
     }
     if (post.is_character) return post.author_name;
-    return authorStats[post.author_id]?.nickname || post.author_name;
+    return authorStats[post.author?.user_id]?.nickname || post.author_name;
   };
 
 
   const getLiveAuthorStatus = (post) => {
     if (!post) return '';
 
-    if (post.author_id === user?.uid) {
+    if (post.author?.user_id === user?.uid) {
       if (post.is_character) {
         const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
         return char ? (char.status_line || '') : (post.author_status_line || '');
@@ -1392,9 +1399,9 @@ const TopicPage = () => {
     }
 
     // Check if we have entries in authorStats for this UID
-    if (!post.author_id) return post.author_status_line || '';
+    if (!post.author?.user_id) return post.author_status_line || '';
 
-    const stats = authorStats[post.author_id];
+    const stats = authorStats[post.author?.user_id];
     if (stats) {
       if (stats.status_line !== undefined && stats.status_line !== '') {
         return stats.status_line;
@@ -1407,7 +1414,7 @@ const TopicPage = () => {
   };
 
   const getLiveAuthorSignature = (post) => {
-    if (post.author_id === user?.uid) {
+    if (post.author?.user_id === user?.uid) {
       if (post.is_character) {
         const char = characters.find(c => c.id === post.author_character_id || c.name === post.author_name);
         return char ? (char.signature || '') : (post.author_signature || '');
@@ -1420,7 +1427,7 @@ const TopicPage = () => {
       }
       return post.author_signature || '';
     }
-    const stats = authorStats[post.author_id];
+    const stats = authorStats[post.author?.user_id];
     if (stats?.settings?.signature !== undefined && stats.settings.signature !== '') {
       return stats.settings.signature;
     }
@@ -1428,10 +1435,10 @@ const TopicPage = () => {
   };
 
   const isAuthorOnline = (post) => {
-    if (!post?.author_id) return false;
+    if (!post?.author?.user_id) return false;
     // Own posts: current user is always online while viewing
-    if (post.author_id === user?.uid) return true;
-    return isUserOnline(post.author_id);
+    if (post.author?.user_id === user?.uid) return true;
+    return isUserOnline(post.author?.user_id);
   };
 
 
@@ -1441,7 +1448,7 @@ const TopicPage = () => {
 
   const handleOpenVoteModal = (post, value, postNumber) => {
     if (!user || profile?.role_id === 'spectator') return;
-    if (!post.author_id || post.author_id === user.uid) return;
+    if (!post.author?.user_id || post.author?.user_id === user.uid) return;
     if (myVotes[post.id]) return;
 
     setRepTargetPost(post);
@@ -1457,7 +1464,7 @@ const TopicPage = () => {
     try {
       await voteOnPost(
         user.uid,
-        repTargetPost.author_id,
+        repTargetPost.author?.user_id,
         repTargetPost.id,
         id,
         repValue,
@@ -1490,12 +1497,12 @@ const TopicPage = () => {
 
       // Optimistic update for authorStats
       setAuthorStats(prev => {
-        if (!repTargetPost.author_id || !(repTargetPost.author_id in prev)) return prev;
-        const stats = prev[repTargetPost.author_id];
+        if (!repTargetPost.author?.user_id || !(repTargetPost.author?.user_id in prev)) return prev;
+        const stats = prev[repTargetPost.author?.user_id];
         if (!stats) return prev;
         return {
           ...prev,
-          [repTargetPost.author_id]: {
+          [repTargetPost.author?.user_id]: {
             ...stats,
             reputation: (stats.reputation || 0) + repValue
           }
@@ -1729,8 +1736,7 @@ const TopicPage = () => {
       _isOptimistic: true,
       reputation: 0,
       ...(ownNewStats ? {
-        author_posts_count: ownNewStats.post_count,
-        author_reputation: ownNewStats.reputation
+        author: { ...postData.author, posts_count: ownNewStats.post_count, reputation: ownNewStats.reputation }
       } : {}),
       created_at: {
         toDate: () => new Date(),
@@ -2095,10 +2101,7 @@ const TopicPage = () => {
       reputation: 0,
       id: tempId,
       _isOptimistic: true,
-      ...(ownNewStats ? {
-        author_posts_count: ownNewStats.post_count,
-        author_reputation: ownNewStats.reputation
-      } : {}),
+      ...(ownNewStats ? {} : {}),
       created_at: {
         toDate: () => new Date(),
         toMillis: () => Date.now(),
@@ -2141,7 +2144,7 @@ const TopicPage = () => {
       if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
           id: newPostId,
-          author_id: pubResult?.author_id || user?.uid || null,
+          author_id: pubResult?.author?.user_id || user?.uid || null,
           author_name: pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
           author_avatar: pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
           author_role_id: pubResult?.author_role_id || profile?.role_id || 'player',
@@ -2329,14 +2332,14 @@ const TopicPage = () => {
         }
       }
 
-      const editResult = await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author_id, topicUpdates);
+      const editResult = await updatePost(postId, editContent.trim(), metadata, user.uid, originalPost?.author?.user_id, topicUpdates);
 
       // First-post title/description/pin changes are topic-level: they must be
       // sent to PATCH /topics/{id} separately. updatePost ignores topicUpdates
       // (the Go backend derives the actor from the auth token), so we call
       // updateTopic explicitly when editing the first post.
       if (editingFirstPost && topicUpdates) {
-        await updateTopic(id, topicUpdates, user.uid, originalPost?.author_id);
+        await updateTopic(id, topicUpdates, user.uid, originalPost?.author?.user_id);
       }
 
       // Keep the main page correct even if the user navigates away before the
@@ -2417,7 +2420,7 @@ const TopicPage = () => {
             return;
           }
         } else {
-          const delAuthorId = deletingPost.author_id;
+          const delAuthorId = deletingPost.author?.user_id;
           const targetPostId = deletingPost.id;
 
           // ОПТИМИСТИЧНЫЙ UI: мгновенно убираем пост с экрана React
@@ -2508,7 +2511,7 @@ const TopicPage = () => {
 
   const canEditPost = (post) => {
     if (!canActOnPost(post)) return false;
-    if (post.author_id === user.uid) {
+    if (post.author?.user_id === user.uid) {
       return hasPermission(PERMISSIONS.EDIT_SELF_POST);
     }
     return hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS);
@@ -2516,7 +2519,7 @@ const TopicPage = () => {
 
   const canDeletePost = (post) => {
     if (!canActOnPost(post)) return false;
-    if (post.author_id === user.uid) {
+    if (post.author?.user_id === user.uid) {
       return hasPermission(PERMISSIONS.DELETE_SELF_POST);
     }
     return hasPermission(PERMISSIONS.DELETE_OTHERS_POSTS);
@@ -2532,10 +2535,10 @@ const TopicPage = () => {
     }
 
     // Check author data from stats
-    if (!post.author_id) {
+    if (!post.author?.user_id) {
       return <ForumRoleBadge roleId="guest" className={extraClass} />;
     }
-    const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+    const authorData = post.author?.user_id === user?.uid ? profile : authorStats[post.author?.user_id];
 
     // If it's undefined, it's still loading (we explicitly set null for 'not found')
     if (authorData === undefined) {
@@ -2746,10 +2749,11 @@ const TopicPage = () => {
               <span className="text-nowrap">
                 {t('forum.author')}:{' '}
                 <ForumAuthorName
-                  userId={topic.author_id}
+                  author={topic.author}
+                  userId={topic.author?.user_id}
                   characterId={topic.author_character_id}
                   isCharacter={!!topic.is_character}
-                  fallbackName={topic.author_name}
+                  fallbackName={topic.author_name || topic.guest_nickname}
                   className="fw-semibold text-primary"
                 />
               </span>
@@ -2893,10 +2897,10 @@ const TopicPage = () => {
                     <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
                       <div className="fw-bold text-center mb-1 text-truncate w-100">
                         <ForumAuthorName
-                          userId={firstPost.author_id}
+                          userId={firstPost.author?.user_id}
                           characterId={firstPost.author_character_id}
                           isCharacter={!!firstPost.is_character}
-                          fallbackName={firstPost.author_name}
+                          author={firstPost.author}
                           onClick={handleQuoteAuthor}
                         />
                       </div>
@@ -2909,10 +2913,10 @@ const TopicPage = () => {
                       ) : null}
                       <div className="mb-2">
                         <ForumAuthorAvatar
-                          userId={firstPost.author_id}
+                          userId={firstPost.author?.user_id}
                           characterId={firstPost.author_character_id}
                           isCharacter={!!firstPost.is_character}
-                          fallbackName={firstPost.author_name}
+                          author={firstPost.author}
                           initialAvatar={firstPost.author_avatar}
                           size={150}
                           className="rounded shadow-sm"
@@ -2921,11 +2925,11 @@ const TopicPage = () => {
                       </div>
                       <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(firstPost)}</div>
                       {(() => {
-                        const authorData = firstPost.author_id === user?.uid ? profile : authorStats[firstPost.author_id];
+                        const authorData = firstPost.author?.user_id === user?.uid ? profile : authorStats[firstPost.author?.user_id];
                         if (!authorData) return null;
                         return (
                           <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
-                            <Link to={`/profile/${firstPost.author_id}`} className="footer-link text-decoration-none px-0">
+                            <Link to={`/profile/${firstPost.author?.user_id}`} className="footer-link text-decoration-none px-0">
                               {t('profile.view_profile')}
                             </Link>
                           </div>
@@ -2936,10 +2940,10 @@ const TopicPage = () => {
                     <div className="d-md-none d-flex flex-row align-items-center gap-2 w-100">
                       <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
                         <ForumAuthorAvatar
-                          userId={firstPost.author_id}
+                          userId={firstPost.author?.user_id}
                           characterId={firstPost.author_character_id}
                           isCharacter={!!firstPost.is_character}
-                          fallbackName={firstPost.author_name}
+                          author={firstPost.author}
                           initialAvatar={firstPost.author_avatar}
                           size={60}
                           className="rounded shadow-sm"
@@ -2949,10 +2953,10 @@ const TopicPage = () => {
                       <div className="flex-grow-1 text-start overflow-hidden">
                         <div className="fw-bold text-truncate author-res-nickname">
                           <ForumAuthorName
-                            userId={firstPost.author_id}
+                            userId={firstPost.author?.user_id}
                             characterId={firstPost.author_character_id}
                             isCharacter={!!firstPost.is_character}
-                            fallbackName={firstPost.author_name}
+                            author={firstPost.author}
                             onClick={handleQuoteAuthor}
                           />
                         </div>
@@ -2970,7 +2974,7 @@ const TopicPage = () => {
                     <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
                       <div className="flex-grow-1">
                         <div className="post-content">
-                          <BBCode rolls={firstPost.rolls} authorId={firstPost.author_id}>{firstPost.content}</BBCode>
+                          <BBCode rolls={firstPost.rolls} authorId={firstPost.author?.user_id}>{firstPost.content}</BBCode>
                         </div>
                         {getLiveAuthorSignature(firstPost) && (
                           <div className="mt-4 pt-3 border-top small text-muted opacity-75 post-signature" style={{ fontStyle: 'italic', borderTopStyle: 'dashed' }}>
@@ -3054,10 +3058,10 @@ const TopicPage = () => {
                       {/* 1. Nickname */}
                       <div className="fw-bold text-center mb-1 text-truncate w-100">
                         <ForumAuthorName
-                          userId={post.author_id}
+                          userId={post.author?.user_id}
                           characterId={post.author_character_id}
                           isCharacter={!!post.is_character}
-                          fallbackName={post.author_name}
+                          author={post.author}
                           onClick={handleQuoteAuthor}
                         />
                       </div>
@@ -3074,10 +3078,10 @@ const TopicPage = () => {
                       {/* 3. Avatar */}
                       <div className="mb-2">
                         <ForumAuthorAvatar
-                          userId={post.author_id}
+                          userId={post.author?.user_id}
                           characterId={post.author_character_id}
                           isCharacter={!!post.is_character}
-                          fallbackName={post.author_name}
+                          author={post.author}
                           initialAvatar={post.author_avatar}
                           size={150}
                           className="rounded shadow-sm"
@@ -3086,16 +3090,16 @@ const TopicPage = () => {
                       </div>
 
                       {/* 4. Posts Count */}
-                      {post.author_id && (
+                      {post.author?.user_id && (
                         <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
-                          {t('profile.posts_count')}: <strong>{authorStats[post.author_id]?.post_count ?? post.author_posts_count ?? 0}</strong>
+                          {t('profile.posts_count')}: <strong>{authorStats[post.author?.user_id]?.post_count ?? post.author?.posts_count ?? 0}</strong>
                         </div>
                       )}
 
                       {/* 5. Reputation */}
-                      {post.author_id && (
+                      {post.author?.user_id && (
                         <div className="text-muted" style={{ fontSize: '0.775rem' }}>
-                          {t('profile.reputation')}: <strong>{authorStats[post.author_id]?.reputation ?? post.author_reputation ?? 0}</strong>
+                          {t('profile.reputation')}: <strong>{authorStats[post.author?.user_id]?.reputation ?? post.author?.reputation ?? 0}</strong>
                         </div>
                       )}
 
@@ -3104,16 +3108,16 @@ const TopicPage = () => {
 
                       {/* Desktop profile links */}
                       {(() => {
-                        const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                        const authorData = post.author?.user_id === user?.uid ? profile : authorStats[post.author?.user_id];
                         if (!authorData) return null;
 
                         return (
                           <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
-                            <Link to={`/profile/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                            <Link to={`/profile/${post.author?.user_id}`} className="footer-link text-decoration-none px-0">
                               {t('profile.view_profile')}
                             </Link>
-                            {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && authorData.role_id !== 'banned' && post.author_id !== user?.uid && (
-                              <Link to={`/messages/${post.author_id}`} className="footer-link text-decoration-none px-0">
+                            {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid && (
+                              <Link to={`/messages/${post.author?.user_id}`} className="footer-link text-decoration-none px-0">
                                 {t('profile.pm')}
                               </Link>
                             )}
@@ -3127,10 +3131,10 @@ const TopicPage = () => {
                       {/* Avatar */}
                       <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
                         <ForumAuthorAvatar
-                          userId={post.author_id}
+                          userId={post.author?.user_id}
                           characterId={post.author_character_id}
                           isCharacter={!!post.is_character}
-                          fallbackName={post.author_name}
+                          author={post.author}
                           initialAvatar={post.author_avatar}
                           size={60}
                           className="rounded shadow-sm"
@@ -3142,10 +3146,10 @@ const TopicPage = () => {
                       <div className="flex-grow-1 text-start overflow-hidden">
                         <div className="fw-bold text-truncate author-res-nickname">
                           <ForumAuthorName
-                            userId={post.author_id}
+                            userId={post.author?.user_id}
                             characterId={post.author_character_id}
                             isCharacter={!!post.is_character}
-                            fallbackName={post.author_name}
+                            author={post.author}
                             onClick={handleQuoteAuthor}
                           />
                         </div>
@@ -3159,14 +3163,14 @@ const TopicPage = () => {
                       {/* Stats & Role Group */}
                       <div className="text-end author-stats-group ms-auto">
                         <div className="d-flex flex-column align-items-end gap-1">
-                          {post.author_id && (
+                          {post.author?.user_id && (
                             <div className="text-muted author-res-stat">
-                              {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{authorStats[post.author_id]?.post_count ?? post.author_posts_count ?? 0}</strong>
+                              {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{authorStats[post.author?.user_id]?.post_count ?? post.author?.posts_count ?? 0}</strong>
                             </div>
                           )}
-                          {post.author_id && (
+                          {post.author?.user_id && (
                             <div className="text-muted author-res-stat">
-                              {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{authorStats[post.author_id]?.reputation ?? post.author_reputation ?? 0}</strong>
+                              {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{authorStats[post.author?.user_id]?.reputation ?? post.author?.reputation ?? 0}</strong>
                             </div>
                           )}
                           <div className="author-res-info-lite text-end">
@@ -3250,7 +3254,7 @@ const TopicPage = () => {
                             )}
                             <div className="mb-2">
                               <div className="d-flex align-items-center justify-content-between mb-2">
-                                {post.author_id === user?.uid && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
+                                {post.author?.user_id === user?.uid && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
                                   <Dropdown className="w-auto">
                                     <Dropdown.Toggle
                                       variant="outline-management"
@@ -3321,7 +3325,7 @@ const TopicPage = () => {
                           </div>
                         ) : (
                           <div className="post-content">
-                            <BBCode rolls={post.rolls} authorId={post.author_id}>{post.content}</BBCode>
+                            <BBCode rolls={post.rolls} authorId={post.author?.user_id}>{post.content}</BBCode>
                             {post.rolls && Object.keys(post.rolls).length > 0 && (
                               <div className="mt-2 small d-flex align-items-center gap-1" style={{ color: 'var(--secondary-color)' }}>
                                 <Dices size={14} />
@@ -3340,9 +3344,9 @@ const TopicPage = () => {
                       </div>
 
                       {/* Reputation / Voting Buttons */}
-                      {settings?.enableReputation && !post._isOptimistic && post.author_id && (post.author_id === user?.uid ? profile : authorStats[post.author_id]) !== null && (() => {
-                        const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
-                        const isOwnPost = post.author_id === user?.uid;
+                      {settings?.enableReputation && !post._isOptimistic && post.author?.user_id && (post.author?.user_id === user?.uid ? profile : authorStats[post.author?.user_id]) !== null && (() => {
+                        const authorData = post.author?.user_id === user?.uid ? profile : authorStats[post.author?.user_id];
+                        const isOwnPost = post.author?.user_id === user?.uid;
                         const hasVoted = !!myVotes[post.id];
                         const hasReputation = (post.reputation || 0) !== 0;
                         const postNum = index + indexOfFirstItem + 1;
@@ -3461,14 +3465,14 @@ const TopicPage = () => {
                           {/* Left side: Profile Links (Mobile Only) */}
                           <div className="d-flex d-md-none gap-3">
                             {(() => {
-                              const authorData = post.author_id === user?.uid ? profile : authorStats[post.author_id];
+                              const authorData = post.author?.user_id === user?.uid ? profile : authorStats[post.author?.user_id];
                               if (!authorData) return null;
                               return (
                                 <>
-                                  <Link to={`/profile/${post.author_id}`} className="author-res-footer-link">
+                                  <Link to={`/profile/${post.author?.user_id}`} className="author-res-footer-link">
                                     {t('profile.view_profile')}
                                   </Link>
-                                  {user && profile?.role_id !== 'pending' && authorData.role_id !== 'banned' && post.author_id !== user?.uid &&
+                                  {user && profile?.role_id !== 'pending' && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid &&
                                     // The permission, not a role list. The sibling
                                     // footer above already gates on it, and a hardcoded
                                     // role list silently denies a custom role that HOLDS
@@ -3476,7 +3480,7 @@ const TopicPage = () => {
                                     // the admin panel's whole point is that roles are
                                     // editable and the code keeps up.
                                     hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && (
-                                    <Link to={`/messages/${post.author_id}`} className="author-res-footer-link">
+                                    <Link to={`/messages/${post.author?.user_id}`} className="author-res-footer-link">
                                       {t('profile.pm')}
                                     </Link>
                                   )}
@@ -3596,10 +3600,10 @@ const TopicPage = () => {
                   <div className="d-none d-md-flex flex-column align-items-center w-100 h-100">
                     <div className="fw-bold text-center mb-1 text-truncate" style={{ maxWidth: '100%' }}>
                       <ForumAuthorName
-                        userId={myDraft.author_id}
+                        userId={myDraft.author?.user_id}
                         characterId={myDraft.author_character_id}
                         isCharacter={!!myDraft.is_character}
-                        fallbackName={myDraft.author_name}
+                        author={myDraft.author}
                         onClick={handleQuoteAuthor}
                       />
                     </div>
@@ -3610,10 +3614,10 @@ const TopicPage = () => {
                     )}
                     <div className="mb-2">
                       <ForumAuthorAvatar
-                        userId={myDraft.author_id}
+                        userId={myDraft.author?.user_id}
                         characterId={myDraft.author_character_id}
                         isCharacter={!!myDraft.is_character}
-                        fallbackName={myDraft.author_name}
+                        author={myDraft.author}
                         initialAvatar={myDraft.author_avatar}
                         size={150}
                         className="rounded shadow-sm"
@@ -3621,15 +3625,15 @@ const TopicPage = () => {
                       />
                     </div>
                     <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
-                      {t('profile.posts_count')}: <strong>{authorStats[myDraft.author_id]?.post_count ?? profile?.post_count ?? 0}</strong>
+                      {t('profile.posts_count')}: <strong>{authorStats[myDraft.author?.user_id]?.post_count ?? profile?.post_count ?? 0}</strong>
                     </div>
                     <div className="text-muted" style={{ fontSize: '0.775rem' }}>
-                      {t('profile.reputation')}: <strong>{authorStats[myDraft.author_id]?.reputation ?? profile?.reputation ?? 0}</strong>
+                      {t('profile.reputation')}: <strong>{authorStats[myDraft.author?.user_id]?.reputation ?? profile?.reputation ?? 0}</strong>
                     </div>
                     <div className="mt-2 mb-2 text-center w-100">{getRoleBadge(myDraft)}</div>
                     {/* Draft Status Links */}
                     <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
-                      <Link to={`/profile/${myDraft.author_id}`} className="footer-link text-decoration-none px-0">
+                      <Link to={`/profile/${myDraft.author?.user_id}`} className="footer-link text-decoration-none px-0">
                         {t('profile.view_profile')}
                       </Link>
                     </div>
@@ -3640,10 +3644,10 @@ const TopicPage = () => {
                     {/* Avatar */}
                     <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
                       <ForumAuthorAvatar
-                        userId={myDraft.author_id}
+                        userId={myDraft.author?.user_id}
                         characterId={myDraft.author_character_id}
                         isCharacter={!!myDraft.is_character}
-                        fallbackName={myDraft.author_name}
+                        author={myDraft.author}
                         initialAvatar={myDraft.author_avatar}
                         size={60}
                         className="rounded shadow-sm"
@@ -3655,10 +3659,10 @@ const TopicPage = () => {
                     <div className="flex-grow-1 text-start overflow-hidden">
                       <div className="fw-bold text-truncate author-res-nickname">
                         <ForumAuthorName
-                          userId={myDraft.author_id}
+                          userId={myDraft.author?.user_id}
                           characterId={myDraft.author_character_id}
                           isCharacter={!!myDraft.is_character}
-                          fallbackName={myDraft.author_name}
+                          author={myDraft.author}
                           onClick={handleQuoteAuthor}
                         />
                       </div>
@@ -3673,10 +3677,10 @@ const TopicPage = () => {
                     <div className="text-end author-stats-group ms-auto">
                       <div className="d-flex flex-column align-items-end gap-1">
                         <div className="text-muted author-res-stat">
-                          {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{authorStats[myDraft.author_id]?.post_count ?? profile?.post_count ?? 0}</strong>
+                          {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{authorStats[myDraft.author?.user_id]?.post_count ?? profile?.post_count ?? 0}</strong>
                         </div>
                         <div className="text-muted author-res-stat">
-                          {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{authorStats[myDraft.author_id]?.reputation ?? profile?.reputation ?? 0}</strong>
+                          {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{authorStats[myDraft.author?.user_id]?.reputation ?? profile?.reputation ?? 0}</strong>
                         </div>
                         <div className="author-res-info-lite text-end">
                           {getRoleBadge(myDraft, 'mb-0')}
@@ -3780,7 +3784,7 @@ const TopicPage = () => {
                         </div>
                       ) : (
                         <div className="post-content">
-                          <BBCode rolls={myDraft.rolls} authorId={myDraft.author_id || user?.uid}>{myDraft.content}</BBCode>
+                          <BBCode rolls={myDraft.rolls} authorId={myDraft.author?.user_id || user?.uid}>{myDraft.content}</BBCode>
                         </div>
                       )}
                       {!editingPostId && getLiveAuthorSignature(myDraft) && (
@@ -3796,7 +3800,7 @@ const TopicPage = () => {
                     <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed post-footer-links" style={{ height: '34px' }}>
                       {/* Left side: Profile Links (Mobile Only) */}
                       <div className="d-flex d-md-none gap-3">
-                        <Link to={`/profile/${myDraft.author_id}`} className="author-res-footer-link">
+                        <Link to={`/profile/${myDraft.author?.user_id}`} className="author-res-footer-link">
                           {t('profile.view_profile')}
                         </Link>
                       </div>

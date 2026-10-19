@@ -218,7 +218,7 @@ const AdminPage = () => {
 
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userForm, setUserForm] = useState({ role_id: '' });
+  const [userForm, setUserForm] = useState({ role_id: '', notifyRoleChange: true });
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -1004,7 +1004,7 @@ const AdminPage = () => {
 
   const handleOpenUserModal = (user) => {
     setEditingUser(user);
-    setUserForm({ role_id: user.role_id || 'player' });
+    setUserForm({ role_id: user.role_id || 'player', notifyRoleChange: true });
     setShowUserModal(true);
   };
 
@@ -1013,7 +1013,7 @@ const AdminPage = () => {
     setSaving(true);
     try {
       setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role_id: userForm.role_id } : u));
-      await updateUserRole(editingUser.id, userForm.role_id, user.uid);
+      await updateUserRole(editingUser.id, userForm.role_id, user.uid, userForm.notifyRoleChange !== false);
       showToast(t('admin.users.toast_role_updated'), 'success');
       setShowUserModal(false);
     } catch (err) {
@@ -2737,6 +2737,16 @@ const AdminPage = () => {
                   </div>
                 ))}
               </div>
+            </Form.Group>
+
+            <Form.Group className="mb-1">
+              <Form.Check
+                type="checkbox"
+                id="notify-role-change-checkbox"
+                label={t('admin.users.notify_role_change_label')}
+                checked={userForm.notifyRoleChange !== false}
+                onChange={(e) => setUserForm({ ...userForm, notifyRoleChange: e.target.checked })}
+              />
             </Form.Group>
           </Form>
         )}
