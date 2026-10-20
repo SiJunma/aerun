@@ -113,6 +113,7 @@ func globalSettingsSnapshot(app core.App) map[string]any {
 		"postsPerPage":          settings.PostsPerPage,
 		"topicsPerPage":         settings.TopicsPerPage,
 		"maxPostsPerTopic":      settings.MaxPostsPerTopic,
+		"maxCharactersPerUser":  settings.MaxCharactersPerUser,
 		"enableReputation":      settings.EnableReputation,
 		"reputationStyle":       settings.ReputationStyle,
 		"enableCharacters":      settings.EnableCharacters,
@@ -179,6 +180,7 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			PostsPerPage          *int           `json:"postsPerPage"`
 			TopicsPerPage         *int           `json:"topicsPerPage"`
 			MaxPostsPerTopic      *int           `json:"maxPostsPerTopic"`
+			MaxCharactersPerUser  *int           `json:"maxCharactersPerUser"`
 			EnableReputation      *bool          `json:"enableReputation"`
 			ReputationStyle       *string        `json:"reputationStyle"`
 			EnableCharacters      *bool          `json:"enableCharacters"`
@@ -221,6 +223,12 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 		}
 		if n := body.MaxPostsPerTopic; n != nil && (*n < auth.MinMaxPostsPerTopic || *n > auth.HardMaxPostsPerTopic) {
 			return validationError("maxPostsPerTopic must be between 2 and 5000")
+		}
+		// The mask cap is bounded by the same ceiling the read path clamps to,
+		// so a value the panel can never store is also a value the forum can
+		// never apply.
+		if n := body.MaxCharactersPerUser; n != nil && (*n < auth.MinMaxCharactersPerUser || *n > auth.HardMaxCharactersPerUser) {
+			return validationError("maxCharactersPerUser must be between 1 and 100")
 		}
 
 		// The keys that arrived, for the audit row. Recorded as names only: the
@@ -279,6 +287,10 @@ func updateGlobalSettingsHandler(cfg config.Config) func(e *core.RequestEvent) e
 			if body.MaxPostsPerTopic != nil {
 				v := *body.MaxPostsPerTopic
 				set("maxPostsPerTopic", func() { record.Set("max_posts_per_topic", v) })
+			}
+			if body.MaxCharactersPerUser != nil {
+				v := *body.MaxCharactersPerUser
+				set("maxCharactersPerUser", func() { record.Set("max_characters_per_user", v) })
 			}
 			if body.EnableReputation != nil {
 				v := *body.EnableReputation

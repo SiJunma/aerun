@@ -165,23 +165,14 @@ func checkNicknameRank(txApp core.App, actor auth.Role, target auth.Role, target
 		return forbiddenError("this nickname is protected and cannot be changed")
 	}
 
-	actorRank, targetRank := rankFor(txApp, actor), rankFor(txApp, target)
-	switch actor {
-	case auth.RoleRoot:
-		return nil
-	case auth.RoleAdmin:
-		if targetRank > actorRank {
-			return forbiddenError("you cannot change the nickname of a higher-ranked account")
-		}
-		return nil
-	case auth.RoleModerator:
-		if targetRank >= actorRank {
-			return forbiddenError("you can only change the nickname of a strictly lower-ranked account")
-		}
-		return nil
-	default:
-		return forbiddenError("you are not allowed to change other members' nicknames")
-	}
+	// The MATRIX itself lives in checkStaffRank (staff_authority.go), shared with
+	// the other staff-on-another-account commands. Only the WORDING is the
+	// nickname's, because that is what the refusal is about.
+	return checkStaffRank(txApp, actor, target, staffRankMessages{
+		targetAbove: "you cannot change the nickname of a higher-ranked account",
+		notLower:    "you can only change the nickname of a strictly lower-ranked account",
+		notStaff:    "you are not allowed to change other members' nicknames",
+	})
 }
 
 // isUntouchableNickname reports whether a nickname is protected. Matching is on

@@ -516,19 +516,37 @@ const ProfilePage = () => {
       if (editingChar) {
         await updateCharacter(uid, editingChar.id, formData);
       } else {
-        savedId = await addCharacter(uid, formData);
+        // The mask belongs to the profile being VIEWED (uid), not to the
+        // viewer. On your own profile that is the self-service route; on
+        // somebody else's it is the staff route, which the server gates on
+        // create_others_mask and the rank matrix.
+        savedId = await addCharacter(uid, formData, { asStaff: !isOwn });
       }
       // The file was chosen before this row had an id, so it goes now. Failing
       // here is not a save failure: the character itself is already stored.
       if (pendingCharAvatar) {
         const { blob, filename } = pendingCharAvatar;
         setPendingCharAvatar(null);
-        await uploadCharacterAvatar(savedId, filename ? new File([blob], filename, { type: blob.type }) : blob);
+        // The third argument is the account whose mask list must be refreshed
+        // afterwards — the profile being VIEWED, which is also who owns the
+        // mask on the staff path.
+        await uploadCharacterAvatar(savedId, filename ? new File([blob], filename, { type: blob.type }) : blob, uid);
       }
       scheduleForumStateRefresh();
     } catch (err) {
       console.error(err);
-      showToast(lang === 'ru' ? 'Не удалось сохранить персонажа' : 'Failed to save character', 'danger');
+      // A full quota is not a generic failure: the server says how many masks
+      // the account may hold, and the subject whose quota ran out. Showing the
+      // number turns "failed to save" into something the member can act on.
+      const limit = err?.data?.character_limit;
+      if (typeof limit === 'number') {
+        const key = err?.data?.limit_subject === 'owner'
+          ? 'profile.character_limit_reached_owner'
+          : 'profile.character_limit_reached';
+        showToast(t(key, { limit }), 'danger');
+      } else {
+        showToast(lang === 'ru' ? 'Не удалось сохранить персонажа' : 'Failed to save character', 'danger');
+      }
       // If failed, we might want to re-open it, but usually a toast is enough
     }
   };
@@ -959,7 +977,18 @@ const ProfilePage = () => {
                 <Tab eventKey="characters" title={t('profile.tab_characters')}>
               <Card className="shadow-sm border-0 bg-card">
                 <Card.Header className="py-3 d-flex justify-content-between align-items-center">
-                  <h5 className="mb-0">{isOwn ? t('profile.characters') : t('profile.characters_other')}</h5>
+                  <h5 className="mb-0">
+                    {isOwn ? t('profile.characters') : t('profile.characters_other')}
+                    {/* The cap is a forum-wide setting the admin owns, so the
+                        member can see it instead of discovering it by being
+                        refused. A role may lower it further — the refusal then
+                        names the real number. */}
+                    {typeof settings?.maxCharactersPerUser === 'number' && (
+                      <span className="text-muted small ms-2">
+                        {characters.length} / {settings.maxCharactersPerUser}
+                      </span>
+                    )}
+                  </h5>
                   {((isOwn && hasPermission(PERMISSIONS.CREATE_SELF_MASK)) || (!isOwn && hasPermission(PERMISSIONS.CREATE_OTHERS_MASK))) && (
                     <Button variant="outline-light" size="sm" onClick={() => handleOpenModal()}>
                       + {t('profile.add_character')}

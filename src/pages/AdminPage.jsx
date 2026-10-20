@@ -299,6 +299,7 @@ const AdminPage = () => {
     postsPerPage: 20,
     topicsPerPage: 20,
     maxPostsPerTopic: 1000,
+    maxCharactersPerUser: 10,
     maintenanceMode: false,
     showMaintenanceMessage: false,
     maintenanceMessage: { en: '', ru: '' },
@@ -347,6 +348,7 @@ const AdminPage = () => {
           postsPerPage: data.postsPerPage ?? 20,
           topicsPerPage: data.topicsPerPage ?? 20,
           maxPostsPerTopic: data.maxPostsPerTopic ?? 1000,
+          maxCharactersPerUser: data.maxCharactersPerUser ?? 10,
           whitelistMode: data.whitelistMode ?? false,
           requireApproval: data.requireApproval ?? true,
           enableCharacters: data.enableCharacters ?? true,
@@ -1436,6 +1438,21 @@ const AdminPage = () => {
                 />
                 <div className="small text-muted mt-1 opacity-75">
                   {t('admin.settings.topics_per_page_help')}
+                </div>
+              </Form.Group>
+            </Col>
+            <Col md={12}>
+              <Form.Group className="mb-4" controlId="maxCharactersPerUser">
+                <Form.Label className="fw-bold">{t('admin.settings.max_characters_per_user')}</Form.Label>
+                <Form.Control
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={settings.maxCharactersPerUser ?? 10}
+                  onChange={(e) => setSettings({ ...settings, maxCharactersPerUser: parseInt(e.target.value) || 10 })}
+                />
+                <div className="small text-muted mt-1 opacity-75">
+                  {t('admin.settings.max_characters_per_user_help')}
                 </div>
               </Form.Group>
             </Col>

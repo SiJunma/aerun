@@ -12,6 +12,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   postsPerPage: 20,
   topicsPerPage: 20,
   maxPostsPerTopic: 1000,
+  maxCharactersPerUser: 10,
   enableReputation: true,
   reputationStyle: 'both',
   enableCharacters: true,

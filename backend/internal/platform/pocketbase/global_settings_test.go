@@ -2,6 +2,7 @@ package pocketbase
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 )
@@ -59,6 +60,57 @@ func TestUpdateGlobalSettingsRequiresAdmin(t *testing.T) {
 	status, _, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings", `{"topicsPerPage":25}`, tokens["player"], "test-idem-settings-player")
 	if status != http.StatusForbidden {
 		t.Fatalf("player edit must be forbidden, got %d", status)
+	}
+}
+
+// TestUpdateGlobalSettingsSavesTheMaskLimit pins the admin panel's control
+// over the per-account mask cap.
+//
+// The cap used to be a compiled constant nobody could change. It is now a
+// forum-wide setting, so the panel's PATCH must store it, the snapshot must
+// publish it, and the bounds must be enforced — a value the read path would
+// clamp away is a value the admin believes they set and did not.
+func TestUpdateGlobalSettingsSavesTheMaskLimit(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, body, _ := categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings",
+		`{"maxCharactersPerUser":25}`, tokens["root"], "test-idem-settings-mask-limit")
+	if status != http.StatusOK {
+		t.Fatalf("admin edit must succeed, got %d: %s", status, body)
+	}
+
+	var resp struct {
+		Settings map[string]any `json:"settings"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if resp.Settings["maxCharactersPerUser"] != float64(25) {
+		t.Fatalf("expected maxCharactersPerUser=25, got %v", resp.Settings["maxCharactersPerUser"])
+	}
+
+	reloaded, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
+	if err != nil {
+		t.Fatalf("find forum_settings row: %v", err)
+	}
+	if got := reloaded.GetInt("max_characters_per_user"); got != 25 {
+		t.Fatalf("expected max_characters_per_user=25 in db, got %d", got)
+	}
+
+	// Out of range: above the ceiling and below the floor. Both must be
+	// refused, not silently clamped — a clamped write looks like it worked.
+	outOfRange := []string{`{"maxCharactersPerUser":500}`, `{"maxCharactersPerUser":0}`}
+	for i, payload := range outOfRange {
+		status, body, _ = categoryCall(t, http.MethodPatch, ts.URL+"/api/aerun/admin/settings",
+			payload, tokens["root"], fmt.Sprintf("test-idem-settings-mask-limit-%d", i))
+		if status != http.StatusBadRequest {
+			t.Fatalf("%s must be refused, got %d: %s", payload, status, body)
+		}
 	}
 }
 

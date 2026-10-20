@@ -18,6 +18,8 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+
+	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
 // seedRuntimeCharacter writes a character row directly, which is how a
@@ -109,6 +111,169 @@ func TestCharacterReadsFollowProfileVisibility(t *testing.T) {
 	})
 }
 
+// TestStaffCreatesMaskForAnotherAccount pins the staff path.
+//
+// The bug it pins: an admin adding a mask on somebody else's profile had the
+// mask written to the ADMIN's own account, and the cap that then refused
+// them was the admin's own role limit — "character limit reached for your
+// role" on an account the admin never touched.
+//
+// So the assertions are about OWNERSHIP (whose row is written) and about
+// WHOSE LIMIT (the owner's role, not the caller's).
+func TestStaffCreatesMaskForAnotherAccount(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// A root account creates a mask owned by the PLAYER. The mask must land
+	// on the player, and the admin's own mask count must stay at zero.
+	status, payload, _ := categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/users/"+fixPlayerID+"/characters",
+		`{"name":"Player Mask","status_line":"","signature":""}`,
+		tokens["root"], "test-idem-char-staff-create")
+	if status != http.StatusCreated {
+		t.Fatalf("staff create for another account = %d, want 201: %s", status, payload)
+	}
+	if !bytes.Contains(payload, []byte(`"owner_id":"`+fixPlayerID+`"`)) {
+		t.Fatalf("the mask must be owned by the account in the path, not the caller: %s", payload)
+	}
+
+	owned, err := app.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": fixPlayerID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owned != 1 {
+		t.Fatalf("the target must own exactly one mask, got %d", owned)
+	}
+	callerOwned, err := app.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": fixRootID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callerOwned != 0 {
+		t.Fatalf("the caller must own none of them, got %d", callerOwned)
+	}
+
+	// A member WITHOUT create_others_mask may not write into somebody else's
+	// masks. The permission is the gate, and the refusal must be 403.
+	status, payload, _ = categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/users/"+fixModeratorID+"/characters",
+		`{"name":"Not Mine"}`,
+		tokens["player"], "test-idem-char-staff-denied")
+	if status != http.StatusForbidden {
+		t.Fatalf("a member without create_others_mask = %d, want 403: %s", status, payload)
+	}
+	owned, err = app.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": fixModeratorID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owned != 0 {
+		t.Fatalf("a refused create must not write a row, got %d", owned)
+	}
+}
+
+// TestStaffCreateChargesTheOwnersLimit pins WHICH limit applies.
+//
+// The cap is a property of the account that OWNS the masks, so a staff member
+// filling somebody else's quota is refused for the OWNER's reason — and the
+// caller's own quota is untouched while that happens.
+func TestStaffCreateChargesTheOwnersLimit(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// Fill the PLAYER's quota to the cap.
+	const cap = 2
+	setCharacterLimit(t, app, cap)
+	for i := 0; i < cap; i++ {
+		status, payload, _ := categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/me/characters",
+			`{"name":"Own `+string(rune('A'+i))+`"}`,
+			tokens["player"], "test-idem-char-owner-fill-"+string(rune('a'+i)))
+		if status != http.StatusCreated {
+			t.Fatalf("filling the player's quota failed at %d: %d %s", i, status, payload)
+		}
+	}
+
+	// The admin now tries to add one more mask for that player. The player's
+	// quota is exhausted, so it is refused — and the message must not blame
+	// the admin's own role.
+	status, payload, _ := categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/users/"+fixPlayerID+"/characters",
+		`{"name":"One Too Many"}`,
+		tokens["root"], "test-idem-char-staff-over")
+	if status != http.StatusConflict {
+		t.Fatalf("staff create past the owner's cap = %d, want 409: %s", status, payload)
+	}
+	if !bytes.Contains(payload, []byte("Character limit")) {
+		t.Fatalf("the refusal must name the reason: %s", payload)
+	}
+	// The refusal must blame the OWNER's quota, not the caller's — that was
+	// the bug this whole staff path was written for.
+	if !bytes.Contains(payload, []byte("owner's account")) {
+		t.Fatalf("the refusal must name the owner's quota: %s", payload)
+	}
+	if !bytes.Contains(payload, []byte("2 masks maximum")) {
+		t.Fatalf("the refusal must name the cap: %s", payload)
+	}
+
+	// The admin's OWN quota is untouched: their mask list is still empty and
+	// they can still create for themselves.
+	callerOwned, err := app.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": fixRootID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callerOwned != 0 {
+		t.Fatalf("the caller's quota must not be charged, got %d", callerOwned)
+	}
+	status, payload, _ = categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/users/"+fixRootID+"/characters",
+		`{"name":"Root Own"}`,
+		tokens["root"], "test-idem-char-staff-self")
+	if status != http.StatusCreated {
+		t.Fatalf("staff create for themselves = %d, want 201: %s", status, payload)
+	}
+}
+
+// setCharacterLimit writes the forum-wide mask cap into the settings row, the
+// way the admin panel's PATCH does.
+//
+// The tests use it to exercise a SMALL cap: the default is ten, and filling
+// ten masks over HTTP to reach the boundary is slow and says nothing a small
+// cap would not.
+func setCharacterLimit(t testing.TB, app *tests.TestApp, limit int) {
+	t.Helper()
+	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
+	if err != nil || record == nil {
+		t.Fatalf("forum settings row missing: %v", err)
+	}
+	record.Set("max_characters_per_user", limit)
+	if err := app.Save(record); err != nil {
+		t.Fatalf("failed to set the character limit: %v", err)
+	}
+}
+
+// setRoleCharacterLimit writes a per-role mask cap onto the role row, the way
+// the role editor's PATCH does.
+func setRoleCharacterLimit(t testing.TB, app *tests.TestApp, roleID string, limit int) {
+	t.Helper()
+	record, err := app.FindFirstRecordByFilter(rolesCollectionName, "role_id = {:rid}", dbx.Params{"rid": roleID})
+	if err != nil || record == nil {
+		t.Fatalf("role %q missing: %v", roleID, err)
+	}
+	record.Set("max_characters_limit", limit)
+	if err := app.Save(record); err != nil {
+		t.Fatalf("failed to set the role character limit: %v", err)
+	}
+}
+
+// TestCharacterCapIsEnforcedServerSide pins the cap on the FORUM-WIDE setting
+// - the number the admin panel edits.
 func TestCharacterCapIsEnforcedServerSide(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -118,9 +283,11 @@ func TestCharacterCapIsEnforcedServerSide(t *testing.T) {
 	defer ts.Close()
 
 	// The player's role row has no explicit max_characters_limit, so the
-	// compiled default applies. Filling it exactly is the boundary that matters:
-	// the limit counts existing rows, not requests.
-	for i := 0; i < defaultCharacterLimit; i++ {
+	// forum-wide setting applies. Filling it exactly is the boundary that
+	// matters: the limit counts existing rows, not requests.
+	const cap = 2
+	setCharacterLimit(t, app, cap)
+	for i := 0; i < cap; i++ {
 		status, payload, _ := categoryCall(t, http.MethodPost,
 			ts.URL+"/api/aerun/me/characters",
 			`{"name":"Mask `+string(rune('A'+i))+`","status_line":"","signature":""}`,
@@ -139,16 +306,89 @@ func TestCharacterCapIsEnforcedServerSide(t *testing.T) {
 	if !bytes.Contains(payload, []byte("Character limit")) {
 		t.Fatalf("the refusal must name the reason: %s", payload)
 	}
+	// The refusal must state the NUMBER, so the member learns the cap instead
+	// of guessing it.
+	if !bytes.Contains(payload, []byte("2 masks maximum")) {
+		t.Fatalf("the refusal must name the cap: %s", payload)
+	}
 
 	count, err := app.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": fixPlayerID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if int(count) != defaultCharacterLimit {
+	if int(count) != cap {
 		t.Fatalf("a refused create must not write a row, got %d", count)
 	}
 }
 
+// TestCharacterRoleLimitNarrowsTheForumCap pins how a per-role limit and the
+// forum-wide setting combine.
+//
+// A role may only make the cap STRICTER. It must not be able to RAISE it: a
+// stale or imported role row would otherwise hand somebody more masks than the
+// forum allows, and the number the admin set in the panel would stop being
+// the number the server enforces.
+func TestCharacterRoleLimitNarrowsTheForumCap(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// A role that wants FEWER masks than the forum allows gets fewer.
+	setCharacterLimit(t, app, 5)
+	setRoleCharacterLimit(t, app, string(auth.RolePlayer), 1)
+
+	status, payload, _ := categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/me/characters", `{"name":"First"}`,
+		tokens["player"], "test-idem-char-role-narrow")
+	if status != http.StatusCreated {
+		t.Fatalf("create 1 failed: %d %s", status, payload)
+	}
+	status, payload, _ = categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/me/characters", `{"name":"Second"}`,
+		tokens["player"], "test-idem-char-role-narrow-2")
+	if status != http.StatusConflict {
+		t.Fatalf("a role cap of 1 must refuse the second mask, got %d: %s", status, payload)
+	}
+	if !bytes.Contains(payload, []byte("1 masks maximum")) {
+		t.Fatalf("the refusal must name the role's own cap: %s", payload)
+	}
+
+	// A role that asks for MORE than the forum allows does not get it.
+	setCharacterLimit(t, app, 2)
+	setRoleCharacterLimit(t, app, string(auth.RolePlayer), 50)
+
+	// The player already holds one mask from the case above, so exactly one
+	// more fits under a forum cap of two — the role's larger value buys
+	// nothing.
+	status, payload, _ = categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/me/characters", `{"name":"Extra"}`,
+		tokens["player"], "test-idem-char-role-raise")
+	if status != http.StatusCreated {
+		t.Fatalf("the second mask must fit under a cap of 2: %d %s", status, payload)
+	}
+	status, payload, _ = categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/me/characters", `{"name":"One Too Many"}`,
+		tokens["player"], "test-idem-char-role-raise-over")
+	if status != http.StatusConflict {
+		t.Fatalf("the forum cap of 2 must refuse the third mask, got %d: %s", status, payload)
+	}
+	if !bytes.Contains(payload, []byte("2 masks maximum")) {
+		t.Fatalf("the forum cap must win over the role's larger value: %s", payload)
+	}
+}
+
+// TestCharacterOwnershipIsEnforced pins who may write to a mask.
+//
+// The OWNER always may. A staff member may too, but only with the matching
+// `_others_mask` permission AND the owner's rank reachable under the owner's
+// matrix — the legacy Firestore rules let isAdmin() manage anybody's
+// characters, and the profile editor still gates those buttons on those keys.
+//
+// The cases below are a MEMBER without those permissions (a spectator): the
+// refusal must be 403 and the row must survive it.
 func TestCharacterOwnershipIsEnforced(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -172,7 +412,7 @@ func TestCharacterOwnershipIsEnforced(t *testing.T) {
 			method: http.MethodPatch,
 			path:   "/api/aerun/characters/charplayer00001",
 			body:   `{"name":"Stolen"}`,
-			actor:  "moderator",
+			actor:  "spectator",
 			want:   http.StatusForbidden,
 		},
 		{
@@ -180,7 +420,7 @@ func TestCharacterOwnershipIsEnforced(t *testing.T) {
 			method: http.MethodDelete,
 			path:   "/api/aerun/characters/charplayer00001",
 			body:   "",
-			actor:  "root",
+			actor:  "spectator",
 			want:   http.StatusForbidden,
 		},
 		{
@@ -217,6 +457,124 @@ func TestCharacterOwnershipIsEnforced(t *testing.T) {
 	}
 	if rec.GetString("name") != "Player Mask" {
 		t.Fatalf("a refused patch must not change the row, got %q", rec.GetString("name"))
+	}
+}
+
+// TestStaffManagesAnotherAccountsMask pins the staff half of the write
+// commands: a staff member holding the `_others_mask` key may edit and delete
+// a mask that belongs to somebody else, and the row it acts on is the OWNER's.
+//
+// The moderator is the interesting actor: it holds the permission, and the
+// player it acts on is strictly lower, so the rank matrix allows it.
+func TestStaffManagesAnotherAccountsMask(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	seedRuntimeCharacter(t, app, "charplayer00001", fixPlayerID, "Player Mask")
+
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, payload, _ := categoryCall(t, http.MethodPatch,
+		ts.URL+"/api/aerun/characters/charplayer00001",
+		`{"name":"Moderated"}`,
+		tokens["moderator"], "test-idem-char-staff-patch")
+	if status != http.StatusOK {
+		t.Fatalf("staff patch of another account's mask = %d, want 200: %s", status, payload)
+	}
+	rec, err := app.FindRecordById(charactersCollectionName, "charplayer00001")
+	if err != nil || rec == nil {
+		t.Fatalf("the mask must survive the staff patch: %v", err)
+	}
+	if rec.GetString("name") != "Moderated" {
+		t.Fatalf("the staff patch must reach the owner's row, got %q", rec.GetString("name"))
+	}
+	if rec.GetString("owner_id") != fixPlayerID {
+		t.Fatalf("the owner must not change, got %q", rec.GetString("owner_id"))
+	}
+
+	status, payload, _ = categoryCall(t, http.MethodDelete,
+		ts.URL+"/api/aerun/characters/charplayer00001",
+		"",
+		tokens["moderator"], "test-idem-char-staff-delete")
+	if status != http.StatusOK {
+		t.Fatalf("staff delete of another account's mask = %d, want 200: %s", status, payload)
+	}
+	if _, err := app.FindRecordById(charactersCollectionName, "charplayer00001"); err == nil {
+		t.Fatal("the staff delete must remove the owner's row")
+	}
+}
+
+// TestStaffCreateRefusesAPeerOfEqualRank pins the rank half of the staff
+// path.
+//
+// The permission says the ACTION may be aimed at somebody else; the rank
+// matrix says WHOM. A moderator holds create_others_mask, so without the rank
+// rule they could create masks for an admin — staff authority aimed upward.
+func TestStaffCreateRefusesAPeerOfEqualRank(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	// A SECOND moderator: the peer must be somebody else, or the request is
+	// the self-service branch and never reaches the rank matrix.
+	peerModeratorID := "usermoder000002"
+	createTestUser(t, app, peerModeratorID, "mod2@example.com", "ModTwo", auth.RoleModerator, auth.StatusActive)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// A moderator creating a mask for another MODERATOR: equal rank is out.
+	status, payload, _ := categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/users/"+peerModeratorID+"/characters",
+		`{"name":"Peer Mask"}`,
+		tokens["moderator"], "test-idem-char-staff-peer")
+	if status != http.StatusForbidden {
+		t.Fatalf("a moderator creating for a peer = %d, want 403: %s", status, payload)
+	}
+	owned, err := app.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": peerModeratorID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owned != 0 {
+		t.Fatalf("a refused staff create must not write a row, got %d", owned)
+	}
+}
+
+// TestStaffDeleteRespectsTheOwnersCurrentMask pins the guard's owner.
+//
+// "The current mask" pointer belongs to the account that OWNS the mask. A
+// staff member deleting somebody else's mask must be stopped by the OWNER's
+// selection: the owner's profile would otherwise point at a row that no
+// longer exists, and the owner is the one who would see it.
+func TestStaffDeleteRespectsTheOwnersCurrentMask(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	seedRuntimeCharacter(t, app, "charplayer00001", fixPlayerID, "Player Mask")
+
+	owner, err := app.FindRecordById(usersCollectionName, fixPlayerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.Set("last_selected_character_id", "charplayer00001")
+	if err := app.Save(owner); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	status, payload, _ := categoryCall(t, http.MethodDelete,
+		ts.URL+"/api/aerun/characters/charplayer00001",
+		"",
+		tokens["root"], "test-idem-char-staff-del-selected")
+	if status != http.StatusConflict {
+		t.Fatalf("staff delete of the owner's current mask = %d, want 409: %s", status, payload)
+	}
+	if _, err := app.FindRecordById(charactersCollectionName, "charplayer00001"); err != nil {
+		t.Fatal("the refused delete must leave the mask in place")
 	}
 }
 

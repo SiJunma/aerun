@@ -246,6 +246,28 @@ const (
 	HardMaxTopicsPerPage = 50
 	MinTopicsPerPage     = 1
 	DefaultTopicsPerPage = 20
+
+	// HardMaxCharactersPerUser bounds the mask (character) cap for ONE
+	// account.
+	//
+	// The EFFECTIVE value is a row in `forum_settings`
+	// (`max_characters_per_user`, migration 1770000013) because the admin
+	// panel owns it — the same reason the post limit and the page sizes moved
+	// there. These constants are the CEILINGS around that tuning, not the
+	// values themselves.
+	//
+	// The ceiling is 100: a hundred masks is far past any real forum's needs,
+	// and the point of the ceiling is that no configuration can make masks
+	// unbounded.
+	HardMaxCharactersPerUser = 100
+	// MinMaxCharactersPerUser keeps one mask possible. A cap of 0 would make
+	// masks uncreatable, which is a different product decision (the
+	// `enable_characters` switch) than a cap.
+	MinMaxCharactersPerUser = 1
+	// DefaultMaxCharactersPerUser is the seeded value and the fallback when
+	// the settings row is missing. Ten is what the owner asked for: a member
+	// with a handful of masks, not a gallery.
+	DefaultMaxCharactersPerUser = 10
 )
 
 // ClampMaxPostsPerTopic bounds a configured value into the permitted range.
@@ -291,6 +313,25 @@ func ClampTopicsPerPage(configured int) int {
 	}
 	if configured > HardMaxTopicsPerPage {
 		return HardMaxTopicsPerPage
+	}
+	return configured
+}
+
+// ClampMaxCharactersPerUser bounds a configured per-account mask cap, with
+// the same "unset means default" rule as ClampPostsPerPage.
+//
+// A zero or negative value means "unset" and yields the DEFAULT rather than
+// the floor, so a settings row that lost its value degrades to a working
+// forum instead of to one where masks cannot be created at all.
+func ClampMaxCharactersPerUser(configured int) int {
+	if configured <= 0 {
+		return DefaultMaxCharactersPerUser
+	}
+	if configured < MinMaxCharactersPerUser {
+		return MinMaxCharactersPerUser
+	}
+	if configured > HardMaxCharactersPerUser {
+		return HardMaxCharactersPerUser
 	}
 	return configured
 }

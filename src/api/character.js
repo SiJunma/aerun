@@ -110,12 +110,27 @@ const toCharacterPayload = (characterData) => ({
   signature: (characterData?.signature || '').trim()
 });
 
-// The uid argument is kept for signature compatibility with the page components.
-// It is deliberately unused: the command derives the owner from the auth token,
-// and trusting a client-supplied owner id here is how one account ends up
-// writing into another's rows.
-export const addCharacter = async (uid, characterData) => {
-  const res = await sendApi('/api/aerun/me/characters', {
+// addCharacter creates a mask for the given owner.
+//
+// The OWNER is the account the mask belongs to, and the two cases are
+// different endpoints:
+//
+//   - your own masks  → POST /api/aerun/me/characters
+//   - somebody else's → POST /api/aerun/users/{id}/characters
+//
+// The second is the staff path: the server checks create_others_mask plus the
+// rank matrix, and charges the OWNER's role limit — not the caller's — so an
+// admin adding a mask for a player is not charged for the player's own masks.
+//
+// The owner id is NOT trusted as an authority: it only says WHICH account the
+// mask is for, and the server decides whether the caller may write there. The
+// self-service route keeps deriving the owner from the auth token, so a client
+// cannot turn it into a write into somebody else's rows.
+export const addCharacter = async (uid, characterData, { asStaff = false } = {}) => {
+  const path = asStaff
+    ? `/api/aerun/users/${uid}/characters`
+    : '/api/aerun/me/characters';
+  const res = await sendApi(path, {
     method: 'POST',
     body: toCharacterPayload(characterData)
   });

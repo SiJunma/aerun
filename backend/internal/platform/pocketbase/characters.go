@@ -40,20 +40,6 @@ const (
 	characterNameMaxLen   = 64
 	characterStatusMaxLen = 256
 	characterSignMaxLen   = 1024
-
-	// defaultCharacterLimit is the compiled fallback used when the owner's role
-	// carries no explicit max_characters_limit.
-	//
-	// TASK-3 required checking the legacy default first
-	// (src/constants/permissions.js / the legacy profile character UI). There
-	// is none: the legacy UI never counted characters at all — it only checked
-	// CREATE_SELF_MASK before showing the "add" button, and PROJECT_SPEC.md §278
-	// defers the limit entirely to roles.max_characters_limit. Rather than
-	// invent a number that silently caps people below the limit they had, the
-	// fallback is the smallest value that still enforces the documented rule
-	// ("the cap is a real number, not an absent concept"), and it is recorded in
-	// the plan so the product can change it in one place.
-	defaultCharacterLimit = 3
 )
 
 // characterPayload is the public shape. avatar_url is the host-agnostic
@@ -163,6 +149,96 @@ type characterForm struct {
 	Signature  string `json:"signature"`
 }
 
+// characterFormFields holds the three writable text fields of a mask.
+type characterFormFields struct {
+	Name       string
+	StatusLine string
+	Signature  string
+}
+
+// readCharacterForm parses and validates the body of a mask command.
+//
+// It is shared by the self-service and the staff command so the two cannot
+// drift on what a valid mask is: a name nobody may use is a name nobody may
+// use.
+func readCharacterForm(e *core.RequestEvent) (characterFormFields, error) {
+	raw, err := readBodyLimited(e, characterBodyLimit)
+	if err != nil {
+		return characterFormFields{}, err
+	}
+	var form characterForm
+	if err := json.Unmarshal(raw, &form); err != nil {
+		return characterFormFields{}, validationError("malformed character payload")
+	}
+
+	fields := characterFormFields{
+		Name:       strings.TrimSpace(form.Name),
+		StatusLine: strings.TrimSpace(form.StatusLine),
+		Signature:  strings.TrimSpace(form.Signature),
+	}
+	if fields.Name == "" || len(fields.Name) > characterNameMaxLen {
+		return characterFormFields{}, validationError("character name is required and must not exceed 64 characters")
+	}
+	if len(fields.StatusLine) > characterStatusMaxLen {
+		return characterFormFields{}, validationError("status_line must not exceed 256 characters")
+	}
+	if len(fields.Signature) > characterSignMaxLen {
+		return characterFormFields{}, validationError("signature must not exceed 1024 characters")
+	}
+	return fields, nil
+}
+
+// createCharacterFor writes a mask owned by ownerID.
+//
+// The owner is NEVER taken from the request body: it is either the caller
+// (self-service) or the account named in the path (staff), and the caller has
+// already been authorised for that account by the route that got here.
+//
+// The CAP is the OWNER's, too. A mask counts against the quota of the
+// account it belongs to, so an admin creating a mask for a player is charged
+// to the PLAYER's limit. Charging it to the actor is what produced "character
+// limit reached for your role" on an account the admin never touched.
+//
+// `limitSubject` says whose quota ran out (limitSubjectSelf /
+// limitSubjectOwner), so the refusal says whose limit was hit.
+func createCharacterFor(txApp core.App, ownerID string, fields characterFormFields, limitSubject string) (*core.Record, error) {
+	limit, err := characterLimitFor(txApp, ownerID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Counted INSIDE the transaction: two concurrent creates would both pass
+	// a check made before it, and this is the only place the cap can be
+	// enforced honestly.
+	count, err := txApp.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": ownerID})
+	if err != nil {
+		return nil, internalError("failed to count characters", err)
+	}
+	if count >= int64(limit) {
+		// The message names the NUMBER, because the cap is now an admin-set
+		// forum-wide value and "character limit reached" alone leaves the
+		// member guessing what the limit is. The subject still says whose
+		// quota ran out — the caller's or the owner's.
+		return nil, characterLimitError(limit, limitSubject)
+	}
+
+	col, err := txApp.FindCollectionByNameOrId(charactersCollectionName)
+	if err != nil {
+		return nil, internalError("characters collection unavailable", err)
+	}
+
+	rec := core.NewRecord(col)
+	rec.Set("owner_id", ownerID)
+	rec.Set("name", fields.Name)
+	rec.Set("status_line", fields.StatusLine)
+	rec.Set("signature", fields.Signature)
+	rec.Set(avatarURLFieldName, "")
+	if err := txApp.Save(rec); err != nil {
+		return nil, internalError("failed to create character", err)
+	}
+	return rec, nil
+}
+
 // createCharacterHandler serves POST /api/aerun/me/characters.
 //
 // Banned accounts are refused; pending ones keep the legacy self-service right
@@ -176,66 +252,23 @@ func createCharacterHandler(e *core.RequestEvent) error {
 		return err
 	}
 
-	raw, err := readBodyLimited(e, characterBodyLimit)
+	fields, err := readCharacterForm(e)
 	if err != nil {
 		return err
-	}
-	var form characterForm
-	if err := json.Unmarshal(raw, &form); err != nil {
-		return validationError("malformed character payload")
-	}
-
-	name := strings.TrimSpace(form.Name)
-	if name == "" || len(name) > characterNameMaxLen {
-		return validationError("character name is required and must not exceed 64 characters")
-	}
-	statusLine := strings.TrimSpace(form.StatusLine)
-	if len(statusLine) > characterStatusMaxLen {
-		return validationError("status_line must not exceed 256 characters")
-	}
-	signature := strings.TrimSpace(form.Signature)
-	if len(signature) > characterSignMaxLen {
-		return validationError("signature must not exceed 1024 characters")
 	}
 
 	ownerID := e.Auth.Id
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
-		limit, err := characterLimitFor(txApp, ownerID)
+		rec, err := createCharacterFor(txApp, ownerID, fields, limitSubjectSelf)
 		if err != nil {
 			return 0, nil, err
-		}
-
-		// Counted INSIDE the transaction: two concurrent creates would both pass
-		// a check made before it, and this is the only place the cap can be
-		// enforced honestly.
-		count, err := txApp.CountRecords(charactersCollectionName, dbx.HashExp{"owner_id": ownerID})
-		if err != nil {
-			return 0, nil, internalError("failed to count characters", err)
-		}
-		if count >= int64(limit) {
-			return 0, nil, conflictError("character limit reached for your role")
-		}
-
-		col, err := txApp.FindCollectionByNameOrId(charactersCollectionName)
-		if err != nil {
-			return 0, nil, internalError("characters collection unavailable", err)
-		}
-
-		rec := core.NewRecord(col)
-		rec.Set("owner_id", ownerID)
-		rec.Set("name", name)
-		rec.Set("status_line", statusLine)
-		rec.Set("signature", signature)
-		rec.Set(avatarURLFieldName, "")
-		if err := txApp.Save(rec); err != nil {
-			return 0, nil, internalError("failed to create character", err)
 		}
 
 		if err := recordAuditLog(txApp, "character_created", e.Auth.Id, map[string]any{
 			"target_id": rec.Id,
 			"owner_id":  ownerID,
-			"name":      name,
+			"name":      fields.Name,
 		}); err != nil {
 			return 0, nil, err
 		}
@@ -245,7 +278,132 @@ func createCharacterHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// updateCharacterHandler serves PATCH /api/aerun/characters/{id} (owner only).
+// createUserCharacterHandler serves POST /api/aerun/users/{id}/characters.
+//
+// It is the staff half of the mask command: the mask belongs to the account
+// named in the path, not to the caller.
+//
+// The legacy Firestore rules allowed exactly this — "allow create: if
+// (isActive() && isOwner(userId)) || isAdmin()" — and the legacy permission
+// registry carries create_others_mask for it, granted to moderators and admins.
+// The modern command layer had only the self-service route, so an admin
+// creating a mask for somebody else had nowhere to put it.
+//
+// Two rules, and the second is the one the bug report was about:
+//
+//   - WHO MAY: the caller needs create_others_mask, and the owner's rank
+//     decides how far down the hierarchy they may reach — the same matrix the
+//     nickname and profile commands use, so staff authority cannot be aimed
+//     upward.
+//   - WHOSE LIMIT: the cap belongs to the OWNER (see createCharacterFor), not
+//     to the actor.
+//
+// Creating a mask for oneself through this route is the self-service command
+// wearing a different address, so it is allowed and charged to the caller's own
+// limit; the client picks the address, not the rules.
+func createUserCharacterHandler(e *core.RequestEvent) error {
+	claim, err := claimFrom(e)
+	if err != nil {
+		return err
+	}
+	if err := requireCharacterAuthor(e); err != nil {
+		return err
+	}
+
+	ownerID := strings.TrimSpace(e.Request.PathValue("id"))
+	if ownerID == "" {
+		return validationError("user identifier is required")
+	}
+
+	fields, err := readCharacterForm(e)
+	if err != nil {
+		return err
+	}
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
+		owner, err := txApp.FindRecordById(usersCollectionName, ownerID)
+		if err != nil || owner == nil {
+			return 0, nil, notFoundError("user not found")
+		}
+		if isUserDeleted(owner) {
+			return 0, nil, forbiddenError("this account has been deleted; it cannot hold a mask")
+		}
+
+		limitSubject := limitSubjectOwner
+		if ownerID != e.Auth.Id {
+			acc := AccessFrom(e)
+			if !auth.Has(acc.Permissions, auth.PermCreateOthersMask) {
+				return 0, nil, forbiddenError("you are not allowed to create masks for other members")
+			}
+			if err := checkStaffRank(txApp, acc.Role, auth.Role(owner.GetString("role")), staffRankMessages{
+				targetAbove: "you cannot create a mask for a higher-ranked account",
+				notLower:    "you can only create a mask for a strictly lower-ranked account",
+				notStaff:    "you are not allowed to create masks for other members",
+			}); err != nil {
+				return 0, nil, err
+			}
+		} else {
+			limitSubject = limitSubjectSelf
+		}
+
+		rec, err := createCharacterFor(txApp, ownerID, fields, limitSubject)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		if err := recordAuditLog(txApp, "character_created", e.Auth.Id, map[string]any{
+			"target_id": rec.Id,
+			"owner_id":  ownerID,
+			"name":      fields.Name,
+		}); err != nil {
+			return 0, nil, err
+		}
+
+		return http.StatusCreated, characterPayload(rec), nil
+	})
+	return writeCommandResult(e, outcome, err)
+}
+
+// characterOwnerAccess answers whether the caller may write a character owned
+// by ownerID.
+//
+// The OWNER always may — that is the whole of self-service. A staff member may
+// act on somebody else's mask when they hold `permission` (the registry's
+// edit_others_mask / delete_others_mask) AND the owner's rank is reachable
+// under the same matrix the nickname and profile commands use. Both halves
+// are needed: the permission alone would let a moderator rewrite an admin's
+// masks.
+//
+// The legacy Firestore rules allowed the admin to manage ANYBODY's characters
+// ("allow update: if isAdmin()"), and the profile editor still gates these
+// buttons on the `_others_mask` keys, so the capability is a promise the UI
+// makes and the command layer has to keep.
+//
+// `denied` is the refusal for a caller who does not hold the permission, and
+// `msgs` the rank matrix's three refusals. They are worded per action because
+// they name what was attempted.
+func characterOwnerAccess(txApp core.App, e *core.RequestEvent, ownerID string, permission auth.Permission, denied string, msgs staffRankMessages) error {
+	if ownerID == e.Auth.Id {
+		return nil
+	}
+
+	acc := AccessFrom(e)
+	if !auth.Has(acc.Permissions, permission) {
+		return forbiddenError(denied)
+	}
+
+	owner, err := txApp.FindRecordById(usersCollectionName, ownerID)
+	if err != nil || owner == nil {
+		return notFoundError("character owner not found")
+	}
+	return checkStaffRank(txApp, acc.Role, auth.Role(owner.GetString("role")), msgs)
+}
+
+// updateCharacterHandler serves PATCH /api/aerun/characters/{id}.
+//
+// The owner may always edit their own mask; a staff member holding
+// edit_others_mask may edit another account's mask, subject to the rank matrix
+// (see characterOwnerAccess).
 func updateCharacterHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -269,15 +427,19 @@ func updateCharacterHandler(e *core.RequestEvent) error {
 		return validationError("malformed character payload")
 	}
 
-	actorID := e.Auth.Id
-
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		rec, err := txApp.FindRecordById(charactersCollectionName, id)
 		if err != nil || rec == nil {
 			return 0, nil, notFoundError("character not found")
 		}
-		if rec.GetString("owner_id") != actorID {
-			return 0, nil, forbiddenError("you can only change your own characters")
+		if err := characterOwnerAccess(txApp, e, rec.GetString("owner_id"), auth.PermEditOthersMask,
+			"you are not allowed to change other members' masks",
+			staffRankMessages{
+				targetAbove: "you cannot change the mask of a higher-ranked account",
+				notLower:    "you can only change the mask of a strictly lower-ranked account",
+				notStaff:    "you are not allowed to change other members' masks",
+			}); err != nil {
+			return 0, nil, err
 		}
 
 		// An omitted field is left alone: this is a PATCH, and "name omitted"
@@ -321,7 +483,11 @@ func updateCharacterHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// deleteCharacterHandler serves DELETE /api/aerun/characters/{id} (owner only).
+// deleteCharacterHandler serves DELETE /api/aerun/characters/{id}.
+//
+// The owner may always delete their own mask; a staff member holding
+// delete_others_mask may delete another account's, subject to the rank matrix
+// (see characterOwnerAccess).
 //
 // A character still referenced by a post, or selected as its owner's current
 // mask, is refused with 409 rather than deleted: the legacy UI only ever deleted
@@ -341,15 +507,19 @@ func deleteCharacterHandler(e *core.RequestEvent) error {
 		return validationError("character identifier is required")
 	}
 
-	actorID := e.Auth.Id
-
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		rec, err := txApp.FindRecordById(charactersCollectionName, id)
 		if err != nil || rec == nil {
 			return 0, nil, notFoundError("character not found")
 		}
-		if rec.GetString("owner_id") != actorID {
-			return 0, nil, forbiddenError("you can only delete your own characters")
+		if err := characterOwnerAccess(txApp, e, rec.GetString("owner_id"), auth.PermDeleteOthersMask,
+			"you are not allowed to delete other members' masks",
+			staffRankMessages{
+				targetAbove: "you cannot delete the mask of a higher-ranked account",
+				notLower:    "you can only delete the mask of a strictly lower-ranked account",
+				notStaff:    "you are not allowed to delete other members' masks",
+			}); err != nil {
+			return 0, nil, err
 		}
 
 		// The post reference column arrives with the TASK-6 post writer (the
@@ -368,7 +538,12 @@ func deleteCharacterHandler(e *core.RequestEvent) error {
 			}
 		}
 
-		owner, err := txApp.FindRecordById(usersCollectionName, actorID)
+		// The "current mask" pointer belongs to the mask's OWNER, not to
+		// whoever asked for the delete: a staff member removing a mask that the
+		// owner has selected must leave that selection intact, or the owner's
+		// profile would point at a row that no longer exists.
+		ownerID := rec.GetString("owner_id")
+		owner, err := txApp.FindRecordById(usersCollectionName, ownerID)
 		if err == nil && owner != nil && owner.GetString("last_selected_character_id") == rec.Id {
 			return 0, nil, conflictError("this character is selected as your current mask")
 		}
@@ -380,7 +555,7 @@ func deleteCharacterHandler(e *core.RequestEvent) error {
 
 		if err := recordAuditLog(txApp, "character_deleted", e.Auth.Id, map[string]any{
 			"target_id": targetID,
-			"owner_id":  actorID,
+			"owner_id":  ownerID,
 		}); err != nil {
 			return 0, nil, err
 		}
@@ -410,8 +585,19 @@ func uploadCharacterAvatarHandler(e *core.RequestEvent) error {
 	if err != nil || rec == nil {
 		return notFoundError("character not found")
 	}
-	if rec.GetString("owner_id") != e.Auth.Id {
-		return forbiddenError("you can only change your own characters")
+	// The avatar belongs to the mask, so the SAME rule as the text fields
+	// applies: the owner may always change it, and a staff member holding
+	// edit_others_mask may change another account's, subject to the rank
+	// matrix. This handler runs outside a transaction (see the note below), so
+	// the check is made directly rather than through the command closure.
+	if err := characterOwnerAccess(e.App, e, rec.GetString("owner_id"), auth.PermEditOthersMask,
+		"you are not allowed to change other members' masks",
+		staffRankMessages{
+			targetAbove: "you cannot change the mask of a higher-ranked account",
+			notLower:    "you can only change the mask of a strictly lower-ranked account",
+			notStaff:    "you are not allowed to change other members' masks",
+		}); err != nil {
+		return err
 	}
 
 	avatarURL, err := storeOwnedAvatar(e, rec, avatarFieldName)
@@ -471,11 +657,28 @@ func postsHaveAuthorCharacter(app core.App) bool {
 	return col.Fields.GetByName("author_character_id") != nil
 }
 
-// characterLimitFor resolves the per-user mask cap: the owner's role row limit
-// when it is greater than zero, otherwise the compiled default. A missing or
-// ambiguous role row degrades to the default rather than to "unlimited" — an
-// unresolvable role must not hand out unlimited writes.
+// characterLimitFor resolves the effective mask cap for one account.
+//
+// TWO SOURCES, AND THE ORDER IS THE POINT.
+//
+// The FORUM-WIDE setting (`forum_settings.max_characters_per_user`, the admin
+// panel's "Max Masks per User") is the CEILING: nobody may hold more masks
+// than that, whatever their role says.
+//
+// A role's own `max_characters_limit` may only make the cap STRICTER, never
+// looser. It used to be the only source, and every role carried 0 — meaning
+// "no opinion" — so in practice the compiled constant applied to everyone.
+// Letting a role value RAISE the ceiling would let a stale or imported row
+// hand somebody more masks than the forum allows, which is exactly the
+// "the number the reader was shown and the number the server applied were
+// unrelated" defect the other forum-wide limits were moved to fix.
+//
+// A missing or ambiguous role row degrades to the forum-wide setting rather
+// than to "unlimited" — an unresolvable role must not hand out unlimited
+// writes.
 func characterLimitFor(app core.App, ownerID string) (int, error) {
+	limit := loadForumSettings(app).MaxCharactersPerUser
+
 	owner, err := app.FindRecordById(usersCollectionName, ownerID)
 	if err != nil || owner == nil {
 		return 0, internalError("owner account not found", err)
@@ -483,7 +686,7 @@ func characterLimitFor(app core.App, ownerID string) (int, error) {
 
 	roleID := owner.GetString("role")
 	if roleID == "" {
-		return defaultCharacterLimit, nil
+		return limit, nil
 	}
 
 	record, err := app.FindFirstRecordByFilter(
@@ -492,10 +695,10 @@ func characterLimitFor(app core.App, ownerID string) (int, error) {
 		dbx.Params{"rid": roleID},
 	)
 	if err != nil || record == nil {
-		return defaultCharacterLimit, nil
-	}
-	if limit := record.GetInt("max_characters_limit"); limit > 0 {
 		return limit, nil
 	}
-	return defaultCharacterLimit, nil
+	if roleLimit := record.GetInt("max_characters_limit"); roleLimit > 0 && roleLimit < limit {
+		return roleLimit, nil
+	}
+	return limit, nil
 }

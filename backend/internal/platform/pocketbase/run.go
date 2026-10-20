@@ -379,6 +379,10 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/users/{id}/posts", listUserPostsHandler)
 	group.GET("/characters/{id}", getCharacterHandler)
 	group.POST("/me/characters", createCharacterHandler).BindFunc(enforceIdempotency)
+	// The staff path: a mask owned by ANOTHER account. The owner is the path
+	// parameter and the server checks create_others_mask plus the rank matrix
+	// (see createUserCharacterHandler).
+	group.POST("/users/{id}/characters", createUserCharacterHandler).BindFunc(enforceIdempotency)
 	group.PATCH("/characters/{id}", updateCharacterHandler).BindFunc(enforceIdempotency)
 	group.DELETE("/characters/{id}", deleteCharacterHandler).BindFunc(enforceIdempotency)
 	// No enforceIdempotency: multipart upload, same documented deviation as

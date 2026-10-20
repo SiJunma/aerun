@@ -1,6 +1,7 @@
 package pocketbase
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -62,6 +63,43 @@ func validationError(message string) error {
 
 func conflictError(message string) error {
 	return newContractError(http.StatusConflict, errKindConflict, message, nil)
+}
+
+// The subjects of a mask-quota refusal. They travel in the error's data map,
+// so the client can pick the right wording without parsing the message.
+const (
+	// limitSubjectSelf: the caller filled their OWN quota.
+	limitSubjectSelf = "self"
+	// limitSubjectOwner: a staff member filled the quota of the account in
+	// the path.
+	limitSubjectOwner = "owner"
+)
+
+// characterLimitError is the refusal for a full mask quota.
+//
+// The LIMIT travels in the data map, not only in the message. A member who
+// cannot create a mask needs the number — "the limit is 10" is actionable,
+// "limit reached" is not — and the client renders its own localised text
+// from these fields rather than parsing an English sentence.
+//
+// `subject` says whose quota ran out: limitSubjectSelf when the caller filled
+// their own, limitSubjectOwner when a staff member hit somebody else's cap.
+// The two need different wording, and the caller is the only one that knows
+// which happened.
+func characterLimitError(limit int, subject string) error {
+	phrase := "your account"
+	if subject == limitSubjectOwner {
+		phrase = "the owner's account"
+	}
+	apiErr := newContractError(
+		http.StatusConflict,
+		errKindConflict,
+		fmt.Sprintf("character limit reached for %s: %d masks maximum", phrase, limit),
+		nil,
+	)
+	apiErr.Data["character_limit"] = limit
+	apiErr.Data["limit_subject"] = subject
+	return apiErr
 }
 
 func forbiddenError(message string) error {

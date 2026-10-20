@@ -45,6 +45,12 @@ type forumSettings struct {
 	// number would have to be wrong for one of them.
 	TopicsPerPage int
 
+	// MaxCharactersPerUser caps how many masks (characters) ONE account may
+	// hold. It arrives with 1770000013 and replaces the compiled constant
+	// that used to sit in characters.go, so the admin panel owns the number
+	// the forum enforces.
+	MaxCharactersPerUser int
+
 	// The fields below arrive with 1768800000, which moved the admin panel's
 	// global settings out of each browser's localStorage. They live here rather
 	// than in a second struct so there is exactly one read of the settings row:
@@ -101,9 +107,10 @@ type forumSettings struct {
 // enforced on the read path.
 func loadForumSettings(app core.App) forumSettings {
 	settings := forumSettings{
-		MaxPostsPerTopic: auth.DefaultMaxPostsPerTopic,
-		PostsPerPage:     auth.DefaultPostsPerPage,
-		TopicsPerPage:    auth.DefaultTopicsPerPage,
+		MaxPostsPerTopic:     auth.DefaultMaxPostsPerTopic,
+		PostsPerPage:         auth.DefaultPostsPerPage,
+		TopicsPerPage:        auth.DefaultTopicsPerPage,
+		MaxCharactersPerUser: auth.DefaultMaxCharactersPerUser,
 		// The defaults below are what the admin panel displayed as its initial
 		// state before 1768800000, so an untouched forum behaves identically
 		// after the move. Registration and every feature stay ON: defaulting a
@@ -134,6 +141,12 @@ func loadForumSettings(app core.App) forumSettings {
 	// ClampTopicsPerPage reads 0 as "unset" — so a pre-migration database picks
 	// up the default here rather than clamping to a floor of 1.
 	settings.TopicsPerPage = auth.ClampTopicsPerPage(record.GetInt("topics_per_page"))
+
+	// The mask cap. A row written before 1770000013 has no value here, and
+	// GetInt reads that as 0 — which ClampMaxCharactersPerUser turns into the
+	// default rather than into the floor, so an un-migrated row does not
+	// silently cap masks at one.
+	settings.MaxCharactersPerUser = auth.ClampMaxCharactersPerUser(record.GetInt("max_characters_per_user"))
 
 	settings.RegistrationEnabled = record.GetBool("registration_enabled")
 	settings.RequireApproval = record.GetBool("require_approval")
