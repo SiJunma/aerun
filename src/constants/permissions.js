@@ -75,6 +75,49 @@ export const PERMISSIONS = {
 
 export const CHIEF_ADMIN_ID = 'root';
 
+// The admin role id. Kept beside CHIEF_ADMIN_ID because the two are the ends
+// of the role-change authority line: `checkRoleChange` on the server lets an
+// admin act on strictly lower accounts and lets only the chief admin appoint
+// another administrator, so the client needs both ids to mirror that rule.
+export const ADMIN_ROLE_ID = 'admin';
+
+// The compiled authority ranks of the system roles, mirroring
+// backend/internal/auth/role.go.
+//
+// WHY THEY ARE HERE AND NOT ONLY IN THE REGISTRY. The server resolves a
+// system's rank from the COMPILED matrix first and only falls back to the
+// `roles` row for a custom role (rankFor in nickname_commands.go). A client
+// that read the registry alone would therefore disagree with the server for
+// exactly the roles it compares most often — admin against admin.
+//
+// The numbers are the ones the server uses: root 1000, admin 800,
+// moderator 600, player 400, spectator 300, guest 200.
+export const SYSTEM_ROLE_RANKS = {
+  root: 1000,
+  admin: 800,
+  moderator: 600,
+  player: 400,
+  spectator: 300,
+  guest: 200,
+};
+
+// rankOfRole answers the authority rank of a role id the way the server does.
+//
+// System roles come from the compiled matrix above; a CUSTOM role is ranked by
+// its own registry row, and the public `GET /roles` publishes that `rank`.
+//
+// `null` means "unknown" — a custom role whose registry row has not loaded
+// (or carries no rank). It is deliberately NOT zero: an unknown rank must not
+// read as "below everybody", because the one thing the caller does with this
+// answer is decide whether a LOWER-ranked account may be edited, and an
+// unknown rank may well be above.
+export const rankOfRole = (roleId, roles = []) => {
+  if (!roleId) return null;
+  if (SYSTEM_ROLE_RANKS[roleId] !== undefined) return SYSTEM_ROLE_RANKS[roleId];
+  const row = (roles || []).find((r) => r.id === roleId);
+  return typeof row?.rank === 'number' ? row.rank : null;
+};
+
 export const PERMISSION_LABELS = {
   [PERMISSIONS.ADMIN_ACCESS]: { en: 'Admin Panel Access', ru: 'Доступ к админке' },
   [PERMISSIONS.MANAGE_FORUM]: { en: 'Manage Forum Settings', ru: 'Настройки форума' },
@@ -510,6 +553,18 @@ export const MAX_ROLE_PERMISSIONS = {
 };
 
 export const resolveUserRoleId = (userEmail, roleId) => {
+  // The ROLE decides. The email is a fallback for the case where the role is
+  // not known at all (an old DTO, a row read before the role column was
+  // populated) — NOT a way to override a role that IS known.
+  //
+  // WHY THE ORDER MATTERS. The chief-admin role is TRANSFERABLE: the server
+  // hands it over one-way (root_transfer.go), and the giver becomes an
+  // ordinary admin. If the email could outrank the role, the giver would keep
+  // rendering as chief admin forever — the badge in the admin panel, the
+  // "Transfer role" button, the ability to see other accounts' addresses. The
+  // email identifies the FOUNDER of the forum; the role says who holds the
+  // office now, and the office can move.
+  //
   // Both sides must be real values before they can be equal. The staff DTO
   // deliberately does not serve email, so userEmail is undefined for every row
   // the members table renders, and VITE_ADMIN_EMAIL is only present in
@@ -517,14 +572,20 @@ export const resolveUserRoleId = (userEmail, roleId) => {
   // comparison below is `undefined === undefined`, which is true -- and every
   // account on the forum would be promoted to Chief Admin and render an Admin
   // badge. It is a one-line guard against a silently total failure.
+  if (roleId) return roleId;
   const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
   if (adminEmail && userEmail && userEmail === adminEmail) return CHIEF_ADMIN_ID;
-  if (roleId === CHIEF_ADMIN_ID) return CHIEF_ADMIN_ID;
-  return roleId || 'player';
+  return 'player';
 };
 
 export const isChiefAdmin = (userEmail, roleId) => {
-  return userEmail === import.meta.env.VITE_ADMIN_EMAIL || roleId === CHIEF_ADMIN_ID;
+  // The role decides, and the email is only a fallback for a missing role —
+  // the same reasoning as resolveUserRoleId above, and for the same reason:
+  // the chief-admin role is transferable, so an address that used to hold it
+  // must stop conferring it the moment the role moves.
+  if (roleId) return roleId === CHIEF_ADMIN_ID;
+  const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
+  return Boolean(adminEmail) && userEmail === adminEmail;
 };
 
 export const getRoleVisuals = (roleId, roles = []) => {

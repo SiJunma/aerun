@@ -1860,6 +1860,19 @@ strike:hover,
   line-height: 1.2;
 }
 
+/* The chief admin's badge is the SAME chip as every other role badge — same
+   padding, same type size. It used to be a class apart (wider padding, larger
+   font), which read as a different badge rather than a distinguished one.
+
+   `badge-root` is the hook: an inset ring marks the office WITHOUT touching
+   the metrics, so the two can never drift apart again the way the inline
+   styles did. The ring is drawn with a box-shadow rather than a border on
+   purpose — a border would grow the chip and reintroduce exactly the
+   difference this class exists to prevent. */
+.role-badge.badge-root {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
 [data-theme='neutral'] .role-badge {
   border-color: #a68a64;
   color: #705c48;

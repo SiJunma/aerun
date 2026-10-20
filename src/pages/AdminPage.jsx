@@ -11,7 +11,7 @@ import { subscribeToAllUsers } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns } from '../api/designs';
-import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID, DEFAULT_ROLES } from '../constants/permissions';
+import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID, ADMIN_ROLE_ID, DEFAULT_ROLES, rankOfRole } from '../constants/permissions';
 import TransferRootModal from '../components/modals/TransferRootModal';
 import { transferRoot } from '../api/admin';
 import Timestamp from '../components/common/Timestamp';
@@ -34,19 +34,17 @@ import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { usePageTitle } from '../contexts/TitleProvider';
 
-const ROLE_LEVELS = {
-  'root': 100,
-  'admin': 90,
-  'moderator': 50,
-  'player': 10,
-  'spectator': 5,
-  'pending': 1,
-  'banned': 0,
-};
+// Every permission key the server knows about.
+//
+// The role editor sends the role's permission list back verbatim, and the
+// server refuses an unknown key with a 400. So the set is also what the editor
+// filters against when it seeds a role's form — a stale key from an import
+// would otherwise make the form unsaveable.
+const KNOWN_PERMISSIONS = new Set(Object.values(PERMISSIONS));
 
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
-  const { user, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
+  const { user, profile, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -69,7 +67,23 @@ const AdminPage = () => {
   // successor, so offering the choice would be a dialog that cannot succeed.
   const [showTransferRoot, setShowTransferRoot] = useState(false);
   const [transferring, setTransferring] = useState(false);
-  const isSelfRoot = isChiefAdmin(user?.email, user?.role_id);
+  // Whether THIS account holds the chief-admin role, as the SERVER says.
+  //
+  // It used to be `isChiefAdmin(user?.email, user?.role_id)`, and both halves
+  // of that were wrong. `user` is the auth-store snapshot — { uid, email,
+  // displayName, ... } — and it carries NO role_id at all, so the answer came
+  // from the email branch: "am I the founder's address?". After a handover
+  // that answer stays true forever, and the ex-root kept the "Transfer role"
+  // button on the NEW root's row — the exact symptom the owner reported.
+  //
+  // The role is read from the STAFF LIST first: that list is the very data the
+  // panel renders, it is fetched from the server, and it is what the button
+  // hangs on. `profile.role_id` is the fallback for the moment before the list
+  // arrives — and it is only ever a fallback, because the auth-store snapshot
+  // it starts from is a localStorage copy of the row as it was at SIGN-IN, so
+  // right after a handover it still says "root" until the profile is re-read.
+  const myRoleId = users.find((u) => u.id === user?.uid)?.role_id || profile?.role_id || 'player';
+  const isSelfRoot = myRoleId === CHIEF_ADMIN_ID;
   const [userSearch, setUserSearch] = useState('');
   const [designs, setDesigns] = useState([]);
 
@@ -269,21 +283,65 @@ const AdminPage = () => {
     }
   }, [hasPermission]);
 
-  const canEditRole = useCallback((targetRole) => {
-    // Every role is editable — a system role is the template custom roles are
-    // derived from, so freezing it would freeze everything built on it. The
-    // backend agrees (catalog_roles.go no longer 403s a system role); the two
-    // identity fields it keeps locked are not editable through the UI at all.
-    if (isRootAdmin) return true;
-    if (targetRole.id === user?.role_id) return false;
+  // Whether the role DEFINITION may be edited from this panel.
+  //
+  // The server's rule is the permission and nothing else: PATCH/POST/DELETE
+  // /roles are bound to RequirePermission(PermManageRoles) (run.go) and the
+  // handlers add no rank check of their own. A role definition is DATA the
+  // admin owns — a system role is edited exactly like a custom one, since it is
+  // the template every custom role is built from, and freezing it would freeze
+  // everything built on it.
+  //
+  // This used to compare the viewer's rank against the target's, which had no
+  // server counterpart and read two fields that do not exist: `user.role_id`
+  // (the auth snapshot carries no role) and `role.level` (the registry
+  // publishes `rank`). So the viewer's level was always 0, every comparison
+  // came out false, and an admin could not edit ANY role — while the server
+  // accepted those writes the whole time.
+  const canEditRole = useCallback((_targetRole) => {
     if (!hasPermission(PERMISSIONS.MANAGE_ROLES)) return false;
+    // The chief-admin role's own row is not in this table at all (it is
+    // filtered out above), so nothing here reaches the office itself.
+    return true;
+  }, [hasPermission]);
 
-    const myRole = roles.find((r) => r.id === user?.role_id);
-    const myRoleLevel = myRole?.level ?? ROLE_LEVELS[user?.role_id] ?? 0;
-    const targetRoleLevel = targetRole.level ?? ROLE_LEVELS[targetRole.id] ?? 0;
+  // ── Role-change authority (the client mirror of the server) ────────────────
+  //
+  // `checkRoleChange` (backend/internal/platform/pocketbase/admin_users.go) is
+  // the authority, and the panel has to offer exactly what it accepts:
+  //
+  //   root  → may change the role of ANY account;
+  //   admin → only of accounts ranked STRICTLY below their own, and may not
+  //           appoint another administrator;
+  //   other → may not change roles at all.
+  //
+  // The panel used to offer the role editor to everyone holding
+  // `change_roles`, so an admin could open their OWN role dialog and then be
+  // refused by the server with "you can only change the role of an account
+  // ranked strictly below yours" (owner, A5). The button is now shown only
+  // where the server would accept the change.
+  const isRootActor = myRoleId === CHIEF_ADMIN_ID;
 
-    return myRoleLevel > targetRoleLevel;
-  }, [isRootAdmin, user?.role_id, hasPermission, roles]);
+  const canChangeRoleOf = (targetRoleId) => {
+    if (!hasPermission(PERMISSIONS.CHANGE_ROLES)) return false;
+    if (isRootActor) return true;
+    if (myRoleId !== ADMIN_ROLE_ID) return false;
+    const myRank = rankOfRole(myRoleId, roles);
+    const targetRank = rankOfRole(targetRoleId, roles);
+    if (myRank === null || targetRank === null) return false;
+    // Strictly below — the same comparison the server makes, so an admin can
+    // never aim the editor at themselves or at an equal-ranked account.
+    return targetRank < myRank;
+  };
+
+  // The roles this viewer may WRITE. `root` is transferred, never assigned
+  // (checkRoleChange refuses it for every caller, root included), and only the
+  // chief admin may appoint another administrator.
+  const assignableRoles = roles.filter((r) => {
+    if (r.id === CHIEF_ADMIN_ID) return false;
+    if (r.id === ADMIN_ROLE_ID && !isRootActor) return false;
+    return true;
+  });
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
@@ -985,12 +1043,22 @@ const AdminPage = () => {
     }
   };
 
-  const handleDeleteUser = (uid) => {
+  const handleDeleteUser = (target) => {
+    // The subject of the deletion, not just its id: the confirmation has to
+    // NAME the account, or a staff member working through a list of a dozen
+    // similar nicknames cannot tell which one the dialog is about.
+    const uid = target?.id ?? target;
+    const nickname = target?.nickname || t('admin.users.unnamed', 'Без имени');
     setDeleteUserPosts(false);
     setConfirmState({
       show: true,
+      // Which operation this confirmation is, so the dialog can show the
+      // options that belong to it. The alternative — comparing the rendered
+      // title against a translated string — breaks the moment the wording
+      // changes, and silently drops the checkbox with it.
+      kind: 'delete-user',
       title: t('admin.users.confirm_delete_title'),
-      message: t('admin.users.confirm_delete_message'),
+      message: t('admin.users.confirm_delete_message_named', { nickname }),
       onConfirm: async () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
@@ -1012,14 +1080,39 @@ const AdminPage = () => {
     });
   };
 
-  const handleOpenUserModal = (user) => {
-    setEditingUser(user);
-    setUserForm({ role_id: user.role_id || 'player', notifyRoleChange: true });
+  const handleOpenUserModal = (target) => {
+    // Refuse to open the editor for an account this viewer may not re-role.
+    // The button is already hidden for those rows, but the guard is what keeps
+    // the refusal in ONE place: the server enforces the same matrix, and a
+    // panel that opens a dialog the server will reject is a lie about what is
+    // possible.
+    if (!canChangeRoleOf(target?.role_id)) {
+      showToast(t('admin.users.error_role_forbidden'), 'danger');
+      return;
+    }
+    setEditingUser(target);
+    setUserForm({ role_id: target.role_id || 'player', notifyRoleChange: true });
     setShowUserModal(true);
   };
 
   const handleSaveUserRole = async () => {
     if (!editingUser) return;
+    // Re-checked at SAVE time, not only at open time: the role of the edited
+    // account (or of the viewer) can change while the dialog is open, and a
+    // request the server will refuse is better never sent than sent and
+    // reported as a failure.
+    if (!canChangeRoleOf(editingUser.role_id)) {
+      showToast(t('admin.users.error_role_forbidden'), 'danger');
+      setShowUserModal(false);
+      return;
+    }
+    // The role being written must also be one this viewer may assign —
+    // `root` is transferred, never assigned, and only the chief admin may
+    // appoint another administrator.
+    if (!assignableRoles.some((r) => r.id === userForm.role_id)) {
+      showToast(t('admin.users.error_role_forbidden'), 'danger');
+      return;
+    }
     setSaving(true);
     try {
       setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role_id: userForm.role_id } : u));
@@ -1038,14 +1131,24 @@ const AdminPage = () => {
     setRoleAttempted(false);
     if (role) {
       setEditingRole(role);
-      // A role's OWN permissions must never exceed its own ceiling — otherwise
-      // an imported/stale role can show checkboxes above its allowed set
-      // (e.g. guest carrying every player permission because its base_role_id
-      // is empty and falls back to 'player'). Clamp to MAX_ROLE_PERMISSIONS.
-      const allowedForRole = MAX_ROLE_PERMISSIONS[role.id] || [];
+      // The form starts from the role's STORED permissions, minus the keys the
+      // server would refuse outright.
+      //
+      // It used to be clamped to MAX_ROLE_PERMISSIONS[role.id] — and for a
+      // CUSTOM role that entry does not exist, so the clamp was an empty list
+      // and the form opened with nothing checked. Saving that role then wrote
+      // an empty permission set: a custom role's powers were erased by
+      // opening its own editor and pressing Save. The ceiling is applied where
+      // it belongs — the CHECKBOX LIST below, which shows a role only the
+      // permissions its base may hold — so nothing above the ceiling is
+      // offered, and nothing the role already holds is taken away.
+      //
+      // The unknown-key filter is what keeps the form saveable: the server
+      // refuses a permission key it does not know with a 400, so a stale key
+      // from an import would otherwise make the role uneditable.
       setRoleForm({
         name: role.name,
-        permissions: normalizePermissions(role.permissions || []).filter(p => allowedForRole.includes(p)),
+        permissions: normalizePermissions(role.permissions || []).filter(p => KNOWN_PERMISSIONS.has(p)),
         color: role.color || 'primary',
         base_role_id: role.base_role_id || '',
         // 0 means "inherit the forum-wide limit", and the form shows that as
@@ -1708,17 +1811,29 @@ const AdminPage = () => {
                       (() => {
                         const visuals = getRoleVisuals('admin', roles);
                         return (
-                          <Badge bg={visuals.color} className={`role-badge px-3 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.85rem' }}>
+                          // The chief admin's badge is the SAME chip as the
+                          // administrator's — same padding, same type size. It
+                          // used to be a class apart (`px-3` / 0.85rem against
+                          // `px-2` / 0.8rem), which read as a different badge
+                          // rather than a distinguished one.
+                          //
+                          // `badge-root` is the hook for that distinction: a
+                          // theme may mark the office without the panel
+                          // inventing a second set of metrics.
+                          <Badge
+                            bg={visuals.color}
+                            className={`role-badge badge-root px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`}
+                            style={{ fontSize: '0.8rem' }}
+                          >
                             {visuals.name}
                           </Badge>
                         );
                       })()
-                    ) : (
+                    ) : canChangeRoleOf(u.role_id) ? (
                       <Button
                         variant="link"
                         className="p-0 text-decoration-none d-inline-flex align-items-center gap-2 group border-0 shadow-none"
                         onClick={() => handleOpenUserModal(u)}
-                        disabled={!hasPermission(PERMISSIONS.CHANGE_ROLES)}
                       >
                         {(() => {
                           const visuals = getRoleVisuals(u.role_id || 'player', roles);
@@ -1732,6 +1847,19 @@ const AdminPage = () => {
                           );
                         })()}
                       </Button>
+                    ) : (
+                      /* The server would refuse this change — an admin may not
+                         touch their own role or an equal-ranked one — so the
+                         panel does not offer it. The badge is still shown: the
+                         role is information, the pencil is a promise. */
+                      (() => {
+                        const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                        return (
+                          <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
+                            {visuals.name}
+                          </Badge>
+                        );
+                      })()
                     )}
                   </div>
                 </td>
@@ -1775,7 +1903,7 @@ const AdminPage = () => {
                         )
                       )}
                       {hasPermission(PERMISSIONS.DELETE_USERS) && (
-                        <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleDeleteUser(u.id)}>
+                        <Button variant="link" size="sm" className="text-danger p-0 text-nowrap text-decoration-none ms-md-2" onClick={() => handleDeleteUser(u)}>
                           <Trash2 size={14} className="me-1" /> {t('admin.users.delete')}
                         </Button>
                       )}
@@ -2501,7 +2629,16 @@ const AdminPage = () => {
             // must NOT fall back to 'player' and show every player permission.
             const currentBaseRole = roleForm.base_role_id || editingRole?.id || 'player';
             const allowedPerms = MAX_ROLE_PERMISSIONS[currentBaseRole] || Object.values(PERMISSIONS);
-            const visiblePerms = group.permissions.filter(p => allowedPerms.includes(p));
+            // What the role ALREADY holds is shown too, even when it sits above
+            // its ceiling (an imported or stale role). A permission the admin
+            // cannot see is one they can never take away, and a permission they
+            // cannot see is also one they cannot account for.
+            //
+            // So the ceiling governs what may be ADDED, and the stored set
+            // governs what is VISIBLE — the two together leave the admin in
+            // control of the role instead of guessing at it.
+            const storedPerms = (editingRole?.permissions || []).filter(p => KNOWN_PERMISSIONS.has(p));
+            const visiblePerms = group.permissions.filter(p => allowedPerms.includes(p) || storedPerms.includes(p));
 
             if (visiblePerms.length === 0) return null;
 
@@ -2758,7 +2895,7 @@ const AdminPage = () => {
             <Form.Group className="mb-3">
               <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">{t('admin.users.change_role_label')}</Form.Label>
               <div className="d-flex flex-column gap-1">
-                {roles.filter(r => r.id !== 'root').map(r => (
+                {assignableRoles.map(r => (
                   <div
                     key={r.id}
                     className={`p-2 rounded d-flex align-items-center mb-1 cursor-pointer role-radio-container`}
@@ -2816,22 +2953,6 @@ const AdminPage = () => {
         )}
       </ForumModal>
 
-      {confirmState.show && confirmState.title === t('admin.users.confirm_delete_title') && (
-        <>
-          <label className="d-block mb-2">
-            <input
-              type="checkbox"
-              checked={deleteUserPosts}
-              onChange={e => setDeleteUserPosts(e.target.checked)}
-              className="form-check-input me-2"
-            />
-            {t('admin.users.delete_posts_label')}
-          </label>
-          <p className="text-muted small mb-3">
-            {t('admin.users.delete_posts_hint')}
-          </p>
-        </>
-      )}
       <ConfirmModal
         show={confirmState.show}
         onHide={() => {
@@ -2841,7 +2962,28 @@ const AdminPage = () => {
         onConfirm={confirmState.onConfirm}
         title={confirmState.title}
         message={confirmState.message}
-      />
+      >
+        {/* The "delete their posts too" option belongs INSIDE this dialog.
+            It used to be rendered as a sibling of the modal, so while the
+            dialog was open the checkbox sat behind the backdrop where it
+            could not be reached — the option existed and was unreachable. */}
+        {confirmState.kind === 'delete-user' && (
+          <>
+            <label className="d-block mb-2 mt-3">
+              <input
+                type="checkbox"
+                checked={deleteUserPosts}
+                onChange={e => setDeleteUserPosts(e.target.checked)}
+                className="form-check-input me-2"
+              />
+              {t('admin.users.delete_posts_label')}
+            </label>
+            <p className="text-muted small mb-0">
+              {t('admin.users.delete_posts_hint')}
+            </p>
+          </>
+        )}
+      </ConfirmModal>
 
       {/* A delete the server would refuse. Rendered instead of firing a request
           that can only fail, and it names the blockers so the admin knows what to

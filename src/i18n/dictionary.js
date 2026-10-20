@@ -571,6 +571,9 @@ export const translations = {
         confirm_ban_message: "Are you sure you want to ban this user? They will lose all access to the forum.",
         confirm_delete_title: "Delete User",
         confirm_delete_message: "Are you sure you want to permanently delete this user account? This action cannot be undone.",
+        // The confirmation NAMES the account: a staff member working through a
+        // list of similar nicknames has to see which one the dialog is about.
+        confirm_delete_message_named: "Are you sure you want to permanently delete the account «{nickname}»? This action cannot be undone.",
         delete_posts_label: "Delete all posts by this user",
         delete_posts_hint: "When checked, every topic and post authored by this user is also removed. Their reputation votes are refunded. The account itself is always soft-deleted and its profile stays readable.",
         confirm_reject_title: "Confirm Reject",
@@ -580,6 +583,9 @@ export const translations = {
         error_delete: "Error deleting user",
         error_approve: "Error approving user",
         error_role_update: "Error updating user role",
+        // The panel never offers a role change the server would refuse; this
+        // is what it says if one is attempted anyway.
+        error_role_forbidden: "You are not allowed to change this account's role.",
         toast_deleted: "User account deleted",
         delete: "Delete",
         edit_user_title: "Manage User Settings",
@@ -1404,6 +1410,8 @@ export const translations = {
         confirm_ban_message: "Вы уверены, что хотите забанить этого пользователя? Он потеряет любой доступ к форуму.",
         confirm_delete_title: "Удалить пользователя",
         confirm_delete_message: "Вы уверены, что хотите навсегда удалить этот аккаунт? Это действие невозможно отменить.",
+        // Подтверждение НАЗЫВАЕТ аккаунт: без этого моделька не говорит, кого именно удаляют.
+        confirm_delete_message_named: "Вы уверены, что хотите навсегда удалить аккаунт «{nickname}»? Это действие невозможно отменить.",
         delete_posts_label: "Удалить все сообщения этого пользователя",
         delete_posts_hint: "Когда включено, все темы и сообщения пользователя тоже удаляются. Их голоса репутации возвращаются. Аккаунт всегда мягко удаляется, его профиль остаётся читаемым.",
         confirm_reject_title: "Подтверждение отклонения",
@@ -1413,6 +1421,9 @@ export const translations = {
         error_delete: "Ошибка при удалении пользователя",
         error_approve: "Ошибка при одобрении пользователя",
         error_role_update: "Ошибка при обновлении роли",
+        // Панель не предлагает смену роли, которую сервер отвергнет; это сообщение —
+        // на случай, если попытка всё же произошла.
+        error_role_forbidden: "Вы не можете изменить роль этого участника.",
         toast_deleted: "Аккаунт пользователя удален",
         delete: "Удалить",
         edit_user_title: "Управление участником",
