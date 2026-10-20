@@ -237,7 +237,19 @@ func findCharacter(app core.App, id string) (*characterDisplay, error) {
 // through to the stored one rather than failing the post: a mask is a display
 // choice, and refusing to publish somebody's message over a stale picker would
 // be a worse outcome than publishing it under their own account.
+//
+// THE SWITCHED-OFF CASE IS DIFFERENT, and it is the one that must not fall
+// through. While the forum's mask system is disabled, the answer is no mask
+// at all: the post goes out under the account. This is not the "stale picker"
+// case above — there, the member meant to post under a mask and the server
+// only failed to match the id; here, the feature is switched off, and honouring
+// the stored selection would keep the feature alive through the back door
+// while the admin panel says it is off.
 func resolveAuthorCharacter(app core.App, ownerID string, requested string) (string, error) {
+	if !loadForumSettings(app).EnableCharacters {
+		return "", nil
+	}
+
 	requested = strings.TrimSpace(requested)
 
 	if requested != "" {

@@ -472,6 +472,7 @@ export const translations = {
         welcome_msg: "Welcome Message (Banner)",
         features: "Feature Toggles",
         enable_characters: "Enable Character (Mask) System",
+    enable_characters_help: "When off, masks cannot be created, edited or deleted, and messages are posted under the account instead of a mask. Existing masks stay readable, so old posts keep their author's name.",
         enable_dice: "Enable Dice Roller",
         enable_reputation: "Enable Reputation System",
         reputation_style: "Reputation Style",
@@ -599,6 +600,8 @@ export const translations = {
         modal_view: "Role Details",
         modal_name: "Role Name",
         modal_base_role: "Base Role (Template)",
+    modal_mask_limit: "Mask Limit",
+    modal_mask_limit_help: "How many masks (characters) a member of this role may hold. Leave empty to inherit the forum-wide limit ({limit}). A number set here takes priority over the forum-wide limit.",
         modal_color: "Tag Color",
         modal_perms: "Permissions",
         system_roles: {
@@ -1302,6 +1305,7 @@ export const translations = {
         welcome_msg: "Приветственное сообщение",
         features: "Функции",
         enable_characters: "Система персонажей (маски)",
+    enable_characters_help: "Если выключено, маски нельзя создавать, изменять и удалять, а сообщения публикуются от имени аккаунта, а не маски. Существующие маски остаются доступными для чтения, поэтому в старых постах сохраняется имя автора.",
         enable_dice: "Использование кубиков",
         enable_reputation: "Система репутации",
         reputation_style: "Стиль репутации",
@@ -1429,6 +1433,8 @@ export const translations = {
         modal_view: "Детали роли",
         modal_name: "Название роли",
         modal_base_role: "Базовая роль (Системный аналог)",
+    modal_mask_limit: "Лимит масок",
+    modal_mask_limit_help: "Сколько масок (персонажей) может держать участник этой роли. Оставьте пустым, чтобы наследовать общий лимит форума ({limit}). Указанное здесь число имеет приоритет над общим лимитом.",
         modal_color: "Цвет тега",
         modal_perms: "Разрешения",
         system_roles: {

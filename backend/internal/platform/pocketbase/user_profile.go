@@ -72,7 +72,18 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		publicSettings = settings
 	}
 
-	return e.JSON(http.StatusOK, map[string]any{
+	// The EFFECTIVE mask limit for THIS account: the role's own number when
+	// the role states one, the forum-wide setting otherwise.
+	//
+	// It is here because the profile's mask counter has to show the number
+	// that will actually be enforced. The forum-wide setting alone would be
+	// wrong for every role that states its own limit — and a counter that
+	// names the wrong limit is worse than no counter.
+	//
+	// The key is added ONLY when the limit resolved: a zero would read as
+	// "no masks at all" rather than "no answer", and the counter is better
+	// absent than wrong.
+	payload := map[string]any{
 		"id":             record.Id,
 		"nickname":       record.GetString("nickname"),
 		"role":           profileRole(record),
@@ -111,7 +122,11 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		"created_at": registrationDay(record),
 		"settings":   publicSettings,
 		"request_id": requestIDFrom(e),
-	})
+	}
+	if limit, err := characterLimitFor(e.App, record.Id); err == nil && limit > 0 {
+		payload["character_limit"] = limit
+	}
+	return e.JSON(http.StatusOK, payload)
 }
 
 // profileRole reports the role a profile response carries. A soft-deleted

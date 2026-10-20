@@ -72,13 +72,16 @@ const TopicFormPage = () => {
     }
     // Masks forbidden in this category → reset the selection so a new topic
     // is posted under the account, not a mask carried over from another topic.
+    // The same reset happens when the admin switches the mask system off.
     const cat = categories.find(c => c.id === categoryId);
-    if (cat && !hasPermission(PERMISSIONS.USE_MASKS, { category: cat }) && selectedCharacterId !== '') {
+    const masksUnavailable = settings?.enableCharacters === false
+      || (cat && !hasPermission(PERMISSIONS.USE_MASKS, { category: cat }));
+    if (masksUnavailable && selectedCharacterId !== '') {
       setSelectedCharacterId('');
       if (user) setLastSelectedMask('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.last_selected_character_id, categoryId, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask]);
+  }, [profile?.last_selected_character_id, categoryId, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask, settings?.enableCharacters]);
 
   const DRAFT_KEY = `topic_draft_${categoryId}`;
 
@@ -317,7 +320,7 @@ const TopicFormPage = () => {
               />
             </Form.Group>
 
-            {hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
+            {settings?.enableCharacters !== false && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
               <Form.Group className="mb-3" controlId="postAs">
                 <Form.Label className="fw-bold h6">{t('forum.post_as')}</Form.Label>
                 <Dropdown className="w-100">

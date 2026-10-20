@@ -241,6 +241,12 @@ func createRoleHandler(e *core.RequestEvent) error {
 		rec.Set("color", form.Color)
 		rec.Set("is_system", false)
 		rec.Set("base_role_id", form.BaseRoleID)
+		// 0 means "this role has no opinion" — it inherits the forum-wide
+		// mask limit. A number overrides it, and is bounded by the same
+		// ceiling the forum-wide value is bound by.
+		if form.MaxCharactersLimit < 0 || form.MaxCharactersLimit > auth.HardMaxCharactersPerUser {
+			return 0, nil, validationError("max_characters_limit must be between 0 and 100")
+		}
 		rec.Set("max_characters_limit", form.MaxCharactersLimit)
 		rec.Set("permissions", perms)
 
@@ -367,6 +373,12 @@ func updateRoleHandler(e *core.RequestEvent) error {
 
 		if limitRaw, ok := form["max_characters_limit"]; ok {
 			if l, ok := limitRaw.(float64); ok {
+				// 0 clears the role's own limit and hands the decision back
+				// to the forum-wide setting. A number overrides it, bounded
+				// by the same ceiling.
+				if l < 0 || l > float64(auth.HardMaxCharactersPerUser) {
+					return 0, nil, validationError("max_characters_limit must be between 0 and 100")
+				}
 				rec.Set("max_characters_limit", int(l))
 			}
 		}

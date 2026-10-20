@@ -794,13 +794,18 @@ const TopicPage = () => {
     }
     // Masks forbidden in this category → reset the selection so a reply is
     // posted under the account, not a mask carried over from another topic.
+    // The same reset happens when the admin switches the mask system off:
+    // the picker is gone, so a carried-over selection would post under a
+    // mask the forum no longer offers.
     const cat = categories.find(c => c.id === topic?.category_id);
-    if (cat && !hasPermission(PERMISSIONS.USE_MASKS, { category: cat }) && selectedCharacterId !== '') {
+    const masksUnavailable = settings?.enableCharacters === false
+      || (cat && !hasPermission(PERMISSIONS.USE_MASKS, { category: cat }));
+    if (masksUnavailable && selectedCharacterId !== '') {
       setSelectedCharacterId('');
       if (user) setLastSelectedMask('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.last_selected_character_id, topic?.category_id, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask]);
+  }, [profile?.last_selected_character_id, topic?.category_id, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask, settings?.enableCharacters]);
 
   useEffect(() => {
     if (topic?.category_id) {
@@ -3940,7 +3945,7 @@ const TopicPage = () => {
                       </Form.Group>
                     )}
                     <div className="d-flex align-items-center justify-content-between mb-2">
-                      {user && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
+                      {user && settings?.enableCharacters !== false && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
                         <Dropdown className="w-auto">
                           <Dropdown.Toggle
                             variant="outline-management"

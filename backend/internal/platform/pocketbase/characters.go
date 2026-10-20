@@ -251,6 +251,9 @@ func createCharacterHandler(e *core.RequestEvent) error {
 	if err := requireCharacterAuthor(e); err != nil {
 		return err
 	}
+	if err := requireCharactersEnabled(e); err != nil {
+		return err
+	}
 
 	fields, err := readCharacterForm(e)
 	if err != nil {
@@ -307,6 +310,9 @@ func createUserCharacterHandler(e *core.RequestEvent) error {
 		return err
 	}
 	if err := requireCharacterAuthor(e); err != nil {
+		return err
+	}
+	if err := requireCharactersEnabled(e); err != nil {
 		return err
 	}
 
@@ -412,6 +418,9 @@ func updateCharacterHandler(e *core.RequestEvent) error {
 	if err := requireCharacterAuthor(e); err != nil {
 		return err
 	}
+	if err := requireCharactersEnabled(e); err != nil {
+		return err
+	}
 
 	id := strings.TrimSpace(e.Request.PathValue("id"))
 	if id == "" {
@@ -501,6 +510,9 @@ func deleteCharacterHandler(e *core.RequestEvent) error {
 	if err := requireCharacterAuthor(e); err != nil {
 		return err
 	}
+	if err := requireCharactersEnabled(e); err != nil {
+		return err
+	}
 
 	id := strings.TrimSpace(e.Request.PathValue("id"))
 	if id == "" {
@@ -575,6 +587,9 @@ func uploadCharacterAvatarHandler(e *core.RequestEvent) error {
 	if err := requireCharacterAuthor(e); err != nil {
 		return err
 	}
+	if err := requireCharactersEnabled(e); err != nil {
+		return err
+	}
 
 	id := strings.TrimSpace(e.Request.PathValue("id"))
 	if id == "" {
@@ -644,6 +659,28 @@ func requireCharacterAuthor(e *core.RequestEvent) error {
 	return nil
 }
 
+// requireCharactersEnabled refuses mask WRITES while the forum's mask system is
+// switched off.
+//
+// WHY A SERVER GUARD AND NOT ONLY A HIDDEN BUTTON. The admin panel's
+// "Enable Characters" switch was decorative: it was stored, published in the
+// public settings snapshot, and read by nobody. A control a client can omit
+// is not a control — the same reasoning 1768800000 applied to the settings
+// that used to live in each browser's localStorage.
+//
+// READING STAYS ALLOWED, and that is a deliberate asymmetry. Posts and topics
+// carry `author_character_id`, so a message already published under a mask
+// names it; refusing to read the mask would strip the author's name from
+// every post they ever wrote under it. Switching the system off therefore
+// means "no new masks, no new mask edits, no posting under a mask" — not
+// "erase what already exists".
+func requireCharactersEnabled(e *core.RequestEvent) error {
+	if loadForumSettings(e.App).EnableCharacters {
+		return nil
+	}
+	return forbiddenError("the character system is disabled on this forum")
+}
+
 // postsHaveAuthorCharacter reports whether the posts collection already carries
 // the frozen display identity reference. It arrives with the TASK-6 post
 // writer, so the delete guard asks the schema instead of assuming: a hard-coded
@@ -659,25 +696,22 @@ func postsHaveAuthorCharacter(app core.App) bool {
 
 // characterLimitFor resolves the effective mask cap for one account.
 //
-// TWO SOURCES, AND THE ORDER IS THE POINT.
+// TWO SOURCES, AND THE ROLE WINS.
+//
+// The ROLE's own `max_characters_limit` is the more specific statement, so it
+// takes priority: a role that says 3 means 3, even when the forum-wide
+// setting says 10. This is the owner's ruling (2026-10-19) — a role exists
+// precisely to say something different about its members.
 //
 // The FORUM-WIDE setting (`forum_settings.max_characters_per_user`, the admin
-// panel's "Max Masks per User") is the CEILING: nobody may hold more masks
-// than that, whatever their role says.
+// panel's "Max Masks per User") is the FALLBACK: it applies to every role
+// that states nothing, and it is what a brand-new role inherits.
 //
-// A role's own `max_characters_limit` may only make the cap STRICTER, never
-// looser. It used to be the only source, and every role carried 0 — meaning
-// "no opinion" — so in practice the compiled constant applied to everyone.
-// Letting a role value RAISE the ceiling would let a stale or imported row
-// hand somebody more masks than the forum allows, which is exactly the
-// "the number the reader was shown and the number the server applied were
-// unrelated" defect the other forum-wide limits were moved to fix.
-//
-// A missing or ambiguous role row degrades to the forum-wide setting rather
-// than to "unlimited" — an unresolvable role must not hand out unlimited
-// writes.
+// A missing or ambiguous role row therefore degrades to the forum-wide
+// setting — an unresolvable role must not hand out unlimited writes, and it
+// must not be read as "no masks allowed" either.
 func characterLimitFor(app core.App, ownerID string) (int, error) {
-	limit := loadForumSettings(app).MaxCharactersPerUser
+	forumLimit := loadForumSettings(app).MaxCharactersPerUser
 
 	owner, err := app.FindRecordById(usersCollectionName, ownerID)
 	if err != nil || owner == nil {
@@ -686,7 +720,7 @@ func characterLimitFor(app core.App, ownerID string) (int, error) {
 
 	roleID := owner.GetString("role")
 	if roleID == "" {
-		return limit, nil
+		return forumLimit, nil
 	}
 
 	record, err := app.FindFirstRecordByFilter(
@@ -695,10 +729,13 @@ func characterLimitFor(app core.App, ownerID string) (int, error) {
 		dbx.Params{"rid": roleID},
 	)
 	if err != nil || record == nil {
-		return limit, nil
+		return forumLimit, nil
 	}
-	if roleLimit := record.GetInt("max_characters_limit"); roleLimit > 0 && roleLimit < limit {
-		return roleLimit, nil
+	// 0 means "this role has no opinion" — it inherits the forum-wide setting.
+	// A number is the role's own limit and wins over it, up to the same
+	// ceiling the forum-wide value is bound by.
+	if roleLimit := record.GetInt("max_characters_limit"); roleLimit > 0 {
+		return auth.ClampMaxCharactersPerUser(roleLimit), nil
 	}
-	return limit, nil
+	return forumLimit, nil
 }

@@ -973,19 +973,25 @@ const ProfilePage = () => {
                     </Card>
                   </Tab>
                 )}
-              {!isLimitedProfile && (
+              {/* The whole tab disappears while the admin has the mask system
+                  switched off. `!== false` rather than a truthy check: the
+                  public settings snapshot arrives asynchronously, and a tab
+                  that hides itself until the snapshot loads would flicker
+                  for every member on every profile visit. The server refuses
+                  the writes either way — this only keeps the UI honest. */}
+              {!isLimitedProfile && settings?.enableCharacters !== false && (
                 <Tab eventKey="characters" title={t('profile.tab_characters')}>
               <Card className="shadow-sm border-0 bg-card">
                 <Card.Header className="py-3 d-flex justify-content-between align-items-center">
                   <h5 className="mb-0">
                     {isOwn ? t('profile.characters') : t('profile.characters_other')}
-                    {/* The cap is a forum-wide setting the admin owns, so the
-                        member can see it instead of discovering it by being
-                        refused. A role may lower it further — the refusal then
-                        names the real number. */}
-                    {typeof settings?.maxCharactersPerUser === 'number' && (
+                    {/* The cap is a forum-wide setting the admin owns, and a
+                        role may state its own number that takes priority — so
+                        the number shown is the EFFECTIVE one the server sent
+                        with this profile, not the forum-wide default. */}
+                    {typeof profile?.character_limit === 'number' && (
                       <span className="text-muted small ms-2">
-                        {characters.length} / {settings.maxCharactersPerUser}
+                        {characters.length} / {profile.character_limit}
                       </span>
                     )}
                   </h5>

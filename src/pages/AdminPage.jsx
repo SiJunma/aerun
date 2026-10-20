@@ -94,7 +94,11 @@ const AdminPage = () => {
 
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
-  const [roleForm, setRoleForm] = useState({ name: '', permissions: [], color: 'primary' });
+  // `max_characters_limit` is a STRING here, not a number: the empty value
+  // means "this role has no opinion — inherit the forum-wide setting", and a
+  // number field cannot hold "empty" without a sentinel that has to be
+  // translated back on save. It is converted to a number in handleSaveRole.
+  const [roleForm, setRoleForm] = useState({ name: '', permissions: [], color: 'primary', max_characters_limit: '' });
 
   // ── Form validity ────────────────────────────────────────────────────────
   //
@@ -1043,7 +1047,11 @@ const AdminPage = () => {
         name: role.name,
         permissions: normalizePermissions(role.permissions || []).filter(p => allowedForRole.includes(p)),
         color: role.color || 'primary',
-        base_role_id: role.base_role_id || ''
+        base_role_id: role.base_role_id || '',
+        // 0 means "inherit the forum-wide limit", and the form shows that as
+        // an EMPTY field rather than a zero: a zero would read as "this role
+        // may hold no masks at all", which is a different thing.
+        max_characters_limit: role.max_characters_limit > 0 ? String(role.max_characters_limit) : ''
       });
     } else {
       setEditingRole(null);
@@ -1061,7 +1069,10 @@ const AdminPage = () => {
             .filter(p => MAX_ROLE_PERMISSIONS.player?.includes(p))
           : [],
         color: 'primary',
-        base_role_id: 'player'
+        base_role_id: 'player',
+        // A new role states nothing about masks, so it inherits the
+        // forum-wide setting.
+        max_characters_limit: ''
       });
     }
     setShowRoleModal(true);
@@ -1075,6 +1086,16 @@ const AdminPage = () => {
     }
     setSaving(true);
     try {
+      // The form holds the mask limit as a STRING so it can be empty; the API
+      // takes a number, where 0 means "inherit the forum-wide setting".
+      // An unparseable value becomes 0 rather than NaN, because NaN would
+      // reach the server as a JSON null and land in the column as a silent
+      // zero anyway.
+      const parsedLimit = Number.parseInt(roleForm.max_characters_limit, 10);
+      const rolePayload = {
+        ...roleForm,
+        max_characters_limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 0
+      };
       if (editingRole) {
         // A system role has NO base by definition, but roleForm.base_role_id
         // falls back to the role's own id — it has to, because that field also
@@ -1085,10 +1106,10 @@ const AdminPage = () => {
         // So the base is omitted from the payload rather than sent as '': the
         // handler only touches the column when the key is present, and a
         // system role must never acquire one however the form is filled in.
-        const { base_role_id: _formBase, ...payload } = roleForm;
-        await updateRole(editingRole.id, editingRole.is_system ? payload : roleForm, user.uid);
+        const { base_role_id: _formBase, ...payload } = rolePayload;
+        await updateRole(editingRole.id, editingRole.is_system ? payload : rolePayload, user.uid);
       } else {
-        await addRole(roleForm, user.uid);
+        await addRole(rolePayload, user.uid);
       }
       // The api layer re-reads the PUBLIC registry and pushes it into AuthProvider,
       // so every badge repaints. This table reads the admin route, which carries
@@ -1223,6 +1244,12 @@ const AdminPage = () => {
               checked={settings.enableCharacters}
               onChange={(e) => setSettings({ ...settings, enableCharacters: e.target.checked })}
             />
+            {/* The switch is enforced by the SERVER, so the admin deserves to
+                know what it actually does — the previous version of this panel
+                promised a feature it never switched off. */}
+            <div className="small text-muted mb-3 opacity-75" style={{ marginTop: '-0.75rem' }}>
+              {t('admin.settings.enable_characters_help')}
+            </div>
             <Form.Check
               type="switch"
               id="dice-switch"
@@ -2402,6 +2429,22 @@ const AdminPage = () => {
                 <Form.Control.Feedback type="invalid">
                   {t('admin.roles.name_required_hint')}
                 </Form.Control.Feedback>
+              </Form.Group>
+            </Col>
+            <Col md={5}>
+              <Form.Group className="mb-4">
+                <Form.Label className="fw-bold">{t('admin.roles.modal_mask_limit')}</Form.Label>
+                <Form.Control
+                  type="number"
+                  min="1"
+                  max="100"
+                  placeholder={String(settings?.maxCharactersPerUser ?? 10)}
+                  value={roleForm.max_characters_limit}
+                  onChange={(e) => setRoleForm({ ...roleForm, max_characters_limit: e.target.value })}
+                />
+                <div className="small text-muted mt-1 opacity-75">
+                  {t('admin.roles.modal_mask_limit_help', { limit: settings?.maxCharactersPerUser ?? 10 })}
+                </div>
               </Form.Group>
             </Col>
             {!editingRole && (

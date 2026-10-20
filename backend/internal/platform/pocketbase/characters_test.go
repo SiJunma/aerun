@@ -12,6 +12,7 @@ package pocketbase
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -321,14 +322,17 @@ func TestCharacterCapIsEnforcedServerSide(t *testing.T) {
 	}
 }
 
-// TestCharacterRoleLimitNarrowsTheForumCap pins how a per-role limit and the
-// forum-wide setting combine.
+// TestCharacterRoleLimitOverridesTheForumCap pins how a per-role limit and
+// the forum-wide setting combine.
 //
-// A role may only make the cap STRICTER. It must not be able to RAISE it: a
-// stale or imported role row would otherwise hand somebody more masks than the
-// forum allows, and the number the admin set in the panel would stop being
-// the number the server enforces.
-func TestCharacterRoleLimitNarrowsTheForumCap(t *testing.T) {
+// The ROLE wins (owner's ruling, 2026-10-19): a role that states a number
+// states the limit for its members, in either direction. The forum-wide
+// setting is what a role INHERITS when it states nothing.
+//
+// The direction matters, so both are pinned: a role may narrow the cap AND
+// widen it. A role that widens it is bounded by the same ceiling the
+// forum-wide value is bound by, so no configuration makes masks unbounded.
+func TestCharacterRoleLimitOverridesTheForumCap(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
@@ -356,27 +360,46 @@ func TestCharacterRoleLimitNarrowsTheForumCap(t *testing.T) {
 		t.Fatalf("the refusal must name the role's own cap: %s", payload)
 	}
 
-	// A role that asks for MORE than the forum allows does not get it.
+	// A role that asks for MORE than the forum allows gets it: the role's
+	// statement is the specific one.
 	setCharacterLimit(t, app, 2)
-	setRoleCharacterLimit(t, app, string(auth.RolePlayer), 50)
+	setRoleCharacterLimit(t, app, string(auth.RolePlayer), 4)
 
-	// The player already holds one mask from the case above, so exactly one
-	// more fits under a forum cap of two — the role's larger value buys
-	// nothing.
-	status, payload, _ = categoryCall(t, http.MethodPost,
-		ts.URL+"/api/aerun/me/characters", `{"name":"Extra"}`,
-		tokens["player"], "test-idem-char-role-raise")
-	if status != http.StatusCreated {
-		t.Fatalf("the second mask must fit under a cap of 2: %d %s", status, payload)
+	// The player already holds one mask from the case above, so three more fit
+	// under the role's cap of four.
+	for i := 0; i < 3; i++ {
+		status, payload, _ = categoryCall(t, http.MethodPost,
+			ts.URL+"/api/aerun/me/characters",
+			`{"name":"Extra `+string(rune('A'+i))+`"}`,
+			tokens["player"], "test-idem-char-role-raise-"+string(rune('a'+i)))
+		if status != http.StatusCreated {
+			t.Fatalf("create %d failed: %d %s", i, status, payload)
+		}
 	}
 	status, payload, _ = categoryCall(t, http.MethodPost,
 		ts.URL+"/api/aerun/me/characters", `{"name":"One Too Many"}`,
 		tokens["player"], "test-idem-char-role-raise-over")
 	if status != http.StatusConflict {
-		t.Fatalf("the forum cap of 2 must refuse the third mask, got %d: %s", status, payload)
+		t.Fatalf("the role cap of 4 must refuse the fifth mask, got %d: %s", status, payload)
+	}
+	if !bytes.Contains(payload, []byte("4 masks maximum")) {
+		t.Fatalf("the refusal must name the role's cap, not the forum-wide one: %s", payload)
+	}
+
+	// A role that states nothing inherits the forum-wide setting.
+	setRoleCharacterLimit(t, app, string(auth.RolePlayer), 0)
+	setCharacterLimit(t, app, 2)
+
+	// The player holds four masks, so the inherited cap of 2 is already
+	// exceeded — the refusal names the FORUM's number.
+	status, payload, _ = categoryCall(t, http.MethodPost,
+		ts.URL+"/api/aerun/me/characters", `{"name":"Inherited"}`,
+		tokens["player"], "test-idem-char-role-inherit")
+	if status != http.StatusConflict {
+		t.Fatalf("the inherited forum cap of 2 must refuse another mask, got %d: %s", status, payload)
 	}
 	if !bytes.Contains(payload, []byte("2 masks maximum")) {
-		t.Fatalf("the forum cap must win over the role's larger value: %s", payload)
+		t.Fatalf("a role without a number must inherit the forum-wide cap: %s", payload)
 	}
 }
 
@@ -575,6 +598,132 @@ func TestStaffDeleteRespectsTheOwnersCurrentMask(t *testing.T) {
 	}
 	if _, err := app.FindRecordById(charactersCollectionName, "charplayer00001"); err != nil {
 		t.Fatal("the refused delete must leave the mask in place")
+	}
+}
+
+// setCharactersEnabled flips the forum's mask switch, the way the admin
+// panel's PATCH does.
+func setCharactersEnabled(t testing.TB, app *tests.TestApp, enabled bool) {
+	t.Helper()
+	record, err := app.FindRecordById(forumSettingsCollectionName, forumSettingsID)
+	if err != nil || record == nil {
+		t.Fatalf("forum settings row missing: %v", err)
+	}
+	record.Set("enable_characters", enabled)
+	if err := app.Save(record); err != nil {
+		t.Fatalf("failed to toggle the character system: %v", err)
+	}
+}
+
+// TestDisabledCharacterSystemRefusesWrites pins what the admin switch does.
+//
+// The switch was decorative for its whole life: stored, published in the
+// public snapshot, and read by nobody. Now it is enforced, and the
+// asymmetry is the point:
+//
+//   - WRITES are refused (403): no new masks, no edits, no deletes, no
+//     avatar uploads.
+//   - READS stay allowed. Posts carry `author_character_id`, so refusing to
+//     read a mask would strip the author's name from every message they
+//     ever wrote under it. Switching the system off is not erasing what
+//     already exists.
+func TestDisabledCharacterSystemRefusesWrites(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	seedRuntimeCharacter(t, app, "charplayer00001", fixPlayerID, "Player Mask")
+
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	setCharactersEnabled(t, app, false)
+
+	writes := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/aerun/me/characters", `{"name":"New Mask"}`},
+		{http.MethodPost, "/api/aerun/users/" + fixPlayerID + "/characters", `{"name":"Staff Mask"}`},
+		{http.MethodPatch, "/api/aerun/characters/charplayer00001", `{"name":"Renamed"}`},
+		{http.MethodDelete, "/api/aerun/characters/charplayer00001", ""},
+		{http.MethodPut, "/api/aerun/characters/charplayer00001/avatar", ""},
+	}
+	for i, w := range writes {
+		status, payload, _ := categoryCall(t, w.method, ts.URL+w.path, w.body,
+			tokens["player"], fmt.Sprintf("test-idem-char-disabled-%d", i))
+		if status != http.StatusForbidden {
+			t.Fatalf("%s %s must be refused while the mask system is off, got %d: %s",
+				w.method, w.path, status, payload)
+		}
+	}
+
+	// The mask survived every refusal.
+	if _, err := app.FindRecordById(charactersCollectionName, "charplayer00001"); err != nil {
+		t.Fatal("a refused write must not touch the mask")
+	}
+
+	// READING still works: the message this mask signed stays readable.
+	status, payload, _ := categoryCall(t, http.MethodGet,
+		ts.URL+"/api/aerun/characters/charplayer00001", "", tokens["player"], "")
+	if status != http.StatusOK {
+		t.Fatalf("reading a mask must stay available, got %d: %s", status, payload)
+	}
+	status, payload, _ = categoryCall(t, http.MethodGet,
+		ts.URL+"/api/aerun/users/"+fixPlayerID+"/characters", "", tokens["player"], "")
+	if status != http.StatusOK {
+		t.Fatalf("listing masks must stay available, got %d: %s", status, payload)
+	}
+}
+
+// TestDisabledCharacterSystemPostsUnderTheAccount pins the last effect of the
+// switch.
+//
+// A member who picked a mask before the admin switched the system off must
+// not keep posting under it. The server resolves the mask, so the answer is
+// "no mask" — the post goes out under the account.
+func TestDisabledCharacterSystemPostsUnderTheAccount(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	seedIdentityFixtures(t, app)
+	seedRuntimeCharacter(t, app, "charplayer00001", fixPlayerID, "Player Mask")
+
+	owner, err := app.FindRecordById(usersCollectionName, fixPlayerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.Set("last_selected_character_id", "charplayer00001")
+	if err := app.Save(owner); err != nil {
+		t.Fatal(err)
+	}
+
+	// While the system is on, the stored selection is honoured.
+	resolved, err := resolveAuthorCharacter(app, fixPlayerID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != "charplayer00001" {
+		t.Fatalf("the stored mask must be used while the system is on, got %q", resolved)
+	}
+
+	setCharactersEnabled(t, app, false)
+
+	// Now it is not — neither the requested id nor the stored one survives.
+	resolved, err = resolveAuthorCharacter(app, fixPlayerID, "charplayer00001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != "" {
+		t.Fatalf("a disabled mask system must post under the account, got %q", resolved)
+	}
+	resolved, err = resolveAuthorCharacter(app, fixPlayerID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != "" {
+		t.Fatalf("a disabled mask system must not fall back to the stored mask, got %q", resolved)
 	}
 }
 
