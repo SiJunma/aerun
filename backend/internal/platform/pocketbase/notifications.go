@@ -557,18 +557,40 @@ func getUnreadCountsHandler(e *core.RequestEvent) error {
 		return internalError("failed to count unread notifications", err)
 	}
 
-	// 2. Unread DMs: sum of max(0, conv.messages_count - member.last_read_sequence)
+	// 2. Unread DMs: counted over the rows the member can still SEE and has
+	// not read yet.
+	//
+	// The old formula (`messages_count - last_read_sequence`, summed over
+	// every membership row) counted messages the member can no longer read:
+	// the ones behind their own erase point and the ones behind the horizon
+	// of a chat they cleared. The badge then disagreed with the thread it
+	// described — the double count the owner's ruling (В4) removes.
+	//
+	// The count is the member's VISIBLE, UNREAD window: after the read
+	// watermark, after the lower edge of their window (`visible_from_sequence`
+	// — the lower edge of a chat that came back as a new dialogue) and after
+	// the horizon that hides what they erased or cleared. An archived chat
+	// therefore counts zero, and a revived one counts its single new message.
 	var dmSummary struct {
 		UnreadConversations int `db:"unread_conversations"`
 		TotalUnreadMessages int `db:"total_unread_messages"`
 	}
 	query := `
 		SELECT 
-			COUNT(CASE WHEN c.messages_count > m.last_read_sequence THEN 1 END) AS unread_conversations,
-			COALESCE(SUM(CASE WHEN c.messages_count > m.last_read_sequence THEN (c.messages_count - m.last_read_sequence) ELSE 0 END), 0) AS total_unread_messages
-		FROM dm_members m
-		JOIN dm_conversations c ON c.id = m.conversation_id
-		WHERE m.user_id = {:user}
+			COUNT(CASE WHEN unread > 0 THEN 1 END) AS unread_conversations,
+			COALESCE(SUM(unread), 0) AS total_unread_messages
+		FROM (
+			SELECT (
+				SELECT COUNT(*) FROM dm_messages msg
+				WHERE msg.conversation_id = c.id
+				  AND msg.sequence > m.last_read_sequence
+				  AND msg.sequence >= m.visible_from_sequence
+				  AND msg.sequence > MAX(m.cleared_sequence, m.erased_sequence)
+			) AS unread
+			FROM dm_members m
+			JOIN dm_conversations c ON c.id = m.conversation_id
+			WHERE m.user_id = {:user}
+		) AS per_conversation
 	`
 	_ = e.App.DB().NewQuery(query).Bind(dbx.Params{"user": e.Auth.Id}).One(&dmSummary)
 

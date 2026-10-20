@@ -363,21 +363,19 @@ func listContainsID(payload map[string]any, id string) bool {
 	return false
 }
 
-// TestClearDropsThreadWhosePeerIsDeleted pins the owner's three-step
-// conversation delete (2026-10-19) for the case where the only other
+// TestEraseWithDeletedPeerIsCollectedByTheCollector pins the owner's
+// personal-projection model (2026-10-19) for the case where the only other
 // participant is a soft-deleted account.
 //
-// The steps are: clear (hide what you have seen) → delete (move the chat to
-// the "Deleted" folder) → erase (remove it for good). The third step is the
-// only irreversible one, and it is allowed exactly when no participant can
-// still read the conversation — which is the case here: the peer is a
-// soft-deleted account, so it can never log in and read anything.
+// Erasing is PERSONAL and always succeeds: it writes the caller's own erase
+// point and removes NOTHING. The physical removal is the collector's job, and
+// it happens only when no participant can read the conversation any more.
 //
-// The chat is NOT dropped on the spot any more. It used to be, and that
-// contradicted the repository rule that a direct message is deleted SOFT
-// (tombstone) — the peer could no longer read the history at all, and the
-// erase happened without the member asking for it explicitly.
-func TestClearDropsThreadWhosePeerIsDeleted(t *testing.T) {
+// The peer being a DELETED ACCOUNT is what releases the hold: its membership
+// row survives, but nobody can read through it any more, so the survivor's own
+// erase point is the whole watermark. A LIVING peer would have to erase the
+// chat too, and only then.
+func TestEraseWithDeletedPeerIsCollectedByTheCollector(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
@@ -385,95 +383,73 @@ func TestClearDropsThreadWhosePeerIsDeleted(t *testing.T) {
 	player2ID, _ := seedSecondPlayer(t, app)
 	softDeleteUserDirectly(t, app, player2ID)
 
-	convID := seedDMConversation(t, app, fixPlayerID, player2ID)
+	convID := seedDMConversationWithMessages(t, app, fixPlayerID, []string{player2ID}, 2)
 
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	// Step 1: clear. Soft — the chat is still there.
-	status, payload := doJSON(t, ts.URL, http.MethodPost,
-		"/api/aerun/dms/"+convID+"/clear", tokens["player"], "clear-deleted-peer-1", "")
-	if status != http.StatusOK {
-		t.Fatalf("clear a thread whose peer is deleted = %d: %v", status, payload)
-	}
-	if _, err := app.FindRecordById(dmConversationsCollectionName, convID); err != nil {
-		t.Error("a clear must not drop the conversation — the erase is a separate, explicit step")
-	}
-
-	// Step 2: delete — the chat moves into the caller's "Deleted" folder.
-	status, payload = doJSON(t, ts.URL, http.MethodPost,
-		"/api/aerun/dms/"+convID+"/delete", tokens["player"], "delete-deleted-peer-1", "")
-	if status != http.StatusOK {
-		t.Fatalf("delete a thread whose peer is deleted = %d: %v", status, payload)
-	}
-	if folder, _ := payload["folder"].(string); folder != "deleted" {
-		t.Errorf("delete must report the deleted folder, got %v", payload)
-	}
-
-	// The chat is in the folder, not in the inbox.
-	status, payload = doJSON(t, ts.URL, http.MethodGet,
-		"/api/aerun/dms?folder=deleted", tokens["player"], "", "")
-	if status != http.StatusOK {
-		t.Fatalf("list the deleted folder = %d: %v", status, payload)
-	}
-	if !listContainsID(payload, convID) {
-		t.Errorf("the deleted folder must carry the chat, got %v", payload)
-	}
-	status, payload = doJSON(t, ts.URL, http.MethodGet,
-		"/api/aerun/dms", tokens["player"], "", "")
-	if status != http.StatusOK {
-		t.Fatalf("list the inbox = %d: %v", status, payload)
-	}
-	if listContainsID(payload, convID) {
-		t.Errorf("a deleted chat must not be in the inbox, got %v", payload)
-	}
-
-	// Step 3: erase. The peer is a soft-deleted account, so it can never log in
-	// and read anything — the erasure is allowed and removes everything.
-	//
-	// The peer being a DELETED ACCOUNT is what releases the hold here (its
-	// membership row survives, but nobody can read through it any more). A
-	// LIVING peer would have to ERASE the chat too, and only then.
-	status, payload = doJSON(t, ts.URL, http.MethodDelete,
+	// The erase always succeeds — no 409, whatever the peer can read.
+	status, payload := doJSON(t, ts.URL, http.MethodDelete,
 		"/api/aerun/dms/"+convID, tokens["player"], "erase-deleted-peer-1", "")
 	if status != http.StatusOK {
 		t.Fatalf("erase a thread whose peer is deleted = %d: %v", status, payload)
 	}
+
+	// The erase removes NOTHING: the rows are still there, and the
+	// conversation with them.
+	if _, err := app.FindRecordById(dmConversationsCollectionName, convID); err != nil {
+		t.Error("an erase must not drop the conversation — the collector is what removes it")
+	}
+	if n := countRows(t, app, dmMessagesCollectionName, "conversation_id = {:c}",
+		map[string]any{"c": convID}); n != 2 {
+		t.Errorf("an erase must not remove a message, %d remain", n)
+	}
+
+	// The collector is the thing that removes what nobody can read, and a
+	// deleted account holds nothing back: the survivor's own erase point is
+	// the whole watermark, so the rows go.
+	removed, err := collectDeletedDMMessages(app)
+	if err != nil {
+		t.Fatalf("the collector failed: %v", err)
+	}
+	if removed != 2 {
+		t.Errorf("a deleted account holds nothing back, the collector removed %d of 2", removed)
+	}
 	if _, err := app.FindRecordById(dmConversationsCollectionName, convID); err == nil {
-		t.Error("the conversation row must be gone after the erase")
+		t.Error("an emptied conversation must be removed with its messages")
 	}
 	if n := countRows(t, app, dmMembersCollectionName, "conversation_id = {:c}",
 		map[string]any{"c": convID}); n != 0 {
 		t.Errorf("membership rows must die with the conversation, %d remain", n)
 	}
-	if n := countRows(t, app, dmMessagesCollectionName, "conversation_id = {:c}",
-		map[string]any{"c": convID}); n != 0 {
-		t.Errorf("messages must die with the conversation, %d remain", n)
-	}
 
-	// Control: a thread with a LIVING peer cannot be erased — the other
-	// member can still read it.
+	// Control: a thread with a LIVING peer keeps its messages — the other
+	// member can still read them, so nothing may go.
 	app2 := newAerunTestApp(t)
 	defer app2.Cleanup()
 	tokens2 := seedIdentityFixtures(t, app2)
 	player3ID, _ := seedSecondPlayer(t, app2)
-	convID2 := seedDMConversation(t, app2, fixPlayerID, player3ID)
+	convID2 := seedDMConversationWithMessages(t, app2, fixPlayerID, []string{player3ID}, 2)
 
 	ts2 := newTestServer(t, app2)
 	defer ts2.Close()
 
-	status, payload = doJSON(t, ts2.URL, http.MethodPost,
-		"/api/aerun/dms/"+convID2+"/delete", tokens2["player"], "delete-live-peer-1", "")
-	if status != http.StatusOK {
-		t.Fatalf("delete a live thread = %d: %v", status, payload)
-	}
 	status, payload = doJSON(t, ts2.URL, http.MethodDelete,
 		"/api/aerun/dms/"+convID2, tokens2["player"], "erase-live-peer-1", "")
-	if status != http.StatusConflict {
-		t.Errorf("erasing a chat a living peer can still read must be refused, got %d: %v", status, payload)
+	if status != http.StatusOK {
+		t.Fatalf("erase a thread whose peer is alive = %d: %v", status, payload)
+	}
+	if removed, err := collectDeletedDMMessages(app2); err != nil {
+		t.Fatalf("the collector failed: %v", err)
+	} else if removed != 0 {
+		t.Errorf("a living peer can still read the chat, the collector removed %d", removed)
 	}
 	if _, err := app2.FindRecordById(dmConversationsCollectionName, convID2); err != nil {
-		t.Error("a refused erase must leave the conversation in place")
+		t.Error("a conversation a living peer can still read must stay in place")
+	}
+	if n := countRows(t, app2, dmMessagesCollectionName, "conversation_id = {:c}",
+		map[string]any{"c": convID2}); n != 2 {
+		t.Errorf("messages a living peer can still read must stay, %d remain", n)
 	}
 }
 

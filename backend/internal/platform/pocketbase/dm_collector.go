@@ -138,12 +138,32 @@ func collectOneConversation(app core.App, conv *core.Record) (int, error) {
 		//
 		// A participant who has not erased holds the line at ZERO, and that
 		// is what keeps the conversation alive: they can still read
-		// everything, so nothing may go. A participant whose account was
-		// deleted holds INT_MAX, so they never hold the line back.
+		// everything, so nothing may go. A participant whose ACCOUNT is gone
+		// holds nothing back: it can never log in, so it can never read
+		// anything, and the survivor's own erase point decides the
+		// watermark.
+		//
+		// The account state is asked of the USERS ROW rather than trusted
+		// from the membership marker alone. The marker (`erased_sequence =
+		// INT_MAX`, written by the delete command) is a denormalized COPY
+		// of that fact, and a copy can be missing: an account deleted by
+		// another binary, or one deleted before this rule existed, leaves
+		// `erased_sequence` at zero — and a member holding the line at zero
+		// keeps every message of the conversation in the database forever.
+		gone, err := dmGoneAccounts(txApp, members)
+		if err != nil {
+			return err
+		}
 		watermark := dmErasedSequenceUnlimited
 		allErased := true
 		for _, m := range members {
 			point := m.GetInt("erased_sequence")
+			if gone[m.GetString("user_id")] {
+				// This participant can never read another message, so it
+				// holds nothing back — and it has released everything it
+				// will ever read.
+				point = dmErasedSequenceUnlimited
+			}
 			if point <= 0 {
 				// This participant has not erased the chat: it stays for
 				// them, so nothing may go.
@@ -203,6 +223,71 @@ func collectOneConversation(app core.App, conv *core.Record) (int, error) {
 		return 0, err
 	}
 	return removed, nil
+}
+
+// dmGoneAccounts returns the ids of the participants whose ACCOUNT is gone:
+// the users row is missing entirely, or it is a soft-deleted account.
+//
+// WHY THE ACCOUNT IS ASKED AND NOT THE MARKER. The membership row carries
+// `erased_sequence`, and the delete command sets it to INT_MAX for exactly
+// this purpose. But that marker is a COPY of the account's fate, and a copy
+// can be missing: an account deleted by another binary, or one deleted before
+// this rule existed, leaves `erased_sequence` at zero — and a participant
+// holding the line at zero keeps every message of the conversation in the
+// database forever, readable by nobody. The users row is the fact itself.
+//
+// The ids are read in ONE query for the whole conversation: the collector
+// walks every conversation in the table, so a per-member lookup would be a
+// query storm on the largest table in the product.
+func dmGoneAccounts(txApp core.App, members []*core.Record) (map[string]bool, error) {
+	gone := map[string]bool{}
+	if len(members) == 0 {
+		return gone, nil
+	}
+
+	ids := make([]string, 0, len(members))
+	seen := map[string]bool{}
+	for _, m := range members {
+		uid := m.GetString("user_id")
+		if uid == "" || seen[uid] {
+			continue
+		}
+		seen[uid] = true
+		ids = append(ids, uid)
+	}
+	if len(ids) == 0 {
+		return gone, nil
+	}
+
+	// dbx.In takes []any: a []string is a compile error rather than a silent
+	// empty IN (), which would make every lookup "find nobody".
+	inArgs := make([]any, len(ids))
+	for i, id := range ids {
+		inArgs[i] = id
+	}
+	rows := []*core.Record{}
+	if err := txApp.RecordQuery(usersCollectionName).
+		AndWhere(dbx.In("id", inArgs...)).
+		All(&rows); err != nil {
+		return nil, err
+	}
+
+	alive := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		alive[r.Id] = true
+		if isUserDeleted(r) {
+			gone[r.Id] = true
+		}
+	}
+	// A membership row whose users row is gone entirely (the account was
+	// deleted without a cascade) is a ghost: nobody can read through it, so
+	// it must not hold the watermark back either.
+	for _, id := range ids {
+		if !alive[id] {
+			gone[id] = true
+		}
+	}
+	return gone, nil
 }
 
 // markUserDMErasesForever records that a participant can never read another

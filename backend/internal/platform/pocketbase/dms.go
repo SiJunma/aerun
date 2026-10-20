@@ -1103,11 +1103,18 @@ func listConversationsHandler(e *core.RequestEvent) error {
 			-- and a chat that came back as a new dialogue counted the history
 			-- behind its lower edge. Counting the rows the member can actually
 			-- see answers both: an archived chat is 0, and a revived one is 1.
+			--
+			-- The horizon is part of the count for the same reason it is part
+			-- of the read filter: a message the member CANNOT see is not
+			-- unread, it is gone for them. The badge and this column are
+			-- therefore the same number, computed by the same rule
+			-- (see getUnreadCountsHandler).
 			(
 				SELECT COUNT(*) FROM dm_messages msg
 				WHERE msg.conversation_id = c.id
 				  AND msg.sequence > m.last_read_sequence
 				  AND msg.sequence >= m.visible_from_sequence
+				  AND msg.sequence > MAX(m.cleared_sequence, m.erased_sequence)
 			) AS unread_count,
 			c.created AS created,
 			c.updated AS updated
@@ -1309,8 +1316,21 @@ func listDMMessagesHandler(e *core.RequestEvent) error {
 	if erased := member.GetInt("erased_sequence"); erased > hiddenUpTo {
 		hiddenUpTo = erased
 	}
+	// EACH FILTER OWNS ITS OWN PARAMETER NAME.
+	//
+	// dbx binds the named parameters of a whole query into ONE map, keyed by
+	// the name inside the placeholder. Two expressions that use the same name
+	// do NOT mean "the same value": the last one written wins, and every
+	// placeholder of that name then resolves to it. Four filters sharing
+	// `{:seq}` therefore collapsed into one — and because the window's lower
+	// edge is written last, it silently REPLACED the horizon: a member who
+	// had erased a conversation went on reading the very messages they had
+	// erased, and a chat revived as a new dialogue came back empty.
+	//
+	// The names below are deliberately distinct. Merging them back is the
+	// defect this comment exists to prevent.
 	if hiddenUpTo > 0 {
-		query = query.AndWhere(dbx.NewExp("sequence > {:seq}", dbx.Params{"seq": hiddenUpTo}))
+		query = query.AndWhere(dbx.NewExp("sequence > {:horizonSeq}", dbx.Params{"horizonSeq": hiddenUpTo}))
 	}
 
 	// The LOWER EDGE of this member's window (owner ruling 2026-10-19).
@@ -1328,17 +1348,17 @@ func listDMMessagesHandler(e *core.RequestEvent) error {
 	// the chat. Deriving one from the other would make an archived chat's
 	// history reappear the moment a new message arrives.
 	if visibleFrom := member.GetInt("visible_from_sequence"); visibleFrom > 0 {
-		query = query.AndWhere(dbx.NewExp("sequence >= {:seq}", dbx.Params{"seq": visibleFrom}))
+		query = query.AndWhere(dbx.NewExp("sequence >= {:visibleFromSeq}", dbx.Params{"visibleFromSeq": visibleFrom}))
 	}
 
 	if afterSeq > 0 {
-		query = query.AndWhere(dbx.NewExp("sequence > {:seq}", dbx.Params{"seq": afterSeq}))
+		query = query.AndWhere(dbx.NewExp("sequence > {:afterSeq}", dbx.Params{"afterSeq": afterSeq}))
 	}
 	// Walking backwards through the thread. Without this there was no way to ask
 	// for anything older than what the caller already holds, so "load older
 	// messages" had no server-side meaning at all.
 	if beforeSeq > 0 {
-		query = query.AndWhere(dbx.NewExp("sequence < {:seq}", dbx.Params{"seq": beforeSeq}))
+		query = query.AndWhere(dbx.NewExp("sequence < {:beforeSeq}", dbx.Params{"beforeSeq": beforeSeq}))
 	}
 
 	// Newest-first for the LIMIT to mean what the caller wants, then reversed
@@ -1410,17 +1430,20 @@ func markConversationReadHandler(e *core.RequestEvent) error {
 
 	maxSeq := conv.GetInt("messages_count")
 	member.Set("last_read_sequence", maxSeq)
-	// Reading the chat moves the READ horizon too.
+	// Reading a chat moves the READ watermark ONLY. It must not move the
+	// VISIBILITY horizon (`cleared_sequence`): that horizon is what hides
+	// messages from the member, and it belongs to the two actions that mean
+	// "take this away from me" — `clear` (the legacy "delete the dialog",
+	// which is what `clearedAt` meant in the Firebase era) and `erase`.
 	//
-	// The read horizon is "what I have consumed": it decides which messages
-	// the thread still shows me and where the "new since" line falls. Reading
-	// a chat is what makes "something new" stop being new, so the horizon has
-	// to follow the read sequence — otherwise a chat the member has read to
-	// the end would show its whole history again on the next open.
+	// Moving it here made reading a chat HIDE that chat: the thread the
+	// member had just read came back empty on the next poll, because the
+	// read filter hides everything at or below the horizon. The client marks
+	// a conversation read the moment a new message arrives, so the history
+	// would have vanished under the reader's cursor.
 	//
-	// `erased_sequence` is NOT touched: an erased chat stays erased for them
-	// whatever they read afterwards.
-	member.Set("cleared_sequence", maxSeq)
+	// `erased_sequence` is not touched either: an erased chat stays erased
+	// for them whatever they read afterwards.
 	if err := e.App.Save(member); err != nil {
 		return internalError("failed to update read sequence", err)
 	}
