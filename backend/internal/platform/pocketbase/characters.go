@@ -405,6 +405,53 @@ func characterOwnerAccess(txApp core.App, e *core.RequestEvent, ownerID string, 
 	return checkStaffRank(txApp, acc.Role, auth.Role(owner.GetString("role")), msgs)
 }
 
+// maskIsBaked reports whether this mask is frozen WITH the posts that used it.
+//
+// A mask of a soft-deleted account is baked when posts still reference it:
+// the account cannot change the mask any more, and staff must not either —
+// renaming it would rewrite the published posts retroactively, so the message
+// would end up saying something its author never wrote under that name.
+//
+// A mask of a deleted account that NO post references is not baked: nothing
+// displays it, so nothing can be rewritten, and freezing it would strand the
+// row forever — the owner is gone and staff could not clean it up.
+func maskIsBaked(txApp core.App, maskID string, ownerID string) (bool, error) {
+	owner, err := txApp.FindRecordById(usersCollectionName, ownerID)
+	if err != nil || owner == nil {
+		return false, nil
+	}
+	if !isUserDeleted(owner) {
+		return false, nil
+	}
+	if !postsHaveAuthorCharacter(txApp) {
+		return false, nil
+	}
+	used, err := txApp.CountRecords(postsCollectionName, dbx.HashExp{
+		"author_character_id": maskID,
+	})
+	if err != nil {
+		return false, internalError("failed to count character references", err)
+	}
+	return used > 0, nil
+}
+
+// requireMaskNotFrozen refuses a write to a mask that is baked with the posts
+// that used it.
+//
+// The refusal names the reason, because "you may not do this" without a
+// reason is indistinguishable from a permissions problem the admin could fix
+// by granting something.
+func requireMaskNotFrozen(txApp core.App, maskID string, ownerID string) error {
+	baked, err := maskIsBaked(txApp, maskID, ownerID)
+	if err != nil {
+		return err
+	}
+	if baked {
+		return forbiddenError("this mask is baked into the posts that used it and can no longer be changed")
+	}
+	return nil
+}
+
 // updateCharacterHandler serves PATCH /api/aerun/characters/{id}.
 //
 // The owner may always edit their own mask; a staff member holding
@@ -448,6 +495,11 @@ func updateCharacterHandler(e *core.RequestEvent) error {
 				notLower:    "you can only change the mask of a strictly lower-ranked account",
 				notStaff:    "you are not allowed to change other members' masks",
 			}); err != nil {
+			return 0, nil, err
+		}
+		// A mask baked into published posts cannot be renamed: the posts
+		// would start saying something their author never wrote.
+		if err := requireMaskNotFrozen(txApp, rec.Id, rec.GetString("owner_id")); err != nil {
 			return 0, nil, err
 		}
 
@@ -612,6 +664,12 @@ func uploadCharacterAvatarHandler(e *core.RequestEvent) error {
 			notLower:    "you can only change the mask of a strictly lower-ranked account",
 			notStaff:    "you are not allowed to change other members' masks",
 		}); err != nil {
+		return err
+	}
+
+	// A baked mask's avatar is part of what the published posts show, so it
+	// is frozen with the rest of it.
+	if err := requireMaskNotFrozen(e.App, rec.Id, rec.GetString("owner_id")); err != nil {
 		return err
 	}
 

@@ -40,8 +40,9 @@ type authorDisplay struct {
 	PostsCount int
 	Signature  string
 	// IsDeleted marks a soft-deleted account: the row survives with its baked
-	// nickname/avatar/counters, but no mask may render through it and the role
-	// badge reads "Deleted".
+	// nickname/avatar/counters, the role badge reads "Deleted", and the
+	// account may no longer act. Its MASKS still render: they are baked with
+	// the posts that used them (see decoratePostAuthor).
 	IsDeleted bool
 }
 
@@ -483,15 +484,28 @@ func decoratePostAuthor(app core.App, payload map[string]any, displays map[strin
 	}
 	payload["author_reputation"] = display.Reputation
 	payload["author_posts_count"] = display.PostsCount
+
+	// THE MASK IS BAKED, SO IT STILL RENDERS.
+	//
+	// A soft-deleted account cannot change its masks any more (every
+	// mutating route refuses a deleted account), and a mask that posts
+	// reference cannot be deleted at all (the delete command refuses it
+	// with 409). The row behind this id is therefore FROZEN: its name,
+	// status, avatar and signature are exactly what the post was published
+	// under. Hiding it would rewrite the message the reader sees - a post
+	// that said "Rough" would suddenly read "Deleted user".
+	//
+	// The ACCOUNT identity is still marked deleted: a mask is a display
+	// layer over an identity, and the identity is gone. The mask does not
+	// resurrect the account, and it does not make the account's other
+	// actions (profile link, direct messages, quoting) available again.
+	applyMask(payload, "author_character_id", id, masks)
+
 	if display.IsDeleted {
 		payload["author_deleted"] = true
-		// No mask may render through a deleted account: the mask is content
-		// of a living member, and the baked account identity is what stays.
 		payload["author_profile_id"] = id
 		return
 	}
-
-	applyMask(payload, "author_character_id", id, masks)
 }
 
 // decoratePostAuthors resolves and applies the author projection to a page of
@@ -554,15 +568,16 @@ func decorateTopicAuthor(app core.App, payload map[string]any, displays map[stri
 
 	payload["author_name"] = display.Nickname
 	payload["author_avatar"] = display.AvatarURL
+
+	// The mask is baked, so it still renders (see decoratePostAuthor).
+	applyMask(payload, "author_character_id", id, masks)
+
 	if display.IsDeleted {
 		payload["author_deleted"] = true
 		payload["author_profile_id"] = id
-		// No mask may render through a deleted account (see decoratePostAuthor).
 		decorateLastPostAuthor(app, payload, displays, masks)
 		return
 	}
-
-	applyMask(payload, "author_character_id", id, masks)
 
 	// The last-post author is decorated HERE too, through the same shared helper
 	// the category index uses. decorateTopicAuthors already loaded the last-post
@@ -760,13 +775,14 @@ func decorateLastPostAuthor(app core.App, payload map[string]any, displays map[s
 
 	payload["last_post_author"] = display.Nickname
 	payload["last_post_author_avatar"] = display.AvatarURL
+
+	// The mask is baked, so it still renders (see decoratePostAuthor).
+	applyLastPostMask(payload, id, masks)
+
 	if display.IsDeleted {
 		payload["last_post_author_deleted"] = true
-		// No mask may rename the last poster through a deleted account.
 		return
 	}
-
-	applyLastPostMask(payload, id, masks)
 }
 
 // signatureFromSettings reads users.settings.signature.

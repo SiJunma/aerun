@@ -579,10 +579,10 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		if charID := topic.GetString("author_character_id"); charID != "" {
 			masks := loadCharacterDisplays(e.App, []string{charID})
 			if mask, ok := masks[charID]; ok && mask.OwnerID == authorID {
-				if d, ok := displays[authorID]; !ok || !d.IsDeleted {
-					payload["author_name"] = mask.Name
-					payload["is_character"] = true
-				}
+				// The mask is baked, so a deleted opener still renders under
+				// it (see decoratePostAuthor — same rule, same reason).
+				payload["author_name"] = mask.Name
+				payload["is_character"] = true
 			}
 		}
 	} else {
