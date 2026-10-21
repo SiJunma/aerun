@@ -1873,7 +1873,7 @@ const AdminPage = () => {
                   {u.status === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
                 </td>
                 <td className="text-end">
-                  {!isChiefAdmin(u.email, u.role_id) && (
+                  {!isChiefAdmin(u.email, u.role_id) && u.id !== user.uid && (
                     <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
                       {u.status === 'pending' && (
                         <>
