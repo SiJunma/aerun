@@ -2509,7 +2509,11 @@ const TopicPage = () => {
   // author always saw Edit/Delete regardless of what their role granted, and a
   // role could not take the right away from its own members.
   const canActOnPost = (post) => {
-    if (!user || profile?.role_id === 'pending') return false;
+    // The account STATE decides this. A pending account's role is a real role
+    // (`player`), so the old `role_id === 'pending'` test could never fire —
+    // and the buttons it guarded are exactly the ones the server refuses a
+    // pending account (they hold no post_reply and no use_reputation).
+    if (!user || profile?.status === 'pending') return false;
     if (post?._isOptimistic || (typeof post?.id === 'string' && post.id.startsWith('temp_'))) return false;
     return true;
   };
@@ -3121,7 +3125,12 @@ const TopicPage = () => {
                             <Link to={`/profile/${post.author?.user_id}`} className="footer-link text-decoration-none px-0">
                               {t('profile.view_profile')}
                             </Link>
-                            {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && !post.author?.deleted && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid && (
+                            {/* The "write" link is an OPENING of a dialogue. A PENDING
+                                viewer may answer inside a dialogue somebody opened
+                                with them, but may not open one — the server refuses
+                                that, and a link that always ends in a refusal is
+                                worse than no link. */}
+                            {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && profile?.status !== 'pending' && !post.author?.deleted && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid && (
                               <Link to={`/messages/${post.author?.user_id}`} className="footer-link text-decoration-none px-0">
                                 {t('profile.pm')}
                               </Link>
@@ -3479,7 +3488,7 @@ const TopicPage = () => {
                                   <Link to={`/profile/${post.author?.user_id}`} className="author-res-footer-link">
                                     {t('profile.view_profile')}
                                   </Link>
-                                  {user && profile?.role_id !== 'pending' && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid &&
+                                  {user && profile?.status !== 'pending' && authorData.role_id !== 'banned' && post.author?.user_id !== user?.uid &&
                                     // The permission, not a role list. The sibling
                                     // footer above already gates on it, and a hardcoded
                                     // role list silently denies a custom role that HOLDS

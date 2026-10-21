@@ -46,7 +46,13 @@ const Navigation = () => {
   // Subscribe to DM unread count via RTDB (0 Firestore reads)
   const [dmUnreadData, setDmUnreadData] = React.useState({ total: 0, conversations: {} });
   React.useEffect(() => {
-    if (!user?.uid || !hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) || profile?.role_id === 'pending') {
+    // A PENDING member is excluded here by the permission check alone: the
+    // unread-count response carries their private conversations, and a member
+    // who may not see them must not be told they exist. The check reads the
+    // STATUS (the permission list is already status-narrowed by the server) —
+    // the old `role_id === 'pending'` test could never fire, because a pending
+    // account's role is a real role and its pending-ness is a status.
+    if (!user?.uid || !hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES)) {
       setDmUnread(0);
       setDmUnreadData({ total: 0, conversations: {} });
       return;
@@ -55,7 +61,7 @@ const Navigation = () => {
       setDmUnreadData(data || { total: 0, conversations: {} });
     });
     return () => unsub();
-  }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES, profile?.role_id]);
+  }, [user?.uid, hasPermission, PERMISSIONS.USE_DIRECT_MESSAGES]);
 
   // Exclude the currently open DM conversation from the badge
   React.useEffect(() => {

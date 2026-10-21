@@ -66,8 +66,8 @@ func (s Status) IsValid() bool {
 }
 
 // pendingAllowedPermissions mirrors the legacy MAX_ROLE_PERMISSIONS.pending
-// set: while an account is unapproved it may only look at the public forum
-// and edit its own presentation fields.
+// set: while an account is unapproved it may only look at the public forum,
+// edit its own presentation fields, and take part in direct messages.
 //
 // PermEditSelfProfile is in this list on purpose: it gates the WHOLE
 // PATCH /me/profile body (bio, location, birthday, status line), and the UI
@@ -75,6 +75,19 @@ func (s Status) IsValid() bool {
 // flow saves a profile while the account is still pending. Without the key
 // NarrowForStatus stripped the permission for every pending account and the
 // save failed with 403 even though the role row granted it.
+//
+// PermUseDirectMessages is in this list on purpose too, and the asymmetry it
+// creates is the point (owner ruling 2026-10-20): a pending member RECEIVES
+// private messages and ANSWERS inside the dialogue somebody opened with it,
+// but may not OPEN one. The narrowing answers "what may this account DO" —
+// it is not an answer about "may others write to it", and reading the
+// narrowed set as such said "a pending member cannot be messaged", which is
+// the opposite of the ruling.
+//
+// The one thing a pending member still may not do — be the first word of a
+// new dialogue — is refused where that difference is visible: the DM command
+// layer (createDMHandler in internal/platform/pocketbase/dms.go) checks the
+// SENDER's status before it creates a conversation.
 var pendingAllowedPermissions = []Permission{
 	PermViewForum,
 	PermEditSelfNickname,
@@ -82,6 +95,7 @@ var pendingAllowedPermissions = []Permission{
 	PermEditSelfStatus,
 	PermEditSelfSignature,
 	PermEditSelfProfile,
+	PermUseDirectMessages,
 }
 
 // NarrowForStatus narrows a role permission list according to the account

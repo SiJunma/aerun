@@ -177,11 +177,20 @@ func TestEffectivePermissionsNarrowedByStatus(t *testing.T) {
 		t.Fatal("pending users keep edit_self_profile — the profile form must save")
 	}
 	for _, perm := range []Permission{
-		PermPostReply, PermCreateTopic, PermUseReputation, PermUseDirectMessages,
+		PermPostReply, PermCreateTopic, PermUseReputation,
 	} {
 		if Has(playerPending, perm) {
 			t.Fatalf("pending users must lose %q", perm)
 		}
+	}
+	// A pending member KEEPS use_direct_messages (owner ruling 2026-10-20):
+	// they receive private messages and answer inside the dialogue somebody
+	// opened with them. What they may not do is OPEN one — and that half of
+	// the rule is not a permission at all, it is a status rule the DM command
+	// layer enforces, because a permission set cannot say "receive but do not
+	// initiate".
+	if !Has(playerPending, PermUseDirectMessages) {
+		t.Fatal("pending users keep use_direct_messages — they may receive and answer")
 	}
 
 	playerBanned, _ := EffectivePermissions(RolePlayer, StatusBanned)

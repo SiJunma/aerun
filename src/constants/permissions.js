@@ -451,7 +451,13 @@ export const MAX_ROLE_PERMISSIONS = {
     // PATCH /me/profile gates the WHOLE bio block on this one key, so without
     // it the client ceiling and the server allowlist disagree and every
     // pending save 403s.
-    PERMISSIONS.EDIT_SELF_PROFILE
+    PERMISSIONS.EDIT_SELF_PROFILE,
+    // Direct messages are a RECEIVING capability for a pending member: they
+    // get the message and answer inside the dialogue somebody opened with
+    // them. Opening one is refused separately — the server checks the
+    // SENDER's status in the DM command layer, because a permission set
+    // cannot say "receive but do not initiate".
+    PERMISSIONS.USE_DIRECT_MESSAGES
   ],
   // A spectator is a viewer. `create_topic` and `post_reply` are gone so the
   // system role means exactly what its name says, and masks and dice went with

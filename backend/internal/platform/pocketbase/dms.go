@@ -515,10 +515,16 @@ func createDMHandler(e *core.RequestEvent) error {
 		// gates the caller on `use_direct_messages`, which is why hiding the button
 		// looked sufficient. It is not: any member who holds the key could POST a
 		// recipient id directly and open a conversation with an account whose role
-		// deliberately does not permit DMs — a spectator, a pending account, a custom
-		// role with the key removed. The stored role row is the authority, so the
-		// recipient's own effective permissions decide, narrowed by the same status
-		// rules that would authenticate them.
+		// deliberately does not permit DMs — a spectator, a custom role with the key
+		// removed. The stored role row is the authority, so the recipient's own
+		// effective permissions decide, narrowed by the same status rules that would
+		// authenticate them.
+		//
+		// A PENDING recipient is NOT one of those accounts (owner ruling
+		// 2026-10-20): a pending member receives private messages and answers
+		// inside the dialogue somebody opened with them. The status narrowing keeps
+		// `use_direct_messages` for pending precisely so that this check passes —
+		// see internal/auth/status.go.
 		//
 		// A rejected recipient names the ROLE, not the account, so the sender learns
 		// that the capability is switched off without learning who holds what.
@@ -587,6 +593,30 @@ func createDMHandler(e *core.RequestEvent) error {
 					"request_id":      requestIDFrom(e),
 				}, nil
 			}
+		}
+
+		// A PENDING sender may not OPEN a conversation (owner ruling
+		// 2026-10-20). A pending member receives private messages and answers
+		// inside the dialogue somebody else opened with them, but the first word
+		// is not theirs to write: a pending account has no way to reach the
+		// member it would be writing to.
+		//
+		// The check is on the SENDER's status, and it is a status rule rather
+		// than a permission one — the permission set cannot say "receive but do
+		// not initiate" (internal/auth/status.go keeps the key for pending
+		// exactly so the RECEIVE half works).
+		//
+		// It sits AFTER the race guard above on purpose: that branch appends
+		// to a conversation which ALREADY exists, which is a reply and not an
+		// opening. The race branch returns before this point, so a pending
+		// account can answer in a dialogue somebody opened with them, and only
+		// the opening is refused.
+		// The status comes from the RESOLVED access context, the same source
+		// every other status rule reads (requireNotBanned, requireLiveAccount):
+		// the raw column is not the answer, the resolved one is.
+		if AccessFrom(e).Status == auth.StatusPending {
+			return 0, nil, forbiddenError(
+				"a pending account cannot start a conversation; it can only answer one that was started for it")
 		}
 
 		// 1. Create dm_conversations record.

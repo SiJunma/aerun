@@ -160,12 +160,18 @@ func TestPendingAccountCannotPost(t *testing.T) {
 	}
 	// The pending ceiling is not "nothing" — view_forum plus the five self-edit
 	// keys survive, which is what lets the account personalise itself while it
-	// waits. Asserting the exact set is the point: a widening here would be
+	// waits. use_direct_messages survives too (owner ruling 2026-10-20): a
+	// pending member RECEIVES private messages and answers inside the dialogue
+	// somebody opened with them. What it may not do is OPEN one, and that
+	// half of the rule is a status rule in the DM command layer, not a
+	// permission one (see dm_pending_test.go).
+	//
+	// Asserting the exact set is the point: a widening here would be
 	// invisible in the UI, which only greys out buttons.
 	want := map[string]bool{
 		"view_forum": true, "edit_self_nickname": true, "edit_self_avatar": true,
 		"edit_self_status": true, "edit_self_signature": true,
-		"edit_self_profile": true,
+		"edit_self_profile": true, "use_direct_messages": true,
 	}
 	got, _ := me["permissions"].([]any)
 	if len(got) != len(want) {

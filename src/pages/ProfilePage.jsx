@@ -96,8 +96,19 @@ const ProfilePage = () => {
   // banned member with a full profile — the messaging button and the
   // reputation controls included.
   const isDeletedProfile = viewedProfile?.deleted === true;
-  const isLimitedProfile = viewedProfile?.status === 'pending'
-    || viewedProfile?.status === 'banned'
+  // A PENDING account is a member in everything but approval, so its profile
+  // shows the same panels an approved member's does — the right column with
+  // posts, masks, biography and reputation IS the profile (owner ruling
+  // 2026-10-20). It used to be folded into the limited profile, and the
+  // result was a bare card with nothing on it but the "write" button.
+  //
+  // What stays different is the account's own pending state, and only in the
+  // one place where it is a real difference: it may not OPEN a direct
+  // conversation (the server refuses that on the sender's status — a pending
+  // member receives messages and answers inside a dialogue somebody opened
+  // with them).
+  const isPendingProfile = viewedProfile?.status === 'pending';
+  const isLimitedProfile = viewedProfile?.status === 'banned'
     || viewedProfile?.role_id === 'spectator'
     || isDeletedProfile;
   const isOwn = profile?.uid === uid;
@@ -107,8 +118,13 @@ const ProfilePage = () => {
   const canEditSignature = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_SIGNATURE) : hasPermission(PERMISSIONS.EDIT_OTHERS_SIGNATURES);
   const canEditAnyAccount = isOwn || canEditNickname || canEditAvatar || canEditStatus || canEditSignature;
 
-  const hasTabs = !isLimitedProfile || profile?.uid === uid || canEditAnyAccount;
-  const activeTab = searchParams.get('tab') || (!isLimitedProfile ? 'characters' : (profile?.uid === uid || canEditAnyAccount ? 'account' : ''));
+  const hasTabs = !isLimitedProfile || isOwn || canEditAnyAccount;
+  // A pending member lands on their OWN account tab: it is the one place where
+  // they can do something (fill in the profile they are waiting to be
+  // approved for). Everyone else sees the same default as for any profile.
+  const activeTab = searchParams.get('tab')
+    || (isOwn && isPendingProfile ? 'account'
+      : (!isLimitedProfile ? 'characters' : (isOwn || canEditAnyAccount ? 'account' : '')));
 
   const [savingAccount, setSavingAccount] = useState(false);
 
@@ -802,8 +818,13 @@ const ProfilePage = () => {
                     )}
                   </div>
 
-                  {/* Send Message button */}
-                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && !isDeletedProfile && viewedProfile?.status !== 'banned' && uid !== profile?.uid && (
+                  {/* Send Message button.
+                      A PENDING viewer does not get it: they may answer inside a
+                      dialogue somebody opened with them, but they may not open
+                      one (the server refuses that on the sender's status), and
+                      a button that always ends in a refusal is worse than no
+                      button — the inbox is where their dialogues live. */}
+                  {hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES) && profile?.status !== 'pending' && !isDeletedProfile && viewedProfile?.status !== 'banned' && uid !== profile?.uid && (
                     <div className="mb-2 text-lg-center">
                       <Button
                         as={Link}
@@ -834,7 +855,14 @@ const ProfilePage = () => {
                           <div className="fw-bold text-accent">
                             {!viewedProfile ? <Skeleton width="30px" height="1.2rem" /> : (viewedProfile?.reputation || 0)}
                           </div>
-                          {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && viewedProfile?.status !== 'pending' && (
+                          {/* The reputation vote is available for a PENDING
+                              target: the server accepts it (it refuses only
+                              a banned or a deleted account), and the client
+                              must not be stricter than the server. The viewer
+                              side keeps its own rule — a pending viewer holds
+                              no use_reputation, so it must not offer the
+                              buttons at all. */}
+                          {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && (
                             <div className="d-flex gap-1 align-items-center">
                               {!myVote ? (
                                 <>
@@ -2024,6 +2052,10 @@ const ProfilePage = () => {
               </Tab>
               )}
 
+              {/* The security tab: managing one's own sign-in methods is the
+                  account holder's business whatever their status — a pending
+                  member can edit their password, email and linked providers
+                  just like anyone else. */}
               {profile?.uid === uid && !isLimitedProfile && (
                 <Tab eventKey="security" title={t('profile.tab_security')}>
                   <SecurityTab />

@@ -370,6 +370,7 @@ export const translations = {
       draft_badge: "Draft",
       draft_preview: "Draft — no messages yet",
       draft_deleted: "Draft deleted",
+      pending_cannot_start: "Your account is awaiting approval, so it cannot start a conversation. You can reply in a conversation someone started with you.",
     },
     notifications: {
       title: "Notifications",
@@ -1208,6 +1209,7 @@ export const translations = {
       draft_badge: "Черновик",
       draft_preview: "Черновик — сообщений нет",
       draft_deleted: "Черновик удален",
+      pending_cannot_start: "Аккаунт ожидает одобрения, поэтому начать диалог нельзя. Ответить в диалоге, который кто-то открыл с вами, — можно.",
     },
     notifications: {
       title: "Уведомления",

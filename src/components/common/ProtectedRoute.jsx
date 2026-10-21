@@ -67,7 +67,13 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   if (profile?.status === 'pending') {
     const isWhitelistOff = !settings.whitelistMode;
     const treatedAsSpectator = isWhitelistOff && !requireAdmin && !requirePosting;
-    if (requireActive && !treatedAsSpectator && location.pathname !== '/pending') {
+    // The DM area is the one exception to the white wall. A message addressed
+    // to this member is not forum content — it is their own correspondence, and
+    // the owner ruled that a pending member answers inside a dialogue somebody
+    // opened with them. The DM route itself still checks the DM permission
+    // below, and the server refuses a pending account that tries to OPEN one.
+    const isDmRoute = requireDm;
+    if (requireActive && !treatedAsSpectator && !isDmRoute && location.pathname !== '/pending') {
       return <Navigate to="/pending" replace />;
     }
   } else if (location.pathname === '/pending') {

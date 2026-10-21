@@ -85,7 +85,12 @@ export const TitleProvider = ({ children }) => {
   // subscribing to that resource for the DM term, so the two badges were reading
   // two endpoints to render one number that one of them already carried.
   useEffect(() => {
-    if (!user?.uid || profile?.role_id === 'pending' || profile?.role_id === 'banned') {
+    // The account STATE decides this, not the role: `banned` and `deleted`
+    // are statuses, and a role column holding them is the legacy layout this
+    // project moved away from. A PENDING member is NOT excluded — they
+    // receive private messages (owner ruling 2026-10-20), and the counter
+    // they are shown is the same one their inbox shows.
+    if (!user?.uid || profile?.status === 'banned' || profile?.status === 'deleted') {
       setUserCount(0);
       setDmUnreadData({ total: 0, conversations: {} });
       return;
@@ -110,7 +115,7 @@ export const TitleProvider = ({ children }) => {
     return () => {
       unsubDm();
     };
-  }, [user?.uid, profile?.role_id, hasPermission, PERMISSIONS?.USE_DIRECT_MESSAGES]);
+  }, [user?.uid, profile?.status, hasPermission, PERMISSIONS?.USE_DIRECT_MESSAGES]);
 
   useEffect(() => {
     let baseName = 'Forum';

@@ -87,6 +87,11 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [targetProfile, setTargetProfile] = useState(initialTargetProfile || null);
   const [messageLimit, setMessageLimit] = useState(15);
   const [peerStatus, setPeerStatus] = useState('active'); // 'active', 'deleted', 'banned'
+  // A PENDING account may ANSWER inside a dialogue somebody opened with it,
+  // but it may not OPEN one (owner ruling 2026-10-20). The server refuses
+  // the opening, and the composer says so here rather than letting the member
+  // type a message that is guaranteed to bounce.
+  const isPendingSelf = profile?.status === 'pending';
 
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [unreadBelowCount, setUnreadBelowCount] = useState(0);
@@ -549,14 +554,20 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       return;
     }
     // An identical lookup is already running: join it instead of racing it.
+    //
+    // THE JOINER STAYS SILENT ON FAILURE. The promise it awaits belongs to the
+    // caller that started the lookup, and that caller reports the failure
+    // exactly once (the catch below). Reporting it here as well printed the
+    // same error twice for one failed request — and with React StrictMode
+    // double-invoking the effect, three times, which is what made a single
+    // refused request look like three separate problems.
     const inflight = openChatInflightRef.current.get(peerUid);
     if (inflight) {
       try {
         const convId = await inflight;
         setActiveChatId(convId);
-      } catch (err) {
-        console.error('[openChat]', err);
-        showToast(lang === 'ru' ? 'Ошибка открытия диалога' : 'Failed to open conversation', 'danger');
+      } catch {
+        // Reported by the owner of the promise.
       }
       return;
     }
@@ -1264,14 +1275,16 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
           </div>
 
           {/* Right: editor column */}
-          {peerStatus !== 'active' ? (
+          {peerStatus !== 'active' || (isPendingSelf && isDraftId(activeChatId)) ? (
             <div className="dm-editor-col d-flex align-items-center justify-content-center">
               <div className="text-center p-4 border rounded" style={{ background: 'var(--block-bg)', borderColor: 'var(--border-color)', width: '100%' }}>
                 <Lock size={32} className="mb-3 text-muted opacity-50" />
                 <p className="text-muted mb-0 fw-medium">
                   {peerStatus === 'deleted'
                     ? (lang === 'ru' ? 'Аккаунт пользователя удален. Отправка сообщений недоступна.' : 'User account deleted. Sending messages is disabled.')
-                    : (lang === 'ru' ? 'Пользователь заблокирован. Отправка сообщений недоступна.' : 'User is banned. Sending messages is disabled.')}
+                    : peerStatus === 'banned'
+                      ? (lang === 'ru' ? 'Пользователь заблокирован. Отправка сообщений недоступна.' : 'User is banned. Sending messages is disabled.')
+                      : t('dm.pending_cannot_start')}
                 </p>
               </div>
             </div>
