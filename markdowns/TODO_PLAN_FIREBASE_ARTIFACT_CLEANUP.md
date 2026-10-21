@@ -70,6 +70,42 @@
 - Линтер, frontend-тесты, backend-тесты и backend CI успешны.
 - Исторические упоминания Firebase либо находятся внутри миграционных/архивных материалов, либо явно помечены как legacy-контекст.
 
+## Ход выполнения (чек-лист)
+
+### Шаг 1 — контрольная точка и реестр (выполнено)
+- Ветка `main`, коммит `13574ab`, рабочее дерево чисто (`git status --short` пуст). Контрольная точка поставлена; работа ведётся в ветке `firebase-artifact-cleanup`.
+- Инвентаризация из плана подтверждена: все перечисленные Firebase-артефакты присутствуют в отслеживаемых файлах (`.firebaserc`, `firebase.json`, `.firebase/`, `firestore.rules`, `firestore.indexes.json`, `database.rules.json`, `storage.rules`, `firebase.js`, `functions/`, `package.json`, `package-lock.json`, `scripts/`, `.github/workflows/backend.yml`).
+- `src/**` не содержит runtime-импортов Firebase (поиск `from "firebase"` — ноль совпадений); `firebase.js` — no-op фасад (все экспорты `null`). Удаление `firebase.js` безопасно с точки зрения импортов.
+- `.github/workflows/backend.yml` — только Go CI, Firebase-ссылок нет.
+- Защищённые группы не трогаются: `backend/migration-data/**`, `backend/tools/migration/**`, `restore/`, миграции PocketBase, `.secrets/`. SHA-256 этих файлов не фиксировались в коммит (по замыслу плана снимки в репозиторий не попадают).
+
+### Предложенная классификация скриптов `scripts/**`
+| Скрипт | Назначение | Предложенный статус |
+| --- | --- | --- |
+| `firestore-inspect.mjs` | Диагностика Firestore через Firebase ADC / REST API (только чтение) | удалить — эксплуатационная Firebase-команда |
+| `init-db.js` | Инициализация Firestore через firebase SDK | удалить |
+| `migrate-status-roles.js` | Перенос статусов/ролей из Firestore | перенести в `backend/tools/migration` |
+| `backfill-is-pinned.js` | Бэкфилл `is_pinned` в Firestore | перенести в `backend/tools/migration` |
+| `backfill-post-category.mjs` | Бэкфилл категории поста через firebase-admin | перенести в `backend/tools/migration` |
+| `recompute-counters.mjs` | Пересчёт счётчиков из Firebase | перенести в `backend/tools/migration` |
+| `clean-ghost-users.mjs` | Удаление «призраков» через firebase-admin | удалить — эксплуатационная Firebase-команда |
+| `clean-orphan-dms.mjs` | Очистка сиротских ЛС через firebase-admin | удалить — эксплуатационная Firebase-команда |
+| `restore-*.mjs` (5 шт.) | Восстановление из `restore/plan.json` через firebase-admin | сохранить — восстановительные данные |
+| `check-no-firebase-storage.mjs` | Запрет на появление Firebase Storage в `src/` | сохранить — защитная проверка |
+| Остальные `check-*.mjs`, `audit-endpoints.mjs`, `local-backend.ps1` | Тесты PocketBase / инфраструктура | оставить без изменений |
+
+### Запланированные деструктивные действия (требуют подтверждения перед выполнением)
+1. Удалить `functions/**`, `.firebaserc`, `firebase.json`, `firestore.rules`, `firestore.indexes.json`, `database.rules.json`, `storage.rules`.
+2. Удалить `firebase.js`.
+3. Из `package.json`: убрать `firebase` и `firebase-tools`, команды `deploy:test`, `deploy:prod`, `lint:rules`; `lint` оставить как `npm run lint:js`; перегенерировать `package-lock.json`.
+4. Удалить скрипты со статусом «удалить» из таблицы выше.
+5. Перенести скрипты со статусом «перенести» в `backend/tools/migration/`.
+6. Поправить активную документацию (`.github/**`, `backend/README.md`, npm-скрипты); исторические документы оставить, пометив как legacy/архивные.
+7. Добавить постоянную защитную проверку: отсутствие Firebase-пакетов в production-зависимостях, отсутствие Firebase CLI в npm-скриптах, отсутствие импортов Firebase вне разрешённых миграционных путей.
+8. Уточнить `.gitignore`: оставить исключения для `.secrets/`, `.firebase/`, старых логов и миграционных снимков.
+
+Все деструктивные изменения выполняются отдельными атомарными коммитами; откат — `git revert` соответствующего коммита. Подтвердите выполнение пунктов 1–8, после чего я приступлю к удалению кода и конфигурации.
+
 ## Откат
 
 Изменения выполнять одним или несколькими атомарными commit'ами, отделяя удаление Firebase-артефактов от редакции документации. Откат — `git revert` соответствующего commit'а; снимки и локальные базы не должны быть частью этого механизма и не должны удаляться ради «чистого» рабочего дерева.
