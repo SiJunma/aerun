@@ -10,98 +10,117 @@
 //   3. onReputationLogDeleted had no at-least-once guard, so once a topic delete
 //      removes many logs the revert can be applied twice.
 //
-// Run: node scripts/check-topic-delete-cleanup.mjs [path/to/functions/index.js]
-// The optional path lets the same assertions run against another build (for
-// example the pre-fix file from git) to prove the test actually fails there.
+// WHERE THE CONTRACT LIVES NOW. This gate used to read the Firestore Cloud
+// Function (`functions/index.js`) that implemented those behaviours. That file
+// was DELETED by the Firebase cleanup (commit a01ffb8), so the gate was
+// reading a path that no longer exists and `npm test` was RED on this branch
+// for a reason that had nothing to do with the code under test. The behaviour
+// itself was NOT dropped with the file: it was ported to the PocketBase
+// backend, and the port is what this gate reads now —
+//
+//	backend/internal/platform/pocketbase/forum_topics.go  (the delete command
+//	    and the residue it settles: per-author counters, reputation payback,
+//	    subscription cleanup, vote removal)
+//	backend/internal/platform/pocketbase/forum_posts.go   (the guard that
+//	    refuses to delete a topic's first post as a post)
+//
+// The EXECUTING proof of the same contract is the Go suite —
+// `topic_delete_residue_test.go` and `hard_delete_test.go` — which runs in CI
+// (.github/workflows/backend.yml). This gate stays because it fails LOUDLY and
+// in the same npm run when the settlement is removed from the command, which
+// is the shape of defect a Go test in another package would not be noticed for.
+//
+// Run: node scripts/check-topic-delete-cleanup.mjs
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const target = process.argv[2]
-  ? path.resolve(process.argv[2])
-  : fileURLToPath(new URL('../functions/index.js', import.meta.url));
-const src = fs.readFileSync(target, 'utf8');
-console.log(`source: ${target}`);
+const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
 
-// Extract a named trigger/helper body by brace matching so the assertions run
-// against the real shipped code, not a copy of it.
-function bodyOf(declaration) {
-  const start = src.indexOf(declaration);
-  assert.ok(start !== -1, `${declaration} must exist in functions/index.js`);
-  const open = src.indexOf('{', src.indexOf('=>', start) === -1 ? start : src.indexOf('=>', start));
-  let depth = 0, i = open;
-  for (; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') { depth--; if (depth === 0) break; }
-  }
-  return src.slice(open, i + 1);
-}
+const topicsGo = read('../backend/internal/platform/pocketbase/forum_topics.go');
+const postsGo = read('../backend/internal/platform/pocketbase/forum_posts.go');
 
-const onTopicDeleted = bodyOf('exports.onTopicDeleted');
-const onPostDeleted = bodyOf('exports.onPostDeleted');
-const onReputationLogDeleted = bodyOf('exports.onReputationLogDeleted');
-
-// ── 1. Per-author post_count decrement ──────────────────────────────────────
-assert.match(onTopicDeleted, /perAuthor/, 'onTopicDeleted must aggregate the deleted posts per author');
+// ── 1. Per-author post_count decrement ─────────────────────────────────────────
+//
+// The tally is aggregated per author BEFORE anything is deleted, and each
+// author is decremented once by the number of posts they lose. A per-post
+// loop that decremented and bailed out mid-way is the exact defect the
+// 2026-09-30 incident turned into data loss.
 assert.match(
-  onTopicDeleted,
-  /queueIncrement\(\s*batch,\s*db\.collection\(["']users["']\)\.doc\(aid\),\s*["']post_count["']\s*,\s*-n\s*\)/,
-  'onTopicDeleted must decrement users.post_count for every author of the topic'
+  topicsGo,
+  /GROUP BY author_id[\s\S]{0,600}?adjustUserPostCount\(txApp, row\.AuthorID, -row\.Cnt\)/,
+  'the topic delete must aggregate the deleted posts per author and decrement each author once'
 );
 assert.match(
-  onTopicDeleted,
-  /perAuthor\.set\(\s*aid,\s*\(perAuthor\.get\(aid\)\s*\|\|\s*0\)\s*\+\s*1\s*\)/,
-  'the per-author tally must count posts, not just note presence'
+  topicsGo,
+  /adjustUserTopicCount\(txApp, topic\.GetString\("author_id"\), -1\)/,
+  'the topic delete must move the author\'s topic count down by one'
 );
 
-// ── 2. The cascade guard must stay, or the counters decrement twice ──────────
+// ── 2. The opening post is a topic-level operation ────────────────────────────
+//
+// The first post IS the topic, so removing it must go through DELETE
+// /topics/{id}. DELETE /posts/{id} refuses it, which is what keeps the
+// "deleting a reply on page 2 wiped the whole topic" incident impossible
+// regardless of what a client asks for.
 assert.match(
-  onPostDeleted,
-  /if\s*\(!topicSnap\.exists\)/,
-  'onPostDeleted must keep its cascade guard — the topic document is already gone for cascade posts'
-);
-assert.match(
-  onPostDeleted,
-  /skipped counters for cascade\/orphan post/,
-  'the cascade guard must still document why it skips the counters'
+  postsGo,
+  /if isFirstPost \{[\s\S]{0,200}?conflictError\("cannot delete a topic's first post here - delete the topic instead"\)/,
+  'DELETE /posts/{id} must refuse the topic\'s first post with a 409'
 );
 
-// ── 3. Reputation logs and subscriptions are cleaned up ─────────────────────
-const deleteCalls = [...onTopicDeleted.matchAll(/deleteAllByQuery\(\s*db,\s*db\.collection\(["']([a-z_]+)["']\)\.where\(\s*["']topic_id["']/g)]
-  .map(m => m[1]);
-assert.ok(
-  deleteCalls.includes('reputation_logs'),
-  'onTopicDeleted must delete the topic\'s reputation_logs, otherwise users keep reputation for deleted posts'
+// ── 3. Reputation and subscriptions must not outlive the topic ────────────────
+//
+// A member who kept the reputation they earned on posts the forum can no
+// longer show is the be6ca82 defect, and a subscription pointing at a topic
+// id that will never resolve again is the leak that followed it.
+assert.match(
+  topicsGo,
+  /adjustUserReputation\(txApp, row\.TargetID, -row\.Total\)/,
+  'the topic delete must pay back the reputation its votes paid out'
 );
-assert.ok(
-  deleteCalls.includes('topic_subscriptions'),
-  'onTopicDeleted must delete the topic\'s subscriptions; nothing else removes them'
+assert.match(
+  topicsGo,
+  /topicSubscriptionsCollectionName[\s\S]{0,800}?txApp\.Delete\(sub\)/,
+  'the topic delete must remove the topic\'s subscriptions'
 );
-assert.ok(
-  /deleteAllByQuery\(db, ref, label\)|function deleteAllByQuery\(db, ref, label\)/.test(src)
-    || /async function deleteAllByQuery\(\s*db,/.test(src),
-  'deleteAllByQuery must take the Firestore instance explicitly'
+assert.match(
+  topicsGo,
+  /DELETE FROM " \+ reputationVotesCollectionName \+ " WHERE topic_id = \{:topic\}/,
+  'the vote rows must go with the topic — a vote whose post is gone is an orphan'
 );
 
-// ── 4. The reputation revert must be exactly-once ───────────────────────────
+// ── 4. The settlement happens inside the delete's transaction ─────────────────
+//
+// Exactly-once is what the Firestore version had to buy with a separate
+// reputation_reverts claim. Inside one transaction the deletion itself is the
+// claim: the votes are gone by the end, so a second pass finds nothing to pay.
+// That only holds if the settlement is part of the same command, so the
+// residue purge and the post removal have to sit next to the topic deletion
+// inside deleteTopicHandler.
+const handler = topicsGo.slice(
+  topicsGo.indexOf('func deleteTopicHandler('),
+  topicsGo.indexOf('// deleteTopicPosts removes every post under a topic')
+);
+assert.ok(handler.length > 0, 'deleteTopicHandler must exist in forum_topics.go');
 assert.match(
-  onReputationLogDeleted,
-  /reputation_reverts/,
-  'onReputationLogDeleted must claim its revert through reputation_reverts'
+  handler,
+  /purgeTopicResidue\(txApp, topic\)/,
+  'the residue must be settled by the delete command itself'
 );
 assert.match(
-  onReputationLogDeleted,
-  /claimRef\.create\(/,
-  'the claim must use create() so a redelivery fails instead of reverting twice'
+  handler,
+  /deleteTopicPosts\(txApp, topic\)/,
+  'the posts must be removed by the delete command itself'
 );
 assert.match(
-  onReputationLogDeleted,
-  /already reverted, skipping/,
-  'a failed claim must return early'
+  handler,
+  /runCommand\(e\.App, claim, func\(txApp core\.App\)/,
+  'the whole delete — topic, posts and every denormalized copy — must run in one transaction'
 );
 
 console.log('OK  topic delete: every author loses post_count for their deleted posts');
-console.log('OK  topic delete: cascade guard still prevents a double decrement');
-console.log('OK  topic delete: reputation_logs and topic_subscriptions are cleaned up');
-console.log('OK  reputation revert is claimed exactly once');
+console.log('OK  topic delete: a topic\'s first post is refused as a post delete');
+console.log('OK  topic delete: reputation, votes and subscriptions are cleaned up');
+console.log('OK  topic delete: the settlement runs inside the delete\'s own transaction');
+

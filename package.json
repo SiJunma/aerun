@@ -21,6 +21,7 @@
     "dev:backend:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1 -StopOnly",
     "lint:js": "eslint .",
     "test:first-post-guard": "node scripts/check-first-post-guard.mjs",
+    "test:topic-delete-affordance": "node scripts/check-topic-delete-affordance.mjs",
     "test:topic-delete-cleanup": "node scripts/check-topic-delete-cleanup.mjs",
     "test:golast-overlay": "node scripts/check-golast-overlay.mjs",
     "test:inflight-guard": "node --test scripts/test-inflight-guard.mjs",
@@ -53,7 +54,7 @@
     "test:no-firebase-deps": "node scripts/check-no-firebase-deps.mjs",
     "test:no-raw-modal": "node scripts/check-no-raw-modal.mjs",
     "test:unsent-reply-rescue": "node scripts/check-unsent-reply-rescue.mjs",
-    "test": "npm run test:first-post-guard && npm run test:topic-delete-cleanup && npm run test:golast-overlay && npm run test:inflight-guard && npm run test:shared-poll && npm run test:dm-mutation-state && npm run test:dm-draft-conversations && npm run test:jsx-comments && npm run test:category-subscriber && npm run test:manage-mode-affordance && npm run test:date-accessors && npm run test:unread-floor && npm run test:audit-action-labels && npm run test:admin-empty-state && npm run test:forum-empty-state && npm run test:admin-form-validation && npm run test:error-classification && npm run test:forum-read-contract && npm run test:drafts-and-settings && npm run test:identity-refresh && npm run test:identity-placeholder && npm run test:user-profile-normalization && npm run test:security-tab && npm run test:last-selected-mask && npm run test:roles-live-update && npm run test:account-status-axis && npm run test:admin-role-authority && npm run test:endpoints && npm run test:mask-avatar-isolation && npm run test:no-firebase-storage && npm run test:no-raw-modal && npm run test:unsent-reply-rescue && npm run test:no-firebase-deps && npm run lint:js",
+    "test": "npm run test:first-post-guard && npm run test:topic-delete-affordance && npm run test:topic-delete-cleanup && npm run test:golast-overlay && npm run test:inflight-guard && npm run test:shared-poll && npm run test:dm-mutation-state && npm run test:dm-draft-conversations && npm run test:jsx-comments && npm run test:category-subscriber && npm run test:manage-mode-affordance && npm run test:date-accessors && npm run test:unread-floor && npm run test:audit-action-labels && npm run test:admin-empty-state && npm run test:forum-empty-state && npm run test:admin-form-validation && npm run test:error-classification && npm run test:forum-read-contract && npm run test:drafts-and-settings && npm run test:identity-refresh && npm run test:identity-placeholder && npm run test:user-profile-normalization && npm run test:security-tab && npm run test:last-selected-mask && npm run test:roles-live-update && npm run test:account-status-axis && npm run test:admin-role-authority && npm run test:endpoints && npm run test:mask-avatar-isolation && npm run test:no-firebase-storage && npm run test:no-raw-modal && npm run test:unsent-reply-rescue && npm run test:no-firebase-deps && npm run lint:js",
     "lint": "npm run lint:js",
     "preview": "vite preview"
   },

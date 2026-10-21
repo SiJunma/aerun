@@ -22,6 +22,7 @@ import {
 import { processDiceRolls } from '../utils/dice';
 import { createInFlight, newIdempotencyKey } from '../utils/inflight';
 import { toMillis, unreadFloor } from '../utils/dates';
+import { canDeleteTopic as canDeleteTopicFor, topicDeleteErrorText } from '../utils/topic-delete';
 import { subscribeToCharacters, fetchCharacter } from '../api/character';
 import { fetchUserProfile } from '../api/auth-resources';
 
@@ -2402,28 +2403,26 @@ const TopicPage = () => {
         const categoryId = topic?.category_id;
 
         if (isFirstPost) {
-          // The first post is the thread itself. Deleting it removes the topic
-          // and all replies, which is only ever allowed when nothing else was
-          // written — otherwise it must go through the explicit topic action.
-          if ((topic?.posts_count || posts.length) > 1) {
-            showToast(
-              lang === 'ru'
-                ? 'Это первое сообщение темы. Удаление темы целиком доступно через меню темы.'
-                : 'This is the topic\'s first post. Use the topic menu to delete the whole topic.',
-              'warning'
-            );
-            setDeletingPost(null);
-            return;
-          }
+          // The first post IS the thread: removing it removes the topic and
+          // every reply under it. This used to refuse outright ("use the topic
+          // menu"), but the topic menu only offered "Delete Topic" to holders
+          // of `delete_others_topics` — so the ordinary author was pointed at a
+          // place that did not exist for them. The delete goes through the
+          // TOPIC route (DELETE /topics/{id}), never DELETE /posts/{id}: the
+          // server refuses the opening post there with a 409, by design.
+          //
+          // Whether the delete is ALLOWED is the server's answer, not the
+          // client's: an author whose thread holds replies from other members
+          // gets a 409 unless they hold `delete_own_topic_with_replies`, and a
+          // stranger's topic gets a 403. Both are reported as-is.
           const delTopicResult = await deleteTopics([id], user.uid);
           applyMutationResult(delTopicResult);
           if (categoryId) {
             navigate(`/category/${categoryId}`);
-            return;
           } else {
             navigate('/');
-            return;
           }
+          return;
         } else {
           const delAuthorId = deletingPost.author?.user_id;
           const targetPostId = deletingPost.id;
@@ -2489,6 +2488,14 @@ const TopicPage = () => {
       setDeletingPost(null);
     } catch (err) {
       console.error(err);
+      // The first post is the topic, so its delete fails for POLICY reasons
+      // (409: the thread holds other members' replies) — not because a post
+      // could not be removed. The message has to say which one happened.
+      if (deletingPost && isTopicFirstPost(deletingPost, posts, currentPage, ITEMS_PER_PAGE)) {
+        showToast(topicDeleteErrorText(err, lang), 'danger');
+        setDeletingPost(null);
+        return;
+      }
       showToast(lang === 'ru' ? 'Не удалось удалить сообщение' : 'Error deleting post', 'danger');
       await loadPosts();
     }
@@ -2533,6 +2540,21 @@ const TopicPage = () => {
     }
     return hasPermission(PERMISSIONS.DELETE_OTHERS_POSTS);
   };
+
+  // Whether the topic itself may be removed from this page.
+  //
+  // The OPENING POST IS the topic: deleting it removes the thread with every
+  // reply under it. That used to be a dead end for the ordinary author — the
+  // post menu answered "use the topic menu", but the topic menu only showed
+  // "Delete Topic" to holders of `delete_others_topics`, so the author was
+  // told to go somewhere that did not exist for them.
+  //
+  // The rule itself lives in src/utils/topic-delete.js, where it can be
+  // EXECUTED by a test; this page only supplies the inputs. The server
+  // decides the rest: it refuses the author when the thread holds replies
+  // from other members and they lack `delete_own_topic_with_replies` (409),
+  // and it refuses a stranger's topic outright (403).
+  const canDeleteTopic = canDeleteTopicFor({ topic, user, hasPermission });
 
   const getRoleBadge = (post, extraClass = 'mb-2') => {
     if (post.is_character) {
@@ -2781,7 +2803,8 @@ const TopicPage = () => {
               {(
                 hasPermission(PERMISSIONS.PIN_TOPICS) ||
                 hasPermission(PERMISSIONS.CLOSE_TOPICS) ||
-                hasPermission(PERMISSIONS.MOVE_TOPICS)) && (
+                hasPermission(PERMISSIONS.MOVE_TOPICS) ||
+                canDeleteTopic) && (
                   <Dropdown>
                     <Dropdown.Toggle
                       variant="link"
@@ -2856,7 +2879,7 @@ const TopicPage = () => {
                           {t('forum.move_posts')}
                         </Dropdown.Item>
                       )}
-                      {hasPermission(PERMISSIONS.DELETE_OTHERS_TOPICS) && (
+                      {canDeleteTopic && (
                         <>
                           <Dropdown.Divider />
                           <Dropdown.Item
@@ -3512,7 +3535,7 @@ const TopicPage = () => {
                           <div className="d-flex gap-2 gap-md-3">
                             {canDeletePost(post) && (!topic.is_locked || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
                               <>
-                                {(!((index + indexOfFirstItem) === 0) || (posts.length <= 1 && (topic?.posts_count || 0) <= 1) || hasPermission(PERMISSIONS.CLOSE_TOPICS)) && (
+                                {((index + indexOfFirstItem) !== 0 || canDeleteTopic) && (
                                   <Button
                                     variant="link"
                                     size="sm"
@@ -4098,9 +4121,18 @@ const TopicPage = () => {
           onHide={() => setShowDeleteTopicModal(false)}
           onConfirm={async () => {
             const catId = topic.category_id;
-            const delModalResult = await deleteTopics([id], user?.uid);
-            applyMutationResult(delModalResult);
-            navigate(catId ? `/category/${catId}` : '/');
+            try {
+              const delModalResult = await deleteTopics([id], user?.uid);
+              applyMutationResult(delModalResult);
+              navigate(catId ? `/category/${catId}` : '/');
+            } catch (err) {
+              // The server refuses a topic whose replies belong to other members
+              // (409) — a POLICY answer, not a broken request, so it gets its
+              // own wording and the modal stays open.
+              console.error(err);
+              showToast(topicDeleteErrorText(err, lang), 'danger');
+              setShowDeleteTopicModal(false);
+            }
           }}
           title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}
           message={lang === 'ru'
