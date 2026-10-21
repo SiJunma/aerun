@@ -1779,6 +1779,9 @@ strike:hover,
 .premium-modal .modal-header .btn-close,
 .confirm-modal .modal-header .btn-close {
   filter: var(--theme-invert, none);
+  /* Compensate the non-standard header padding (0.75rem 1.25rem) so the close
+   * button sits flush against the modal edges instead of floating inside it. */
+  margin: -0.75rem -1.25rem -0.75rem auto;
 }
 
 .premium-modal .modal-title,

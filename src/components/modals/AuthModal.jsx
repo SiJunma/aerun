@@ -49,7 +49,7 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
       onHide={onHide}
       size="md"
       showHeader
-      headerClassName="border-0 pb-0"
+      headerClassName="border-0"
       bodyClassName="px-4 pb-4 pt-0"
       contentClassName="shadow-lg rounded-4 overflow-hidden bg-card"
     >
