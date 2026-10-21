@@ -1779,9 +1779,6 @@ strike:hover,
 .premium-modal .modal-header .btn-close,
 .confirm-modal .modal-header .btn-close {
   filter: var(--theme-invert, none);
-  /* Compensate the non-standard header padding (0.75rem 1.25rem) so the close
-   * button sits flush against the modal edges instead of floating inside it. */
-  margin: -0.75rem -1.25rem -0.75rem auto;
 }
 
 .premium-modal .modal-title,
@@ -3698,6 +3695,27 @@ a.rep-preview-name:hover {
   color: #1f160e !important;
 }
 
+/* ── Email Verification Banner: mobile adaptations ────────────────────────── */
+@media (max-width: 767.98px) {
+  .email-verification-banner {
+    align-items: stretch;
+    gap: 1.25rem;
+  }
+
+  .email-verification-actions {
+    width: 100%;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+  }
+
+  .email-verification-actions .email-verification-btn-primary,
+  .email-verification-actions .email-verification-btn-secondary {
+    width: 100% !important;
+    justify-content: center;
+  }
+}
+
 /* ── DM Chat Two-Column Layout ─────────────────────────────────────────── */
 .dm-chat-body {
   flex: 1 1 0;
@@ -3839,6 +3857,7 @@ a.rep-preview-name:hover {
 }
 
 @media (max-width: 567.98px) {
+
   /* Line 1 = nick only, line 2 = timestamp. The preview gives its place to the
    * timestamp so nothing is doubled and the name keeps the full row width. */
   .dm-conversation-date,
