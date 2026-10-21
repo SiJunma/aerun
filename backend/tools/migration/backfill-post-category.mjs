@@ -12,7 +12,7 @@
 //
 // Read-only unless --apply.
 import { createRequire } from 'node:module';
-const require = createRequire(new URL('../functions/package.json', import.meta.url));
+const require = createRequire(new URL('../../functions/package.json', import.meta.url));
 const admin = require('firebase-admin');
 
 const APPLY = process.argv.includes('--apply');
