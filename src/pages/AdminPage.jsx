@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown } from 'react-bootstrap';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Row, Col, Card, Form, Button, Table, Badge, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -30,6 +30,8 @@ import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
 import { pb } from '../api/pocketbase';
 import DesignsTab from '../components/admin/DesignsTab';
+import AdminSidebar from '../components/admin/AdminSidebar';
+import { ADMIN_NAV_GROUPS, filterNavByPermissions, collectVisibleTabPaths } from '../config/adminNavigation';
 import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -48,7 +50,25 @@ const AdminPage = () => {
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'settings';
+  // The sections this viewer may open. The navigation and the panels below
+  // read the SAME list, so a section can never be shown in the sidebar and
+  // be missing from the page, or the other way round.
+  const visibleNavGroups = useMemo(
+    () => filterNavByPermissions(ADMIN_NAV_GROUPS, hasPermission),
+    [hasPermission]
+  );
+  const visibleTabPaths = useMemo(
+    () => collectVisibleTabPaths(visibleNavGroups),
+    [visibleNavGroups]
+  );
+  // The section the viewer is actually looking at. A `?tab=` left in the URL
+  // by a bookmark or by a section the viewer has since lost access to must not
+  // open an empty page, so an unreachable tab falls back to the first one the
+  // viewer may open.
+  const requestedTab = searchParams.get('tab');
+  const activeTab = visibleTabPaths.includes(requestedTab)
+    ? requestedTab
+    : (visibleTabPaths[0] ?? null);
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
@@ -2473,58 +2493,42 @@ const AdminPage = () => {
   };
 
   return (
-    <Container className="py-5">
-      <ForumBreadcrumbs
-        items={[{ label: t('nav.admin'), active: true }]}
-      />
-      <h2 className="mb-4">{t('admin.dashboard')}</h2>
-
-      <Nav variant="tabs" activeKey={activeTab} className="mb-4 border-0" onSelect={(k) => setActiveTab(k)}>
-        {hasPermission(PERMISSIONS.MANAGE_FORUM) && (
-          <Nav.Item>
-            <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">{t('admin.tabs.settings')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
-          <Nav.Item>
-            <Nav.Link eventKey="designs" className="px-4 fw-bold border-0">{t('admin.tabs.designs')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {(hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && (
-          <Nav.Item>
-            <Nav.Link eventKey="users" className="px-4 fw-bold border-0">{t('admin.tabs.users')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
-          <Nav.Item>
-            <Nav.Link eventKey="roles" className="px-4 fw-bold border-0">{t('admin.tabs.roles')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-          <Nav.Item>
-            <Nav.Link eventKey="categories" className="px-4 fw-bold border-0">{t('admin.tabs.categories')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && (
-          <Nav.Item>
-            <Nav.Link eventKey="audit" className="px-4 fw-bold border-0">{t('admin.tabs.audit')}</Nav.Link>
-          </Nav.Item>
-        )}
-      </Nav>
-
-      {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
-      {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
-        <DesignsTab
-          designs={designs}
-          settings={settings}
-          updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
-          userId={user.uid}
+    <div id="admin-page" className="admin-page py-4">
+      <div id="admin-breadcrumbs" className="admin-breadcrumbs mb-3">
+        <ForumBreadcrumbs
+          items={[{ label: t('nav.admin'), active: true }]}
         />
-      )}
-      {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
-      {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
-      {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
-      {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
+      </div>
+
+      <header id="admin-header" className="admin-header mb-4">
+        <h1 className="admin-page-title">{t('admin.dashboard')}</h1>
+      </header>
+
+      <div className="row admin-layout">
+        <Col lg={3} className="admin-sidebar-column">
+          <AdminSidebar
+            groups={visibleNavGroups}
+            activeTab={activeTab}
+            onSelect={setActiveTab}
+          />
+        </Col>
+
+        <Col lg={9} className="admin-content" id="admin-content">
+          {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
+          {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
+            <DesignsTab
+              designs={designs}
+              settings={settings}
+              updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
+              userId={user.uid}
+            />
+          )}
+          {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
+          {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
+          {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
+          {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
+        </Col>
+      </div>
 
       {/* Role Modal */}
       <ForumModal
@@ -3176,7 +3180,7 @@ const AdminPage = () => {
         currentUserId={user?.uid || ''}
         onReauthWithGoogle={handleReauthForTransfer}
       />
-    </Container>
+    </div>
   );
 };
 

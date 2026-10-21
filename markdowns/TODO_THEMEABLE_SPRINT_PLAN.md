@@ -1124,60 +1124,70 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 Админка менее приоритетна для кастомизации пользовательскими темами, но должна быть адресуемой через CSS (администратор может захотеть стилизовать её под свой форум).
 
+Навигация админки — боковой сайдбар со СГРУППИРОВАННЫМИ разделами, а не плоский ряд табов (реализовано в `INPROGRESS_SPRINT_PLAN_admin_reorg.md`). Разделы, к которым у посетителя нет доступа, не отрисовываются вовсе, и группа, у которой не осталось ни одного доступного раздела, исчезает вместе с ними.
+
 ```
 <div id="admin-page" class="admin-page">
-  <nav id="admin-breadcrumbs">...</nav>
-  <header id="admin-header">
-    <h1 class="page-title">...</h1>
+  <div id="admin-breadcrumbs" class="admin-breadcrumbs">...</div>
+  <header id="admin-header" class="admin-header">
+    <h1 class="admin-page-title">...</h1>
   </header>
-  <nav class="admin-tabs">
-    <button class="admin-tab [is-active]" data-tab="users">...</button>
-    <button class="admin-tab [is-active]" data-tab="categories">...</button>
-    <button class="admin-tab [is-active]" data-tab="roles">...</button>
-    <button class="admin-tab [is-active]" data-tab="designs">...</button>
-    <button class="admin-tab [is-active]" data-tab="settings">...</button>
-    <button class="admin-tab [is-active]" data-tab="audit">...</button>
-  </nav>
-  <div id="admin-content" class="admin-tab-content">
-    <!-- Active tab content -->
-    
-    <!-- Users tab -->
-    <div class="admin-users-tab">
-      <div class="admin-users-filters">...</div>
-      <div class="admin-users-list">
-        <div class="admin-user-item" data-user-id="{uid}">...</div>
-      </div>
+  <div class="row admin-layout">
+    <div class="col-lg-3 admin-sidebar-column">
+      <!-- На узких экранах это Offcanvas-drawer, на широких — статичная колонка.
+           Разметка навигации существует в DOM ровно в одном экземпляре. -->
+      <nav id="admin-sidebar" class="admin-nav">
+        <div class="admin-sidebar-group [is-open|is-collapsed]" data-group="userManagement">
+          <button class="admin-sidebar-group-header" aria-expanded="true">...</button>
+          <ul class="admin-sidebar-list">
+            <li class="admin-nav-item">
+              <button class="admin-nav-link [is-active]" data-tab="users" aria-current="page">...</button>
+            </li>
+          </ul>
+        </div>
+      </nav>
     </div>
-    
-    <!-- Categories tab -->
-    <div class="admin-categories-tab">
-      <div class="admin-category-groups">
-        <div class="admin-category-group" data-group-id="{id}">...</div>
-      </div>
-      <div class="admin-categories-list">
-        <div class="admin-category-item" data-category-id="{id}">...</div>
-      </div>
-    </div>
-    
-    <!-- Designs tab -->
-    <div class="admin-designs-tab">
-      <div class="admin-designs-settings">...</div>
-      <div class="admin-designs-list">
-        <div class="design-card" data-design-id="{id}">
-          <div class="design-card-name">...</div>
-          <div class="design-card-status">...</div>
-          <div class="design-card-actions">...</div>
+    <div id="admin-content" class="col-lg-9 admin-content">
+      <!-- Active section content -->
+
+      <!-- Users section -->
+      <div class="admin-users-tab">
+        <div class="admin-users-filters">...</div>
+        <div class="admin-users-list">
+          <div class="admin-user-item" data-user-id="{uid}">...</div>
         </div>
       </div>
-    </div>
-    
-    <!-- Settings tab -->
-    <div class="admin-settings-tab">...</div>
-    
-    <!-- Audit tab -->
-    <div class="admin-audit-tab">
-      <div class="audit-log-list">
-        <div class="audit-log-item">...</div>
+
+      <!-- Categories section -->
+      <div class="admin-categories-tab">
+        <div class="admin-category-groups">
+          <div class="admin-category-group" data-group-id="{id}">...</div>
+        </div>
+        <div class="admin-categories-list">
+          <div class="admin-category-item" data-category-id="{id}">...</div>
+        </div>
+      </div>
+
+      <!-- Designs section -->
+      <div class="admin-designs-tab">
+        <div class="admin-designs-settings">...</div>
+        <div class="admin-designs-list">
+          <div class="design-card" data-design-id="{id}">
+            <div class="design-card-name">...</div>
+            <div class="design-card-status">...</div>
+            <div class="design-card-actions">...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings section -->
+      <div class="admin-settings-tab">...</div>
+
+      <!-- Audit section -->
+      <div class="admin-audit-tab">
+        <div class="audit-log-list">
+          <div class="audit-log-item">...</div>
+        </div>
       </div>
     </div>
   </div>

@@ -1,0 +1,204 @@
+/* ==========================================================================
+   Admin view shell and navigation
+
+   Every rule below hangs on the SEMANTIC class the themeable contract
+   defines (#admin-page, #admin-sidebar, .admin-nav-link, .is-active,
+   [data-tab], [data-group]) and never on Bootstrap's own class names, so a
+   custom design can restyle the admin panel by targeting those names.
+
+   Colours come from the forum's own theme variables (--text-color,
+   --card-bg, --border-color, --content-link-color, --block-bg), so the
+   navigation follows the light / dark / neutral themes without one extra
+   rule per theme.
+   ========================================================================== */
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-page-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.admin-layout {
+  align-items: flex-start;
+}
+
+/* A grid column must be allowed to shrink, or a wide table in the content
+   column pushes the navigation off the screen. */
+.admin-content {
+  min-width: 0;
+}
+
+/* The toggle only ever shows on narrow screens, where the navigation is a
+   drawer rather than a column. */
+.admin-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+/* ── The navigation panel ────────────────────────────────────────────────── */
+
+.admin-sidebar {
+  /* Bootstrap paints the offcanvas with the body colour; the panel inside it
+     carries the forum's own surface instead. */
+  --bs-offcanvas-bg: var(--bg-color);
+  --bs-offcanvas-color: var(--text-color);
+  --bs-offcanvas-border-color: var(--border-color);
+  --bs-offcanvas-width: 17rem;
+}
+
+.admin-sidebar-body {
+  padding: 0.75rem;
+}
+
+.admin-nav {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+}
+
+.admin-sidebar-group {
+  margin-bottom: 0.25rem;
+}
+
+.admin-sidebar-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  color: var(--secondary-color);
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.admin-sidebar-group-header:hover {
+  color: var(--text-color);
+  background-color: var(--block-bg);
+}
+
+.admin-sidebar-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.admin-sidebar-group-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.admin-sidebar-group.is-collapsed .admin-sidebar-group-chevron {
+  transform: rotate(-90deg);
+}
+
+/* The list folds by height rather than by `display: none`, so the group
+   opens and closes smoothly. `visibility` keeps the folded links out of the
+   tab order and out of the screen reader's tree. */
+.admin-sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0 0.5rem;
+  max-height: 30rem;
+  overflow: hidden;
+  transition: max-height 0.25s ease, visibility 0.25s ease;
+}
+
+.admin-sidebar-group.is-collapsed .admin-sidebar-list {
+  max-height: 0;
+  visibility: hidden;
+}
+
+.admin-nav-item {
+  margin: 0;
+}
+
+.admin-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: 0.925rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.admin-nav-link:hover {
+  opacity: 1;
+  background-color: var(--block-bg);
+}
+
+.admin-nav-link.is-active {
+  opacity: 1;
+  font-weight: 600;
+  color: var(--content-link-color);
+  background-color: var(--block-bg);
+  box-shadow: inset 2px 0 0 var(--content-link-color);
+}
+
+.admin-nav-link-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.admin-nav-link.is-active .admin-nav-link-icon {
+  opacity: 1;
+}
+
+/* ── Wide screens: the navigation is a sticky column ─────────────────────── */
+
+/* From `lg` up the Offcanvas is no longer a drawer: Bootstrap renders it in
+   the flow as a static block, and all that is left is to keep it in view
+   while the (much longer) content column scrolls past. */
+@media (min-width: 992px) {
+  .admin-sidebar {
+    position: sticky;
+    top: 4.25rem;
+    max-height: calc(100vh - 5.25rem);
+    overflow-y: auto;
+  }
+
+  /* The drawer header carries the title and the close button, both of which
+     only make sense while the navigation covers the page. */
+  .admin-sidebar-header {
+    display: none;
+  }
+}
+
+/* ── Narrow screens: the navigation is an off-canvas drawer ──────────────── */
+
+/* Below `lg` the Offcanvas keeps its own drawer behaviour: it slides in from
+   the edge, dims the page behind it and locks the page scroll. Only the
+   drawer width is ours to set. */
+@media (max-width: 991.98px) {
+  .admin-sidebar {
+    width: min(17rem, 86vw);
+  }
+}

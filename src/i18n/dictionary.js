@@ -458,6 +458,13 @@ export const translations = {
     admin: {
       title: "Admin Panel",
       dashboard: "Admin Dashboard",
+      nav: {
+        userManagement: "User & Access",
+        forumContent: "Forum Content",
+        systemConfig: "System",
+        toggleMenu: "Admin menu",
+        menuLabel: "Admin sections"
+      },
       tabs: {
         settings: "Settings",
         designs: "Designs",
@@ -1298,6 +1305,13 @@ export const translations = {
     admin: {
       title: "Панель управления",
       dashboard: "Панель управления",
+      nav: {
+        userManagement: "Пользователи и доступ",
+        forumContent: "Контент форума",
+        systemConfig: "Система",
+        toggleMenu: "Меню админки",
+        menuLabel: "Разделы админки"
+      },
       tabs: {
         settings: "Настройки",
         designs: "Дизайны",
