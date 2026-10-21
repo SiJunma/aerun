@@ -12,6 +12,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumTabs from '../components/common/ForumTabs';
 import ForumEmptyState from '../components/common/ForumEmptyState';
 import { usePageTitle } from '../contexts/TitleProvider';
+import { resolveField } from '../utils/text';
 
 const TABS = { ALL: 'all', NEW: 'new_replies' };
 const ITEMS_PER_PAGE = 20;
@@ -100,7 +101,7 @@ const NewRepliesPage = () => {
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);
     if (!cat) return '';
-    return typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title;
+    return resolveField(cat.title, lang);
   };
 
   // The list is ALREADY filtered by the server — by category access on the ALL

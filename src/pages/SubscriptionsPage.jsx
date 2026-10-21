@@ -10,6 +10,7 @@ import ForumPagination from '../components/common/ForumPagination';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumEmptyState from '../components/common/ForumEmptyState';
 import { usePageTitle } from '../contexts/TitleProvider';
+import { resolveField } from '../utils/text';
 
 const SubscriptionsPage = () => {
   const { t, lang } = useI18n();
@@ -83,7 +84,7 @@ const SubscriptionsPage = () => {
   const getCategoryName = (id) => {
     const cat = categories.find(c => c.id === id);
     if (!cat) return '';
-    return typeof cat.title === 'object' ? (lang === 'ru' ? cat.title.ru : cat.title.en) : cat.title;
+    return resolveField(cat.title, lang);
   };
 
   // Permission filter, still applied client-side: it narrows THIS page's rows

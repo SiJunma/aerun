@@ -373,11 +373,29 @@ const (
 func dailyActiveMembers(app core.App, now time.Time) ([]map[string]any, int) {
 	cutoff := now.Add(-dailyActiveWindow).UTC().Format(types.DefaultDateLayout)
 
+	// THE COUNT AND THE NAMES MUST AGREE, so both carry the SAME predicate:
+	// the daily window AND "the account is not deleted".
+	//
+	// A DELETED ACCOUNT IS EXCLUDED, and that is the one exception to the rule
+	// below about status. The row answers "who is around today" — a name a
+	// member can open a profile of. A deleted account cannot be signed into, is
+	// not in the members table, and its profile renders as a tombstone, so
+	// listing it here would advertise an account the forum has already taken
+	// out of circulation. The predicate is notDeletedUsersExpr — the same SQL
+	// twin of isUserDeleted the members list and the nickname check use, so
+	// "deleted" cannot mean two different things depending on which code path
+	// asks.
 	var count int64
 	if err := app.DB().
 		NewQuery("SELECT COUNT(*) FROM " + usersCollectionName +
-			" WHERE last_seen >= {:cutoff}").
-		Bind(dbx.Params{"cutoff": cutoff}).
+			" WHERE last_seen >= {:cutoff}" +
+			" AND (is_deleted = {:no} OR is_deleted IS NULL)" +
+			" AND (status IS NULL OR status != {:deleted})").
+		Bind(dbx.Params{
+			"cutoff":  cutoff,
+			"no":      false,
+			"deleted": string(auth.StatusDeleted),
+		}).
 		Row(&count); err != nil {
 		app.Logger().Warn("daily active count unavailable", "error", err)
 		return []map[string]any{}, 0
@@ -389,6 +407,7 @@ func dailyActiveMembers(app core.App, now time.Time) ([]map[string]any, int) {
 			"last_seen >= {:cutoff}",
 			dbx.Params{"cutoff": cutoff},
 		)).
+		AndWhere(notDeletedUsersExpr()).
 		OrderBy("last_seen DESC", "id DESC").
 		Limit(dailyActiveUserLimit).
 		All(&records); err != nil {
@@ -422,23 +441,25 @@ func listForumStatsHandler(e *core.RequestEvent) error {
 		return internalError("failed to count posts", err)
 	}
 
-	// Members counts EVERY account, whatever its status.
-	//
-	// A ban and an unapproved registration both describe what an account may DO,
-	// not whether it exists. The account keeps its nickname, its post history and
-	// its place in the members table, so the headline total that sits next to
-	// "N topics / M posts" has to count them too — otherwise the panel quietly
-	// reports a smaller forum than the one people are looking at, and the three
-	// numbers stop describing the same place.
+	// Members counts every account that can still act — a ban or an unapproved
+	// registration describe what an account may DO, not whether it exists, so
+	// both stay in the count. A soft-deleted account is out of circulation: its
+	// session is dead, it cannot act, and its profile renders as a tombstone, so
+	// it is excluded from the stats alongside everything else it no longer is.
 	//
 	// Counted with an explicit query rather than CountRecords(..., exp): the naive
 	// predicates are wrong in two different ways. `status != 'pending'` still counts
 	// BANNED accounts while excluding unapproved ones, and SQL's three-valued logic
 	// drops NULL rows from any `!=` comparison, so an account with no status set
-	// would silently vanish. Counting every row avoids both.
+	// would silently vanish. The predicate below is notDeletedUsersExpr, the same
+	// SQL twin of isUserDeleted the members list and the nickname check use, so
+	// "deleted" cannot mean two different things depending on which code path asks.
 	var users int64
 	if err := e.App.DB().
-		NewQuery("SELECT COUNT(*) FROM " + usersCollectionName).
+		NewQuery("SELECT COUNT(*) FROM " + usersCollectionName +
+			" WHERE (is_deleted = {:no} OR is_deleted IS NULL)" +
+			" AND (status IS NULL OR status != {:deleted})").
+		Bind(dbx.Params{"no": false, "deleted": string(auth.StatusDeleted)}).
 		Row(&users); err != nil {
 		return internalError("failed to count members", err)
 	}
@@ -449,9 +470,14 @@ func listForumStatsHandler(e *core.RequestEvent) error {
 	// the newest account precisely because it is pending, so filtering those out
 	// would report whoever joined before it. A forum with no members reports null
 	// rather than a placeholder object the page would try to link.
+	//
+	// A soft-deleted account is out of circulation and excluded here too: its
+	// session is dead and its profile is a tombstone, so reporting it as "the
+	// newest registered account" would advertise an account nobody can reach.
 	var newest map[string]any
 	var newestRecords []*core.Record
 	if err := e.App.RecordQuery(usersCollectionName).
+		AndWhere(notDeletedUsersExpr()).
 		OrderBy("created DESC", "id DESC").
 		Limit(1).
 		All(&newestRecords); err == nil && len(newestRecords) > 0 {

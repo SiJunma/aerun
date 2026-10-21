@@ -519,6 +519,14 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 		// partial index always assumed; the row stays writable, and the
 		// release commits in the same transaction as the flag above.
 		targetUser.Set("nickname_normalized", "")
+		// The email address is released for reuse as well: the users collection's
+		// partial UNIQUE index on email (`WHERE email != ''`) only constrains
+		// non-empty values, so an empty email frees the address for a fresh
+		// registration. Migration 1770000014 makes the column optional so the
+		// row stays writable after this write, and the release commits in the
+		// same transaction as the flag above. Storing deleted accounts' emails
+		// is not our practice.
+		targetUser.Set("email", "")
 		// The session dies with the account. A PocketBase auth token is signed
 		// with `tokenKey + AuthToken.Secret` and verified against the CURRENT
 		// tokenKey on every request, so rotating the key invalidates every
