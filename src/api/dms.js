@@ -479,11 +479,23 @@ export const subscribeToPeerCard = (uid, callback, errorCallback) => {
         // check here compared it against `role_id`, which is a different column
         // and never holds that value. So the lock silently never engaged.
         status: res?.status || 'active',
+        // `deleted` is a SEPARATE flag from `status`: a removed account keeps
+        // whatever status it had, so `status` alone reads "active" for a person
+        // who is gone. The server sends it on every card and it was DROPPED
+        // here, so the thread never learned that the peer was removed and kept
+        // showing the old name and avatar. Carried through untouched now.
+        deleted: res?.deleted === true,
       };
     },
     intervalMs: 120000,
     initialValue: null,
-    onError: (err) => console.warn('[subscribeToPeerCard err]', err),
+    // Diagnostics only. Whether the peer is gone is the CALLER's decision, and
+    // it must be made from the error itself — a 404 means "no such account",
+    // while a network failure means "we do not know". Collapsing the two would
+    // lock the composer of a live conversation because the network hiccuped.
+    onError: (err) => {
+      console.warn('[subscribeToPeerCard err]', err);
+    },
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
           () => onDelivered(),

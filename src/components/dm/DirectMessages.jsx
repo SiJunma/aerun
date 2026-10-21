@@ -40,6 +40,7 @@ import ErrorCard from '../common/ErrorCard';
 import ConfirmModal from '../common/ConfirmModal';
 import { PERMISSIONS } from '../../constants/permissions';
 import { deletedDisplayName, identityAvatar, placeholderAvatarUrl } from '../../utils/identity';
+import { toMillis as toEpochMs } from '../../utils/dates';
 
 /**
  * DirectMessages component
@@ -180,17 +181,48 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // re-reads four fields every two minutes rather than a whole profile.
   useEffect(() => {
     if (!activePeer?.uid) return;
-    const unsub = subscribeToPeerCard(activePeer.uid, (card) => {
-      if (!card || card.deleted) {
+    const unsub = subscribeToPeerCard(
+      activePeer.uid,
+      (card) => {
+        // A card that never arrived says NOTHING about the peer: the first read
+        // is still in flight, or the last one failed and the shared poll kept
+        // the previous value. Treating "no card" as "the peer is gone" locked
+        // the composer of a live conversation on every network hiccup — and on
+        // mount, before the very first read had even answered.
+        if (!card) return;
+        if (card.deleted) {
+          setPeerStatus('deleted');
+          // The name must follow the language too, so `lang` is a dependency of
+          // this effect: switching the interface language re-renders the label
+          // for an already-removed peer. `uid` is kept — the effect is keyed by
+          // it, and dropping it would tear down the subscription.
+          setActivePeer((prev) => (
+            prev?.name === deletedDisplayName(lang)
+              ? prev
+              : { ...prev, name: deletedDisplayName(lang) }
+          ));
+        } else if (card.status === 'banned') {
+          setPeerStatus('banned');
+        } else {
+          setPeerStatus('active');
+        }
+      },
+      (err) => {
+        // Only ONE failure means the account is gone: the server's 404 for an
+        // unknown peer. A network error or a 500 means "we do not know", and
+        // answering it with "deleted" would take a live conversation's composer
+        // away on a bad connection.
+        if (err?.status !== 404) return;
         setPeerStatus('deleted');
-      } else if (card.status === 'banned') {
-        setPeerStatus('banned');
-      } else {
-        setPeerStatus('active');
+        setActivePeer((prev) => (
+          prev?.name === deletedDisplayName(lang)
+            ? prev
+            : { ...prev, name: deletedDisplayName(lang) }
+        ));
       }
-    });
+    );
     return () => unsub();
-  }, [activePeer?.uid]);
+  }, [activePeer?.uid, lang]);
 
   // ── Load target profile if not provided ─────────────────────────────────
   //
@@ -200,7 +232,31 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // so the duplicate was two reads of a member's full profile instead.
   useEffect(() => {
     if (!targetUid || initialTargetProfile) return;
-    const unsub = subscribeToPeerCard(targetUid, (card) => setTargetProfile(card));
+    const unsub = subscribeToPeerCard(
+      targetUid,
+      (card) => setTargetProfile(card),
+      (err) => {
+        // A 404 means the account row is GONE — hard-deleted, or removed by a
+        // binary older than the soft delete. The THREAD can still exist: the
+        // dm_members row survives, and the server resolves conversations from
+        // that table alone.
+        //
+        // Without this branch the chat could not be opened AT ALL: the
+        // auto-open effect waits for a peer card that can never arrive, so
+        // the member clicked a conversation in their own inbox and got an
+        // empty screen. A missing account is a state the thread must draw,
+        // not a reason to refuse to draw it.
+        if (err?.status !== 404) return;
+        setTargetProfile({
+          uid: targetUid,
+          nickname: '',
+          avatar: '',
+          avatar_url: '',
+          deleted: true,
+          missing: true,
+        });
+      }
+    );
     return () => unsub();
   }, [targetUid, initialTargetProfile]);
 
@@ -249,11 +305,15 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
     if (mode !== 'chat' || !targetUid || !myUid || !targetProfile) return;
     openChat(targetUid, {
       uid: targetUid,
-      name: targetProfile?.nickname || 'User',
+      // A peer whose account row is gone has no nickname. The header draws the
+      // localized "Deleted user" placeholder for it — a nameless "User" would
+      // be a lie about who the thread is with, and the placeholder is the same
+      // one every other surface uses.
+      name: targetProfile.nickname || deletedDisplayName(lang),
       avatar: targetProfile?.avatar_url || '',
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, targetUid, myUid, targetProfile]);
+  }, [mode, targetUid, myUid, targetProfile, lang]);
 
   // ── Reset state when returning to inbox ──────────────────────────────────
   useEffect(() => {
@@ -908,12 +968,25 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   // is the Firestore accessor the migration removed: it survives only on the
   // object type this data no longer is, so the first member to CLEAR a
   // conversation unmounted the whole page with a TypeError instead of a list.
+  //
+  // The PARSING lives in one place — src/utils/dates.js — because this file
+  // used to carry its own copy, and the copy was wrong about the one shape
+  // that matters most here: a NUMBER. The draft store keeps
+  // `createdAt: Date.now()`, and the local copy turned that number into
+  // `new Date("1750000000000")`, which is not a date and parses as Invalid
+  // Date. Every draft therefore sorted with _sort = 0 and sank BELOW every
+  // real conversation, breaking the "a fresh dialogue is on top" ruling for
+  // drafts only. The shared helper handles the number, the Firestore
+  // Timestamp, the serialised Timestamp and the PocketBase string.
+  //
+  // The local wrapper only adds the ONE distinction this file needs: "no
+  // value at all" is null here, not 0. The filters ask "is there a horizon
+  // to compare against?", and 0 is the epoch — a real instant, not an
+  // absence.
   const toMillis = (value) => {
-    if (!value) return null;
-    if (typeof value.toMillis === 'function') return value.toMillis();
-    if (value instanceof Date) return value.getTime();
-    const parsed = new Date(String(value).replace(' ', 'T'));
-    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+    if (value === null || value === undefined || value === '') return null;
+    const ms = toEpochMs(value);
+    return ms > 0 ? ms : null;
   };
 
   const myClearTime = conversations.find(c => c.id === activeChatId)?.clearedAt?.[myUid];

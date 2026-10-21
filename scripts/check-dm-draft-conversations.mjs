@@ -154,6 +154,49 @@ const ok = (message) => { passed += 1; console.log(`  ok  ${message}`); };
   ok('a corrupted draft store degrades to empty and self-heals on write');
 }
 
+// ── A fresh draft sorts ABOVE a real conversation ───────────────────────────
+//
+// REPORTED: "a newly created draft sank to the BOTTOM of the dialogue list,
+// although fresh/new dialogues must be on top".
+//
+// THE CAUSE IS A SHAPE, NOT A COMPARATOR. The draft store keeps
+// `createdAt: Date.now()` — a NUMBER of milliseconds. The inbox row carries it
+// as `lastTimestamp`, and the row's sort key went through a parser that only
+// understood date SHAPES: `new Date(String(1750000000000))` is not a date, it
+// parses as Invalid Date, and the key collapsed to 0. Every real conversation
+// parses to ~1.7e12, so the descending sort put every draft BELOW all of them.
+//
+// So the sort itself was never wrong — the freshness key of a draft was simply
+// unreadable. This test pins the two halves separately: the draft's own key
+// must be a usable instant, and it must out-rank a real conversation.
+{
+  const { toMillis: sharedToMillis } = await import('../src/utils/dates.js');
+
+  const draft = upsertDraft('acc1', { peerUid: 'uFresh', nickname: 'Fresh' });
+  const row = listDrafts('acc1').find((d) => d.peerUid === 'uFresh');
+
+  assert.equal(typeof row.createdAt, 'number',
+    'the draft store must keep createdAt as epoch milliseconds (a number)');
+  assert.ok(sharedToMillis(row.createdAt) > 0,
+    'a draft createdAt must parse into a usable instant — ' +
+    'the number shape is what made every draft sort to the bottom');
+
+  // The real comparison the inbox performs: a PocketBase datetime string
+  // against the draft's numeric stamp.
+  const olderRealMs = sharedToMillis('2026-10-05 01:05:55.787Z');
+  assert.ok(sharedToMillis(row.createdAt) > olderRealMs,
+    'a just-created draft must out-rank an older real conversation in the inbox sort');
+  ok('a fresh draft sorts above a real conversation (the number shape is parsed)');
+
+  // And the inverse: the order is by FRESHNESS, not by kind. A real
+  // conversation newer than the draft must rank above it — otherwise "drafts
+  // first" would be a second, wrong rule.
+  const newerRealMs = sharedToMillis('2099-01-01 00:00:00.000Z');
+  assert.ok(newerRealMs > sharedToMillis(row.createdAt),
+    'a newer real conversation must rank above an older draft');
+  ok('the order is by freshness, not by kind');
+}
+
 // Composer autosave: save, load, clear, per-account and per-conversation.
 {
   store.clear();

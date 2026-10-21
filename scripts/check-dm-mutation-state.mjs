@@ -193,6 +193,31 @@ check(!/\.to(?:Millis|Date)\s*\(/.test(threadDates),
   'DirectMessages must not call .toMillis()/.toDate() on PocketBase datetime strings — ' +
   'it is the Firestore accessor and throws during render');
 
+// ── ONE date parser, not a second copy ─────────────────────────────────────
+//
+// REPORTED: "a newly created draft sank to the BOTTOM of the dialogue list,
+// although fresh/new dialogues must be on top".
+//
+// The inbox sorts by ONE freshness key: a real conversation by its
+// `last_message_at`, a draft by its `createdAt`. The draft store keeps
+// `createdAt: Date.now()` — a NUMBER of milliseconds — and the thread used to
+// parse it with its OWN copy of the date reader, which only understood date
+// SHAPES: `new Date(String(1750000000000))` is not a date, it parses as
+// Invalid Date, and the key collapsed to 0. Every real conversation parses to
+// ~1.7e12, so the descending sort put every draft BELOW all of them.
+//
+// The fix is not another arm in a local parser — it is to use the ONE parser
+// the project already has (src/utils/dates.js), which knows the number shape
+// because the rest of the forum stores optimistic stamps as numbers too.
+// A fifth local copy is how this defect came back.
+check(/from '\.\.\/\.\.\/utils\/dates'/.test(thread),
+  'DirectMessages must parse dates through the shared src/utils/dates.js helper — ' +
+  'a local copy is what made every draft sort to the bottom of the inbox');
+
+check(!/const toMillis = \(value\) => \{[\s\S]*?new Date\(String\(value\)/.test(thread),
+  'DirectMessages must not carry its own date parser — the number shape ' +
+  '(Date.now()) must be handled by the shared helper, or drafts sort to the bottom');
+
 // ── The thread must not read a member's whole profile ────────────────────
 //
 // REPORTED: "the handler that brings EVERYTHING about a user, including their
@@ -218,6 +243,41 @@ check(!/role_id\s*===\s*'banned'/.test(thread),
   "the composer lock must test `status === 'banned'`, not the role column — " +
   'banned is an account status, so the role check never matched and the ' +
   'composer stayed unlocked');
+
+// ── A vanished peer must still be OPENABLE ──────────────────────────────────
+//
+// REPORTED: "I still cannot open my dialogue with a deleted user", with the
+// console showing "[subscribeToPeerCard err] ApiError: User not found.".
+//
+// THE THREAD SURVIVES THE ACCOUNT. dm_members stores user_id as a plain TEXT
+// id, not a RelationField, so a membership row outlives the users row it
+// points at: the conversation, its history and its place in the inbox all
+// remain. The account row is what is gone — hard-deleted, or removed by a
+// binary older than the soft delete.
+//
+// The peer read then answers 404, and the thread used to STOP THERE: the
+// chat-mode auto-open waits for a peer card, so a card that can never arrive
+// meant the member clicked their own inbox row and got an empty screen. The
+// composer lock was right (a gone account cannot be written to), but the THREAD
+// must still be readable.
+//
+// So the peer read must answer a question about the ACCOUNT, and a 404 must be
+// read as "the account is gone" — a state the thread draws with the
+// "Deleted user" placeholder — not as "there is nothing to open".
+check(/err\?\.status\s*!==\s*404/.test(thread),
+  'a 404 from the peer read must be handled explicitly — it means the account ' +
+  'is gone, and the thread must still open with the "Deleted user" placeholder');
+
+// The chat-mode auto-open waits for a peer card. A vanished peer must produce
+// ONE — an empty, deleted-marked card — or the chat never opens at all.
+check(/setTargetProfile\(\{[\s\S]{0,300}?deleted:\s*true/.test(thread),
+  'a 404 from the peer read must still produce a target profile — without it ' +
+  'the chat-mode auto-open waits forever and the dialogue cannot be opened');
+
+// And the header must name that peer the way every other surface does.
+check(!/name:\s*targetProfile\?\.nickname\s*\|\|\s*'User'/.test(thread),
+  'the chat header must not fall back to the nameless "User" — a vanished ' +
+  'peer is drawn with the localized "Deleted user" placeholder');
 
 // The backend endpoint must stay a WHITELIST. This is the half a client-only
 // gate cannot see: the payload is assembled server-side, and the test that would
