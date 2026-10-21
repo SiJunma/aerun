@@ -32,10 +32,38 @@ package importer
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
+
+// quoteTagRegex matches the opening tag of a post quote written in the legacy
+// markup: [quote="#p<postId>,t<topicId>,<authorName>"]. Only the post id is
+// significant; the topic id and author name are carried along verbatim. It is
+// intentionally identical to post_notifications.quoteRegex so the migration
+// rewrite and the runtime notification parser agree on what a quote looks like.
+var quoteTagRegex = regexp.MustCompile(`\[quote\s*=\s*"?#p([a-zA-Z0-9_-]+)(?:,[^\]]*?)?"?\]`)
+
+// quoteIDOnly matches a bare `#p<legacyId>` marker inside a matched quote tag.
+var quoteIDOnly = regexp.MustCompile(`#p([a-zA-Z0-9_-]+)`)
+
+// rewriteQuotePostIDs replaces every legacy post id referenced in a quote tag
+// (`[quote="#p<legacyId>,t<topicId>,<name>"]`) with the derived target id, so
+// quotes in imported posts still point at the post they quoted. The target id
+// is DeriveID(SpacePost, legacyId) — exactly the id the quoted post's own row
+// carries — so a quote and its target agree after cutover. Anything outside a
+// quote tag is left untouched.
+func rewriteQuotePostIDs(content string) string {
+	return quoteTagRegex.ReplaceAllStringFunc(content, func(match string) string {
+		loc := quoteIDOnly.FindStringIndex(match)
+		if loc == nil {
+			return match
+		}
+		legacyID := match[loc[0]+2 : loc[1]]
+		return match[:loc[0]] + "#p" + DeriveID(SpacePost, legacyID) + match[loc[1]:]
+	})
+}
 
 // TopicRow is the target state of one topics record.
 type TopicRow struct {
@@ -334,7 +362,7 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			// reputation_votes rows this same import writes, so a stale cached
 			// score cannot survive next to the votes that produced it.
 			Reputation: 0,
-			Content:    stringField(p.fields, "content"),
+			Content:    rewriteQuotePostIDs(stringField(p.fields, "content")),
 			EditedAt:   TimestampToISO(timeField(p.fields, "edited_at")),
 			CreatedAt:  TimestampToISO(p.created),
 			UpdatedAt:  TimestampToISO(p.created),
@@ -386,7 +414,7 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			TopicID:   topic.TargetID,
 			AuthorID:  DeriveID(SpaceUser, authorRef),
 			IsDraft:   true,
-			Content:   stringField(p.fields, "content"),
+			Content:   rewriteQuotePostIDs(stringField(p.fields, "content")),
 			CreatedAt: TimestampToISO(p.created),
 			UpdatedAt: TimestampToISO(p.created),
 			Findings:  map[string]string{"draft_no_sequence": p.legacyID},

@@ -340,3 +340,42 @@ func TestForumPlanIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestRewriteQuotePostIDs pins the legacy-to-derived id rewrite inside quote
+// markup: a post quoting another post keeps a working link after cutover
+// because the legacy id in the quote is replaced by the derived target id that
+// the quoted post's own row carries.
+func TestRewriteQuotePostIDs(t *testing.T) {
+	plan := forumFixture()
+	postAt(plan, "p1", "t1", "u1", time.Unix(100, 0).UTC())
+	postAt(plan, "p2", "t1", "u1", time.Unix(200, 0).UTC())
+
+	// p2 quotes p1 using the legacy markup the exporter preserved verbatim.
+	plan.Posts["p2"]["content"] = `ответ [quote="#pp1,t1,Author"]цитата[/quote] продолжение`
+
+	fp := BuildForumPlan(plan, alwaysYes, alwaysYes)
+	p2 := findPost(t, fp, "p2")
+
+	want := `ответ [quote="#p` + DeriveID(SpacePost, "p1") + `,t1,Author"]цитата[/quote] продолжение`
+	if p2.Content != want {
+		t.Fatalf("legacy quote id not rewritten to derived id:\n got %q\nwant %q", p2.Content, want)
+	}
+
+	// A `#p` marker that is not part of a quote tag must be left alone, and the
+	// quoting post's own id must never be rewritten.
+	plain := `сообщение #p42 без тега цитаты`
+	plan.Posts["p2"]["content"] = plain
+	fp2 := BuildForumPlan(plan, alwaysYes, alwaysYes)
+	if got := findPost(t, fp2, "p2").Content; got != plain {
+		t.Fatalf("non-quote content must be unchanged:\n got %q\nwant %q", got, plain)
+	}
+
+	// Multiple quotes in one post are all rewritten, and repeated quotes of the
+	// same post produce the same derived id each time.
+	plan.Posts["p2"]["content"] = `[quote="#pp1,t1,A"]первая[/quote] и [quote="#pp1,t1,A"]вторая[/quote]`
+	fp3 := BuildForumPlan(plan, alwaysYes, alwaysYes)
+	wantMulti := `[quote="#p` + DeriveID(SpacePost, "p1") + `,t1,A"]первая[/quote] и [quote="#p` + DeriveID(SpacePost, "p1") + `,t1,A"]вторая[/quote]`
+	if got := findPost(t, fp3, "p2").Content; got != wantMulti {
+		t.Fatalf("multiple quotes not all rewritten:\n got %q\nwant %q", got, wantMulti)
+	}
+}
