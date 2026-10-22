@@ -249,6 +249,11 @@ const AdminPage = () => {
   // Whether "delete all posts by this user" is checked in the user-delete
   // confirmation dialog. Defaults off: delete only the account.
   const [deleteUserPosts, setDeleteUserPosts] = useState(false);
+  // Ref mirror so the confirm handler (captured at dialog-open time in
+  // confirmState.onConfirm) reads the CURRENT checkbox value at confirm time,
+  // not the stale value from when the dialog was opened. Without this, a
+  // checked checkbox is ignored and deletePosts is always false (bug O12).
+  const deleteUserPostsRef = useRef(false);
 
   // A delete the SERVER would refuse, caught before the request is made.
   //
@@ -1063,7 +1068,7 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
-          await deleteUser(uid, user.uid, { deletePosts: deleteUserPosts });
+          await deleteUser(uid, user.uid, { deletePosts: deleteUserPostsRef.current });
           // The stats panel (ForumStats) reads forumStats from AuthProvider —
           // total members, newest member, today's visitors — NOT from this
           // board's local `users` array. Filtering the row here left the shared
@@ -2980,7 +2985,10 @@ const AdminPage = () => {
               <input
                 type="checkbox"
                 checked={deleteUserPosts}
-                onChange={e => setDeleteUserPosts(e.target.checked)}
+                onChange={e => {
+                  setDeleteUserPosts(e.target.checked);
+                  deleteUserPostsRef.current = e.target.checked;
+                }}
                 className="form-check-input me-2"
               />
               {t('admin.users.delete_posts_label')}

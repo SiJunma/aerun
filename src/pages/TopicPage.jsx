@@ -2581,7 +2581,7 @@ const TopicPage = () => {
         roleId={authorData?.role_id || post.author_role_id}
         status={authorData?.status}
         userEmail={authorData?.email}
-        isDeleted={authorData === null}
+        isDeleted={authorData === null || post.author?.deleted === true || post.author_deleted === true}
         className={extraClass}
       />
     );

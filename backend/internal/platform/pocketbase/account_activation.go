@@ -43,6 +43,38 @@ func registerAccountActivationHook(app core.App) {
 	})
 }
 
+// registerOAuth2RejectedDeletedHook makes the Google OAuth2 flow treat a
+// soft-deleted account as if it never existed, so a fresh registration
+// creates an absolute new record instead of resurrecting the deleted one.
+//
+// PocketBase's oauth2Submit, triggered from OnRecordAuthWithOAuth2Request,
+// finds an existing record by email or by ExternalAuth provider+providerId.
+// If that record is soft-deleted, oauth2Submit would rewrite it (re-set the
+// email, re-link the provider) before OnRecordAuthRequest ever gets to refuse
+// it — exactly the O9 symptom: the deleted account's email gets "added back"
+// and the 403 arrives only after the damage.
+//
+// This hook runs first. When it sees a deleted record, it:
+//   - drops the ExternalAuth row so the provider id can be reclaimed,
+//   - clears the email so the address is free for reuse,
+//   - sets e.Record = nil so oauth2Submit creates a brand-new record.
+//
+// Registration via OAuth2 then proceeds exactly like a first-time sign-up.
+func registerOAuth2RejectedDeletedHook(app core.App) {
+	app.OnRecordAuthWithOAuth2Request().BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
+		if e.Record != nil && e.Record.Collection().Name == usersCollectionName && isUserDeleted(e.Record) {
+			if err := e.App.DeleteAllExternalAuthsByRecord(e.Record); err != nil {
+				return err
+			}
+			if e.Record.Email() != "" {
+				e.Record.SetEmail("")
+			}
+			e.Record = nil
+		}
+		return e.Next()
+	})
+}
+
 // activateAccountIfApprovalDisabled flips a still-pending forum account to
 // active when the "require approval" gate is off. It is a no-op for guests,
 // non-forum auth collections, already-active/banned accounts and — crucially —

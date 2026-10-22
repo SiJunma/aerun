@@ -113,6 +113,12 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		// "require approval" gate is off — the server-side half of that switch
 		// that nothing used to honour. See account_activation.go.
 		registerAccountActivationHook(se.App)
+		// Rejects soft-deleted accounts in the OAuth2 flow so a
+		// deleted user's Google sign-in becomes a brand-new
+		// registration instead of resurrecting the deleted record
+		// (bug O9: deleted account's email re-added, 403 after the
+		// fact). See registerOAuth2RejectedDeletedHook.
+		registerOAuth2RejectedDeletedHook(se.App)
 		return se.Next()
 	})
 
