@@ -156,6 +156,19 @@ visitors can read the public forum; category-level narrowing arrives with the
 Sprint 4 category read models. `pending` narrows any role to `view_forum` plus
 the self-edit rights, `banned` denies everything.
 
+**Email verification gate.** A content-creating mutation (new topic, reply, opening
+a DM, sending a DM message) additionally requires a confirmed email
+(`users.verified = true`). Registration leaves every new account
+`verified=false`, so this is the gate that stops a fresh member from posting
+under a nickname that proves nothing. Exemptions, on purpose: guests (no
+mailbox to confirm), staff (`root`/`admin`/`moderator` — locking them out over
+a mailbox they never had to confirm would be a self-inflicted outage) and
+`pending` accounts (a pending member may receive and ANSWER inside a dialogue
+somebody opened with them; only OPENING one is refused, and that rule lives
+inside the DM transaction where the race for the first message is resolved). A
+refusal answers `403` with the message "this account's email is not verified;
+confirm it before posting or messaging".
+
 ### Identity & Settings (Sprint 2)
 
 - `POST /api/aerun/auth/register` — guest-only email/password registration.

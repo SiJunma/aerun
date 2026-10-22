@@ -2160,13 +2160,16 @@ const ProfilePage = () => {
 
       {/* Profile Reputation Modal. ForumModal closes by unmounting (no exit
           transition), so the re-render storm of a vote cannot strand the
-          dialog in the flow the way the old raw react-bootstrap Modal did. */}
+          dialog in the flow the way the old raw react-bootstrap Modal did.
+          The header drops its pb-0 for the same reason as in AuthModal: the
+          body already carries pt-4, and the extra header padding pushed the
+          title away from the close button. */}
       <ForumModal
         show={showRepModal}
         onHide={() => setShowRepModal(false)}
         title={lang === 'ru' ? 'Репутация пользователя' : 'User Reputation'}
         titleClassName="fw-bold text-accent"
-        headerClassName="border-0 pb-0"
+        headerClassName="border-0"
         bodyClassName="pt-4"
         footerClassName="border-0 pt-0"
         className="reputation-modal shadow-lg"

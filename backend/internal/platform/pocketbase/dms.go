@@ -483,7 +483,20 @@ func createDMHandler(e *core.RequestEvent) error {
 		return forbiddenError("authentication required")
 	}
 
+	acc := AccessFrom(e)
+	// Opening a NEW dialogue is the case the owner reported: an unverified
+	// account could start a private conversation with any player and post
+	// under a nickname that proves nothing. Pending accounts are exempt here
+	// for the same reason as everywhere else (see requireVerified): the
+	// "cannot open the first dialogue" rule for pending lives deeper down,
+	// inside the transaction, where the race for the first message is
+	// resolved.
+	if err := requireVerified(acc); err != nil {
+		return err
+	}
+
 	raw, err := readBodyLimited(e, maxDMBodyBytes)
+
 	if err != nil {
 		return err
 	}
@@ -929,7 +942,17 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 		return forbiddenError("authentication required")
 	}
 
+	acc := AccessFrom(e)
+	// Replying inside an already open dialogue. The owner ruled that an
+	// unverified member may ANSWER there (only OPENING one is refused), so
+	// this handler keeps its own gate: requireVerified lets pending through
+	// and refuses only accounts whose email was never confirmed.
+	if err := requireVerified(acc); err != nil {
+		return err
+	}
+
 	convID := e.Request.PathValue("id")
+
 	raw, err := readBodyLimited(e, maxDMBodyBytes)
 	if err != nil {
 		return err

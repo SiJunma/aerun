@@ -3696,23 +3696,75 @@ a.rep-preview-name:hover {
 }
 
 /* ── Email Verification Banner: mobile adaptations ────────────────────────── */
-@media (max-width: 767.98px) {
+/* Tablet and below (was phones only, 767.98px): the banner broke apart on
+   tablets too, where the buttons used to stretch to the full row width and
+   the text column was vertically centred against them. The breakpoint is
+   raised so the two halves stack from 992px down, and the buttons keep
+   their natural width instead of being forced to 100% — a full-width
+   button row on a phone looked like a form, not a banner. */
+@media (max-width: 991.98px) {
   .email-verification-banner {
-    align-items: stretch;
+    /* Top-aligned, so a two-line description stays next to its icon
+       instead of drifting to the vertical middle of the banner. */
+    align-items: flex-start;
     gap: 1.25rem;
   }
 
+  /* The icon must not be squeezed by the flex row — a squashed mail icon
+     was the visible symptom of the missing `flex-shrink: 0`. */
+  .email-verification-icon-box {
+    flex-shrink: 0 !important;
+  }
+
+  /* The "link sent" confirmation line is a text paragraph with an icon;
+     centring it made the icon float away from the first line. */
+  .email-verification-success {
+    align-items: start !important;
+  }
+
+  .email-verification-success .lucide-icon,
+  .email-verification-success svg {
+    flex-shrink: 0 !important;
+    /* Nudge the icon down so it sits on the first text line's baseline. */
+    margin-top: 5px;
+  }
+
   .email-verification-actions {
-    width: 100%;
+    /* `width: auto` (not 100%) — the buttons keep their content width and
+       wrap under the text on narrow screens. */
+    width: auto !important;
     flex-direction: column !important;
-    align-items: stretch !important;
+    align-items: flex-start !important;
     gap: 0.75rem !important;
   }
 
   .email-verification-actions .email-verification-btn-primary,
   .email-verification-actions .email-verification-btn-secondary {
-    width: 100% !important;
+    width: auto !important;
+    /* Still bounded: a long translated label must not overflow the banner. */
+    max-width: 100%;
     justify-content: center;
+  }
+
+  /* Icons inside the buttons were being compressed into a sliver when the
+     button was squeezed — keep them rigid. */
+  .email-verification-actions .email-verification-btn-primary .lucide-icon,
+  .email-verification-actions .email-verification-btn-secondary .lucide-icon,
+  .email-verification-actions .email-verification-btn-primary svg,
+  .email-verification-actions .email-verification-btn-secondary svg {
+    flex-shrink: 0 !important;
+  }
+}
+
+/* ── Email Verification Banner: small mobile (< 768px) ────────────────────── */
+/* Only on phones does the LEFT half itself stack: the icon moves above the
+   text, because at 360px there is no room for icon + title + description
+   side by side. */
+@media (max-width: 767.98px) {
+  .email-verification-left {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
   }
 }
 

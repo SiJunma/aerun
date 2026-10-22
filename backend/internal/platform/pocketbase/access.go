@@ -24,6 +24,14 @@ type AccessContext struct {
 	Role        auth.Role
 	Status      auth.Status
 	Permissions []auth.Permission
+	// Verified reports whether the caller's email has been confirmed. Guests
+	// carry false; they have no email address to verify.
+	//
+	// It is a separate axis from Role and Status on purpose: "pending" and
+	// "unverified" are different facts even though registration produces both
+	// at once, and the write rules treat them differently — see
+	// requireVerified.
+	Verified bool
 }
 
 // guestAccess is the context used when there is nothing to resolve.
@@ -32,6 +40,7 @@ func guestAccess() AccessContext {
 		Role:        auth.RoleGuest,
 		Status:      auth.StatusActive,
 		Permissions: auth.DefaultPermissions(auth.RoleGuest),
+		Verified:    false,
 	}
 }
 
@@ -97,6 +106,7 @@ func accessForUser(app core.App, record *core.Record) AccessContext {
 		Role:        role,
 		Status:      status,
 		Permissions: auth.NarrowForStatus(base, status),
+		Verified:    record.GetBool("verified"),
 	}
 }
 
@@ -122,6 +132,7 @@ func (r *AccessResolver) resolve(e *core.RequestEvent) AccessContext {
 		Role:        role,
 		Status:      status,
 		Permissions: auth.NarrowForStatus(base, status),
+		Verified:    record.GetBool("verified"),
 	}
 }
 

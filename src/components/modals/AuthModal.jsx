@@ -44,12 +44,15 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
   }, [show, user]);
 
   return (
+    // The header no longer carries pb-0: the body already starts with pt-0, and
+    // the extra header padding pushed the title away from the close button.
+    // `border-0` stays — the modal draws its own separator.
     <ForumModal
       show={show}
       onHide={onHide}
       size="md"
       showHeader
-      headerClassName="border-0 pb-0"
+      headerClassName="border-0"
       title={mode === 'login' ? 'Войти' : mode === 'forgot_password' ? 'Восстановление пароля' : 'Регистрация'}
       bodyClassName="px-4 pb-4 pt-0"
       contentClassName="shadow-lg rounded-4 overflow-hidden bg-card"

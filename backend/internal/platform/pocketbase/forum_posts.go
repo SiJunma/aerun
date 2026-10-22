@@ -144,6 +144,14 @@ func createPostHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
+	// Same gate as topic creation, and for the same reason: an account whose
+	// email was never confirmed must not be able to write into an existing
+	// discussion. It sits next to the category check on purpose — the category
+	// answers "may this role write HERE", this answers "may this account write
+	// AT ALL"; both must pass.
+	if err := requireVerified(acc); err != nil {
+		return err
+	}
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)

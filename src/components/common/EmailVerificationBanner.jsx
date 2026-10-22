@@ -79,7 +79,11 @@ const EmailVerificationBanner = () => {
   return (
     <Container className="email-verification-banner-wrapper py-2">
       <div className="email-verification-banner d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 py-3 px-4 rounded-3">
-        <div className="d-flex align-items-center gap-3">
+        {/* The left half (icon + text) and the right half (buttons) get their own
+            hook classes: the mobile layout in index.css has to collapse the two
+            halves independently, and Bootstrap utility classes alone could not
+            express "keep the icon on top of the text" on phones. */}
+        <div className="email-verification-left d-flex align-items-start gap-3">
           <div className="email-verification-icon-box flex-shrink-0">
             <Mail size={22} />
           </div>
@@ -91,7 +95,7 @@ const EmailVerificationBanner = () => {
               {t('auth.email_verification_desc', { email: user.email }) || `Please verify your email address (${user.email}) to unlock full forum permissions.`}
             </div>
             {sentSuccess && (
-              <div className="email-verification-success mt-1 d-flex align-items-center gap-1">
+              <div className="email-verification-success mt-1 d-flex align-items-start gap-1">
                 <CheckCircle size={14} />
                 <span>{t('auth.verification_email_sent') || 'A new verification link has been sent to your email.'}</span>
               </div>
@@ -105,7 +109,7 @@ const EmailVerificationBanner = () => {
           </div>
         </div>
 
-        <div className="d-flex align-items-center gap-2 flex-shrink-0 flex-wrap">
+        <div className="email-verification-actions d-flex align-items-center gap-2 flex-shrink-0 flex-wrap">
           <Button
             size="sm"
             className="email-verification-btn-primary d-flex align-items-center gap-2 px-3 shadow-sm border-0"

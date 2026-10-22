@@ -9,6 +9,7 @@ import {
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
+import { identityAvatar } from '../utils/identity';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns } from '../api/designs';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID, ADMIN_ROLE_ID, DEFAULT_ROLES, rankOfRole } from '../constants/permissions';
@@ -1799,7 +1800,13 @@ const AdminPage = () => {
               <tr key={u.id} className="align-middle">
                 <td>
                   <div className="d-flex align-items-center">
-                    {resolveAvatarUrl(u.avatar_url) && <img src={resolveAvatarUrl(u.avatar_url)} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
+                    {/* identityAvatar instead of a bare resolveAvatarUrl: the old
+                        markup rendered NOTHING for a user without an avatar, which
+                        left the admin table with an invisible gap in front of the
+                        nickname. identityAvatar falls back to a generated avatar
+                        built from the name, so every row shows the same
+                        avatar-plus-nickname pair as the rest of the app. */}
+                    <img src={identityAvatar({ name: u.nickname, avatar: u.avatar_url, size: 32 })} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />
                     <div>
                       <div className="fw-bold">{u.nickname || t('admin.users.unnamed', 'Без имени')}</div>
                     </div>
