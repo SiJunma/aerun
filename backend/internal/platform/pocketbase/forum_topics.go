@@ -135,15 +135,10 @@ func createTopicHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
-	// Creating a topic is the first thing an unverified account can do wrong:
-	// registration leaves `verified=false`, so without this gate a fresh member
-	// owns a nickname that proves nothing and can post under it in every
-	// category its role allows. Staff and pending accounts are exempt inside
-	// requireVerified — see the comment there for why.
-	if err := requireVerified(acc); err != nil {
-		return err
-	}
-
+	// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21)
+	// delegates the write decision to categoryWriteAllowed, which correctly
+	// permits guest-zone posting for pending/unverified accounts and refuses
+	// them elsewhere. No requireVerified gate here anymore.
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		// Verify category exists
 		category, err := txApp.FindRecordById(categoriesCollectionName, form.CategoryID)

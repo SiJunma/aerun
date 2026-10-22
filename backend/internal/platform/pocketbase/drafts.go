@@ -103,6 +103,20 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 			return 0, nil, notFoundError("topic not found")
 		}
 
+		// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21):
+		// categoryWriteAllowed decides whether this account may write in this
+		// category — guest-zone override lets pending/unverified through, and
+		// everything else refuses them. This closes the old loophole where a
+		// draft saved in a guest topic could be published into a closed one.
+		acc := AccessFrom(e)
+		allowed, err := categoryWriteAllowed(txApp, acc, topic.GetString("category_id"), auth.PermPostReply)
+		if err != nil {
+			return 0, nil, internalError("failed to resolve category permission", err)
+		}
+		if !allowed {
+			return 0, nil, forbiddenError("you cannot write in this category")
+		}
+
 		existing, _ := txApp.FindFirstRecordByFilter(
 			postsCollectionName,
 			"topic_id = {:topic} && author_id = {:author} && is_draft = true",
@@ -323,8 +337,18 @@ func publishDraftHandler(e *core.RequestEvent) error {
 			return 0, nil, conflictError("draft is orphaned: its topic no longer exists")
 		}
 		acc := AccessFrom(e)
+		// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21):
+		// publishing a draft is a write into the topic's category, so the same
+		// categoryWriteAllowed gate applies. A draft saved in a guest zone may not
+		// be promoted into a closed category.
+		allowed, err := categoryWriteAllowed(txApp, acc, topic.GetString("category_id"), auth.PermPostReply)
+		if err != nil {
+			return 0, nil, internalError("failed to resolve category permission", err)
+		}
+		if !allowed {
+			return 0, nil, forbiddenError("you cannot write in this category")
+		}
 		// Same rule as createPostHandler: `close_topics` bypasses the lock, and
-		// the post limit below still applies to it.
 		if topic.GetBool("locked") && !auth.Has(acc.Permissions, auth.PermCloseTopics) {
 			return 0, nil, conflictError("topic is locked")
 		}

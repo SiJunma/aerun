@@ -734,18 +734,16 @@ func listAdminCategoriesHandler(e *core.RequestEvent) error {
 }
 
 // categoryWriteAllowed reports whether the caller may perform `perm` inside
-// `categoryID`. A category-level override is the decisive factor:
-//   - an explicit role list GRANTS access to its members even without the
-//     global permission (the whole point of per-category overrides), and
-//   - an explicit role list DENIES access to anyone not in it — even when the
-//     caller holds the global permission — except root, who bypasses.
-//
-// If the category carries no override for `perm` at all (key absent, or the
-// inherit marker), the caller falls back to their global permission.
-// Resolution order:
+// `categoryID`. Resolution order:
 //  1. root is always allowed; banned is always denied.
-//  2. an explicit category role list: membership grants, non-membership denies.
-//  3. absent key or inherit marker → fall back to the global permission.
+//  2. An account without `CanPostGlobally()` (pending or unverified, non-staff)
+//     may write ONLY where the category explicitly names `guest` in its
+//     override — i.e. an open guest zone like `gostevaya`. Any other override
+//     (or none at all) denies.
+//  3. An explicit category role list GRANTS access to its members even without
+//     the global permission; an explicit role list that excludes the caller
+//     DENIES — even when the caller holds the global permission.
+//  4. Absent key or inherit marker → fall back to the global permission.
 func categoryWriteAllowed(app core.App, acc AccessContext, categoryID string, perm auth.Permission) (bool, error) {
 	if acc.Role == auth.RoleRoot {
 		return true, nil
@@ -755,6 +753,21 @@ func categoryWriteAllowed(app core.App, acc AccessContext, categoryID string, pe
 	}
 	if categoryID == "" {
 		return false, nil
+	}
+
+	// An account that cannot post globally (pending or unverified, non-staff)
+	// may only write where the category explicitly opens its override to `guest`.
+	if !acc.CanPostGlobally() {
+		category, err := app.FindRecordById(categoriesCollectionName, categoryID)
+		if err != nil || category == nil {
+			return false, err
+		}
+		perms := decodePermissionsMap(category.Get("permissions"))
+		override, hasOverride := perms[string(perm)]
+		if !hasOverride || len(override) == 0 || slices.Contains(override, auth.CategoryInheritMarker) {
+			return false, nil
+		}
+		return slices.Contains(override, string(auth.RoleGuest)), nil
 	}
 
 	category, err := app.FindRecordById(categoriesCollectionName, categoryID)

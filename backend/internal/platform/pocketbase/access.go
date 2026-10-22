@@ -34,6 +34,20 @@ type AccessContext struct {
 	Verified bool
 }
 
+// CanPostGlobally reports whether this account may post outside a category
+// that explicitly grants write access through its per-category override.
+// Staff always pass (their mailbox problems must not lock the forum out of
+// management). Everyone else needs active status AND a confirmed email.
+// A guest context always returns false: guests have no email to verify and
+// no global posting right — they may only write where a category names `guest`
+// in its override.
+func (acc AccessContext) CanPostGlobally() bool {
+	if isStaff(acc) {
+		return true
+	}
+	return acc.Status == auth.StatusActive && acc.Verified
+}
+
 // guestAccess is the context used when there is nothing to resolve.
 func guestAccess() AccessContext {
 	return AccessContext{

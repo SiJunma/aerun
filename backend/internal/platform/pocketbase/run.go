@@ -425,21 +425,19 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 
 	// Draft posts (drafts page + in-topic editing).
 	//
-	// The WRITE routes carry PermPostReply, the same key POST /topics/{id}/posts
-	// demands. A draft is a reply that has not been sent yet, so gating it on
-	// anything weaker means the reply gate is bypassable: these routes used to
-	// be bound with enforceIdempotency alone, which consults neither the role nor
-	// the status, and an account narrowed to nothing — banned, or pending — could
-	// draft and then publish straight into the live forum.
+	// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21)
+	// moved the permission decision from the route middleware into the handlers:
+	// upsertDraftHandler and publishDraftHandler call categoryWriteAllowed
+	// directly, which lets pending/unverified accounts write in guest zones and
+	// refuses them elsewhere. The routes themselves only require authentication
+	// (claimFrom) plus idempotency.
 	group.GET("/me/drafts", listMyDraftsHandler)
 	group.GET("/topics/{id}/draft", getDraftHandler)
-	group.PUT("/topics/{id}/draft", upsertDraftHandler).
-		BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
+	group.PUT("/topics/{id}/draft", upsertDraftHandler).BindFunc(enforceIdempotency)
 	// Deleting one's own draft grants nothing, so it stays ungated: a banned
 	// account tidying up its unsent text is harmless.
 	group.DELETE("/drafts/{id}", deleteDraftHandler).BindFunc(enforceIdempotency)
-	group.POST("/drafts/{id}/publish", publishDraftHandler).
-		BindFunc(RequirePermission(auth.PermPostReply)).BindFunc(enforceIdempotency)
+	group.POST("/drafts/{id}/publish", publishDraftHandler).BindFunc(enforceIdempotency)
 
 	// Sprint 4 reputation, subscriptions and audit routes.
 	group.GET("/admin/audit-logs", adminListAuditLogsHandler).BindFunc(RequirePermission(auth.PermViewAuditLog))

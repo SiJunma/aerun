@@ -484,16 +484,13 @@ func createDMHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
-	// Opening a NEW dialogue is the case the owner reported: an unverified
-	// account could start a private conversation with any player and post
-	// under a nickname that proves nothing. Pending accounts are exempt here
-	// for the same reason as everywhere else (see requireVerified): the
-	// "cannot open the first dialogue" rule for pending lives deeper down,
-	// inside the transaction, where the race for the first message is
-	// resolved.
-	if err := requireVerified(acc); err != nil {
-		return err
-	}
+	// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21):
+	// no requireVerified gate here anymore. Whether an account may OPEN a
+	// new conversation is decided by CanPostGlobally() — staff and
+	// active+verified always pass; pending and active+unverified are
+	// refused with a distinct message. Replying in an existing dialogue
+	// (race-matched below) needs no such gate: any participant holding
+	// PermUseDirectMessages may answer.
 
 	raw, err := readBodyLimited(e, maxDMBodyBytes)
 
@@ -627,9 +624,13 @@ func createDMHandler(e *core.RequestEvent) error {
 		// The status comes from the RESOLVED access context, the same source
 		// every other status rule reads (requireNotBanned, requireLiveAccount):
 		// the raw column is not the answer, the resolved one is.
-		if AccessFrom(e).Status == auth.StatusPending {
+		if !acc.CanPostGlobally() {
+			if acc.Status == auth.StatusPending {
+				return 0, nil, forbiddenError(
+					"a pending account cannot start a conversation; it can only answer one that was started for it")
+			}
 			return 0, nil, forbiddenError(
-				"a pending account cannot start a conversation; it can only answer one that was started for it")
+				"email verification is required to start a new conversation; you can answer existing conversations")
 		}
 
 		// 1. Create dm_conversations record.
@@ -942,14 +943,11 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 		return forbiddenError("authentication required")
 	}
 
-	acc := AccessFrom(e)
-	// Replying inside an already open dialogue. The owner ruled that an
-	// unverified member may ANSWER there (only OPENING one is refused), so
-	// this handler keeps its own gate: requireVerified lets pending through
-	// and refuses only accounts whose email was never confirmed.
-	if err := requireVerified(acc); err != nil {
-		return err
-	}
+	// Replying inside an already open dialogue. The unverified-write-rights
+	// architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21) removed the
+	// requireVerified gate here: any participant holding PermUseDirectMessages
+	// may answer, whether pending, unverified or fully verified. Staff can
+	// also write first to an unverified or pending account.
 
 	convID := e.Request.PathValue("id")
 

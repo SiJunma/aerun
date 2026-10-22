@@ -144,15 +144,10 @@ func createPostHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
-	// Same gate as topic creation, and for the same reason: an account whose
-	// email was never confirmed must not be able to write into an existing
-	// discussion. It sits next to the category check on purpose — the category
-	// answers "may this role write HERE", this answers "may this account write
-	// AT ALL"; both must pass.
-	if err := requireVerified(acc); err != nil {
-		return err
-	}
-
+	// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21)
+	// delegates the write decision to categoryWriteAllowed, which correctly
+	// permits guest-zone posting for pending/unverified accounts and refuses
+	// them elsewhere. No requireVerified gate here anymore.
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
 		// `topic == nil` is the whole "not there" test. There is no `deleted`
