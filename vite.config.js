@@ -18,7 +18,8 @@ export default defineConfig({
           ui: ['react-bootstrap', 'bootstrap'],
           icons: ['lucide-react'],
           firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
-        }
+        },
+        external: [],
       }
     }
   }
