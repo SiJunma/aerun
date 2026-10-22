@@ -89,3 +89,7 @@ restore/
 # in the repository — read the output from the terminal instead.
 err.txt
 npmtest.txt
+backend/aerun.exe
+lint_output.txt
+lint_result.txt
+lint_tmp.txt
