@@ -4595,3 +4595,8 @@ kbd {
   border-left: 1px solid var(--border-color);
   opacity: 0.2;
 }
+
+/* DM unread badge on the navbar — Bootstrap hides .badge:empty, ours must stay visible */
+.dm-unread-badge:empty {
+  display: inline-flex !important;
+}

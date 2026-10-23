@@ -205,10 +205,12 @@ const Navigation = () => {
                 <Badge
                   bg="danger"
                   pill
-                  className="position-absolute"
+                  className="position-absolute dm-unread-badge"
                   style={{ top: '0px', right: '-3px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
                   aria-label={t('dm.aria_unread')}
-                />
+                >
+                  •
+                </Badge>
               )}
             </Nav.Link>
           )}
