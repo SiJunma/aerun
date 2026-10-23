@@ -239,6 +239,11 @@ const TopicPage = () => {
     pageLoadTimeRef.current = Date.now();
   }, [id]);
 
+  const [accessError, setAccessError] = React.useState(null);
+  const [accessErrRaw, setAccessErrRaw] = React.useState(null);
+  const [topicNotFound, setTopicNotFound] = React.useState(false);
+  const [postsLoadError, setPostsLoadError] = React.useState(null);
+
   // Слушатель новых сообщений и удалений из RTDB в реальном времени
   useEffect(() => {
     if (!id || !topic || topicNotFound) return;
@@ -330,18 +335,6 @@ const TopicPage = () => {
   // ({ topicId, valueMs } | null). It, not the localStorage read map, is what
   // the jump-to-first-unread effect aims the scroll with.
   const readCutoffRef = useRef(null);
-
-  const [accessError, setAccessError] = React.useState(null);
-  // The SAME failure as `accessError`, but still an Error.
-  //
-  // `accessError` is flattened to `err.message` because that is what the
-  // access-denied card renders — and flattening is exactly where the HTTP status
-  // is lost. The unsent-reply rescue has to ask "404/403 or just a failed
-  // read?", so it reads the original here rather than guessing from prose.
-  // Kept in a separate state so the rendering contract above stays untouched.
-  const [accessErrRaw, setAccessErrRaw] = React.useState(null);
-  const [topicNotFound, setTopicNotFound] = React.useState(false);
-  const [postsLoadError, setPostsLoadError] = React.useState(null);
 
   const loadPosts = React.useCallback(async (overridePage) => {
     setPostsLoadError(null);
