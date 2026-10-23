@@ -241,7 +241,7 @@ const TopicPage = () => {
 
   // Слушатель новых сообщений и удалений из RTDB в реальном времени
   useEffect(() => {
-    if (!id) return;
+    if (!id || !topic || topicNotFound) return;
 
     const sinceTimestamp = pageLoadTimeRef.current || Date.now();
 
@@ -318,7 +318,7 @@ const TopicPage = () => {
       unsubNew();
       unsubRemoved();
     };
-  }, [id, currentPage, ITEMS_PER_PAGE]);
+  }, [id, topic, topicNotFound, currentPage, ITEMS_PER_PAGE]);
 
   const isFetchingPostsRef = useRef(false);
   const activeFetchIdRef = useRef(0);
@@ -371,11 +371,20 @@ const TopicPage = () => {
     isFetchingPostsRef.current = pageToFetch;
 
     try {
-      const { posts: data, pinnedPost, page: resolvedPage, lastPost, readCutoff, targetFound, movedToTopicId } =
+      const { posts: data, pinnedPost, page: resolvedPage, lastPost, readCutoff, targetFound, movedToTopicId, deleted } =
         await fetchSecuredPosts(id, pageToFetch, ITEMS_PER_PAGE, lastVisitMs, targetPostId);
 
       // Если стартовал более свежий запрос, отбрасываем старый ответ!
       if (currentFetchId !== activeFetchIdRef.current) {
+        return [];
+      }
+
+      if (deleted) {
+        if (isMountedRef.current) {
+          setTopic(null);
+          setTopicNotFound(true);
+          setIsPageLoading(false);
+        }
         return [];
       }
 
@@ -522,7 +531,11 @@ const TopicPage = () => {
       currentTopicIdRef.current = id;
     }
 
-    const unsubStats = subscribeToTopicStats(id, (stats, err) => {
+    let unsubStats = null;
+    let cancelled = false;
+
+    unsubStats = subscribeToTopicStats(id, (stats, err) => {
+      if (cancelled) return;
       if (err) {
         // Any error reaches this branch, not just a 404/403: subscribeToTopicStats
         // (forum.js) has already folded 404/403 into `callback(null, null)`, so
@@ -537,6 +550,10 @@ const TopicPage = () => {
         setTopic(null);
         setTopicNotFound(true);
         setIsPageLoading(false);
+        if (unsubStats) {
+          unsubStats();
+          unsubStats = null;
+        }
         return;
       }
       setTopic((prev) => {
@@ -569,7 +586,11 @@ const TopicPage = () => {
     });
 
     return () => {
-      unsubStats();
+      cancelled = true;
+      if (unsubStats) {
+        unsubStats();
+        unsubStats = null;
+      }
     };
   }, [id]);
 
@@ -600,6 +621,8 @@ const TopicPage = () => {
 
   // Load posts whenever topic id or page changes
   useEffect(() => {
+    if (!id || !topic || topicNotFound) return;
+
     // Если эта страница только что была загружена в рамках запроса 'last', предотвращаем повторный запрос
     if (skipNextLoadForPageRef.current === currentPage) {
       skipNextLoadForPageRef.current = null;
@@ -644,7 +667,7 @@ const TopicPage = () => {
 
     setPosts([]);
     loadPosts();
-  }, [id, currentPage, loadPosts, searchParams, readMapReady, user?.uid]);
+  }, [id, topic, topicNotFound, currentPage, loadPosts, searchParams, readMapReady, user?.uid]);
 
   const lastMarkedOffsetRef = useRef(-1);
   useEffect(() => {
@@ -703,12 +726,13 @@ const TopicPage = () => {
   // and GET /me/votes?topic_id=) into one GET /api/aerun/topics/{id}/context
   // (F2 of INPROGRESS_TOPIC_OPEN_READS_AND_DRAFT_SAFETY_PLAN).
   useEffect(() => {
-    if (!user?.uid || !id) return;
+    if (!user?.uid || !id || !topic || topicNotFound) return;
     let cancelled = false;
     (async () => {
       try {
         const ctx = await fetchTopicContext(id);
         if (!cancelled && isMountedRef.current) {
+          if (ctx?.deleted) return;
           setMyDraft(decorateDraft(ctx.draft));
           setIsSubscribed(!!ctx.subscribed);
           setMyVotes(ctx.votes || {});
@@ -723,18 +747,18 @@ const TopicPage = () => {
     // profile), and it is only called inside the async load below — listing it
     // would re-fetch the draft on every render instead of on a uid/id change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, id]);
+  }, [user?.uid, id, topic, topicNotFound]);
 
   // Track unread quote and mention notifications for THIS topic (Variant B).
   // Filtered on the server (?unread=true&type=quote&topic_id=id), so the callback
   // directly yields active quotes without pulling the full 100-record user inbox.
   useEffect(() => {
-    if (!user?.uid || !id) return;
+    if (!user?.uid || !id || !topic || topicNotFound) return;
     const unsub = subscribeToTopicNotifications(user.uid, id, (activeQuotes) => {
       setUnreadQuotes(activeQuotes || []);
     });
     return () => unsub();
-  }, [user?.uid, id]);
+  }, [user?.uid, id, topic, topicNotFound]);
 
   useEffect(() => {
     if (unreadQuotes.length === 0 || posts.length === 0) return;

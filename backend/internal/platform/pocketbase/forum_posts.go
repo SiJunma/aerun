@@ -313,8 +313,9 @@ func createPostHandler(e *core.RequestEvent) error {
 // construction: a post either has a row and is counted, or it does not exist.
 func listPostsHandler(e *core.RequestEvent) error {
 	topicID := e.Request.PathValue("id")
-	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
-	if err != nil || topic == nil {
+	acc := AccessFrom(e)
+	allowed, topic, err := canViewTopic(e.App, acc, topicID)
+	if err != nil || !allowed || topic == nil {
 		// Deleted / missing topic answers 200 with a deleted flag instead of
 		// a cascade of 404s: the client gets one successful response.
 		return e.JSON(http.StatusOK, map[string]any{

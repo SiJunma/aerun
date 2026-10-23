@@ -62,10 +62,15 @@ func getTopicContextHandler(e *core.RequestEvent) error {
 		return forbiddenError("banned accounts cannot read topic context")
 	}
 
-	// Hidden or missing topic is 404, byte-identical either way.
+	// Hidden or missing topic answers 200 with a deleted flag instead of
+	// a cascade of 404s, byte-identical either way.
 	allowed, topic, err := canViewTopic(e.App, acc, id)
 	if err != nil || !allowed || topic == nil {
-		return notFoundError("topic not found")
+		return e.JSON(http.StatusOK, map[string]any{
+			"deleted":    true,
+			"topic_id":   id,
+			"request_id": requestIDFrom(e),
+		})
 	}
 
 	// Guest: the empty shape, still 200. The visibility check above already
