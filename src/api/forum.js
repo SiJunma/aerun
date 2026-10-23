@@ -136,6 +136,10 @@ export const fetchTopicStats = async (topicId) => {
   if (!topicId) return null;
   const res = await sendApi(`/api/aerun/topics/${topicId}/stats`);
   if (!res) return null;
+  // Deleted / missing topic answers 200 {deleted: true} instead of a cascade
+  // of 404s. Fold into null so the page renders the "Topic Not Found" card
+  // via the existing !stats branch in TopicPage.
+  if (res.deleted) return null;
   const createdDate = res.created || res.created_at || null;
   const lastPostDate = res.last_post_at || res.last_post_created || createdDate;
   return {

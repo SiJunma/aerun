@@ -315,7 +315,14 @@ func listPostsHandler(e *core.RequestEvent) error {
 	topicID := e.Request.PathValue("id")
 	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
 	if err != nil || topic == nil {
-		return notFoundError("topic not found")
+		// Deleted / missing topic answers 200 with a deleted flag instead of
+		// a cascade of 404s: the client gets one successful response.
+		return e.JSON(http.StatusOK, map[string]any{
+			"deleted":     true,
+			"topic_id":    topicID,
+			"items":       []map[string]any{},
+			"request_id":  requestIDFrom(e),
+		})
 	}
 
 	settings := loadForumSettings(e.App)

@@ -44,8 +44,12 @@ type CategoryGroupRow struct {
 	LegacyID string
 	// TargetID is DeriveID(SpaceCategoryGroup, LegacyID).
 	TargetID string
-	// Title is the collapsed display title.
-	Title     string
+	// Title is the collapsed display title (Russian wins, English fallback).
+	Title string
+	// TitleI18n holds the full legacy {en, ru} map for the title_i18n JSON
+	// column. English is preserved here even when it is not the collapsed
+	// display value.
+	TitleI18n map[string]string
 	SortOrder int
 	CreatedAt string
 	UpdatedAt string
@@ -66,6 +70,11 @@ type CategoryRow struct {
 	// Title and Description are the collapsed legacy label maps.
 	Title       string
 	Description string
+	// TitleI18n / DescriptionI18n hold the full legacy {en, ru} maps for the
+	// name_i18n / description_i18n JSON columns. English is preserved here even
+	// when it is not the collapsed display value.
+	TitleI18n       map[string]string
+	DescriptionI18n map[string]string
 	// TitleCode / DescriptionCode / AllowedRolesCode explain each collapse.
 	TitleCode        string
 	DescriptionCode  string
@@ -129,6 +138,7 @@ func BuildCategoryPlan(plan *ImportPlan, roleIDs []string) *CategoryPlan {
 		}
 		raw := collapseLabelMap(fields["title"])
 		row.Title, row.TitleCode = raw.value, raw.code
+		row.TitleI18n = labelMapToStrings(fields["title"])
 		row.SortOrder = numberField(fields, "order")
 
 		if row.Title == "" {
@@ -157,8 +167,10 @@ func BuildCategoryPlan(plan *ImportPlan, roleIDs []string) *CategoryPlan {
 
 		title := collapseLabelMap(fields["title"])
 		row.Title, row.TitleCode = title.value, title.code
+		row.TitleI18n = labelMapToStrings(fields["title"])
 		desc := collapseLabelMap(fields["description"])
 		row.Description, row.DescriptionCode = desc.value, desc.code
+		row.DescriptionI18n = labelMapToStrings(fields["description"])
 
 		if row.Title == "" {
 			// categories.name is Required, so a nameless category cannot be
@@ -249,6 +261,25 @@ type collapsedLabel struct {
 	value string
 	// code is the finding code when something was lost, "" otherwise.
 	code string
+}
+
+// labelMapToStrings extracts the legacy {en, ru} label map as map[string]string.
+// Returns nil when the value is absent or not a map.
+func labelMapToStrings(raw any) map[string]string {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			out[k] = strings.TrimSpace(s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // collapseLabelMap reduces the legacy bilingual label to the single string the

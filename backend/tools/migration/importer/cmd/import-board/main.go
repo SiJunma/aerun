@@ -469,6 +469,7 @@ func categoryGroupUpserts(cp *importer.CategoryPlan) []pb.CategoryGroupUpsert {
 		out = append(out, pb.CategoryGroupUpsert{
 			TargetID:  row.TargetID,
 			Title:     row.Title,
+			TitleI18n: row.TitleI18n,
 			SortOrder: row.SortOrder,
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
@@ -486,6 +487,8 @@ func categoryUpserts(cp *importer.CategoryPlan) []pb.CategoryUpsert {
 			Name:         row.Title,
 			Slug:         row.Slug,
 			Description:  row.Description,
+			NameI18n:     row.TitleI18n,
+			DescriptionI18n: row.DescriptionI18n,
 			SortOrder:    row.SortOrder,
 			AllowedRoles: row.AllowedRoles,
 			CreatedAt:    row.CreatedAt,

@@ -356,9 +356,9 @@ func TestRewriteQuotePostIDs(t *testing.T) {
 	fp := BuildForumPlan(plan, alwaysYes, alwaysYes)
 	p2 := findPost(t, fp, "p2")
 
-	want := `ответ [quote="#p` + DeriveID(SpacePost, "p1") + `,t1,Author"]цитата[/quote] продолжение`
+	want := `ответ [quote="#p` + DeriveID(SpacePost, "p1") + `,t` + DeriveID(SpaceTopic, "1") + `,Author"]цитата[/quote] продолжение`
 	if p2.Content != want {
-		t.Fatalf("legacy quote id not rewritten to derived id:\n got %q\nwant %q", p2.Content, want)
+		t.Fatalf("legacy quote ids not rewritten to derived ids:\n got %q\nwant %q", p2.Content, want)
 	}
 
 	// A `#p` marker that is not part of a quote tag must be left alone, and the
@@ -374,7 +374,7 @@ func TestRewriteQuotePostIDs(t *testing.T) {
 	// same post produce the same derived id each time.
 	plan.Posts["p2"]["content"] = `[quote="#pp1,t1,A"]первая[/quote] и [quote="#pp1,t1,A"]вторая[/quote]`
 	fp3 := BuildForumPlan(plan, alwaysYes, alwaysYes)
-	wantMulti := `[quote="#p` + DeriveID(SpacePost, "p1") + `,t1,A"]первая[/quote] и [quote="#p` + DeriveID(SpacePost, "p1") + `,t1,A"]вторая[/quote]`
+	wantMulti := `[quote="#p` + DeriveID(SpacePost, "p1") + `,t` + DeriveID(SpaceTopic, "1") + `,A"]первая[/quote] и [quote="#p` + DeriveID(SpacePost, "p1") + `,t` + DeriveID(SpaceTopic, "1") + `,A"]вторая[/quote]`
 	if got := findPost(t, fp3, "p2").Content; got != wantMulti {
 		t.Fatalf("multiple quotes not all rewritten:\n got %q\nwant %q", got, wantMulti)
 	}
