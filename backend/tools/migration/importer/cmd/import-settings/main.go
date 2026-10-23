@@ -5,7 +5,7 @@
 // but the importer never wrote the real values there — they were reported as
 // PB_SETTINGS_* env vars instead. This command closes the gap.
 //
-//\tgo run ./tools/migration/importer/cmd/import-settings \\\n\t    -data pb_data -ledger migration-data/stage-2.json
+// \tgo run ./tools/migration/importer/cmd/import-settings \\\n\t    -data pb_data -ledger migration-data/stage-2.json
 //
 // Re-running converges: every field is compared against the stored value
 // before writing, so a second run reports no change.
@@ -30,7 +30,7 @@ func main() {
 		dataDir    = flag.String("data", "", "PocketBase data directory to write into")
 		ledgerPath = flag.String("ledger", "", "staging ledger JSON (from cli.mjs stage)")
 		authPath   = flag.String("auth", "", "official Firebase Auth export JSON (optional)")
-		dryRun = flag.Bool("dry-run", false, "plan and report without writing")
+		dryRun     = flag.Bool("dry-run", false, "plan and report without writing")
 	)
 	flag.Parse()
 

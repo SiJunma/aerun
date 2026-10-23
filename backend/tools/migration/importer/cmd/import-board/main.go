@@ -482,17 +482,17 @@ func categoryUpserts(cp *importer.CategoryPlan) []pb.CategoryUpsert {
 	out := make([]pb.CategoryUpsert, 0, len(cp.CategoryRows))
 	for _, row := range cp.CategoryRows {
 		out = append(out, pb.CategoryUpsert{
-			TargetID:     row.TargetID,
-			GroupID:      row.GroupID,
-			Name:         row.Title,
-			Slug:         row.Slug,
-			Description:  row.Description,
-			NameI18n:     row.TitleI18n,
+			TargetID:        row.TargetID,
+			GroupID:         row.GroupID,
+			Name:            row.Title,
+			Slug:            row.Slug,
+			Description:     row.Description,
+			NameI18n:        row.TitleI18n,
 			DescriptionI18n: row.DescriptionI18n,
-			SortOrder:    row.SortOrder,
-			AllowedRoles: row.AllowedRoles,
-			CreatedAt:    row.CreatedAt,
-			UpdatedAt:    row.UpdatedAt,
+			SortOrder:       row.SortOrder,
+			AllowedRoles:    row.AllowedRoles,
+			CreatedAt:       row.CreatedAt,
+			UpdatedAt:       row.UpdatedAt,
 		})
 	}
 	return out

@@ -552,9 +552,9 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		// render the "topic not found" card without round-tripping every
 		// endpoint.
 		return e.JSON(http.StatusOK, map[string]any{
-			"deleted":     true,
-			"topic_id":    id,
-			"request_id":  requestIDFrom(e),
+			"deleted":    true,
+			"topic_id":   id,
+			"request_id": requestIDFrom(e),
 		})
 	}
 
@@ -616,9 +616,9 @@ func getTopicHandler(e *core.RequestEvent) error {
 	allowed, topic, err := canViewTopic(e.App, acc, id)
 	if err != nil || !allowed || topic == nil {
 		return e.JSON(http.StatusOK, map[string]any{
-			"deleted":     true,
-			"topic_id":    id,
-			"request_id":  requestIDFrom(e),
+			"deleted":    true,
+			"topic_id":   id,
+			"request_id": requestIDFrom(e),
 		})
 	}
 

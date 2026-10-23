@@ -69,7 +69,7 @@ func rewriteQuotePostIDs(content string) string {
 			legacyID := match[loc[0]+2 : loc[1]]
 			match = match[:loc[0]] + "#p" + DeriveID(SpacePost, legacyID) + match[loc[1]:]
 		}
-			// Replace legacy topic id ,t<legacyTopicId><sep> with derived target id.
+		// Replace legacy topic id ,t<legacyTopicId><sep> with derived target id.
 		// The `t` is a markup marker and is preserved; only the id part is rewritten.
 		topicLoc := quoteTopicIDOnly.FindStringIndex(match)
 		if topicLoc != nil {

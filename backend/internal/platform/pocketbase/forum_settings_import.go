@@ -13,7 +13,6 @@
 // This writer closes the gap: it reads settings/global from the staging
 // ledger and upserts the values into forum_settings (id "forumsettings01").
 // It is idempotent: a second run over the same export reports no change.
-//
 package pocketbase
 
 import (
@@ -33,12 +32,12 @@ type SettingsUpsert struct {
 	ForumName      map[string]string
 	WelcomeMessage map[string]string
 	// Text
-	LogoURL         string
-	BgLight         string
-	BgDark          string
-	BgNeutral       string
-	BgOpacityLight  float64
-	BgOpacityDark   float64
+	LogoURL          string
+	BgLight          string
+	BgDark           string
+	BgNeutral        string
+	BgOpacityLight   float64
+	BgOpacityDark    float64
 	BgOpacityNeutral float64
 	// Feature flags
 	RegistrationEnabled   bool

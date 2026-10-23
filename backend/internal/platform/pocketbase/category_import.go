@@ -52,10 +52,10 @@ type CategoryGroupUpsert struct {
 type CategoryUpsert struct {
 	TargetID string
 	// GroupID is the referenced group's derived target id, "" for unassigned.
-	GroupID      string
-	Name         string
-	Slug         string
-	Description  string
+	GroupID     string
+	Name        string
+	Slug        string
+	Description string
 	// NameI18n holds the full {en, ru} label map for name_i18n. See TitleI18n
 	// for nil semantics.
 	NameI18n map[string]string

@@ -318,10 +318,10 @@ func listPostsHandler(e *core.RequestEvent) error {
 		// Deleted / missing topic answers 200 with a deleted flag instead of
 		// a cascade of 404s: the client gets one successful response.
 		return e.JSON(http.StatusOK, map[string]any{
-			"deleted":     true,
-			"topic_id":    topicID,
-			"items":       []map[string]any{},
-			"request_id":  requestIDFrom(e),
+			"deleted":    true,
+			"topic_id":   topicID,
+			"items":      []map[string]any{},
+			"request_id": requestIDFrom(e),
 		})
 	}
 
