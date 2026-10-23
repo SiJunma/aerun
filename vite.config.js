@@ -17,7 +17,6 @@ export default defineConfig({
           vendor: ['react', 'react-dom', 'react-router-dom'],
           ui: ['react-bootstrap', 'bootstrap'],
           icons: ['lucide-react'],
-          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
         }
       }
     }
