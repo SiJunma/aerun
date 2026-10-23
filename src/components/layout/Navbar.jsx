@@ -110,11 +110,11 @@ const Navigation = () => {
   };
 
   return (
-    <Navbar 
-      bg="dark" 
-      variant="dark" 
-      expand="lg" 
-      sticky="top" 
+    <Navbar
+      bg="dark"
+      variant="dark"
+      expand="lg"
+      sticky="top"
       expanded={expanded}
       onToggle={(val) => setExpanded(val)}
       className="mb-0 shadow-sm border-bottom border-secondary border-opacity-25"
@@ -122,19 +122,19 @@ const Navigation = () => {
       <Container className="d-flex align-items-center">
         <div className="d-flex align-items-center">
           <div className="position-relative d-lg-none">
-            <Navbar.Toggle 
-              aria-controls="basic-navbar-nav" 
+            <Navbar.Toggle
+              aria-controls="basic-navbar-nav"
               className="me-2 border-0 p-1"
               onClick={() => setExpanded(!expanded)}
             />
             {unreadTopicsCount > 0 && (
-              <span 
-                className="position-absolute rounded-circle bg-warning shadow-sm" 
-                style={{ 
-                  width: '10px', 
-                  height: '10px', 
-                  top: '5px', 
-                  right: '11px', 
+              <span
+                className="position-absolute rounded-circle bg-warning shadow-sm"
+                style={{
+                  width: '10px',
+                  height: '10px',
+                  top: '5px',
+                  right: '11px',
                   border: '2px solid var(--nav-bg)',
                   pointerEvents: 'none'
                 }}
@@ -143,9 +143,9 @@ const Navigation = () => {
           </div>
           <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="d-flex align-items-center gap-2">
             {(activeDesign?.logoUrl || settings?.logoUrl) && (
-              <img 
-                src={activeDesign?.logoUrl || settings.logoUrl} 
-                alt="Logo" 
+              <img
+                src={activeDesign?.logoUrl || settings.logoUrl}
+                alt="Logo"
                 style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
               />
             )}
@@ -205,12 +205,9 @@ const Navigation = () => {
                 <Badge
                   bg="danger"
                   pill
-                  className="position-absolute dm-unread-badge"
-                  style={{ top: '0px', right: '-3px', fontSize: '0.6rem', minWidth: '16px', padding: '2px 4px' }}
+                  className="dm-unread-badge"
                   aria-label={t('dm.aria_unread')}
-                >
-                  •
-                </Badge>
+                />
               )}
             </Nav.Link>
           )}
@@ -235,9 +232,9 @@ const Navigation = () => {
                 if (isOpen) setExpanded(false);
               }}
             >
-              <NavDropdown.Item 
-                as={Link} 
-                to={`/profile/${user.uid}`} 
+              <NavDropdown.Item
+                as={Link}
+                to={`/profile/${user.uid}`}
                 onClick={() => setExpanded(false)}
                 className="d-flex align-items-center gap-2"
               >
@@ -249,9 +246,9 @@ const Navigation = () => {
                   inbox, not a section of the forum — and a top-level link to
                   somebody's private working notes is the wrong thing to put
                   next to Members and Admin. */}
-              <NavDropdown.Item 
-                as={Link} 
-                to="/drafts" 
+              <NavDropdown.Item
+                as={Link}
+                to="/drafts"
                 onClick={() => setExpanded(false)}
                 className="d-flex align-items-center gap-2"
               >
@@ -273,20 +270,20 @@ const Navigation = () => {
                 className="no-caret d-none d-lg-block"
               >
                 <NavDropdown.Item onClick={() => { changeGuestTheme('light'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'light' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'light' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {theme === 'light' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
                   {t('profile.theme_light')}
                 </NavDropdown.Item>
                 <NavDropdown.Item onClick={() => { changeGuestTheme('dark'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'dark' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'dark' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {theme === 'dark' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
                   {t('profile.theme_dark')}
                 </NavDropdown.Item>
                 <NavDropdown.Item onClick={() => { changeGuestTheme('neutral'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'neutral' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'neutral' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {theme === 'neutral' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
                   {t('profile.theme_neutral')}
                 </NavDropdown.Item>
               </NavDropdown>
 
-              <Nav.Link 
+              <Nav.Link
                 as={settings?.whitelistMode ? Link : 'span'}
                 to={settings?.whitelistMode ? "/login" : undefined}
                 role={settings?.whitelistMode ? undefined : "button"}
@@ -296,7 +293,7 @@ const Navigation = () => {
                     setShowAuthModal(true);
                   }
                   setExpanded(false);
-                }} 
+                }}
                 className="fw-semibold text-light px-2"
                 style={{ cursor: 'pointer' }}
               >
@@ -347,7 +344,7 @@ const Navigation = () => {
               </Nav.Link>
             )}
           </Nav>
-          
+
           {!user && (
             <Nav className="d-lg-none mt-2 pt-2 border-top border-secondary border-opacity-25">
               <NavDropdown
@@ -362,15 +359,15 @@ const Navigation = () => {
                 className="no-caret"
               >
                 <NavDropdown.Item onClick={() => { changeGuestTheme('light'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'light' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'light' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {theme === 'light' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
                   {t('profile.theme_light')}
                 </NavDropdown.Item>
                 <NavDropdown.Item onClick={() => { changeGuestTheme('dark'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'dark' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'dark' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {theme === 'dark' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
                   {t('profile.theme_dark')}
                 </NavDropdown.Item>
                 <NavDropdown.Item onClick={() => { changeGuestTheme('neutral'); setExpanded(false); }} className={`d-flex align-items-center gap-2 ${theme === 'neutral' ? 'fw-bold text-primary' : ''}`}>
-                  {theme === 'neutral' ? <Check size={16} /> : <div style={{width: 16}}></div>}
+                  {theme === 'neutral' ? <Check size={16} /> : <div style={{ width: 16 }}></div>}
                   {t('profile.theme_neutral')}
                 </NavDropdown.Item>
               </NavDropdown>
@@ -378,10 +375,10 @@ const Navigation = () => {
           )}
         </Navbar.Collapse>
       </Container>
-      
-      <AuthModal 
-        show={showAuthModal} 
-        onHide={() => setShowAuthModal(false)} 
+
+      <AuthModal
+        show={showAuthModal}
+        onHide={() => setShowAuthModal(false)}
         initialMode={authModalMode}
       />
     </Navbar>

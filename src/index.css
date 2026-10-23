@@ -4597,6 +4597,15 @@ kbd {
 }
 
 /* DM unread badge on the navbar — Bootstrap hides .badge:empty, ours must stay visible */
+.dm-unread-badge {
+  top: 3px;
+  right: 0px;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  position: absolute;
+}
+
 .dm-unread-badge:empty {
   display: inline-flex !important;
 }
