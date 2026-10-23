@@ -16,7 +16,7 @@ HOST = "202.148.54.64"
 DEPLOY_USER = "deploy"
 ROOT_USER = "root"
 KEY = r"C:\Users\alina\.ssh\aerun_deploy"
-BRANCH = "feature/pocketbase-migration"
+BRANCH = "main"
 PROD_URL = "https://aerun-world.com"
 HEALTH_PATH = "/api/aerun/health"
 CHUNK = 256 << 10
@@ -248,7 +248,7 @@ def step_build_frontend() -> None:
     log("== 2. build frontend ==")
     env = dict(os.environ)
     env["VITE_POCKETBASE_URL"] = PROD_URL
-    run(["npm", "run", "build"], env=env)
+    run("npm run build", env=env)
     index = os.path.join(ROOT, "dist", "index.html")
     if not os.path.isfile(index):
         raise Fail("dist/index.html missing after build")
