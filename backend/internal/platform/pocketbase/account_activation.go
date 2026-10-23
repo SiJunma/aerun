@@ -106,6 +106,10 @@ func registerOAuth2RejectedDeletedHook(app core.App) {
 			// creates the ExternalAuth link, and saves — all inside its own
 			// transaction.
 			e.Record = fresh
+			// Tell the staff a newcomer arrived — the Firebase onUserCreated
+			// parity. Best-effort: the account already exists, so a failed
+			// notice is logged and the sign-in still succeeds.
+			notifyStaffOfRegistration(app, fresh, "")
 			return e.Next()
 		}
 
@@ -124,6 +128,10 @@ func registerOAuth2RejectedDeletedHook(app core.App) {
 			}
 
 			e.Record = fresh
+			// Tell the staff a newcomer arrived — the Firebase onUserCreated
+			// parity. Best-effort: the account already exists, so a failed
+			// notice is logged and the sign-in still succeeds.
+			notifyStaffOfRegistration(app, fresh, "")
 			return e.Next()
 		}
 
