@@ -551,11 +551,7 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		// a cascade of 404s: the client gets one successful response and can
 		// render the "topic not found" card without round-tripping every
 		// endpoint.
-		return e.JSON(http.StatusOK, map[string]any{
-			"deleted":    true,
-			"topic_id":   id,
-			"request_id": requestIDFrom(e),
-		})
+		return notFoundError("topic not found")
 	}
 
 	payload := map[string]any{
@@ -615,11 +611,7 @@ func getTopicHandler(e *core.RequestEvent) error {
 	acc := AccessFrom(e)
 	allowed, topic, err := canViewTopic(e.App, acc, id)
 	if err != nil || !allowed || topic == nil {
-		return e.JSON(http.StatusOK, map[string]any{
-			"deleted":    true,
-			"topic_id":   id,
-			"request_id": requestIDFrom(e),
-		})
+		return notFoundError("topic not found")
 	}
 
 	payload := topicPayload(topic)

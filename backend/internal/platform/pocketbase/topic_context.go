@@ -65,13 +65,7 @@ func getTopicContextHandler(e *core.RequestEvent) error {
 	// Hidden or missing topic is 404, byte-identical either way.
 	allowed, topic, err := canViewTopic(e.App, acc, id)
 	if err != nil || !allowed || topic == nil {
-		// Deleted / missing topic answers 200 with a deleted flag instead of
-		// a cascade of 404s: the client gets one successful response.
-		return e.JSON(http.StatusOK, map[string]any{
-			"deleted":    true,
-			"topic_id":   id,
-			"request_id": requestIDFrom(e),
-		})
+		return notFoundError("topic not found")
 	}
 
 	// Guest: the empty shape, still 200. The visibility check above already
