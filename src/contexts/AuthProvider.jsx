@@ -1225,6 +1225,7 @@ export const AuthProvider = ({ children }) => {
           // root-only.
           const effectiveRoleId = user ? profile?.role_id || 'player' : 'guest';
           const isRoot = effectiveRoleId === 'root' || effectiveRoleId === CHIEF_ADMIN_ID;
+          if (isRoot) return true; // root bypasses any explicit category override
           if (override.length === 0) {
             return isRoot; // root-only override
           }
