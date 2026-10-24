@@ -16,54 +16,53 @@
 }
 ```
 
-Однако в коде и в схеме коллекции `posts` поле `content` имеет `Max: 65536` (миграция `1766100000_forum_command_layer.go`). Ошибка воспроизводилась и локально, и на продакшене.
+Аналогичная проблема с личными сообщениями >1024 символов:
+```
+{
+  "code": "validation_max_text_constraint",
+  "message": "Must be no more than 1024 character(s).",
+  "params": { "max": 1024 }
+}
+```
 
 ## Причина (найдена и исправлена)
-**Корневая причина не была в поле `posts.content`**, как предполагалось изначально.
+**Корневая причина не была в поле `posts.content`.**
 
 PocketBase использует систему идемпотентности (`internal/platform/pocketbase/idempotency.go`). После успешного сохранения поста через `txApp.Save(post)`, функция `runCommand` маршалит весь ответ (включая полное содержимое поста в поле `content`) в JSON-конверт `idemEnvelope{Status, Body}` и пытается сохранить его в таблицу `idempotency_keys` в колонку `response_json`.
 
-Колонка `idempotency_keys.response_json` имела `max=0`, которую PocketBase интерпретировал как лимит 5000 символов. Когда ответ conten post'а превышал 5000 символов, PocketBase отвергал сохранение с ошибкой `validation_max_text_constraint` на поле `response_json`.
+Колонка `idempotency_keys.response_json` имела `max=0`, которую PocketBase интерпретировал как **лимит 5000 символов**. Когда ответ с постом превышал 5000 символов, PocketBase отвергал сохранение с `validation_max_text_constraint` на поле `response_json` — несмотря на то, что сама запись поста уже была успешно записана в БД.
 
-**Это объясняло всё:**
-- `txApp.Save(post)` проходил успешно (пост сохранялся в БД)
-- Ошибка возникала в `writeCommandResult` при попытке сохранить ответ в `idempotency_keys.response_json`
-- Ошибка появлялась только для постов >5000 символов
-- Локально и на продакшене проблема воспроизводилась одинаково
+Аналогично, колонка `dm_conversations.last_message` имела `max=1024`, что блокировало длинные личные сообщения.
 
 ## Исправление
-В коллекции `idempotency_keys` колонку `response_json` zmienено с `max=0` на `max=1000000` (пraktisch безлимит).
-
-**Выполнено на:**
-- Локальной БД: `backend/pb_data/data.db` — `UPDATE _collections SET fields=... WHERE name='idempotency_keys'`
-- Продакшене (VPS): необходимо применить аналогичное изменение
+Создана миграция `1778828403_fix_idempotency_and_dm_max.go`, которая меняет:
+- `idempotency_keys.response_json`: `max=0` → `max=1000000`
+- `dm_conversations.last_message`: `max=1024` → `max=1000000`
 
 ## Что проверялось и НЕ помогло (до нахождения причины)
 | Что проверялось | Результат |
 |-----------------|-----------|
-| Код Go (Max: 65536, ValidatePostContent) | ✅ Верно, лимита 5000 нет |
+| Код Go (`posts.content` Max: 65536, `ValidatePostContent`) | ✅ Верно, лимита 5000 нет |
 | Схема `posts.content` в БД | ✅ max=65536 |
-| Миграция 1778828401 | ✅ Применена, не помогла |
-| Миграция 1778828402 | ✅ Применена, не помогла |
 | Перезапуск сервера (локально + прод) | ❌ Не помогло |
 | Удаление WAL-файлов | ❌ Не помогло |
 | Удаление дубликата БД | ❌ Не помогло |
 | Разные бинарники (.local-run vs backend) | ✅ Исправлено, не помогло |
 | `max_chars_per_post` (0 → 65536 → 50) | ❌ Не влияет |
-| Стандартное API PocketBase | ✅ Работает (403, не 400) |
+| Стандартное API PocketBase (`/api/collections/posts/records/{id}`) | ✅ Работает (403 "Only superusers", не 400 validation) |
 
 ## Связанные изменения в коде
-- `backend/internal/migrations/1778828401_fix_post_content_and_author_ref.go` — миграция (фикс content max + backfill last_post_author_ref)
-- `backend/internal/migrations/1778828402_reload_posts_schema.go` — миграция (фикс schema reload, не была нужна)
+- `backend/internal/migrations/1778828401_fix_post_content_and_author_ref.go` — миграция (фикс `posts.content` max + backfill `last_post_author_ref`)
+- `backend/internal/migrations/1778828402_reload_posts_schema.go` — миграция (форсированный `app.Save()`, не была нужна)
+- `backend/internal/migrations/1778828403_fix_idempotency_and_dm_max.go` — **основная миграция исправления** (`response_json.max` 0→1000000, `last_message.max` 1024→1000000)
 - `backend/internal/platform/pocketbase/forum_import.go` — TopicUpsert получил поля AuthorRef
 - `backend/tools/migration/importer/cmd/import-board/main.go` — проброс полей в TopicUpsert
 - `backend/tools/migration/importer/forum.go` — TopicRow/PostRow получили AuthorRef-поля
 
 ## Что нужно сделать на продакшене (VPS)
-1. **Критически важно:** Изменить `response_json.max` с 0 на 1000000 в коллекции `idempotency_keys`
-2. Перезапустить сервис `aerun.service`
-3. Проверить редактирование поста >5000 символов на `https://aerun-world.com`
+1. Применить миграцию `1778828403` (она уже задеплоена с кодом, нужно перезапустить сервер)
+2. Перезапустить сервис `aerun.service` на VPS
+3. Проверить редактирование поста >5000 символов и отправку длинного ЛС на `https://aerun-world.com`
 
-## Статус текущих изменений в git
-- Коммит `4bbee79`: fix: force reload posts schema into PocketBase memory cache (добавлена миграция 1778828402, INCIDENT файл)
+## Git
 - Все изменения закоммичены и запушены на `origin/main`
