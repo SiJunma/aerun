@@ -502,21 +502,21 @@ func topicUpserts(fp *importer.ForumPlan) []pb.TopicUpsert {
 	out := make([]pb.TopicUpsert, 0, len(fp.TopicRows))
 	for _, row := range fp.TopicRows {
 		out = append(out, pb.TopicUpsert{
-			TargetID:         row.TargetID,
-			CategoryID:       row.CategoryID,
-			AuthorID:         row.AuthorID,
-			Title:            row.Title,
-			Locked:           row.Locked,
-			Pinned:           row.Pinned,
-			PostsCount:       row.PostsCount,
-			LastPostID:       row.LastPostID,
-			LastPostCreated:  row.LastPostCreated,
-			LastPostAuthorID:         row.LastPostAuthorID,
+			TargetID:                  row.TargetID,
+			CategoryID:                row.CategoryID,
+			AuthorID:                  row.AuthorID,
+			Title:                     row.Title,
+			Locked:                    row.Locked,
+			Pinned:                    row.Pinned,
+			PostsCount:                row.PostsCount,
+			LastPostID:                row.LastPostID,
+			LastPostCreated:           row.LastPostCreated,
+			LastPostAuthorID:          row.LastPostAuthorID,
 			LastPostAuthorCharacterID: row.LastPostAuthorCharacterID,
-			LastPostAuthorKind:       row.LastPostAuthorKind,
+			LastPostAuthorKind:        row.LastPostAuthorKind,
 			LastPostGuestDisplayName:  row.LastPostGuestDisplayName,
-			CreatedAt:        row.CreatedAt,
-			UpdatedAt:        row.UpdatedAt,
+			CreatedAt:                 row.CreatedAt,
+			UpdatedAt:                 row.UpdatedAt,
 		})
 	}
 	return out

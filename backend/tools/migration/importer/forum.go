@@ -99,20 +99,20 @@ type TopicRow struct {
 	// newest post. An empty LastPostID means the topic has no posts yet, which
 	// the target allows (last_post_created then keeps a non-null tombstone
 	// timestamp; the keyset index must never meet a NULL).
-	LastPostID        string
-	LastPostCreated   string
-	LastPostAuthorID  string
+	LastPostID       string
+	LastPostCreated  string
+	LastPostAuthorID string
 	// LastPostAuthorKind / LastPostAuthorCharacterID / LastPostGuestDisplayName
 	// are the last-post AuthorRef variant: they let the frontend resolve the
 	// name/avatar of the last post's author without a second lookup.
-	LastPostAuthorKind      string
+	LastPostAuthorKind        string
 	LastPostAuthorCharacterID string
-	LastPostGuestDisplayName string
-	CreatedAt         string
-	UpdatedAt         string
-	Reputation        int
-	AuthorCharacterID string
-	Findings          map[string]string
+	LastPostGuestDisplayName  string
+	CreatedAt                 string
+	UpdatedAt                 string
+	Reputation                int
+	AuthorCharacterID         string
+	Findings                  map[string]string
 }
 
 // PostRow is the target state of one posts record.
@@ -133,11 +133,11 @@ type PostRow struct {
 	// AuthorKind / GuestDisplayName are the post's AuthorRef variant: they
 	// feed the topic's last-post projection so the frontend can resolve the
 	// last speaker's name/avatar.
-	AuthorKind      string
+	AuthorKind       string
 	GuestDisplayName string
-	CreatedAt       string
-	UpdatedAt       string
-	Findings        map[string]string
+	CreatedAt        string
+	UpdatedAt        string
+	Findings         map[string]string
 }
 
 // ForumPlan is the full result of planning L5 + L6 + drafts.
@@ -399,7 +399,7 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			// AuthorRef variant of the post: feeds the topic's last-post
 			// projection so the frontend can resolve the last speaker's
 			// name/avatar.
-			AuthorKind:      strings.TrimSpace(stringField(p.fields, "author_kind")),
+			AuthorKind:       strings.TrimSpace(stringField(p.fields, "author_kind")),
 			GuestDisplayName: strings.TrimSpace(stringField(p.fields, "guest_display_name")),
 		}
 		if ref := strings.TrimSpace(stringField(p.fields, "author_character_id")); ref != "" {

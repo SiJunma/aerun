@@ -52,9 +52,9 @@ type TopicUpsert struct {
 	// LastPostAuthorKind / LastPostAuthorCharacterID / LastPostGuestDisplayName
 	// are the last-post AuthorRef variant: they let the frontend resolve the
 	// name/avatar of the last post's author without a second lookup.
-	LastPostAuthorKind      string
+	LastPostAuthorKind        string
 	LastPostAuthorCharacterID string
-	LastPostGuestDisplayName string
+	LastPostGuestDisplayName  string
 	// CreatedAt / UpdatedAt override the Autodate columns. The topics collection
 	// uses AutodateField, so a historical date has to be written through SetRaw.
 	CreatedAt string

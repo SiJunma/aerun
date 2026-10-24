@@ -1,13 +1,13 @@
 // 1778828401_fix_post_content_and_author_ref.go fixes two runtime issues:
 //
-// 1. posts.content Max may be stuck at 5000 in some databases, causing
-//    validation_max_text_constraint on post edits longer than 5000 chars.
-//    Forces Max to 65536 (matching the schema in 1766100000).
+//  1. posts.content Max may be stuck at 5000 in some databases, causing
+//     validation_max_text_constraint on post edits longer than 5000 chars.
+//     Forces Max to 65536 (matching the schema in 1766100000).
 //
-// 2. last_post_author_ref columns (last_post_author_kind,
-//    last_post_author_character_id, last_post_guest_display_name) may be
-//    empty for existing topics, causing the frontend to show no author for
-//    the last post. Re-derives them from each topic's newest visible post.
+//  2. last_post_author_ref columns (last_post_author_kind,
+//     last_post_author_character_id, last_post_guest_display_name) may be
+//     empty for existing topics, causing the frontend to show no author for
+//     the last post. Re-derives them from each topic's newest visible post.
 //
 // Idempotent: safe to re-run.
 package migrations
