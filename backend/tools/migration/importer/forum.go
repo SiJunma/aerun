@@ -102,6 +102,12 @@ type TopicRow struct {
 	LastPostID        string
 	LastPostCreated   string
 	LastPostAuthorID  string
+	// LastPostAuthorKind / LastPostAuthorCharacterID / LastPostGuestDisplayName
+	// are the last-post AuthorRef variant: they let the frontend resolve the
+	// name/avatar of the last post's author without a second lookup.
+	LastPostAuthorKind      string
+	LastPostAuthorCharacterID string
+	LastPostGuestDisplayName string
 	CreatedAt         string
 	UpdatedAt         string
 	Reputation        int
@@ -124,6 +130,11 @@ type PostRow struct {
 	Reputation      int
 	EditedAt        string
 	AuthorCharacter string
+	// AuthorKind / GuestDisplayName are the post's AuthorRef variant: they
+	// feed the topic's last-post projection so the frontend can resolve the
+	// last speaker's name/avatar.
+	AuthorKind      string
+	GuestDisplayName string
 	CreatedAt       string
 	UpdatedAt       string
 	Findings        map[string]string
@@ -385,6 +396,11 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			CreatedAt:  TimestampToISO(p.created),
 			UpdatedAt:  TimestampToISO(p.created),
 			Findings:   map[string]string{},
+			// AuthorRef variant of the post: feeds the topic's last-post
+			// projection so the frontend can resolve the last speaker's
+			// name/avatar.
+			AuthorKind:      strings.TrimSpace(stringField(p.fields, "author_kind")),
+			GuestDisplayName: strings.TrimSpace(stringField(p.fields, "guest_display_name")),
 		}
 		if ref := strings.TrimSpace(stringField(p.fields, "author_character_id")); ref != "" {
 			row.AuthorCharacter = DeriveID(SpaceCharacter, authorRef+"/characters/"+ref)
@@ -398,6 +414,9 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 		newestVisible = row.TargetID
 		topic.LastPostID = row.TargetID
 		topic.LastPostAuthorID = row.AuthorID
+		topic.LastPostAuthorKind = row.AuthorKind
+		topic.LastPostAuthorCharacterID = row.AuthorCharacter
+		topic.LastPostGuestDisplayName = row.GuestDisplayName
 		topic.LastPostCreated = row.CreatedAt
 	}
 

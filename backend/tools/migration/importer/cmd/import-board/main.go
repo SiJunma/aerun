@@ -511,7 +511,10 @@ func topicUpserts(fp *importer.ForumPlan) []pb.TopicUpsert {
 			PostsCount:       row.PostsCount,
 			LastPostID:       row.LastPostID,
 			LastPostCreated:  row.LastPostCreated,
-			LastPostAuthorID: row.LastPostAuthorID,
+			LastPostAuthorID:         row.LastPostAuthorID,
+			LastPostAuthorCharacterID: row.LastPostAuthorCharacterID,
+			LastPostAuthorKind:       row.LastPostAuthorKind,
+			LastPostGuestDisplayName:  row.LastPostGuestDisplayName,
 			CreatedAt:        row.CreatedAt,
 			UpdatedAt:        row.UpdatedAt,
 		})
