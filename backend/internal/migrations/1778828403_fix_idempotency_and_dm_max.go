@@ -1,15 +1,15 @@
 // 1778828403_fix_idempotency_and_dm_max.go fixes two TextField Max limits that
 // were silently capping content length at 5000 and 1024 characters.
 //
-// 1. idempotency_keys.response_json — PocketBase's idempotency system stores the
-//    full command response envelope (including post content) in this column.
-//    Max=0 was interpreted by PocketBase as a 5000-character cap, which caused
-//    editPostHandler/createPostHandler to fail with validation_max_text_constraint
-//    for any post longer than 5000 characters, even though posts.content itself
-//    allows 65536.
+//  1. idempotency_keys.response_json — PocketBase's idempotency system stores the
+//     full command response envelope (including post content) in this column.
+//     Max=0 was interpreted by PocketBase as a 5000-character cap, which caused
+//     editPostHandler/createPostHandler to fail with validation_max_text_constraint
+//     for any post longer than 5000 characters, even though posts.content itself
+//     allows 65536.
 //
-// 2. dm_conversations.last_message — Max=1024 capped direct message conversation
-//    last_message at 1024 characters, causing validation failures for longer DMs.
+//  2. dm_conversations.last_message — Max=1024 capped direct message conversation
+//     last_message at 1024 characters, causing validation failures for longer DMs.
 //
 // Both fields are changed to Max=1000000 (effectively unlimited).
 //
