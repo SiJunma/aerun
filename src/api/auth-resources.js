@@ -215,6 +215,24 @@ export const fetchLatestTopics = async (page = 1, pageSize = 20) => {
   }
 };
 
+// The /active-topics ("Most Discussed") feed ranks topics by posts_count DESC
+// (most replies first), with id DESC as tiebreak. Server enforces the ordering
+// via sort_by=replies; we only normalise and paginate the same way as every
+// other topic list so the two feeds cannot drift apart.
+export const fetchTopDiscussedTopics = async (page = 1, pageSize = 20) => {
+  try {
+    const res = await sendApi(`/api/aerun/topics?sort_by=replies&page=${page}&limit=${pageSize}`);
+    return {
+      topics: (res?.items || []).map(normalizeTopic),
+      total: res?.total ?? 0,
+      perPage: res?.per_page || pageSize,
+    };
+  } catch (err) {
+    console.error('[fetchTopDiscussedTopics]', err);
+    return { topics: [], total: 0, perPage: pageSize };
+  }
+};
+
 // The unread feed, paged on the server.
 //
 // It is a separate read rather than a client-side filter of the general feed,
@@ -286,6 +304,29 @@ export const subscribeToLatestTopics = (callback, page = 1, pageSize = 20) => {
   return poll.subscribe((data) => callback(data));
 };
 
+// Polls one page of the "most discussed" feed (sorted by posts_count DESC).
+//
+// Its poll key is separate from latest-topics so page N of each feed stays
+// isolated, and separate from unread-topics because that feed carries a
+// server-side read-state filter this one does not.
+const topDiscussedPolls = new Map();
+
+export const subscribeToTopDiscussedTopics = (callback, page = 1, pageSize = 20) => {
+  const key = `top-discussed:${page}:${pageSize}`;
+  let poll = topDiscussedPolls.get(key);
+  if (!poll) {
+    poll = sharedPoll(key, {
+      fetch: () => fetchTopDiscussedTopics(page, pageSize),
+      intervalMs: 20000,
+      initialValue: { topics: [], total: 0, perPage: pageSize },
+      onError: (err) => console.error('[subscribeToTopDiscussedTopics]', err),
+    });
+    topDiscussedPolls.set(key, poll);
+  }
+
+  return poll.subscribe((data) => callback(data));
+};
+
 // ── Guest Activity ──────────────────────────────────────────────────────────
 
 export const recordGuestActivity = async (_guestId) => {};
@@ -296,19 +337,20 @@ export const deleteGuestActivity = async (_guestId) => {};
 
 // subscribeToTopTopics backs the /active-topics list.
 //
-// It maps through `fetchLatestTopics`, not through its own request, so this page
-// cannot drift from the new-replies feed: both render the SAME normalised rows,
-// and a fix to one is a fix to both. The previous version issued its own
-// `sendApi` and passed `res.items` through raw, which is how that page ended up
-// showing "—" where every other topic list showed a timestamp and a link.
+// It now ranks topics by posts_count DESC (most replies first) via the
+// sort_by=replies server path, matching the page's own description:
+// "Top 50 forum topics, sorted by number of replies."
+//
+// It maps through `fetchTopDiscussedTopics`, not through its own request, so
+// this page cannot drift from the other topic lists: both render the SAME
+// normalised rows, and a fix to one is a fix to both. The previous version
+// issued its own `sendApi` and passed `res.items` through raw, which is how
+// that page ended up showing "—" where every other topic list showed a
+// timestamp and a link.
 export const subscribeToTopTopics = (callback, page = 1, pageSize = 20) => {
-  // It IS subscribeToLatestTopics, not a second poll with a different interval.
-  //
-  // Both pages read the same page of the same endpoint, and both used to build
-  // their own loop over it under the same poll key — which meant whichever
-  // mounted first decided the interval for both, and the "30s" and "20s" in the
-  // two definitions described nothing. One resource, one loop, one interval.
-  return subscribeToLatestTopics(callback, page, pageSize);
+  // One resource, one loop, one interval — subscribes to the top-discussed
+  // feed (sorted by replies), not the recency feed.
+  return subscribeToTopDiscussedTopics(callback, page, pageSize);
 };
 
 // isAbortedRequest recognises the PocketBase SDK's auto-cancellation.
