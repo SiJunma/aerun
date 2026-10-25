@@ -109,3 +109,7 @@ eslint-report.txt
 # Local artifacts of python deploy.py (VPS deploy CLI): packed frontend/backend
 # bundles reused with --skip-build. Never committed.
 .deploy/
+
+# Python bytecode cache
+__pycache__/
+*.py[cod]
