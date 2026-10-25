@@ -202,6 +202,7 @@ const TopicPage = () => {
   const editEditorRef = useRef(null);
   const goLast = searchParams.get('goLast') === '1';
   const isJumpRequested = !!(searchParams.get('post') || goLast || hash.startsWith('#post-'));
+  const wantDraftEditor = searchParams.get('draft') === '1';
   const ITEMS_PER_PAGE = settings?.postsPerPage ?? 20;
   const MAX_CHARS = settings?.maxCharsPerPost ?? 15000;
   const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
@@ -2278,7 +2279,6 @@ const TopicPage = () => {
   // set `myDraft`-adjacent state back to a shape that re-triggers this effect and
   // reopen the editor the user just closed — the page would fight the reader.
   const draftAutoOpenRef = useRef(false);
-  const wantDraftEditor = searchParams.get('draft') === '1';
   useEffect(() => {
     if (!wantDraftEditor || !myDraft || draftAutoOpenRef.current) return;
     draftAutoOpenRef.current = true;
