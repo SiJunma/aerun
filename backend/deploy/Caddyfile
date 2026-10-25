@@ -1,3 +1,17 @@
+{
+	# Отключаем HTTP-3 (QUIC), иначе Chrome на продакшене получает
+	# net::ERR_QUI_PROTOCOL_ERROR на долгоживущих SSE-подключениях
+	# к /api/realtime. На локалке HTTP-3 не используется (обычный HTTP),
+	# поэтому ошибки там нет.
+	servers :443 {
+		protocol {
+			experimental_http3 {
+				disabled
+			}
+		}
+	}
+}
+
 aerun-world.com {
 	encode zstd gzip
 	header {
