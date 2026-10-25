@@ -123,30 +123,30 @@ func TestTopicStatsAndTopicHideARestrictedCategory(t *testing.T) {
 		"/api/aerun/topics/" + topic.Id,
 		"/api/aerun/topics/" + topic.Id + "/stats",
 	} {
-		status, _ := doJSON(t, server.URL, http.MethodGet, path, tokens["player"], "", "")
-		if status != http.StatusNotFound {
-			t.Errorf("GET %s as player: got %d, want 404 — a hidden thread must read as missing", path, status)
+		status, payload := doJSON(t, server.URL, http.MethodGet, path, tokens["player"], "", "")
+		if status != http.StatusOK || payload["deleted"] != true {
+			t.Errorf("GET %s as player: got %d (%v), want 200 with deleted:true — a hidden thread must read as missing/deleted", path, status, payload)
 		}
-		status, _ = doJSON(t, server.URL, http.MethodGet, path, "", "", "")
-		if status != http.StatusNotFound {
-			t.Errorf("GET %s as guest: got %d, want 404 — a hidden thread must read as missing", path, status)
+		status, payload = doJSON(t, server.URL, http.MethodGet, path, "", "", "")
+		if status != http.StatusOK || payload["deleted"] != true {
+			t.Errorf("GET %s as guest: got %d (%v), want 200 with deleted:true — a hidden thread must read as missing/deleted", path, status, payload)
 		}
-		status, payload := doJSON(t, server.URL, http.MethodGet, path, tokens["moderator"], "", "")
-		if status != http.StatusOK {
-			t.Errorf("GET %s as moderator: got %d, want 200 (%v)", path, status, payload)
+		status, payload = doJSON(t, server.URL, http.MethodGet, path, tokens["moderator"], "", "")
+		if status != http.StatusOK || payload["deleted"] == true {
+			t.Errorf("GET %s as moderator: got %d, want 200 without deleted (%v)", path, status, payload)
 		}
 	}
 
 	// A banned member is refused by canViewCategory before the role is even
-	// consulted, so both routes answer 404 for them too — the same silence
-	// the isolation test pins for the category list.
+	// consulted, so both routes answer 200 with deleted=true for them too —
+	// the same silent non-disclosure.
 	for _, path := range []string{
 		"/api/aerun/topics/" + topic.Id,
 		"/api/aerun/topics/" + topic.Id + "/stats",
 	} {
-		status, _ := doJSON(t, server.URL, http.MethodGet, path, tokens["banned"], "", "")
-		if status != http.StatusNotFound {
-			t.Errorf("GET %s as banned: got %d, want 404", path, status)
+		status, payload := doJSON(t, server.URL, http.MethodGet, path, tokens["banned"], "", "")
+		if status != http.StatusOK || payload["deleted"] != true {
+			t.Errorf("GET %s as banned: got %d (%v), want 200 with deleted:true", path, status, payload)
 		}
 	}
 }
@@ -180,7 +180,7 @@ func TestTopicStatsReportsLocked(t *testing.T) {
 	}
 }
 
-func TestTopicStatsMissingTopicIs404(t *testing.T) {
+func TestTopicStatsMissingTopicIsDeletedFlag(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
@@ -189,9 +189,15 @@ func TestTopicStatsMissingTopicIs404(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
-	status, _ := doJSON(t, server.URL, http.MethodGet,
+	status, payload := doJSON(t, server.URL, http.MethodGet,
 		"/api/aerun/topics/nonexistent0001/stats", tokens["player"], "", "")
-	if status != http.StatusNotFound {
-		t.Fatalf("stats for a missing topic: got %d, want 404", status)
+	if status != http.StatusOK {
+		t.Fatalf("stats for a missing topic: got %d, want 200 (%v)", status, payload)
+	}
+	if deleted, _ := payload["deleted"].(bool); !deleted {
+		t.Errorf("stats for missing topic deleted = %v, want true", payload["deleted"])
+	}
+	if payload["topic_id"] != "nonexistent0001" {
+		t.Errorf("stats for missing topic topic_id = %v, want nonexistent0001", payload["topic_id"])
 	}
 }

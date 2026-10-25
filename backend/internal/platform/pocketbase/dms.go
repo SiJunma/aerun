@@ -483,7 +483,17 @@ func createDMHandler(e *core.RequestEvent) error {
 		return forbiddenError("authentication required")
 	}
 
+	acc := AccessFrom(e)
+	// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21):
+	// no requireVerified gate here anymore. Whether an account may OPEN a
+	// new conversation is decided by CanPostGlobally() — staff and
+	// active+verified always pass; pending and active+unverified are
+	// refused with a distinct message. Replying in an existing dialogue
+	// (race-matched below) needs no such gate: any participant holding
+	// PermUseDirectMessages may answer.
+
 	raw, err := readBodyLimited(e, maxDMBodyBytes)
+
 	if err != nil {
 		return err
 	}
@@ -614,9 +624,13 @@ func createDMHandler(e *core.RequestEvent) error {
 		// The status comes from the RESOLVED access context, the same source
 		// every other status rule reads (requireNotBanned, requireLiveAccount):
 		// the raw column is not the answer, the resolved one is.
-		if AccessFrom(e).Status == auth.StatusPending {
+		if !acc.CanPostGlobally() {
+			if acc.Status == auth.StatusPending {
+				return 0, nil, forbiddenError(
+					"a pending account cannot start a conversation; it can only answer one that was started for it")
+			}
 			return 0, nil, forbiddenError(
-				"a pending account cannot start a conversation; it can only answer one that was started for it")
+				"email verification is required to start a new conversation; you can answer existing conversations")
 		}
 
 		// 1. Create dm_conversations record.
@@ -929,7 +943,14 @@ func sendDMMessageHandler(e *core.RequestEvent) error {
 		return forbiddenError("authentication required")
 	}
 
+	// Replying inside an already open dialogue. The unverified-write-rights
+	// architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21) removed the
+	// requireVerified gate here: any participant holding PermUseDirectMessages
+	// may answer, whether pending, unverified or fully verified. Staff can
+	// also write first to an unverified or pending account.
+
 	convID := e.Request.PathValue("id")
+
 	raw, err := readBodyLimited(e, maxDMBodyBytes)
 	if err != nil {
 		return err

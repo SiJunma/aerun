@@ -16,7 +16,7 @@ HOST = "202.148.54.64"
 DEPLOY_USER = "deploy"
 ROOT_USER = "root"
 KEY = r"C:\Users\alina\.ssh\aerun_deploy"
-BRANCH = "feature/pocketbase-migration"
+BRANCH = "main"
 PROD_URL = "https://aerun-world.com"
 HEALTH_PATH = "/api/aerun/health"
 CHUNK = 256 << 10
@@ -236,10 +236,9 @@ def public_front() -> None:
 
 
 def step_pull() -> None:
-    log("== 1. git pull (local) ==")
+    log("== 1. git fetch (local, no hard reset) ==")
     run(["git", "fetch", "origin", "--prune"])
     run(["git", "checkout", BRANCH])
-    run(["git", "reset", "--hard", "origin/" + BRANCH])
     head = run(["git", "rev-parse", "--short", "HEAD"], capture=True).strip()
     log("  local HEAD: " + head)
 
@@ -248,7 +247,7 @@ def step_build_frontend() -> None:
     log("== 2. build frontend ==")
     env = dict(os.environ)
     env["VITE_POCKETBASE_URL"] = PROD_URL
-    run(["npm", "run", "build"], env=env)
+    run("npm run build", env=env)
     index = os.path.join(ROOT, "dist", "index.html")
     if not os.path.isfile(index):
         raise Fail("dist/index.html missing after build")
@@ -301,8 +300,8 @@ def step_swap_backend() -> None:
 
 
 def step_sync_repo() -> None:
-    log("== 7. sync VPS clone ==")
-    out = ssh("cd ~/project && git fetch origin --prune && git reset --hard origin/%s"
+    log("== 7. sync VPS clone (fetch only, no hard reset) ==")
+    out = ssh("cd ~/project && git fetch origin --prune"
               " && git rev-parse --short HEAD" % BRANCH)
     lines = [l for l in out.strip().splitlines() if l.strip()]
     log("  VPS HEAD: " + (lines[-1] if lines else "?"))
@@ -329,6 +328,22 @@ def step_verify() -> None:
     if "backend healthy" not in out:
         log("  ! no 'backend healthy' line in recent journal (non-fatal)")
     log("DEPLOY OK")
+
+
+def cmd_caddy(args) -> None:
+    action = args.caddy_action
+    if action == "reload":
+        log("== reload caddy ==")
+        ssh("systemctl reload caddy", user=ROOT_USER, timeout=60)
+    elif action == "restart":
+        log("== restart caddy ==")
+        ssh("systemctl restart caddy", user=ROOT_USER, timeout=60)
+        time.sleep(2)
+    elif action == "status":
+        log("== caddy status ==")
+        ssh("systemctl is-active caddy && systemctl is-enabled caddy", user=ROOT_USER)
+        ssh("systemctl status caddy --no-pager -n 8", user=ROOT_USER)
+    log("CADDY %s OK" % action.upper())
 
 
 def cmd_db(args) -> None:
@@ -382,6 +397,8 @@ def build_parser():
     sub.add_parser("sync", help="git fetch/reset on VPS only (no artifacts)")
     sub.add_parser("status", help="service state + deployed commit + disk use")
     sub.add_parser("health", help="VPS loopback + public API + frontend checks")
+    caddy = sub.add_parser("caddy", help="manage Caddy reverse proxy (reload/restart/status)")
+    caddy.add_argument("caddy_action", choices=["reload", "restart", "status"])
     db = sub.add_parser("db", help="pre-release database helpers")
     db.add_argument("db_action", choices=["backup", "migrate", "restore"])
     db.add_argument("--file", default=None, help="backup file for db restore")
@@ -470,6 +487,8 @@ def main() -> int:
             cmd_status()
         elif args.cmd == "health":
             cmd_health()
+        elif args.cmd == "caddy":
+            cmd_caddy(args)
         elif args.cmd == "db":
             cmd_db(args)
         return 0

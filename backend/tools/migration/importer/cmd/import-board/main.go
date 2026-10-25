@@ -469,6 +469,7 @@ func categoryGroupUpserts(cp *importer.CategoryPlan) []pb.CategoryGroupUpsert {
 		out = append(out, pb.CategoryGroupUpsert{
 			TargetID:  row.TargetID,
 			Title:     row.Title,
+			TitleI18n: row.TitleI18n,
 			SortOrder: row.SortOrder,
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
@@ -481,15 +482,17 @@ func categoryUpserts(cp *importer.CategoryPlan) []pb.CategoryUpsert {
 	out := make([]pb.CategoryUpsert, 0, len(cp.CategoryRows))
 	for _, row := range cp.CategoryRows {
 		out = append(out, pb.CategoryUpsert{
-			TargetID:     row.TargetID,
-			GroupID:      row.GroupID,
-			Name:         row.Title,
-			Slug:         row.Slug,
-			Description:  row.Description,
-			SortOrder:    row.SortOrder,
-			AllowedRoles: row.AllowedRoles,
-			CreatedAt:    row.CreatedAt,
-			UpdatedAt:    row.UpdatedAt,
+			TargetID:        row.TargetID,
+			GroupID:         row.GroupID,
+			Name:            row.Title,
+			Slug:            row.Slug,
+			Description:     row.Description,
+			NameI18n:        row.TitleI18n,
+			DescriptionI18n: row.DescriptionI18n,
+			SortOrder:       row.SortOrder,
+			AllowedRoles:    row.AllowedRoles,
+			CreatedAt:       row.CreatedAt,
+			UpdatedAt:       row.UpdatedAt,
 		})
 	}
 	return out
@@ -499,18 +502,21 @@ func topicUpserts(fp *importer.ForumPlan) []pb.TopicUpsert {
 	out := make([]pb.TopicUpsert, 0, len(fp.TopicRows))
 	for _, row := range fp.TopicRows {
 		out = append(out, pb.TopicUpsert{
-			TargetID:         row.TargetID,
-			CategoryID:       row.CategoryID,
-			AuthorID:         row.AuthorID,
-			Title:            row.Title,
-			Locked:           row.Locked,
-			Pinned:           row.Pinned,
-			PostsCount:       row.PostsCount,
-			LastPostID:       row.LastPostID,
-			LastPostCreated:  row.LastPostCreated,
-			LastPostAuthorID: row.LastPostAuthorID,
-			CreatedAt:        row.CreatedAt,
-			UpdatedAt:        row.UpdatedAt,
+			TargetID:                  row.TargetID,
+			CategoryID:                row.CategoryID,
+			AuthorID:                  row.AuthorID,
+			Title:                     row.Title,
+			Locked:                    row.Locked,
+			Pinned:                    row.Pinned,
+			PostsCount:                row.PostsCount,
+			LastPostID:                row.LastPostID,
+			LastPostCreated:           row.LastPostCreated,
+			LastPostAuthorID:          row.LastPostAuthorID,
+			LastPostAuthorCharacterID: row.LastPostAuthorCharacterID,
+			LastPostAuthorKind:        row.LastPostAuthorKind,
+			LastPostGuestDisplayName:  row.LastPostGuestDisplayName,
+			CreatedAt:                 row.CreatedAt,
+			UpdatedAt:                 row.UpdatedAt,
 		})
 	}
 	return out

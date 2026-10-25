@@ -15,9 +15,9 @@
 Локальный сервер: `backend/.local-run/aerun.exe`, логи — `stdout.log` / `stderr.log`
 рядом. Порт `8090` занят? `npm run dev:backend` сам убьёт старый процесс.
 
-## Деплой на VPS (прод, ветка `feature/pocketbase-migration`)
+## Деплой на VPS (прод, ветка `main`)
 
-Сначала убедиться, что код запушен: `git push origin feature/pocketbase-migration`.
+Сначала убедиться, что код запушен: `git push origin main`.
 Потом одна из команд:
 
 | Хочу... | Команда |

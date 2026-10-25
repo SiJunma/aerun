@@ -48,20 +48,38 @@ var quoteTagRegex = regexp.MustCompile(`\[quote\s*=\s*"?#p([a-zA-Z0-9_-]+)(?:,[^
 // quoteIDOnly matches a bare `#p<legacyId>` marker inside a matched quote tag.
 var quoteIDOnly = regexp.MustCompile(`#p([a-zA-Z0-9_-]+)`)
 
-// rewriteQuotePostIDs replaces every legacy post id referenced in a quote tag
-// (`[quote="#p<legacyId>,t<topicId>,<name>"]`) with the derived target id, so
-// quotes in imported posts still point at the post they quoted. The target id
-// is DeriveID(SpacePost, legacyId) — exactly the id the quoted post's own row
-// carries — so a quote and its target agree after cutover. Anything outside a
-// quote tag is left untouched.
+// quoteTopicIDOnly matches the `,t<legacyTopicId><sep>` component inside a
+// matched quote tag. Group 1 is the legacy topic id *without* its `t` prefix
+// (the `t` is a markup marker, not part of the id); group 2 is the separator
+// (comma, double-quote, or closing bracket) that follows it.
+var quoteTopicIDOnly = regexp.MustCompile(`,t([a-zA-Z0-9_-]+)([,"\])])`)
+
+// rewriteQuotePostIDs replaces every legacy post id and topic id referenced in
+// a quote tag (`[quote="#p<legacyId>,t<topicId>,<name>"]`) with the derived
+// target ids, so quotes in imported posts still point at the post and topic
+// they quoted. The target ids are DeriveID(SpacePost/SpaceTopic, legacyId) —
+// exactly the ids the quoted post's and topic's own rows carry — so a quote
+// and its target agree after cutover. Anything outside a quote tag is left
+// untouched.
 func rewriteQuotePostIDs(content string) string {
 	return quoteTagRegex.ReplaceAllStringFunc(content, func(match string) string {
+		// Replace legacy post id #p<legacyId> with derived target id
 		loc := quoteIDOnly.FindStringIndex(match)
-		if loc == nil {
-			return match
+		if loc != nil {
+			legacyID := match[loc[0]+2 : loc[1]]
+			match = match[:loc[0]] + "#p" + DeriveID(SpacePost, legacyID) + match[loc[1]:]
 		}
-		legacyID := match[loc[0]+2 : loc[1]]
-		return match[:loc[0]] + "#p" + DeriveID(SpacePost, legacyID) + match[loc[1]:]
+		// Replace legacy topic id ,t<legacyTopicId><sep> with derived target id.
+		// The `t` is a markup marker and is preserved; only the id part is rewritten.
+		topicLoc := quoteTopicIDOnly.FindStringIndex(match)
+		if topicLoc != nil {
+			// match[topicLoc[0]] is the leading comma; topicLoc[1] is after the separator
+			// captured group 1 (topic id without the `t` marker): match[topicLoc[0]+2 : topicLoc[1]-1]
+			legacyTopicID := match[topicLoc[0]+2 : topicLoc[1]-1]
+			separator := match[topicLoc[1]-1 : topicLoc[1]]
+			match = match[:topicLoc[0]] + ",t" + DeriveID(SpaceTopic, legacyTopicID) + separator + match[topicLoc[1]:]
+		}
+		return match
 	})
 }
 
@@ -81,14 +99,20 @@ type TopicRow struct {
 	// newest post. An empty LastPostID means the topic has no posts yet, which
 	// the target allows (last_post_created then keeps a non-null tombstone
 	// timestamp; the keyset index must never meet a NULL).
-	LastPostID        string
-	LastPostCreated   string
-	LastPostAuthorID  string
-	CreatedAt         string
-	UpdatedAt         string
-	Reputation        int
-	AuthorCharacterID string
-	Findings          map[string]string
+	LastPostID       string
+	LastPostCreated  string
+	LastPostAuthorID string
+	// LastPostAuthorKind / LastPostAuthorCharacterID / LastPostGuestDisplayName
+	// are the last-post AuthorRef variant: they let the frontend resolve the
+	// name/avatar of the last post's author without a second lookup.
+	LastPostAuthorKind        string
+	LastPostAuthorCharacterID string
+	LastPostGuestDisplayName  string
+	CreatedAt                 string
+	UpdatedAt                 string
+	Reputation                int
+	AuthorCharacterID         string
+	Findings                  map[string]string
 }
 
 // PostRow is the target state of one posts record.
@@ -106,9 +130,14 @@ type PostRow struct {
 	Reputation      int
 	EditedAt        string
 	AuthorCharacter string
-	CreatedAt       string
-	UpdatedAt       string
-	Findings        map[string]string
+	// AuthorKind / GuestDisplayName are the post's AuthorRef variant: they
+	// feed the topic's last-post projection so the frontend can resolve the
+	// last speaker's name/avatar.
+	AuthorKind       string
+	GuestDisplayName string
+	CreatedAt        string
+	UpdatedAt        string
+	Findings         map[string]string
 }
 
 // ForumPlan is the full result of planning L5 + L6 + drafts.
@@ -367,6 +396,11 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 			CreatedAt:  TimestampToISO(p.created),
 			UpdatedAt:  TimestampToISO(p.created),
 			Findings:   map[string]string{},
+			// AuthorRef variant of the post: feeds the topic's last-post
+			// projection so the frontend can resolve the last speaker's
+			// name/avatar.
+			AuthorKind:       strings.TrimSpace(stringField(p.fields, "author_kind")),
+			GuestDisplayName: strings.TrimSpace(stringField(p.fields, "guest_display_name")),
 		}
 		if ref := strings.TrimSpace(stringField(p.fields, "author_character_id")); ref != "" {
 			row.AuthorCharacter = DeriveID(SpaceCharacter, authorRef+"/characters/"+ref)
@@ -380,6 +414,9 @@ func (fp *ForumPlan) assignTopicPosts(topic *TopicRow, posts []pendingPost, user
 		newestVisible = row.TargetID
 		topic.LastPostID = row.TargetID
 		topic.LastPostAuthorID = row.AuthorID
+		topic.LastPostAuthorKind = row.AuthorKind
+		topic.LastPostAuthorCharacterID = row.AuthorCharacter
+		topic.LastPostGuestDisplayName = row.GuestDisplayName
 		topic.LastPostCreated = row.CreatedAt
 	}
 

@@ -3695,6 +3695,79 @@ a.rep-preview-name:hover {
   color: #1f160e !important;
 }
 
+/* ── Email Verification Banner: mobile adaptations ────────────────────────── */
+/* Tablet and below (was phones only, 767.98px): the banner broke apart on
+   tablets too, where the buttons used to stretch to the full row width and
+   the text column was vertically centred against them. The breakpoint is
+   raised so the two halves stack from 992px down, and the buttons keep
+   their natural width instead of being forced to 100% — a full-width
+   button row on a phone looked like a form, not a banner. */
+@media (max-width: 991.98px) {
+  .email-verification-banner {
+    /* Top-aligned, so a two-line description stays next to its icon
+       instead of drifting to the vertical middle of the banner. */
+    align-items: flex-start;
+    gap: 1.25rem;
+  }
+
+  /* The icon must not be squeezed by the flex row — a squashed mail icon
+     was the visible symptom of the missing `flex-shrink: 0`. */
+  .email-verification-icon-box {
+    flex-shrink: 0 !important;
+  }
+
+  /* The "link sent" confirmation line is a text paragraph with an icon;
+     centring it made the icon float away from the first line. */
+  .email-verification-success {
+    align-items: start !important;
+  }
+
+  .email-verification-success .lucide-icon,
+  .email-verification-success svg {
+    flex-shrink: 0 !important;
+    /* Nudge the icon down so it sits on the first text line's baseline. */
+    margin-top: 5px;
+  }
+
+  .email-verification-actions {
+    /* `width: auto` (not 100%) — the buttons keep their content width and
+       wrap under the text on narrow screens. */
+    width: auto !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+
+  .email-verification-actions .email-verification-btn-primary,
+  .email-verification-actions .email-verification-btn-secondary {
+    width: auto !important;
+    /* Still bounded: a long translated label must not overflow the banner. */
+    max-width: 100%;
+    justify-content: center;
+  }
+
+  /* Icons inside the buttons were being compressed into a sliver when the
+     button was squeezed — keep them rigid. */
+  .email-verification-actions .email-verification-btn-primary .lucide-icon,
+  .email-verification-actions .email-verification-btn-secondary .lucide-icon,
+  .email-verification-actions .email-verification-btn-primary svg,
+  .email-verification-actions .email-verification-btn-secondary svg {
+    flex-shrink: 0 !important;
+  }
+}
+
+/* ── Email Verification Banner: small mobile (< 768px) ────────────────────── */
+/* Only on phones does the LEFT half itself stack: the icon moves above the
+   text, because at 360px there is no room for icon + title + description
+   side by side. */
+@media (max-width: 767.98px) {
+  .email-verification-left {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+}
+
 /* ── DM Chat Two-Column Layout ─────────────────────────────────────────── */
 .dm-chat-body {
   flex: 1 1 0;
@@ -3836,6 +3909,7 @@ a.rep-preview-name:hover {
 }
 
 @media (max-width: 567.98px) {
+
   /* Line 1 = nick only, line 2 = timestamp. The preview gives its place to the
    * timestamp so nothing is doubled and the name keeps the full row width. */
   .dm-conversation-date,
@@ -3965,6 +4039,15 @@ a.rep-preview-name:hover {
     resize: none !important;
     overflow-y: auto;
     transition: height 0.1s ease;
+  }
+
+  /* DM edit textarea: full width inside the bubble, grows with content */
+  .dm-chat-bubble textarea.form-control {
+    width: 100% !important;
+    min-height: 70px !important;
+    max-height: 80vh !important;
+    resize: vertical !important;
+    overflow-y: auto !important;
   }
 
   /* Compact toolbar: smaller icons and tighter spacing */
@@ -4520,4 +4603,18 @@ kbd {
   align-self: center;
   border-left: 1px solid var(--border-color);
   opacity: 0.2;
+}
+
+/* DM unread badge on the navbar — Bootstrap hides .badge:empty, ours must stay visible */
+.dm-unread-badge {
+  top: 3px;
+  right: 0px;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  position: absolute;
+}
+
+.dm-unread-badge:empty {
+  display: inline-flex !important;
 }

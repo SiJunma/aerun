@@ -434,8 +434,8 @@ assert.match(
 );
 assert.match(
   resources,
-  /subscribeToTopTopics[\s\S]{0,900}return subscribeToLatestTopics\(/,
-  'subscribeToTopTopics must reuse the latest-topics feed so the two lists cannot drift'
+  /subscribeToTopTopics[\s\S]{0,900}return subscribeToTopDiscussedTopics\(/,
+  'subscribeToTopTopics must reuse the top-discussed (replies-sorted) feed so the two lists cannot drift'
 );
 assert.doesNotMatch(
   resources,

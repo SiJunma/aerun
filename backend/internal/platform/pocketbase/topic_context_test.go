@@ -156,23 +156,23 @@ func TestTopicContextHidesARestrictedCategory(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
-	// A hidden thread must read as missing — 404, byte-identical to a topic
-	// that does not exist — so its existence never leaks through /context.
+	// A hidden thread must read as missing/deleted — 200 with deleted:true,
+	// byte-identical to a topic that does not exist — so its existence never leaks through /context.
 	for _, actor := range []string{"player", ""} {
-		status, _ := doJSON(t, server.URL, http.MethodGet,
+		status, payload := doJSON(t, server.URL, http.MethodGet,
 			"/api/aerun/topics/"+topic.Id+"/context", tokens[actor], "", "")
-		if status != http.StatusNotFound {
-			t.Errorf("context as %q: got %d, want 404 — a hidden thread must read as missing", actor, status)
+		if status != http.StatusOK || payload["deleted"] != true {
+			t.Errorf("context as %q: got %d (%v), want 200 with deleted:true — a hidden thread must read as missing/deleted", actor, status, payload)
 		}
 	}
 	status, payload := doJSON(t, server.URL, http.MethodGet,
 		"/api/aerun/topics/"+topic.Id+"/context", tokens["moderator"], "", "")
-	if status != http.StatusOK {
-		t.Errorf("context as moderator: got %d, want 200 (%v)", status, payload)
+	if status != http.StatusOK || payload["deleted"] == true {
+		t.Errorf("context as moderator: got %d, want 200 without deleted (%v)", status, payload)
 	}
 
 	// Banned is refused BEFORE the visibility check, so it is 403 here too —
-	// the global interception, not a 404 "missing topic".
+	// the global interception, not a 200 "missing/deleted topic".
 	status, _ = doJSON(t, server.URL, http.MethodGet,
 		"/api/aerun/topics/"+topic.Id+"/context", tokens["banned"], "", "")
 	if status != http.StatusForbidden {
@@ -180,7 +180,7 @@ func TestTopicContextHidesARestrictedCategory(t *testing.T) {
 	}
 }
 
-func TestTopicContextMissingTopicIs404(t *testing.T) {
+func TestTopicContextMissingTopicIsDeletedFlag(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
@@ -189,10 +189,16 @@ func TestTopicContextMissingTopicIs404(t *testing.T) {
 	server := newTestServer(t, app)
 	defer server.Close()
 
-	status, _ := doJSON(t, server.URL, http.MethodGet,
+	status, payload := doJSON(t, server.URL, http.MethodGet,
 		"/api/aerun/topics/nonexistent0001/context", tokens["player"], "", "")
-	if status != http.StatusNotFound {
-		t.Fatalf("context for a missing topic: got %d, want 404", status)
+	if status != http.StatusOK {
+		t.Fatalf("context for a missing topic: got %d, want 200 (%v)", status, payload)
+	}
+	if deleted, _ := payload["deleted"].(bool); !deleted {
+		t.Errorf("context for missing topic deleted = %v, want true", payload["deleted"])
+	}
+	if payload["topic_id"] != "nonexistent0001" {
+		t.Errorf("context for missing topic topic_id = %v, want nonexistent0001", payload["topic_id"])
 	}
 }
 

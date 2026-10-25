@@ -184,7 +184,7 @@ const renderDraftCard = (draft, isOrphan) => {
               // loads, so "Edit" lands on the text rather than on a page the user
               // then has to find the draft card on.
               <Link
-                to={`/topic/${draft.topic_id}?draft=1`}
+                to={`/topic/${draft.topic_id}?draft=1&goLast=1`}
                 className="fw-bold text-decoration-none d-block"
                 style={{ fontSize: '1.1rem', lineHeight: '1.25' }}
               >
@@ -232,7 +232,7 @@ const renderDraftCard = (draft, isOrphan) => {
                   variant="link"
                   size="sm"
                   className="p-0 footer-link"
-                  onClick={() => navigate(`/topic/${draft.topic_id}?draft=1`)}
+                  onClick={() => navigate(`/topic/${draft.topic_id}?draft=1&goLast=1`)}
                   disabled={busy}
                 >
                   <FilePen size={12} className="me-1" />

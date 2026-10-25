@@ -101,6 +101,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const messagesEndRef = useRef(null);
   const editorRef = useRef(null);
   const scrollContainerRef = useRef(null);
+  const dmEditTextareaRef = useRef(null);
   const isLoadingOlderRef = useRef(false);
   const scrollPosBeforeRef = useRef({ scrollHeight: 0, scrollTop: 0 });
   const initialScrollDoneRef = useRef(false);
@@ -691,6 +692,23 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [editingText, setEditingText] = useState('');
 
+  // корректируем высоту textarea при редактировании DM, чтобы большое
+  // сообщение не схлопывалось до трёх строк — разворачивается под размер текста
+  const adjustDmEditTextareaHeight = useCallback(() => {
+    const el = dmEditTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const desired = Math.min(el.scrollHeight, window.innerHeight * 0.8);
+    el.style.height = Math.max(desired, 70) + 'px';
+  }, []);
+
+  // при открытии редактирования и при каждом вводе — подгоняем высоту под текст
+  useEffect(() => {
+    if (editingMsgId !== null) {
+      adjustDmEditTextareaHeight();
+    }
+  }, [editingMsgId, editingText, adjustDmEditTextareaHeight]);
+
   const handleStartDmEdit = (msg) => {
     setEditingMsgId(msg.id);
     setEditingText(msg.text || '');
@@ -1204,6 +1222,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                       <div
                         className={`px-3 py-2 rounded-3 dm-chat-bubble ${isMe ? 'dm-bubble-me' : 'dm-bubble-peer'}`}
                         style={{
+                          width: '100%',
                           maxWidth: '85%',
                           background: isMe ? 'var(--primary-color)' : 'var(--block-bg)',
                           border: isMe ? 'none' : '1px solid var(--border-color)',
@@ -1219,10 +1238,20 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                           <div className="w-100">
                             <Form.Control
                               as="textarea"
-                              rows={3}
+                              ref={dmEditTextareaRef}
                               value={editingText}
-                              onChange={(e) => setEditingText(e.target.value)}
+                              onChange={(e) => {
+                                setEditingText(e.target.value);
+                                adjustDmEditTextareaHeight();
+                              }}
                               autoFocus
+                              style={{
+                                width: '100%',
+                                minHeight: '70px',
+                                maxHeight: '80vh',
+                                resize: 'vertical',
+                                boxSizing: 'border-box',
+                              }}
                             />
                             <div className="d-flex gap-2 justify-content-end mt-2">
                               <Button size="sm" variant="outline-secondary" onClick={handleCancelDmEdit}>

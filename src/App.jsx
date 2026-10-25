@@ -129,7 +129,7 @@ const App = () => {
         <Route path="/messages" element={<ProtectedRoute requireDm><Layout><MessagesPage /></Layout></ProtectedRoute>} />
         <Route path="/messages/:uid" element={<ProtectedRoute requireDm><Layout><MessagesPage /></Layout></ProtectedRoute>} />
         <Route path="/active-topics" element={<ProtectedRoute allowGuest><Layout><ActiveTopicsPage /></Layout></ProtectedRoute>} />
-        <Route path="/new-replies" element={<ProtectedRoute><Layout><NewRepliesPage /></Layout></ProtectedRoute>} />
+        <Route path="/new-replies" element={<ProtectedRoute allowGuest><Layout><NewRepliesPage /></Layout></ProtectedRoute>} />
         <Route path="/subscriptions" element={<ProtectedRoute><Layout><SubscriptionsPage /></Layout></ProtectedRoute>} />
         <Route path="/drafts" element={<ProtectedRoute><Layout><DraftsPage /></Layout></ProtectedRoute>} />
 

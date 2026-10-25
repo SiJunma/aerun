@@ -144,7 +144,10 @@ func createPostHandler(e *core.RequestEvent) error {
 	}
 
 	acc := AccessFrom(e)
-
+	// The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21)
+	// delegates the write decision to categoryWriteAllowed, which correctly
+	// permits guest-zone posting for pending/unverified accounts and refuses
+	// them elsewhere. No requireVerified gate here anymore.
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		topic, err := txApp.FindRecordById(topicsCollectionName, topicID)
 		// `topic == nil` is the whole "not there" test. There is no `deleted`
@@ -310,9 +313,17 @@ func createPostHandler(e *core.RequestEvent) error {
 // construction: a post either has a row and is counted, or it does not exist.
 func listPostsHandler(e *core.RequestEvent) error {
 	topicID := e.Request.PathValue("id")
-	topic, err := e.App.FindRecordById(topicsCollectionName, topicID)
-	if err != nil || topic == nil {
-		return notFoundError("topic not found")
+	acc := AccessFrom(e)
+	allowed, topic, err := canViewTopic(e.App, acc, topicID)
+	if err != nil || !allowed || topic == nil {
+		// Deleted / missing topic answers 200 with a deleted flag instead of
+		// a cascade of 404s: the client gets one successful response.
+		return e.JSON(http.StatusOK, map[string]any{
+			"deleted":    true,
+			"topic_id":   topicID,
+			"items":      []map[string]any{},
+			"request_id": requestIDFrom(e),
+		})
 	}
 
 	settings := loadForumSettings(e.App)

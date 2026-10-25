@@ -9,6 +9,7 @@ import {
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
+import { identityAvatar } from '../utils/identity';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
 import { subscribeToDesigns } from '../api/designs';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID, ADMIN_ROLE_ID, DEFAULT_ROLES, rankOfRole } from '../constants/permissions';
@@ -268,6 +269,11 @@ const AdminPage = () => {
   // Whether "delete all posts by this user" is checked in the user-delete
   // confirmation dialog. Defaults off: delete only the account.
   const [deleteUserPosts, setDeleteUserPosts] = useState(false);
+  // Ref mirror so the confirm handler (captured at dialog-open time in
+  // confirmState.onConfirm) reads the CURRENT checkbox value at confirm time,
+  // not the stale value from when the dialog was opened. Without this, a
+  // checked checkbox is ignored and deletePosts is always false (bug O12).
+  const deleteUserPostsRef = useRef(false);
 
   // A delete the SERVER would refuse, caught before the request is made.
   //
@@ -1082,7 +1088,7 @@ const AdminPage = () => {
       onConfirm: async () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
-          await deleteUser(uid, user.uid, { deletePosts: deleteUserPosts });
+          await deleteUser(uid, user.uid, { deletePosts: deleteUserPostsRef.current });
           // The stats panel (ForumStats) reads forumStats from AuthProvider —
           // total members, newest member, today's visitors — NOT from this
           // board's local `users` array. Filtering the row here left the shared
@@ -1819,7 +1825,13 @@ const AdminPage = () => {
               <tr key={u.id} className="align-middle">
                 <td>
                   <div className="d-flex align-items-center">
-                    {resolveAvatarUrl(u.avatar_url) && <img src={resolveAvatarUrl(u.avatar_url)} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />}
+                    {/* identityAvatar instead of a bare resolveAvatarUrl: the old
+                        markup rendered NOTHING for a user without an avatar, which
+                        left the admin table with an invisible gap in front of the
+                        nickname. identityAvatar falls back to a generated avatar
+                        built from the name, so every row shows the same
+                        avatar-plus-nickname pair as the rest of the app. */}
+                    <img src={identityAvatar({ name: u.nickname, avatar: u.avatar_url, size: 32 })} alt="" className="rounded-circle me-2" style={{ width: '32px', height: '32px', objectFit: 'cover' }} />
                     <div>
                       <div className="fw-bold">{u.nickname || t('admin.users.unnamed', 'Без имени')}</div>
                     </div>
@@ -2228,10 +2240,10 @@ const AdminPage = () => {
                             <td>{cat.order}</td>
                             <td>
                               <div className="fw-bold">
-                                {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                                {resolveTitle(cat.title)}
                               </div>
                               <div className="small text-muted">
-                                {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                                {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en || cat.description.ru || '') : cat.description}
                               </div>
                             </td>
                             <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
@@ -2284,10 +2296,10 @@ const AdminPage = () => {
                           <td>{cat.order}</td>
                           <td>
                             <div className="fw-bold">
-                              {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                              {resolveTitle(cat.title)}
                             </div>
                             <div className="small text-muted">
-                              {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                              {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en || cat.description.ru || '') : cat.description}
                             </div>
                           </td>
                           <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
@@ -2977,7 +2989,10 @@ const AdminPage = () => {
               <input
                 type="checkbox"
                 checked={deleteUserPosts}
-                onChange={e => setDeleteUserPosts(e.target.checked)}
+                onChange={e => {
+                  setDeleteUserPosts(e.target.checked);
+                  deleteUserPostsRef.current = e.target.checked;
+                }}
                 className="form-check-input me-2"
               />
               {t('admin.users.delete_posts_label')}

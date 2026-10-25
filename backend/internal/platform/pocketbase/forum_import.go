@@ -49,6 +49,12 @@ type TopicUpsert struct {
 	LastPostID       string
 	LastPostCreated  string
 	LastPostAuthorID string
+	// LastPostAuthorKind / LastPostAuthorCharacterID / LastPostGuestDisplayName
+	// are the last-post AuthorRef variant: they let the frontend resolve the
+	// name/avatar of the last post's author without a second lookup.
+	LastPostAuthorKind        string
+	LastPostAuthorCharacterID string
+	LastPostGuestDisplayName  string
 	// CreatedAt / UpdatedAt override the Autodate columns. The topics collection
 	// uses AutodateField, so a historical date has to be written through SetRaw.
 	CreatedAt string
@@ -341,6 +347,9 @@ func applyTopicUpsert(rec *core.Record, u TopicUpsert) {
 
 	rec.Set("last_post_id", u.LastPostID)
 	rec.Set("last_post_author_id", u.LastPostAuthorID)
+	rec.Set(lastPostAuthorKindField, u.LastPostAuthorKind)
+	rec.Set("last_post_author_character_id", u.LastPostAuthorCharacterID)
+	rec.Set(lastPostGuestDisplayNameField, u.LastPostGuestDisplayName)
 	// last_post_created must never be NULL: the topic list walks the index
 	// (pinned, last_post_created, id) backwards, and a NULL would drop the row
 	// from every list without an error. The importer guarantees a non-empty value
@@ -398,6 +407,9 @@ func topicMatches(rec *core.Record, u TopicUpsert) bool {
 		// behind a comparison against a field that was never there.
 		rec.GetString("last_post_id") == u.LastPostID &&
 		rec.GetString("last_post_author_id") == u.LastPostAuthorID &&
+		rec.GetString(lastPostAuthorKindField) == u.LastPostAuthorKind &&
+		rec.GetString("last_post_author_character_id") == u.LastPostAuthorCharacterID &&
+		rec.GetString(lastPostGuestDisplayNameField) == u.LastPostGuestDisplayName &&
 		autodateMatches(rec, "last_post_created", u.LastPostCreated) &&
 		autodateMatches(rec, "created", u.CreatedAt)
 }

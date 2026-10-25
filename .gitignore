@@ -78,6 +78,7 @@ backend/migration-data/
 # exists in somebody's memory. One rule, no ping, no chance of a future snapshot
 # being swept in by accident.
 backend/pb_data*/
+pb_data/
 # Local backend build artifacts and run logs. The binary is built to the
 # REPOSITORY-ROOT .local-run/ (go build -o ../.local-run/aerun.exe), and the
 # stdout/stderr capture from local launches lands beside it. Two directories
@@ -108,3 +109,7 @@ eslint-report.txt
 # Local artifacts of python deploy.py (VPS deploy CLI): packed frontend/backend
 # bundles reused with --skip-build. Never committed.
 .deploy/
+
+# Python bytecode cache
+__pycache__/
+*.py[cod]

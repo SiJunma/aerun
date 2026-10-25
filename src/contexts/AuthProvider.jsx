@@ -69,6 +69,17 @@ export const AuthProvider = ({ children }) => {
   });
   const [loading, setLoading] = useState(true);
   const [emailUnverified, setEmailUnverified] = useState(false);
+  const [isPendingApproval, setIsPendingApproval] = useState(false);
+
+  // canPostGlobally mirrors the backend's AccessContext.CanPostGlobally():
+  // staff always pass; everyone else needs active status AND a confirmed email.
+  const canPostGlobally = useMemo(() => {
+    if (!profile) return false;
+    const roleId = profile.role_id || 'player';
+    const isStaffRole = roleId === 'root' || roleId === 'admin' || roleId === 'moderator';
+    if (isStaffRole) return true;
+    return profile.status === 'active' && profile.verified === true;
+  }, [profile]);
   const [readMap, setReadMap] = useState({});
   const [readMapReady] = useState(true);
   const [categories, setCategories] = useState([]);
@@ -235,6 +246,7 @@ export const AuthProvider = ({ children }) => {
       setUser(u);
       setProfile(toOwnProfile(rec));
       setEmailUnverified(rec.verified === false);
+      setIsPendingApproval(rec.status === 'pending');
       // …and the snapshot is corrected against the server, so nothing here is
       // read-only for the rest of the session.
       refreshOwnProfile(rec.id);
@@ -242,6 +254,7 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       setProfile(null);
       setEmailUnverified(false);
+      setIsPendingApproval(false);
     }
   }, [toOwnProfile, refreshOwnProfile]);
 
@@ -543,6 +556,7 @@ export const AuthProvider = ({ children }) => {
       setEmailUnverified(!verified);
       if (verified && authData?.record) {
         setProfile(toOwnProfile(authData.record));
+        setIsPendingApproval(authData.record.status === 'pending');
       }
       return verified;
     } catch (err) {
@@ -1163,6 +1177,22 @@ export const AuthProvider = ({ children }) => {
   // genuine edge case rather than the normal path, which is what makes it safe to
   // trim the matrix out of GET /roles.
   const hasPermission = useCallback((perm, { category } = {}) => {
+    // The unverified-write-rights architecture (plan PLAN_UNVERIFIED_WRITE_RIGHTS_2026-10-21):
+    // an account that cannot post globally (pending or unverified, non-staff)
+    // may write ONLY where the category explicitly opens its override to `guest`.
+    if (!canPostGlobally && category && (perm === PERMISSIONS.CREATE_TOPIC || perm === PERMISSIONS.POST_REPLY)) {
+      const catId = typeof category === 'string' ? category : category?.id;
+      if (catId) {
+        const cat = categories.find(c => c.id === catId);
+        const override = cat?.permissions?.[perm];
+        if (Array.isArray(override) && override.includes('guest')) {
+          return true;
+        }
+        return false;
+      }
+      return false;
+    }
+
     // A category-level override can GRANT an action to a role that lacks it
     // globally: an admin enables posting in a specific category without
     // enabling it board-wide for the role. Without this, enabling a role's
@@ -1195,6 +1225,7 @@ export const AuthProvider = ({ children }) => {
           // root-only.
           const effectiveRoleId = user ? profile?.role_id || 'player' : 'guest';
           const isRoot = effectiveRoleId === 'root' || effectiveRoleId === CHIEF_ADMIN_ID;
+          if (isRoot) return true; // root bypasses any explicit category override
           if (override.length === 0) {
             return isRoot; // root-only override
           }
@@ -1218,7 +1249,7 @@ export const AuthProvider = ({ children }) => {
 
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
     return !!normalizePermissions(userRole?.permissions).includes(perm);
-  }, [user, profile, roles, effectivePermissions, categories]);
+  }, [user, profile, roles, effectivePermissions, categories, canPostGlobally]);
 
   const isUserOnline = useCallback((uid) => {
     if (!uid) return false;
@@ -1256,6 +1287,8 @@ export const AuthProvider = ({ children }) => {
     checkVerificationStatus,
     emailUnverified,
     setEmailUnverified,
+    isPendingApproval,
+    canPostGlobally,
     logout,
     updateSettings,
     updateProfile,
@@ -1279,7 +1312,7 @@ export const AuthProvider = ({ children }) => {
     user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, categoryGroups, forumStateLoading, forumStateError,
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
-    resendVerificationEmail, checkVerificationStatus, emailUnverified, logout,
+    resendVerificationEmail, checkVerificationStatus, emailUnverified, isPendingApproval, canPostGlobally, logout,
     updateSettings, updateProfile, setLastSelectedMask, recordActivity, refreshForumState, scheduleForumStateRefresh, applyForumState, forumStats,
     dailyActiveUsers, updateLocalTopicLastPost, updateLocalTopicPostsCount, hasPermission, roles, activeUsers,
     activeUserIds, isUserOnline

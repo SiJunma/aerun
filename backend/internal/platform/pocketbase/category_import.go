@@ -38,6 +38,10 @@ import (
 type CategoryGroupUpsert struct {
 	TargetID string
 	Title    string
+	// TitleI18n holds the full {en, ru} label map for title_i18n. When nil the
+	// column is left unchanged on existing rows and set to {en: title, ru: title}
+	// on new rows (matching the legacy collapsed-only behaviour).
+	TitleI18n map[string]string
 	// SortOrder is the legacy `order`; the target column is sort_order.
 	SortOrder int
 	CreatedAt string
@@ -48,14 +52,20 @@ type CategoryGroupUpsert struct {
 type CategoryUpsert struct {
 	TargetID string
 	// GroupID is the referenced group's derived target id, "" for unassigned.
-	GroupID      string
-	Name         string
-	Slug         string
-	Description  string
-	SortOrder    int
-	AllowedRoles []string
-	CreatedAt    string
-	UpdatedAt    string
+	GroupID     string
+	Name        string
+	Slug        string
+	Description string
+	// NameI18n holds the full {en, ru} label map for name_i18n. See TitleI18n
+	// for nil semantics.
+	NameI18n map[string]string
+	// DescriptionI18n holds the full {en, ru} label map for description_i18n.
+	// See TitleI18n for nil semantics.
+	DescriptionI18n map[string]string
+	SortOrder       int
+	AllowedRoles    []string
+	CreatedAt       string
+	UpdatedAt       string
 }
 
 // CategoryImportReport states what the import changed, so a rehearsal can prove
@@ -122,7 +132,7 @@ func ImportCategoryGroups(app core.App, upserts []CategoryGroupUpsert) (Category
 			if !ok {
 				rec = core.NewRecord(col)
 				rec.Set("id", id)
-				applyGroupLabelImport(rec, u.Title)
+				applyGroupLabelImport(rec, u.Title, u.TitleI18n)
 				rec.Set("sort_order", u.SortOrder)
 				setHistoricalDate(rec, "created_at", u.CreatedAt)
 				setHistoricalDate(rec, "updated_at", u.UpdatedAt)
@@ -136,7 +146,7 @@ func ImportCategoryGroups(app core.App, upserts []CategoryGroupUpsert) (Category
 				report.GroupsUnchanged = append(report.GroupsUnchanged, id)
 				continue
 			}
-			applyGroupLabelImport(rec, u.Title)
+			applyGroupLabelImport(rec, u.Title, u.TitleI18n)
 			rec.Set("sort_order", u.SortOrder)
 			setHistoricalDate(rec, "created_at", u.CreatedAt)
 			setHistoricalDate(rec, "updated_at", u.UpdatedAt)
@@ -165,18 +175,41 @@ func ImportCategoryGroups(app core.App, upserts []CategoryGroupUpsert) (Category
 }
 
 // applyGroupLabelImport writes the group title and its i18n twin in one place.
-// The importer collapses the legacy {en, ru} map to one value, so both languages
-// receive it — identical to what the read path would serve from the fallback,
-// but written explicitly so a later admin bilingual edit is never paired with a
-// stale legacy string (or vice versa) by a re-run.
-func applyGroupLabelImport(rec *core.Record, title string) {
+// When i18n is non-nil it is written verbatim to title_i18n; otherwise both
+// languages receive the collapsed title (the legacy single-string behaviour).
+func applyGroupLabelImport(rec *core.Record, title string, i18n map[string]string) {
 	rec.Set("title", title)
-	rec.Set("title_i18n", map[string]any{"en": title, "ru": title})
+	if i18n != nil {
+		raw := make(map[string]any, len(i18n))
+		for k, v := range i18n {
+			raw[k] = v
+		}
+		rec.Set("title_i18n", raw)
+	} else {
+		rec.Set("title_i18n", map[string]any{"en": title, "ru": title})
+	}
 }
 
 func categoryGroupMatches(rec *core.Record, u CategoryGroupUpsert) bool {
-	return rec.GetString("title") == u.Title &&
-		rec.GetInt("sort_order") == u.SortOrder &&
+	if rec.GetString("title") != u.Title {
+		return false
+	}
+	if u.TitleI18n != nil {
+		stored := rec.Get("title_i18n")
+		if stored == nil {
+			return false
+		}
+		storedMap, ok := stored.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, v := range u.TitleI18n {
+			if fmt.Sprintf("%v", storedMap[k]) != v {
+				return false
+			}
+		}
+	}
+	return rec.GetInt("sort_order") == u.SortOrder &&
 		historicalDateMatches(rec, "created_at", u.CreatedAt) &&
 		historicalDateMatches(rec, "updated_at", u.UpdatedAt)
 }
@@ -298,14 +331,27 @@ func applyCategoryUpsert(rec *core.Record, u CategoryUpsert) {
 	rec.Set("name", u.Name)
 	rec.Set("slug", u.Slug)
 	rec.Set("description", u.Description)
-	// The i18n pair travels WITH the legacy string: the importer collapses the
-	// legacy {en, ru} map to one value (collapseLabelMap), and writing both
-	// languages here keeps the read path from pairing a freshly imported legacy
-	// string with a stale i18n payload an admin had edited earlier. When the
-	// match check says "unchanged" this writer is skipped and those admin
-	// edits survive untouched.
-	rec.Set("name_i18n", map[string]any{"en": u.Name, "ru": u.Name})
-	rec.Set("description_i18n", map[string]any{"en": u.Description, "ru": u.Description})
+	// i18n maps travel with the legacy string: when present they are written
+	// verbatim; otherwise both languages receive the collapsed value so a
+	// re-run never pairs a fresh legacy string with a stale admin i18n edit.
+	if u.NameI18n != nil {
+		raw := make(map[string]any, len(u.NameI18n))
+		for k, v := range u.NameI18n {
+			raw[k] = v
+		}
+		rec.Set("name_i18n", raw)
+	} else {
+		rec.Set("name_i18n", map[string]any{"en": u.Name, "ru": u.Name})
+	}
+	if u.DescriptionI18n != nil {
+		raw := make(map[string]any, len(u.DescriptionI18n))
+		for k, v := range u.DescriptionI18n {
+			raw[k] = v
+		}
+		rec.Set("description_i18n", raw)
+	} else {
+		rec.Set("description_i18n", map[string]any{"en": u.Description, "ru": u.Description})
+	}
 	rec.Set("group_id", u.GroupID)
 	rec.Set("sort_order", u.SortOrder)
 	// allowed_roles is stored as JSON because the column is a JSONField. The
@@ -340,6 +386,39 @@ func applyCategoryUpsert(rec *core.Record, u CategoryUpsert) {
 // happens on the untouched record: applying the upsert first would overwrite the
 // very values being compared and every run would report a change.
 func categoryMatches(rec *core.Record, u CategoryUpsert) bool {
+	if rec.GetString("name") != u.Name {
+		return false
+	}
+	if u.NameI18n != nil {
+		stored := rec.Get("name_i18n")
+		if stored == nil {
+			return false
+		}
+		storedMap, ok := stored.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, v := range u.NameI18n {
+			if fmt.Sprintf("%v", storedMap[k]) != v {
+				return false
+			}
+		}
+	}
+	if u.DescriptionI18n != nil {
+		stored := rec.Get("description_i18n")
+		if stored == nil {
+			return false
+		}
+		storedMap, ok := stored.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, v := range u.DescriptionI18n {
+			if fmt.Sprintf("%v", storedMap[k]) != v {
+				return false
+			}
+		}
+	}
 	roles := decodeRoleIDList(rec.Get("allowed_roles"))
 	if len(roles) == 0 {
 		roles = nil
@@ -348,8 +427,7 @@ func categoryMatches(rec *core.Record, u CategoryUpsert) bool {
 	if len(want) == 0 {
 		want = nil
 	}
-	return rec.GetString("name") == u.Name &&
-		rec.GetString("slug") == u.Slug &&
+	return rec.GetString("slug") == u.Slug &&
 		rec.GetString("description") == u.Description &&
 		rec.GetString("group_id") == u.GroupID &&
 		rec.GetInt("sort_order") == u.SortOrder &&

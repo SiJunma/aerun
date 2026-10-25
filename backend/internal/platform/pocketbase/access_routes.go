@@ -65,6 +65,40 @@ func requireNotBanned(acc AccessContext, action string) error {
 	return nil
 }
 
+// requireVerified refuses a content-creating mutation from an account whose
+// email has not been confirmed.
+//
+// WHO IS EXEMPT, AND WHY. Guests have no email address to verify. Staff
+// (root/admin/moderator) are trusted actors — locking them out over a mailbox
+// they never had to confirm would be a self-inflicted outage.
+//
+// A PENDING account is exempt as well, and this is the subtle one. Registration
+// leaves every new account unverified, so "pending" and "unverified" are the same
+// fact for a fresh member — and the owner ruled on 2026-10-20 that a pending
+// member RECEIVES private messages and ANSWERS inside a dialogue somebody
+// opened with them (only OPENING one is refused). Narrowing this gate by
+// verification would have taken that right away, and the DM command layer has a
+// test pinning it.
+//
+// So the gate is aimed at the case it was reported for: an ACTIVE account whose
+// email was never confirmed. Such an account holds full posting rights and is
+// trusted by nobody — it can post under a nickname that proves nothing.
+func requireVerified(acc AccessContext) error {
+	if acc.Role == auth.RoleGuest {
+		return nil
+	}
+	if isStaff(acc) {
+		return nil
+	}
+	if acc.Status == auth.StatusPending {
+		return nil
+	}
+	if !acc.Verified {
+		return forbiddenError("this account's email is not verified; confirm it before posting or messaging")
+	}
+	return nil
+}
+
 // profilePayload builds the public profile DTO for GET /api/aerun/me. It is
 // assembled field by field on purpose: email and legacy_firebase_uid can
 // never leak into the response because they are not part of the map.

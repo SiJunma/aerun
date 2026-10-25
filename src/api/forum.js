@@ -113,7 +113,9 @@ export const subscribeToTopic = (topicId, callback) => {
 export const fetchTopic = async (topicId) => {
   if (!topicId) return null;
   try {
-    return normalizeTopic((await sendApi(`/api/aerun/topics/${topicId}`))?.topic);
+    const res = await sendApi(`/api/aerun/topics/${topicId}`);
+    if (res?.deleted) return null;
+    return normalizeTopic(res?.topic);
   } catch (err) {
     if (err?.status === 404 || err?.status === 403) return null;
     throw err;
@@ -136,6 +138,10 @@ export const fetchTopicStats = async (topicId) => {
   if (!topicId) return null;
   const res = await sendApi(`/api/aerun/topics/${topicId}/stats`);
   if (!res) return null;
+  // Deleted / missing topic answers 200 {deleted: true} instead of a cascade
+  // of 404s. Fold into null so the page renders the "Topic Not Found" card
+  // via the existing !stats branch in TopicPage.
+  if (res.deleted) return null;
   const createdDate = res.created || res.created_at || null;
   const lastPostDate = res.last_post_at || res.last_post_created || createdDate;
   return {
@@ -222,6 +228,14 @@ export const subscribeToTopicStats = (topicId, callback) => {
 export const fetchTopicContext = async (topicId) => {
   if (!topicId) return { draft: null, subscribed: false, votes: {} };
   const res = await sendApi(`/api/aerun/topics/${topicId}/context`);
+  if (res?.deleted) {
+    return {
+      draft: null,
+      subscribed: false,
+      votes: {},
+      deleted: true,
+    };
+  }
   const votesMap = {};
   (res?.votes || []).forEach((r) => {
     if (r.post_id) {
@@ -405,6 +419,20 @@ export const fetchSecuredPosts = async (topicId, page = 1, pageSize = 20, lastVi
     qs += `&last_visit=${encodeURIComponent(lastVisit)}`;
   }
   const res = await sendApi(`/api/aerun/topics/${topicId}/posts?${qs}`);
+  if (res?.deleted) {
+    return {
+      posts: [],
+      total: 0,
+      page: 1,
+      limit: pageSize,
+      deleted: true,
+      readCutoff: null,
+      targetPostId: null,
+      targetFound: null,
+      movedToTopicId: null,
+      pinnedPost: null,
+    };
+  }
   const items = (res?.items || []).map(normalizePost);
   return {
     posts: items,
