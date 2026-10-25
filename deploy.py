@@ -331,6 +331,22 @@ def step_verify() -> None:
     log("DEPLOY OK")
 
 
+def cmd_caddy(args) -> None:
+    action = args.caddy_action
+    if action == "reload":
+        log("== reload caddy ==")
+        ssh("systemctl reload caddy", user=ROOT_USER, timeout=60)
+    elif action == "restart":
+        log("== restart caddy ==")
+        ssh("systemctl restart caddy", user=ROOT_USER, timeout=60)
+        time.sleep(2)
+    elif action == "status":
+        log("== caddy status ==")
+        ssh("systemctl is-active caddy && systemctl is-enabled caddy", user=ROOT_USER)
+        ssh("systemctl status caddy --no-pager -n 8", user=ROOT_USER)
+    log("CADDY %s OK" % action.upper())
+
+
 def cmd_db(args) -> None:
     if args.db_action == "backup":
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -382,6 +398,8 @@ def build_parser():
     sub.add_parser("sync", help="git fetch/reset on VPS only (no artifacts)")
     sub.add_parser("status", help="service state + deployed commit + disk use")
     sub.add_parser("health", help="VPS loopback + public API + frontend checks")
+    caddy = sub.add_parser("caddy", help="manage Caddy reverse proxy (reload/restart/status)")
+    caddy.add_argument("caddy_action", choices=["reload", "restart", "status"])
     db = sub.add_parser("db", help="pre-release database helpers")
     db.add_argument("db_action", choices=["backup", "migrate", "restore"])
     db.add_argument("--file", default=None, help="backup file for db restore")
@@ -470,6 +488,8 @@ def main() -> int:
             cmd_status()
         elif args.cmd == "health":
             cmd_health()
+        elif args.cmd == "caddy":
+            cmd_caddy(args)
         elif args.cmd == "db":
             cmd_db(args)
         return 0
