@@ -2220,10 +2220,10 @@ const AdminPage = () => {
                             <td>{cat.order}</td>
                             <td>
                               <div className="fw-bold">
-                                {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                                {resolveTitle(cat.title)}
                               </div>
                               <div className="small text-muted">
-                                {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                                {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en || cat.description.ru || '') : cat.description}
                               </div>
                             </td>
                             <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
@@ -2276,10 +2276,10 @@ const AdminPage = () => {
                           <td>{cat.order}</td>
                           <td>
                             <div className="fw-bold">
-                              {typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title}
+                              {resolveTitle(cat.title)}
                             </div>
                             <div className="small text-muted">
-                              {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en) : cat.description}
+                              {typeof cat.description === 'object' ? (cat.description[currentLang] || cat.description.en || cat.description.ru || '') : cat.description}
                             </div>
                           </td>
                           <td>{t('admin.categories.table_stats_combined', { topics: cat.topics_count || 0, posts: cat.posts_count || 0 })}</td>
