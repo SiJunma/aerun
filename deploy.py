@@ -236,10 +236,9 @@ def public_front() -> None:
 
 
 def step_pull() -> None:
-    log("== 1. git pull (local) ==")
+    log("== 1. git fetch (local, no hard reset) ==")
     run(["git", "fetch", "origin", "--prune"])
     run(["git", "checkout", BRANCH])
-    run(["git", "reset", "--hard", "origin/" + BRANCH])
     head = run(["git", "rev-parse", "--short", "HEAD"], capture=True).strip()
     log("  local HEAD: " + head)
 
@@ -301,8 +300,8 @@ def step_swap_backend() -> None:
 
 
 def step_sync_repo() -> None:
-    log("== 7. sync VPS clone ==")
-    out = ssh("cd ~/project && git fetch origin --prune && git reset --hard origin/%s"
+    log("== 7. sync VPS clone (fetch only, no hard reset) ==")
+    out = ssh("cd ~/project && git fetch origin --prune"
               " && git rev-parse --short HEAD" % BRANCH)
     lines = [l for l in out.strip().splitlines() if l.strip()]
     log("  VPS HEAD: " + (lines[-1] if lines else "?"))
