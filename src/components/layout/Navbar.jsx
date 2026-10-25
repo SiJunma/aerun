@@ -323,16 +323,14 @@ const Navigation = () => {
 
         <Navbar.Collapse id="basic-navbar-nav" className="order-lg-2">
           <Nav className="me-auto mt-2 mt-lg-0">
+            <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
+              {t('nav.active_topics')}
+              {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
+            </Nav.Link>
             {user && (
-              <>
-                <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
-                  {t('nav.active_topics')}
-                  {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
-                </Nav.Link>
-                <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)}>
-                  {t('nav.subscriptions', 'Подписки')}
-                </Nav.Link>
-              </>
+              <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)}>
+                {t('nav.subscriptions', 'Подписки')}
+              </Nav.Link>
             )}
             <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)}>
 
