@@ -308,6 +308,11 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	// explicit flag keeps the guarantee exactly where it belongs.
 	pinPriority := parseIntParam(e.Request.URL.Query().Get("pinned_first"), 0) == 1
 
+	// sort_by=replies ranks the whole list by posts_count DESC (most discussed
+	// first), with id DESC as tiebreak. Mutually exclusive with pinned_first.
+	sortBy := strings.TrimSpace(e.Request.URL.Query().Get("sort_by"))
+	sortByReplies := sortBy == "replies"
+
 	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
 	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
 	if page < 1 {
@@ -336,6 +341,63 @@ func listTopicsHandler(e *core.RequestEvent) error {
 		where = append(where, dbx.HashExp{"category_id": categoryID})
 		query = query.AndWhere(dbx.HashExp{"category_id": categoryID})
 	}
+
+	// Resolve the caller's access context once — guests resolve to the guest
+	// baseline (view_forum), so a signed-out visitor sees exactly the topics
+	// in categories the guest role may view.
+	acc := AccessFrom(e)
+
+	// Allowed category IDs for this caller. When a specific category was
+	// requested, the list collapses to that single category — and if the
+	// caller may not view it, the answer is empty (the topic's existence in
+	// a hidden section never leaks).
+	var allowedCategoryIDs []string
+	if categoryID != "" {
+		allowed, err := canViewCategory(e.App, acc, categoryID)
+		if err != nil || !allowed {
+			return e.JSON(http.StatusOK, map[string]any{
+				"items":       []map[string]any{},
+				"total":       0,
+				"page":        page,
+				"per_page":    limit,
+				"next_cursor": "",
+				"request_id":  requestIDFrom(e),
+			})
+		}
+		allowedCategoryIDs = []string{categoryID}
+	} else {
+		// Global feed: list every category and keep only the ones this caller
+		// may view. A category the caller cannot see contributes no topics.
+		allCats, err := e.App.FindAllRecords(categoriesCollectionName, nil)
+		if err != nil {
+			return internalError("failed to list categories", err)
+		}
+		for _, c := range allCats {
+			allowed, err := canViewCategory(e.App, acc, c.Id)
+			if err != nil || !allowed {
+				continue
+			}
+			allowedCategoryIDs = append(allowedCategoryIDs, c.Id)
+		}
+	}
+
+	if len(allowedCategoryIDs) == 0 {
+		return e.JSON(http.StatusOK, map[string]any{
+			"items":       []map[string]any{},
+			"total":       0,
+			"page":        page,
+			"per_page":    limit,
+			"next_cursor": "",
+			"request_id":  requestIDFrom(e),
+		})
+	}
+
+	inArgs := make([]any, len(allowedCategoryIDs))
+	for i, id := range allowedCategoryIDs {
+		inArgs[i] = id
+	}
+	where = append(where, dbx.In("category_id", inArgs...))
+	query = query.AndWhere(dbx.In("category_id", inArgs...))
 
 	// The unread filter resolves the caller's unread topic ids first and pins the
 	// main query to them.
@@ -408,6 +470,18 @@ func listTopicsHandler(e *core.RequestEvent) error {
 					"id":      lastID,
 				},
 			))
+		} else if sortByReplies && len(parts) == 2 {
+			lastPostsCount := parts[0]
+			lastID := parts[1]
+
+			// Keyset predicate for (posts_count DESC, id DESC)
+			query = query.AndWhere(dbx.NewExp(
+				"(posts_count < {:count}) OR (posts_count = {:count} AND id < {:id})",
+				dbx.Params{
+					"count": lastPostsCount,
+					"id":    lastID,
+				},
+			))
 		}
 	}
 
@@ -420,6 +494,8 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	// pinned announcement above every recent reply.
 	if pinPriority {
 		query = query.OrderBy("pinned DESC", "last_post_created DESC", "id DESC")
+	} else if sortByReplies {
+		query = query.OrderBy("posts_count DESC", "id DESC")
 	} else {
 		query = query.OrderBy("last_post_created DESC", "id DESC")
 	}
@@ -455,6 +531,10 @@ func listTopicsHandler(e *core.RequestEvent) error {
 				pinnedFlag = "1"
 			}
 			nextCursor = fmt.Sprintf("%s|%s|%s", pinnedFlag, lastPostCreated, lastRec.Id)
+		} else if sortByReplies {
+			// Replies feeds: no pin, no timestamp — the cursor is posts_count|id.
+			lastPostsCount := lastRec.GetInt("posts_count")
+			nextCursor = fmt.Sprintf("%d|%s", lastPostsCount, lastRec.Id)
 		} else {
 			// Recency feeds: no pin in the ordering, so none in the cursor
 			// (last_post_created|id).
