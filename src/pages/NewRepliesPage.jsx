@@ -23,6 +23,7 @@ const NewRepliesPage = () => {
     user, profile,
     markAllRead, isMarkingAllRead, unreadTopicsCount,
     categories, readMap,
+    hasPermission, PERMISSIONS,
   } = useAuth();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -38,7 +39,10 @@ const NewRepliesPage = () => {
   const [total, setTotal] = useState(0);
   const [topicsLoading, setTopicsLoading] = useState(true);
 
-  const activeTab = searchParams.get('tab') === TABS.NEW ? TABS.NEW : TABS.ALL;
+  const isGuest = !user;
+  // У гостя нет непрочитанных тем — отдельной вкладки «Новые ответы» и всего таб-бара нет:
+  // список активных тем открывается сразу под заголовком страницы.
+  const activeTab = isGuest ? TABS.ALL : searchParams.get('tab') === TABS.NEW ? TABS.NEW : TABS.ALL;
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
   // Re-entering the loading state is derived from (tab, page), not from the
@@ -113,7 +117,16 @@ const NewRepliesPage = () => {
   // weaker one is worse than none: a category that had not loaded yet read as "not
   // permitted", so rows silently vanished, and a member whose local role state was
   // stale saw a different list than the server had approved.
-  const filteredTopics = topics;
+  //
+  // Guests reach this page from the navbar link, and the server's /api/aerun/topics
+  // does not narrow hidden categories for them, so rows from sections invisible to
+  // guests leak through. Filter client-side against the category map, the same way
+  // ActiveTopicsPage does, so guests never see topics from hidden sections.
+  const visibleTopics = topics.filter(topic => {
+    const cat = categories.find(c => c.id === topic.category_id);
+    return cat && hasPermission(PERMISSIONS.VIEW_FORUM, { category: cat });
+  });
+  const filteredTopics = visibleTopics;
 
   // Which of the rows ON THIS PAGE are unread, locally.
   //
@@ -146,7 +159,7 @@ const NewRepliesPage = () => {
   };
 
   const handlePageChange = (page) => {
-    setSearchParams({ tab: activeTab, page });
+    setSearchParams(isGuest ? { page } : { tab: activeTab, page });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -193,26 +206,30 @@ const NewRepliesPage = () => {
         )}
       </div>
 
-      {/* Tabs */}
-      <ForumTabs
-        activeId={activeTab}
-        onChange={switchTab}
-        tabs={[
-          {
-            id: TABS.ALL,
-            label: t('stats.active_topics_tab', 'Все активные'),
-            icon: <MessageSquare size={16} />
-          },
-          ...(user
-            ? [{
-                id: TABS.NEW,
-                label: t('stats.new_replies_tab', 'Новые ответы'),
-                icon: <Bell size={16} />,
-                badge: unreadTopicsCount
-              }]
-            : [])
-        ]}
-      />
+      {!isGuest && (
+        <>
+          {/* Tabs */}
+          <ForumTabs
+            activeId={activeTab}
+            onChange={switchTab}
+            tabs={[
+              {
+                id: TABS.ALL,
+                label: t('stats.active_topics_tab', 'Все активные'),
+                icon: <MessageSquare size={16} />
+              },
+              ...(user
+                ? [{
+                    id: TABS.NEW,
+                    label: t('stats.new_replies_tab', 'Новые ответы'),
+                    icon: <Bell size={16} />,
+                    badge: unreadTopicsCount
+                  }]
+                : [])
+            ]}
+          />
+        </>
+      )}
 
       {loading ? (
         <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
