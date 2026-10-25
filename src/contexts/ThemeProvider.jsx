@@ -17,7 +17,7 @@ export const ThemeProvider = ({ children }) => {
   }, [settings?.defaultDesignId]);
 
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('guest_theme') || 'dark';
+    return localStorage.getItem('guest_theme') || getFallbackTheme();
   });
 
   // Sync the active theme with the signed-in member's preference during render
@@ -41,6 +41,23 @@ export const ThemeProvider = ({ children }) => {
     }
   }, [themeSource]);
 
+  // A guest without an explicit theme choice must open with the forum's default
+  // design, not with the hardcoded dark fallback. `settings.defaultDesignId`
+  // arrives asynchronously (via getGlobalSettings), so the fallback is applied
+  // once it is known — but never overriding an explicit localStorage choice or
+  // a signed-in member's own preference. Applied during render (like the
+  // themeSource sync above) so it never causes a cascading render from an effect.
+  const [prevFallbackTheme, setPrevFallbackTheme] = useState(getFallbackTheme());
+  const currentFallbackTheme = getFallbackTheme();
+  if (
+    !themeSource &&
+    !localStorage.getItem('guest_theme') &&
+    currentFallbackTheme !== prevFallbackTheme
+  ) {
+    setPrevFallbackTheme(currentFallbackTheme);
+    setTheme(currentFallbackTheme);
+  }
+
   useEffect(() => {
     const isStandardTheme = ['light', 'dark', 'neutral'].includes(theme);
     if (isStandardTheme) {
@@ -49,13 +66,11 @@ export const ThemeProvider = ({ children }) => {
     } else {
       // If the theme is a custom design, we set the data-theme attribute to
       // the standard base theme (usually 'dark', or light/neutral if the default design is light/neutral).
-      const baseTheme = (settings?.defaultDesignId && ['light', 'dark', 'neutral'].includes(settings.defaultDesignId))
-        ? settings.defaultDesignId
-        : 'dark';
+      const baseTheme = getFallbackTheme();
       document.body.setAttribute('data-theme', baseTheme);
       document.body.setAttribute('data-custom-design', theme);
     }
-  }, [theme, settings?.defaultDesignId]);
+  }, [theme, settings?.defaultDesignId, getFallbackTheme]);
 
   const changeGuestTheme = useCallback((newTheme) => {
     setTheme(newTheme);
