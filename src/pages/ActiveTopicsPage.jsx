@@ -23,11 +23,9 @@ const ITEMS_PER_PAGE = 20;
 // there is more than one page cannot solve that, because the member who is
 // already missing pages never sees the control that would reveal it.
 //
-// So the control is always present, with at least three pages of addressable
-// space. Empty pages beyond the data are honest — they say the list is shorter
-// than the pager — while a missing pager says nothing at all.
-const MIN_PAGES = 3;
-
+// So the control is always present. Empty pages beyond the data are honest —
+// they say the list is shorter than the pager — while a missing pager says
+// nothing at all.
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
   const { user, hasPermission, PERMISSIONS, categories } = useAuth();
@@ -77,7 +75,7 @@ const ActiveTopicsPage = () => {
   });
 
   const realPages = Math.ceil(total / ITEMS_PER_PAGE);
-  const totalPages = Math.max(MIN_PAGES, realPages);
+  const totalPages = Math.max(1, realPages);
 
   const handlePageChange = (page) => {
     setSearchParams({ page });
@@ -140,7 +138,7 @@ const ActiveTopicsPage = () => {
       )}
 
       {/* Unconditional: the control must be visible even when the list is short,
-          which is the entire point of MIN_PAGES. */}
+          so the member always sees the pager and knows the list is finite. */}
       {!loading && (
         <div className="mt-4">
           <ForumPagination
