@@ -1290,6 +1290,13 @@ const TopicPage = () => {
       // else: the read map is still loading — the effect re-runs when it arrives.
     }
 
+    // Draft card jump: ?draft=1 from DraftsPage — scroll to
+    // the draft card itself once the last page is rendered.
+    if (wantDraftEditor && myDraft && targetId !== `post-${myDraft.id}`) {
+      targetId = `post-${myDraft.id}`;
+      scrollBlock = 'center';
+    }
+
     // 2. Perform the actual scroll
     const fullTargetKey = `${id}_${targetPage}_${targetId}_${queryPostId || ''}`;
     if (targetId && lastTargetRef.current !== fullTargetKey) {
@@ -1330,7 +1337,7 @@ const TopicPage = () => {
         setIsPageLoading(false);
       }
     }
-  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped, loadPosts]);
+  }, [posts, topic, searchParams, goLast, currentPage, hash, id, readMap, readMapReady, profile, navigate, setSearchParams, user, isJumpRequested, lang, showToast, ITEMS_PER_PAGE, setAlreadyJumped, loadPosts, myDraft, wantDraftEditor]);
   // The badge tooltip names the ACCOUNT behind a mask ("Player: …"), so it must
   // resolve for every post, not only for the viewer's own.
   //
