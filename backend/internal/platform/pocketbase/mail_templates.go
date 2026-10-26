@@ -102,7 +102,7 @@ var resetPasswordTemplate = core.EmailTemplate{
   <a class="btn" href="{{ .AppURL }}/_/#/auth/confirm-password-reset/` + phToken + `" target="_blank" rel="noopener">Choose a new password</a>
 </p>
 <p style="color:#64748b;font-size:13px;line-height:1.5;">
-  The link is valid for a short time and can be used once. If you did not ask for this, ignore this email — your current password stays in place and nothing changes.
+  The link is valid for 30 minutes and can be used once. If you did not ask for this, ignore this email — your current password stays in place and nothing changes.
 </p>
 <p style="margin-top:20px;">Thanks,<br/>The ` + phAppName + ` team</p>
 `,
