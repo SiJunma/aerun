@@ -100,7 +100,7 @@ const foundBranch = priority1.slice(
   priority1.indexOf('} else {')
 );
 assert.match(foundBranch, /targetId = `post-\$\{queryPostId\}`/, 'Post found on the page → local scroll target is set');
-assert.match(foundBranch, /scrollBlock = 'center'/, 'Found post is scrolled into view (centered)');
+assert.match(foundBranch, /scrollBlock = 'start'/, 'Found post is scrolled into view (at the start)');
 assert.doesNotMatch(foundBranch, /locatePost/, 'Post found on the page → no locator call');
 assert.equal((priority1.match(/locatePost\(queryPostId/g) || []).length, 1,
   'Locator runs exactly once and only in the not-found branch');

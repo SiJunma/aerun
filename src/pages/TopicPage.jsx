@@ -91,6 +91,10 @@ const TopicPage = () => {
   const locationRef = useRef(location);
   locationRef.current = location;
   const pendingCreatedPostIdRef = useRef(null);
+  // Set for the duration of a draft publish so the draft-context fetch that
+  // was started by the accompanying `setTopic` write cannot resurrect the
+  // draft card after the publish already committed.
+  const draftJustPublishedRef = useRef(false);
   const { t, lang } = useI18n();
   const { profile, setProfile, user, recordActivity, markTopicRead, updateLocalTopicLastPost, updateLocalTopicPostsCount, scheduleForumStateRefresh, applyForumState, readMap, readMapReady, hasPermission, PERMISSIONS, settings, categories, isUserOnline, setLastSelectedMask } = useAuth();
   const { showToast } = useToast();
@@ -727,7 +731,12 @@ const TopicPage = () => {
         const ctx = await fetchTopicContext(id);
         if (!cancelled && isMountedRef.current) {
           if (ctx?.deleted) return;
-          setMyDraft(decorateDraft(ctx.draft));
+          // A draft that was just published must not be resurrected by a
+          // context fetch that started before the publish committed.
+          if (!draftJustPublishedRef.current && ctx?.draft) {
+            setMyDraft(decorateDraft(ctx.draft));
+          }
+          draftJustPublishedRef.current = false;
           setIsSubscribed(!!ctx.subscribed);
           setMyVotes(ctx.votes || {});
         }
@@ -1139,7 +1148,7 @@ const TopicPage = () => {
         pendingCreatedPostIdRef.current = null;
         lastTargetRef.current = null;
         targetId = `post-${pendingPostId}`;
-        scrollBlock = 'center';
+        scrollBlock = 'start';
       } else if (isFetchingPostsRef.current) {
         return;
       } else {
@@ -1155,7 +1164,7 @@ const TopicPage = () => {
       if (postIndex !== -1) {
         targetPage = currentPage;
         targetId = `post-${queryPostId}`;
-        scrollBlock = 'center';
+        scrollBlock = 'start';
         locatingPostIdRef.current = null; // Сбрасываем замок, так как пост уже на экране
       } else {
         // ВАЖНО: Если этот postId УЖЕ находится в процессе поиска, предотвращаем повторный вызов!
@@ -1295,7 +1304,7 @@ const TopicPage = () => {
     // the draft card itself once the last page is rendered.
     if (wantDraftEditor && myDraft && targetId !== `post-${myDraft.id}`) {
       targetId = `post-${myDraft.id}`;
-      scrollBlock = 'center';
+      scrollBlock = 'start';
     }
 
     // 2. Perform the actual scroll
@@ -1791,7 +1800,7 @@ const TopicPage = () => {
       setTimeout(() => {
         const element = document.getElementById(`post-${tempId}`);
         if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
           element.classList.add('highlight-new-post');
           setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
         }
@@ -1804,6 +1813,11 @@ const TopicPage = () => {
       const replyResult = await createPost(postData, idempotencyKey);
       const newPostId = replyResult?.postId;
       navigateToCreatedPost(tempId, newPostId);
+      // Same-page sends never touch `location.state`, so remember the real post
+      // ID here — the unified scroll controller will focus `post-${newPostId}`
+      // once the optimistic placeholder swaps to the server ID. This guarantees
+      // scroll-to-focus for every message sent from the bottom reply form.
+      if (newPostId) pendingCreatedPostIdRef.current = newPostId;
 
       if (curCategoryId && newPostId) {
         updateLocalTopicLastPost(id, curCategoryId, curTitle, {
@@ -2056,10 +2070,28 @@ const TopicPage = () => {
     const publishedDraft = myDraft;
     if (!publishedDraft) return;
 
+    draftJustPublishedRef.current = true;
     setDraftSaving(true);
     recordActivity();
 
     const tempId = `temp_draft_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+    // Remember the optimistic id right away so the unified scroll controller
+    // focuses post-${tempId} once the optimistic row is appended — instead of
+    // jumping to the top/bottom of the page because of the still-present
+    // ?goLast in the URL.
+    pendingCreatedPostIdRef.current = tempId;
+
+    // Drop ?goLast / ?draft from the address bar immediately so the scroll
+    // controller does not chase a stale jump intent while the publish is in
+    // flight. preventScrollReset keeps the reader where they are.
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev);
+      params.delete('draft');
+      params.delete('goLast');
+      return params;
+    }, { replace: true, preventScrollReset: true, state: null });
+
     const { content: processedContent, rolls } = processDiceRolls(publishedDraft.content || '');
 
     // Optimistically hide draft and mark as read
@@ -2155,7 +2187,7 @@ const TopicPage = () => {
       setTimeout(() => {
         const element = document.getElementById(`post-${tempId}`);
         if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
           element.classList.add('highlight-new-post');
           setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
         }
@@ -2214,6 +2246,18 @@ const TopicPage = () => {
               return p;
             });
           });
+          // Remember the real post ID so the unified scroll controller can
+          // focus `post-${newPostId}` once the list re-renders.
+          pendingCreatedPostIdRef.current = newPostId;
+          // Drop ?draft=1 / ?goLast from the address bar so the draft editor
+          // does not reopen and the URL stops pointing at a draft that is now
+          // a published post. preventScrollReset keeps the reader on the post.
+          setSearchParams(prev => {
+            const params = new URLSearchParams(prev);
+            params.delete('draft');
+            params.delete('goLast');
+            return params;
+          }, { replace: true, preventScrollReset: true, state: null });
         }
       }
     } catch (err) {
