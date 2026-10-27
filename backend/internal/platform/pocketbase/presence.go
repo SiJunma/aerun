@@ -51,7 +51,13 @@ type userPresence struct {
 var (
 	presenceMu    sync.RWMutex
 	onlineMembers = make(map[string]userPresence)
-	presenceTTL   = 75 * time.Second
+	// presenceTTL is how long a member stays in the "online now" map after
+	// their last heartbeat. 15 minutes is the online window the spec, the
+	// stats panel and the guest model all use, so a member who merely goes
+	// idle, switches tabs or closes the tab without a leave beacon remains
+	// present for a full 15 minutes of inactivity — not one heartbeat — before
+	// being cleared from "active now".
+	presenceTTL   = 15 * time.Minute
 )
 
 // memberLastSeenWriteInterval throttles how often a heartbeat is allowed to
@@ -603,10 +609,12 @@ func registerGuestPresenceCron(app core.App) error {
 // its only reader); guests come from the collection through the same helper
 // that feeds /presence/guests.
 //
-// The two halves age out on different windows on purpose: a member drops after
-// presenceTTL (75s, one heartbeat plus slack) while a guest keeps counting for
-// guestPresenceWindow. That mirrors the legacy setup, where the RTDB status
-// node and the guest_presence node were collected on different schedules.
+// Both halves age out on the same 15-minute window: a member drops after
+// presenceTTL (15 minutes from the last heartbeat) and a guest keeps counting
+// for guestPresenceWindow (15 minutes). A closed tab that never sends its
+// leave beacon therefore ages out of the counter instead of sticking forever.
+// That mirrors the legacy setup, where the RTDB status node and the
+// guest_presence node were collected on different schedules.
 func listOnlineUsersHandler(e *core.RequestEvent) error {
 	now := time.Now()
 
