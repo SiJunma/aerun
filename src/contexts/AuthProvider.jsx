@@ -259,7 +259,24 @@ export const AuthProvider = ({ children }) => {
   }, [toOwnProfile, refreshOwnProfile]);
 
   useEffect(() => {
-    syncUserFromAuthStore();
+    // Restore a possibly-expired session before syncing identity. Without this,
+    // a returning member's stale token makes `isValid` false, so no
+    // Authorization header is sent and the backend answers /api/aerun/me as a
+    // guest — heartbeats, notifications and the online list all break.
+    const restoreSession = async () => {
+      if (pb.authStore.record) {
+        try {
+          await pb.collection('users').authRefresh();
+        } catch (refreshErr) {
+          // Dead session: tokenKey rotated or account deleted. Never re-send a
+          // stale token; clear so subsequent /me reads land as an honest guest.
+          console.warn('[AuthProvider] session refresh failed; clearing stale store', refreshErr);
+          pb.authStore.clear();
+        }
+      }
+    };
+    void restoreSession().then(syncUserFromAuthStore);
+
     const unsubAuth = pb.authStore.onChange(() => {
       syncUserFromAuthStore();
     });
