@@ -126,6 +126,13 @@ const sendHeartbeat = async (character = null) => {
 
 /**
  * Initializes presence tracking for an authenticated user.
+ *
+ * Sends ONE heartbeat on mount and then stays silent. Presence is kept alive
+ * only by explicit user activity (clicks / key presses) — see the
+ * `onUserInteraction` listeners in AuthProvider, which call `recordActivity`
+ * → `setRtdbOnline`. There is deliberately NO passive interval: a background
+ * tab or an idle user must not stay listed as "online", and a missed heartbeat
+ * must let the member age out of the live map after presenceTTL.
  */
 export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
   if (heartbeatTimer) {
@@ -138,16 +145,7 @@ export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
   currentActiveCharacter = activeCharacter;
   sendHeartbeat(activeCharacter);
 
-  heartbeatTimer = setInterval(() => {
-    sendHeartbeat(currentActiveCharacter);
-  }, 30000);
-
-  return () => {
-    if (heartbeatTimer) {
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
-    }
-  };
+  return () => {};
 };
 
 /**
@@ -200,8 +198,8 @@ export const setRtdbOffline = async (uid, isLogout = false) => {
   // Deliberately BEFORE the authStore is cleared by the caller: this is the only
   // moment the request is still authenticated, so a leave sent later would 401.
   // A failure here must not block the sign-out itself, so it is swallowed —
-  // the cost of skipping it is a presence row that ages out on its own in 75s,
-  // not a stuck session.
+  // the cost of skipping it is a presence row that ages out on its own after
+  // presenceTTL (15 minutes), not a stuck session.
   if (isLogout && uid) {
     try {
       await sendApi('/api/aerun/presence/leave', { method: 'POST', body: {} });

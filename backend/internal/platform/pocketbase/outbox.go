@@ -275,8 +275,8 @@ func dmEmailSkipReason(app core.App, rec *core.Record) string {
 		return "unparseable dm_unread event"
 	}
 
-	if isMemberOnline(recipientID, now) {
-		return "recipient online"
+	if isMemberOnline(recipientID, now) || isMemberRecentlyActive(app, recipientID, now) {
+		return "recipient online or recently active"
 	}
 
 	if user, err := app.FindRecordById(usersCollectionName, recipientID); err == nil && user != nil {

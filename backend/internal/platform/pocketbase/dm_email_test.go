@@ -160,9 +160,9 @@ func TestDMEmailSkippedWhenBothOnline(t *testing.T) {
 	}
 }
 
-// TestDMEmailSentWhenRecipientLoggedOut verifies that when the recipient just
-// signed out (their users.last_seen was updated to now), they are recognized as
-// offline and an outbox email is properly enqueued.
+// TestDMEmailSentWhenRecipientLoggedOut verifies that when the recipient
+// signed out long ago (users.last_seen older than presenceTTL), they are
+// recognized as offline and an outbox email is properly enqueued.
 func TestDMEmailSentWhenRecipientLoggedOut(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
@@ -170,10 +170,11 @@ func TestDMEmailSentWhenRecipientLoggedOut(t *testing.T) {
 	tokens := seedIdentityFixtures(t, app)
 	player2ID, _ := seedSecondPlayer(t, app)
 
-	// Simulate player2 just leaving: remove from onlineMembers, write last_seen = now
+	// Simulate player2 having left a long time ago: not in the live map and
+	// last_seen well outside the 15-minute online window.
 	clearMemberOnlineForTest(player2ID)
 	rec, _ := app.FindRecordById(usersCollectionName, player2ID)
-	rec.Set(userLastSeenField, time.Now().UTC().Format(time.RFC3339))
+	rec.Set(userLastSeenField, time.Now().UTC().Add(-20*time.Minute).Format(time.RFC3339))
 	_ = app.Save(rec)
 
 	ts := newTestServer(t, app)
@@ -186,10 +187,44 @@ func TestDMEmailSentWhenRecipientLoggedOut(t *testing.T) {
 	}
 	convID := payload["conversation_id"].(string)
 
-	// Outbox event must be enqueued even though last_seen is 0 seconds ago
 	dedupeKey := fmt.Sprintf("dm:first-unread:%s:%s", convID, player2ID)
 	if n := countOutboxByKey(t, app, dedupeKey); n != 1 {
 		t.Fatalf("offline recipient must queue exactly 1 outbox row, got %d", n)
+	}
+}
+
+// TestDMEmailSkippedWhenRecipientRecentlyActive verifies that a recipient who
+// is not in the live onlineMembers map (e.g. background tab throttled the
+// heartbeat) but whose users.last_seen is inside the 15-minute window still
+// blocks the DM email — they were recently on the forum.
+func TestDMEmailSkippedWhenRecipientRecentlyActive(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	player2ID, _ := seedSecondPlayer(t, app)
+
+	// Not in onlineMembers at all, but last_seen is 2 minutes ago — inside the
+	// 15-minute active window.
+	clearMemberOnlineForTest(player2ID)
+	rec, _ := app.FindRecordById(usersCollectionName, player2ID)
+	rec.Set(userLastSeenField, time.Now().UTC().Add(-2*time.Minute).Format(time.RFC3339))
+	_ = app.Save(rec)
+
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	body := fmt.Sprintf(`{"recipient_ids":["%s"],"title":"Hi","text":"hello"}`, player2ID)
+	status, _ := postDM(t, ts.URL+"/api/aerun/dms", tokens["player"], "dm-recent-1", body)
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if n := countOutboxByKey(t, app, ""); n != 0 {
+		t.Fatalf("recently active recipient must queue no email, got %d outbox rows", n)
+	}
+	stale, _ := app.FindFirstRecordByFilter(notificationsCollectionName, "recipient_id = {:r} && type = 'dm'", map[string]any{"r": player2ID})
+	if stale != nil {
+		t.Fatal("recently active recipient must not get an in-app DM notification")
 	}
 }
 

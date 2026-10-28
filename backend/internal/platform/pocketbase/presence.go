@@ -163,6 +163,27 @@ func writeMemberLastSeen(app core.App, authRecord *core.Record, now time.Time) {
 	}
 }
 
+// isMemberRecentlyActive reports whether the member was active on the forum
+// within presenceTTL, based on the durable users.last_seen clock.
+//
+// This is the backstop for isMemberOnline: the live onlineMembers map drops a
+// member after 15 quiet minutes, which happens when a tab sits in the
+// background and the browser throttles its heartbeat. The durable column is
+// written on every heartbeat (first beat after any idle period always writes,
+// then at most every memberLastSeenWriteInterval), so it lags the real moment
+// by at most one interval — well inside the 15-minute window.
+func isMemberRecentlyActive(app core.App, userID string, now time.Time) bool {
+	user, err := app.FindRecordById(usersCollectionName, userID)
+	if err != nil || user == nil {
+		return false
+	}
+	stored := user.GetDateTime(userLastSeenField)
+	if stored.IsZero() {
+		return false
+	}
+	return !stored.Time().Before(now.Add(-presenceTTL))
+}
+
 // ---------------------------------------------------------------------------
 // Guests: the guest_presence collection
 // ---------------------------------------------------------------------------

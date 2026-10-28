@@ -63,9 +63,10 @@ type editDMMessageForm struct {
 //
 // Firebase parity: onDmMessageCreated checked whether the recipient was currently
 // online on the forum (state == 'online'). In PocketBase, live presence is
-// tracked in onlineMembers with presenceTTL (75s, refreshed every 30s by heartbeat).
-// When a user logs out, they are removed from onlineMembers immediately.
-// When a user closes the tab, they expire after presenceTTL.
+// tracked in onlineMembers with presenceTTL (15 minutes, refreshed by heartbeat
+// on explicit user activity). When a user logs out, they are removed from
+// onlineMembers immediately. When a user closes the tab or goes idle, they
+// expire after presenceTTL.
 func isMemberOnline(userID string, now time.Time) bool {
 	presenceMu.RLock()
 	defer presenceMu.RUnlock()
@@ -144,8 +145,8 @@ func maybeEnqueueDMEmail(txApp core.App, conversationID string, recipient *core.
 		txApp.Logger().Debug("dm-email skipped: recipient nil or email disabled", "conversation_id", conversationID, "recipient_id", recipientId)
 		return
 	}
-	if isMemberOnline(recipient.Id, time.Now()) {
-		txApp.Logger().Debug("dm-email skipped: recipient is online", "conversation_id", conversationID, "recipient_id", recipient.Id)
+	if isMemberOnline(recipient.Id, time.Now()) || isMemberRecentlyActive(txApp, recipient.Id, time.Now()) {
+		txApp.Logger().Debug("dm-email skipped: recipient is online or recently active", "conversation_id", conversationID, "recipient_id", recipient.Id)
 		return
 	}
 	tpl, ok := loadEmailTemplates(txApp)[emailTemplateDM]
