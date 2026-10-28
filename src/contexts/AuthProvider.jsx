@@ -1100,7 +1100,20 @@ export const AuthProvider = ({ children }) => {
   const markTopicRead = useCallback(async (topicId, offset = null, lastVisiblePostId = null) => {
     if (!user?.uid || !topicId) return;
     const now = Date.now();
-    setReadMap(prev => ({ ...prev, [topicId]: now }));
+    // Only move the read cursor forward, never backward. Going back to an
+    // earlier page must not overwrite the read position set by a later page —
+    // otherwise goLast resolves against the older cursor and drops the user
+    // onto a page they already read instead of the last page.
+    setReadMap(prev => {
+      const existing = prev[topicId];
+      const existingOffset = existing?.offset ?? null;
+      if (offset !== null && existingOffset !== null && offset <= existingOffset) {
+        return prev;
+      }
+      // Store the same shape recordTopicVisit writes to localStorage
+      // ({timestamp, offset}) so React state and localStorage never disagree.
+      return { ...prev, [topicId]: offset !== null ? { timestamp: now, offset } : now };
+    });
     setCategories(prev => (Array.isArray(prev) ? prev.map(c => (
       c.last_post_topic_id === topicId ? { ...c, unread: false } : c
     )) : prev));

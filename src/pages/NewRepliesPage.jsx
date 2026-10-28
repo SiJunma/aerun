@@ -183,18 +183,17 @@ const NewRepliesPage = () => {
         {activeTab === TABS.NEW && user && (
           <button
             className="btn btn-outline-primary btn-sm rounded-pill px-3 d-flex align-items-center gap-2"
-            // The ids of the rows the member can actually SEE, not a page size and
-            // not "whatever was last fetched". The server marks what it is given and
-            // refuses anything in a category this member may not read, so handing it
-            // a list that includes hidden rows would make the whole call fail — and
-            // skipping them silently is the behaviour this replaced.
+            // markAllRead sends {all: true} and lets the SERVER resolve the full
+            // unread set from the same predicate that drives the badge counter —
+            // the client-supplied id list is not trusted (a polled page can only
+            // ever be a partial snapshot).
             onClick={() => markAllRead(unreadTopics.map(t => t.id))}
-            // Gated on the rows on screen, not on the badge number. The badge counts
-            // the WHOLE board while this list is one page of it, so requiring both to
-            // be non-zero is what made this button permanently disabled whenever the
-            // two disagreed — which they always did, since the badge counts topics
-            // this member cannot see on this page.
-            disabled={unreadTopics.length === 0 || isMarkingAllRead}
+            // Gated on the server's unread topic count (the badge number), not on
+            // how many unread rows happen to be on this page. The badge counts the
+            // WHOLE board; requiring both to be non-zero made the button permanently
+            // disabled whenever the two disagreed — which they always did, since
+            // unread topics on page two+ were invisible on page one.
+            disabled={unreadTopicsCount === 0 || isMarkingAllRead}
           >
             {isMarkingAllRead && (
               <div className="spinner-border spinner-border-sm" role="status">
