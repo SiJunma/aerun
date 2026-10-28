@@ -9,7 +9,7 @@ import {
   updateTopic,
   deleteTopics, moveTopics, movePosts, fetchTopicContext, saveTopicDraft,
   deleteDraft, publishDraft,
-  locatePost, subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb
+  locatePost
 } from '../api/forum';
 import {
   saveUnsentReply,
@@ -23,6 +23,7 @@ import { processDiceRolls } from '../utils/dice';
 import { createInFlight, newIdempotencyKey } from '../utils/inflight';
 import { toMillis, unreadFloor } from '../utils/dates';
 import { canDeleteTopic as canDeleteTopicFor, topicDeleteErrorText } from '../utils/topic-delete';
+import { queueOptimisticPost, resolveOptimisticPost, clearPendingOptimisticPost } from '../utils/optimisticPostQueue';
 import { subscribeToCharacters, fetchCharacter } from '../api/character';
 import { fetchUserProfile } from '../api/auth-resources';
 
@@ -249,86 +250,7 @@ const TopicPage = () => {
   const [topicNotFound, setTopicNotFound] = React.useState(false);
   const [postsLoadError, setPostsLoadError] = React.useState(null);
 
-  // Слушатель новых сообщений и удалений из RTDB в реальном времени
-  useEffect(() => {
-    if (!id || !topic || topicNotFound) return;
 
-    const sinceTimestamp = pageLoadTimeRef.current || Date.now();
-
-    const unsubNew = subscribeToNewPostsRtdb(id, sinceTimestamp, (newPost) => {
-      const curTopic = topicRef.current;
-      const curPosts = postsRef.current;
-      const effectivePostsCount = Math.max(curTopic?.posts_count || 0, (currentPage - 1) * ITEMS_PER_PAGE + curPosts.length);
-      const totalPagesCount = Math.max(1, Math.ceil(effectivePostsCount / ITEMS_PER_PAGE));
-
-      if (currentPage < totalPagesCount) return;
-
-      setPosts(prev => {
-        if (prev.some(p => p.id === newPost.id)) return prev;
-        return [...prev, newPost];
-      });
-
-      // ── Автоматически обогащаем и обновляем метаданные автора ──────────────────
-      if (newPost.author?.user_id) {
-        const curUser = userRef.current;
-        const curProfile = profileRef.current;
-        setAuthorStats(prev => {
-          // 1. Если автор — это текущий юзер (своё сообщение уже обработано в handleReply)
-          if (newPost.author?.user_id === curUser?.uid && curProfile) {
-            return {
-              ...prev,
-              [curUser.uid]: {
-                ...(prev[curUser.uid] || {}),
-                post_count: Math.max((prev[curUser.uid]?.post_count || 0), (curProfile.post_count || 0)),
-                reputation: curProfile.reputation || 0,
-                role_id: curProfile.role_id,
-                status_line: curProfile.status_line || '',
-                settings: curProfile.settings
-              }
-            };
-          }
-
-          // 2. Если автор — ЧУЖОЙ пользователь:
-          const existingAuthorStats = prev[newPost.author?.user_id];
-          const currentPostCount = existingAuthorStats?.post_count ?? newPost.author?.posts_count ?? 0;
-          const updatedPostCount = currentPostCount + 1;
-          const postSig = newPost.author_signature || newPost.signature || newPost.settings?.signature || '';
-
-          return {
-            ...prev,
-            [newPost.author?.user_id]: {
-              ...existingAuthorStats,
-              post_count: updatedPostCount,
-              reputation: existingAuthorStats?.reputation ?? newPost.author?.reputation ?? 0,
-              role_id: existingAuthorStats?.role_id || newPost.author_role_id || 'player',
-              status_line: existingAuthorStats?.status_line ?? newPost.author_status_line ?? '',
-              settings: postSig
-                ? { ...(existingAuthorStats?.settings || {}), signature: postSig }
-                : (existingAuthorStats?.settings || { signature: '' })
-            }
-          };
-        });
-      }
-
-      // Подсветка нового поста БЕЗ принудительного скролла страницы
-      setTimeout(() => {
-        const el = document.getElementById(`post-${newPost.id}`);
-        if (el) {
-          el.classList.add('highlight-new-post');
-          setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
-        }
-      }, 200);
-    });
-
-    const unsubRemoved = subscribeToPostRemovalsRtdb(id, (deletedPostId) => {
-      setPosts(prev => prev.filter(p => p.id !== deletedPostId));
-    });
-
-    return () => {
-      unsubNew();
-      unsubRemoved();
-    };
-  }, [id, topic, topicNotFound, currentPage, ITEMS_PER_PAGE]);
 
   const isFetchingPostsRef = useRef(false);
   const activeFetchIdRef = useRef(0);
@@ -608,25 +530,13 @@ const TopicPage = () => {
 
     setPageTitle(topic.title);
 
-    // If topic stats changed remotely (e.g. a post was deleted or added by another user):
-    if (prevTopicStatsRef.current && prevTopicStatsRef.current.id === topic.id) {
-      const prevCount = prevTopicStatsRef.current.posts_count ?? 0;
-      const newCount = topic.posts_count ?? 0;
-      const prevLastPostId = prevTopicStatsRef.current.last_post_id;
-      const newLastPostId = topic.last_post_id;
-
-      if (newCount !== prevCount || (newLastPostId && prevLastPostId && newLastPostId !== prevLastPostId)) {
-        loadPosts(currentPage);
-      }
-    }
-
     prevTopicStatsRef.current = {
       id: topic.id,
       posts_count: topic.posts_count,
       last_post_at: topic.last_post_at,
       last_post_id: topic.last_post_id
     };
-  }, [topic, setPageTitle, loadPosts, currentPage]);
+  }, [topic, setPageTitle]);
 
   // Load posts whenever topic id or page changes
   useEffect(() => {
@@ -634,9 +544,9 @@ const TopicPage = () => {
 
     // Пропускаем оптимистичные подсчёты счетчика из submitReply / publishDraft:
     // они меняют posts_count / last_post_at, но НЕ last_post_id. Реальное
-    // изменение от сервера всегда меняет last_post_id — тогда перезагрузка
-    // постов нужна.
-    const currentTopicKey = `${id}|${topic.last_post_id || ''}`;
+    // изменение от сервера всегда меняет last_post_id или posts_count — тогда
+    // перезагрузка постов нужна.
+    const currentTopicKey = `${id}|${topic.last_post_id || ''}|${topic.posts_count || 0}`;
     if (
       prevTopicKeyRef.current === currentTopicKey &&
       prevCurrentPageRef.current === currentPage
@@ -675,7 +585,6 @@ const TopicPage = () => {
     // ?post=ID теперь обрабатывается сервером напрямую за 1 запрос через loadPosts(?post=).
     // Только хэш-ссылки без ?post (#post-ID) ждут разрешения через локатор.
     if ((hasPostJump || hasHashJump) && !hasExplicitPage && !hasPostJump) {
-      setPosts([]);
       return;
     }
 
@@ -684,11 +593,9 @@ const TopicPage = () => {
     // дал бы неверную страницу, а эффект отметки прочитанного записал бы timestamp
     // «сейчас» и обнулил всё накопленное непрочитанное.
     if (user?.uid && !hasExplicitPage && !hasPostJump && !hasHashJump && searchParams.get('goLast') === '1' && !readMapReady) {
-      setPosts([]);
       return;
     }
 
-    setPosts([]);
     loadPosts();
   }, [id, topic, topicNotFound, currentPage, loadPosts, searchParams, readMapReady, user?.uid]);
 
@@ -722,24 +629,45 @@ const TopicPage = () => {
   // here from the live profile instead of being snapshotted into storage, so a
   // draft can never render a stale name or avatar, and can never render the
   // "Guest" fallback the old localStorage version did after its first edit.
-  const decorateDraft = (draft, charId = '') => {
+  const decorateDraft = (draft, charId = undefined) => {
     if (!draft) return null;
-    // The server stores the mask on the draft row and echoes it back, so that
-    // value wins: it is what publish will actually promote. `charId` is only
-    // the local fallback for a response that predates the column.
-    const maskId = draft.author_character_id || charId || '';
+    // The server stores the mask on the draft row and echoes it back.
+    // When charId is explicitly provided (e.g. from handleSaveDraft or handleUpdateDraft),
+    // it reflects the author's intentional choice (including '' for main account).
+    // Otherwise fallback to whatever the server draft returned.
+    const maskId = (charId !== undefined && charId !== null)
+      ? charId
+      : (draft.author_character_id || '');
     const char = characters.find(c => c.id === maskId);
+    const authorName = char ? char.name : (profile?.nickname || user?.displayName || 'Guest');
+    const authorAvatar = char ? char.avatar_url : (profile?.avatar_url || '');
+    const isChar = !!char;
+    const authorCharId = char ? char.id : null;
+    const authorUid = user?.uid || draft.author_id || null;
+    const roleId = profile?.role_id || (user ? 'player' : 'guest');
+
     return {
       ...draft,
       is_draft: true,
-      author_id: user?.uid || null,
-      author_name: char ? char.name : (profile?.nickname || user?.displayName || 'Guest'),
-      author_avatar: char ? char.avatar_url : (profile?.avatar_url || ''),
-      author_role_id: profile?.role_id || 'spectator',
+      author_id: authorUid,
+      author_name: authorName,
+      author_avatar: authorAvatar,
+      author_role_id: roleId,
       author_status_line: char ? (char.status_line || '') : (profile?.status_line || ''),
       author_signature: char ? (char.signature || '') : (profile?.settings?.signature || ''),
-      is_character: !!char,
-      author_character_id: char ? char.id : null,
+      is_character: isChar,
+      author_character_id: authorCharId,
+      author: {
+        user_id: authorUid,
+        display_name: authorName,
+        avatar_url: authorAvatar,
+        role_id: roleId,
+        is_character: isChar,
+        character_id: authorCharId,
+        posts_count: profile?.post_count || 0,
+        reputation: profile?.reputation || 0,
+        kind: user ? 'user' : 'guest'
+      }
     };
   };
 
@@ -1793,6 +1721,7 @@ const TopicPage = () => {
     setReplyContent('');
 
     // 4. Construct optimistic post and append to list
+    const replyAuthorDTO = buildAuthorDTO(postData.author_character_id);
     const optimisticPost = {
       ...postData,
       content: processedContent,
@@ -1800,9 +1729,10 @@ const TopicPage = () => {
       id: tempId,
       _isOptimistic: true,
       reputation: 0,
-      ...(ownNewStats ? {
-        author: { ...postData.author, posts_count: ownNewStats.post_count, reputation: ownNewStats.reputation }
-      } : {}),
+      author: {
+        ...replyAuthorDTO,
+        ...(ownNewStats ? { posts_count: ownNewStats.post_count, reputation: ownNewStats.reputation } : {})
+      },
       created_at: {
         toDate: () => new Date(),
         toMillis: () => Date.now(),
@@ -1811,6 +1741,7 @@ const TopicPage = () => {
     };
 
     if (targetPage !== currentPage) {
+      queueOptimisticPost(id, optimisticPost);
       setAlreadyJumped(false);
       setSearchParams({ page: targetPage }, {
         preventScrollReset: true,
@@ -1837,6 +1768,9 @@ const TopicPage = () => {
     try {
       const replyResult = await createPost(postData, idempotencyKey);
       const newPostId = replyResult?.postId;
+      if (newPostId) {
+        resolveOptimisticPost(id, tempId, newPostId);
+      }
       navigateToCreatedPost(tempId, newPostId);
       // Same-page sends never touch `location.state`, so remember the real post
       // ID here — the unified scroll controller will focus `post-${newPostId}`
@@ -1892,6 +1826,7 @@ const TopicPage = () => {
       }
     } catch (err) {
       console.error('[createPost error]', err);
+      clearPendingOptimisticPost(id, tempId);
 
       // The rescue. DRAFT_KEY below is read back only by THIS topic's page, and
       // the two ways this request fails are exactly the two cases where that
@@ -1987,6 +1922,25 @@ const TopicPage = () => {
     }
   };
 
+  // Build the nested author DTO that ForumAuthorAvatar / ForumAuthorName /
+  // getRoleBadge consume.  Without it the card falls back to flat fields and
+  // getRoleBadge sees no user_id → shows "guest".
+  const buildAuthorDTO = (charId) => {
+    const selChar = characters.find(c => c.id === charId);
+    return {
+      kind: user ? 'member' : 'guest',
+      user_id: user?.uid || null,
+      display_name: selChar
+        ? selChar.name
+        : (profile?.nickname || user?.displayName || profile?.email?.split('@')[0] || 'Guest'),
+      avatar_url: selChar
+        ? selChar.avatar_url
+        : (profile?.avatar_url || ''),
+      character_id: charId || null,
+      role_id: profile?.role_id || 'spectator',
+    };
+  };
+
   // Build post data object for draft operations
   const buildPostData = () => {
     const selectedChar = characters.find(c => c.id === selectedCharacterId);
@@ -2074,10 +2028,20 @@ const TopicPage = () => {
       // symptom, and the one that also dropped every author_* field.
       if (isMountedRef.current) {
         setMyDraft(decorateDraft(saved, editCharacterId));
+        const savedDraftId = saved?.id || myDraft?.id;
         setEditingPostId(null);
         setEditContent('');
         setEditCharacterId('');
         showToast(t('forum.draft_updated'));
+
+        setTimeout(() => {
+          const element = document.getElementById(`post-${savedDraftId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('highlight-new-post');
+            setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
+          }
+        }, 100);
       }
     } catch (err) {
       console.error(err);
@@ -2175,6 +2139,7 @@ const TopicPage = () => {
       }, newTotalPosts, 1);
     }
 
+    const pubAuthorDTO = buildAuthorDTO(publishedDraft?.author_character_id);
     const optimisticPost = {
       topic_id: id,
       author_id: user.uid,
@@ -2189,7 +2154,10 @@ const TopicPage = () => {
       reputation: 0,
       id: tempId,
       _isOptimistic: true,
-      ...(ownNewStats ? {} : {}),
+      author: {
+        ...pubAuthorDTO,
+        ...(ownNewStats ? { posts_count: ownNewStats.post_count, reputation: ownNewStats.reputation } : {})
+      },
       created_at: {
         toDate: () => new Date(),
         toMillis: () => Date.now(),
@@ -2198,6 +2166,7 @@ const TopicPage = () => {
     };
 
     if (targetPage !== currentPage) {
+      queueOptimisticPost(id, optimisticPost);
       setAlreadyJumped(false);
       setSearchParams({ page: targetPage }, {
         preventScrollReset: true,
@@ -2222,6 +2191,9 @@ const TopicPage = () => {
     try {
       const pubResult = await publishDraft(publishedDraft.id);
       const newPostId = pubResult?.postId || pubResult?.id;
+      if (newPostId) {
+        resolveOptimisticPost(id, tempId, newPostId);
+      }
       navigateToCreatedPost(tempId, newPostId);
 
       // The server's decorated post is the authority on WHO spoke. The draft
@@ -2251,21 +2223,32 @@ const TopicPage = () => {
             if (prev.some(p => p.id === newPostId)) {
               return prev.filter(p => p.id !== tempId);
             }
+            // Build the converged author DTO from the server's response so that
+            // ForumAuthorAvatar, ForumAuthorName and getRoleBadge all display
+            // correct data without a page reload.
+            const serverAuthor = pubResult?.author || {};
+            const convergedAuthorDTO = {
+              kind: serverAuthor.kind || 'member',
+              user_id: serverAuthor.user_id || user?.uid || null,
+              display_name: serverAuthor.display_name || pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
+              avatar_url: serverAuthor.avatar_url || pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
+              character_id: serverAuthor.character_id || pubResult?.author_character_id || null,
+              role_id: serverAuthor.role_id || profile?.role_id || 'player',
+            };
             return prev.map(p => {
               if (p.id === tempId) {
                 return {
                   ...p,
                   id: newPostId,
                   _isOptimistic: false,
-                  // Roll the card forward onto the server's identity. Keeping
-                  // the optimistic author_* here is what made the mask look like
-                  // it had been dropped the instant the draft was published.
+                  // Roll the card forward onto the server's identity.
                   ...(pubResult?.author_name ? { author_name: pubResult.author_name } : {}),
                   ...(pubResult?.author_avatar !== undefined ? { author_avatar: pubResult.author_avatar } : {}),
                   ...(pubResult?.author_status_line !== undefined ? { author_status_line: pubResult.author_status_line } : {}),
                   ...(pubResult?.author_signature !== undefined ? { author_signature: pubResult.author_signature } : {}),
                   ...(pubResult?.is_character !== undefined ? { is_character: pubResult.is_character } : {}),
                   ...(pubResult?.author_character_id !== undefined ? { author_character_id: pubResult.author_character_id } : {}),
+                  author: convergedAuthorDTO,
                 };
               }
               return p;
@@ -2287,6 +2270,7 @@ const TopicPage = () => {
       }
     } catch (err) {
       console.error('[publishDraft error]', err);
+      clearPendingOptimisticPost(id, tempId);
 
       if (isMountedRef.current) {
         setMyDraft(publishedDraft);
@@ -2383,12 +2367,18 @@ const TopicPage = () => {
       }
 
       // ОПТИМИСТИЧНЫЙ UI: мгновенно обновляем текст и данные поста на экране React
+      // Also update the nested `author` DTO that ForumAuthorAvatar / ForumAuthorName
+      // actually read — flat fields alone are not enough.
+      const editAuthorDTO = Object.keys(metadata).length > 0
+        ? buildAuthorDTO(editCharacterId)
+        : null;
       setPosts(prev => prev.map(p => {
         if (p.id === postId) {
           return {
             ...p,
             content: editContent.trim(),
             ...metadata,
+            ...(editAuthorDTO ? { author: { ...p.author, ...editAuthorDTO } } : {}),
             edited_at: {
               toDate: () => new Date(),
               toMillis: () => Date.now()
@@ -2398,10 +2388,23 @@ const TopicPage = () => {
         return p;
       }));
 
+      // Скролл к отредактированному посту для фокуса
+      const savedPostId = postId;
+
       // Сбрасываем форму редактирования
       setEditingPostId(null);
       setEditContent('');
       setEditCharacterId('');
+
+      // Scroll to the edited post after form resets and DOM updates
+      setTimeout(() => {
+        const element = document.getElementById(`post-${savedPostId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.classList.add('highlight-new-post');
+          setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
+        }
+      }, 100);
 
       // First-post edits also update the topic (title/description/author identity).
       // The server applies the same per-role key whitelist the rules do.
@@ -2468,7 +2471,7 @@ const TopicPage = () => {
 
     } catch (err) {
       console.error(err);
-      alert('Error editing post');
+      showToast(lang === 'ru' ? 'Ошибка при редактировании сообщения' : 'Error editing post', 'danger');
       // В случае ошибки возвращаем актуальные данные с сервера
       await loadPosts();
     }
@@ -2575,6 +2578,10 @@ const TopicPage = () => {
             showToast(lang === 'ru' ? 'Устаревшее сообщение удалено из кэша' : 'Ghost post cleared', 'info');
           } else {
             showToast(lang === 'ru' ? 'Сообщение удалено' : 'Post deleted', 'success');
+          }
+
+          if (currentPage > 1 && remainingPosts.length === 0) {
+            setSearchParams({ page: currentPage - 1 });
           }
         }
       }
@@ -3454,7 +3461,7 @@ const TopicPage = () => {
                               <Button size="sm" variant="primary" onClick={() => handleSaveEdit(post.id)}>
                                 {lang === 'ru' ? 'Сохранить' : 'Save'}
                               </Button>
-                              <Button size="sm" variant="outline-secondary" onClick={() => setEditingPostId(null)}>
+                              <Button size="sm" variant="outline-secondary" onClick={() => { setEditingPostId(null); setEditContent(''); setEditCharacterId(''); }}>
                                 {lang === 'ru' ? 'Отмена' : 'Cancel'}
                               </Button>
                             </div>
@@ -3915,7 +3922,7 @@ const TopicPage = () => {
                             >
                               {draftSaving ? t('forum.draft_saving') : t('forum.draft_update_btn')}
                             </Button>
-                            <Button size="sm" variant="outline-danger" onClick={() => { setEditingPostId(null); setEditContent(''); }}>
+                            <Button size="sm" variant="outline-danger" onClick={() => { setEditingPostId(null); setEditContent(''); setEditCharacterId(''); }}>
                               {t('common.cancel')}
                             </Button>
                           </div>

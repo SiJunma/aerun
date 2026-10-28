@@ -142,15 +142,21 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 		if err := writeRolls(post, content, form.Rolls); err != nil {
 			return 0, nil, validationError(err.Error())
 		}
-		// The same server-owned resolution createPostHandler uses, for the same
-		// reason: the client names the mask it wants and the server answers with
-		// the one it will accept, so a draft can never be filed under somebody
-		// else's mask. Persisting it HERE is what makes publish reproduce the
-		// identity — a draft published without this column came out under the
-		// account name and the mask was silently lost.
-		characterID, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
-		if err != nil {
-			return 0, nil, err
+		// The client names the mask it wants and the server answers with
+		// the one it will accept (403 on a borrowed mask).
+		//
+		// An explicit empty string means "draft as my account", not "whatever
+		// mask was last selected in the composer". `resolveAuthorCharacter`
+		// treats empty as "fall back to last_selected_character_id", which is
+		// right for a fresh reply but wrong for a draft that may be edited
+		// back onto the account while the composer still holds a mask.
+		var characterID string
+		if strings.TrimSpace(form.CharacterID) != "" {
+			resolved, err := resolveAuthorCharacter(txApp, e.Auth.Id, form.CharacterID)
+			if err != nil {
+				return 0, nil, err
+			}
+			characterID = resolved
 		}
 		post.Set("author_character_id", characterID)
 

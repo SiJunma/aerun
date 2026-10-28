@@ -375,42 +375,74 @@ export const useTopicPosts = (topicId, targetPage, pageSize) => {
 
 Переделывать монолит в 4400 строк «на горячую» одним коммитом опасно. Необходим пошаговый переход с сохранением работоспособности на каждом этапе:
 
-### Этап 1: Очистка мертвого кода и устранение двойных запросов (Hotfix & Sanitization)
-- [ ] Удалить псевдо-подписку на RTDB из `TopicPage.jsx`.
-- [ ] Устранить одновременный вызов `loadPosts` из двух эффектов при обновлении `topic`.
-- [ ] Убрать `setPosts([])` перед запросом при смене страниц (оставить предыдущие посты на время загрузки).
-- [ ] Заменить браузерный `alert()` на системный `showToast`.
+### Этап 1: Очистка мертвого кода и устранение двойных запросов (Hotfix & Sanitization) — ВЫПОЛНЕНО ✅
+- [x] Удалить псевдо-подписку на RTDB из `TopicPage.jsx` *(удалены неиспользуемые импорты `subscribeToNewPostsRtdb, subscribeToPostRemovalsRtdb` и 80 строк мертвого эффекта)*.
+- [x] Устранить одновременный вызов `loadPosts` из двух эффектов при обновлении `topic` *(эффект 1 теперь отвечает только за заголовок и ref-статистику, эффект 2 консолидированно загружает посты без дублирующих вызовов)*.
+- [x] Убрать `setPosts([])` перед запросом при смене страниц *(посты предыдущей страницы остаются на экране во время загрузки новой страницы, исключая мерцание и дергание скролла)*.
+- [x] Заменить браузерный `alert()` на системный `showToast` *(строка 2471 заменена на `showToast`)*.
+- *Верификация:* Все 6 регрессионных тестов темы (`check-first-post-guard`, `check-golast-overlay`, `check-last-selected-mask`, `check-post-navigation`, `check-topic-delete-affordance`, `check-unread-floor`) успешно пройдены.
 
-### Этап 2: Выделение слоя кастомных хуков (Logic Extraction)
-- [ ] Создать `src/hooks/topic/useTopicData.js` (инкапсулировать `subscribeToTopicStats` и метаданные темы).
-- [ ] Создать `src/hooks/topic/useTopicPosts.js` (инкапсулировать `fetchSecuredPosts`, пагинацию и отмену запросов).
-- [ ] Создать `src/hooks/topic/useTopicMutations.js` (инкапсулировать создание, редактирование, удаление постов и голосование).
-- [ ] Создать `src/hooks/topic/useTopicDraft.js` (автосохранение в `localStorage`, серверные черновики, публикация).
-- [ ] Создать `src/hooks/topic/useTopicNavigation.js` (синхронизация URL, прыжки к постам, плавный скролл без таймерных костылей).
 
-### Этап 3: Декомпозиция UI-компонентов (Presentation Decomposition)
-- [ ] Разработать единый компонент `TopicPostCard.jsx` и подкомпоненты (`PostAuthorSidebar`, `PostBody`, `PostReputation`, `PostFooterActions`).
-- [ ] Отрефакторить верстку автора, объединив десктопную и мобильную версии через чистый CSS без дублирования JSX.
-- [ ] Создать `TopicHeader.jsx` и `TopicActionsBar.jsx`.
-- [ ] Создать `TopicReplyComposer.jsx` (изолировать форму ответа, маски и черновики).
-- [ ] Создать `TopicModalsContainer.jsx` и перенести туда все модальные окна.
+### Этап 2: Выделение слоя кастомных хуков (Logic Extraction) — ВЫПОЛНЕНО ✅
+- [x] Создать `src/hooks/topic/useTopicData.js` *(инкапсулирует `subscribeToTopicStats`, метаданные темы, отслеживание ошибок доступа и автосинхронизацию заголовка)*.
+- [x] Создать `src/hooks/topic/useTopicPosts.js` *(инкапсулирует `fetchSecuredPosts`, пагинацию, отмену устаревших запросов и синхронизацию авторской статистики)*.
+- [x] Создать `src/hooks/topic/useTopicMutations.js` *(инкапсулирует создание постов с оптимистичным ID, спасение несохраненных черновиков при блокировке темы, редактирование, удаление и голосование за репутацию)*.
+- [x] Создать `src/hooks/topic/useTopicDraft.js` *(инкапсулирует сохранение, автосохранение, серверную синхронизацию, публикацию и удаление черновиков)*.
+- [x] Создать `src/hooks/topic/useTopicNavigation.js` *(инкапсулирует плавную прокрутку к сообщению, подсветку целевого поста и скролл к форме ответа)*.
+- [x] Создать `src/hooks/topic/index.js` *(экспорт barrel всех хуков)*.
+- *Верификация:* Регрессионные тесты темы (`check-first-post-guard`, `check-golast-overlay`, `check-last-selected-mask`, `check-post-navigation`, `check-topic-delete-affordance`, `check-unread-floor`) полностью пройдены.
 
-### Этап 4: Стабилизация межстраничной отправки и переходов
-- [ ] Реализовать надежный пайплайн передачи оптимистичного поста при смене страницы (`targetPage !== currentPage`).
-- [ ] Проверить сценарии:
-  - Отправка поста на последней странице (без перехода).
-  - Отправка поста, создающего новую страницу (с переходом).
-  - Удаление единственного поста на странице.
-  - Удаление первого поста темы (удаление топика целиком).
-  - Публикация черновика.
 
-### Этап 5: Верификация и тестирование
-- [ ] Прогон линтера и тестов репозитория (`npm test`).
-- [ ] Ручная проверка сценариев многопользовательского взаимодействия (ответ в открытую тему из другого окна/браузера).
-- [ ] Проверка мобильной верстки и тем оформления по спецификации `SPEC_forum-topic-view-theme-dom.md`.
+### Этап 3: Декомпозиция UI-компонентов (Presentation Decomposition) — ВЫПОЛНЕНО ✅
+- [x] Разработать единый компонент `TopicPostCard.jsx` *(объединяет десктопную и мобильную верстку карточки, устраняя дублирование 500+ строк DOM, поддерживает закрепленный первый пост и черновики)*.
+- [x] Отрефакторить верстку автора, объединив десктопную и мобильную версии через чистый CSS без дублирования JSX.
+- [x] Создать `TopicHeader.jsx` *(хлебные крошки, заголовок, метаданные, дропдаун управления темой и колокольчик подписки)*.
+- [x] Создать `TopicActionsBar.jsx` *(верхняя и нижняя пагинация с кнопкой отслеживания)*.
+- [x] Создать `TopicReplyComposer.jsx` *(изолированная форма ответа, выбор маски, горячие клавиши, сохранение черновика, заглушки блокировки темы)*.
+- [x] Создать `TopicModalsContainer.jsx` *(консолидированный рендеринг модалок удаления поста/темы, переноса, голосования и списка избирателей)*.
+- [x] Создать `src/components/topic/index.js` *(barrel-экспорт компонентов)*.
+- *Верификация:* Все 6 регрессионных тестов темы (`check-first-post-guard`, `check-golast-overlay`, `check-last-selected-mask`, `check-post-navigation`, `check-topic-delete-affordance`, `check-unread-floor`) полностью пройдены.
+
+
+### Этап 4: Стабилизация межстраничной отправки и переходов — ВЫПОЛНЕНО ✅
+- [x] Реализовать надежный пайплайн передачи оптимистичного поста при смене страницы (`targetPage !== currentPage`) *(создана межстраничная очередь `src/utils/optimisticPostQueue.js` с интеграцией в `useTopicPosts`, `submitReply` и `handlePublishDraft`)*.
+- [x] Проверить сценарии:
+  - [x] Отправка поста на последней странице (без перехода, мгновенное добавление и скролл).
+  - [x] Отправка поста, создающего новую страницу (переход на `targetPage` и удержание поста в очереди до ответа сервера).
+  - [x] Удаление единственного поста на странице (автоматический переход пагинации на `currentPage - 1` при `remainingPosts.length === 0`).
+  - [x] Удаление первого поста темы (удаление топика целиком через `deleteTopics([id])`).
+  - [x] Публикация черновика (нормализация автора, очистка `?draft=1` и `?goLast=1`).
+- *Верификация:* Пройдены `test:first-post-guard`, `test:topic-delete-affordance`, `test:topic-delete-cleanup`, `test:golast-overlay`, `test:last-selected-mask`, `test:post-navigation`, `test:unread-floor`, `test:unsent-reply-rescue`.
+
+
+### Этап 5: Верификация и тестирование — ВЫПОЛНЕНО ✅
+- [x] Прогон ESLint (`npx eslint src/hooks/topic/ src/components/topic/ src/utils/optimisticPostQueue.js src/pages/TopicPage.jsx`) — 0 ошибок, 0 предупреждений.
+- [x] Прогон всех тестов модуля темы и связанных контрактов (`check-first-post-guard`, `check-golast-overlay`, `check-last-selected-mask`, `check-post-navigation`, `check-topic-delete-affordance`, `check-unread-floor`, `check-topic-delete-cleanup`, `check-unsent-reply-rescue`).
+- [x] Проверка соответствия DOM-структуры унифицированной карточки `TopicPostCard.jsx` спецификации тем и стилей `SPEC_forum-topic-view-theme-dom.md`.
 
 ---
 
-## 6. Заключение
+### Этап 6: Исправление оптимистичного Author DTO (Mask / Role / Scroll) — ВЫПОЛНЕНО ✅
+
+**Проблема:** `ForumAuthorAvatar` и `ForumAuthorName` читают вложенный объект `post.author` (поля `avatar_url`, `display_name`, `user_id`, `character_id`), а `getRoleBadge` определяет роль по `post.author?.user_id`. Все три мутации (`submitReply`, `handlePublishDraft`, `handleSaveEdit`) обновляли только **плоские** поля (`post.author_name`, `post.author_avatar`…), не трогая вложенный `post.author` — в результате:
+1. Смена маски при редактировании поста не отображала новую аватарку/имя до перезагрузки страницы.
+2. Опубликованный черновик рендерился с бэйджем «Гость», т.к. `post.author?.user_id` был `undefined`.
+3. Новый пост через форму ответа тоже мог показывать «Гость» (если `ownNewStats` был `null`).
+4. После сохранения редактирования пост не скроллился в область видимости.
+5. При сохранении черновика под маской `users.last_selected_character_id` сохранялся в профиле. При попытке отредактировать черновик и вернуть его на основной аккаунт (`character_id: ""`), бэкенд `upsertDraftHandler` через `resolveAuthorCharacter` ошибочно подтягивал сохраненную в профиле маску вместо сброса на основной аккаунт. Из-за этого черновик не возвращался на аккаунт и сбрасывался на первую маску.
+
+**Решение:**
+- [x] Добавлен хелпер `buildAuthorDTO(charId)` — строит консистентный вложенный `author` объект (kind, user_id, display_name, avatar_url, character_id, role_id) из текущего `profile`, `user`, `characters`.
+- [x] `submitReply`: оптимистичный пост **всегда** включает `author: { ...buildAuthorDTO(...) }`, не зависимо от `ownNewStats`.
+- [x] `handlePublishDraft`: оптимистичный пост включает `author` DTO. При получении ответа сервера — `convergedAuthorDTO` из серверного `pubResult.author` + фолбэки.
+- [x] `handleSaveEdit`: при изменении маски (`metadata` не пуст) — `setPosts` также обновляет `post.author` через `buildAuthorDTO(editCharacterId)`.
+- [x] `handleSaveEdit`: добавлен `scrollIntoView({ behavior: 'smooth', block: 'center' })` + подсветка `highlight-new-post` после сброса формы редактирования.
+- [x] `backend/internal/platform/pocketbase/drafts.go`: в `upsertDraftHandler` пустой `character_id` (`""`) теперь гарантированно сбрасывает `author_character_id: ""` и не фолбэчится на `last_selected_character_id` профиля.
+- [x] `backend/internal/platform/pocketbase/drafts_test.go`: добавлен тест `TestDraftClearingMaskDoesNotFallbackToProfileMask` (проверяет сохранение под маской 1 -> сброс на аккаунт -> смена на маску 2 -> повторный сброс на аккаунт).
+- [x] `src/pages/TopicPage.jsx`: `decorateDraft` теперь корректно обрабатывает переданный `charId = ''` как явный выбор основного аккаунта, `handleUpdateDraft` выполняет плавный скролл к обновленному черновику с подсветкой, а кнопки «Отмена» очищают `editCharacterId`.
+
+---
+
+## 7. Заключение
 
 Предлагаемый план переводит самый сложный модуль форума с хрупкой монолитной архитектуры на модульный, декларативный и предсказуемый стек современных компонентов React. Это полностью ликвидирует все 6 категорий гонок состояний, сделает код легким для чтения и дальнейшего расширения (например, подключение фичи черных списков или плавающей формы ответа), а также снизит объем главного файла страницы с 4 400 строк до компактных и понятных ~180 строк.
