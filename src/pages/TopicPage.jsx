@@ -514,6 +514,17 @@ const TopicPage = () => {
 
   const currentTopicIdRef = useRef(id);
   const skipNextLoadForPageRef = useRef(null);
+  // Ключ темы, по которому различаем реальное изменение от сервера (меняется
+  // last_post_id) и оптимистичный подсчёт счетчика из submitReply /
+  // publishDraft (меняются только posts_count / last_post_at). Оптимистичное
+  // изменение не должно очищать список постов: оптимистичный пост уже в
+  // списке и будет примирован с реальным, когда createPost/publishDraft
+  // вернёт server id. Без этого пропуска эффект ниже делает setPosts([]) +
+  // loadPosts() до завершения сетевого запроса, сервер ещё не знает о посте,
+  // и пост исчезает до перезагрузки страницы (особенно заметно под маской,
+  // т.к. resolveAuthorCharacter задерживает ответ сервера).
+  const prevTopicKeyRef = useRef(null);
+  const prevCurrentPageRef = useRef(null);
 
   // Topic metadata and freshness are driven entirely by subscribeToTopicStats.
   // Initial load delivers title, pins, counters and author info without the ~1.2 KB
@@ -620,6 +631,20 @@ const TopicPage = () => {
   // Load posts whenever topic id or page changes
   useEffect(() => {
     if (!id || !topic || topicNotFound) return;
+
+    // Пропускаем оптимистичные подсчёты счетчика из submitReply / publishDraft:
+    // они меняют posts_count / last_post_at, но НЕ last_post_id. Реальное
+    // изменение от сервера всегда меняет last_post_id — тогда перезагрузка
+    // постов нужна.
+    const currentTopicKey = `${id}|${topic.last_post_id || ''}`;
+    if (
+      prevTopicKeyRef.current === currentTopicKey &&
+      prevCurrentPageRef.current === currentPage
+    ) {
+      return;
+    }
+    prevTopicKeyRef.current = currentTopicKey;
+    prevCurrentPageRef.current = currentPage;
 
     // Если эта страница только что была загружена в рамках запроса 'last', предотвращаем повторный запрос
     if (skipNextLoadForPageRef.current === currentPage) {
@@ -3001,6 +3026,7 @@ const TopicPage = () => {
                           characterId={firstPost.author_character_id}
                           isCharacter={!!firstPost.is_character}
                           author={firstPost.author}
+                          fallbackName={firstPost.author_name}
                           onClick={handleQuoteAuthor}
                         />
                       </div>
@@ -3057,6 +3083,7 @@ const TopicPage = () => {
                             characterId={firstPost.author_character_id}
                             isCharacter={!!firstPost.is_character}
                             author={firstPost.author}
+                            fallbackName={firstPost.author_name}
                             onClick={handleQuoteAuthor}
                           />
                         </div>
@@ -3162,6 +3189,7 @@ const TopicPage = () => {
                           characterId={post.author_character_id}
                           isCharacter={!!post.is_character}
                           author={post.author}
+                          fallbackName={post.author_name}
                           onClick={handleQuoteAuthor}
                         />
                       </div>
@@ -3255,6 +3283,7 @@ const TopicPage = () => {
                             characterId={post.author_character_id}
                             isCharacter={!!post.is_character}
                             author={post.author}
+                            fallbackName={post.author_name}
                             // A deleted account keeps its baked name but must not
                             // link to its (soft-deleted) profile.
                             onClick={post.author?.deleted ? undefined : handleQuoteAuthor}
@@ -3711,6 +3740,7 @@ const TopicPage = () => {
                         characterId={myDraft.author_character_id}
                         isCharacter={!!myDraft.is_character}
                         author={myDraft.author}
+                        fallbackName={myDraft.author_name}
                         onClick={handleQuoteAuthor}
                       />
                     </div>
@@ -3770,6 +3800,7 @@ const TopicPage = () => {
                           characterId={myDraft.author_character_id}
                           isCharacter={!!myDraft.is_character}
                           author={myDraft.author}
+                          fallbackName={myDraft.author_name}
                           onClick={handleQuoteAuthor}
                         />
                       </div>
