@@ -301,8 +301,7 @@ def step_swap_backend() -> None:
 
 def step_sync_repo() -> None:
     log("== 7. sync VPS clone (fetch only, no hard reset) ==")
-    out = ssh("cd ~/project && git fetch origin --prune"
-              " && git rev-parse --short HEAD" % BRANCH)
+    out = ssh(f"cd ~/project && git fetch origin --prune && git rev-parse --short HEAD")
     lines = [l for l in out.strip().splitlines() if l.strip()]
     log("  VPS HEAD: " + (lines[-1] if lines else "?"))
     ssh("rm -f %s.q* %s.q* /tmp/*.part; true" % (FRONT_REMOTE, BACK_REMOTE))
