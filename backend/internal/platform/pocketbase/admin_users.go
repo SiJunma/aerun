@@ -292,6 +292,18 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 			targetUser.Set("status", status)
 		}
 
+		// PocketBase validates the ENTIRE record on Save, not just the changed
+		// fields. A row created before the `status` column existed, or one whose
+		// `tokenKey` was never rotated, would fail validation here with a 500
+		// even though only the role is being changed. Repair the required fields
+		// before saving so the role update is never blocked by stale data.
+		if strings.TrimSpace(targetUser.GetString("status")) == "" {
+			targetUser.Set("status", string(auth.StatusActive))
+		}
+		if len(targetUser.GetString("tokenKey")) < 30 {
+			targetUser.RefreshTokenKey()
+		}
+		
 		if err := txApp.Save(targetUser); err != nil {
 			return 0, nil, internalError("failed to update user", err)
 		}
