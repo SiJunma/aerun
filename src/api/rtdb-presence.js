@@ -127,13 +127,17 @@ const sendHeartbeat = async (character = null) => {
 /**
  * Initializes presence tracking for an authenticated user.
  *
- * Sends ONE heartbeat on mount and then stays silent. Presence is kept alive
- * only by explicit user activity (clicks / key presses) — see the
+ * Sends ONE heartbeat on mount, then keeps presence alive with a passive
+ * heartbeat every MEMBER_HEARTBEAT_MS while the tab is open. Presence is also
+ * refreshed on explicit user activity (clicks / key presses) — see the
  * `onUserInteraction` listeners in AuthProvider, which call `recordActivity`
- * → `setRtdbOnline`. There is deliberately NO passive interval: a background
- * tab or an idle user must not stay listed as "online", and a missed heartbeat
- * must let the member age out of the live map after presenceTTL.
+ * → `setRtdbOnline`. A passive interval is kept so a member who is merely
+ * reading (not clicking) does not age out of the live map while the tab stays
+ * open; when the tab closes or the user goes idle beyond presenceTTL, the map
+ * entry expires on its own.
  */
+const MEMBER_HEARTBEAT_MS = 60 * 1000;
+
 export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
@@ -145,7 +149,16 @@ export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
   currentActiveCharacter = activeCharacter;
   sendHeartbeat(activeCharacter);
 
-  return () => {};
+  heartbeatTimer = setInterval(() => {
+    sendHeartbeat(currentActiveCharacter);
+  }, MEMBER_HEARTBEAT_MS);
+
+  return () => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
 };
 
 /**
