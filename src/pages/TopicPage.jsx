@@ -158,6 +158,8 @@ const TopicPage = () => {
   // latch the member gets three identical offers for one lost reply.
   const rescueWrittenRef = useRef(null);
 
+
+
   // Edit state
   const [editingPostId, setEditingPostId] = useState(null);
   const [editContent, setEditContent] = useState('');
@@ -249,6 +251,35 @@ const TopicPage = () => {
   const [accessErrRaw, setAccessErrRaw] = React.useState(null);
   const [topicNotFound, setTopicNotFound] = React.useState(false);
   const [postsLoadError, setPostsLoadError] = React.useState(null);
+
+
+  // Remembers whether the topic was already closed/missing/denied when this
+  // page first loaded, and the reply text at that moment. Used so that a page
+  // reload (or first visit to an already-closed topic) whose draft simply got
+  // restored into the form is NOT treated as a new "the topic closed under me"
+  // incident — the text is already in the form, and a rescue may already exist
+  // or may have been deliberately deleted by the member.
+  const topicInitialStateRef = useRef({ loaded: false, wasUnavailable: false });
+  const replyContentAtLoadRef = useRef('');
+
+  // Record the topic's availability state on first load. Runs once, when the
+  // topic read finally resolves (topic set, topicNotFound set, or accessError
+  // set). Reset whenever the member navigates to a different topic (id change),
+  // because the component may be reused by React Router.
+  useEffect(() => {
+    topicInitialStateRef.current.loaded = false;
+    topicInitialStateRef.current.wasUnavailable = false;
+    replyContentAtLoadRef.current = '';
+  }, [id]);
+
+  useEffect(() => {
+    if (topicInitialStateRef.current.loaded) return;
+    if (!topic && !topicNotFound && !accessError) return; // still loading
+    topicInitialStateRef.current.loaded = true;
+    topicInitialStateRef.current.wasUnavailable =
+      topicNotFound || accessError || Boolean(topic && topic.is_locked);
+    replyContentAtLoadRef.current = replyContent;
+  }, [topic, topicNotFound, accessError, replyContent]);
 
 
 
@@ -858,6 +889,11 @@ const TopicPage = () => {
     const text = replyContent.trim();
     if (!text) return;
 
+    // Wait until the topic read has resolved before deciding whether to
+    // rescue. On first load the topic arrives asynchronously; rescuing before
+    // it lands would treat every page load as an incident.
+    if (!topic && !topicNotFound && !accessError) return;
+
     // A topic that is neither locked nor missing is still postable: leave it be.
     if (topic && !topic.is_locked && !topicNotFound && !accessError) return;
 
@@ -879,6 +915,30 @@ const TopicPage = () => {
     // Reason is decided from the state that changed, in the same precedence the
     // page's own cards use: not-found beats access-denied beats a lock.
     const reason = gone ? REASON_TOPIC_UNAVAILABLE : REASON_TOPIC_CLOSED;
+
+    // A page reload (or first visit to an already-closed topic) is not a new
+    // incident: the topic was already unavailable when this page loaded, and
+    // the draft was simply restored into the form. The text is already safe
+    // (an existing rescue was left alone, or deliberately deleted by the
+    // member). Do not create a new rescue and do not open the modal.
+    if (
+      topicInitialStateRef.current.wasUnavailable &&
+      replyContent === replyContentAtLoadRef.current
+    ) {
+      rescueWrittenRef.current = { topicId: id, reason };
+      return;
+    }
+
+    // A page reload is not a new incident: `rescueWrittenRef.current` lives only
+    // in this session and is gone after a reload, so a stale ref check alone
+    // would re-rescue (and re-open the modal) every time the member refreshes a
+    // closed topic whose draft simply got restored into the form. If a rescue
+    // already exists for this (topic, member), the text is already safe — leave
+    // it be and do not notify the global notice.
+    if (hasUnsentReply(id, user?.uid)) {
+      rescueWrittenRef.current = { topicId: id, reason };
+      return;
+    }
 
     if (rescueWrittenRef.current?.topicId === id && rescueWrittenRef.current.reason === reason) {
       // Already rescued this exact event on this exact topic; the stats poll
