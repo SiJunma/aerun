@@ -1,7 +1,7 @@
 import React from 'react';
-import { Card, Button, Badge, Dropdown } from 'react-bootstrap';
+import { Card, Button } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
-import { Pin, TrendingUp, TrendingDown, MoreHorizontal, Trash2, Edit } from 'lucide-react';
+import { Pin, Edit } from 'lucide-react';
 import ForumAuthorAvatar from '../common/ForumAuthorAvatar';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
@@ -32,12 +32,13 @@ export const TopicPostCard = ({
   onQuote,
   onStartEdit,
   onDeletePost,
-  onRepVote,
   onShowVoters,
   onShowVoteInfo,
   onQuoteAuthor,
   myVotes = {},
   editingChildren = null,
+  onOpenDm,
+  onOpenRepVote,
   lang,
   t,
   showToast
@@ -55,10 +56,29 @@ export const TopicPostCard = ({
   const canEdit = canEditPost?.(post);
   const canReply = hasPermission?.(PERMISSIONS.POST_REPLY, { category });
 
+  const authorDataForDm = authorId === user?.uid ? profile : authorStats[authorId];
+  const isDeletedAuthor = authorDataForDm === null || post.author?.deleted === true || post.author_deleted === true;
+  const isBannedAuthor = (authorDataForDm?.role_id || post.author_role_id) === 'banned';
+  const canDm = !!(
+    user &&
+    authorId &&
+    authorId !== user.uid &&
+    hasPermission?.(PERMISSIONS.USE_DIRECT_MESSAGES) &&
+    profile?.status !== 'pending' &&
+    !isDeletedAuthor &&
+    !isBannedAuthor
+  );
+
+  const postRepValue = post.reputation || 0;
+  const postRepVotesCount = post.reputation_votes_count || 0;
+  const userVote = post.my_vote ?? myVotes[post.id];
+
+  const reputationColor = postRepValue > 0 ? 'text-success' : postRepValue < 0 ? 'text-danger' : 'text-muted';
+
   return (
     <Card
       id={`post-${post.id}`}
-      className={`mb-4 shadow-sm border-0 post-card ${isPinnedFirstPost ? 'pinned-first-post-card' : ''} ${isDraft ? 'draft-post-card' : ''}`}
+      className={`mb-4 shadow-sm border-0 post-card card ${isPinnedFirstPost ? 'pinned-first-post-card' : ''} ${isDraft ? 'draft-post-card' : ''}`}
     >
       {/* Pinned marker strip */}
       {isPinnedFirstPost && (
@@ -96,6 +116,7 @@ export const TopicPostCard = ({
                 />
               </div>
 
+              {/* 2. Status */}
               {liveStatus === 'LOADING' ? (
                 <div className="skeleton mb-2 mx-auto" style={{ width: '80%', height: '14px' }}></div>
               ) : liveStatus ? (
@@ -104,6 +125,7 @@ export const TopicPostCard = ({
                 </div>
               ) : null}
 
+              {/* 3. Avatar */}
               <div className="mb-2">
                 <ForumAuthorAvatar
                   userId={authorId}
@@ -117,29 +139,41 @@ export const TopicPostCard = ({
                 />
               </div>
 
-              <div className="mt-2 mb-2 text-center w-100">
-                {getRoleBadge?.(post)}
-              </div>
-
-              {/* Author Stats (Posts & Rep) */}
-              {authorId && (
-                <div className="small text-muted mb-2 text-center w-100">
-                  <div>
-                    {lang === 'ru' ? 'Сообщений' : 'Posts'}: <strong>{postCount}</strong>
-                  </div>
-                  <div>
-                    {lang === 'ru' ? 'Репутация' : 'Reputation'}: <strong>{reputation}</strong>
-                  </div>
+              {/* 4. Posts Count */}
+              {post.author?.user_id && (
+                <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
+                  {t?.('profile.posts_count') || lang === 'ru' ? 'Posts' : 'Posts'}: <strong>{postCount}</strong>
                 </div>
               )}
 
-              {authorId && (
-                <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
-                  <Link to={`/profile/${authorId}`} className="footer-link text-decoration-none px-0">
-                    {t?.('profile.view_profile') || 'Profile'}
-                  </Link>
+              {/* 5. Reputation */}
+              {post.author?.user_id && (
+                <div className="text-muted" style={{ fontSize: '0.775rem' }}>
+                  {t?.('profile.reputation') || lang === 'ru' ? 'Reputation' : 'Reputation'}: <strong>{reputation}</strong>
                 </div>
               )}
+
+              {/* 6. Role/Mask */}
+              <div className="mt-2 mb-2 text-center w-100">{getRoleBadge?.(post)}</div>
+
+              {/* Desktop profile links */}
+              {(() => {
+                const authorDataForLinks = post.author?.user_id === user?.uid ? profile : authorStats[post.author?.user_id];
+                if (!authorDataForLinks) return null;
+
+                return (
+                  <div className="mt-auto border-top w-100 d-flex gap-3 justify-content-center border-top-dashed align-items-center" style={{ height: '34px' }}>
+                    <Link to={`/profile/${post.author?.user_id}`} className="footer-link text-decoration-none px-0">
+                      {t?.('profile.view_profile') || 'Profile'}
+                    </Link>
+                    {canDm && onOpenDm && (
+                      <Link to={`/messages/${post.author?.user_id}`} className="footer-link text-decoration-none px-0" onClick={() => onOpenDm(post.author?.user_id)}>
+                        {lang === 'ru' ? 'PM' : 'PM'}
+                      </Link>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Mobile Author Row */}
@@ -151,7 +185,7 @@ export const TopicPostCard = ({
                   isCharacter={!!post.is_character}
                   author={post.author}
                   initialAvatar={post.author_avatar}
-                  size={50}
+                  size={60}
                   className="rounded shadow-sm"
                   isOnline={isOnline}
                 />
@@ -164,23 +198,30 @@ export const TopicPostCard = ({
                     isCharacter={!!post.is_character}
                     author={post.author}
                     fallbackName={post.author_name}
-                    onClick={onQuoteAuthor}
+                    onClick={post.author?.deleted ? undefined : onQuoteAuthor}
                   />
                 </div>
                 {liveStatus && (
-                  <div className="text-muted small text-truncate" style={{ fontSize: '0.75rem' }}>
+                  <div className="text-primary author-res-status" style={{ fontStyle: 'italic', lineHeight: '1.2' }}>
                     {liveStatus}
                   </div>
                 )}
               </div>
               <div className="text-end author-stats-group ms-auto">
                 <div className="d-flex flex-column align-items-end gap-1">
-                  {authorId && (
-                    <div className="text-muted author-res-stat small" style={{ fontSize: '0.75rem' }}>
-                      {lang === 'ru' ? 'Постов' : 'Posts'}: <strong>{postCount}</strong>
+                  {post.author?.user_id && (
+                    <div className="text-muted author-res-stat">
+                      {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{postCount}</strong>
                     </div>
                   )}
-                  {getRoleBadge?.(post, 'mb-0')}
+                  {post.author?.user_id && (
+                    <div className="text-muted author-res-stat">
+                      {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{reputation}</strong>
+                    </div>
+                  )}
+                  <div className="author-res-info-lite text-end">
+                    {getRoleBadge?.(post, 'mb-0')}
+                  </div>
                 </div>
               </div>
             </div>
@@ -188,7 +229,7 @@ export const TopicPostCard = ({
 
           {/* Content Area */}
           <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
-            {/* Header Strip: Timestamp & Post Number */}
+            {/* Header Strip: Time, # */}
             <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
               <small className="text-muted">
                 {post._isOptimistic ? (
@@ -204,24 +245,15 @@ export const TopicPostCard = ({
                       showToast?.(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
                     }}
                   >
-                    <Timestamp date={post.created_at} className="text-muted" />
+                    <span className="text-nowrap text-muted">{post.created_at}</span>
                   </a>
                 )}
-                {post.edited_at && !post._isOptimistic && (
-                  <span className="d-block d-md-inline-block ms-md-2 opacity-50">
-                    ({lang === 'ru' ? 'ред.' : 'edited'} <Timestamp date={post.edited_at} />)
-                  </span>
-                )}
               </small>
-
               {postNumber !== undefined && (
-                <div className="text-muted small opacity-50 post-number-indicator">
-                  #{postNumber}
-                </div>
+                <div className="text-muted small opacity-50 post-number-indicator">#{postNumber}</div>
               )}
             </div>
 
-            {/* Post Body Area */}
             <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
               <div className="flex-grow-1">
                 {isEditing && editingChildren ? (
@@ -242,80 +274,83 @@ export const TopicPostCard = ({
                   </>
                 )}
               </div>
+
+              {/* Reputation section at bottom - matches reference HTML */}
+              {(postRepVotesCount > 0 || postRepValue !== 0) && (
+                <div className="mt-3 d-flex justify-content-end align-items-center gap-2 reputation-section">
+                  {/* Eye button: view who voted */}
+                  <button
+                    type="button"
+                    className="rep-eye-btn"
+                    title={lang === 'ru' ? 'Посмотреть кто голосовал' : 'View who evaluated'}
+                    onClick={() => onShowVoters?.(post, postNumber)}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="lucide lucide-eye"
+                      aria-hidden="true"
+                    >
+                      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path>
+                      <circle cx={12} cy={12} r={3}></circle>
+                    </svg>
+                  </button>
+
+                  {/* Award + value */}
+                  <div
+                    className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
+                    title={userVote
+                      ? (lang === 'ru' ? 'Вы оценили этот пост (Нажмите чтобы посмотреть ваш голос)' : 'You evaluated this post (Click to view your vote)')
+                      : (lang === 'ru' ? 'Посмотреть кто голосовал' : 'View who evaluated')}
+                    onClick={userVote ? () => onShowVoteInfo?.(userVote) : () => onOpenRepVote?.(post, postNumber)}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={postRepValue > 0 ? 'currentColor' : 'currentColor'}
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className={`lucide lucide-award ${reputationColor}`}
+                      aria-hidden="true"
+                    >
+                      <path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"></path>
+                      <circle cx={12} cy={8} r={6}></circle>
+                    </svg>
+                    <strong>{postRepValue}</strong>
+                    <span className="ms-1" style={{ fontWeight: 500, opacity: 0.9 }}>
+                      {postRepValue > 0 ? `(+${postRepValue})` : postRepValue !== 0 ? `(${postRepValue})` : '(+1)'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer Actions Strip */}
             {!isEditing && (
-              <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed post-footer-links" style={{ height: '38px' }}>
-                {/* Left side: Voters badge & Rep buttons */}
-                <div className="d-flex align-items-center gap-2">
-                  {/* Voters count badge */}
-                  {(post.reputation_votes_count > 0 || post.reputation !== 0) && (
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0 text-decoration-none text-muted small"
-                      onClick={() => onShowVoters?.(post, postNumber)}
-                      title={lang === 'ru' ? 'Посмотреть кто голосовал' : 'View voters'}
-                    >
-                      <Badge bg={post.reputation > 0 ? 'success' : post.reputation < 0 ? 'danger' : 'secondary'} className="px-2 py-1">
-                        {post.reputation > 0 ? `+${post.reputation}` : post.reputation}
-                      </Badge>
-                    </Button>
-                  )}
-
-                  {/* Vote Buttons (if not author and not already voted) */}
-                  {user && authorId && authorId !== user.uid && !myVotes[post.id] && onRepVote && (
-                    <div className="d-flex align-items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline-success"
-                        className="py-0 px-1 border-0"
-                        onClick={() => onRepVote(post, 1, postNumber)}
-                        title={lang === 'ru' ? 'Повысить репутацию' : 'Upvote'}
-                      >
-                        <TrendingUp size={14} />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline-danger"
-                        className="py-0 px-1 border-0"
-                        onClick={() => onRepVote(post, -1, postNumber)}
-                        title={lang === 'ru' ? 'Понизить репутацию' : 'Downvote'}
-                      >
-                        <TrendingDown size={14} />
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* Voted badge click to view vote info */}
-                  {myVotes[post.id] && (
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0 text-decoration-none"
-                      onClick={() => onShowVoteInfo?.(myVotes[post.id])}
-                    >
-                      <Badge bg={myVotes[post.id].value > 0 ? 'success' : 'danger'} className="px-2 py-1 opacity-75">
-                        {myVotes[post.id].value > 0 ? `+${myVotes[post.id].value}` : myVotes[post.id].value}
-                      </Badge>
-                    </Button>
+              <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
+                <div className="d-flex d-md-none gap-3">
+                  <a className="author-res-footer-link" href={`/profile/${authorId}`} data-discover="true">
+                    {t?.('profile.view_profile') || 'Profile'}
+                  </a>
+                  {canDm && onOpenDm && (
+                    <a className="author-res-footer-link" href={`/messages/${authorId}`} data-discover="true" onClick={() => onOpenDm(authorId)}>
+                      {lang === 'ru' ? 'PM' : 'PM'}
+                    </a>
                   )}
                 </div>
-
-                {/* Right side: Action buttons (Quote, Edit, Delete) */}
-                <div className="d-flex align-items-center gap-2">
-                  {canEdit && (
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="footer-link p-0 text-decoration-none"
-                      onClick={() => onStartEdit?.(post, postNumber === 1)}
-                    >
-                      {lang === 'ru' ? 'Редактировать' : 'Edit'}
-                    </Button>
-                  )}
-
+                <div className="d-none d-md-block"></div>
+                <div className="d-flex gap-2 gap-md-3">
                   {onDeletePost && (
                     <Button
                       variant="link"
@@ -324,6 +359,17 @@ export const TopicPostCard = ({
                       onClick={() => onDeletePost?.(post)}
                     >
                       {lang === 'ru' ? 'Удалить' : 'Delete'}
+                    </Button>
+                  )}
+
+                  {canEdit && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="footer-link p-0 text-decoration-none"
+                      onClick={() => onStartEdit?.(post, postNumber === 1)}
+                    >
+                      {lang === 'ru' ? 'Редактировать' : 'Edit'}
                     </Button>
                   )}
 
