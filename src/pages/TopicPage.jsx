@@ -847,20 +847,45 @@ const TopicPage = () => {
     }
   }, [id, DRAFT_KEY]);
 
+  // Debounced autosave of unsent reply text to localStorage. Writing on every
+  // keystroke blocks the main thread (synchronous storage I/O) and is the cause
+  // of the >1s typing lag reported after the topic-page rework. We defer the
+  // write until the member pauses typing, then flush once. `setReplyContent`
+  // itself stays immediate so the controlled textarea never lags behind input.
+  const draftSaveTimerRef = useRef(null);
   useEffect(() => {
-    if (replyContent) {
-      localStorage.setItem(DRAFT_KEY, replyContent);
-      // The text changed, so whatever was rescued no longer describes it. A new
-      // refusal deserves a fresh rescue — and a topic closing under the NEW text
-      // must be able to raise the modal again.
-      rescueWrittenRef.current = null;
-    } else {
-      localStorage.removeItem(DRAFT_KEY);
-      // An emptied form has nothing to rescue; clearing the latch here means the
-      // next write is evaluated from scratch rather than suppressed by a refusal
-      // the member already backed out of.
-      rescueWrittenRef.current = null;
+    // The text changed, so whatever was rescued no longer describes it. A new
+    // refusal deserves a fresh rescue — and a topic closing under the NEW text
+    // must be able to raise the modal again. Cleared immediately, not deferred,
+    // so the rescue effect can re-evaluate on the very next keystroke.
+    rescueWrittenRef.current = null;
+
+    if (draftSaveTimerRef.current) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
     }
+    if (replyContent) {
+      draftSaveTimerRef.current = setTimeout(() => {
+        draftSaveTimerRef.current = null;
+        try {
+          localStorage.setItem(DRAFT_KEY, replyContent);
+        } catch {
+          // localStorage may be unavailable in private mode; degrade gracefully.
+        }
+      }, 1000);
+    } else {
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // localStorage may be unavailable in private mode; degrade gracefully.
+      }
+    }
+    return () => {
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+    };
   }, [replyContent, DRAFT_KEY]);
 
   // THE SECOND RESCUE PATH — the form becomes unusable while the text sits in it.
