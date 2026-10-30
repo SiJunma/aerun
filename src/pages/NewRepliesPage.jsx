@@ -188,12 +188,8 @@ const NewRepliesPage = () => {
             // the client-supplied id list is not trusted (a polled page can only
             // ever be a partial snapshot).
             onClick={() => markAllRead(unreadTopics.map(t => t.id))}
-            // Gated on the server's unread topic count (the badge number), not on
-            // how many unread rows happen to be on this page. The badge counts the
-            // WHOLE board; requiring both to be non-zero made the button permanently
-            // disabled whenever the two disagreed — which they always did, since
-            // unread topics on page two+ were invisible on page one.
-            disabled={unreadTopicsCount === 0 || isMarkingAllRead}
+            // Gated on isMarkingAllRead alone, not on badge counter.
+            disabled={isMarkingAllRead}
           >
             {isMarkingAllRead && (
               <div className="spinner-border spinner-border-sm" role="status">

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, Button } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
-import { Pin, Edit } from 'lucide-react';
+import { Pin, Edit, Award, Send, FilePen } from 'lucide-react';
 import ForumAuthorAvatar from '../common/ForumAuthorAvatar';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
@@ -32,6 +32,7 @@ export const TopicPostCard = ({
   onQuote,
   onStartEdit,
   onDeletePost,
+  onPublishDraft,
   onShowVoters,
   onShowVoteInfo,
   onQuoteAuthor,
@@ -78,7 +79,7 @@ export const TopicPostCard = ({
   return (
     <Card
       id={`post-${post.id}`}
-      className={`mb-4 shadow-sm border-0 post-card card ${isPinnedFirstPost ? 'pinned-first-post-card' : ''} ${isDraft ? 'draft-post-card' : ''}`}
+      className={`mb-4 shadow-sm border-0 post-card ${isPinnedFirstPost ? 'pinned-first-post-card' : ''} ${isDraft ? 'draft-post-card' : ''}`}
     >
       {/* Pinned marker strip */}
       {isPinnedFirstPost && (
@@ -86,15 +87,6 @@ export const TopicPostCard = ({
           <Pin size={13} fill="currentColor" />
           <span className="fw-semibold" style={{ fontSize: '0.75rem' }}>
             {t?.('forum.first_post_pinned_label') || 'Pinned First Post'}
-          </span>
-        </div>
-      )}
-
-      {/* Draft marker strip */}
-      {isDraft && (
-        <div className="draft-post-strip d-flex align-items-center gap-2 px-3 py-1 bg-warning text-dark">
-          <span className="fw-semibold small">
-            {lang === 'ru' ? 'Черновик (виден только вам)' : 'Draft (visible only to you)'}
           </span>
         </div>
       )}
@@ -231,27 +223,39 @@ export const TopicPostCard = ({
           <div className="d-flex flex-column flex-grow-1" style={{ minHeight: '100%', minWidth: 0 }}>
             {/* Header Strip: Time, # */}
             <div className="post-header-strip px-2 px-md-4 py-1 d-flex justify-content-between align-items-center">
-              <small className="text-muted">
-                {post._isOptimistic ? (
-                  <Timestamp date={post.created_at} className="text-muted" />
-                ) : (
-                  <a
-                    href={`/topic/${topicId}?post=${post.id}`}
-                    className="text-decoration-none text-muted hover-link"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      const url = `${window.location.origin}/topic/${topicId}?post=${post.id}`;
-                      navigator.clipboard.writeText(url);
-                      showToast?.(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
-                    }}
-                  >
-                    <span className="text-nowrap text-muted">{post.created_at}</span>
-                  </a>
-                )}
-              </small>
-              {postNumber !== undefined && (
-                <div className="text-muted small opacity-50 post-number-indicator">#{postNumber}</div>
+              {!isDraft && (
+                <small className="text-muted">
+                  {post._isOptimistic ? (
+                    <Timestamp date={post.created_at} className="text-muted" />
+                  ) : (
+                    <a
+                      href={`/topic/${topicId}?post=${post.id}`}
+                      className="text-decoration-none text-muted hover-link"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        const url = `${window.location.origin}/topic/${topicId}?post=${post.id}`;
+                        navigator.clipboard.writeText(url);
+                        showToast?.(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
+                      }}
+                    >
+                      <span className="text-nowrap text-muted">{post.created_at}</span>
+                    </a>
+                  )}
+                </small>
               )}
+              {isDraft ? (
+                <>
+                  <span className="badge bg-secondary" style={{ letterSpacing: '0.05em', fontSize: '0.7rem' }}>
+                    <FilePen size={11} className="me-1" />
+                    DRAFT
+                  </span>
+                  <span className="text-muted small fst-italic">
+                    {lang === 'ru' ? 'только вам' : 'only visible to you'}
+                  </span>
+                </>
+              ) : postNumber !== undefined ? (
+                <div className="text-muted small opacity-50 post-number-indicator">#{postNumber}</div>
+              ) : null}
             </div>
 
             <div className="px-2 px-md-4 py-2 flex-grow-1 d-flex flex-column">
@@ -276,10 +280,11 @@ export const TopicPostCard = ({
               </div>
 
               {/* Reputation section at bottom - matches reference HTML */}
-              {(postRepVotesCount > 0 || postRepValue !== 0) && (
+              {post.author?.user_id && (
                 <div className="mt-3 d-flex justify-content-end align-items-center gap-2 reputation-section">
-                  {/* Eye button: view who voted */}
-                  <button
+                  {/* Eye button: view who voted - only show when there are votes */}
+                  {(postRepVotesCount > 0 || postRepValue !== 0) && (
+                    <button
                     type="button"
                     className="rep-eye-btn"
                     title={lang === 'ru' ? 'Посмотреть кто голосовал' : 'View who evaluated'}
@@ -302,43 +307,75 @@ export const TopicPostCard = ({
                       <circle cx={12} cy={12} r={3}></circle>
                     </svg>
                   </button>
+                  )}
 
-                  {/* Award + value */}
-                  <div
-                    className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
-                    title={userVote
-                      ? (lang === 'ru' ? 'Вы оценили этот пост (Нажмите чтобы посмотреть ваш голос)' : 'You evaluated this post (Click to view your vote)')
-                      : (lang === 'ru' ? 'Посмотреть кто голосовал' : 'View who evaluated')}
-                    onClick={userVote ? () => onShowVoteInfo?.(userVote) : () => onOpenRepVote?.(post, postNumber)}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={postRepValue > 0 ? 'currentColor' : 'currentColor'}
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className={`lucide lucide-award ${reputationColor}`}
-                      aria-hidden="true"
-                    >
-                      <path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"></path>
-                      <circle cx={12} cy={8} r={6}></circle>
-                    </svg>
-                    <strong>{postRepValue}</strong>
-                    <span className="ms-1" style={{ fontWeight: 500, opacity: 0.9 }}>
-                      {postRepValue > 0 ? `(+${postRepValue})` : postRepValue !== 0 ? `(${postRepValue})` : '(+1)'}
-                    </span>
+                  {/* Post reputation badge */}
+                  {post.author?.user_id === user?.uid ? (
+                      /* Own post: always show disabled award badge regardless of vote state */
+                      <div
+                        className="text-muted small d-flex align-items-center gap-1 rep-badge-own"
+                        title={lang === 'ru' ? 'Репутация сообщения (Вы не можете голосовать за свой пост)' : 'Post reputation (You cannot vote for your own post)'}
+                      >
+                        <Award
+                          size={14}
+                          className="text-muted"
+                          style={{ opacity: 0.65 }}
+                        />
+                        <strong>{postRepValue}</strong>
+                      </div>
+                    ) : userVote ? (
+                      /* Already voted (current user voted) */
+                      <div
+                        className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
+                        title={lang === 'ru' ? 'Вы уже оценили этот пост (Нажмите чтобы посмотреть ваш голос)' : 'You evaluated this post (Click to view your vote)'}
+                        onClick={() => onShowVoteInfo?.(userVote)}
+                      >
+                        <Award
+                          size={14}
+                          className="text-success"
+                        />
+                        <strong>{postRepValue}</strong>
+                        <span className="ms-1" style={{ fontWeight: 500, opacity: 0.9 }}>
+                          {myVotes[post.id].value > 0 ? '(+1)' : '(-1)'}
+                        </span>
+                      </div>
+                    ) : !!myVotes[post.id] ? (
+                      /* Has voted (another user voted) - but this shouldn't happen since myVotes is per-user */
+                      <div
+                        className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
+                        title={lang === 'ru' ? 'Вы уже оценили этот пост' : 'You evaluated this post'}
+                      >
+                        <Award
+                          size={14}
+                          className="text-accent"
+                        />
+                        <strong>{postRepValue}</strong>
+                        <span className="ms-1" style={{ fontWeight: 500, opacity: 0.9 }}>
+                          ({myVotes[post.id].value > 0 ? '+1' : '-1'})
+                        </span>
+                      </div>
+                    ) : (
+                      /* Can vote */
+                      <div
+                        className="text-muted small d-flex align-items-center gap-1 rep-trigger"
+                        title={lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы оценить)' : 'Post reputation (Click to evaluate)'}
+                        onClick={() => onOpenRepVote?.(post, postNumber)}
+                      >
+                        <Award
+                          size={14}
+                          className="text-accent"
+                        />
+                        <strong>{postRepValue}</strong>
+                      </div>
+                    )}
                   </div>
-                </div>
               )}
+              {isEditing && editingChildren}
             </div>
 
             {/* Footer Actions Strip */}
             {!isEditing && (
-              <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed" style={{ height: '34px' }}>
+              <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed post-footer-links" style={{ height: '34px' }}>
                 <div className="d-flex d-md-none gap-3">
                   <a className="author-res-footer-link" href={`/profile/${authorId}`} data-discover="true">
                     {t?.('profile.view_profile') || 'Profile'}
@@ -361,7 +398,6 @@ export const TopicPostCard = ({
                       {lang === 'ru' ? 'Удалить' : 'Delete'}
                     </Button>
                   )}
-
                   {canEdit && (
                     <Button
                       variant="link"
@@ -373,7 +409,17 @@ export const TopicPostCard = ({
                     </Button>
                   )}
 
-                  {canReply && onQuote && (
+                  {isDraft ? (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="footer-link p-0 text-decoration-none fw-semibold text-success"
+                      onClick={() => onPublishDraft?.(post.id)}
+                    >
+                      <Send size={12} className="me-1" />
+                      {lang === 'ru' ? 'Опубликовать' : 'Publish'}
+                    </Button>
+                  ) : canReply && onQuote && (
                     <Button
                       variant="link"
                       size="sm"

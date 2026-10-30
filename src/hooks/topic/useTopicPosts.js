@@ -179,7 +179,9 @@ export const useTopicPosts = ({
           return [...data, ...uniqueOptimistic];
         });
 
-        setPinnedFirstPost(pinnedPost || null);
+        if (pinnedPost) {
+          setPinnedFirstPost(pinnedPost);
+        }
 
         setAuthorStats(prev => {
           const next = { ...prev };

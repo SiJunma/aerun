@@ -186,7 +186,7 @@ export const TopicModalsContainer = ({
             <div>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <div className="small text-muted">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
-                {selectedVote.voter_id === currentUserId && !isEditingRepComment && (
+                {(selectedVote.voter_id === currentUserId || !selectedVote.voter_id) && !isEditingRepComment && (
                   <Button
                     variant="link"
                     size="sm"
