@@ -303,7 +303,7 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 		if len(targetUser.GetString("tokenKey")) < 30 {
 			targetUser.RefreshTokenKey()
 		}
-		
+
 		if err := txApp.Save(targetUser); err != nil {
 			return 0, nil, internalError("failed to update user", err)
 		}

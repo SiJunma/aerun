@@ -390,4 +390,3 @@ func TestDraftClearingMaskDoesNotFallbackToProfileMask(t *testing.T) {
 		t.Fatalf("posts.author_character_id in DB = %q, want empty after second clear, got %q", got, got)
 	}
 }
-
