@@ -1913,8 +1913,7 @@ export default function TopicPage() {
       />
 
       {/* Bottom breadcrumbs & back-to-category (legacy parity) */}
-      <div className="mt-4">
-        <ForumBreadcrumbs
+      <div className="mt-5 mb-5">        <ForumBreadcrumbs
           items={[
             ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
             { label: topic?.title || '...', active: true },

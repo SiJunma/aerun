@@ -35,12 +35,14 @@ export const TopicHeader = ({
 
   return (
     <>
-      <ForumBreadcrumbs
-        items={[
-          ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
-          { label: topic?.title || '...', active: true }
-        ]}
-      />
+      <div className="mt-4">
+        <ForumBreadcrumbs
+          items={[
+            ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
+            { label: topic?.title || '...', active: true }
+          ]}
+        />
+      </div>
 
       <div className="mb-4 topic-header-area">
         <div className="mb-2">
