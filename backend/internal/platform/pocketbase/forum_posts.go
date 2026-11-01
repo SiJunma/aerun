@@ -100,15 +100,17 @@ func postPayload(record *core.Record) map[string]any {
 	// invites a branch that can never be true.
 	payload["content"] = record.GetString("content")
 
-	// `reputation` is the post's vote score. The command layer keeps
-	// posts.reputation in step with every cast, replace and withdrawal
-	// (reputation.go), so the column is authoritative — but until it is
-	// projected here the topic page had no way to see it: its karma badge
-	// renders `post.reputation || 0` and gates the "view who evaluated" eye on
-	// `(post.reputation || 0) !== 0`, so a post that plainly carried votes
-	// rendered "0" and the eye never appeared. `GetInt` yields 0 for a row that
-	// predates the reputation column, which is exactly the correct empty score.
-	payload["reputation"] = record.GetInt("reputation")
+	// `karma` is the post's vote score (the JSON field is named `karma` — NOT
+	// `reputation` — because `reputation` on a profile is the member's aggregate
+	// score, and the two were constantly confused on the wire). The command layer
+	// keeps posts.reputation in step with every cast, replace and withdrawal
+	// (reputation.go), so the column is authoritative — but until it is projected
+	// here the topic page had no way to see it: its karma badge renders
+	// `post.karma || 0` and gates the "view who evaluated" eye on
+	// `(post.karma || 0) !== 0`, so a post that plainly carried votes rendered
+	// "0" and the eye never appeared. `GetInt` yields 0 for a row that predates
+	// the column, which is exactly the correct empty score.
+	payload["karma"] = record.GetInt("reputation")
 
 	edited := record.GetDateTime("edited")
 	if !edited.IsZero() {
@@ -988,6 +990,14 @@ func deletePostHandler(e *core.RequestEvent) error {
 			return 0, nil, internalError("failed to rebuild topic projection after post deletion", err)
 		}
 
+		// Nudge every open reader of the topic. A hard delete changes the page
+		// (post gone, counters moved) and — unlike create and move — nothing
+		// else would wake the connected readers: their stats poll is SUSPENDED
+		// while the signal stream is healthy, so without this nudge a deletion
+		// stayed invisible until the stream dropped. Same transaction as the
+		// rebuild, same guest-baseline audience decision as create/move.
+		publishTopicSignal(txApp, topic)
+
 		return http.StatusOK, map[string]any{
 			"deleted":    true,
 			"post_id":    post.Id,
@@ -1077,6 +1087,18 @@ func movePostsHandler(e *core.RequestEvent) error {
 		// rebuild: posts_count AND the full last-post AuthorRef. A failed
 		// rebuild fails the whole move — a moved post with the old projection
 		// still pointing at it is corruption, not a partial success.
+		// The OPENER is re-filed first: moving the opening post does NOT delete
+		// the topic (owner ruling 2026-11-01) — the next earliest post becomes
+		// the opener, and a stale opener naming the author of a moved-away post
+		// is the same corruption class as a stale last-post projection.
+		// refileTopicOpener is idempotent, so a move that never touched the
+		// opening post rewrites identical values.
+		if err := refileTopicOpener(txApp, sourceTopic); err != nil {
+			return 0, nil, internalError("failed to re-file source topic opener", err)
+		}
+		if err := refileTopicOpener(txApp, targetTopic); err != nil {
+			return 0, nil, internalError("failed to re-file target topic opener", err)
+		}
 		if err := rebuildTopicProjection(txApp, sourceTopic); err != nil {
 			return 0, nil, internalError("failed to rebuild source topic projection", err)
 		}
@@ -1091,6 +1113,14 @@ func movePostsHandler(e *core.RequestEvent) error {
 		}); err != nil {
 			return 0, nil, err
 		}
+
+		// Nudge every open reader of BOTH topics: a moved post changes the
+		// page (post gone / post arrived) AND — since the opener re-file —
+		// possibly the topic's opener author. Without this a connected
+		// reader waited out the 15s poll; a poll-only reader still gets the
+		// same facts one interval later.
+		publishTopicSignal(txApp, sourceTopic)
+		publishTopicSignal(txApp, targetTopic)
 
 		return http.StatusOK, map[string]any{
 			"moved_count": len(form.PostIDs),

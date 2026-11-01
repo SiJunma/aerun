@@ -65,15 +65,36 @@ export const TopicModalsContainer = ({
   lang,
   t
 }) => {
+  // Deleting the topic's FIRST post deletes the WHOLE topic (the server
+  // re-files the delete through the topic route), so the confirmation must
+  // warn about that — same swap the legacy monolith made in its modals.
+  const isFirstPostDeleting =
+    !!deletingPost &&
+    !deletingPost.is_draft &&
+    indexOfFirstItem === 0 &&
+    posts?.length > 0 &&
+    posts[0]?.id === deletingPost.id;
   return (
     <>
-      {/* Delete Post Modal */}
+      {/* Delete Post Modal — deleting the topic's FIRST post deletes the
+          whole topic, so the title/message swap to the legacy topic warning
+          for that case (legacy monolith, modals section). */}
       <ConfirmModal
         show={!!deletingPost}
         onHide={onCancelDeletePost}
         onConfirm={onConfirmDeletePost}
-        title={t?.('forum.delete_post_title') || 'Delete Post'}
-        message={t?.('forum.delete_post_confirm') || 'Are you sure you want to delete this post?'}
+        title={
+          isFirstPostDeleting
+            ? (lang === 'ru' ? 'Удалить тему?' : 'Delete topic?')
+            : (t?.('forum.delete_post_title') || 'Delete Post')
+        }
+        message={
+          isFirstPostDeleting
+            ? (lang === 'ru'
+                ? 'Внимание: удаление первого сообщения приведет к удалению всей темы целиком. Это действие необратимо.'
+                : 'Warning: deleting the first post will delete the entire topic. This action cannot be undone.')
+            : (t?.('forum.delete_post_confirm') || 'Are you sure you want to delete this post?')
+        }
         confirmText={t?.('common.delete') || 'Delete'}
         cancelText={t?.('common.cancel') || 'Cancel'}
       />
@@ -108,7 +129,15 @@ export const TopicModalsContainer = ({
         onHide={onCancelMovePosts}
         posts={posts || []}
         startIndex={(indexOfFirstItem || 0) + 1}
-        firstPostId={posts?.[0]?.id}
+        // "First post" here means the TOPIC's first post. Moving it does NOT
+        // delete the topic (owner ruling 2026-11-01): the next earliest post
+        // becomes the opener — hence the label, not a scary warning. That is
+        // page-1 index 0 ONLY: on pages 2+ posts[0] is an ordinary reply and
+        // must not carry the mark. Same gate the delete-post check above
+        // applies (indexOfFirstItem === 0); on pages 2+ the first post is
+        // absent from this list anyway (when pinned it renders as the pinned
+        // card, which the modal does not list).
+        firstPostId={indexOfFirstItem === 0 ? posts?.[0]?.id : null}
         currentTopicId={topicId}
         onConfirm={onConfirmMovePosts}
       />

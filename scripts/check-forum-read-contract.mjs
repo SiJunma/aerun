@@ -629,12 +629,14 @@ assert.doesNotMatch(
   'the users realtime hook delivered nothing (no RealtimeRule) and would push whole auth records'
 );
 
-// The topic author hydration must go through the shared normaliser, so a profile
-// read there is narrowed by the same server-side whitelist as the profile page's.
-assert.match(
+// The topic author hydration is GONE: every decorated post carries its
+// author (posts_count/reputation/status_line/signature — post.author), so
+// the page must not fire an /api/aerun/users/{uid} N+1 per distinct poster
+// on every page load.
+assert.doesNotMatch(
   topicPageCode,
   /await fetchUserProfile\(uid\)/,
-  'the author hydration must hydrate through the profile DTO'
+  'the per-author hydration N+1 must not return — post.author carries the stats'
 );
 
 // ── The topic form sends the mask and the pin ───────────────────────────────

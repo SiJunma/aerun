@@ -1,13 +1,16 @@
 import React from 'react';
 import { Dropdown } from 'react-bootstrap';
-import { Pin, Lock, Settings, Trash2, ArrowRightLeft, Bell, BellOff } from 'lucide-react';
+import { Pin, Lock, Settings, Trash2, ArrowRightLeft } from 'lucide-react';
 import ForumBreadcrumbs from '../common/ForumBreadcrumbs';
+import ForumPagination from '../common/ForumPagination';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
 import { resolveField } from '../../utils/text';
 
 /**
  * TopicHeader: Topic title, metadata, breadcrumbs, and topic management actions dropdown.
+ * The top pagination lives inside the header's action group (legacy monolith parity) —
+ * the subscription bell intentionally lives in the BOTTOM actions bar only.
  */
 export const TopicHeader = ({
   topic,
@@ -17,12 +20,13 @@ export const TopicHeader = ({
   hasPermission,
   PERMISSIONS,
   canDeleteTopic,
-  isSubscribed,
-  togglingSub,
-  onToggleSubscription,
+  currentPage,
+  totalPages,
+  onPageChange,
   onPinToggle,
   onLockToggle,
   onOpenMoveModal,
+  onOpenMovePostsModal,
   onOpenDeleteModal
 }) => {
   if (!topic) return null;
@@ -111,6 +115,12 @@ export const TopicHeader = ({
                       {t('forum.move_topic')}
                     </Dropdown.Item>
                   )}
+                  {hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS) && (
+                    <Dropdown.Item onClick={onOpenMovePostsModal} className="d-flex align-items-center gap-2">
+                      <ArrowRightLeft size={14} />
+                      {t('forum.move_posts')}
+                    </Dropdown.Item>
+                  )}
                   {canDeleteTopic && (
                     <>
                       <Dropdown.Divider />
@@ -124,19 +134,15 @@ export const TopicHeader = ({
               </Dropdown>
             )}
 
-            {/* Subscription Bell */}
-            {onToggleSubscription && (
-              <button
-                onClick={onToggleSubscription}
-                disabled={togglingSub}
-                className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 topic-subscribe-btn"
-                title={isSubscribed ? t('forum.unsubscribe_hint') : t('forum.subscribe_hint')}
-              >
-                {isSubscribed ? <BellOff size={14} /> : <Bell size={14} />}
-                <span className="d-none d-sm-inline">
-                  {isSubscribed ? t('forum.unsubscribe') : t('forum.subscribe')}
-                </span>
-              </button>
+            {/* Top pagination — lives inside the header's action group (legacy parity) */}
+            {totalPages > 1 && (
+              <div className="pagination-top">
+                <ForumPagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={onPageChange}
+                />
+              </div>
             )}
           </div>
         </div>

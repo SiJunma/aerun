@@ -40,6 +40,8 @@ func TestTopicStatsReturnsOnlyItsContract(t *testing.T) {
 	want := map[string]bool{
 		"topic_id":          true,
 		"title":             true,
+		"description":       true,
+		"author":            true,
 		"category_id":       true,
 		"author_id":         true,
 		"author_name":       true,

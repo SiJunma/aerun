@@ -639,11 +639,91 @@ func TestPostReputationReachesTheClient(t *testing.T) {
 		t.Fatalf("post %s missing from the topic feed: %#v", postID, payload)
 	}
 
-	rep, present := found["reputation"]
+	// The wire key is `karma`, NOT `reputation`: the payload rename
+	// (forum_posts.go postPayload) exists because `reputation` on a PROFILE is
+	// the member's aggregate score, and the two were constantly confused on the
+	// wire. The karma badge reads `post.karma || 0` and gates the eye on
+	// `(post.karma || 0) !== 0` — so the payload key and the reader must agree.
+	karma, present := found["karma"]
 	if !present {
-		t.Fatalf("post payload has no `reputation` key at all: %#v — TopicPage reads post.reputation and always renders 0 without it", found)
+		t.Fatalf("post payload has no `karma` key at all: %#v — the karma badge renders post.karma and always shows 0 without it", found)
 	}
-	if got, _ := rep.(float64); got != 1 {
-		t.Errorf("post.reputation = %v, want 1 — the vote exists in the DB but the feed hid it, so the karma badge showed 0 and the eye button never appeared", rep)
+	if got, _ := karma.(float64); got != 1 {
+		t.Errorf("post.karma = %v, want 1 — the vote exists in the DB but the feed hid it, so the karma badge showed 0 and the eye button never appeared", karma)
 	}
+}
+
+// TestTopicDescriptionIsStoredAndServed is the description's end-to-end
+// contract, mirroring TestPinFirstPostIsStoredAndServed: the "Краткое описание"
+// input has to reach the server on CREATE, survive in the topic row, come back
+// on every read (the header and the category list render it), and be re-filable
+// by the author through PATCH /topics/{id} — the field the first-post editor
+// edits together with the title.
+func TestTopicDescriptionIsStoredAndServed(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+	catID := getGeneralCategoryID(t, app)
+
+	topicID, payload := createTopicVia(t, server.URL, tokens["player"], catID,
+		"idem-desc-1", `,"description":"Краткое описание темы"`)
+	topic, _ := payload["topic"].(map[string]any)
+	if got, _ := topic["description"].(string); got != "Краткое описание темы" {
+		t.Fatalf("create response description = %q, want the submitted text — the field was dropped", got)
+	}
+
+	stored, err := app.FindRecordById(topicsCollectionName, topicID)
+	if err != nil || stored == nil {
+		t.Fatalf("stored topic %s not found: %v", topicID, err)
+	}
+	if got := stored.GetString("description"); got != "Краткое описание темы" {
+		t.Errorf("topics.description was not persisted: got %q", got)
+	}
+
+	// The author re-files it through the same PATCH the first-post editor makes.
+	status, body := doJSON(t, server.URL, http.MethodPatch, "/api/aerun/topics/"+topicID,
+		tokens["player"], "idem-desc-2", `{"description":"Обновлённое описание"}`)
+	if status != http.StatusOK {
+		t.Fatalf("author description patch: got %d, want 200 (%v)", status, body)
+	}
+	updatedTopic, _ := body["topic"].(map[string]any)
+	if got, _ := updatedTopic["description"].(string); got != "Обновлённое описание" {
+		t.Errorf("patch response description = %q, want the new text", got)
+	}
+	stored, err = app.FindRecordById(topicsCollectionName, topicID)
+	if err != nil {
+		t.Fatalf("stored topic after patch: %v", err)
+	}
+	if got := stored.GetString("description"); got != "Обновлённое описание" {
+		t.Errorf("topics.description after patch = %q, want the new text", got)
+	}
+
+	// A stranger without edit_others_topics cannot rewrite someone's description.
+	status, body = doJSON(t, server.URL, http.MethodPatch, "/api/aerun/topics/"+topicID,
+		tokens["pending"], "idem-desc-3", `{"description":"stranger rewrite"}`)
+	if status == http.StatusOK {
+		t.Fatalf("stranger description patch: got 200 — description edit must be gated like the title (%v)", body)
+	}
+
+	// The client form caps the input at 200 (maxLength); the server enforces it.
+	tooLong := `{"description":"` + repeatRune("д", 201) + `"}`
+	status, _ = doJSON(t, server.URL, http.MethodPatch, "/api/aerun/topics/"+topicID,
+		tokens["player"], "idem-desc-4", tooLong)
+	if status == http.StatusOK {
+		t.Error("a 201-character description patch was accepted — MaxTopicDescriptionLen is not enforced")
+	}
+}
+
+// repeatRune builds a string of n copies of s — the test file does not import
+// strings, and one local helper is cheaper than widening the import list.
+func repeatRune(s string, n int) string {
+	out := make([]byte, 0, len(s)*n)
+	for i := 0; i < n; i++ {
+		out = append(out, s...)
+	}
+	return string(out)
 }

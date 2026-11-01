@@ -11,6 +11,7 @@ import RichEditor from '../common/RichEditor';
 export const PostInlineEditor = ({
   isFirstPost = false,
   isDraft = false,
+  canChangeMask = true,
   editTopicTitle = '',
   setEditTopicTitle,
   editTopicDescription = '',
@@ -81,7 +82,10 @@ export const PostInlineEditor = ({
 
       <div className="mb-2">
         <div className="d-flex align-items-center justify-content-between mb-2">
-          {canUseMasks && (
+          {/* Mask re-filing is the AUTHOR's decision: the server ignores the
+              character_id of a non-author edit, so the picker is hidden for
+              moderated edits of other members' posts. */}
+          {canUseMasks && canChangeMask && (
             <Dropdown className="w-auto">
               <Dropdown.Toggle
                 variant="outline-management"

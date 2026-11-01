@@ -1,5 +1,14 @@
 package forum
 
+import (
+	"errors"
+	"fmt"
+	"math/rand"
+	"regexp"
+	"strconv"
+	"time"
+)
+
 // Dice rolls (migration 1768200000).
 //
 // `processDiceRolls` in the browser rewrites every `[dice=N]` tag into a
@@ -36,12 +45,6 @@ package forum
 // Server-side RNG would be the stronger design; it is a deliberate non-goal
 // here, and the one thing this package does NOT do is vouch for the numbers
 // being fair.
-
-import (
-	"errors"
-	"fmt"
-	"regexp"
-)
 
 const (
 	// MaxRollsPerPost caps how many rolls one post may carry. The client has no
@@ -96,7 +99,56 @@ func ReferencedRollIDs(content string) map[string]bool {
 // roll that is itself malformed is rejected, because storing it would either
 // fail the render or store a die that lies. An empty result means "no rolls",
 // which callers store as an empty object — see writeRolls.
+
+// DraftDicePattern finds the client's unrolled `[dice=N type=T]` tag in a
+// draft body. Drafts are stored with the tag RAW — the throw must happen at
+// publication, not while the throw is still editable.
+var DiceTagPattern = regexp.MustCompile(`\[dice=(\d+)(?:\s+type=([a-z]+))?\]`)
+
+// RollDraftDice converts a draft body's unrolled `[dice=N type=T]` tags into
+// thrown `[roll=<id>]` references plus the companion throws map, in the exact
+// shape client `processDiceRolls` produces. Called by the publish command: a
+// draft may hold the tag unresolved for as long as it is editable, and the
+// value freezes only when the post becomes real.
+func RollDraftDice(content string) (string, map[string]any) {
+	rolls := map[string]any{}
+	counter := 0
+	now := time.Now().UnixMilli()
+	rolled := DiceTagPattern.ReplaceAllStringFunc(content, func(match string) string {
+		sub := DiceTagPattern.FindStringSubmatch(match)
+		sides := 20
+		if n, err := strconv.Atoi(sub[1]); err == nil && n > 0 {
+			sides = n
+		}
+		rollType := sub[2]
+		if rollType == "" {
+			rollType = RollTypeNormal
+		}
+		counter++
+		id := fmt.Sprintf("roll_%d_%d", now, counter)
+		value := rand.Intn(sides) + 1
+		rolls[id] = map[string]any{
+			"id":    id,
+			"sides": sides,
+			"value": value,
+			"type":  rollType,
+		}
+		return "[roll=" + id + "]"
+	})
+	return rolled, rolls
+}
+
 func ValidateRolls(content string, incoming map[string]any) (map[string]any, error) {
+	// The throws map is an APPEND-ONLY AUDIT TRAIL, not a projection of the
+	// body: "Dice thrown: N" counts every throw the map holds, while the
+	// chips render only the ones the CURRENT body still references. When the
+	// two disagree (more throws than visible chips), the post has been
+	// re-rolled through an edit — that discrepancy is the tampering evidence
+	// the counter exists to surface, so unreferenced entries ACCUMULATE here
+	// instead of being silently dropped. Malformed entries are still checked:
+	// one the body references is a broken throw in THIS post (reject the
+	// write); one the body cannot even name is dropped rather than failing
+	// the whole edit.
 	if len(incoming) == 0 {
 		return nil, nil
 	}
@@ -107,15 +159,18 @@ func ValidateRolls(content string, incoming map[string]any) (map[string]any, err
 	referenced := ReferencedRollIDs(content)
 	clean := make(map[string]any, len(incoming))
 	for id, raw := range incoming {
-		if !referenced[id] {
-			continue
-		}
 		roll, err := sanitizeRoll(id, raw)
 		if err != nil {
-			return nil, err
+			if referenced[id] {
+				return nil, err
+			}
+			continue
 		}
 		clean[id] = roll
 	}
+	// Duplicates inside the body are fine: two tags pointing at one entry
+	// render the same throw twice, while the "dice thrown" counter counts
+	// keys — one per throw.
 	if len(clean) == 0 {
 		return nil, nil
 	}

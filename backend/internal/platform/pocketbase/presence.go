@@ -41,11 +41,12 @@ import (
 )
 
 type userPresence struct {
-	UserID    string    `json:"id"`
-	Nickname  string    `json:"nickname"`
-	AvatarURL string    `json:"avatar_url"`
-	Role      string    `json:"role"`
-	LastSeen  time.Time `json:"last_seen"`
+	UserID          string         `json:"id"`
+	Nickname        string         `json:"nickname"`
+	AvatarURL       string         `json:"avatar_url"`
+	Role            string         `json:"role"`
+	LastSeen        time.Time      `json:"last_seen"`
+	ActiveCharacter map[string]any `json:"active_character,omitempty"`
 }
 
 var (
@@ -294,6 +295,10 @@ var guestLimiter = newGuestThrottle(guestHeartbeatsPerMinute, time.Minute)
 
 type heartbeatForm struct {
 	GuestID string `json:"guest_id"`
+	// ActiveCharacter is the mask the member is currently posting under
+	// (a character id). Resolved server-side against the caller's own
+	// characters, so a forged id cannot borrow somebody else's mask.
+	ActiveCharacter string `json:"active_character"`
 }
 
 // heartbeatHandler records one presence beat. The route serves both identities
@@ -313,13 +318,24 @@ func heartbeatHandler(e *core.RequestEvent) error {
 	now := time.Now()
 
 	if e.Auth != nil {
+		activeCharacter := map[string]any{}
+		if form.ActiveCharacter != "" {
+			if display, err := findCharacter(e.App, form.ActiveCharacter); err == nil && display != nil && display.OwnerID == e.Auth.Id {
+				activeCharacter = map[string]any{
+					"id":         form.ActiveCharacter,
+					"name":       display.Name,
+					"avatar_url": display.AvatarURL,
+				}
+			}
+		}
 		presenceMu.Lock()
 		onlineMembers[e.Auth.Id] = userPresence{
-			UserID:    e.Auth.Id,
-			Nickname:  e.Auth.GetString("nickname"),
-			AvatarURL: e.Auth.GetString("avatar_url"),
-			Role:      e.Auth.GetString("role"),
-			LastSeen:  now,
+			UserID:          e.Auth.Id,
+			Nickname:        e.Auth.GetString("nickname"),
+			AvatarURL:       e.Auth.GetString("avatar_url"),
+			Role:            e.Auth.GetString("role"),
+			LastSeen:        now,
+			ActiveCharacter: activeCharacter,
 		}
 		presenceMu.Unlock()
 

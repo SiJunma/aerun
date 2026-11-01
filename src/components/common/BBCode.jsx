@@ -284,7 +284,12 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
   });
 
   // 3. Spacing Optimization (Absorption of newlines around block tags)
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'dice', 'roll', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code', 'html', 'hide', 'hide_secured'];
+  // `dice` and `roll` are DELIBERATELY ABSENT here: they are self-closing
+  // inline-block chips, not block containers. Absorbing the newline after
+  // them glued the following text to the chip (the "[dice=6]\nтекст" report):
+  // with white-space:pre-wrap the break must survive, so a tag authored on
+  // its own line keeps its own line.
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code', 'html', 'hide', 'hide_secured'];
   function preprocessNodes(nodes) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
@@ -572,7 +577,10 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       case 'roll': {
         const rollId = params.default;
         // Use baked-in values if available (for quotes/permanence if original post is deleted)
-        const roll = rolls[rollId] || (params.value ? {
+        // rolls can legitimately be null (an optimistic row built before the
+        // throws resolve) — the default {} parameter only covers undefined,
+        // and a null access here crashed the whole page.
+        const roll = (rolls && rolls[rollId]) || (params.value ? {
           value: params.value,
           sides: params.sides,
           type: params.type

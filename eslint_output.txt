@@ -1,7 +1,0 @@
-
-G:\Stacionar\WEB\My Web Sites\forum-Aerun\src\pages\ProfilePage.jsx
-  337:6  warning  React Hook useEffect has a missing dependency: 'isDeletedProfile'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
-  458:6  warning  React Hook useEffect has a missing dependency: 'buildAccountForm'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
-
-✖ 2 problems (0 errors, 2 warnings)
-

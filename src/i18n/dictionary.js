@@ -178,7 +178,7 @@ export const translations = {
       move_posts_no_topics: "No topics available",
       move_posts_select_page: "Select page",
       move_posts_deselect_page: "Deselect all",
-      move_posts_first_post_warn: "(moving this will delete the source topic)",
+      move_posts_first_post_warn: "(the next post becomes the topic opener)",
       move_posts_btn: "Move ({n})",
       move_posts_moving: "Moving...",
       move_posts_success: "Posts moved!",
@@ -787,6 +787,7 @@ export const translations = {
           topic_move: "Topic Moved",
           topic_pin: "Topic Pinned",
           topic_title_edit: "Topic Renamed",
+          topic_description_edit: "Topic Description Edited",
           email_template_updated: "Email Template Updated",
           email_template_test_sent: "Test Email Sent"
         },
@@ -1027,7 +1028,7 @@ export const translations = {
       move_posts_no_topics: "Нет доступных тем",
       move_posts_select_page: "Выбрать все на странице",
       move_posts_deselect_page: "Снять выделение",
-      move_posts_first_post_warn: "(тема удалится при переносе)",
+      move_posts_first_post_warn: "(открывающим станет следующий пост)",
       move_posts_btn: "Перенести ({n})",
       move_posts_moving: "Перенос...",
       move_posts_success: "Сообщения перенесены!",
@@ -1634,6 +1635,7 @@ export const translations = {
           topic_move: "Тема перемещена",
           topic_pin: "Тема закреплена",
           topic_title_edit: "Тема переименована",
+          topic_description_edit: "Описание темы изменено",
           email_template_updated: "Шаблон email обновлён",
           email_template_test_sent: "Тестовое email-письмо отправлено"
         },

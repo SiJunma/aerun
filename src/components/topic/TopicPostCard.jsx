@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, Button } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
-import { Pin, Edit, Award, Send, FilePen } from 'lucide-react';
+import { Pin, Edit, Award, Send, FilePen, Dices } from 'lucide-react';
 import ForumAuthorAvatar from '../common/ForumAuthorAvatar';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
@@ -14,6 +14,7 @@ import BBCode from '../common/BBCode';
 export const TopicPostCard = ({
   post,
   postNumber,
+  topic,
   topicId,
   isPinnedFirstPost = false,
   isDraft = false,
@@ -29,6 +30,7 @@ export const TopicPostCard = ({
   isAuthorOnline,
   getRoleBadge,
   canEditPost,
+  canDeleteTopic,
   onQuote,
   onStartEdit,
   onDeletePost,
@@ -46,7 +48,7 @@ export const TopicPostCard = ({
 }) => {
   if (!post) return null;
 
-  const authorId = post.author?.user_id || post.author_id;
+  const authorId = post.author?.user_id || post.author?.user_id;
   const authorData = authorId === user?.uid ? profile : authorStats[authorId];
   const postCount = authorData?.post_count ?? post.author?.posts_count ?? 0;
   const reputation = authorData?.reputation ?? post.author?.reputation ?? 0;
@@ -54,12 +56,55 @@ export const TopicPostCard = ({
   const liveSignature = getLiveAuthorSignature?.(post);
   const isOnline = isAuthorOnline?.(post);
 
-  const canEdit = canEditPost?.(post);
+  const topicLocked = !!(topic?.is_locked);
+  const canModerateLocked = hasPermission?.(PERMISSIONS.CLOSE_TOPICS);
+
+  // Delete rights: respect topic lock, self/other delete permissions, and never
+  // allow deleting the topic's first post unless the user can delete the topic.
+  const isFirstPost = postNumber === 1;
+  const canDeleteSelf = hasPermission?.(PERMISSIONS.DELETE_SELF_POST);
+  const canDeleteOthers = hasPermission?.(PERMISSIONS.DELETE_OTHERS_POSTS);
+  const canDelete = (!topicLocked || canModerateLocked)
+    && (post.is_draft
+      || (authorId === user?.uid ? canDeleteSelf : canDeleteOthers))
+    && !(isFirstPost && !canDeleteTopic);
+
+  const canEdit = canEditPost?.(post) && (!topicLocked || canModerateLocked);
+
+  // Reputation voting is gated on authentication and the USE_REPUTATION permission.
+  const canVote = user && hasPermission?.(PERMISSIONS.USE_REPUTATION);
+
+  // Reputation values must be declared BEFORE `voteBadge` — the JSX below
+  // evaluates `{postRepValue}` eagerly, and a later `const` would throw a
+  // TDZ ReferenceError on the very first render of the card.
+  const postRepValue = post.karma || 0;
+  const postRepVotesCount = post.reputation_votes_count || 0;
+  const userVote = post.my_vote ?? myVotes[post.id];
+
+  const voteBadge = canVote ? (
+    <div
+      className="text-muted small d-flex align-items-center gap-1 rep-trigger"
+      title={lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы оценить)' : 'Post reputation (Click to evaluate)'}
+      onClick={() => onOpenRepVote?.(post, postNumber)}
+    >
+      <Award size={14} className="text-accent" />
+      <strong>{postRepValue}</strong>
+    </div>
+  ) : (
+    /* Guest or missing permission: show value but block voting */
+    <div
+      className="text-muted small d-flex align-items-center gap-1 rep-badge-own"
+      title={lang === 'ru' ? 'Репутация сообщения (Нет права на оценку)' : 'Post reputation (Voting not allowed)'}
+    >
+      <Award size={14} className="text-muted" style={{ opacity: 0.65 }} />
+      <strong>{postRepValue}</strong>
+    </div>
+  );
   const canReply = hasPermission?.(PERMISSIONS.POST_REPLY, { category });
 
   const authorDataForDm = authorId === user?.uid ? profile : authorStats[authorId];
-  const isDeletedAuthor = authorDataForDm === null || post.author?.deleted === true || post.author_deleted === true;
-  const isBannedAuthor = (authorDataForDm?.role_id || post.author_role_id) === 'banned';
+  const isDeletedAuthor = authorDataForDm === null || post.author?.deleted === true || post.author?.deleted === true;
+  const isBannedAuthor = (authorDataForDm?.role_id || post.author?.role_id) === 'banned';
   const canDm = !!(
     user &&
     authorId &&
@@ -70,11 +115,6 @@ export const TopicPostCard = ({
     !isBannedAuthor
   );
 
-  const postRepValue = post.reputation || 0;
-  const postRepVotesCount = post.reputation_votes_count || 0;
-  const userVote = post.my_vote ?? myVotes[post.id];
-
-  const reputationColor = postRepValue > 0 ? 'text-success' : postRepValue < 0 ? 'text-danger' : 'text-muted';
 
   return (
     <Card
@@ -100,10 +140,10 @@ export const TopicPostCard = ({
               <div className="fw-bold text-center mb-1 text-truncate w-100">
                 <ForumAuthorName
                   userId={authorId}
-                  characterId={post.author_character_id}
+                  characterId={post.author?.character_id}
                   isCharacter={!!post.is_character}
                   author={post.author}
-                  fallbackName={post.author_name}
+                  fallbackName={post.author?.display_name}
                   onClick={onQuoteAuthor}
                 />
               </div>
@@ -121,10 +161,10 @@ export const TopicPostCard = ({
               <div className="mb-2">
                 <ForumAuthorAvatar
                   userId={authorId}
-                  characterId={post.author_character_id}
+                  characterId={post.author?.character_id}
                   isCharacter={!!post.is_character}
                   author={post.author}
-                  initialAvatar={post.author_avatar}
+                  initialAvatar={post.author?.avatar_url}
                   size={150}
                   className="rounded shadow-sm"
                   isOnline={isOnline}
@@ -173,10 +213,10 @@ export const TopicPostCard = ({
               <div className="author-avatar-wrapper flex-shrink-0 hide-on-extra-small-mobile">
                 <ForumAuthorAvatar
                   userId={authorId}
-                  characterId={post.author_character_id}
+                  characterId={post.author?.character_id}
                   isCharacter={!!post.is_character}
                   author={post.author}
-                  initialAvatar={post.author_avatar}
+                  initialAvatar={post.author?.avatar_url}
                   size={60}
                   className="rounded shadow-sm"
                   isOnline={isOnline}
@@ -186,10 +226,10 @@ export const TopicPostCard = ({
                 <div className="fw-bold text-truncate author-res-nickname">
                   <ForumAuthorName
                     userId={authorId}
-                    characterId={post.author_character_id}
+                    characterId={post.author?.character_id}
                     isCharacter={!!post.is_character}
                     author={post.author}
-                    fallbackName={post.author_name}
+                    fallbackName={post.author?.display_name}
                     onClick={post.author?.deleted ? undefined : onQuoteAuthor}
                   />
                 </div>
@@ -238,8 +278,13 @@ export const TopicPostCard = ({
                         showToast?.(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
                       }}
                     >
-                      <span className="text-nowrap text-muted">{post.created_at}</span>
+                      <Timestamp date={post.created_at} className="text-muted" />
                     </a>
+                  )}
+                  {post.edited_at && !post._isOptimistic && (
+                    <span className="d-block d-md-inline-block ms-md-2 opacity-50">
+                      ({lang === 'ru' ? 'ред.' : 'edited'} <Timestamp date={post.edited_at} />)
+                    </span>
                   )}
                 </small>
               )}
@@ -279,9 +324,25 @@ export const TopicPostCard = ({
                 )}
               </div>
 
-              {/* Reputation section at bottom - matches reference HTML */}
-              {post.author?.user_id && (
-                <div className="mt-3 d-flex justify-content-end align-items-center gap-2 reputation-section">
+              {/* Reputation section at bottom - matches reference HTML.
+                  A draft has no karma at all — it is not published yet. */}
+              {!isDraft && (post.author?.user_id || (post.rolls && Object.keys(post.rolls).length > 0)) && (
+                <div className="mt-3 d-flex justify-content-between align-items-center gap-2 reputation-section">
+                  {/* Dice throws sit LEFT; the karma controls stay RIGHT.
+                      Guest posts render the throws too — they simply have no
+                      karma controls, so the row is dice-only for them. The
+                      LEFT SLOT IS ALWAYS RENDERED (empty when the post has no
+                      throws) — with justify-content-between a missing left
+                      child would collapse the karma badge to the left edge. */}
+                  <div>
+                    {post.rolls && Object.keys(post.rolls).length > 0 && (
+                      <div className="small d-flex align-items-center gap-1" style={{ color: 'var(--secondary-color)' }}>
+                        <Dices size={14} />
+                        <span>{lang === 'ru' ? `Всего бросков: ${Object.keys(post.rolls).length}` : `Dice thrown: ${Object.keys(post.rolls).length}`}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="d-flex justify-content-end align-items-center gap-2">
                   {/* Eye button: view who voted - only show when there are votes */}
                   {(postRepVotesCount > 0 || postRepValue !== 0) && (
                     <button
@@ -339,7 +400,7 @@ export const TopicPostCard = ({
                           {myVotes[post.id].value > 0 ? '(+1)' : '(-1)'}
                         </span>
                       </div>
-                    ) : !!myVotes[post.id] ? (
+                    ) : myVotes[post.id] ? (
                       /* Has voted (another user voted) - but this shouldn't happen since myVotes is per-user */
                       <div
                         className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
@@ -355,28 +416,18 @@ export const TopicPostCard = ({
                         </span>
                       </div>
                     ) : (
-                      /* Can vote */
-                      <div
-                        className="text-muted small d-flex align-items-center gap-1 rep-trigger"
-                        title={lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы оценить)' : 'Post reputation (Click to evaluate)'}
-                        onClick={() => onOpenRepVote?.(post, postNumber)}
-                      >
-                        <Award
-                          size={14}
-                          className="text-accent"
-                        />
-                        <strong>{postRepValue}</strong>
-                      </div>
+                      /* Can vote — gated by canVote badge computed above */
+                      voteBadge
                     )}
                   </div>
+                  </div>
               )}
-              {isEditing && editingChildren}
             </div>
 
             {/* Footer Actions Strip */}
             {!isEditing && (
               <div className="px-2 px-md-4 mt-auto d-flex flex-wrap justify-content-between align-items-center gap-3 border-top border-top-dashed post-footer-links" style={{ height: '34px' }}>
-                <div className="d-flex d-md-none gap-3">
+                                <div className="d-flex d-md-none gap-3">
                   <a className="author-res-footer-link" href={`/profile/${authorId}`} data-discover="true">
                     {t?.('profile.view_profile') || 'Profile'}
                   </a>
@@ -388,7 +439,7 @@ export const TopicPostCard = ({
                 </div>
                 <div className="d-none d-md-block"></div>
                 <div className="d-flex gap-2 gap-md-3">
-                  {onDeletePost && (
+                  {canDelete && onDeletePost && (
                     <Button
                       variant="link"
                       size="sm"

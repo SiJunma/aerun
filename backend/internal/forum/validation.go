@@ -18,6 +18,7 @@ var (
 	ErrReputationVoterOrTargetRequired = errors.New("voter and target are required")
 	ErrGuestNicknameRequired           = errors.New("guest nickname is required")
 	ErrGuestNicknameTooLong            = errors.New("guest nickname must not exceed 64 characters")
+	ErrTopicDescriptionTooLong         = errors.New("topic description must not exceed 200 characters")
 )
 
 // ValidateReputationVote validates voter vs target, vote value and comment length.
@@ -46,6 +47,19 @@ func ValidateTopicTitle(title string) (string, error) {
 	}
 	if utf8.RuneCountInString(trimmed) > MaxTopicTitleLen {
 		return "", ErrTopicTitleTooLong
+	}
+	return trimmed, nil
+}
+
+// ValidateTopicDescription validates the topic's OPTIONAL short description
+// ("Краткое описание"). Unlike the title it may be EMPTY — both client forms
+// render an optional input — so only the upper bound is enforced here. The
+// result is always trimmed: leading/trailing whitespace is form noise, not
+// content.
+func ValidateTopicDescription(description string) (string, error) {
+	trimmed := strings.TrimSpace(description)
+	if utf8.RuneCountInString(trimmed) > MaxTopicDescriptionLen {
+		return "", ErrTopicDescriptionTooLong
 	}
 	return trimmed, nil
 }

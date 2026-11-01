@@ -164,12 +164,17 @@ export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
 /**
  * Updates the active mask/character in presence tracking.
  */
-export const updateRtdbActiveCharacter = async (uid, characterData) => {
-  currentActiveCharacter = characterData ? {
-    id: characterData.id || characterData._id,
-    name: characterData.name || '',
-    avatar_url: characterData.avatar_url || ''
-  } : null;
+export const updateRtdbActiveCharacter = async (uid, character) => {
+  // The SERVER resolves the mask (id -> name/avatar, owner-checked) — the
+  // client only needs to name the id. An object is still accepted for
+  // compatibility.
+  currentActiveCharacter = typeof character === 'string'
+    ? character
+    : character ? {
+      id: character.id || character._id,
+      name: character.name || '',
+      avatar_url: character.avatar_url || ''
+    } : null;
   await sendHeartbeat(currentActiveCharacter);
 };
 

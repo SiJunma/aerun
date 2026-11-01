@@ -35,19 +35,24 @@ export const useTopicMutations = ({
     selectedCharacterId,
     _selectedChar,
     guestNickname,
+    tempId: providedTempId,
     onSuccess,
     onError
   }) => {
     if (!content?.trim()) return null;
 
     const savedReplyContent = content.trim();
-    const token = replyInFlightRef.current.begin();
-    if (!token) return null;
+    if (!replyInFlightRef.current.begin()) return null;
 
     setSubmittingPost(true);
     recordActivity?.();
 
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    // USE THE CALLER'S temp id when given: the optimistic card on the page
+    // was appended under THAT id, and the reconcile below (onSuccess)
+    // replaces by it. A second, hook-local id made the replacement miss —
+    // the page's optimistic card stayed "pending" beside the server row,
+    // and the next posts merge kept both: the moved-opener duplicate.
+    const tempId = providedTempId || `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const idempotencyKey = newIdempotencyKey();
 
     try {
@@ -63,7 +68,9 @@ export const useTopicMutations = ({
 
       const serverPost = await createPost(payload, idempotencyKey);
 
-      clearUnsentReply({ topicId, uid: currentUser?.uid });
+      // Positional signature: (topicId, uid) — see src/api/unsent-replies.js.
+      // An object call silently no-ops (uid would be undefined).
+      clearUnsentReply(topicId, currentUser?.uid);
       scheduleForumStateRefresh?.();
 
       onSuccess?.(serverPost, tempId);
@@ -86,7 +93,9 @@ export const useTopicMutations = ({
       onError?.(err, tempId, savedReplyContent);
       throw err;
     } finally {
-      token.release();
+      // createInFlight().begin() returns a BOOLEAN — the latch is released
+      // via end() on the latch object itself, not via a token handle.
+      replyInFlightRef.current.end();
       setSubmittingPost(false);
     }
   }, [
@@ -108,45 +117,46 @@ export const useTopicMutations = ({
       const { content: processedContent, rolls: freshRolls } = processDiceRolls(content.trim());
       const mergedRolls = { ...(existingRolls || {}), ...(freshRolls || {}) };
 
-      const updated = await updatePost(postId, {
-        content: processedContent,
-        character_id: characterId || null,
-        rolls: Object.keys(mergedRolls).length > 0 ? mergedRolls : undefined
+      const updated = await updatePost(postId, processedContent, {
+        rolls: Object.keys(mergedRolls).length > 0 ? mergedRolls : undefined,
+        author_character_id: characterId || ''
       });
 
-      showToast?.(lang === 'ru' ? 'Сообщение обновлено' : 'Post updated', 'success');
+      // Toasts belong to the caller (useTopicModalState.handleSaveEdit) —
+      // toasting here AND there produced duplicate "Post updated" toasts.
       return updated;
     } catch (err) {
       console.error('[updatePost error]', err);
-      showToast?.(lang === 'ru' ? 'Ошибка при редактировании сообщения' : 'Error editing post', 'danger');
       throw err;
     }
-  }, [showToast, lang]);
+  }, []);
 
   // Remove existing post
   const removePost = useCallback(async (postId) => {
     try {
-      await deletePost(postId);
+      const result = await deletePost({ id: postId }, currentUser?.uid);
       scheduleForumStateRefresh?.();
-      showToast?.(lang === 'ru' ? 'Сообщение удалено' : 'Post deleted', 'success');
+      // Toasts belong to the caller — the delete flow decides between the
+      // success text and the ghost-post notice.
+      return result;
     } catch (err) {
       console.error('[deletePost error]', err);
-      showToast?.(err.message || 'Error deleting post', 'danger');
       throw err;
     }
-  }, [scheduleForumStateRefresh, showToast, lang]);
+  }, [scheduleForumStateRefresh, currentUser?.uid]);
 
   // Submit reputation vote on post
   const submitRepVote = useCallback(async ({
     postId,
+    targetUid,
     value,
     comment,
     voterNickname
   }) => {
-    if (!postId || !currentUser?.uid) return;
+    if (!postId || !currentUser?.uid || !targetUid) return;
     setSubmittingRep(true);
     try {
-      await voteOnPost(currentUser.uid, postId, value, comment, voterNickname);
+      await voteOnPost(currentUser.uid, targetUid, postId, topicId, value, comment, undefined, undefined, voterNickname);
       recordActivity?.();
       showToast?.(lang === 'ru' ? 'Голос за репутацию учтен' : 'Reputation vote recorded', 'success');
     } catch (err) {
@@ -156,7 +166,7 @@ export const useTopicMutations = ({
     } finally {
       setSubmittingRep(false);
     }
-  }, [currentUser?.uid, recordActivity, showToast, lang]);
+  }, [currentUser?.uid, topicId, recordActivity, showToast, lang]);
 
   // Edit reputation comment
   const editRepComment = useCallback(async (voteId, newComment) => {

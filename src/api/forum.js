@@ -323,6 +323,11 @@ export const createTopic = async (topicData, firstPostData) => {
     body: {
       category_id: topicData.category_id,
       title: topicData.title,
+      // The topic's short subtitle ("Краткое описание"). Dropped here before:
+      // the create form held it in state and sent it, but this body never
+      // forwarded it, so the server stored an empty description and the
+      // header/category list lost it on every reload.
+      description: topicData.description || '',
       content: processedContent.trim(),
       rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
       // Both of these used to be dropped on the floor. The form held
@@ -521,7 +526,16 @@ export const createPost = async (postData, idempotencyKey) => {
   // in the optimistic card and then dropped on the floor: the `[roll=<id>]` tag
   // reached the server with nothing pointing at it, and every reader after a
   // reload saw the raw tag. The tag is a pointer; this map is the payload.
-  const { content: processedContent, rolls } = processDiceRolls(postData.content);
+  // The reply path (useTopicMutations) has ALREADY run processDiceRolls on
+  // the text and hands the THROWN rolls over in postData.rolls — running the
+  // scan a SECOND time over the already-processed content finds no [dice]
+  // tags, yields an empty map, and wipes the throws again. When the caller
+  // passes rolls, they are authoritative; the scan is only a fallback for
+  // callers that still send raw [dice] text.
+  const preRolled = postData.rolls && Object.keys(postData.rolls).length > 0
+    ? { content: postData.content, rolls: postData.rolls }
+    : processDiceRolls(postData.content);
+  const { content: processedContent, rolls } = preRolled;
 
   const res = await sendApi(`/api/aerun/topics/${postData.topic_id}/posts`, {
     method: 'POST',
@@ -706,6 +720,16 @@ export const updateTopic = async (topicId, data, _performerId, _authorId) => {
   if (data.title !== undefined) body.title = data.title;
   if (data.is_locked !== undefined) body.locked = data.is_locked;
   if (data.is_pinned !== undefined) body.pinned = data.is_pinned;
+  // The in-topic pin of the OPENING post (`first_post_pinned`) is a first-class
+  // key of the server's updateTopicForm (a *bool: absent = untouched). This
+  // whitelist used to carry only title/locked/pinned, so the hook's flag was
+  // dropped HERE — PATCH /topics arrived as {title} and the edit form's
+  // checkbox silently did nothing, no matter what the hook above it sent.
+  if (data.first_post_pinned !== undefined) body.first_post_pinned = data.first_post_pinned;
+  // The topic's short subtitle ("Краткое описание"): the first-post editor
+  // edits it together with the title. The server validates and stores it
+  // (topics.description, max 200); dropped by the whitelist until Session 37.
+  if (data.description !== undefined) body.description = data.description;
 
   return await sendApi(`/api/aerun/topics/${topicId}`, {
     method: 'PATCH',
@@ -809,8 +833,11 @@ export const moveTopics = async (topicIds, targetCategoryId, _performerId) => {
   }
 };
 
-export const movePosts = async (postIds, targetTopicId, _performerId) => {
-  return await sendApi(`/api/aerun/topics/${targetTopicId}/posts/move`, {
+// The route is /topics/{SOURCE}/posts/move: the path carries the topic the
+// posts LEAVE, the body carries the topic they arrive at. Swapping them made
+// the server see source == target and refuse every move.
+export const movePosts = async (postIds, sourceTopicId, targetTopicId, _performerId) => {
+  return await sendApi(`/api/aerun/topics/${sourceTopicId}/posts/move`, {
     method: 'POST',
     body: {
       target_topic_id: targetTopicId,
@@ -819,7 +846,7 @@ export const movePosts = async (postIds, targetTopicId, _performerId) => {
   });
 };
 
-export const createTopicFromPosts = async (postIds, topicData, performerId) => {
+export const createTopicFromPosts = async (postIds, sourceTopicId, topicData, performerId) => {
   const newTopic = await sendApi('/api/aerun/topics', {
     method: 'POST',
     body: {
@@ -830,7 +857,7 @@ export const createTopicFromPosts = async (postIds, topicData, performerId) => {
   });
 
   const newTopicId = newTopic?.topic?.id || newTopic?.id;
-  await movePosts(postIds, newTopicId, performerId);
+  await movePosts(postIds, sourceTopicId, newTopicId, performerId);
   return newTopicId;
 };
 

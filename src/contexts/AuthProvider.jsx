@@ -15,6 +15,7 @@ import {
 import {
   initRtdbPresence,
   setRtdbOnline,
+  updateRtdbActiveCharacter,
   setRtdbOffline,
   subscribeToOnlineUsers,
   initRtdbGuestPresence,
@@ -268,6 +269,14 @@ export const AuthProvider = ({ children }) => {
         try {
           await pb.collection('users').authRefresh();
         } catch (refreshErr) {
+          // Auto-cancelled requests say NOTHING about the session: a Vite HMR
+          // remount fires a second authRefresh and the SDK aborts the
+          // in-flight first one (ClientResponseError 0 / AbortError). The
+          // newer instance re-runs this refresh — clearing the store here
+          // logged members out on every hot reload.
+          if (refreshErr?.isAbort || refreshErr?.status === 0) {
+            return;
+          }
           // Dead session: tokenKey rotated or account deleted. Never re-send a
           // stale token; clear so subsequent /me reads land as an honest guest.
           console.warn('[AuthProvider] session refresh failed; clearing stale store', refreshErr);
@@ -321,7 +330,7 @@ export const AuthProvider = ({ children }) => {
   // anonymous one beats as a guest so the stats panel can count them.
   useEffect(() => {
     if (user?.uid && profile) {
-      return initRtdbPresence(user.uid, profile);
+      return initRtdbPresence(user.uid, profile, profile?.last_selected_character_id || null);
     }
     return initRtdbGuestPresence(getOrCreateGuestId());
   }, [user?.uid, profile, getOrCreateGuestId]);
@@ -410,7 +419,7 @@ export const AuthProvider = ({ children }) => {
       if (!isRtdbOnlineRef.current || (now - lastPushTimeRef.current >= PUSH_INTERVAL_MS)) {
         isRtdbOnlineRef.current = true;
         lastPushTimeRef.current = now;
-        setRtdbOnline(user.uid, profile).catch(() => {});
+        setRtdbOnline(user.uid, profile, profile?.last_selected_character_id || null).catch(() => {});
       }
     }
   }, [user, profile]);
@@ -848,6 +857,9 @@ export const AuthProvider = ({ children }) => {
     if (record && record.last_selected_character_id !== id) {
       pb.authStore.save(pb.authStore.token, { ...record, last_selected_character_id: id });
     }
+    // The online list shows the active mask — push it into presence right
+    // away instead of waiting for the next beat.
+    updateRtdbActiveCharacter(user.uid, id || null).catch(() => {});
   }, [user?.uid]);
 
   // ONE refresh in flight at a time, with at most ONE queued behind it.

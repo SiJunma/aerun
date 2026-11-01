@@ -39,12 +39,24 @@ type createTopicForm struct {
 	// GuestNickname is the display name a guest picks when posting without an
 	// account. Empty for authenticated users.
 	GuestNickname string `json:"guest_nickname"`
+	// Description is the topic's optional short subtitle ("Краткое описание").
+	// Dropped by every version before 1780000000: the create form held it and
+	// sent it, but no column received it, so created topics lost it on reload.
+	Description string `json:"description"`
 }
 
 type updateTopicForm struct {
 	Title  *string `json:"title"`
 	Locked *bool   `json:"locked"`
 	Pinned *bool   `json:"pinned"`
+	// FirstPostPinned re-files the OPENING post's in-topic pin (the banner
+	// gate). POINTER: an absent key means "the edit did not touch it" — the
+	// edit form sends it only when the author actually flipped the checkbox.
+	FirstPostPinned *bool `json:"first_post_pinned"`
+	// Description re-files the topic's short subtitle (the "Краткое описание"
+	// input of the first-post editor). POINTER: an absent key means "the edit
+	// did not touch it" — same shape as Title.
+	Description *string `json:"description"`
 }
 
 type moveTopicForm struct {
@@ -62,6 +74,7 @@ func topicPayload(record *core.Record) map[string]any {
 		"id":                record.Id,
 		"category_id":       record.GetString("category_id"),
 		"title":             record.GetString("title"),
+		"description":       record.GetString("description"),
 		"posts_count":       record.GetInt("posts_count"),
 		"locked":            record.GetBool("locked"),
 		"pinned":            record.GetBool("pinned"),
@@ -129,6 +142,11 @@ func createTopicHandler(e *core.RequestEvent) error {
 		return validationError(err.Error())
 	}
 
+	description, err := forum.ValidateTopicDescription(form.Description)
+	if err != nil {
+		return validationError(err.Error())
+	}
+
 	content, err := forum.ValidatePostContent(form.Content)
 	if err != nil {
 		return validationError(err.Error())
@@ -181,6 +199,7 @@ func createTopicHandler(e *core.RequestEvent) error {
 			topic.Set("guest_principal_id", guestPrincipalIDFromRequest(e))
 		}
 		topic.Set("title", title)
+		topic.Set("description", description)
 		topic.Set("posts_count", 1)
 		topic.Set("locked", false)
 		topic.Set("pinned", false)
@@ -639,8 +658,12 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 	}
 
 	payload := map[string]any{
-		"topic_id":          topic.Id,
-		"title":             topic.GetString("title"),
+		"topic_id": topic.Id,
+		"title":    topic.GetString("title"),
+		// The first-post editor prefills its description input from the topic
+		// state, and the topic state is hydrated from THIS read — without it
+		// the editor opened empty even on a topic that plainly had one.
+		"description":       topic.GetString("description"),
 		"category_id":       topic.GetString("category_id"),
 		"author_id":         topic.GetString("author_id"),
 		"posts_count":       topic.GetInt("posts_count"),
@@ -652,6 +675,13 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		"created":           topic.GetDateTime("created").String(),
 		"request_id":        requestIDFrom(e),
 	}
+	// The NESTED AuthorRef DTO is what the header's ForumAuthorName reads
+	// FIRST (author?.display_name ?? fallbackName). The stats merge on the
+	// client spreads stats over the previous topic state, so without this key
+	// a stale opener DTO survived every merge — moving the opening post
+	// re-filed the opener on the server, but the live header kept naming the
+	// author of the post that had LEFT until the page was remounted.
+	payload["author"] = authorDTOFromRecord(topic)
 	if charID := topic.GetString("author_character_id"); charID != "" {
 		payload["author_character_id"] = charID
 	}
@@ -661,6 +691,10 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 		displays := loadAuthorDisplays(e.App, []string{authorID})
 		if d, ok := displays[authorID]; ok {
 			payload["author_name"] = d.Nickname
+			if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+				dto["display_name"] = d.Nickname
+				dto["avatar_url"] = d.AvatarURL
+			}
 			if d.IsDeleted {
 				// A deleted opener keeps the baked account name: no mask may
 				// rename it (see decoratePostAuthor — same rule, same reason).
@@ -674,6 +708,11 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 				// it (see decoratePostAuthor — same rule, same reason).
 				payload["author_name"] = mask.Name
 				payload["is_character"] = true
+				if dto, ok := payload["author"].(map[string]any); ok && dto != nil {
+					dto["display_name"] = mask.Name
+					dto["avatar_url"] = mask.AvatarURL
+					dto["is_character"] = true
+				}
 			}
 		}
 	} else {
@@ -801,6 +840,35 @@ func updateTopicHandler(e *core.RequestEvent) error {
 			}
 		}
 
+		// The description is topic CONTENT, same edit class as the title:
+		// the author or a holder of edit_others_topics, and a stranger's edit
+		// is audited.
+		if form.Description != nil {
+			if !canEdit {
+				return 0, nil, forbiddenError("you cannot change this topic's description")
+			}
+			newDescription, err := forum.ValidateTopicDescription(*form.Description)
+			if err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+			oldDescription := topic.GetString("description")
+			topic.Set("description", newDescription)
+			if !isAuthor {
+				if err := recordAuditLog(txApp, "topic_description_edit", e.Auth.Id, map[string]any{
+					"topic_id":        id,
+					"old_description": oldDescription,
+					"new_description": newDescription,
+				}); err != nil {
+					return 0, nil, err
+				}
+			}
+		}
+
+		// The in-topic pin of the OPENING post is the AUTHOR's decision
+		// (same gate class as the mask re-file above).
+		if form.FirstPostPinned != nil && isAuthor {
+			topic.Set("first_post_pinned", *form.FirstPostPinned)
+		}
 		if err := txApp.Save(topic); err != nil {
 			return 0, nil, internalError("failed to update topic", err)
 		}

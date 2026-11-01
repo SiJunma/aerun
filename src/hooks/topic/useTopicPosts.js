@@ -67,6 +67,14 @@ export const useTopicPosts = ({
       }
     }
 
+    // skipNextLoadForPageRef guard: if this exact page was already resolved by
+    // a previous setSearchParams tick (targetPostId / goLast=1 deep link), skip
+    // the duplicate fetch to avoid a second network request and a skeleton flash.
+    if (skipNextLoadForPageRef.current === pageToFetch) {
+      skipNextLoadForPageRef.current = null;
+      return [];
+    }
+
     const currentFetchId = ++activeFetchIdRef.current;
     isFetchingPostsRef.current = pageToFetch;
 
@@ -131,6 +139,15 @@ export const useTopicPosts = ({
             }
             return next;
           }, { replace: true, preventScrollReset: true });
+          // The skip exists for ONE consumer: effect 16 re-running after the
+          // page parameter changes. When the resolved page IS the page we are
+          // already on, the URL write does not move `currentPage`, effect 16
+          // never re-runs, and a skip left armed here would silently eat the
+          // next unrelated fetch — the live refetch — dropping the very
+          // update the reader is watching for. Disarm it immediately.
+          if (resolvedPage === currentPage) {
+            skipNextLoadForPageRef.current = null;
+          }
         }
       } else if (resolvedPage && pageToFetch === 'last') {
         skipNextLoadForPageRef.current = resolvedPage;
@@ -141,6 +158,11 @@ export const useTopicPosts = ({
           }
           return next;
         }, { replace: true, preventScrollReset: true });
+        // Same disarm: a resolved page equal to the current one produces no
+        // effect-16 re-run to consume the skip.
+        if (resolvedPage === currentPage) {
+          skipNextLoadForPageRef.current = null;
+        }
       }
 
       const activePage = resolvedPage || (typeof pageToFetch === 'number' ? pageToFetch : 1);

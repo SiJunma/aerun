@@ -68,14 +68,23 @@ export const useTopicData = (id) => {
           return stats;
         }
 
-        // Nothing moved: keep the existing reference so no render cascades
+        // Nothing moved: keep the existing reference so no render cascades.
+        // The opener identity is PART of the comparison: moving the opening
+        // post re-files the topic's author without touching posts_count
+        // (the client's own optimistic arithmetic already matched the
+        // server's count), last_post or the title — a guard that ignored the
+        // author froze the header on the previous opener until remount.
         if (
           prev.posts_count === stats.posts_count &&
           prev.last_post_id === stats.last_post_id &&
           prev.last_post_at_ms === stats.last_post_at_ms &&
           prev.is_locked === stats.is_locked &&
           prev.is_pinned === stats.is_pinned &&
-          prev.title === stats.title
+          prev.title === stats.title &&
+          prev.description === stats.description &&
+          prev.author?.user_id === stats.author?.user_id &&
+          prev.author?.character_id === stats.author?.character_id &&
+          prev.author?.display_name === stats.author?.display_name
         ) {
           return prev;
         }

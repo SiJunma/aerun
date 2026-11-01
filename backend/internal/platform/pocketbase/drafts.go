@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/SiJunma/aerun/backend/internal/forum"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
@@ -373,6 +374,34 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		}
 
 		post.Set("is_draft", false)
+		// THE THROW FREEZES HERE. A draft stores its dice tags RAW
+		// ([dice=N type=T]) for as long as it is editable — the throw happens
+		// at publication, server-side, exactly once. Promoting the row
+		// verbatim without this pass would publish a post whose
+		// [dice=...] tags render as "pending" forever.
+		if content := post.GetString("content"); forum.DiceTagPattern.MatchString(content) {
+			rolledContent, freshRolls := forum.RollDraftDice(content)
+			// The draft body may also carry INHERITED [roll=<id>] references (a
+			// draft saved under the older roll-at-save semantics, or a throw moved
+			// between drafts). Their entries live in the stored map — merge the
+			// freshly generated throws with them instead of replacing the map,
+			// or the inherited tags would lose their throws and render raw.
+			storedRolls, err := decodeRolls(post.Get("rolls"))
+			if err != nil {
+				storedRolls = map[string]any{}
+			}
+			mergedRolls := map[string]any{}
+			for rollID, rollEntry := range storedRolls {
+				mergedRolls[rollID] = rollEntry
+			}
+			for rollID, rollEntry := range freshRolls {
+				mergedRolls[rollID] = rollEntry
+			}
+			post.Set("content", rolledContent)
+			if err := writeRolls(post, rolledContent, mergedRolls); err != nil {
+				return 0, nil, validationError(err.Error())
+			}
+		}
 		// The mask lives on the draft row, so publishing keeps the identity the
 		// text was written under. It is NOT re-read from the profile here: the
 		// author may have switched masks since saving, and a post that silently
@@ -416,8 +445,12 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		redactPostRolls([]map[string]any{postOut}, AccessFrom(e))
 
 		return http.StatusOK, map[string]any{
-			"post":       postOut,
-			"post_id":    post.Id,
+			"post":    postOut,
+			"post_id": post.Id,
+			// The ROLLED body travels back so the optimistic
+			// row (showing the raw [dice=N] placeholder) can
+			// reconcile onto the thrown post without a reload.
+			"content":    post.GetString("content"),
 			"request_id": requestIDFrom(e),
 		}, nil
 	})
