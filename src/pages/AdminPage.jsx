@@ -4,7 +4,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
   getGlobalSettings, updateGlobalSettings, uploadIdentityPlaceholder, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles
+  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles, bulkUpdateUsers, bulkDeleteUsers
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
@@ -55,6 +55,18 @@ const AdminPage = () => {
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
+  // Bulk (multi-user) actions. Selection is keyed by user id and persists across
+  // pages of the staff list — an account picked on page one stays selected when
+  // the admin turns to page two and back.
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set());
+  const [bulkAction, setBulkAction] = useState(null);
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
+  // ids the viewer removed from the selection while the confirmation modal was open
+  const [bulkModalExcluded, setBulkModalExcluded] = useState(new Set());
+  const [bulkRoleId, setBulkRoleId] = useState('');
+  const [bulkRoleNotifyChange, setBulkRoleNotifyChange] = useState(true);
+  const [bulkDeletePosts, setBulkDeletePosts] = useState(false);
   // The role EDITOR's rows, from GET /admin/roles.
   //
   // `roles` from useAuth is the PUBLIC badge registry — role_id, name, rank,
@@ -348,6 +360,171 @@ const AdminPage = () => {
     if (r.id === ADMIN_ROLE_ID && !isRootActor) return false;
     return true;
   });
+
+  // ── Bulk actions ────────────────────────────────────────────────────────
+  //
+  // A row's checkbox renders only when the actor may perform at least one bulk
+  // operation on that user (§3.2): ban/unban (PermBanUsers), delete
+  // (PermDeleteUsers) or role change (canChangeRoleOf). An account can never
+  // be selected for an action on itself — the server repeats this rule.
+
+  const canBulkEditUser = (u) => {
+    if (u.id === user.uid) return false;
+    return (
+      hasPermission(PERMISSIONS.BAN_USERS) ||
+      hasPermission(PERMISSIONS.DELETE_USERS) ||
+      canChangeRoleOf(u.role_id)
+    );
+  };
+
+  const bulkEditable = users.filter(canBulkEditUser);
+  const bulkAll = bulkEditable.length > 0 && bulkEditable.every(u => selectedUserIds.has(u.id));
+  const bulkAny = bulkEditable.some(u => selectedUserIds.has(u.id));
+  const bulkSelected = bulkEditable.filter(u => selectedUserIds.has(u.id));
+  const bulkAnyBanned = bulkSelected.some(u => u.status === 'banned');
+
+  // Default role for the bulk role-change modal: the role of the first selected
+  // user when it is one the viewer may assign, otherwise the first assignable role.
+  const defaultBulkRoleId = (() => {
+    const first = bulkSelected[0];
+    if (first && assignableRoles.some((r) => r.id === first.role_id)) return first.role_id;
+    return assignableRoles[0]?.id || '';
+  })();
+
+  // Ids that will actually be acted on: the persistent selection minus anything
+  // the viewer dropped while the confirmation modal was open.
+  const effectiveBulkIds = [...selectedUserIds].filter(id => !bulkModalExcluded.has(id));
+
+  const toggleBulkUser = (id) => {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleBulkAll = () => {
+    if (bulkAll) {
+      setSelectedUserIds(new Set());
+      return;
+    }
+    const next = new Set(selectedUserIds);
+    bulkEditable.forEach(u => next.add(u.id));
+    setSelectedUserIds(next);
+  };
+
+  const bulkModalTitle = () => {
+    const count = bulkSelected.length;
+    if (bulkAction === 'role') return t('admin.users.bulk_modal_title_role', { count });
+    if (bulkAction === 'ban') return t('admin.users.bulk_modal_title_ban', { count });
+    if (bulkAction === 'unban') return t('admin.users.bulk_modal_title_unban', { count });
+    return t('admin.users.bulk_modal_title_delete', { count });
+  };
+
+  const handleOpenBulkModal = (action) => {
+    if (effectiveBulkIds.length === 0) return;
+    setBulkAction(action);
+    setBulkModalExcluded(new Set());
+    setBulkRoleId(defaultBulkRoleId);
+    setBulkRoleNotifyChange(true);
+    setBulkDeletePosts(false);
+    setBulkModalOpen(true);
+  };
+
+  const handleCloseBulkModal = () => {
+    setBulkModalOpen(false);
+    setBulkAction(null);
+    setBulkModalExcluded(new Set());
+    setBulkRoleNotifyChange(true);
+  };
+
+  const handleRemoveFromBulkSelection = (id) => {
+    setBulkModalExcluded(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    // Drop it from the persistent selection so the row checkbox unchecks too.
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  // Executes the chosen bulk action over the currently selected ids (minus any
+  // the viewer dropped in the confirmation modal). Optimistic update with
+  // per-target rollback on partial failure, mirroring the single-user handlers.
+  const handleBulkConfirm = async () => {
+    const ids = effectiveBulkIds;
+    if (ids.length === 0) {
+      setBulkModalOpen(false);
+      return;
+    }
+    const before = users;
+    setBulkPending(true);
+    try {
+      let optimistic;
+      if (bulkAction === 'role') {
+        optimistic = users.map(u => (selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)
+          ? { ...u, role_id: bulkRoleId }
+          : u));
+      } else if (bulkAction === 'ban' || bulkAction === 'unban') {
+        optimistic = users.map(u => (selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)
+          ? { ...u, status: bulkAction === 'ban' ? 'banned' : 'active' }
+          : u));
+      } else {
+        optimistic = users.filter(u => !(selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)));
+      }
+      setUsers(optimistic);
+
+      let res;
+      if (bulkAction === 'delete') {
+        res = await bulkDeleteUsers(ids, { delete_posts: bulkDeletePosts });
+      } else if (bulkAction === 'role') {
+        res = await bulkUpdateUsers(ids, { role: bulkRoleId, notify_role_change: bulkRoleNotifyChange });
+      } else {
+        res = await bulkUpdateUsers(ids, { status: bulkAction === 'ban' ? 'banned' : 'active' });
+      }
+
+      await refreshForumState?.(true);
+
+      const failed = (res?.items || []).filter(i => !i.ok);
+      if (failed.length > 0) {
+        const rejected = new Set(failed.map(i => i.id));
+        setUsers(prev => {
+          const next = prev.map(u => {
+            if (!rejected.has(u.id)) return u;
+            const old = before.find(o => o.id === u.id);
+            return old || u;
+          });
+          const present = new Set(next.map(u => u.id));
+          const restored = before.filter(u => rejected.has(u.id) && !present.has(u.id));
+          return [...next, ...restored];
+        });
+        showToast(t('admin.users.toast_bulk_partial', {
+          succeeded: res.succeeded,
+          failed: res.failed,
+        }), 'warning');
+      } else {
+        showToast(t('admin.users.toast_bulk_done', { count: res.processed }), 'success');
+      }
+    } catch (err) {
+      setUsers(before);
+      console.error('[bulk users err]', err);
+      showToast(err?.message || t('admin.users.error_bulk'), 'danger');
+    } finally {
+      setBulkPending(false);
+      setBulkModalOpen(false);
+      setBulkAction(null);
+      setBulkModalExcluded(new Set());
+      setSelectedUserIds(new Set());
+      setBulkRoleId('');
+      setBulkRoleNotifyChange(true);
+      setBulkDeletePosts(false);
+    }
+  };
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
@@ -1791,9 +1968,69 @@ const AdminPage = () => {
             />
           </InputGroup>
         </Card.Header>
+        {selectedUserIds.size > 0 && (
+          <Card.Body className="py-3 border-bottom">
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <span className="fw-bold text-muted small">
+                {t('admin.users.bulk_selected', { count: selectedUserIds.size })}
+              </span>
+
+              {hasPermission(PERMISSIONS.CHANGE_ROLES) && assignableRoles.length > 0 && (
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  disabled={bulkPending}
+                  onClick={() => handleOpenBulkModal('role')}
+                >
+                  {t('admin.users.bulk_change_role')}
+                </Button>
+              )}
+              {hasPermission(PERMISSIONS.BAN_USERS) && (
+                <Button
+                  variant={bulkAnyBanned ? 'success' : 'danger'}
+                  size="sm"
+                  disabled={bulkPending}
+                  onClick={() => handleOpenBulkModal(bulkAnyBanned ? 'unban' : 'ban')}
+                >
+                  {t(bulkAnyBanned ? 'admin.users.bulk_unban' : 'admin.users.bulk_ban')}
+                </Button>
+              )}
+              {hasPermission(PERMISSIONS.DELETE_USERS) && (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={bulkPending}
+                  onClick={() => handleOpenBulkModal('delete')}
+                >
+                  {t('admin.users.bulk_delete')}
+                </Button>
+              )}
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                disabled={bulkPending}
+                onClick={() => setSelectedUserIds(new Set())}
+              >
+                {t('admin.users.bulk_clear')}
+              </Button>
+            </div>
+          </Card.Body>
+        )}
         <Table hover responsive className="mb-0 overflow-hidden">
           <thead>
             <tr>
+              <th style={{ width: '36px' }}>
+                {bulkEditable.length > 0 && (
+                  <input
+                    type="checkbox"
+                    className="form-check-input mt-1"
+                    checked={bulkAll}
+                    onChange={toggleBulkAll}
+                    indeterminate={bulkAny && !bulkAll}
+                    aria-label={t('admin.users.table_select')}
+                  />
+                )}
+              </th>
               <th>{t('admin.users.table_user')}</th>
               <th>{t('admin.users.table_role')}</th>
               <th>{t('admin.users.table_status')}</th>
@@ -1803,6 +2040,17 @@ const AdminPage = () => {
           <tbody>
             {filteredUsers.map(u => (
               <tr key={u.id} className="align-middle">
+                <td style={{ width: '36px' }} className="select-cell">
+                  {canBulkEditUser(u) && (
+                    <input
+                      type="checkbox"
+                      className="form-check-input mt-1"
+                      checked={selectedUserIds.has(u.id)}
+                      onChange={() => toggleBulkUser(u.id)}
+                      aria-label={t('admin.users.table_select')}
+                    />
+                  )}
+                </td>
                 <td>
                   <div className="d-flex align-items-center">
                     {/* identityAvatar instead of a bare resolveAvatarUrl: the old
@@ -2962,6 +3210,133 @@ const AdminPage = () => {
               />
             </Form.Group>
           </Form>
+        )}
+      </ForumModal>
+
+      {/* Bulk action confirmation modal — shows every selected nickname and lets
+         the viewer drop anyone they accidentally picked before confirming. */}
+      <ForumModal
+        show={bulkModalOpen}
+        onHide={handleCloseBulkModal}
+        title={bulkAction ? bulkModalTitle() : t('common.confirm_title')}
+        footer={
+          <>
+            <Button
+              variant="outline-secondary"
+              onClick={handleCloseBulkModal}
+              disabled={bulkPending}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleBulkConfirm}
+              disabled={bulkPending || (bulkAction === 'role' && !bulkRoleId)}
+            >
+              {bulkPending ? t('common.loading') : t('admin.users.bulk_do')}
+            </Button>
+          </>
+        }
+      >
+        <div className="mb-3">
+          <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">
+            {t('admin.users.bulk_modal_users_label')}
+          </Form.Label>
+          <div className="d-flex flex-wrap gap-2" style={{ maxHeight: '260px', overflowY: 'auto', border: '1px solid rgba(var(--bs-gray-rgb),0.2)', padding: '8px', borderRadius: '6px', background: 'rgba(var(--bs-gray-rgb),0.03)' }}>
+            {effectiveBulkIds.map(id => {
+              const u = users.find(x => x.id === id);
+              if (!u) return null;
+              return (
+                <div key={id} className="d-flex align-items-center gap-2 px-2 py-1 rounded border bg-white shadow-sm">
+                  <img
+                    src={identityAvatar({ name: u.nickname, avatar: u.avatar_url, size: 24 })}
+                    alt=""
+                    className="rounded-circle"
+                    style={{ width: '24px', height: '24px', objectFit: 'cover' }}
+                  />
+                  <span className="small">{u.nickname || t('admin.users.unnamed', 'Без имени')}</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0 text-danger opacity-60 hover-opacity-100"
+                    onClick={() => handleRemoveFromBulkSelection(id)}
+                    aria-label={t('admin.users.bulk_modal_remove_user')}
+                  >
+                    <span className="visually-hidden">{t('admin.users.bulk_modal_remove_user')}</span>
+                    &times;
+                  </Button>
+                </div>
+              );
+            })}
+            {effectiveBulkIds.length === 0 && (
+              <span className="text-muted small">{t('admin.users.bulk_modal_none_left', 'Никто не выбран')}</span>
+            )}
+          </div>
+        </div>
+
+        {bulkAction === 'role' && (
+          <>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">
+                {t('admin.users.bulk_modal_role_label')}
+              </Form.Label>
+              <div className="d-flex flex-column gap-1">
+                {assignableRoles.map(r => (
+                  <div
+                    key={r.id}
+                    className={`p-2 rounded d-flex align-items-center mb-1 cursor-pointer role-radio-container`}
+                    style={{
+                      border: '1px solid',
+                      borderColor: bulkRoleId === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
+                      background: bulkRoleId === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
+                      transition: 'all 0.15s ease-in-out',
+                      opacity: bulkRoleId === r.id ? 1 : 0.8
+                    }}
+                    onClick={() => setBulkRoleId(r.id)}
+                  >
+                    <Form.Check
+                      type="radio"
+                      id={`bulk-role-radio-${r.id}`}
+                      name="bulkUserRole"
+                      checked={bulkRoleId === r.id}
+                      onChange={() => setBulkRoleId(r.id)}
+                      className="mb-0 me-2"
+                    />
+                    <label htmlFor={`bulk-role-radio-${r.id}`} className="mb-0 cursor-pointer flex-grow-1">
+                      <Badge bg={r.color || 'primary'} className={`role-badge px-3 ${['warning', 'light', 'management'].includes(r.color) ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.85rem' }}>
+                        {r.name}
+                      </Badge>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </Form.Group>
+            <Form.Group className="mb-0">
+              <Form.Check
+                type="checkbox"
+                id="bulk-modal-notify-role-change"
+                label={t('admin.users.notify_role_change_label')}
+                checked={bulkRoleNotifyChange !== false}
+                onChange={(e) => setBulkRoleNotifyChange(e.target.checked)}
+              />
+            </Form.Group>
+          </>
+        )}
+
+        {bulkAction === 'delete' && (
+          <Form.Group className="mb-1">
+            <Form.Check
+              type="checkbox"
+              id="bulk-modal-delete-posts"
+              label={t('admin.users.bulk_modal_delete_posts')}
+              checked={bulkDeletePosts}
+              onChange={(e) => setBulkDeletePosts(e.target.checked)}
+            />
+          </Form.Group>
+        )}
+
+        {bulkAction === 'delete' && bulkDeletePosts && (
+          <div className="small text-danger">{t('admin.users.bulk_modal_delete_warning')}</div>
         )}
       </ForumModal>
 

@@ -325,6 +325,8 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	group.GET("/admin/users", adminListUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess))
 	group.PATCH("/admin/users/{id}", adminUpdateUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	group.DELETE("/admin/users/{id}", adminDeleteUserHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+	group.PATCH("/admin/users/bulk", adminBulkUpdateUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
+	group.DELETE("/admin/users/bulk", adminBulkDeleteUsersHandler).BindFunc(RequirePermission(auth.PermAdminAccess)).BindFunc(enforceIdempotency)
 	// The root role changes hands only through this command; a plain role write
 	// refuses it for every caller (see checkRoleChange). Gated on admin_access
 	// as a cheap first gate, but the handler demands the root role AND the

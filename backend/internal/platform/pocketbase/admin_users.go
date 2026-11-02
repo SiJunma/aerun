@@ -51,6 +51,9 @@ const (
 	// one flag; the limit is generous rather than tight so a client sending
 	// extra fields is not rejected for the wrong reason.
 	adminDeleteBodyBytes = 8 * 1024
+	// adminBulkBodyBytes bounds a bulk users body: at most adminListMaxPerPage
+	// ids plus a small payload, so one command never pulls the whole table.
+	adminBulkBodyBytes = 64 * 1024
 )
 
 func adminListUsersHandler(e *core.RequestEvent) error {
@@ -578,6 +581,288 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 			"delete_posts": deletePosts,
 			"id":           userID,
 			"request_id":   requestIDFrom(e),
+		}, nil
+	})
+
+	return writeCommandResult(e, outcome, err)
+}
+
+// adminBulkUpdateForm is the body of PATCH /admin/users/bulk. Exactly one of
+// Role / Status must be present; ids is required and non-empty.
+type adminBulkUpdateForm struct {
+	IDs              []string `json:"ids"`
+	Role             *string  `json:"role"`
+	Status           *string  `json:"status"`
+	NotifyRoleChange *bool    `json:"notify_role_change"`
+}
+
+// adminBulkDeleteForm is the body of DELETE /admin/users/bulk.
+type adminBulkDeleteForm struct {
+	IDs        []string `json:"ids"`
+	DeletePosts *bool   `json:"delete_posts"`
+}
+
+// bulkItem is one target's result inside a bulk command response.
+type bulkItem struct {
+	ID     string `json:"id"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+	Code   string `json:"code,omitempty"`
+	Role   string `json:"role,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// adminBulkUpdateUsersHandler performs one bulk operation (role change or
+// ban/unban) over a list of users in a single transaction, target by target.
+// Every target is checked independently: a refused target is reported in
+// `items` with a machine-readable code and does not abort the rest. The HTTP
+// status is 200 even when some targets fail — only an invalid body (400) or a
+// missing actor-level right (403) fails the whole request.
+// Route gate: RequirePermission(auth.PermAdminAccess) — root and admin only,
+// same as the single /admin/users/{id} endpoints (§2 of the spec).
+func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
+	claim, err := claimFrom(e)
+	if err != nil {
+		return err
+	}
+	acc := AccessFrom(e)
+
+	raw, err := readBodyLimited(e, adminBulkBodyBytes)
+	if err != nil {
+		return err
+	}
+	var form adminBulkUpdateForm
+	if err := json.Unmarshal(raw, &form); err != nil || len(form.IDs) == 0 {
+		return validationError("expected a non-empty ids array")
+	}
+
+	hasRole := form.Role != nil
+	hasStatus := form.Status != nil
+	if !hasRole && !hasStatus {
+		return validationError("expected role or status in the body")
+	}
+	if hasRole {
+		if !auth.Has(acc.Permissions, auth.PermChangeRoles) {
+			return router.NewForbiddenError("you are not allowed to change roles", nil)
+		}
+		if err := requireKnownRole(e.App, strings.TrimSpace(*form.Role)); err != nil {
+			return err
+		}
+	}
+	if hasStatus {
+		if !auth.Has(acc.Permissions, auth.PermBanUsers) {
+			return router.NewForbiddenError("you are not allowed to ban or unban users", nil)
+		}
+		switch strings.TrimSpace(*form.Status) {
+		case string(auth.StatusBanned), string(auth.StatusActive):
+		default:
+			return validationError("invalid status value")
+		}
+	}
+
+	role := ""
+	if form.Role != nil {
+		role = strings.TrimSpace(*form.Role)
+	}
+	status := ""
+	if form.Status != nil {
+		status = strings.TrimSpace(*form.Status)
+	}
+	notifyRoleChange := true
+	if form.NotifyRoleChange != nil {
+		notifyRoleChange = *form.NotifyRoleChange
+	}
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
+		var items []bulkItem
+		succeeded := 0
+
+		for _, id := range form.IDs {
+			item := bulkItem{ID: id}
+
+			targetUser, err := txApp.FindRecordById(usersCollectionName, id)
+			if err != nil || targetUser == nil {
+				item.Error = "user not found"
+				item.Code = "not_found"
+				items = append(items, item)
+				continue
+			}
+			if isUserDeleted(targetUser) {
+				item.Error = "user is already deleted"
+				item.Code = "already_deleted"
+				items = append(items, item)
+				continue
+			}
+			// An actor cannot act on their own account through bulk either.
+			if id == claim.Actor {
+				item.Error = "cannot act on your own account"
+				item.Code = "self_action"
+				items = append(items, item)
+				continue
+			}
+
+			roleChanged := false
+			oldRole := targetUser.GetString("role")
+			if role != "" {
+				if err := checkRoleChange(txApp, acc.Role, oldRole, role); err != nil {
+					item.Error = err.Error()
+					item.Code = "forbidden"
+					items = append(items, item)
+					continue
+				}
+				targetUser.Set("role", role)
+				targetUser.Set("custom_role_id", customRoleIDFor(txApp, role))
+				roleChanged = role != oldRole
+			}
+			if status != "" {
+				targetUser.Set("status", status)
+			}
+
+			// PocketBase validates the ENTIRE record on Save — repair stale
+			// required fields so a role change is never blocked by old data.
+			if strings.TrimSpace(targetUser.GetString("status")) == "" {
+				targetUser.Set("status", string(auth.StatusActive))
+			}
+			if len(targetUser.GetString("tokenKey")) < 30 {
+				targetUser.RefreshTokenKey()
+			}
+			if err := txApp.Save(targetUser); err != nil {
+				return 0, nil, internalError("failed to update user", err)
+			}
+
+			if roleChanged && notifyRoleChange {
+				newRole := targetUser.GetString("role")
+				if _, err := createNotification(txApp, id, e.Auth.Id, "role_change",
+					"Your role has been changed",
+					map[string]any{
+						"target_id":     id,
+						"old_role":      oldRole,
+						"old_role_name": roleDisplayName(txApp, oldRole),
+						"new_role":      newRole,
+						"new_role_name": roleDisplayName(txApp, newRole),
+						"changed_by":    e.Auth.Id,
+					},
+				); err != nil {
+					txApp.Logger().Warn("bulk role change notification failed",
+						"error", err, "targetId", id, "actorId", e.Auth.Id)
+				}
+			}
+
+			_ = recordAuditLog(txApp, "admin_user_update", e.Auth.Id, map[string]any{
+				"target_id": id,
+				"role":      targetUser.GetString("role"),
+				"status":    targetUser.GetString("status"),
+			})
+
+			item.OK = true
+			item.Role = targetUser.GetString("role")
+			item.Status = targetUser.GetString("status")
+			succeeded++
+			items = append(items, item)
+		}
+
+		return http.StatusOK, map[string]any{
+			"processed":  len(form.IDs),
+			"succeeded":  succeeded,
+			"failed":     len(form.IDs) - succeeded,
+			"items":      items,
+			"request_id": requestIDFrom(e),
+		}, nil
+	})
+
+	return writeCommandResult(e, outcome, err)
+}
+
+// adminBulkDeleteUsersHandler soft-deletes a list of users in a single
+// transaction, target by target, with the same per-target error contract as
+// adminBulkUpdateUsersHandler.
+func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
+	claim, err := claimFrom(e)
+	if err != nil {
+		return err
+	}
+	acc := AccessFrom(e)
+
+	raw, err := readBodyLimited(e, adminBulkBodyBytes)
+	if err != nil {
+		return err
+	}
+	var form adminBulkDeleteForm
+	if err := json.Unmarshal(raw, &form); err != nil || len(form.IDs) == 0 {
+		return validationError("expected a non-empty ids array")
+	}
+	if !auth.Has(acc.Permissions, auth.PermDeleteUsers) {
+		return router.NewForbiddenError("you are not allowed to delete users", nil)
+	}
+
+	deletePosts := false
+	if form.DeletePosts != nil {
+		deletePosts = *form.DeletePosts
+	}
+
+	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
+		var items []bulkItem
+		succeeded := 0
+
+		for _, id := range form.IDs {
+			item := bulkItem{ID: id}
+
+			targetUser, err := txApp.FindRecordById(usersCollectionName, id)
+			if err != nil || targetUser == nil {
+				item.Error = "user not found"
+				item.Code = "not_found"
+				items = append(items, item)
+				continue
+			}
+			if isUserDeleted(targetUser) {
+				item.Error = "user is already deleted"
+				item.Code = "already_deleted"
+				items = append(items, item)
+				continue
+			}
+			// An actor cannot delete their own account through bulk either.
+			if id == claim.Actor {
+				item.Error = "cannot act on your own account"
+				item.Code = "self_action"
+				items = append(items, item)
+				continue
+			}
+
+			if deletePosts {
+				if err := purgeUserContent(txApp, id); err != nil {
+					return 0, nil, err
+				}
+			}
+
+			targetUser.Set(userIsDeletedField, true)
+			targetUser.Set("status", string(auth.StatusDeleted))
+			targetUser.Set("nickname_normalized", "")
+			targetUser.Set("email", "")
+			targetUser.RefreshTokenKey()
+			if err := txApp.Save(targetUser); err != nil {
+				return 0, nil, internalError("failed to delete user", err)
+			}
+
+			if err := markUserDMErasesForever(txApp, id); err != nil {
+				return 0, nil, err
+			}
+
+			_ = recordAuditLog(txApp, "admin_user_delete", e.Auth.Id, map[string]any{
+				"target_id":    id,
+				"delete_posts": deletePosts,
+			})
+
+			item.OK = true
+			succeeded++
+			items = append(items, item)
+		}
+
+		return http.StatusOK, map[string]any{
+			"processed":  len(form.IDs),
+			"succeeded":  succeeded,
+			"failed":     len(form.IDs) - succeeded,
+			"items":      items,
+			"request_id": requestIDFrom(e),
 		}, nil
 	})
 

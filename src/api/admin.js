@@ -406,3 +406,28 @@ export const sendTestEmail = async () => {
     throw err;
   }
 };
+
+/**
+ * bulkUpdateUsers performs one bulk operation (role change or ban/unban) over
+ * a list of users. The server answers 200 even when individual targets fail,
+ * so the promise resolves with { processed, succeeded, failed, items } and
+ * the caller must inspect `res.failed` / `res.items`. It rejects only on a bad
+ * body (400) or a missing actor-level right (403).
+ */
+export const bulkUpdateUsers = async (ids, { role, status, notify_role_change = true } = {}) => {
+  return await sendApi('/api/aerun/admin/users/bulk', {
+    method: 'PATCH',
+    body: { ids, role, status, notify_role_change }
+  });
+};
+
+/**
+ * bulkDeleteUsers soft-deletes a list of users in one command, optionally
+ * purging their content. Same error contract as bulkUpdateUsers.
+ */
+export const bulkDeleteUsers = async (ids, { delete_posts = false } = {}) => {
+  return await sendApi('/api/aerun/admin/users/bulk', {
+    method: 'DELETE',
+    body: { ids, delete_posts }
+  });
+};
