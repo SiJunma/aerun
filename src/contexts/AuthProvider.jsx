@@ -1116,16 +1116,19 @@ export const AuthProvider = ({ children }) => {
     // earlier page must not overwrite the read position set by a later page —
     // otherwise goLast resolves against the older cursor and drops the user
     // onto a page they already read instead of the last page.
-    setReadMap(prev => {
-      const existing = prev[topicId];
-      const existingOffset = existing?.offset ?? null;
-      if (offset !== null && existingOffset !== null && offset <= existingOffset) {
-        return prev;
-      }
-      // Store the same shape recordTopicVisit writes to localStorage
-      // ({timestamp, offset}) so React state and localStorage never disagree.
-      return { ...prev, [topicId]: offset !== null ? { timestamp: now, offset } : now };
-    });
+    // The guard must block BOTH the local state update AND the server write:
+    // apiRecordTopicVisit pins topic_read_states to last_visible_post_id, so a
+    // backward page navigation would move the server cursor back, make the
+    // topic look unread again, and relight the navbar badge (1).
+    const existing = readMap[topicId];
+    const existingOffset = existing?.offset ?? null;
+    if (offset !== null && existingOffset !== null && offset <= existingOffset) {
+      return;
+    }
+    setReadMap(prev => ({
+      ...prev,
+      [topicId]: offset !== null ? { timestamp: now, offset } : now,
+    }));
     setCategories(prev => (Array.isArray(prev) ? prev.map(c => (
       c.last_post_topic_id === topicId ? { ...c, unread: false } : c
     )) : prev));
@@ -1137,7 +1140,7 @@ export const AuthProvider = ({ children }) => {
     // delays the badge to the next tick.
     refreshUnreadCounts(user.uid);
     refreshUnreadTopics();
-  }, [user?.uid]);
+  }, [user?.uid, readMap]);
 
   // markAllRead sends the ids to the server, which owns the read state now.
   //
