@@ -2,7 +2,7 @@
 
 > **Статус:** Комплексная спецификация архитектуры и интерфейса  
 > **Дата обновления:** 28 октября 2026 г.  
-> **Корреляция:** Согласовано с [`TODO_SPRINT_PLAN_admin_reorg.md`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/markdowns/TODO_SPRINT_PLAN_admin_reorg.md) и [`SPEC_forum-and-members-theme-dom.md`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/markdowns/SPEC_forum-and-members-theme-dom.md)  
+> **Корреляция:** Согласовано с [`ARCHIVED_SPRINT_PLAN_admin_reorg.md`] и [`SPEC_forum-and-members-theme-dom.md`]  
 > **Целевые файлы:** `src/pages/AdminPage.jsx`, `src/components/layout/Layout.jsx`, `src/navigation/adminNavigationConfig.js`, `src/components/admin/*`
 
 ---
