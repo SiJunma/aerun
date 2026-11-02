@@ -598,8 +598,8 @@ type adminBulkUpdateForm struct {
 
 // adminBulkDeleteForm is the body of DELETE /admin/users/bulk.
 type adminBulkDeleteForm struct {
-	IDs        []string `json:"ids"`
-	DeletePosts *bool   `json:"delete_posts"`
+	IDs         []string `json:"ids"`
+	DeletePosts *bool    `json:"delete_posts"`
 }
 
 // bulkItem is one target's result inside a bulk command response.

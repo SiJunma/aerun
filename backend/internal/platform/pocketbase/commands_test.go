@@ -661,36 +661,36 @@ func TestAdminBulkAccessMatrix(t *testing.T) {
 		makeAdminActor bool
 	}{
 		{
-			name:           "guest is unauthenticated",
-			actor:          "",
-			method:         http.MethodPatch,
-			body:           `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
-			expectStatus:   http.StatusUnauthorized,
-			expectContent:  []string{"Authentication is required"},
+			name:          "guest is unauthenticated",
+			actor:         "",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusUnauthorized,
+			expectContent: []string{"Authentication is required"},
 		},
 		{
-			name:           "player is forbidden",
-			actor:          "player",
-			method:         http.MethodPatch,
-			body:           `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
-			expectStatus:   http.StatusForbidden,
-			expectContent:  []string{"You are not allowed"},
+			name:          "player is forbidden",
+			actor:         "player",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusForbidden,
+			expectContent: []string{"You are not allowed"},
 		},
 		{
-			name:           "moderator is forbidden",
-			actor:          "moderator",
-			method:         http.MethodPatch,
-			body:           `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
-			expectStatus:   http.StatusForbidden,
-			expectContent:  []string{"You are not allowed"},
+			name:          "moderator is forbidden",
+			actor:         "moderator",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusForbidden,
+			expectContent: []string{"You are not allowed"},
 		},
 		{
-			name:           "root is allowed",
-			actor:          "root",
-			method:         http.MethodPatch,
-			body:           `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
-			expectStatus:   http.StatusOK,
-			expectContent:  []string{"\"processed\":1", "\"succeeded\":1"},
+			name:          "root is allowed",
+			actor:         "root",
+			method:        http.MethodPatch,
+			body:          `{"ids":["` + fixPlayerID + `"],"status":"banned"}`,
+			expectStatus:  http.StatusOK,
+			expectContent: []string{"\"processed\":1", "\"succeeded\":1"},
 		},
 		{
 			name:           "admin is allowed",
@@ -702,12 +702,12 @@ func TestAdminBulkAccessMatrix(t *testing.T) {
 			makeAdminActor: true,
 		},
 		{
-			name:           "root delete is allowed",
-			actor:          "root",
-			method:         http.MethodDelete,
-			body:           `{"ids":["` + fixPlayerID + `"]}`,
-			expectStatus:   http.StatusOK,
-			expectContent:  []string{"\"processed\":1", "\"succeeded\":1"},
+			name:          "root delete is allowed",
+			actor:         "root",
+			method:        http.MethodDelete,
+			body:          `{"ids":["` + fixPlayerID + `"]}`,
+			expectStatus:  http.StatusOK,
+			expectContent: []string{"\"processed\":1", "\"succeeded\":1"},
 		},
 	}
 	for _, tc := range cases {
@@ -745,12 +745,12 @@ func TestAdminBulkAccessMatrix(t *testing.T) {
 // targets; HTTP stays 200 (§4.4).
 func TestAdminBulkUpdatePartialSuccess(t *testing.T) {
 	scenario := tests.ApiScenario{
-		Name:            "root bans player, targets itself and a missing account",
-		Method:          http.MethodPatch,
-		URL:             "/api/aerun/admin/users/bulk",
-		Body:            strings.NewReader(`{"ids":["` + fixPlayerID + `","` + fixRootID + `","does-not-exist"],"status":"banned"}`),
-		TestAppFactory:  newAerunTestApp,
-		ExpectedStatus:  http.StatusOK,
+		Name:           "root bans player, targets itself and a missing account",
+		Method:         http.MethodPatch,
+		URL:            "/api/aerun/admin/users/bulk",
+		Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `","` + fixRootID + `","does-not-exist"],"status":"banned"}`),
+		TestAppFactory: newAerunTestApp,
+		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
 			`"processed":3`,
 			`"succeeded":1`,
@@ -799,12 +799,12 @@ func TestAdminBulkRoleChange(t *testing.T) {
 
 	t.Run("root re-roles player to moderator", func(t *testing.T) {
 		scenario := tests.ApiScenario{
-			Name:            "root bulk-re-roles player to moderator",
-			Method:          http.MethodPatch,
-			URL:             "/api/aerun/admin/users/bulk",
-			Body:            strings.NewReader(`{"ids":["` + fixPlayerID + `"],"role":"moderator"}`),
-			TestAppFactory:  newAerunTestApp,
-			ExpectedStatus:  http.StatusOK,
+			Name:           "root bulk-re-roles player to moderator",
+			Method:         http.MethodPatch,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"],"role":"moderator"}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
 			ExpectedContent: []string{
 				`"processed":1`,
 				`"succeeded":1`,
@@ -824,12 +824,12 @@ func TestAdminBulkRoleChange(t *testing.T) {
 
 	t.Run("admin cannot bulk-appoint another admin", func(t *testing.T) {
 		scenario := tests.ApiScenario{
-			Name:            "admin bulk-re-roles player to admin is refused per target",
-			Method:          http.MethodPatch,
-			URL:             "/api/aerun/admin/users/bulk",
-			Body:            strings.NewReader(`{"ids":["` + fixPlayerID + `"],"role":"admin"}`),
-			TestAppFactory:  newAerunTestApp,
-			ExpectedStatus:  http.StatusOK,
+			Name:           "admin bulk-re-roles player to admin is refused per target",
+			Method:         http.MethodPatch,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"],"role":"admin"}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
 			ExpectedContent: []string{
 				`"processed":1`,
 				`"succeeded":0`,
@@ -855,12 +855,12 @@ func TestAdminBulkRoleChange(t *testing.T) {
 func TestAdminBulkDelete(t *testing.T) {
 	t.Run("self-delete and missing target are per-item errors", func(t *testing.T) {
 		scenario := tests.ApiScenario{
-			Name:            "root bulk-delete with self and missing target",
-			Method:          http.MethodDelete,
-			URL:             "/api/aerun/admin/users/bulk",
-			Body:            strings.NewReader(`{"ids":["` + fixRootID + `","does-not-exist"]}`),
-			TestAppFactory:  newAerunTestApp,
-			ExpectedStatus:  http.StatusOK,
+			Name:           "root bulk-delete with self and missing target",
+			Method:         http.MethodDelete,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixRootID + `","does-not-exist"]}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
 			ExpectedContent: []string{
 				`"processed":2`,
 				`"succeeded":0`,
@@ -882,12 +882,12 @@ func TestAdminBulkDelete(t *testing.T) {
 
 	t.Run("active player is soft-deleted", func(t *testing.T) {
 		scenario := tests.ApiScenario{
-			Name:            "root bulk-deletes an active player",
-			Method:          http.MethodDelete,
-			URL:             "/api/aerun/admin/users/bulk",
-			Body:            strings.NewReader(`{"ids":["` + fixPlayerID + `"],"delete_posts":true}`),
-			TestAppFactory:  newAerunTestApp,
-			ExpectedStatus:  http.StatusOK,
+			Name:           "root bulk-deletes an active player",
+			Method:         http.MethodDelete,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"],"delete_posts":true}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
 			ExpectedContent: []string{
 				`"processed":1`,
 				`"succeeded":1`,
@@ -906,12 +906,12 @@ func TestAdminBulkDelete(t *testing.T) {
 
 	t.Run("already-deleted target reports already_deleted", func(t *testing.T) {
 		scenario := tests.ApiScenario{
-			Name:            "root bulk-deletes an already-deleted player",
-			Method:          http.MethodDelete,
-			URL:             "/api/aerun/admin/users/bulk",
-			Body:            strings.NewReader(`{"ids":["` + fixPlayerID + `"]}`),
-			TestAppFactory:  newAerunTestApp,
-			ExpectedStatus:  http.StatusOK,
+			Name:           "root bulk-deletes an already-deleted player",
+			Method:         http.MethodDelete,
+			URL:            "/api/aerun/admin/users/bulk",
+			Body:           strings.NewReader(`{"ids":["` + fixPlayerID + `"]}`),
+			TestAppFactory: newAerunTestApp,
+			ExpectedStatus: http.StatusOK,
 			ExpectedContent: []string{
 				`"processed":1`,
 				`"succeeded":0`,
