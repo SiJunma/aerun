@@ -132,6 +132,14 @@ func upsertTopicReadState(app core.App, userID, topicID, lastReadPostID, lastRea
 		dbx.Params{"user": userID, "topic": topicID},
 	)
 	if err == nil && existing != nil {
+		// Never move the read cursor backward: a visit to an earlier page must
+		// not overwrite a later read position, or the topic will appear unread
+		// again (badge relights with 1).
+		existingCreated := existing.GetDateTime("last_read_created")
+		newCreated, parseErr := types.ParseDateTime(lastReadCreated)
+		if parseErr == nil && !existingCreated.IsZero() && newCreated.Before(existingCreated) {
+			return nil // backward write: ignore
+		}
 		existing.Set("last_read_post_id", lastReadPostID)
 		existing.Set("last_read_created", lastReadCreated)
 		existing.Set("last_read_post_tiebreak_id", lastReadTiebreakID)

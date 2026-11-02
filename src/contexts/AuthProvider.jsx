@@ -1123,6 +1123,10 @@ export const AuthProvider = ({ children }) => {
     const existing = readMap[topicId];
     const existingOffset = existing?.offset ?? null;
     if (offset !== null && existingOffset !== null && offset <= existingOffset) {
+      // We are not moving the server cursor here, so there is nothing to
+      // refresh on the client — the server state is already correct. Do not
+      // touch refreshUnreadCounts/refreshUnreadTopics, or we risk overwriting a
+      // just-arrived correct 0 with a stale cached 1 from an earlier visit.
       return;
     }
     setReadMap(prev => ({
