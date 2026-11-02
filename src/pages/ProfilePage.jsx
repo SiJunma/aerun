@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
@@ -334,7 +334,7 @@ const ProfilePage = () => {
     
     fetchPosts();
     return () => { isMounted = false; };
-  }, [uid, activeTab, currentPagePosts, postFilter]);
+  }, [uid, activeTab, currentPagePosts, postFilter, isDeletedProfile]);
 
 
 
@@ -351,7 +351,7 @@ const ProfilePage = () => {
   // now), never to hardcoded 'dark'/'en': a fresh account holds no stored
   // theme/language, and the old `|| 'dark'` wrote 'dark' into the form state,
   // so the next save on ANY tab persisted a theme the member never chose.
-  const buildAccountForm = (source) => ({
+  const buildAccountForm = useCallback((source) => ({
     nickname: source.nickname || source.displayName || '',
     status_line: source.status_line || '',
     avatar_url: source.avatar_url || '',
@@ -374,7 +374,7 @@ const ProfilePage = () => {
     email_notif_topic_replies: source.settings?.email_notifications?.topic_replies !== false,
     soundEnabled: source.settings?.sound?.enabled ?? false,
     soundVolume:  source.settings?.sound?.volume  ?? 40
-  });
+  }), [liveTheme, settings, lang]);
 
   const seedAccountForm = (source) => setAccountFormData(buildAccountForm(source));
 
@@ -455,7 +455,7 @@ const ProfilePage = () => {
     lastInitRef.current = { uid: source.uid, key };
     seedSnapshotRef.current = next;
     setAccountFormData(next);
-  }, [profile, viewedProfile, uid, canEditAnyAccount]);
+  }, [profile, viewedProfile, uid, canEditAnyAccount, buildAccountForm]);
 
   const handleOpenModal = (char = null) => {
     // A stale new-mask preview (a local blob: URL) must never show for

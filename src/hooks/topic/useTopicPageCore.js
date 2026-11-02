@@ -44,11 +44,7 @@ export const useTopicPageCore = ({
   // mask dropdown with a single "post as user" entry.
   const [characters, setCharacters] = useState([]);
   useEffect(() => {
-    if (!user?.uid) {
-      setCharacters([]);
-      return undefined;
-    }
-    const unsub = subscribeToCharacters(user.uid, setCharacters);
+    const unsub = subscribeToCharacters(user?.uid, setCharacters);
     return () => unsub();
   }, [user?.uid]);
 

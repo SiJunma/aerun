@@ -37,7 +37,6 @@ export const useTopicModeration = ({
     } finally {
       if (isMountedRef.current) setTogglingSub(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicId, currentUser?.uid, toggleSubscription, showToast, t, isMountedRef]);
 
   const handlePinToggle = useCallback(async () => {
@@ -51,7 +50,6 @@ export const useTopicModeration = ({
       console.error('[pin toggle error]', err);
       showToast(t?.('forum.pin_toggle_error') || 'Failed to toggle pin', 'danger');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topic, topicId, currentUser?.uid, updateTopic, setTopic, showToast, t]);
 
   const handleLockToggle = useCallback(async () => {
@@ -65,7 +63,6 @@ export const useTopicModeration = ({
       console.error('[lock toggle error]', err);
       showToast(t?.('forum.lock_toggle_error') || 'Failed to toggle lock', 'danger');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topic, topicId, currentUser?.uid, updateTopic, setTopic, showToast, t]);
 
   const handleConfirmDeleteTopic = useCallback(async () => {
@@ -76,7 +73,6 @@ export const useTopicModeration = ({
       console.error('[delete topic error]', err);
       showToast(t?.('forum.delete_topic_error') || 'Failed to delete topic', 'danger');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicId, topic, currentUser?.uid, deleteTopics, navigate, showToast, t]);
 
   const handleConfirmMoveTopic = useCallback(async (targetCategoryId) => {
@@ -88,7 +84,6 @@ export const useTopicModeration = ({
       console.error('[move topic error]', err);
       showToast(t?.('forum.topic_move_error') || 'Failed to move topic', 'danger');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicId, currentUser?.uid, moveTopics, navigate, showToast, t]);
 
   const handleConfirmMovePosts = useCallback(async (postIds, targetTopicId) => {
@@ -100,8 +95,7 @@ export const useTopicModeration = ({
       console.error('[move posts error]', err);
       showToast(t?.('forum.posts_move_error') || 'Failed to move posts', 'danger');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.uid, movePosts, showToast, t]);
+  }, [topicId, currentUser?.uid, movePosts, showToast, t]);
 
   return {
     togglingSub,

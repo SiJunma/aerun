@@ -37,14 +37,14 @@ export const useTopicJumpScroll = ({
       setAlreadyJumped(false);
     }
     lastJumpIntentRef.current = intent;
-  }, [topicId, postParam, goLastParam, hash, setAlreadyJumped]);
+  }, [topicId, postParam, goLastParam, hash, setAlreadyJumped, lastJumpIntentRef]);
 
   // Guest page fallback wait guard
   useEffect(() => {
     if (!hasExplicitPage && !isMountedRef.current && topicId) {
       // Contract marker for check-golast-overlay.mjs
     }
-  }, [hasExplicitPage, topicId]);
+  }, [hasExplicitPage, topicId, isMountedRef]);
 
   // Scroll to target post when navigation target changes (post=, #post-, goLast)
   useEffect(() => {
@@ -81,7 +81,7 @@ export const useTopicJumpScroll = ({
     }
     // If targetId resolved but the DOM element isn't mounted yet (cold start),
     // we deliberately do NOT set alreadyJumped, so the next posts render retries.
-  }, [topicId, postParam, hash, goLastParam, posts, currentPage, ITEMS_PER_PAGE, setAlreadyJumped, markTopicRead]);
+  }, [topicId, postParam, hash, goLastParam, posts, currentPage, ITEMS_PER_PAGE, setAlreadyJumped, markTopicRead, alreadyJumpedRef, pendingCreatedPostIdRef]);
 
   const navigateToCreatedPost = useCallback((tempId, postId) => {
     const currentLocation = locationRef.current;

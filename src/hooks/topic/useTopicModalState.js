@@ -20,7 +20,7 @@ export const useTopicModalState = ({
   setMyVotes,
   recordActivity,
   lang,
-  t,
+  _t,
   showToast,
   posts,
   setPosts,
@@ -192,7 +192,7 @@ export const useTopicModalState = ({
     } finally {
       if (isMountedRef.current) setModalState((prev) => ({ ...prev, savingEdit: false }));
     }
-  }, [topicId, currentUser, lang, t, showToast, posts, pinnedFirstPost, currentPage, ITEMS_PER_PAGE, isTopicFirstPost, buildAuthorDTO, mutationEditPost, setPosts, setPinnedFirstPost, setTopic, topic, isMountedRef, modalState]);
+  }, [topicId, currentUser, lang, showToast, posts, pinnedFirstPost, currentPage, ITEMS_PER_PAGE, isTopicFirstPost, buildAuthorDTO, mutationEditPost, setPosts, setPinnedFirstPost, setTopic, topic, isMountedRef, modalState]);
 
 
   const handleConfirmDeleteTopic = async () => {

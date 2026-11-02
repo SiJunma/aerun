@@ -14,7 +14,7 @@ export const ThemeProvider = ({ children }) => {
       return settings.defaultDesignId;
     }
     return 'dark';
-  }, [settings?.defaultDesignId]);
+  }, [settings]);
 
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('guest_theme') || getFallbackTheme();
