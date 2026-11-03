@@ -4,7 +4,7 @@ import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
   getGlobalSettings, updateGlobalSettings, uploadIdentityPlaceholder, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles, bulkUpdateUsers, bulkDeleteUsers
+  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles, bulkUpdateUsers, bulkDeleteUsers, fetchUsersContentCounts
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
 import { subscribeToAllUsers } from '../api/auth-resources';
@@ -43,6 +43,11 @@ import { usePageTitle } from '../contexts/TitleProvider';
 // would otherwise make the form unsaveable.
 const KNOWN_PERMISSIONS = new Set(Object.values(PERMISSIONS));
 
+// adminBulkMaxIds mirrors the server cap (adminBulkMaxIDs = 100): one bulk
+// request carries at most 100 ids, so a bigger selection must be trimmed
+// before the confirmation button unlocks.
+const adminBulkMaxIds = 100;
+
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
   const { user, profile, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
@@ -64,6 +69,11 @@ const AdminPage = () => {
   const [bulkPending, setBulkPending] = useState(false);
   // ids the viewer removed from the selection while the confirmation modal was open
   const [bulkModalExcluded, setBulkModalExcluded] = useState(new Set());
+  // Snapshot of every picked account, keyed by id: {nickname, avatar_url,
+  // role_id, status}. The `users` state holds only the CURRENT page, but the
+  // selection persists across pages (§8.2), so the confirmation modal needs
+  // each selected account's row data even when that row is not rendered.
+  const [bulkSelectionSnap, setBulkSelectionSnap] = useState({});
   const [bulkRoleId, setBulkRoleId] = useState('');
   const [bulkRoleNotifyChange, setBulkRoleNotifyChange] = useState(true);
   const [bulkDeletePosts, setBulkDeletePosts] = useState(false);
@@ -266,6 +276,15 @@ const AdminPage = () => {
   // not the stale value from when the dialog was opened. Without this, a
   // checked checkbox is ignored and deletePosts is always false (bug O12).
   const deleteUserPostsRef = useRef(false);
+  // Preview of what the "delete all their content" option destroys: how many
+  // topics and posts the purge would remove. The SINGLE delete dialog counts
+  // the one account it names; the bulk dialog sums the WHOLE selection —
+  // including rows picked on other pages. Counts are asked lazily, only
+  // while the option is checked.
+  const [deleteContentCount, setDeleteContentCount] = useState(null);
+  const [deleteContentCountLoading, setDeleteContentCountLoading] = useState(false);
+  const [bulkContentCount, setBulkContentCount] = useState(null);
+  const [bulkContentCountLoading, setBulkContentCountLoading] = useState(false);
 
   // A delete the SERVER would refuse, caught before the request is made.
   //
@@ -380,26 +399,50 @@ const AdminPage = () => {
   const bulkEditable = users.filter(canBulkEditUser);
   const bulkAll = bulkEditable.length > 0 && bulkEditable.every(u => selectedUserIds.has(u.id));
   const bulkAny = bulkEditable.some(u => selectedUserIds.has(u.id));
-  const bulkSelected = bulkEditable.filter(u => selectedUserIds.has(u.id));
-  const bulkAnyBanned = bulkSelected.some(u => u.status === 'banned');
+
+  // Ids that will actually be acted on: the persistent selection minus anything
+  // the viewer dropped while the confirmation modal was open. The selection
+  // persists across pages (§8.2), so this list can name rows that are NOT in
+  // the current `users` page — the modal title, the chips and the ban/unban
+  // button therefore read each picked account through bulkSelectionSnap and
+  // only fall back to the current page.
+  const effectiveBulkIds = [...selectedUserIds].filter(id => !bulkModalExcluded.has(id));
+  const bulkAnyBanned = effectiveBulkIds.some(id => (
+    (bulkSelectionSnap[id] ?? users.find(x => x.id === id))?.status === 'banned'
+  ));
 
   // Default role for the bulk role-change modal: the role of the first selected
   // user when it is one the viewer may assign, otherwise the first assignable role.
   const defaultBulkRoleId = (() => {
-    const first = bulkSelected[0];
+    // The first picked account may live on another page (selection persists
+    // across pages), so read it through the selection snapshot first.
+    const firstId = effectiveBulkIds[0];
+    const first = bulkSelectionSnap[firstId] ?? users.find(x => x.id === firstId);
     if (first && assignableRoles.some((r) => r.id === first.role_id)) return first.role_id;
     return assignableRoles[0]?.id || '';
   })();
 
-  // Ids that will actually be acted on: the persistent selection minus anything
-  // the viewer dropped while the confirmation modal was open.
-  const effectiveBulkIds = [...selectedUserIds].filter(id => !bulkModalExcluded.has(id));
-
   const toggleBulkUser = (id) => {
+    const isRemoving = selectedUserIds.has(id);
     setSelectedUserIds(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
+      if (isRemoving) next.delete(id);
       else next.add(id);
+      return next;
+    });
+    // Keep the snapshot in step with the selection: a row picked on ANY page
+    // must stay visible (and reviewable) in the confirmation modal even after
+    // the admin flips to another page of the staff list.
+    setBulkSelectionSnap(prev => {
+      const next = { ...prev };
+      if (isRemoving) {
+        delete next[id];
+      } else {
+        const u = users.find(x => x.id === id);
+        if (u) {
+          next[id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role_id: u.role_id, status: u.status };
+        }
+      }
       return next;
     });
   };
@@ -407,15 +450,27 @@ const AdminPage = () => {
   const toggleBulkAll = () => {
     if (bulkAll) {
       setSelectedUserIds(new Set());
+      setBulkSelectionSnap({});
       return;
     }
-    const next = new Set(selectedUserIds);
-    bulkEditable.forEach(u => next.add(u.id));
-    setSelectedUserIds(next);
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      bulkEditable.forEach(u => next.add(u.id));
+      return next;
+    });
+    setBulkSelectionSnap(prev => {
+      const next = { ...prev };
+      bulkEditable.forEach(u => {
+        next[u.id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role_id: u.role_id, status: u.status };
+      });
+      return next;
+    });
   };
 
   const bulkModalTitle = () => {
-    const count = bulkSelected.length;
+    // The count must cover the WHOLE selection, including rows picked on other
+    // pages — the request will act on every one of them.
+    const count = effectiveBulkIds.length;
     if (bulkAction === 'role') return t('admin.users.bulk_modal_title_role', { count });
     if (bulkAction === 'ban') return t('admin.users.bulk_modal_title_ban', { count });
     if (bulkAction === 'unban') return t('admin.users.bulk_modal_title_unban', { count });
@@ -437,18 +492,24 @@ const AdminPage = () => {
     setBulkAction(null);
     setBulkModalExcluded(new Set());
     setBulkRoleNotifyChange(true);
+    setBulkContentCount(null);
   };
 
   const handleRemoveFromBulkSelection = (id) => {
     setBulkModalExcluded(prev => {
       const next = new Set(prev);
-      next.delete(id);
+      next.add(id);
       return next;
     });
     // Drop it from the persistent selection so the row checkbox unchecks too.
     setSelectedUserIds(prev => {
       const next = new Set(prev);
       next.delete(id);
+      return next;
+    });
+    setBulkSelectionSnap(prev => {
+      const next = { ...prev };
+      delete next[id];
       return next;
     });
   };
@@ -494,14 +555,25 @@ const AdminPage = () => {
       if (failed.length > 0) {
         const rejected = new Set(failed.map(i => i.id));
         setUsers(prev => {
+          // Failed targets go back to their pre-action state, and rows that
+          // the optimistic delete removed re-enter the table at the position
+          // they had in `before` — not appended at the bottom of the list.
           const next = prev.map(u => {
             if (!rejected.has(u.id)) return u;
             const old = before.find(o => o.id === u.id);
             return old || u;
           });
           const present = new Set(next.map(u => u.id));
-          const restored = before.filter(u => rejected.has(u.id) && !present.has(u.id));
-          return [...next, ...restored];
+          const restored = [];
+          before.forEach((u, idx) => {
+            if (rejected.has(u.id) && !present.has(u.id)) restored.push({ u, idx });
+          });
+          if (restored.length === 0) return next;
+          const out = [...next];
+          restored.forEach(({ u, idx }) => {
+            out.splice(Math.min(idx, out.length), 0, u);
+          });
+          return out;
         });
         showToast(t('admin.users.toast_bulk_partial', {
           succeeded: res.succeeded,
@@ -510,6 +582,11 @@ const AdminPage = () => {
       } else {
         showToast(t('admin.users.toast_bulk_done', { count: res.processed }), 'success');
       }
+      // The request went through (fully or partially): the selection has done
+      // its job. Only a FAILED REQUEST — the catch below — keeps it, so the
+      // admin can retry without re-picking the rows.
+      setSelectedUserIds(new Set());
+      setBulkSelectionSnap({});
     } catch (err) {
       setUsers(before);
       console.error('[bulk users err]', err);
@@ -519,12 +596,66 @@ const AdminPage = () => {
       setBulkModalOpen(false);
       setBulkAction(null);
       setBulkModalExcluded(new Set());
-      setSelectedUserIds(new Set());
       setBulkRoleId('');
       setBulkRoleNotifyChange(true);
       setBulkDeletePosts(false);
     }
   };
+
+  // Preview of what the "delete all their content" option destroys: how many
+  // topics and posts the purge would remove. The SINGLE delete dialog counts
+  // the one account it names; the bulk dialog sums the WHOLE selection —
+  // including rows picked on other pages, because effectiveBulkIds covers
+  // them. Counts are asked lazily, only while the option is checked.
+  const deleteCountUid = confirmState.kind === 'delete-user' && confirmState.show ? confirmState.uid : '';
+  useEffect(() => {
+    if (!deleteCountUid || !deleteUserPosts) {
+      setDeleteContentCount(null);
+      return;
+    }
+    let alive = true;
+    setDeleteContentCountLoading(true);
+    fetchUsersContentCounts([deleteCountUid])
+      .then(res => {
+        if (alive) setDeleteContentCount(res?.items?.[0] || null);
+      })
+      .catch(err => {
+        console.error('[delete content count err]', err);
+        if (alive) setDeleteContentCount(null);
+      })
+      .finally(() => {
+        if (alive) setDeleteContentCountLoading(false);
+      });
+    return () => { alive = false; };
+  }, [deleteCountUid, deleteUserPosts]);
+
+  const bulkCountKey = bulkAction === 'delete' ? effectiveBulkIds.join(',') : '';
+  useEffect(() => {
+    const ids = bulkCountKey ? bulkCountKey.split(',') : [];
+    if (bulkAction !== 'delete' || !bulkDeletePosts || ids.length === 0) {
+      setBulkContentCount(null);
+      return;
+    }
+    let alive = true;
+    setBulkContentCountLoading(true);
+    fetchUsersContentCounts(ids)
+      .then(res => {
+        if (!alive) return;
+        const items = res?.items || [];
+        setBulkContentCount({
+          topics: items.reduce((acc, i) => acc + (i.topics || 0), 0),
+          posts: items.reduce((acc, i) => acc + (i.posts || 0), 0),
+        });
+      })
+      .catch(err => {
+        console.error('[bulk content count err]', err);
+        if (alive) setBulkContentCount(null);
+      })
+      .finally(() => {
+        if (alive) setBulkContentCountLoading(false);
+      });
+    return () => { alive = false; };
+  }, [bulkAction, bulkDeletePosts, bulkCountKey]);
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
@@ -1242,6 +1373,7 @@ const AdminPage = () => {
       kind: 'delete-user',
       title: t('admin.users.confirm_delete_title'),
       message: t('admin.users.confirm_delete_message_named', { nickname }),
+      uid,
       onConfirm: async () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
@@ -2024,9 +2156,14 @@ const AdminPage = () => {
                   <input
                     type="checkbox"
                     className="form-check-input mt-1"
+                    ref={(el) => {
+                      // React does not map an `indeterminate` prop onto the DOM
+                      // property (it is not a reflected attribute), so the
+                      // mixed "some selected" state must be set by hand.
+                      if (el) el.indeterminate = bulkAny && !bulkAll;
+                    }}
                     checked={bulkAll}
                     onChange={toggleBulkAll}
-                    indeterminate={bulkAny && !bulkAll}
                     aria-label={t('admin.users.table_select')}
                   />
                 )}
@@ -3231,7 +3368,7 @@ const AdminPage = () => {
             <Button
               variant="primary"
               onClick={handleBulkConfirm}
-              disabled={bulkPending || (bulkAction === 'role' && !bulkRoleId)}
+              disabled={bulkPending || (bulkAction === 'role' && !bulkRoleId) || effectiveBulkIds.length > adminBulkMaxIds}
             >
               {bulkPending ? t('common.loading') : t('admin.users.bulk_do')}
             </Button>
@@ -3244,10 +3381,13 @@ const AdminPage = () => {
           </Form.Label>
           <div className="d-flex flex-wrap gap-2" style={{ maxHeight: '260px', overflowY: 'auto', border: '1px solid rgba(var(--bs-gray-rgb),0.2)', padding: '8px', borderRadius: '6px', background: 'rgba(var(--bs-gray-rgb),0.03)' }}>
             {effectiveBulkIds.map(id => {
-              const u = users.find(x => x.id === id);
+              // The row may not be on the CURRENT page (selection persists
+              // across pages, §8.2) — the snapshot keeps it visible and
+              // removable here regardless.
+              const u = bulkSelectionSnap[id] || users.find(x => x.id === id);
               if (!u) return null;
               return (
-                <div key={id} className="d-flex align-items-center gap-2 px-2 py-1 rounded border bg-white shadow-sm">
+                <div key={id} className="d-flex align-items-center gap-2 px-2 py-1 rounded border shadow-sm" style={{ background: 'rgba(var(--bs-gray-rgb), 0.08)' }}>
                   <img
                     src={identityAvatar({ name: u.nickname, avatar: u.avatar_url, size: 24 })}
                     alt=""
@@ -3273,6 +3413,12 @@ const AdminPage = () => {
             )}
           </div>
         </div>
+
+        {effectiveBulkIds.length > adminBulkMaxIds && (
+          <div className="small text-danger mb-2">
+            {t('admin.users.bulk_modal_too_many', { count: effectiveBulkIds.length })}
+          </div>
+        )}
 
         {bulkAction === 'role' && (
           <>
@@ -3338,6 +3484,15 @@ const AdminPage = () => {
         {bulkAction === 'delete' && bulkDeletePosts && (
           <div className="small text-danger">{t('admin.users.bulk_modal_delete_warning')}</div>
         )}
+        {bulkAction === 'delete' && bulkDeletePosts && (
+          <div className={bulkContentCountLoading || !bulkContentCount ? 'text-muted small' : 'small text-danger'}>
+            {bulkContentCountLoading
+              ? t('admin.users.delete_posts_counting')
+              : bulkContentCount
+                ? t('admin.users.bulk_delete_posts_count', { topics: bulkContentCount.topics, posts: bulkContentCount.posts })
+                : null}
+          </div>
+        )}
       </ForumModal>
 
       <ConfirmModal
@@ -3371,6 +3526,15 @@ const AdminPage = () => {
             <p className="text-muted small mb-0">
               {t('admin.users.delete_posts_hint')}
             </p>
+              {deleteUserPosts && (
+                <p className={deleteContentCountLoading || !deleteContentCount ? 'text-muted small mb-0' : 'small text-danger mb-0'}>
+                  {deleteContentCountLoading
+                    ? t('admin.users.delete_posts_counting')
+                    : deleteContentCount
+                      ? t('admin.users.delete_posts_count', { topics: deleteContentCount.topics, posts: deleteContentCount.posts })
+                      : null}
+                </p>
+              )}
           </>
         )}
       </ConfirmModal>
@@ -3425,8 +3589,8 @@ const AdminPage = () => {
                 <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? <Timestamp date={selectedAuditLog.created_at} /> : '...'}
               </div>
 
-              <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
-                <div className="mb-1 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
+              <div className="p-3 rounded border border-secondary border-opacity-25" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-color)' }}>
+                <div className="mb-1 fw-bold" style={{ color: 'var(--text-color)', textTransform: 'uppercase', fontSize: '0.7rem' }}>
                   {t('admin.audit.table_performer')}
                 </div>
                 <div>
@@ -3435,13 +3599,13 @@ const AdminPage = () => {
                     return p ? `${p.nickname || (isRootAdmin ? p.email : '***')}` : 'Unknown User';
                   })()}
                 </div>
-                <div className="text-muted" style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                <div style={{ color: 'var(--secondary-color)', fontSize: '0.75rem', fontFamily: 'monospace' }}>
                   ID: {selectedAuditLog.performer_id}
                 </div>
               </div>
 
-              <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
-                <div className="mb-2 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
+              <div className="p-3 rounded border border-secondary border-opacity-25" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-color)' }}>
+                <div className="mb-2 fw-bold" style={{ color: 'var(--text-color)', textTransform: 'uppercase', fontSize: '0.7rem' }}>
                   Raw Details
                 </div>
                 {Object.entries(selectedAuditLog.details || {}).map(([k, v]) => {
@@ -3456,7 +3620,7 @@ const AdminPage = () => {
 
                   return (
                     <div key={k} className="mb-2 last-child-mb-0">
-                      <div className="fw-bold">{label} {k !== label && <span className="text-muted fw-normal">({k})</span>}:</div>
+                      <div className="fw-bold" style={{ color: 'var(--text-color)' }}>{label} {k !== label && <span style={{ color: 'var(--secondary-color)' }} className="fw-normal">({k})</span>}:</div>
                       <div className="ms-2">
                         {k === 'changes' && typeof v === 'object' ? (
                           <div className="d-flex flex-column gap-1 mt-1">
@@ -3464,8 +3628,8 @@ const AdminPage = () => {
                               const cLabel = t(`admin.audit.fields.${ck}`) || ck;
                               const renderValue = (val) => typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val);
                               return (
-                                <div key={ck} className="p-2 rounded bg-white border border-secondary border-opacity-10">
-                                  <div className="fw-bold small">{cLabel}:</div>
+                                <div key={ck} className="p-2 rounded border border-secondary border-opacity-10" style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-color)' }}>
+                                  <div className="fw-bold small" style={{ color: 'var(--text-color)' }}>{cLabel}:</div>
                                   <div className="d-flex align-items-center gap-2 small flex-wrap">
                                     <span className="text-danger text-decoration-line-through opacity-75">{renderValue(cv.from)}</span>
                                     <ArrowRightLeft size={10} className="text-muted" />
@@ -3478,7 +3642,7 @@ const AdminPage = () => {
                         ) : (
                           <>
                             {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
-                            {resolvedName && <span className="text-muted ms-2">({resolvedName})</span>}
+                            {resolvedName && <span style={{ color: 'var(--secondary-color)' }} className="ms-2">({resolvedName})</span>}
                           </>
                         )}
                       </div>
@@ -3487,7 +3651,7 @@ const AdminPage = () => {
                 })}
               </div>
 
-              <div className="text-muted text-end" style={{ fontSize: '0.65rem', fontFamily: 'monospace' }}>
+              <div style={{ color: 'var(--secondary-color)', fontSize: '0.65rem', fontFamily: 'monospace', textAlign: 'right' }}>
                 Log ID: {selectedAuditLog.id}
               </div>
             </div>
