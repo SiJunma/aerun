@@ -1,4 +1,10 @@
-# `backend/tools/ops` — one-off operational tools
+> ⚠️ **ОТРЕДАКТИВНО / LEGACY FIREBASE**
+> Эти инструменты нацелены наライブ **Firebase** проект (очистка email, кастомные токены и т.п.) и нужны только для завершения миграции.
+> Проект переведён на **Go 1.27 + PocketBase (SQLite)**.
+> **Не использовать для текущих задач разработки.**
+> После закрытия легаси-проекта файлы подлежат удалению (Sprint 9).
+
+# `backend/tools/ops` — one-off operational tools [ОТРЕДАКТИВНО / LEGACY FIREBASE]
 
 These scripts are **not** part of the backend runtime. They exist to close a
 specific audit item against the live Firebase project and are expected to be

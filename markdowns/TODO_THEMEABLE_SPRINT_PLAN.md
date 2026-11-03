@@ -1,4 +1,10 @@
-# Themeable DOM Refactoring — мастер-план для агентов
+> ⚠️ **ОТРЕДАКТИВНО / LEGACY FIREBASE**
+> В первом абзаце этого плана фигурирует **Firebase** как текущий бэкенд — это больше не соответствует действительности.
+> Проект переведён на **Go 1.27 + PocketBase (SQLite)**.
+> **Не использовать как актуальную спецификацию.**
+> Актуальная документация: `backend/README.md`, `backend/internal/migrations`.
+
+# Themeable DOM Refactoring — мастер-план для агентов [ОТРЕДАКТИВНО / LEGACY FIREBASE]
 
 ## Оглавление
 

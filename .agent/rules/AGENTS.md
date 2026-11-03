@@ -1,4 +1,11 @@
-# Project Rules
+> ⚠️ **ОТРЕДАКТИВНО / LEGACY FIREBASE**
+> Этот файл описывает правила для эпохи **Firebase (Firestore / RTDB / Auth)**, которая больше не является текущей.
+> Проект переведён на **Go 1.27 + PocketBase (SQLite)**.
+> **Не использовать как спецификацию для текущих задач.**
+> Актуальная документация: `backend/README.md`, `DEPLOY.md`.
+> (Файлы `PROJECT_CONTEXT.md` / `PROJECT_SPEC.md` архивированы — описывают легаси Firebase.)
+
+# Project Rules [ОТРЕДАКТИВНО / LEGACY FIREBASE]
 
 - **User instruction precedence**: The agent configuration file (`.agents/AGENTS.md`, `.clinerules`) holds standing defaults and guardrails, not absolute prohibitions. When the human gives an explicit instruction that contradicts a default rule, the explicit instruction takes precedence — the human is the authority and knows what they asked for. Defaults exist to prevent *unwanted autonomous* action, not to veto an explicit, intentional command from the human.
 

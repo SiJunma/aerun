@@ -1,4 +1,10 @@
-# PocketBase schema and migration map (from the Firebase snapshot)
+> ⚠️ **ОТРЕДАКТИВНО / НЕАКТУАЛЬНАЯ КАРТА МИГРАЦИИ**
+> Этот документ описывал соответствие Firebase → PocketBase на этапе Sprint 7 (до final cutover).
+> Миграция уже завершена, актуальная PocketBase схема отличается strongly.
+> **Не использовать как актуальную спецификацию схемы.**
+> Актуальная документация: `backend/README.md`, `backend/internal/migrations`.
+
+# PocketBase schema and migration map (from the Firebase snapshot) [ОТРЕДАКТИВНО / НЕАКТУАЛЬНАЯ КАРТА МИГРАЦИИ]
 
 **Status:** working baseline for the import writer (Sprint 7 continuation)
 **Source:** `backend/migration-data/stage-1.json` (snapshot `512509de…5746`,

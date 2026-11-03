@@ -1,4 +1,10 @@
-# Offline migration preparation
+> ⚠️ **ОТРЕДАКТИВНО / LEGACY FIREBASE**
+> Инструмент экспорта и стажировки данных из **Firebase** для миграции.
+> Проект уже переведён на **Go 1.27 + PocketBase (SQLite)**.
+> **Не использовать как спецификацию для текущих задач разработки.**
+> Актуальная схема: `backend/README.md`, `backend/internal/migrations`.
+
+# Offline migration preparation [ОТРЕДАКТИВНО / LEGACY FIREBASE]
 
 Status: rehearsal exporter + intermediate JSON staging, NOT a PocketBase domain
 importer. No Firebase requests are made by the tests. Node >=20 is required.
