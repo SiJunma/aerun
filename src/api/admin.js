@@ -431,3 +431,16 @@ export const bulkDeleteUsers = async (ids, { delete_posts = false } = {}) => {
     body: { ids, delete_posts }
   });
 };
+
+/**
+ * fetchUsersContentCounts asks the server how much content the
+ * "delete all their content" option would destroy for each account:
+ * { items: [{ id, topics, posts }] } — owned topics and owned posts.
+ * Read-only, no idempotency key needed.
+ */
+export const fetchUsersContentCounts = async (ids) => {
+  return await sendApi('/api/aerun/admin/users/content-counts', {
+    method: 'POST',
+    body: { ids }
+  });
+};

@@ -54,6 +54,11 @@ const (
 	// adminBulkBodyBytes bounds a bulk users body: at most adminListMaxPerPage
 	// ids plus a small payload, so one command never pulls the whole table.
 	adminBulkBodyBytes = 64 * 1024
+	// adminBulkMaxIDs caps one bulk command (§4.2 of the spec): a request may
+	// name at most one staff page of users, so a single transaction never
+	// stretches across the whole table even though the 64 KB body budget
+	// would admit far more.
+	adminBulkMaxIDs = 100
 )
 
 func adminListUsersHandler(e *core.RequestEvent) error {
@@ -257,6 +262,7 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 		}
 
 		oldRole := targetUser.GetString("role")
+		oldStatus := targetUser.GetString("status")
 		roleChanged := false
 
 		if form.Role != nil {
@@ -284,6 +290,16 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 		}
 
 		if form.Status != nil {
+			// A status write is aimed at somebody's standing, so it passes the
+			// same destructive-action authority matrix as the bulk endpoints —
+			// and one's own account is never a ban/unban target (the bulk
+			// endpoints refuse self-action the same way; owner ruling §9.5).
+			if userID == e.Auth.Id {
+				return 0, nil, forbiddenError("you cannot ban or unban your own account")
+			}
+			if err := checkUserTargetAuthority(txApp, acc.Role, targetUser.GetString("role")); err != nil {
+				return 0, nil, err
+			}
 			status := strings.TrimSpace(*form.Status)
 			// Status, not AllStatusValues: the stored vocabulary carries the
 			// "deleted" soft-delete marker, but ASSIGNING it here would create
@@ -294,7 +310,6 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 			}
 			targetUser.Set("status", status)
 		}
-
 		// PocketBase validates the ENTIRE record on Save, not just the changed
 		// fields. A row created before the `status` column existed, or one whose
 		// `tokenKey` was never rotated, would fail validation here with a 500
@@ -336,10 +351,19 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 			}
 		}
 
+		// The audit entry must name the target by NICKNAME (§9.7 of the
+		// spec) and carry the previous values next to the new ones: a
+		// status alone ("banned") cannot tell a ban from an unban without
+		// the old value beside it. The nickname is read off the record
+		// before the save — a delete keeps the display nickname baked, but
+		// capturing first makes the entry independent of that invariant.
 		_ = recordAuditLog(txApp, "admin_user_update", e.Auth.Id, map[string]any{
-			"target_id": userID,
-			"role":      targetUser.GetString("role"),
-			"status":    targetUser.GetString("status"),
+			"target_id":       userID,
+			"target_nickname": targetUser.GetString("nickname"),
+			"old_role":        oldRole,
+			"old_status":      oldStatus,
+			"role":            targetUser.GetString("role"),
+			"status":          targetUser.GetString("status"),
 		})
 
 		return http.StatusOK, map[string]any{
@@ -425,6 +449,36 @@ func checkRoleChange(txApp core.App, actor auth.Role, currentRole, newRole strin
 	return nil
 }
 
+// checkUserTargetAuthority guards the DESTRUCTIVE account actions — ban,
+// unban (status writes) and soft-delete — against the target's rank.
+//
+// It is deliberately STRICTER than the shared staff authority matrix of
+// staff_authority.go: renaming or editing an equal is reversible, but a ban
+// or a delete is a hostile act, so the target must rank STRICTLY below the
+// actor. An admin therefore can neither ban nor delete a peer admin, and an
+// unresolvable actor rank (the deny-by-default of rankFor) refuses too.
+//
+// On top of the rank rule the owner ruled that the chief admin account can
+// never be the TARGET of these actions at all: root cannot be banned,
+// unbanned or deleted — not by an admin, not by root itself. The role
+// changes hands only through the transfer procedure.
+//
+// Self-targeting is a separate refusal (self_action) checked by the caller.
+func checkUserTargetAuthority(txApp core.App, actor auth.Role, targetRole string) error {
+	if auth.Role(targetRole) == auth.RoleRoot {
+		return forbiddenError("the chief admin account cannot be banned, unbanned or deleted")
+	}
+	if actor == auth.RoleRoot {
+		return nil
+	}
+	if rankFor(txApp, auth.Role(targetRole)) >= rankFor(txApp, actor) {
+		return forbiddenError(
+			"you can only ban, unban or delete accounts ranked strictly below yours",
+		)
+	}
+	return nil
+}
+
 // requireKnownRole rejects a role id that has no row in the roles collection.
 //
 // A role is valid if the roles collection knows it — whether a compiled system
@@ -501,6 +555,10 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 		return err
 	}
 
+	// The delete is aimed at somebody else's standing: the actor's resolved
+	// role feeds the destructive-action authority matrix below.
+	acc := AccessFrom(e)
+
 	userID := e.Request.PathValue("id")
 	deletePosts := adminDeletePostsRequested(e)
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
@@ -511,6 +569,19 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 		if isUserDeleted(targetUser) {
 			return 0, nil, conflictError("user is already deleted")
 		}
+		// One's own account is never a delete target, and the target must
+		// pass the destructive-action authority matrix — strictly below the
+		// actor, with the chief admin untouchable at all (owner ruling, §9.5).
+		if userID == e.Auth.Id {
+			return 0, nil, forbiddenError("you cannot delete your own account")
+		}
+		if err := checkUserTargetAuthority(txApp, acc.Role, targetUser.GetString("role")); err != nil {
+			return 0, nil, err
+		}
+
+		// §9.7 of the spec: the audit entry names the target by nickname,
+		// captured before the row is taken out of circulation.
+		targetNickname := targetUser.GetString("nickname")
 
 		if deletePosts {
 			if err := purgeUserContent(txApp, userID); err != nil {
@@ -572,8 +643,9 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 		}
 
 		_ = recordAuditLog(txApp, "admin_user_delete", e.Auth.Id, map[string]any{
-			"target_id":    userID,
-			"delete_posts": deletePosts,
+			"target_id":       userID,
+			"target_nickname": targetNickname,
+			"delete_posts":    deletePosts,
 		})
 
 		return http.StatusOK, map[string]any{
@@ -587,8 +659,10 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 	return writeCommandResult(e, outcome, err)
 }
 
-// adminBulkUpdateForm is the body of PATCH /admin/users/bulk. Exactly one of
-// Role / Status must be present; ids is required and non-empty.
+// adminBulkUpdateForm is the body of PATCH /admin/users/bulk. Role and Status
+// are each optional, but at least one must be present (§4.2 of the spec); both
+// may be sent in one pass (re-role a list AND ban it). ids is required,
+// non-empty, deduplicated and capped at adminBulkMaxIDs.
 type adminBulkUpdateForm struct {
 	IDs              []string `json:"ids"`
 	Role             *string  `json:"role"`
@@ -612,14 +686,45 @@ type bulkItem struct {
 	Status string `json:"status,omitempty"`
 }
 
+// dedupeIDs returns ids in first-seen order without duplicates.
+//
+// A repeated id would otherwise be saved twice, audited twice and counted
+// twice in processed/succeeded — and in the delete pass the second encounter
+// of the same id would read back as already_deleted and pollute the items
+// list with a phantom error.
+func dedupeIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// bulkIDsFromForm validates the id list both bulk handlers share: it
+// deduplicates, refuses an array that is empty (or empty after deduplication)
+// and enforces the adminBulkMaxIDs ceiling from §4.2 of the spec.
+func bulkIDsFromForm(ids []string) ([]string, error) {
+	deduped := dedupeIDs(ids)
+	if len(deduped) == 0 {
+		return nil, validationError("expected a non-empty ids array")
+	}
+	if len(deduped) > adminBulkMaxIDs {
+		return nil, validationError("too many ids: at most 100 per request")
+	}
+	return deduped, nil
+}
+
 // adminBulkUpdateUsersHandler performs one bulk operation (role change or
 // ban/unban) over a list of users in a single transaction, target by target.
 // Every target is checked independently: a refused target is reported in
-// `items` with a machine-readable code and does not abort the rest. The HTTP
-// status is 200 even when some targets fail — only an invalid body (400) or a
-// missing actor-level right (403) fails the whole request.
-// Route gate: RequirePermission(auth.PermAdminAccess) — root and admin only,
-// same as the single /admin/users/{id} endpoints (§2 of the spec).
+// `items` with a machine-readable code and does not abort the rest. HTTP is
+// 200 even on partial failure; only a bad body (400) or a missing actor-level
+// right (403) fails the whole request. Gate: PermAdminAccess (§2 of spec).
 func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 	claim, err := claimFrom(e)
 	if err != nil {
@@ -632,8 +737,12 @@ func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 		return err
 	}
 	var form adminBulkUpdateForm
-	if err := json.Unmarshal(raw, &form); err != nil || len(form.IDs) == 0 {
-		return validationError("expected a non-empty ids array")
+	if err := json.Unmarshal(raw, &form); err != nil {
+		return validationError("invalid JSON body")
+	}
+	form.IDs, err = bulkIDsFromForm(form.IDs)
+	if err != nil {
+		return err
 	}
 
 	hasRole := form.Role != nil
@@ -675,6 +784,12 @@ func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		var items []bulkItem
+		// targets feeds THE audit event of this command (§9.7 of the spec):
+		// a bulk operation writes exactly ONE audit row, and it must name
+		// every processed account by nickname — including the refused ones —
+		// so the log reader sees the FULL list the admin attempted, with the
+		// values each account had before the command touched it.
+		var targets []map[string]any
 		succeeded := 0
 
 		for _, id := range form.IDs {
@@ -685,12 +800,21 @@ func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 				item.Error = "user not found"
 				item.Code = "not_found"
 				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "ok": false, "code": "not_found"})
 				continue
 			}
+			// The nickname and the current role/status are captured at load:
+			// every later branch (refusal included) can name the account and
+			// its standing in the audit summary, and the success path reads
+			// them after saves that never touch the nickname.
+			nickname := targetUser.GetString("nickname")
+			oldRole := targetUser.GetString("role")
+			oldStatus := targetUser.GetString("status")
 			if isUserDeleted(targetUser) {
 				item.Error = "user is already deleted"
 				item.Code = "already_deleted"
 				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": false, "code": "already_deleted", "old_role": oldRole, "old_status": oldStatus})
 				continue
 			}
 			// An actor cannot act on their own account through bulk either.
@@ -698,16 +822,29 @@ func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 				item.Error = "cannot act on your own account"
 				item.Code = "self_action"
 				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": false, "code": "self_action", "old_role": oldRole, "old_status": oldStatus})
+				continue
+			}
+
+			// A status write is aimed at the target's standing: the target
+			// must pass the destructive-action authority matrix — strictly
+			// below the actor, and the chief admin is untouchable at all
+			// (owner ruling, §9.5 of the spec).
+			if err := checkUserTargetAuthority(txApp, acc.Role, targetUser.GetString("role")); err != nil {
+				item.Error = err.Error()
+				item.Code = "forbidden"
+				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": false, "code": "forbidden", "old_role": oldRole, "old_status": oldStatus})
 				continue
 			}
 
 			roleChanged := false
-			oldRole := targetUser.GetString("role")
 			if role != "" {
 				if err := checkRoleChange(txApp, acc.Role, oldRole, role); err != nil {
 					item.Error = err.Error()
 					item.Code = "forbidden"
 					items = append(items, item)
+					targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": false, "code": "forbidden", "old_role": oldRole, "old_status": oldStatus})
 					continue
 				}
 				targetUser.Set("role", role)
@@ -748,18 +885,37 @@ func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 				}
 			}
 
-			_ = recordAuditLog(txApp, "admin_user_update", e.Auth.Id, map[string]any{
-				"target_id": id,
-				"role":      targetUser.GetString("role"),
-				"status":    targetUser.GetString("status"),
-			})
-
 			item.OK = true
 			item.Role = targetUser.GetString("role")
 			item.Status = targetUser.GetString("status")
 			succeeded++
 			items = append(items, item)
+			targets = append(targets, map[string]any{
+				"id":         id,
+				"nickname":   nickname,
+				"ok":         true,
+				"old_role":   oldRole,
+				"old_status": oldStatus,
+			})
 		}
+
+		// THE audit event of this bulk command (§9.7 of the spec): one row
+		// carries the admin's action AND the full nickname list of the
+		// targets, with each account's previous role/status beside it. There
+		// is deliberately NO per-target audit row here — the single-target
+		// PATCH writes those, and a bulk pass would only duplicate this
+		// summary into N fragments beside it. The row is written even when
+		// every target was refused: an all-failure attempt is exactly what
+		// an auditor looks for.
+		_ = recordAuditLog(txApp, "admin_users_bulk_update", e.Auth.Id, map[string]any{
+			"role":               role,
+			"status":             status,
+			"notify_role_change": notifyRoleChange,
+			"processed":          len(form.IDs),
+			"succeeded":          succeeded,
+			"failed":             len(form.IDs) - succeeded,
+			"targets":            targets,
+		})
 
 		return http.StatusOK, map[string]any{
 			"processed":  len(form.IDs),
@@ -788,8 +944,12 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 		return err
 	}
 	var form adminBulkDeleteForm
-	if err := json.Unmarshal(raw, &form); err != nil || len(form.IDs) == 0 {
-		return validationError("expected a non-empty ids array")
+	if err := json.Unmarshal(raw, &form); err != nil {
+		return validationError("invalid JSON body")
+	}
+	form.IDs, err = bulkIDsFromForm(form.IDs)
+	if err != nil {
+		return err
 	}
 	if !auth.Has(acc.Permissions, auth.PermDeleteUsers) {
 		return router.NewForbiddenError("you are not allowed to delete users", nil)
@@ -802,6 +962,11 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 
 	outcome, err := runCommand(e.App, claim, func(txApp core.App) (int, any, error) {
 		var items []bulkItem
+		// targets feeds THE audit event of this command (§9.7 of the spec):
+		// a bulk delete writes exactly ONE audit row, and it must name every
+		// processed account by nickname — including the refused ones — so
+		// the log reader sees the FULL list the admin attempted.
+		var targets []map[string]any
 		succeeded := 0
 
 		for _, id := range form.IDs {
@@ -812,12 +977,19 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 				item.Error = "user not found"
 				item.Code = "not_found"
 				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "ok": false, "code": "not_found"})
 				continue
 			}
+			// The nickname is captured at load: every later branch (refusal
+			// included) can name the account in the audit summary, and the
+			// success path reads it before the row is taken out of
+			// circulation.
+			nickname := targetUser.GetString("nickname")
 			if isUserDeleted(targetUser) {
 				item.Error = "user is already deleted"
 				item.Code = "already_deleted"
 				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": false, "code": "already_deleted"})
 				continue
 			}
 			// An actor cannot delete their own account through bulk either.
@@ -825,6 +997,19 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 				item.Error = "cannot act on your own account"
 				item.Code = "self_action"
 				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": false, "code": "self_action"})
+				continue
+			}
+
+			// A delete is the most destructive account action: the target
+			// must pass the destructive-action authority matrix — strictly
+			// below the actor, and the chief admin is untouchable at all
+			// (owner ruling, §9.5 of the spec).
+			if err := checkUserTargetAuthority(txApp, acc.Role, targetUser.GetString("role")); err != nil {
+				item.Error = err.Error()
+				item.Code = "forbidden"
+				items = append(items, item)
+				targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": false, "code": "forbidden"})
 				continue
 			}
 
@@ -847,15 +1032,26 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 				return 0, nil, err
 			}
 
-			_ = recordAuditLog(txApp, "admin_user_delete", e.Auth.Id, map[string]any{
-				"target_id":    id,
-				"delete_posts": deletePosts,
-			})
-
 			item.OK = true
 			succeeded++
 			items = append(items, item)
+			targets = append(targets, map[string]any{"id": id, "nickname": nickname, "ok": true})
 		}
+
+		// THE audit event of this bulk command (§9.7 of the spec): one row
+		// carries the admin's action AND the full nickname list of the
+		// targets. There is deliberately NO per-target audit row here — the
+		// single-target DELETE writes those, and a bulk pass would only
+		// duplicate this summary into N fragments beside it. The row is
+		// written even when every target was refused: an all-failure attempt
+		// is exactly what an auditor looks for.
+		_ = recordAuditLog(txApp, "admin_users_bulk_delete", e.Auth.Id, map[string]any{
+			"delete_posts": deletePosts,
+			"processed":    len(form.IDs),
+			"succeeded":    succeeded,
+			"failed":       len(form.IDs) - succeeded,
+			"targets":      targets,
+		})
 
 		return http.StatusOK, map[string]any{
 			"processed":  len(form.IDs),
@@ -867,6 +1063,49 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 	})
 
 	return writeCommandResult(e, outcome, err)
+}
+
+// adminUsersContentCountsHandler answers POST /admin/users/content-counts:
+// how much authored content the "delete all their content" option would
+// destroy for each named account — owned topics and owned posts, the same
+// rows purgeUserContent removes. Read-only (no runCommand, no idempotency
+// key), but gated like every other admin users route: the counts leak
+// authorship volume to whoever could reach them.
+func adminUsersContentCountsHandler(e *core.RequestEvent) error {
+	raw, err := readBodyLimited(e, adminBulkBodyBytes)
+	if err != nil {
+		return err
+	}
+	var form adminBulkUpdateForm
+	if err := json.Unmarshal(raw, &form); err != nil {
+		return validationError("invalid JSON body")
+	}
+	form.IDs, err = bulkIDsFromForm(form.IDs)
+	if err != nil {
+		return err
+	}
+
+	items := make([]map[string]any, 0, len(form.IDs))
+	for _, id := range form.IDs {
+		topics, err := e.App.CountRecords(topicsCollectionName, dbx.HashExp{"author_id": id})
+		if err != nil {
+			return internalError("failed to count topics", err)
+		}
+		posts, err := e.App.CountRecords(postsCollectionName, dbx.HashExp{"author_id": id})
+		if err != nil {
+			return internalError("failed to count posts", err)
+		}
+		items = append(items, map[string]any{
+			"id":     id,
+			"topics": topics,
+			"posts":  posts,
+		})
+	}
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"items":      items,
+		"request_id": requestIDFrom(e),
+	})
 }
 
 // adminDeletePostsRequested reads the delete_posts flag for the admin user
