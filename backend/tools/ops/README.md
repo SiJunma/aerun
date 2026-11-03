@@ -18,7 +18,7 @@ result is idempotent.
 Why it is needed: legacy public Firestore `users` documents still carry a copy
 of the account email while `firestore.rules` grants `allow read: if true` on
 that collection, so those addresses are world readable. Firebase Auth is the
-canonical source for email; see `BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`
+canonical source for email; see `markdowns/Archive/DONE_BACKEND_MIGRATION_AUDIT_AND_SPRINT_PLAN.md`
 section "Why the email copy is removed, and what does NOT depend on it".
 
 Why a custom token: the callable requires a real root user session
