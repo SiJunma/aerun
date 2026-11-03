@@ -28,6 +28,7 @@ package migrations
 import (
 	"fmt"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	m "github.com/pocketbase/pocketbase/migrations"
 )
@@ -40,13 +41,45 @@ func init() {
 	})
 }
 
+// addTopicDescriptionField adds the `description` field to the topics collection.
+// It avoids app.Save(topics) because that triggers SyncRecordTableSchema →
+// dropCollectionIndexes → dbutils.ParseIndex, which can hang due to regex
+// catastrophic backtracking in PocketBase v0.40.4 (see CI log).
+// Instead the column is added directly via ALTER TABLE and the collection record
+// is persisted to _collections without invoking the schema-sync hooks.
 func addTopicDescriptionField(app core.App) error {
 	topics, err := mutateCollectionForSchema(app, "topics")
 	if err != nil {
 		return fmt.Errorf("topics: %w", err)
 	}
+	if topics.Fields.GetByName("description") != nil {
+		return nil // already exists
+	}
+
+	// Add the column directly to the SQLite table.
+	if _, err := app.DB().NewQuery(
+		"ALTER TABLE topics ADD COLUMN description VARCHAR(200)",
+	).Execute(); err != nil {
+		return fmt.Errorf("alter table: %w", err)
+	}
+
+	// Update the in-memory collection so subsequent operations in this app
+	// instance are aware of the new field.
 	ensureField(topics, &core.TextField{Name: "description", Max: 200})
-	return app.Save(topics)
+
+	// Persist the schema change to _collections directly, bypassing
+	// app.Save() which triggers SyncRecordTableSchema.
+	raw, err := topics.Fields.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("marshal fields: %w", err)
+	}
+	if _, err := app.DB().NewQuery(
+		"UPDATE _collections SET fields = {:fields} WHERE id = {:id}",
+	).Bind(dbx.Params{"fields": string(raw), "id": topics.Id}).Execute(); err != nil {
+		return fmt.Errorf("update collection fields: %w", err)
+	}
+
+	return nil
 }
 
 func removeTopicDescriptionField(app core.App) error {
@@ -54,6 +87,30 @@ func removeTopicDescriptionField(app core.App) error {
 	if err != nil {
 		return fmt.Errorf("topics: %w", err)
 	}
+	if topics.Fields.GetByName("description") == nil {
+		return nil // already removed
+	}
+
+	// Remove the column directly from the SQLite table.
+	if _, err := app.DB().NewQuery(
+		"ALTER TABLE topics DROP COLUMN description",
+	).Execute(); err != nil {
+		return fmt.Errorf("drop column: %w", err)
+	}
+
+	// Update the in-memory collection.
 	topics.Fields.RemoveByName("description")
-	return app.Save(topics)
+
+	// Persist the schema change to _collections directly.
+	raw, err := topics.Fields.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("marshal fields: %w", err)
+	}
+	if _, err := app.DB().NewQuery(
+		"UPDATE _collections SET fields = {:fields} WHERE id = {:id}",
+	).Bind(dbx.Params{"fields": string(raw), "id": topics.Id}).Execute(); err != nil {
+		return fmt.Errorf("update collection fields: %w", err)
+	}
+
+	return nil
 }
