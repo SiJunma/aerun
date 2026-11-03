@@ -68,7 +68,8 @@ func addTopicDescriptionField(app core.App) error {
 	ensureField(topics, &core.TextField{Name: "description", Max: 200})
 
 	// Persist the schema change to _collections directly, bypassing
-	// app.Save() which triggers SyncRecordTableSchema.
+	// app.Save() which triggers SyncRecordTableSchema → dropCollectionIndexes →
+	// dbutils.ParseIndex (catastrophic regex backtracking in PocketBase v0.40.4).
 	raw, err := topics.Fields.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("marshal fields: %w", err)
@@ -77,6 +78,12 @@ func addTopicDescriptionField(app core.App) error {
 		"UPDATE _collections SET fields = {:fields} WHERE id = {:id}",
 	).Bind(dbx.Params{"fields": string(raw), "id": topics.Id}).Execute(); err != nil {
 		return fmt.Errorf("update collection fields: %w", err)
+	}
+
+	// Reload the collections cache so the new field is visible to subsequent
+	// operations in this app instance (topic creation, etc.).
+	if err := app.ReloadCachedCollections(); err != nil {
+		return fmt.Errorf("reload collections cache: %w", err)
 	}
 
 	return nil
@@ -110,6 +117,11 @@ func removeTopicDescriptionField(app core.App) error {
 		"UPDATE _collections SET fields = {:fields} WHERE id = {:id}",
 	).Bind(dbx.Params{"fields": string(raw), "id": topics.Id}).Execute(); err != nil {
 		return fmt.Errorf("update collection fields: %w", err)
+	}
+
+	// Reload the collections cache so the field removal is visible.
+	if err := app.ReloadCachedCollections(); err != nil {
+		return fmt.Errorf("reload collections cache: %w", err)
 	}
 
 	return nil
