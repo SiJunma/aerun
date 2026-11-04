@@ -43,10 +43,20 @@
  */
 const REFRESH_COALESCE_MS = 250;
 
+// How long a successful read stays "fresh" for the connect-replay decision.
+// The realtime hook's onConnected used to unconditionally requestRefresh(), so
+// a cold start always paid TWO requests: start()'s initial read plus the
+// connect replay ~250ms behind it, for state that had just been read. The
+// replay now runs only when the last successful read is older than this
+// window (or nothing has ever succeeded) — resources that OPT IN (see
+// `skipConnectReplayMs` below; currently only dm-unread, whose counters are
+// cheap, caller-scoped, and double-read on every cold start).
+const REPLAY_FRESH_MS = 1000;
+
 // Exported for the transport tests, which assert against the REAL windows rather
 // than a shortened stand-in. Asserting on a faked timer would only prove the fake
 // behaves; asserting on the shipped value proves the shipped value.
-export { REFRESH_COALESCE_MS };
+export { REFRESH_COALESCE_MS, REPLAY_FRESH_MS };
 
 // A background tab is invisible, not gone: nothing is rendered from these values
 // until the tab comes back, and the read on return is unconditional.
@@ -201,6 +211,9 @@ const bindRealtimeHook = (hook, { onDelivered, onConnected, onDead }) => {
  * @param {(err: any) => void} [options.onError] diagnostics hook
  * @param {(reload: () => void) => (() => void)} [options.realtime] realtime hook
  * @param {string} [options.name] label for diagnostics
+ * @param {number} [options.skipConnectReplayMs] opt-in freshness window for the
+ *   connect-replay: when > 0, onConnected skips its catch-up refresh if the
+ *   last successful read is younger than this many ms. 0 = always replay.
  */
 export const createSharedPoll = ({
   fetch,
@@ -209,12 +222,17 @@ export const createSharedPoll = ({
   onError = null,
   realtime = null,
   name = 'resource',
+  skipConnectReplayMs = 0,
 }) => {
   const subscribers = new Set();
 
   let value = initialValue;
   let loaded = false;
   let error = null;
+  // Timestamp of the last successful read. Used only for the opt-in connect-
+  // replay freshness check below; it does not gate the interval, the
+  // visibility catch-up, or explicit refresh() calls.
+  let lastReadOkAt = 0;
 
   let timer = null;
   let inFlight = false;
@@ -255,6 +273,7 @@ export const createSharedPoll = ({
       value = next;
       loaded = true;
       error = null;
+      lastReadOkAt = Date.now();
       deliver();
     } catch (err) {
       // The previous value is deliberately KEPT, and the error travels WITH it.
@@ -331,8 +350,16 @@ export const createSharedPoll = ({
           stopTimer();
           setTransport('realtime');
           // Catch up now. Everything that changed while this resource believed it
-          // had no realtime was never fetched.
-          requestRefresh();
+          // had no realtime was never fetched. OPT-IN exception: a resource that
+          // set skipConnectReplayMs and whose last successful read is younger
+          // than that window (or is still in flight) skips this replay — the
+          // primary read has just delivered this exact answer, and the replay
+          // would be a byte-for-byte duplicate ~250ms behind it.
+          if (!skipConnectReplayMs
+            || lastReadOkAt === 0
+            || Date.now() - lastReadOkAt > skipConnectReplayMs) {
+            requestRefresh();
+          }
         },
         onDelivered: () => {
           stopTimer();
@@ -366,6 +393,14 @@ export const createSharedPoll = ({
         if (running && transport === 'connecting') {
           setTransport('polling');
           startTimer();
+          // Same opt-in freshness rule as onConnected: a stream that never
+          // opens falls back to polling, but within the window the primary
+          // read has already landed — do not immediately pay twice.
+          if (!skipConnectReplayMs
+            || lastReadOkAt === 0
+            || Date.now() - lastReadOkAt > skipConnectReplayMs) {
+            requestRefresh();
+          }
         }
       }, REALTIME_GRACE_MS);
     } else {

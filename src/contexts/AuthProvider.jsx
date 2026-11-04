@@ -139,6 +139,11 @@ export const AuthProvider = ({ children }) => {
   const lastForumRefreshTimeRef = useRef(0);
   const readMapRef = useRef({});
   readMapRef.current = readMap;
+  // The same latest-value mirror for profile: presence and recordActivity
+  // read it so they do not depend on the whole profile object (a new identity
+  // on every refreshOwnProfile write re-beat presence twice per cold start).
+  const profileRef = useRef(null);
+  profileRef.current = profile;
 
   // getOrCreateGuestId returns the opaque per-browser visitor id used for
   // anonymous presence. It is generated once (the legacy generator: a random
@@ -388,15 +393,15 @@ export const AuthProvider = ({ children }) => {
   const guestPresenceStartedRef = useRef(false);
   useEffect(() => {
     if (!restored) return;
-    if (user?.uid && profile) {
+    if (user?.uid && profileRef.current) {
       // This session no longer owns a guest presence, so a later sign-out must
       // not try to remove one.
       guestPresenceStartedRef.current = false;
-      return initRtdbPresence(user.uid, profile, profile?.last_selected_character_id || null);
+      return initRtdbPresence(user.uid, profileRef.current, profileRef.current?.last_selected_character_id || null);
     }
     guestPresenceStartedRef.current = true;
     return initRtdbGuestPresence(getOrCreateGuestId());
-  }, [user?.uid, profile, getOrCreateGuestId, restored]);
+  }, [user?.uid, restored, getOrCreateGuestId]);
 
   // Logging in ends the guest session: the guest_presence row goes, so a visitor
   // who registers or signs in is never counted as a guest (the heartbeat
@@ -485,15 +490,15 @@ export const AuthProvider = ({ children }) => {
   const recordActivity = useCallback(() => {
     const now = Date.now();
     lastActivityRef.current = now;
-    if (user?.uid && profile) {
+    if (user?.uid && profileRef.current) {
       const PUSH_INTERVAL_MS = 2 * 60 * 1000;
       if (!isRtdbOnlineRef.current || (now - lastPushTimeRef.current >= PUSH_INTERVAL_MS)) {
         isRtdbOnlineRef.current = true;
         lastPushTimeRef.current = now;
-        setRtdbOnline(user.uid, profile, profile?.last_selected_character_id || null).catch(() => {});
+        setRtdbOnline(user.uid, profileRef.current, profileRef.current?.last_selected_character_id || null).catch(() => {});
       }
     }
-  }, [user, profile]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user?.uid || !profile) return;

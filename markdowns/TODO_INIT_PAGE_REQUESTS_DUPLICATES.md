@@ -12,6 +12,7 @@
 > - ✅ **Фаза 3** — кэш `getDesigns` теперь читается. Отступление от шага 6.3: добавлен параметр `force`; `notifySubscribers` вызывает `getDesigns(true)` — иначе мутации дизайнов получали бы из кэша до-мутационный снимок вместо серверного состояния.
 > - ✅ **Фаза 4** (realtime hub, 11/3/2026): один SDK-подписчик + один watcher на всё приложение в `src/api/realtime-signals.js`; membership-Set, teardown при уходе последнего члена, pending-dedup, перестройка потока при ротации токена (`authStore.onChange`). Отступление от шага 6.4: импорт `pocketbase` переведён на явное расширение `./pocketbase.js` (иначе нативный Node-ESM не резолвит и поведенческие тесты не запускаются). Новый тест `scripts/test-realtime-hub.mjs` (5 кейсов, `--experimental-test-module-mocks`, `--test-force-exit`) — добавлен в `package.json` (`test:realtime-hub`).
 > - ✅ **Фаза 5** (серверная часть, 11/3/2026): Cloudflare **подтверждён перед VPS** (`Server: cloudflare`) — QUIC-ошибка живёт на ребре CF, её переключение доступно только из дашборда (SSL/TLS → Edge Certificates → HTTP/3 — **ручной шаг**). На Caddy VPS: `servers { protocols h1 h2 }` (HTTP/3 origin отключён, `alt-svc` больше не отдаётся) + `flush_interval -1` для `/api/*` (SSE пробрасывается мгновенно — верифицировано: PB_CONNECT за 0.17 c). Бэкап: `/etc/caddy/Caddyfile.bak-20261103`. Заметка: PocketBase v0.40.4 не шлёт SSE keep-alive — при полной тишине CF ребро закрывает поток по idle-таймауту (~100 c); SDK переподключается сам с backoff.
+> - ✅ **Фаза 6 — остаточные дубли cold start (11/4/2026, Cline):** продакшен-замер после деплоя показал heartbeat ×3 и unread-counts ×2 при всех закрытых дублях Фаз 1–4. Причины: (a) presence-эффект и `recordActivity` зависели от всего объекта `profile` и перезапускались на каждую запись `refreshOwnProfile` (снапшот → свежий), а ActivityTracker бился на mount; (b) `shared-poll` по `onConnected` всегда делал catch-up `requestRefresh()` — второй identical unread-counts ~250ms за первичным read. Исправления: presence/recordActivity читают profile через `profileRef` и зависят только от `[uid, restored]`; ActivityTracker пропускает mount; `dm-unread` opt-in в `skipConnectReplayMs: 1000` (`shared-poll.js`, freshness-окно `REPLAY_FRESH_MS`) — replay пропускается только при свежем successful read, stale/never-ok всё равно перечитывают. Проверки: `test-shared-poll` (4 новых кейса replay), `check-identity-refresh` (3 новых гейта по deps/mount), ESLint, `npm run build` — зелёные. Прод-верификация после деплоя frontend.
 > - ✅ **Деплой** (11/3/2026): frontend развёрнут (`deploy.py frontend`), health OK; backend не менялся — рестарт не требовался.
 > - ✅ **Проверки (все зелёные, 11/3/2026):** `test-shared-poll` (детерминизирован — visibility-тест на шаг-резолюцию, 5/5 прогонов 15/15 без флейка), `test-inflight-guard`, `test:realtime-hub`, ESLint, `npm run build`. Оба ранее падавших гейта **выровнены и зелёные**: `check-identity-refresh` (чек ProfilePage `buildAccountForm` переписан под текущую `useCallback`-реализацию) и `check-post-navigation` (переписан под серверный резолв `?post=` — см. заметку в п. 4 блока исправлений выше).
 > - ✅ **Словарь ролей (11/3/2026, Cline):** пользовательские строки на фронте переведены на серверное имя `role` (колонка `users.role`, staff-DTO, `/me`, presence, профиль). Легаси-переименование в `role_id` убрано; имя `role_id` осталось только у серверных сущностей, где оно и есть настоящее: ключ коллекции `roles` (`roles.role_id`, `base_role_id`), колонка `users.custom_role_id` и flat-поле постов `author_role_id`. Сниппеты выше обновлены.
@@ -358,20 +359,20 @@ npm run build
 
 | Endpoint | До | После |
 |---|---|---|
-| heartbeat | ×3 | ×1 |
+| heartbeat | ×3 | ×1 (Фаза 6: presence/recordActivity через profileRef + ActivityTracker без mount-beat; прод-замер 11/4 показал ×3 до Фазы 6) |
 | guest/leave | ×1 | ×0 |
 | me | ×2 | ×1 |
 | forum-index | ×2 | ×1 |
 | forum-stats | ×2 | ×1 |
-| unread-counts | ×1 по коду (наблюдение ×2 — п. 10) | ×1 подтверждён замером |
-| designs | ×1 по коду (наблюдение ×2 — п. 10) | ×1 подтверждён замером + кэш работает |
+| unread-counts | ×1 по коду (наблюдение ×2 — п. 10) — **исправлено в Фазе 6**: дубль был детерминированным catch-up replay в shared-poll, не сетевым повтором | ×1 (skipConnectReplayMs opt-in; прод-замер ×2 до Фазы 6) |
+| designs | ×1 по коду (наблюдение ×2 — п. 10) | ×1 подтверждён замером 11/4 + кэш работает |
 | realtime SSE | 1 + reconnect-шторм | 1 (после Фазы 5 — без шторма) |
 
 ---
 
 ## 10. Протокол верификации наблюдений (п. 10)
 
-Назначение: отличить реальный дефект кода от расхождения «код ×1 vs наблюдение ×2» и локализовать причину. Применяется к `unread-counts` (п. 4.6), `designs` (п. 4.4) и `/api/realtime` (п. 4.3, п. 8). Выполняется на прод-релизе, НЕ в dev-сборке.
+> **Закрытие по unread-counts/heartbeat (Фаза 6, 11/4/2026):** оба «расхождения» п. 10 оказались детерминированными дефектами кода, а не сетевыми повторами: heartbeat ×3 — deps presence/recordActivity на всём `profile` + mount-beat ActivityTracker; unread-counts ×2 — безусловный catch-up replay в shared-poll по onConnected. После Фазы 6 протокол п. 10 для них не нужен; для `designs` замер 11/4 подтвердил ×1.
 
 ### 10.1. Замер 1 — DevTools Network с колонкой Initiator
 

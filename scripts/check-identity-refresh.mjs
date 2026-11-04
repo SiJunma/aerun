@@ -40,6 +40,38 @@ const check = (ok, message) => {
   if (!ok) failures.push(message);
 };
 
+// ── Presence must NOT re-beat on every profile identity change ─────────────
+// initRtdbPresence immediately sends one heartbeat, so depending the presence
+// effect on the whole `profile` object re-ran it on every refreshOwnProfile
+// write (snapshot -> fresh -> ...) and tripled heartbeat on cold start. It
+// must depend only on the primitives that actually change presence: uid and
+// restored (guest/member switch), and read profile from profileRef.
+check(
+  !/\[user\?\.uid, profile, getOrCreateGuestId, restored\]/.test(authProvider),
+  'the presence effect must not depend on the whole profile object — that re-beats on every profile write'
+);
+check(
+  /\[user\?\.\uid, restored, getOrCreateGuestId\]/.test(authProvider),
+  'the presence effect must depend only on uid, restored and the stable guest-id getter'
+);
+check(
+  /initRtdbPresence\(user\.uid, profileRef\.current/.test(authProvider),
+  'the presence effect must read the current profile via profileRef, not via the effect deps'
+);
+// recordActivity (App.jsx ActivityTracker -> POST heartbeat) must not change
+// identity on every profile write either — it is a plain function now keyed
+// only by uid, reading profile from the ref.
+check(
+  /const recordActivity = useCallback\(\(\) => \{\s+const now = Date\.now\(\);\s+lastActivityRef\.current = now;\s+if \(user\?\.\uid && profileRef\.current\)/.test(authProvider),
+  'recordActivity must read profile via profileRef and depend only on uid'
+);
+// ActivityTracker must skip its mount beat: presence already beats on cold
+// start, so a mount recordActivity is a guaranteed duplicate.
+check(
+  /mountedRef\.current = true;\s+return;/.test(app),
+  'ActivityTracker must skip the mount render — the presence loop already beats on cold start'
+);
+
 // ── The forum re-reads when the identity changes ────────────────────────────
 // A role or status change alters what the server will return WITHOUT changing
 // who is asking, so the key must carry all three parts.

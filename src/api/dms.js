@@ -218,6 +218,7 @@ export const subscribeToUnreadCounts = (uid, callback) => {
     },
     intervalMs: 15000,
     initialValue: { total: 0, conversations: {}, topics: 0, notifications: 0 },
+    skipConnectReplayMs: 1000,
     // The comment that used to stand here said this resource deliberately had no
     // realtime channel, on the grounds that the counters only move as a side
     // effect of a message and "that message already wakes the DM list poll and

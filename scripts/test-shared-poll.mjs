@@ -21,7 +21,7 @@ import test from 'node:test';
 // The module reads `document` for tab visibility; each test installs its own.
 const { createSharedPoll, sharedPoll, __resetSharedPolls } =
   await import('../src/api/shared-poll.js');
-const { REALTIME_GRACE_MS, REFRESH_COALESCE_MS } =
+const { REALTIME_GRACE_MS, REFRESH_COALESCE_MS, REPLAY_FRESH_MS } =
   await import('../src/api/shared-poll.js');
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -304,6 +304,83 @@ test('the transport is observable, and unsubscribing closes the stream', async (
   await wait(20);
   assert.equal(seen.length, countAfterUnsubscribe,
     'a removed listener must stop receiving, or a long session accumulates them');
+});
+
+test('connect replay is skipped within the freshness window when opted in', async () => {
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'replay-skip-fresh',
+    intervalMs: 0,
+    skipConnectReplayMs: REPLAY_FRESH_MS,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { setTimeout(() => onStateChange(true), 10); return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1, 'primary read');
+    await wait(REFRESH_COALESCE_MS + 400);
+    assert.equal(poll.getTransport(), 'realtime');
+    assert.equal(calls, 1, 'no replay within the freshness window');
+  } finally { stop(); }
+});
+
+test('connect replay still runs when stale', async () => {
+  let calls = 0;
+  let setState = null;
+  const poll = createSharedPoll({
+    name: 'replay-stale',
+    intervalMs: 0,
+    skipConnectReplayMs: 1,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { setState = onStateChange; return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1);
+    await wait(20);
+    setState(true);
+    await wait(REFRESH_COALESCE_MS + 60);
+    assert.equal(calls, 2, 'stale read must trigger the catch-up replay');
+  } finally { stop(); }
+});
+
+test('connect replay still runs when primary never succeeded', async () => {
+  let calls = 0;
+  let setState = null;
+  const poll = createSharedPoll({
+    name: 'replay-never-ok',
+    intervalMs: 0,
+    skipConnectReplayMs: REPLAY_FRESH_MS,
+    fetch: async () => { calls += 1; throw new Error('down'); },
+    realtime: (_o, _d, onStateChange) => { setState = onStateChange; return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1);
+    setState(true);
+    await wait(REFRESH_COALESCE_MS + 60);
+    assert.equal(calls, 2, 'a failed primary read must not suppress the replay');
+  } finally { stop(); }
+});
+
+test('connect replay is unconditional without opt-in', async () => {
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'replay-default',
+    intervalMs: 0,
+    fetch: async () => { calls += 1; return calls; },
+    realtime: (_o, _d, onStateChange) => { setTimeout(() => onStateChange(true), 10); return () => {}; },
+  });
+  const stop = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 1);
+    await wait(REFRESH_COALESCE_MS + 400);
+    assert.equal(calls, 2, 'without the opt-in the replay must still happen');
+  } finally { stop(); }
 });
 
 test('a hidden tab is not polled, and is read once on return', async () => {

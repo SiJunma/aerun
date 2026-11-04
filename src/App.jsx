@@ -27,12 +27,19 @@ import RealtimeStatusBanner from './components/common/RealtimeStatusBanner';
 /**
  * ActivityTracker — records every route change as user activity.
  * Mounted once inside the Router so it has access to useLocation.
+ * Skips the mount render: the presence loop already beats on cold start, so a
+ * mount-beat here is a guaranteed duplicate.
  */
 const ActivityTracker = () => {
   const location = useLocation();
   const { recordActivity } = useAuth();
+  const mountedRef = React.useRef(false);
 
   useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
     if (recordActivity) recordActivity();
   }, [location.pathname, recordActivity]);
 
