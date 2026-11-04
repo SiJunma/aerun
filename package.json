@@ -26,6 +26,7 @@
     "test:golast-overlay": "node scripts/check-golast-overlay.mjs",
     "test:inflight-guard": "node --test scripts/test-inflight-guard.mjs",
     "test:shared-poll": "node --test scripts/test-shared-poll.mjs",
+    "test:realtime-hub": "node --test --experimental-test-module-mocks --test-force-exit scripts/test-realtime-hub.mjs",
     "test:dm-mutation-state": "node scripts/check-dm-mutation-state.mjs",
     "test:dm-draft-conversations": "node scripts/check-dm-draft-conversations.mjs",
     "test:jsx-comments": "node scripts/check-jsx-no-line-comments.mjs",

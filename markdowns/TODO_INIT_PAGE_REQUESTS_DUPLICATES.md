@@ -5,11 +5,26 @@
 Статус: **v3 — все наблюдения — продакшен-факты. StrictMode исключён из объяснений.**
 Объект: форум Aerun, живой релиз на VPS (продакшен)
 
+> **Статус реализации (11/3/2026, Cline):**
+> - ✅ **Фаза 1** — идемпотентный `syncUserFromAuthStore` (`lastSyncedSignatureRef`). Отступление от шага 1.2: сигнатура расширена полями `email`, `avatar_url`, `last_selected_character_id` и `JSON.stringify(settings)` — их пишут через `authStore.save` (`setLastSelectedMask`, `updateProfile`) и они влияют на UI, без них гейт ломал бы перестройку `profile` по `onChange`.
+> - ✅ **Фаза 2** — `restored`-гейт на 4 эффекта (права, presence, форум, переходный) + `guestPresenceStartedRef` (0 × `guest/leave`). Сброс флага сделан в участника-ветке presence-эффекта (в документе — «переходного эффекта», но веток «участник/гость» у переходного эффекта нет; семантика сохранена).
+> - ✅ **Шаг 2.5** — регулярка deps в `scripts/check-identity-refresh.mjs:52` обновлена на `\[identityKey, refreshForumState, restored\]`.
+> - ✅ **Фаза 3** — кэш `getDesigns` теперь читается. Отступление от шага 6.3: добавлен параметр `force`; `notifySubscribers` вызывает `getDesigns(true)` — иначе мутации дизайнов получали бы из кэша до-мутационный снимок вместо серверного состояния.
+> - ✅ **Фаза 4** (realtime hub, 11/3/2026): один SDK-подписчик + один watcher на всё приложение в `src/api/realtime-signals.js`; membership-Set, teardown при уходе последнего члена, pending-dedup, перестройка потока при ротации токена (`authStore.onChange`). Отступление от шага 6.4: импорт `pocketbase` переведён на явное расширение `./pocketbase.js` (иначе нативный Node-ESM не резолвит и поведенческие тесты не запускаются). Новый тест `scripts/test-realtime-hub.mjs` (5 кейсов, `--experimental-test-module-mocks`, `--test-force-exit`) — добавлен в `package.json` (`test:realtime-hub`).
+> - ✅ **Фаза 5** (серверная часть, 11/3/2026): Cloudflare **подтверждён перед VPS** (`Server: cloudflare`) — QUIC-ошибка живёт на ребре CF, её переключение доступно только из дашборда (SSL/TLS → Edge Certificates → HTTP/3 — **ручной шаг**). На Caddy VPS: `servers { protocols h1 h2 }` (HTTP/3 origin отключён, `alt-svc` больше не отдаётся) + `flush_interval -1` для `/api/*` (SSE пробрасывается мгновенно — верифицировано: PB_CONNECT за 0.17 c). Бэкап: `/etc/caddy/Caddyfile.bak-20261103`. Заметка: PocketBase v0.40.4 не шлёт SSE keep-alive — при полной тишине CF ребро закрывает поток по idle-таймауту (~100 c); SDK переподключается сам с backoff.
+> - ✅ **Деплой** (11/3/2026): frontend развёрнут (`deploy.py frontend`), health OK; backend не менялся — рестарт не требовался.
+> - ✅ **Проверки (все зелёные, 11/3/2026):** `test-shared-poll` (детерминизирован — visibility-тест на шаг-резолюцию, 5/5 прогонов 15/15 без флейка), `test-inflight-guard`, `test:realtime-hub`, ESLint, `npm run build`. Оба ранее падавших гейта **выровнены и зелёные**: `check-identity-refresh` (чек ProfilePage `buildAccountForm` переписан под текущую `useCallback`-реализацию) и `check-post-navigation` (переписан под серверный резолв `?post=` — см. заметку в п. 4 блока исправлений выше).
+> - ✅ **Словарь ролей (11/3/2026, Cline):** пользовательские строки на фронте переведены на серверное имя `role` (колонка `users.role`, staff-DTO, `/me`, presence, профиль). Легаси-переименование в `role_id` убрано; имя `role_id` осталось только у серверных сущностей, где оно и есть настоящее: ключ коллекции `roles` (`roles.role_id`, `base_role_id`), колонка `users.custom_role_id` и flat-поле постов `author_role_id`. Сниппеты выше обновлены.
+>
+> - Протокол п. 10 (замеры Initiator/серверных логов для `unread-counts`/`designs` ×2) — на живом релизе, НЕ выполнен.
+
 > **Исправления v1 → v3 (результат перепроверки):**
 > 1. `heartbeat` ×2 → на самом деле **×3** плюс один скрытый `POST guest/leave`. Общая корневая причина — **двойной `syncUserFromAuthStore`** (п. 4.0 — новая находка).
 > 2. «`realtime` ×N — каждый вызов открывает своё SSE-соединение» — **неверно**. PocketBase SDK (v0.28.1) мультиплексирует ВСЕ подписки через ОДИН `EventSource`. Каждый вызов стоит лишь 1 POST-регистрацию + 1 watcher-интервал (п. 4.3).
 > 3. `unread-counts` ×2 — **трассировка кода даёт ×1** на холодный старт (п. 4.6). Наблюдаемый продакшен-×2 помечен как **НЕВЕРИФИЦИРОВАННОЕ РАСХОЖДЕНИЕ**: текущий код не воспроизводит его, требуется замер с колонкой Initiator / лог сервера (п. 10). Никаких списываний на StrictMode.
 > 4. `designs` ×2 — **трассировка кода даёт ×1** (единственный caller, deps `[]`, п. 4.4). Наблюдаемый продакшен-×2 помечен как **НЕВЕРИФИЦИРОВАННОЕ РАСХОЖДЕНИЕ**. Реальный подтверждённый дефект здесь — write-only кэш: ЛЮБОЙ повторный mount DesignProvider добавляет +1 fetch.
+>
+> **Обновление 11/3/2026 (после внедрения Фаз 1–4):** гейты `scripts/check-post-navigation.mjs` и `scripts/check-identity-refresh.mjs` выровнены с рефакторингом серверного резолва `?post=` (проверки теперь указывают в `useTopicPosts.js` / `TopicPage.jsx` / `TopicPostCard.jsx`, `locatePost` должен отсутствовать в клиентском пути) и тест `scripts/test-shared-poll.mjs` (`testSharedPollDeduplicatesRaceConcurrentStarts`) переведён на шаг-резолюцию через `setImmediate` — 5/5 прогонов подряд 15/15 без флейка.
 
 ---
 
@@ -115,7 +130,7 @@ useEffect(() => {
 **Файл:** `src/contexts/AuthProvider.jsx:951-955`
 
 ```jsx
-const identityKey = `${user?.uid || ''}|${profile?.role_id || ''}|${profile?.status || ''}`;
+const identityKey = `${user?.uid || ''}|${profile?.role || ''}|${profile?.status || ''}`;
 
 useEffect(() => {
   refreshForumState(true);
@@ -222,7 +237,7 @@ const lastSyncedSignatureRef = useRef(null);
 
 ```jsx
 const signature = rec
-  ? [rec.id, rec.verified, rec.role_id, rec.status, rec.nickname, rec.settings?.theme].join('|')
+  ? [rec.id, rec.verified, rec.role, rec.status, rec.nickname, rec.settings?.theme].join('|')
   : 'guest';
 if (signature === lastSyncedSignatureRef.current) {
   return; // sync идемпотентен: данные не менялись — state не трогаем

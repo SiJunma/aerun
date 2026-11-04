@@ -22,7 +22,7 @@ const Navigation = () => {
   const [showAuthModal, setShowAuthModal] = React.useState(false);
   const [authModalMode, setAuthModalMode] = React.useState('login');
 
-  const isAdmin = (profile?.role_id === 'admin' || profile?.role_id === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
+  const isAdmin = (profile?.role === 'admin' || profile?.role === 'root') && hasPermission(PERMISSIONS.ADMIN_ACCESS);
 
   // The unread-notification badge is the SERVER's count, not a list counted here.
   //
@@ -50,7 +50,7 @@ const Navigation = () => {
     // unread-count response carries their private conversations, and a member
     // who may not see them must not be told they exist. The check reads the
     // STATUS (the permission list is already status-narrowed by the server) —
-    // the old `role_id === 'pending'` test could never fire, because a pending
+    // the old `role === 'pending'` test could never fire, because a pending
     // account's role is a real role and its pending-ness is a status.
     if (!user?.uid || !hasPermission(PERMISSIONS.USE_DIRECT_MESSAGES)) {
       setDmUnread(0);
@@ -169,7 +169,7 @@ const Navigation = () => {
           )}
 
           {/* Notifications bell */}
-          {user && profile?.role_id !== 'banned' && profile?.role_id !== 'pending' && profile?.role_id !== 'spectator' && (
+          {user && profile?.role !== 'banned' && profile?.role !== 'pending' && profile?.role !== 'spectator' && (
             <Nav.Link
               as={Link}
               to="/notifications"

@@ -44,7 +44,7 @@ const handlePresenceSnapshot = (presence) => {
       id: u.id,
       nickname: u.nickname || 'User',
       avatar_url: u.avatar_url || '',
-      role_id: u.role || 'player',
+      role: u.role || 'player',
       post_count: u.post_count || 0,
       status_line: u.status_line || '',
       signature: u.signature || '',

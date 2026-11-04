@@ -111,7 +111,7 @@ const ForumStats = () => {
                     <span className="text-muted small">{t('stats.newest_member')}</span>
                     <Link 
                       to={`/profile/${newestUser.id}`} 
-                      className={`online-user-link text-decoration-none fw-bold small ${newestUser.role_id === 'admin' || newestUser.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : newestUser.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                      className={`online-user-link text-decoration-none fw-bold small ${newestUser.role === 'admin' || newestUser.role === CHIEF_ADMIN_ID ? 'online-author-admin' : newestUser.role === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
                     >
                       {newestUser.nickname}
                     </Link>
@@ -135,7 +135,7 @@ const ForumStats = () => {
                   <span key={u.id} className="small">
                     <Link
                       to={`/profile/${u.id}`}
-                      className={`online-user-link text-decoration-none ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                      className={`online-user-link text-decoration-none ${u.role === 'admin' || u.role === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
                     >
                       {u.nickname}
                     </Link>
@@ -159,7 +159,7 @@ const ForumStats = () => {
                   <span key={u.id} className="small">
                     <Link
                       to={`/profile/${u.id}`}
-                      className={`online-user-link text-decoration-none ${u.role_id === 'admin' || u.role_id === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role_id === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
+                      className={`online-user-link text-decoration-none ${u.role === 'admin' || u.role === CHIEF_ADMIN_ID ? 'online-author-admin' : u.role === 'moderator' ? 'online-author-mod' : 'text-primary'}`}
                     >
                       {u.nickname}
                     </Link>

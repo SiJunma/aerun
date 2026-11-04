@@ -1,4 +1,4 @@
-import { pb } from './pocketbase';
+import { pb } from './pocketbase.js';
 
 /**
  * Realtime signals: the nudge queue the whole realtime transport runs on.
@@ -52,6 +52,148 @@ import { pb } from './pocketbase';
  */
 const CONNECTION_POLL_MS = 5000;
 
+// ── The hub ──────────────────────────────────────────────────────────────────
+//
+// Every call site used to open its OWN SDK subscription to the same topic. The
+// SDK multiplexes them over one EventSource, but each subscribe call still cost
+// a POST /api/realtime registration (the POST carries the FULL subscription
+// list) plus one CONNECTION_POLL_MS watcher running on its own timer, and on
+// the main page two resources were live at cold start — two registrations and
+// two watchers for one stream.
+//
+// The hub holds ONE SDK subscription for the whole app. Callers join as
+// callback bundles and leave when their unsubscribe runs; the last departure
+// closes the stream, so an idle page holds no SSE connection, no registrations
+// and no watcher at all.
+//
+// One more job the hub takes over: the SSE connection carries the auth token
+// from the moment it was opened, and the server binds the negotiated client id
+// to that identity. A token that rotates later (an auth-refresh) would leave
+// the stream speaking for an expired session, and nothing in the call sites
+// rebinds on a token change with the SAME uid — their effects key on
+// `user?.uid`. The hub watches the auth store and rebuilds the stream when the
+// token actually changes under live membership.
+const hubMembers = new Set();
+let hubUnsubscribe = null;
+let hubWatcher = null;
+let hubEstablished = false;
+// True while the subscribe promise is still negotiating. The guard in
+// ensureHub must count it, or two members joining in the same tick would each
+// open their own SDK subscription — the very duplication the hub exists to
+// prevent — and the first resolved unsubscribe handle would be overwritten and
+// leaked.
+let hubPending = false;
+let hubLastConnected = null;
+let hubGeneration = 0;
+let hubLastToken = null;
+
+const broadcastState = (connected) => {
+  if (connected === hubLastConnected) return;
+  hubLastConnected = connected;
+  hubMembers.forEach((member) => {
+    try { member.onStateChange?.(connected); } catch (e) { console.error(e); }
+  });
+};
+
+const broadcastDead = () => {
+  hubMembers.forEach((member) => {
+    try { member.onDead?.(); } catch (e) { console.error(e); }
+  });
+};
+
+const closeHub = () => {
+  // Bump the generation first: a subscription promise that was still
+  // negotiating must see itself stale instead of re-opening the stream for
+  // members that have already left.
+  hubGeneration += 1;
+  hubPending = false;
+  if (hubWatcher) { clearInterval(hubWatcher); hubWatcher = null; }
+  const unsub = hubUnsubscribe;
+  hubUnsubscribe = null;
+  hubEstablished = false;
+  hubLastConnected = null;
+  if (typeof unsub === 'function') {
+    try { unsub(); } catch { /* already closed */ }
+  }
+};
+
+const ensureHub = () => {
+  if (hubEstablished || hubPending || hubUnsubscribe) return;
+  const generation = hubGeneration;
+  hubPending = true;
+  hubLastToken = pb.authStore.token;
+
+  try {
+    // The SDK sends the Authorization header from the auth store on the realtime
+    // connection, so a signed-in member's subscription resolves through the
+    // collection's own list rule and a guest's resolves to nothing.
+    //
+    // `subscribe` returns a Promise in this SDK version, and the unsubscribe it
+    // resolves with is the only handle on the stream. Holding it in a module
+    // local is what makes a close that arrives first still work: without the
+    // holder, "closed before the promise settled" would have no way to close
+    // the connection it just opened.
+    // The promise resolving IS the connection being up: `subscribe` awaits
+    // `connect()`, which resolves its pending connects inside the PB_CONNECT
+    // handler, after the client id has been negotiated.
+    const pending = pb.collection('realtime_signals').subscribe('*', (_event, record) => {
+      // The id is a nudge target, not a permission: the client still has to ask
+      // `/api/aerun` for anything real, and that request is what enforces access.
+      hubMembers.forEach((member) => {
+        try { member.onEvent?.(record?.topic, record?.entity_id); } catch (e) { console.error(e); }
+      });
+    });
+
+    Promise.resolve(pending)
+      .then((unsub) => {
+        hubPending = false;
+        if (generation !== hubGeneration) {
+          // The hub was closed (or rebuilt for a new token) while this
+          // subscription was still negotiating — close what just opened.
+          try { unsub(); } catch { /* already closed */ }
+          return;
+        }
+        hubUnsubscribe = unsub;
+        hubEstablished = true;
+        broadcastState(true);
+        // Watches for the drop the SDK does not announce, and for the reconnect
+        // it makes on its own. ONE watcher for every member of the hub.
+        hubWatcher = setInterval(() => {
+          if (hubMembers.size === 0) return;
+          broadcastState(!!pb.realtime?.isConnected);
+        }, CONNECTION_POLL_MS);
+      })
+      .catch((err) => {
+        hubPending = false;
+        // A subscription that cannot even be established is a dead stream, and
+        // the grace window in shared-poll will fall back to polling. Reporting it
+        // the same way keeps one code path for "no realtime" instead of two.
+        if (generation !== hubGeneration || hubMembers.size === 0) return;
+        console.warn('[realtime-signals] subscription failed; polling will cover it', err);
+        broadcastDead();
+        closeHub();
+      });
+  } catch (err) {
+    console.warn('[realtime-signals] could not subscribe; polling will cover it', err);
+    broadcastDead();
+    closeHub();
+  }
+};
+
+// Registered once, at module scope: this module is a singleton, and the store
+// keeps no API for unregistering a listener by identity. Only a REAL token
+// change under live membership rebuilds the stream — the boot-time saves that
+// fire before any caller joined are no-ops, and an onChange that reports the
+// same token (profile saves write the record back) is filtered above.
+pb.authStore.onChange(() => {
+  const token = pb.authStore.token;
+  if (token === hubLastToken) return;
+  hubLastToken = token;
+  if (hubMembers.size === 0) return;
+  closeHub();
+  ensureHub();
+});
+
 /**
  * Subscribes to the signal stream.
  *
@@ -71,87 +213,30 @@ const CONNECTION_POLL_MS = 5000;
  *   happens in development.
  */
 export const subscribeToRealtimeSignals = (onEvent, onDead, onStateChange) => {
+  const member = { onEvent, onDead, onStateChange };
   let cancelled = false;
-  let delivered = false;
-  let unsubscribe = null;
-  let watcher = null;
-  let lastConnected = null;
 
-  const report = (connected) => {
-    if (cancelled || connected === lastConnected) return;
-    lastConnected = connected;
-    onStateChange?.(connected);
-  };
-
-  const reportDead = () => {
-    // Once per transition. A reconnect loop that reported every drop would
-    // restart the poll interval every time, which is a reconnect storm wearing
-    // the costume of a fallback.
-    if (cancelled || delivered) return;
-    delivered = true;
-    onDead?.();
-  };
-
-  try {
-    // The SDK sends the Authorization header from the auth store on the realtime
-    // connection, so a signed-in member's subscription resolves through the
-    // collection's own list rule and a guest's resolves to nothing.
-    //
-    // `subscribe` returns a Promise in this SDK version, and the unsubscribe it
-    // resolves with is the only handle on the stream. Holding it in a local is
-    // what makes a cancel that arrives first still work: without the holder,
-    // "cancelled before the promise settled" would have no way to close the
-    // connection it just opened.
-    // The promise resolving IS the connection being up: `subscribe` awaits
-    // `connect()`, which resolves its pending connects inside the PB_CONNECT
-    // handler, after the client id has been negotiated.
-    const pending = pb.collection('realtime_signals').subscribe('*', (_event, record) => {
-      if (cancelled) return;
-      delivered = true;
-      // The id is a nudge target, not a permission: the client still has to ask
-      // `/api/aerun` for anything real, and that request is what enforces access.
-      onEvent?.(record?.topic, record?.entity_id);
-    });
-
-    Promise.resolve(pending)
-      .then((unsub) => {
-        unsubscribe = unsub;
-        if (cancelled) { close(); return; }
-        report(true);
-        // Watches for the drop the SDK does not announce, and for the reconnect
-        // it makes on its own.
-        watcher = setInterval(() => {
-          if (!cancelled) report(!!pb.realtime?.isConnected);
-        }, CONNECTION_POLL_MS);
-      })
-      .catch((err) => {
-        // A subscription that cannot even be established is a dead stream, and
-        // the grace window in shared-poll will fall back to polling. Reporting it
-        // the same way keeps one code path for "no realtime" instead of two.
-        if (!cancelled) {
-          console.warn('[realtime-signals] subscription failed; polling will cover it', err);
-          reportDead();
-        }
-      });
-  } catch (err) {
-    console.warn('[realtime-signals] could not subscribe; polling will cover it', err);
-    reportDead();
-  }
-
-  function close() {
-    if (watcher) { clearInterval(watcher); watcher = null; }
-    if (typeof unsubscribe === 'function') {
-      try { unsubscribe(); } catch { /* already closed */ }
-    }
-    unsubscribe = null;
+  hubMembers.add(member);
+  ensureHub();
+  // A caller joining an already-established hub learns its state immediately:
+  // the hub's own subscribe promise resolved long ago and will not fire again,
+  // so without this the late joiner would never hear that the stream is up.
+  // A hub that is still negotiating (or dead) reports through the normal
+  // transition paths once its subscription settles or fails.
+  if (hubEstablished && hubLastConnected !== null) {
+    try { onStateChange?.(hubLastConnected); } catch (e) { console.error(e); }
   }
 
   return () => {
     // Idempotent: React StrictMode mounts effects twice in development, so this
-    // runs on a stream that may already be closing.
+    // runs on a membership that may already be leaving.
     if (cancelled) return;
     cancelled = true;
-    close();
+    hubMembers.delete(member);
+    // The last departure closes the stream. Until then the hub ignores every
+    // individual cancel — the SDK subscription belongs to the hub, not to the
+    // caller that happened to join first.
+    if (hubMembers.size === 0) closeHub();
   };
 };
 

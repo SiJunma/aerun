@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown } from 'react-bootstrap';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Container, Row, Col, Card, Nav, Form, Button, Table, Badge, Dropdown, Spinner } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
   getGlobalSettings, updateGlobalSettings, uploadIdentityPlaceholder, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles, bulkUpdateUsers, bulkDeleteUsers, fetchUsersContentCounts
+  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles, fetchAdminUsers, bulkUpdateUsers, bulkDeleteUsers, fetchUsersContentCounts
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
-import { subscribeToAllUsers } from '../api/auth-resources';
+import { toMembersRow, withLegacyDates } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { identityAvatar } from '../utils/identity';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
@@ -50,7 +50,7 @@ const adminBulkMaxIds = 100;
 
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
-  const { user, profile, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
+  const { user, profile, meRole, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,6 +60,21 @@ const AdminPage = () => {
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
+  // The staff table reads ONE server page per render: `usersPage` is what the
+  // pagination footer drives, `usersSearch` is the COMMITTED (debounced)
+  // search string the server narrows by, and the totals come from the
+  // response envelope. `usersLoading` covers a tab entry, a page switch and
+  // the refetch after a mutation.
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersSearch, setUsersSearch] = useState('');
+  const [usersTotalItems, setUsersTotalItems] = useState(0);
+  const [usersTotalPages, setUsersTotalPages] = useState(1);
+  const [usersLoading, setUsersLoading] = useState(false);
+  // Bumped after every successful mutation so the loader effect re-reads the
+  // page from the server instead of trusting the optimistic patch to keep
+  // counts and ordering honest.
+  const [usersRefreshNonce, setUsersRefreshNonce] = useState(0);
+  const reloadUsers = useCallback(() => setUsersRefreshNonce(n => n + 1), []);
   // Bulk (multi-user) actions. Selection is keyed by user id and persists across
   // pages of the staff list — an account picked on page one stays selected when
   // the admin turns to page two and back.
@@ -70,9 +85,10 @@ const AdminPage = () => {
   // ids the viewer removed from the selection while the confirmation modal was open
   const [bulkModalExcluded, setBulkModalExcluded] = useState(new Set());
   // Snapshot of every picked account, keyed by id: {nickname, avatar_url,
-  // role_id, status}. The `users` state holds only the CURRENT page, but the
-  // selection persists across pages (§8.2), so the confirmation modal needs
-  // each selected account's row data even when that row is not rendered.
+  // role, status}. The `users` state holds only the CURRENT server page,
+  // but the selection persists across pages, so the confirmation modal reads
+  // the snapshot for every picked account — including rows on pages that are
+  // not rendered right now.
   const [bulkSelectionSnap, setBulkSelectionSnap] = useState({});
   const [bulkRoleId, setBulkRoleId] = useState('');
   const [bulkRoleNotifyChange, setBulkRoleNotifyChange] = useState(true);
@@ -83,13 +99,20 @@ const AdminPage = () => {
   // color — because that route is ungated so a signed-out visitor can still render
   // badges. The editor additionally needs permissions, is_system, base_role_id,
   // max_characters_limit and the record id, and those are deliberately not
-  // published to everyone. Loaded here, only when this account may manage roles.
+  // published to everyone. Loaded only when the roles tab is open AND this
+  // account may manage roles.
   const [adminRoles, setAdminRoles] = useState([]);
   // Root handover. Only the account that IS the chief admin sees the button,
   // and the candidates exclude yourself — the server refuses you as your own
   // successor, so offering the choice would be a dialog that cannot succeed.
   const [showTransferRoot, setShowTransferRoot] = useState(false);
   const [transferring, setTransferring] = useState(false);
+  // Candidates for the handover dialog. The staff table itself holds one
+  // server page now, so the dialog loads its own list when it opens — the
+  // successor may sit on any page, and this is a rare root-only action that
+  // can afford the bounded walk the old table paid on every mount.
+  const [transferCandidates, setTransferCandidates] = useState([]);
+  const [transferLoading, setTransferLoading] = useState(false);
   // Whether THIS account holds the chief-admin role, as the SERVER says.
   //
   // It used to be `isChiefAdmin(user?.email, user?.role_id)`, and both halves
@@ -99,13 +122,16 @@ const AdminPage = () => {
   // that answer stays true forever, and the ex-root kept the "Transfer role"
   // button on the NEW root's row — the exact symptom the owner reported.
   //
-  // The role is read from the STAFF LIST first: that list is the very data the
-  // panel renders, it is fetched from the server, and it is what the button
-  // hangs on. `profile.role_id` is the fallback for the moment before the list
-  // arrives — and it is only ever a fallback, because the auth-store snapshot
-  // it starts from is a localStorage copy of the row as it was at SIGN-IN, so
-  // right after a handover it still says "root" until the profile is re-read.
-  const myRoleId = users.find((u) => u.id === user?.uid)?.role_id || profile?.role_id || 'player';
+  // The role of THIS account, as the SERVER says — read from the same /me
+  // projection that feeds `hasPermission` (one 30s poll carries both the
+  // permission set and the role, so the rank gates below and the permission
+  // gates can never disagree about who is asking). The fallbacks cover the
+  // window before the first /me answer lands: `profile` is the server row
+  // AuthProvider re-reads at boot (a rename on another device converges
+  // through it), then the staff page itself, then the auth-store snapshot —
+  // which is only ever a last resort, because it is a localStorage copy of
+  // the row as it was at SIGN-IN.
+  const myRoleId = meRole || users.find((u) => u.id === user?.uid)?.role || profile?.role || 'player';
   const isSelfRoot = myRoleId === CHIEF_ADMIN_ID;
   const [userSearch, setUserSearch] = useState('');
   const [designs, setDesigns] = useState([]);
@@ -259,7 +285,7 @@ const AdminPage = () => {
 
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userForm, setUserForm] = useState({ role_id: '', notifyRoleChange: true });
+  const [userForm, setUserForm] = useState({ role: '', notifyRoleChange: true });
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -306,6 +332,25 @@ const AdminPage = () => {
   const [auditSortDesc, setAuditSortDesc] = useState(true);
   const [auditPage, setAuditPage] = useState(1);
   const AUDIT_PAGE_SIZE = 25;
+
+  // id → nickname for the ids the audit trail itself names. Most entries
+  // record the target's nickname beside its id (target_id/target_nickname,
+  // and the bulk `targets` rows), and the staff list the panel used to scan
+  // for them is one server page now — so the trail itself is the lookup,
+  // not the (partial) table.
+  const auditNicknameIndex = useMemo(() => {
+    const index = {};
+    (auditLogs || []).forEach(log => {
+      const d = log.details || {};
+      if (d.target_id && d.target_nickname) index[d.target_id] = d.target_nickname;
+      if (Array.isArray(d.targets)) {
+        d.targets.forEach(tg => {
+          if (tg?.id && tg?.nickname) index[tg.id] = tg.nickname;
+        });
+      }
+    });
+    return index;
+  }, [auditLogs]);
 
   // Tab permissions check
   const canAccessTab = useCallback((tab) => {
@@ -392,7 +437,7 @@ const AdminPage = () => {
     return (
       hasPermission(PERMISSIONS.BAN_USERS) ||
       hasPermission(PERMISSIONS.DELETE_USERS) ||
-      canChangeRoleOf(u.role_id)
+      canChangeRoleOf(u.role)
     );
   };
 
@@ -418,7 +463,7 @@ const AdminPage = () => {
     // across pages), so read it through the selection snapshot first.
     const firstId = effectiveBulkIds[0];
     const first = bulkSelectionSnap[firstId] ?? users.find(x => x.id === firstId);
-    if (first && assignableRoles.some((r) => r.id === first.role_id)) return first.role_id;
+    if (first && assignableRoles.some((r) => r.id === first.role)) return first.role;
     return assignableRoles[0]?.id || '';
   })();
 
@@ -440,7 +485,7 @@ const AdminPage = () => {
       } else {
         const u = users.find(x => x.id === id);
         if (u) {
-          next[id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role_id: u.role_id, status: u.status };
+          next[id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role: u.role, status: u.status };
         }
       }
       return next;
@@ -461,7 +506,7 @@ const AdminPage = () => {
     setBulkSelectionSnap(prev => {
       const next = { ...prev };
       bulkEditable.forEach(u => {
-        next[u.id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role_id: u.role_id, status: u.status };
+        next[u.id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role: u.role, status: u.status };
       });
       return next;
     });
@@ -529,7 +574,7 @@ const AdminPage = () => {
       let optimistic;
       if (bulkAction === 'role') {
         optimistic = users.map(u => (selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)
-          ? { ...u, role_id: bulkRoleId }
+          ? { ...u, role: bulkRoleId }
           : u));
       } else if (bulkAction === 'ban' || bulkAction === 'unban') {
         optimistic = users.map(u => (selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)
@@ -582,6 +627,11 @@ const AdminPage = () => {
       } else {
         showToast(t('admin.users.toast_bulk_done', { count: res.processed }), 'success');
       }
+      // The staff table renders one server page now, so the optimistic patch
+      // above can only ever be a preview: the refetch brings back the server's
+      // page and the honest totals (rows acted on may sit on other pages —
+      // the selection persists across them).
+      reloadUsers();
       // The request went through (fully or partially): the selection has done
       // its job. Only a FAILED REQUEST — the catch below — keeps it, so the
       // admin can retry without re-picking the rows.
@@ -745,35 +795,122 @@ const AdminPage = () => {
         setSettings(migrated);
       }
     });
-    const unsubCats = subscribeToAllCategories(setCategories);
-    const unsubGroups = subscribeToCategoryGroups(setGroups);
-    // `{ staff: true }` because this screen needs the staff DTO — `status` and
-    // `verified` are served by `GET /api/aerun/admin/users` and by nothing else,
-    // and this is the one caller allowed to ask for it. Without the flag the
-    // public member read would be used here too, and the moderation columns
-    // would render empty.
-    const unsubUsers = subscribeToAllUsers(setUsers, { staff: true });
-    const unsubDesigns = subscribeToDesigns(setDesigns);
-
     return () => {
       unsubSettings();
-      unsubCats();
-      unsubGroups();
-      unsubUsers();
-      unsubDesigns();
     };
   }, []);
 
-  // The editor's role rows, loaded only when this account may manage roles.
+  // ── Per-tab loading ──────────────────────────────────────────────────────
   //
-  // Refetched whenever the permission flips rather than once on mount: the public
-  // registry is enough to render badges, so a moderator who gains or loses
-  // `manage_roles` would otherwise see an editor whose rows never arrived, or one
-  // still showing rows the server now refuses.
+  // Every list below used to subscribe ON MOUNT, whether or not its tab was
+  // open: opening /admin fired the categories read, the FULL staff walk (one
+  // request per /admin/users page) and the designs read at once, even for an
+  // admin who only came to look at Settings. The reads now follow the tab: a
+  // subscription is created when its tab becomes active and dropped — its
+  // connection-restored refetch listener with it — when the admin leaves, so
+  // returning to the tab re-reads from the server rather than showing rows
+  // that were current when the page mounted. None of these poll; each is a
+  // one-shot read per subscription (see src/api/connection.js), so a tab
+  // switch costs exactly the reads that tab needs.
+  useEffect(() => {
+    if (activeTab !== 'categories') return;
+    const unsubCats = subscribeToAllCategories(setCategories);
+    const unsubGroups = subscribeToCategoryGroups(setGroups);
+    return () => {
+      unsubCats();
+      unsubGroups();
+    };
+  }, [activeTab]);
+
+  // The search field holds the LIVE input; the COMMITTED value only changes
+  // 400 ms after the last keystroke, so typing "anna" costs one server read,
+  // not four, and every commit returns the table to page 1.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setUsersSearch(userSearch);
+      setUsersPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [userSearch]);
+
+  // The loader's error path needs `t` and `showToast`, but NEITHER may enter
+  // the dependency array: I18nProvider hands out a fresh `t` on every render
+  // (it is a plain function, not a useCallback), so a dep on it would re-run
+  // this effect — and therefore refetch the page — on every unrelated state
+  // change, the loading toggle included. The ref keeps the latest pair
+  // reachable without becoming part of the effect's contract.
+  const latestRenderRef = useRef({});
+  latestRenderRef.current = { t, showToast };
+
+  // The staff table reads one page per request from `GET /admin/users`.
+  // `perPage` is capped at 30 server-side, so the whole list can no longer
+  // arrive in a client-side walk: every page switch, committed search and
+  // post-action refresh is an explicit read. The caller's own role needs no
+  // read here at all — it rides on the /me projection that feeds
+  // `hasPermission` (see myRoleId above) — so the roles tab, which renders no
+  // rows, issues nothing.
+  useEffect(() => {
+    if (activeTab !== 'users') return;
+    let alive = true;
+    setUsersLoading(true);
+    fetchAdminUsers({ page: usersPage, search: usersSearch })
+      .then(res => {
+        if (!alive) return;
+        // Both sources spell the role `role` — the `users` column and the staff
+        // DTO agree — but the raw staff row still needs the normalisation:
+        // toMembersRow is the one mapper both routes go through, and skipping
+        // it is how every badge once resolved to the Player fallback.
+        const items = (res?.items || []).map(u => withLegacyDates(toMembersRow(u)));
+        const tp = Math.max(1, res?.totalPages ?? 1);
+        setUsers(items);
+        setUsersTotalItems(res?.totalItems ?? 0);
+        setUsersTotalPages(tp);
+        // A page that emptied out under us — rows deleted on the last
+        // page, a search that narrowed — steps back to the last real one
+        // instead of showing an empty table forever.
+        if (items.length === 0 && usersPage > tp) setUsersPage(tp);
+      })
+      .catch(err => {
+        console.error('[admin users page err]', err);
+        if (alive) {
+          setUsers([]);
+          setUsersTotalItems(0);
+          setUsersTotalPages(1);
+          latestRenderRef.current.showToast(
+            latestRenderRef.current.t('admin.users.error_load'),
+            'danger'
+          );
+        }
+      })
+      .finally(() => { if (alive) setUsersLoading(false); });
+    return () => { alive = false; };
+  }, [activeTab, usersPage, usersSearch, usersRefreshNonce]);
+
+  // Designs render on the designs tab, and the Settings tab reads the same
+  // list for the default-design dropdown.
+  useEffect(() => {
+    if (activeTab !== 'designs' && activeTab !== 'settings') return;
+    const unsubDesigns = subscribeToDesigns(setDesigns);
+    return () => unsubDesigns();
+  }, [activeTab]);
+
+  // The editor's role rows, loaded only when the roles tab is open AND this
+  // account may manage roles.
+  //
+  // Both gates, not just the permission one: the editor renders only on the
+  // roles tab, so the read follows it — an admin sitting on Settings no longer
+  // pays for rows nothing was showing. The permission gate stays because the
+  // public registry is enough to render badges: a moderator who gains or loses
+  // `manage_roles` would otherwise see an editor whose rows never arrived, or
+  // one still showing rows the server now refuses. Losing the permission clears
+  // the rows; regaining it (on the roles tab) re-reads them.
   const canManageRoles = hasPermission(PERMISSIONS.MANAGE_ROLES);
   useEffect(() => {
     if (!canManageRoles) {
       setAdminRoles([]);
+      return;
+    }
+    if (activeTab !== 'roles') {
       return;
     }
     let active = true;
@@ -785,7 +922,7 @@ const AdminPage = () => {
         if (active) console.warn('[AdminPage] admin roles failed to load:', err);
       });
     return () => { active = false; };
-  }, [canManageRoles]);
+  }, [activeTab, canManageRoles]);
 
   // After a create/update/delete the editor list is re-read from the admin route.
   // refreshRoles() only refreshes the PUBLIC registry, which no longer carries the
@@ -1231,6 +1368,10 @@ const AdminPage = () => {
           // (member count, newest member, today's visitors) has to be re-read;
           // this board's local `users` patch does not touch that snapshot.
           await refreshForumState?.(true);
+          // Server truth replaces the optimistic patch: the page may have
+          // shifted (a rejected account is deleted), and the footer counts
+          // come from the next read.
+          reloadUsers();
           showToast(t('admin.users.toast_rejected'), 'success');
         } catch (err) {
           console.error(err);
@@ -1248,6 +1389,7 @@ const AdminPage = () => {
       // Approving flips pending -> active, which is what lets the account start
       // showing up in the online list and today's visitors on the public index.
       await refreshForumState?.(true);
+      reloadUsers();
       showToast(t('admin.users.toast_approved'), 'success');
     } catch (err) {
       setUsers(before);
@@ -1272,6 +1414,7 @@ const AdminPage = () => {
           // A ban changes who the public stats may list (a banned account leaves
           // today's visitors / online), so re-read the shared snapshot.
           await refreshForumState?.(true);
+          reloadUsers();
           showToast(t('admin.users.toast_banned'), 'success');
         } catch (err) {
           setUsers(before);
@@ -1290,6 +1433,7 @@ const AdminPage = () => {
       // Mirror of the ban path: the account rejoins the population the public
       // stats may list, so the snapshot has to be refreshed.
       await refreshForumState?.(true);
+      reloadUsers();
       showToast(t('admin.users.toast_unbanned'), 'success');
     } catch (err) {
       // Without the revert the row would stay banned in the table after a
@@ -1330,6 +1474,36 @@ const AdminPage = () => {
         pb.authStore.save(previousToken, previousRecord);
       }
       throw err;
+    }
+  };
+
+  // The handover dialog needs a candidate list that spans the WHOLE table,
+  // but the staff table itself holds one server page. When the dialog opens,
+  // its own loader walks the pages once — a rare, root-only action that can
+  // afford the bounded walk the old table used to pay on every mount. The
+  // walk is bounded by the server's own totalPages, so it cannot loop.
+  const handleOpenTransferRoot = async () => {
+    setShowTransferRoot(true);
+    setTransferLoading(true);
+    try {
+      const rows = [];
+      let page = 1;
+      for (;;) {
+        const res = await fetchAdminUsers({ page });
+        // Same normalisation as the table: one mapper for both readers, so
+        // the modal cannot receive a row shape the dialog did not expect.
+        const items = (res?.items || []).map(u => withLegacyDates(toMembersRow(u)));
+        rows.push(...items);
+        const totalPages = res?.totalPages ?? 1;
+        if (page >= totalPages || items.length === 0) break;
+        page += 1;
+      }
+      setTransferCandidates(rows);
+    } catch (err) {
+      console.error('[transfer candidates err]', err);
+      setTransferCandidates([]);
+    } finally {
+      setTransferLoading(false);
     }
   };
 
@@ -1386,6 +1560,7 @@ const AdminPage = () => {
           // dead account until a full refresh re-ran the identity effect.
           // Refresh it here like every other mutation on this page does.
           await refreshForumState?.(true);
+          reloadUsers();
           showToast(t('admin.users.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -1401,12 +1576,12 @@ const AdminPage = () => {
     // the refusal in ONE place: the server enforces the same matrix, and a
     // panel that opens a dialog the server will reject is a lie about what is
     // possible.
-    if (!canChangeRoleOf(target?.role_id)) {
+    if (!canChangeRoleOf(target?.role)) {
       showToast(t('admin.users.error_role_forbidden'), 'danger');
       return;
     }
     setEditingUser(target);
-    setUserForm({ role_id: target.role_id || 'player', notifyRoleChange: true });
+    setUserForm({ role: target.role || 'player', notifyRoleChange: true });
     setShowUserModal(true);
   };
 
@@ -1416,7 +1591,7 @@ const AdminPage = () => {
     // account (or of the viewer) can change while the dialog is open, and a
     // request the server will refuse is better never sent than sent and
     // reported as a failure.
-    if (!canChangeRoleOf(editingUser.role_id)) {
+    if (!canChangeRoleOf(editingUser.role)) {
       showToast(t('admin.users.error_role_forbidden'), 'danger');
       setShowUserModal(false);
       return;
@@ -1424,14 +1599,15 @@ const AdminPage = () => {
     // The role being written must also be one this viewer may assign —
     // `root` is transferred, never assigned, and only the chief admin may
     // appoint another administrator.
-    if (!assignableRoles.some((r) => r.id === userForm.role_id)) {
+    if (!assignableRoles.some((r) => r.id === userForm.role)) {
       showToast(t('admin.users.error_role_forbidden'), 'danger');
       return;
     }
     setSaving(true);
     try {
-      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role_id: userForm.role_id } : u));
-      await updateUserRole(editingUser.id, userForm.role_id, user.uid, userForm.notifyRoleChange !== false);
+      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role: userForm.role } : u));
+      await updateUserRole(editingUser.id, userForm.role, user.uid, userForm.notifyRoleChange !== false);
+      reloadUsers();
       showToast(t('admin.users.toast_role_updated'), 'success');
       setShowUserModal(false);
     } catch (err) {
@@ -2076,13 +2252,13 @@ const AdminPage = () => {
 
 
   const renderUsers = () => {
-    // Nickname only. The staff endpoint does not serve email addresses, so an
-    // email search term matches nothing — the previous `u.email` branch here
-    // was already dead against the PocketBase data source, and keeping it
-    // would suggest a capability that does not exist.
-    const filteredUsers = users.filter(u =>
-      u.nickname?.toLowerCase().includes(userSearch.toLowerCase())
-    );
+    // The search runs on the SERVER (`?search=` narrows by nickname before
+    // the page is cut), so `users` already holds exactly the rows this page
+    // renders — a client-side substring pass here would hide rows the server
+    // counted and desync the pagination footer. (An email term matches
+    // nothing server-side for the same reason it matched nothing here: the
+    // staff endpoint does not serve email addresses.)
+    const filteredUsers = users;
 
     return (
       <Card className="shadow-sm border-0">
@@ -2175,7 +2351,20 @@ const AdminPage = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.map(u => (
+            {filteredUsers.length === 0 && usersLoading ? (
+              <tr>
+                <td colSpan={5} className="text-center text-muted py-4">
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  {t('common.loading')}
+                </td>
+              </tr>
+            ) : filteredUsers.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="text-center text-muted py-4">
+                  {t('admin.users.empty')}
+                </td>
+              </tr>
+            ) : filteredUsers.map(u => (
               <tr key={u.id} className="align-middle">
                 <td style={{ width: '36px' }} className="select-cell">
                   {canBulkEditUser(u) && (
@@ -2204,7 +2393,7 @@ const AdminPage = () => {
                 </td>
                 <td>
                   <div className="d-flex align-items-center gap-1">
-                    {isChiefAdmin(u.email, u.role_id) ? (
+                    {isChiefAdmin(u.email, u.role) ? (
                       (() => {
                         const visuals = getRoleVisuals('admin', roles);
                         return (
@@ -2226,14 +2415,14 @@ const AdminPage = () => {
                           </Badge>
                         );
                       })()
-                    ) : canChangeRoleOf(u.role_id) ? (
+                    ) : canChangeRoleOf(u.role) ? (
                       <Button
                         variant="link"
                         className="p-0 text-decoration-none d-inline-flex align-items-center gap-2 group border-0 shadow-none"
                         onClick={() => handleOpenUserModal(u)}
                       >
                         {(() => {
-                          const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                          const visuals = getRoleVisuals(u.role || 'player', roles);
                           return (
                             <>
                               <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
@@ -2250,7 +2439,7 @@ const AdminPage = () => {
                          panel does not offer it. The badge is still shown: the
                          role is information, the pencil is a promise. */
                       (() => {
-                        const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                        const visuals = getRoleVisuals(u.role || 'player', roles);
                         return (
                           <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
                             {visuals.name}
@@ -2270,7 +2459,7 @@ const AdminPage = () => {
                   {u.status === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
                 </td>
                 <td className="text-end">
-                  {!isChiefAdmin(u.email, u.role_id) && u.id !== user.uid && (
+                  {!isChiefAdmin(u.email, u.role) && u.id !== user.uid && (
                     <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
                       {u.status === 'pending' && (
                         <>
@@ -2306,7 +2495,7 @@ const AdminPage = () => {
                       )}
                     </div>
                   )}
-                  {isChiefAdmin(u.email, u.role_id) && (
+                  {isChiefAdmin(u.email, u.role) && (
                     /* The protected badge sits where the actions would be. For
                        the CURRENT chief admin it also offers the handover — it is
                        the one account that can act on it at all. */
@@ -2317,7 +2506,7 @@ const AdminPage = () => {
                           variant="outline-danger"
                           size="sm"
                           className="text-nowrap"
-                          onClick={() => setShowTransferRoot(true)}
+                          onClick={handleOpenTransferRoot}
                         >
                           <ShieldAlert size={14} className="me-1" />
                           {currentLang === 'ru' ? 'Передать роль' : 'Transfer role'}
@@ -2330,6 +2519,18 @@ const AdminPage = () => {
             ))}
           </tbody>
         </Table>
+        {/* Server-side pagination: the footer mirrors the response envelope —
+            one request renders one page, and `totalItems` is the count of the
+            NARROWED set (the search filter applies before the page is cut).
+            ForumPagination hides itself when there is a single page. */}
+        <Card.Body className="d-flex flex-wrap align-items-center justify-content-between gap-2 border-top py-2">
+          <span className="text-muted small">{t('admin.users.total', { count: usersTotalItems })}</span>
+          <ForumPagination
+            currentPage={usersPage}
+            totalPages={usersTotalPages}
+            onPageChange={setUsersPage}
+          />
+        </Card.Body>
       </Card>
     );
   };
@@ -2694,6 +2895,10 @@ const AdminPage = () => {
     const resolveId = (v) => {
       const usr = users?.find(u => u.id === v);
       if (usr) return usr.nickname || (isRootAdmin ? usr.email : '***');
+      // The trail names most targets twice (id and nickname); the staff
+      // page is not the whole table any more, so the trail resolves what
+      // the current page cannot.
+      if (auditNicknameIndex[v]) return auditNicknameIndex[v];
       const cat = categories?.find(c => c.id === v);
       if (cat) return typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title;
       return v.length < 20 ? v : null; // short = readable role id, long = opaque hash
@@ -2705,8 +2910,11 @@ const AdminPage = () => {
       .filter(log => {
         if (auditActionFilter !== 'all' && log.action_type !== auditActionFilter) return false;
         if (!searchLower) return true;
-        const performer = users?.find(u => u.id === log.performer_id);
-        const performerName = (performer?.nickname || (isRootAdmin ? performer?.email : '***') || '').toLowerCase();
+        // The server carries the performer's nickname on every audit row now;
+        // the staff page is only a fallback for rows it happens to hold.
+        const performerName = (log.performerNickname
+          || users?.find(u => u.id === log.performer_id)?.nickname
+          || '').toLowerCase();
         const actionLabel = auditActionLabel(log.action_type).toLowerCase();
         const detailValues = Object.values(log.details || {}).map(v => {
           if (typeof v === 'string') return (resolveId(v) || v).toLowerCase();
@@ -2776,8 +2984,9 @@ const AdminPage = () => {
               </thead>
               <tbody>
                 {pageItems.map(log => {
-                  const performer = users.find(u => u.id === log.performer_id);
-                  const performerName = performer ? (performer.nickname || (isRootAdmin ? performer.email : '***')) : 'Unknown User';
+                  const performerName = log.performerNickname
+                    || users.find(u => u.id === log.performer_id)?.nickname
+                    || 'Unknown User';
 
                   return (
                     <tr key={log.id} className="align-middle">
@@ -3298,21 +3507,21 @@ const AdminPage = () => {
                     className={`p-2 rounded d-flex align-items-center mb-1 cursor-pointer role-radio-container`}
                     style={{
                       border: '1px solid',
-                      borderColor: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
-                      background: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
+                      borderColor: userForm.role === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
+                      background: userForm.role === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
                       transition: 'all 0.15s ease-in-out',
-                      opacity: userForm.role_id === r.id ? 1 : 0.8
+                      opacity: userForm.role === r.id ? 1 : 0.8
                     }}
-                    onClick={() => setUserForm({ ...userForm, role_id: r.id })}
+                    onClick={() => setUserForm({ ...userForm, role: r.id })}
                     onMouseEnter={(e) => {
-                      if (userForm.role_id !== r.id) {
+                      if (userForm.role !== r.id) {
                         e.currentTarget.style.borderColor = 'rgba(var(--primary-rgb), 0.25)';
                         e.currentTarget.style.opacity = '1';
                         e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.03)';
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (userForm.role_id !== r.id) {
+                      if (userForm.role !== r.id) {
                         e.currentTarget.style.borderColor = 'rgba(var(--primary-rgb), 0.12)';
                         e.currentTarget.style.opacity = '0.8';
                         e.currentTarget.style.background = 'transparent';
@@ -3323,8 +3532,8 @@ const AdminPage = () => {
                       type="radio"
                       id={`role-radio-${r.id}`}
                       name="userRole"
-                      checked={userForm.role_id === r.id}
-                      onChange={() => setUserForm({ ...userForm, role_id: r.id })}
+                      checked={userForm.role === r.id}
+                      onChange={() => setUserForm({ ...userForm, role: r.id })}
                       className="mb-0 me-2"
                     />
                     <label htmlFor={`role-radio-${r.id}`} className="mb-0 cursor-pointer flex-grow-1">
@@ -3595,8 +3804,12 @@ const AdminPage = () => {
                 </div>
                 <div>
                   {(() => {
+                    // Server-carried nickname first (every audit row now has
+                    // one), then the staff page for rows it happens to hold.
                     const p = users.find(u => u.id === selectedAuditLog.performer_id);
-                    return p ? `${p.nickname || (isRootAdmin ? p.email : '***')}` : 'Unknown User';
+                    return selectedAuditLog.performerNickname
+                      || (p ? `${p.nickname || (isRootAdmin ? p.email : '***')}` : '')
+                      || 'Unknown User';
                   })()}
                 </div>
                 <div style={{ color: 'var(--secondary-color)', fontSize: '0.75rem', fontFamily: 'monospace' }}>
@@ -3616,6 +3829,11 @@ const AdminPage = () => {
                   if (v && typeof v === 'string' && v.length > 20) {
                     const tgt = users.find(u => u.id === v);
                     if (tgt) resolvedName = tgt.nickname || (isRootAdmin ? tgt.email : '***');
+                    // Not on the current staff page: the trail itself named
+                    // most targets twice (id and nickname).
+                    if (!resolvedName && auditNicknameIndex[v]) {
+                      resolvedName = auditNicknameIndex[v];
+                    }
                   }
 
                   return (
@@ -3723,9 +3941,9 @@ const AdminPage = () => {
       <TransferRootModal
         show={showTransferRoot}
         onHide={() => setShowTransferRoot(false)}
-        candidates={users}
+        candidates={transferCandidates}
         onConfirm={handleTransferRoot}
-        busy={transferring}
+        busy={transferring || transferLoading}
         currentNickname={user?.displayName || user?.name || ''}
         currentUserId={user?.uid || ''}
         onReauthWithGoogle={handleReauthForTransfer}

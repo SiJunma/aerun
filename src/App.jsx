@@ -65,7 +65,7 @@ const ActivityTracker = () => {
 const IdentityRedirect = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
-  const identity = `${user?.uid || ''}|${profile?.role_id || ''}|${profile?.status || ''}`;
+  const identity = `${user?.uid || ''}|${profile?.role || ''}|${profile?.status || ''}`;
   const previousIdentityRef = useRef(identity);
 
   useEffect(() => {

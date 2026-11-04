@@ -86,7 +86,7 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
   }
 
   // Posting-required route: spectators cannot post, create topics, etc.
-  if (requirePosting && profile?.role_id === 'spectator') {
+  if (requirePosting && profile?.role === 'spectator') {
     return <Navigate to="/" replace />;
   }
 

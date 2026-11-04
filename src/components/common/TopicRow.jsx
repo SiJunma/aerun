@@ -40,7 +40,7 @@ const TopicRow = ({
   const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
   const isUnreadByServer = serverUnread !== null ? serverUnread : true;
   const isUnreadByState = isUnreadByServer && !isLocallyRead;
-  const hasUnread = !!user && profile?.role_id !== 'pending' && topic.last_post_author_ref?.user_id !== user?.uid && isUnreadByState;
+  const hasUnread = !!user && profile?.role !== 'pending' && topic.last_post_author_ref?.user_id !== user?.uid && isUnreadByState;
 
   const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
   const totalPages = Math.ceil((topic.posts_count || 1) / ITEMS_PER_PAGE);

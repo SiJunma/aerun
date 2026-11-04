@@ -44,14 +44,16 @@ const check = (ok, message) => {
 // A role or status change alters what the server will return WITHOUT changing
 // who is asking, so the key must carry all three parts.
 check(
-  /const identityKey = `\$\{user\?\.uid \|\| ''\}\|\$\{profile\?\.role_id \|\| ''\}\|\$\{profile\?\.status \|\| ''\}`/.test(authProvider),
+  /const identityKey = `\$\{user\?\.uid \|\| ''\}\|\$\{profile\?\.role \|\| ''\}\|\$\{profile\?\.status \|\| ''\}`/.test(authProvider),
   'AuthProvider must key the forum refresh on uid AND role AND status — a role change ' +
     'changes what /categories returns without changing who is asking'
 );
 check(
-  /\[identityKey, refreshForumState\]/.test(authProvider),
-  'the refresh effect must depend on identityKey, or it runs on mount only and the forum ' +
-    'state is frozen at whichever identity was signed in when the provider mounted'
+  /\[identityKey, refreshForumState, restored\]/.test(authProvider),
+  'the refresh effect must depend on identityKey AND the restored gate — without identityKey it ' +
+    'runs on mount only and the forum state is frozen at whichever identity was signed in when ' +
+    'the provider mounted, and without restored it fires once for the pre-restore guest key ' +
+    "('|') and again for the member key, doubling forum-index and forum-stats on every cold start"
 );
 check(
   /refreshForumState\(true\)/.test(authProvider),
@@ -366,7 +368,7 @@ assert.deepEqual(
 // is what let the card and the inputs disagree indefinitely, and it is why the
 // reload reproduced the bug instead of healing it.
 check(
-  /const buildAccountForm = \(source\) => \(\{/.test(profilePage) &&
+  /const buildAccountForm = (?:useCallback\()?\(source\) =>\s*\(\{/.test(profilePage) &&
     /JSON\.stringify\(next\)/.test(profilePage),
   'ProfilePage must re-seed the account form when the server-side values change — seeding once ' +
     'per uid freezes the inputs at whatever the snapshot held'

@@ -172,7 +172,7 @@ const MainPage = () => {
                     const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
                     const isUnreadByServer = serverUnread !== null ? serverUnread : true;
                     const hasUnread = !!user &&
-                      profile?.role_id !== 'pending' &&
+                      profile?.role !== 'pending' &&
                       cat.last_post_author_ref?.user_id !== user?.uid &&
                       isUnreadByServer &&
                       !isLocallyRead;

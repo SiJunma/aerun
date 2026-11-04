@@ -71,12 +71,17 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [emailUnverified, setEmailUnverified] = useState(false);
   const [isPendingApproval, setIsPendingApproval] = useState(false);
+  // The session restore has settled: until this flips, every effect keyed on
+  // identity must wait. Firing them earlier means they run in the GUEST phase of
+  // a returning member — a guest heartbeat, a guest /me resource and a guest
+  // forum read that the member phase then has to duplicate or cancel.
+  const [restored, setRestored] = useState(false);
 
   // canPostGlobally mirrors the backend's AccessContext.CanPostGlobally():
   // staff always pass; everyone else needs active status AND a confirmed email.
   const canPostGlobally = useMemo(() => {
     if (!profile) return false;
-    const roleId = profile.role_id || 'player';
+    const roleId = profile.role || 'player';
     const isStaffRole = roleId === 'root' || roleId === 'admin' || roleId === 'moderator';
     if (isStaffRole) return true;
     return profile.status === 'active' && profile.verified === true;
@@ -112,6 +117,12 @@ export const AuthProvider = ({ children }) => {
   // by account status, and only the command layer knows the narrowing. Keeping them
   // in one place is what lets `GET /roles` stop publishing the matrix.
   const [effectivePermissions, setEffectivePermissions] = useState([]);
+  // The STORED role, from the same /me projection the permissions above ride
+  // on — one poll, both halves of "who is this caller". The profile row is a
+  // server read too, but a boot-time one: a role a moderator changed in
+  // another session arrives here within the poll's interval, which the
+  // profile alone cannot do.
+  const [meRole, setMeRole] = useState('');
   const [dmUnread, setDmUnread] = useState({ total: 0, conversations: {}, topics: 0 });
   const [activeDmConvId, setActiveDmConvId] = useState(null);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -232,10 +243,38 @@ export const AuthProvider = ({ children }) => {
     return promise;
   }, [toOwnProfile]);
 
+  // Signature of the last sync: if the auth store record has not changed, a
+  // repeat sync must not mint new state objects and restart every subscriber.
+  // The auth store fires onChange twice on boot (once from authRefresh's
+  // internal save, once from the .then after restoreSession), and every field
+  // written back through authStore.save() flows through here too — so the list
+  // below must cover everything the UI reads off the record: identity and
+  // status (user/profile), theme and the whole settings blob, and the mask,
+  // whose save in setLastSelectedMask relies on onChange rebuilding profile.
+  const lastSyncedSignatureRef = useRef(null);
+
   // Initialize Auth State from PocketBase authStore
   const syncUserFromAuthStore = useCallback(() => {
-    if (pb.authStore.isValid && pb.authStore.record) {
-      const rec = pb.authStore.record;
+    const rec = pb.authStore.record;
+    const signature = rec
+      ? [
+          rec.id,
+          rec.verified,
+          rec.role,
+          rec.status,
+          rec.nickname,
+          rec.email,
+          rec.avatar_url,
+          rec.last_selected_character_id,
+          JSON.stringify(rec.settings ?? null)
+        ].join('|')
+      : 'guest';
+    if (signature === lastSyncedSignatureRef.current) {
+      return; // idempotent sync: nothing changed, so leave the state alone
+    }
+    lastSyncedSignatureRef.current = signature;
+
+    if (pb.authStore.isValid && rec) {
       const u = {
         uid: rec.id,
         id: rec.id,
@@ -257,6 +296,9 @@ export const AuthProvider = ({ children }) => {
       setEmailUnverified(false);
       setIsPendingApproval(false);
     }
+    // Idempotent: repeating the same set is a no-op, so late onChange events
+    // after the first sync cannot re-gate the effects below.
+    setRestored(true);
   }, [toOwnProfile, refreshOwnProfile]);
 
   useEffect(() => {
@@ -322,18 +364,39 @@ export const AuthProvider = ({ children }) => {
   // permissions. `/me` answers it for a guest too, so this subscription is what
   // makes the fallback in hasPermission unreachable in normal operation.
   useEffect(() => {
-    const unsubscribe = subscribeToEffectivePermissions(user?.uid, setEffectivePermissions);
+    // Wait for the session restore: subscribing as 'guest' before the restore
+    // settles is what made a returning member read /me twice (guest resource,
+    // then the member one).
+    if (!restored) return;
+    const unsubscribe = subscribeToEffectivePermissions(user?.uid, (me) => {
+      // null is the "not asked yet" value from the poll: keep whatever the
+      // previous state was rather than locking every control.
+      if (!me) return;
+      setEffectivePermissions(me.permissions || []);
+      setMeRole(me.role || '');
+    });
     return unsubscribe;
-  }, [user?.uid]);
+  }, [user?.uid, restored]);
 
   // Presence and DM subscriptions. A signed-in visitor beats as a member; an
   // anonymous one beats as a guest so the stats panel can count them.
+  //
+  // guestPresenceStartedRef records whether THIS session actually opened a
+  // guest presence: without it, a returning member whose browser still holds a
+  // guest_id from an earlier guest session sent POST /presence/guest/leave on
+  // every page load, announcing a departure that never happened here.
+  const guestPresenceStartedRef = useRef(false);
   useEffect(() => {
+    if (!restored) return;
     if (user?.uid && profile) {
+      // This session no longer owns a guest presence, so a later sign-out must
+      // not try to remove one.
+      guestPresenceStartedRef.current = false;
       return initRtdbPresence(user.uid, profile, profile?.last_selected_character_id || null);
     }
+    guestPresenceStartedRef.current = true;
     return initRtdbGuestPresence(getOrCreateGuestId());
-  }, [user?.uid, profile, getOrCreateGuestId]);
+  }, [user?.uid, profile, getOrCreateGuestId, restored]);
 
   // Logging in ends the guest session: the guest_presence row goes, so a visitor
   // who registers or signs in is never counted as a guest (the heartbeat
@@ -361,6 +424,11 @@ export const AuthProvider = ({ children }) => {
   // uid, so the effect runs only where the identity actually changed.
   const previousUidRef = useRef(undefined);
   useEffect(() => {
+    // Wait for the session restore. Until then a returning member's uid is not
+    // set, and treating the post-restore sync as a guest→member transition
+    // would announce a departure that never happened; the first observation
+    // AFTER the restore is a mount, not a transition.
+    if (!restored) return;
     const uid = user?.uid;
     const previousUid = previousUidRef.current;
     previousUidRef.current = uid;
@@ -370,10 +438,13 @@ export const AuthProvider = ({ children }) => {
     if (previousUid === undefined) return;
 
     if (!uid || uid === previousUid) return;
+    // Only remove a guest presence THIS session actually started — a stale
+    // guest_id in localStorage from an earlier visit is not a live guest row.
+    if (!guestPresenceStartedRef.current) return;
     const guestId = localStorage.getItem('guest_id');
     if (!guestId) return;
     removeRtdbGuestPresence(guestId);
-  }, [user?.uid]);
+  }, [user?.uid, restored]);
 
   useEffect(() => {
     return subscribeToOnlineUsers(setActiveUsers);
@@ -948,11 +1019,14 @@ export const AuthProvider = ({ children }) => {
   // `updated` is deliberately NOT a dependency. It changes on every profile
   // keystroke-driven save, and re-reading the forum because a status line was
   // edited would be a request per save for a list that did not change.
-  const identityKey = `${user?.uid || ''}|${profile?.role_id || ''}|${profile?.status || ''}`;
+  const identityKey = `${user?.uid || ''}|${profile?.role || ''}|${profile?.status || ''}`;
 
   useEffect(() => {
+    // The restore gate keeps the '||' pre-restore key from firing a read that
+    // the real identity then has to repeat.
+    if (!restored) return;
     refreshForumState(true);
-  }, [identityKey, refreshForumState]);
+  }, [identityKey, refreshForumState, restored]);
 
   // Members leaving the online list are the OTHER half of the sign-out symptom,
   // and they arrive through a different channel: `activeUsers` is fed by the
@@ -1272,7 +1346,7 @@ export const AuthProvider = ({ children }) => {
           // Explicit category role list: membership grants, non-membership
           // denies, even when the global right differs. An empty list is
           // root-only.
-          const effectiveRoleId = user ? profile?.role_id || 'player' : 'guest';
+          const effectiveRoleId = user ? profile?.role || 'player' : 'guest';
           const isRoot = effectiveRoleId === 'root' || effectiveRoleId === CHIEF_ADMIN_ID;
           if (isRoot) return true; // root bypasses any explicit category override
           if (override.length === 0) {
@@ -1293,7 +1367,7 @@ export const AuthProvider = ({ children }) => {
       return !!normalizePermissions(guestRole?.permissions).includes(perm);
     }
 
-    const effectiveRoleId = profile?.role_id || 'player';
+    const effectiveRoleId = profile?.role || 'player';
     if (effectiveRoleId === 'root' || effectiveRoleId === CHIEF_ADMIN_ID) return true;
 
     const userRole = roles.find(r => r.id === effectiveRoleId) || DEFAULT_ROLES.find(r => r.id === effectiveRoleId);
@@ -1305,11 +1379,12 @@ export const AuthProvider = ({ children }) => {
     return activeUserIds.has(uid);
   }, [activeUserIds]);
 
-  const isRootAdmin = isChiefAdmin(user?.email, profile?.role_id);
+  const isRootAdmin = isChiefAdmin(user?.email, profile?.role);
 
   const value = useMemo(() => ({
     user,
     profile,
+    meRole,
     setProfile,
     authError,
     isRootAdmin,
@@ -1358,7 +1433,7 @@ export const AuthProvider = ({ children }) => {
     PERMISSIONS,
     DEFAULT_ROLES
   }), [
-    user, profile, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, categoryGroups, forumStateLoading, forumStateError,
+    user, profile, meRole, authError, isRootAdmin, settings, loading, readMap, readMapReady, categories, categoryGroups, forumStateLoading, forumStateError,
     unreadTopicsCount, dmUnread, activeDmConvId, setActiveDmConvId, isMarkingAllRead, markTopicRead, markAllRead,
     loginWithGoogle, registerWithEmail, loginWithEmail, resetPassword,
     resendVerificationEmail, checkVerificationStatus, emailUnverified, isPendingApproval, canPostGlobally, logout,

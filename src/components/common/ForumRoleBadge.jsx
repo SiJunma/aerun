@@ -2,7 +2,7 @@ import React from 'react';
 import { Badge } from 'react-bootstrap';
 import { useI18n } from '../../contexts/I18nProvider';
 import { useAuth } from '../../contexts/AuthProvider';
-import { getRoleVisuals, resolveUserRoleId } from '../../constants/permissions';
+import { getRoleVisuals, resolveUserRole } from '../../constants/permissions';
 
 /**
  * Shared component for rendering role and status badges (Banned, Deleted, Pending).
@@ -58,7 +58,7 @@ const ForumRoleBadge = ({
   }
 
   // Resolve standard role visuals
-  const resolvedId = resolveUserRoleId(userEmail, roleId);
+  const resolvedId = resolveUserRole(userEmail, roleId);
   const visuals = getRoleVisuals(resolvedId, roles);
 
   return (

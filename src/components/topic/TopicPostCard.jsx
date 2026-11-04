@@ -104,7 +104,10 @@ export const TopicPostCard = ({
 
   const authorDataForDm = authorId === user?.uid ? profile : authorStats[authorId];
   const isDeletedAuthor = authorDataForDm === null || post.author?.deleted === true || post.author?.deleted === true;
-  const isBannedAuthor = (authorDataForDm?.role_id || post.author?.role_id) === 'banned';
+  // `post.author` — the server AuthorRef DTO — carries no role at all, so the
+  // old `post.author?.role_id` fallback was always undefined; the role comes
+  // from the authorStats row or nothing.
+  const isBannedAuthor = authorDataForDm?.role === 'banned';
   const canDm = !!(
     user &&
     authorId &&

@@ -279,7 +279,7 @@ export const useTopicModalState = ({
     // Legacy parity guards: authenticated non-spectator, not own post,
     // not already voted by this user.
     if (!post) return;
-    if (!currentUser || profile?.role_id === 'spectator') return;
+    if (!currentUser || profile?.role === 'spectator') return;
     if (!post.author?.user_id || post.author?.user_id === currentUser.uid) return;
     if (myVotes?.[post.id]) return;
     setModalState((prev) => ({

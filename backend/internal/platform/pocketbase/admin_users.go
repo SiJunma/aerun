@@ -93,6 +93,16 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 		where = append(where, notDeletedUsersExpr())
 	}
 
+	// `search` narrows by nickname substring. The needle is BOUND, never
+	// interpolated, for the same reason the mention picker binds it
+	// (user_profile.go): a nickname may contain `%` and `_`, and a LIKE built
+	// by concatenation is both an injection point and a way to match every
+	// account. The filter applies BEFORE the page is cut, so the totalPages
+	// the client paginates over counts the NARROWED set.
+	if search := strings.TrimSpace(query.Get("search")); search != "" {
+		where = append(where, dbx.Like("nickname", search))
+	}
+
 	total, err := e.App.CountRecords(usersCollectionName, where...)
 	if err != nil {
 		return router.NewInternalServerError("user count failed", err)
@@ -114,51 +124,7 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		items = append(items, map[string]any{
-			"id":       record.Id,
-			"nickname": record.GetString("nickname"),
-			// The role stays the STORED role here, on purpose: this is the
-			// staff view, and the original role of a deleted account is
-			// history the staff may need (it is what the account held while
-			// it could act). The public profile is the surface that paints
-			// "Deleted" instead (see profileRole).
-			//
-			// What the staff view must NOT do is present a deleted account
-			// as living: the `deleted` flag and `status` below carry that
-			// verdict, and the admin table renders a "Deleted" badge from
-			// them.
-			"role":       record.GetString("role"),
-			"status":     record.GetString("status"),
-			"deleted":    isUserDeleted(record),
-			"verified":   record.GetBool("verified"),
-			"avatar_url": record.GetString("avatar_url"),
-			// The one-line status MembersPage renders under the nickname. It was
-			// missing here, so the admin table received `undefined` for it from
-			// this route while the public read supplied a real value — the same
-			// row rendering differently depending on which endpoint answered,
-			// which is the signature of a mapper gap rather than a data gap.
-			"status_line": record.GetString("status_line"),
-			"created":     record.GetDateTime("created"),
-			"updated":     record.GetDateTime("updated"),
-			// The durable last-visit clock (migration 1767300000), which is
-			// what the members table renders once a member is no longer in the
-			// live presence map.
-			//
-			// The `created` fallback is the never-empty guarantee, enforced at
-			// the boundary where the value is actually consumed rather than
-			// trusted to every writer. Registration is provably real activity,
-			// so falling back to it can only understate how recently someone
-			// was here — it can never invent a visit. Emitting a zero time
-			// instead would push the problem onto every client and this column
-			// is read by exactly one of them.
-			"last_seen": lastSeenOrCreated(record),
-			// Denormalised counters. Emitted under the legacy names the
-			// frontend already reads (MembersPage sorts on `post_count` and
-			// `reputation`), so no consumer has to learn a third vocabulary.
-			"post_count":   record.GetInt("posts_count"),
-			"topics_count": record.GetInt("topics_count"),
-			"reputation":   record.GetInt("reputation"),
-		})
+		items = append(items, staffUserRow(record))
 	}
 
 	totalItems := int(total)
@@ -171,6 +137,58 @@ func adminListUsersHandler(e *core.RequestEvent) error {
 		"items":      items,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// staffUserRow builds one whitelisted staff row for the admin read model.
+// Both the paginated list and the caller's own `self` row answer through it,
+// so the two can never drift apart — and the whitelist here is the whole
+// security property of the endpoint.
+func staffUserRow(record *core.Record) map[string]any {
+	return map[string]any{
+		"id":       record.Id,
+		"nickname": record.GetString("nickname"),
+		// The role stays the STORED role here, on purpose: this is the
+		// staff view, and the original role of a deleted account is
+		// history the staff may need (it is what the account held while
+		// it could act). The public profile is the surface that paints
+		// "Deleted" instead (see profileRole).
+		//
+		// What the staff view must NOT do is present a deleted account
+		// as living: the `deleted` flag and `status` below carry that
+		// verdict, and the admin table renders a "Deleted" badge from
+		// them.
+		"role":       record.GetString("role"),
+		"status":     record.GetString("status"),
+		"deleted":    isUserDeleted(record),
+		"verified":   record.GetBool("verified"),
+		"avatar_url": record.GetString("avatar_url"),
+		// The one-line status MembersPage renders under the nickname. It was
+		// missing here, so the admin table received `undefined` for it from
+		// this route while the public read supplied a real value — the same
+		// row rendering differently depending on which endpoint answered,
+		// which is the signature of a mapper gap rather than a data gap.
+		"status_line": record.GetString("status_line"),
+		"created":     record.GetDateTime("created"),
+		"updated":     record.GetDateTime("updated"),
+		// The durable last-visit clock (migration 1767300000), which is
+		// what the members table renders once a member is no longer in the
+		// live presence map.
+		//
+		// The `created` fallback is the never-empty guarantee, enforced at
+		// the boundary where the value is actually consumed rather than
+		// trusted to every writer. Registration is provably real activity,
+		// so falling back to it can only understate how recently someone
+		// was here — it can never invent a visit. Emitting a zero time
+		// instead would push the problem onto every client and this column
+		// is read by exactly one of them.
+		"last_seen": lastSeenOrCreated(record),
+		// Denormalised counters. Emitted under the legacy names the
+		// frontend already reads (MembersPage sorts on `post_count` and
+		// `reputation`), so no consumer has to learn a third vocabulary.
+		"post_count":   record.GetInt("posts_count"),
+		"topics_count": record.GetInt("topics_count"),
+		"reputation":   record.GetInt("reputation"),
+	}
 }
 
 // lastSeenOrCreated returns the account's last-visit timestamp, falling back to

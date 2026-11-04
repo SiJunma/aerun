@@ -220,7 +220,7 @@ export const useTopicPosts = ({
                 post_count: postCount,
                 reputation: p.author?.reputation ?? next[p.author?.user_id]?.reputation ?? 0,
                 status_line: p.author_status_line !== undefined ? p.author_status_line : (next[p.author?.user_id]?.status_line ?? ''),
-                role_id: p.author_role_id || next[p.author?.user_id]?.role_id || 'player',
+                role: p.author_role_id || next[p.author?.user_id]?.role || 'player',
                 settings: sig
                   ? { ...(next[p.author?.user_id]?.settings || {}), signature: sig }
                   : (next[p.author?.user_id]?.settings || { signature: '' })

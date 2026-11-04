@@ -126,7 +126,9 @@ export const useTopicPostAuth = ({
     }
     return (
       <ForumRoleBadge
-        roleId={authorData?.role_id || post.author?.role_id}
+        // the server AuthorRef DTO carries no role; the badge resolves from the
+        // authorStats row (or the viewer's own profile) only.
+        roleId={authorData?.role}
         status={authorData?.status}
         userEmail={authorData?.email}
         isDeleted={authorData === null || post.author?.deleted === true || post.author?.deleted === true}

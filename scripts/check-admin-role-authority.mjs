@@ -80,16 +80,16 @@ check(
     'the snapshot carries no role, so the answer came from the founder alias and survived a handover'
 );
 check(
-  /profile\?\.role_id|users\.find\(/.test(page),
+  /profile\?\.role|users\.find\(/.test(page),
   'src/pages/AdminPage.jsx: the panel must read the viewer\'s role from the server ' +
-    '(profile.role_id or the staff list), not from the auth snapshot'
+    '(profile.role or the staff list), not from the auth snapshot'
 );
 check(
   /const isSelfRoot = myRoleId === CHIEF_ADMIN_ID/.test(page),
   'src/pages/AdminPage.jsx: the handover button must be gated on the viewer\'s actual role id'
 );
 check(
-  /isChiefAdmin\(u\.email, u\.role_id\)|u\.role_id === CHIEF_ADMIN_ID/.test(page),
+  /isChiefAdmin\(u\.email, u\.role\)|u\.role === CHIEF_ADMIN_ID/.test(page),
   'src/pages/AdminPage.jsx: the protected row must be recognised by the role column'
 );
 
@@ -101,8 +101,8 @@ check(
     'stand in for a role that is not known'
 );
 check(
-  /export const resolveUserRoleId = \(userEmail, roleId\) => \{[\s\S]{0,2000}?if \(roleId\) return roleId;/.test(perms),
-  'src/constants/permissions.js: resolveUserRoleId must answer by the role first — otherwise the ' +
+  /export const resolveUserRole = \(userEmail, roleId\) => \{[\s\S]{0,2000}?if \(roleId\) return roleId;/.test(perms),
+  'src/constants/permissions.js: resolveUserRole must answer by the role first — otherwise the ' +
     'founder alias keeps rendering a Chief Admin badge for the account that handed the role over'
 );
 
@@ -151,7 +151,7 @@ check(
 // the role list must exclude the ones the viewer may not assign.
 check(
   /const canChangeRoleOf = \(targetRoleId\)/.test(page) &&
-    /canChangeRoleOf\(u\.role_id\)/.test(page),
+    /canChangeRoleOf\(u\.role\)/.test(page),
   'src/pages/AdminPage.jsx: the role editor must be gated by canChangeRoleOf — the server refuses ' +
     'an admin\'s own role and an equal-ranked one'
 );
@@ -167,12 +167,12 @@ check(
     'never assigned, and only the chief admin may appoint an administrator'
 );
 check(
-  /if \(!assignableRoles\.some\(\(r\) => r\.id === userForm\.role_id\)\)/.test(page),
+  /if \(!assignableRoles\.some\(\(r\) => r\.id === userForm\.role\)\)/.test(page),
   'src/pages/AdminPage.jsx: the save path must refuse a role the viewer may not assign — the guard ' +
     'belongs where the request is made, not only where the list is rendered'
 );
 check(
-  /if \(!canChangeRoleOf\(editingUser\.role_id\)\)/.test(page),
+  /if \(!canChangeRoleOf\(editingUser\.role\)\)/.test(page),
   'src/pages/AdminPage.jsx: the save path must re-check the TARGET as well — the authority to ' +
     'edit is a property of both accounts, and either can change while the dialog is open'
 );

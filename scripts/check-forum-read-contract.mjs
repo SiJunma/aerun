@@ -100,8 +100,14 @@ forbid(
 );
 assert.match(
   stripComments(adminPage),
-  /subscribeToAllUsers\(setUsers, \{ staff: true \}\)/,
+  /fetchAdminUsers\(/,
   'AdminPage must request the staff read explicitly — status and verified are served by /admin/users and by no other route, so a silent default would empty those columns'
+);
+forbid(
+  stripComments(adminPage),
+  'AdminPage.jsx',
+  /subscribeToAllUsers/,
+  'AdminPage reads the paged staff list through fetchAdminUsers (/admin/users); the public walk would reintroduce a silent fallback to the member DTO, which serves neither status nor verified'
 );
 
 // ── The list routes answer `items` ───────────────────────────────────────────

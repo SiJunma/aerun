@@ -7,12 +7,15 @@
 //   3. the posts and reputation tabs rendered nothing.
 //
 // All three were one root cause plus one sibling bug. The pages read the
-// Firestore vocabulary (`role_id`, `post_count`, `uid`) while PocketBase spells
-// the same facts `role`, `posts_count` and `id`, and two independent mappers read
-// different fields: subscribeToUser spread the RAW record (so every `role_id`
-// read was undefined, and resolveUserRoleId(undefined) falls back to 'player'),
-// while AuthProvider built the profile from a hand-written whitelist that listed
-// neither the profile block nor the real counter names. Separately, both list
+// Firestore vocabulary (`post_count`, `uid`) while PocketBase spells the same
+// facts `posts_count` and `id`, and two independent mappers read different
+// fields: subscribeToUser spread the RAW record (so every `uid` read was
+// undefined and resolveUserRole(undefined) falls back to 'player'), while
+// AuthProvider built the profile from a hand-written whitelist that listed
+// neither the profile block nor the real counter names. The role axis no longer
+// has a legacy alias at all: user rows speak the server column `role` end to
+// end, and a reader asking for `role_id` on a user row reads a field that does
+// not exist. Separately, both list
 // APIs return `total` and the page read `totalCount`, i.e. undefined.
 //
 // Run: node scripts/check-user-profile-normalization.mjs
@@ -39,7 +42,7 @@ const normalizeUserProfile = new Function(
 );
 {
   // A migrated row as PocketBase actually returns it: the join key is `role`,
-  // the counter is `posts_count`, and there is no `uid` or `role_id` at all.
+  // the counter is `posts_count`, and there is no `uid` alias at all.
   const row = {
     id: 'u1',
     nickname: 'Arin',
@@ -61,8 +64,9 @@ const normalizeUserProfile = new Function(
   const p = normalizeUserProfile(row);
 
   // 1. The custom role must survive, not collapse to the 'player' fallback.
-  assert.equal(p.role_id, 'veteran', 'role_id must come from the users.role column');
-  assert.notEqual(p.role_id, 'player', 'a custom role must not read back as Player');
+  assert.equal(p.role, 'veteran', 'role must come from the users.role column');
+  assert.notEqual(p.role, 'player', 'a custom role must not read back as Player');
+  assert.ok(!('role_id' in p), 'the legacy role_id alias must be gone from the row');
 
   // The counter is posts_count on this backend.
   assert.equal(p.post_count, 1201, 'post_count must come from posts_count');
@@ -79,8 +83,8 @@ const normalizeUserProfile = new Function(
 
 // A row written before the rename still renders (the ?? chains fall back).
 {
-  const p = normalizeUserProfile({ id: 'u2', role_id: 'moderator', post_count: 7 });
-  assert.equal(p.role_id, 'moderator', 'a legacy role_id must still resolve');
+  const p = normalizeUserProfile({ id: 'u2', role: 'moderator', post_count: 7 });
+  assert.equal(p.role, 'moderator', 'the server role column must resolve');
   assert.equal(p.post_count, 7, 'a legacy post_count must still resolve');
 }
 
@@ -265,7 +269,7 @@ const normalizeUserProfile = new Function(
   assert.match(badge, /effectiveStatus === 'banned'/, 'the banned badge must key off status');
   assert.match(badge, /effectiveStatus === 'pending'/, 'the pending badge must key off status');
   assert.ok(
-    !/role_id === '(pending|banned)'/.test(page),
+    !/role_id?\s*===\s*'(pending|banned)'/.test(page),
     'the page must not test banned/pending against the role column'
   );
 }
@@ -275,6 +279,7 @@ console.log('OK  user profile: role, counters, bio and totals all normalise');
   const p = normalizeUserProfile({ id: 'u3' });
   assert.equal(p.post_count, 0);
   assert.equal(p.reputation, 0);
-  assert.equal(p.role_id, 'player', 'an unset role falls back to player');
+  assert.equal(p.role, 'player', 'an unset role falls back to player');
+  assert.ok(!('role_id' in p), 'an unset role must not resurrect the legacy alias');
   assert.deepEqual(p.settings, {}, 'settings must default to an object, not undefined');
 }

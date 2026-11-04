@@ -36,7 +36,7 @@ export const TopicReplyComposer = React.forwardRef(({
 
   // Spectator mode / no permission
   if (!hasPermission(PERMISSIONS.POST_REPLY, { category })) {
-    if (user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned') {
+    if (user && profile?.role !== 'pending' && profile?.role !== 'banned') {
       return (
         <div className="mt-5 p-4 text-center text-muted border rounded" ref={ref}>
           <span className="opacity-75">

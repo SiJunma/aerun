@@ -7,10 +7,21 @@ import { ESLint } from 'eslint';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const file = fileURLToPath(new URL('../src/pages/TopicPage.jsx', import.meta.url));
 const source = readFileSync(file, 'utf8');
+// The TopicPage monolith was split into hooks: the jump/scroll controller (which
+// owns navigateToCreatedPost) lives in useTopicJumpScroll, the posts load effect
+// lives in useTopicPosts, and the post card renders from TopicPostCard. The gate
+// follows the logic, not the old file layout.
+const jumpHook = fileURLToPath(new URL('../src/hooks/topic/useTopicJumpScroll.js', import.meta.url));
+const jumpSource = readFileSync(jumpHook, 'utf8');
+const postsHook = fileURLToPath(new URL('../src/hooks/topic/useTopicPosts.js', import.meta.url));
+const postsHookSource = readFileSync(postsHook, 'utf8');
+const postCard = fileURLToPath(new URL('../src/components/topic/TopicPostCard.jsx', import.meta.url));
+const postCardSource = readFileSync(postCard, 'utf8');
 
-// Exercise the actual helper without importing the browser/Firebase component.
-const match = source.match(/const navigateToCreatedPost = \(tempId, postId\) => \{([\s\S]*?)\n  \};/);
-assert.ok(match, 'Post navigation helper must exist');
+// Exercise the actual helper without importing the browser component. The hook
+// wraps it in useCallback, so the extraction matches the wrapped form.
+const match = jumpSource.match(/const navigateToCreatedPost = useCallback\(\(tempId, postId\) => \{([\s\S]*?)\n  \}, \[/);
+assert.ok(match, 'Post navigation helper must exist in src/hooks/topic/useTopicJumpScroll.js');
 const helperBody = match[1];
 const run = new Function(
   'locationRef', 'isMountedRef', 'pendingCreatedPostIdRef', 'setSearchParams', 'tempId', 'postId',
@@ -54,59 +65,62 @@ assert.equal(staleRef.current, 'real_1', 'Stale completion must not overwrite th
 // The highlight flow reads the remembered ID and never routes through the URL.
 assert.match(helperBody, /pendingCreatedPostIdRef\.current = postId/, 'Remember the created post in component state');
 assert.doesNotMatch(helperBody, /params\.set\(/, 'No URL parameter mutations for created posts');
-assert.match(source, /Priority 0: scroll to a post created by this user without touching the URL/);
-assert.match(source, /targetId = `post-\$\{pendingPostId\}`/);
+// Priority 0 lives in the hook now: a post this session just created outranks
+// every ?post= / #post- / goLast target in the scroll controller's precedence.
+const jumpPriority = jumpSource.indexOf('if (pendingCreatedPostIdRef.current) {');
+const postParamBranch = jumpSource.indexOf("} else if (postParam) {");
+assert.ok(jumpPriority !== -1 && postParamBranch !== -1 && jumpPriority < postParamBranch,
+  'A created post must outrank ?post= in the scroll target precedence');
+assert.match(jumpSource, /targetId = `post-\$\{pendingCreatedPostIdRef\.current\}`/);
 assert.doesNotMatch(source, /post:\s*tempId/, 'Temporary IDs must not be used as URL post targets');
-assert.equal((source.match(/navigateToCreatedPost\(tempId, newPostId\)/g) || []).length, 2,
+assert.equal((source.match(/navigateToCreatedPost\(\w+, newPostId\)/g) || []).length, 2,
   'Reply and draft publication must both complete navigation using the server ID');
 assert.equal((source.match(/state: \{ pendingPostId: tempId \}/g) || []).length, 2);
 console.log('PASS: focused post navigation regression checks');
 
-// In-topic paste: when the target post is already on the loaded page, the load
-// effect must skip the clear+refetch (scroll is handled by the navigation effect).
-const loadEffectStart = source.indexOf('// Load posts whenever topic id or page changes');
-const loadEffectEnd = source.indexOf('const lastMarkedOffsetRef', loadEffectStart);
-const loadEffect = source.slice(loadEffectStart, loadEffectEnd);
-assert.match(loadEffect, /jumpTargetId = searchParams\.get\('post'\) \|\| pendingCreatedPostIdRef\.current/);
-const skipCondition = loadEffect.match(/if \((jumpTargetId && [^\n]+?)\) \{/);
-assert.ok(skipCondition, 'Skip condition must exist in the load effect');
-const shouldSkip = new Function(
-  'jumpTargetId', 'loadedPageRef', 'currentPage', 'postsRef',
-  `return !!(${skipCondition[1]});`
-);
-assert.equal(shouldSkip('p9', { current: 2 }, 2, { current: [{ id: 'p9' }] }), true, 'Post on the loaded page → skip refetch');
-assert.equal(shouldSkip('p9', { current: 2 }, 3, { current: [{ id: 'p9' }] }), false, 'Another page → normal load');
-assert.equal(shouldSkip('pX', { current: 2 }, 2, { current: [{ id: 'p9' }] }), false, 'Post not on the page → locate path');
-assert.equal(shouldSkip(null, { current: 2 }, 2, { current: [{ id: 'p9' }] }), false, 'No jump target → normal load');
-assert.ok(
-  loadEffect.indexOf('postsRef.current.some(p => p.id === jumpTargetId)') <
-  loadEffect.indexOf('(hasPostJump || hasHashJump) && !hasExplicitPage'),
-  'Skip must run before posts are cleared for page resolution'
-);
-assert.match(source, /loadedPageRef\.current = activePage/, 'loadPosts must record the page it rendered');
-assert.equal((source.match(/locatePost\(/g) || []).length, 2, 'locatePost stays reserved for posts absent from the loaded list');
+// ── The ?post= deep link resolves its page SERVER-SIDE now ──────────────────
+// The old flow walked pages from the browser (locatePost + a client-side
+// membership skip over the loaded list). The refactor moved resolution into the
+// unified posts endpoint: loadPosts sends targetPostId, the server answers with
+// resolvedPage / targetFound / movedToTopicId in ONE request.
 
-// Minimal reproduction of the in-topic scenario: a valid ?post=ID arrives while
-// posts are already rendered on the loaded page. The navigation effect must set
-// a local scroll target for it WITHOUT calling locatePost, and the load effect
-// skip (asserted above) must prevent the clear+refetch.
-const navEffectStart = source.indexOf('Unified Navigation & Scroll Controller');
-const navEffectEnd = source.indexOf('}, [posts, topic, searchParams', navEffectStart);
-assert.ok(navEffectStart !== -1 && navEffectEnd !== -1, 'Navigation effect bounds must be found');
-const navEffect = source.slice(navEffectStart, navEffectEnd);
-const priority1 = navEffect.slice(navEffect.indexOf("const queryPostId = searchParams.get('post');"));
-const foundBranch = priority1.slice(
-  priority1.indexOf('if (postIndex !== -1) {'),
-  priority1.indexOf('} else {')
-);
-assert.match(foundBranch, /targetId = `post-\$\{queryPostId\}`/, 'Post found on the page → local scroll target is set');
-assert.match(foundBranch, /scrollBlock = 'start'/, 'Found post is scrolled into view (at the start)');
-assert.doesNotMatch(foundBranch, /locatePost/, 'Post found on the page → no locator call');
-assert.equal((priority1.match(/locatePost\(queryPostId/g) || []).length, 1,
-  'Locator runs exactly once and only in the not-found branch');
-assert.equal(shouldSkip('p9', { current: 2 }, 2, { current: [{ id: 'p9' }] }), true,
-  'Same scenario through the load effect: no clear+refetch when the post is on the page');
-console.log('PASS: ?post=ID on a loaded page → scroll target set, no clear+refetch, no locator');
+// The load path must carry the target post id to the server.
+assert.match(postsHookSource, /fetchSecuredPosts\(topicId, pageToFetch, itemsPerPage, lastVisitMs, targetPostId\)/,
+  'loadPosts must hand targetPostId to the unified posts endpoint for server-side page resolution');
+
+// A pending target starts at page 1 and lets the server tell the real page.
+assert.match(postsHookSource, /if \(queryPostId\) \{\s*\n\s*targetPostId = queryPostId;/,
+  'a ?post= target must be resolved through the endpoint, not by client-side walking');
+
+// The page-resolution write must arm the skip guard, and the skip must disarm
+// immediately when the resolved page is already the rendered one — otherwise a
+// skip left armed silently eats the next unrelated (live) fetch.
+assert.match(postsHookSource, /skipNextLoadForPageRef\.current = resolvedPage;/,
+  'the resolved page must arm the duplicate-fetch skip');
+assert.match(postsHookSource, /if \(resolvedPage === currentPage\) \{\s*\n\s*skipNextLoadForPageRef\.current = null;\s*\n\s*\}/,
+  'a skip for the page already rendered must disarm immediately');
+assert.match(postsHookSource, /if \(skipNextLoadForPageRef\.current === pageToFetch\) \{\s*\n\s*skipNextLoadForPageRef\.current = null;\s*\n\s*return \[\];/,
+  'an armed skip must consume itself and skip the duplicate fetch');
+
+// The rendered page is recorded, so the rest of the page can reason about it.
+assert.match(postsHookSource, /loadedPageRef\.current = activePage/, 'loadPosts must record the page it rendered');
+
+// locatePost is retired from the component path: nothing may walk pages from
+// the browser when the endpoint resolves the page in one query.
+assert.equal((source.match(/locatePost\(/g) || []).length, 0,
+  'TopicPage must not call locatePost — page resolution is server-side');
+assert.equal((postsHookSource.match(/locatePost\(/g) || []).length, 0,
+  'useTopicPosts must not call locatePost — page resolution is server-side');
+
+// ── The scroll controller targets ?post= / #post- / goLast locally ──────────
+// A valid ?post=ID that resolves to the already-rendered page must set a local
+// scroll target WITHOUT any locator: the page was resolved before the fetch,
+// and the skip guard above prevented the clear+refetch.
+assert.match(jumpSource, /targetId = `post-\$\{postParam\}`/,
+  'a ?post= target resolves to a local scroll target');
+assert.doesNotMatch(jumpSource, /locatePost/,
+  'the scroll controller must never call the locator');
+console.log('PASS: ?post=ID resolves its page server-side; scroll targets stay local');
 console.log('PASS: in-topic post links scroll locally without a redundant locate');
 
 // locatePost's return contract (src/api/forum.js): `{ topicId, page, postId }`
@@ -129,11 +143,13 @@ console.log('PASS: locatePost result contract (object|null) matches how TopicPag
 
 
 // Sending an optimistic post must not show any in-flight visualization on the
-// post card: the header strip renders a normal timestamp in every state.
-assert.doesNotMatch(source, /Отправка\.\.\.|Sending\.\.\./, 'No "Sending..." label on the post card');
-const headerStripStart = source.indexOf('post-header-strip');
-const headerStripEnd = source.indexOf('post-number-indicator', headerStripStart);
-const headerStrip = source.slice(headerStripStart, headerStripEnd);
+// post card: the header strip renders a normal timestamp in every state. The
+// card lives in TopicPostCard since the TopicPage split.
+assert.doesNotMatch(postCardSource, /Отправка\.\.\.|Sending\.\.\./, 'No "Sending..." label on the post card');
+const headerStripStart = postCardSource.indexOf('post-header-strip');
+const headerStripEnd = postCardSource.indexOf('post-number-indicator', headerStripStart);
+assert.ok(headerStripStart !== -1 && headerStripEnd !== -1, 'Post card header strip bounds must be found');
+const headerStrip = postCardSource.slice(headerStripStart, headerStripEnd);
 assert.match(headerStrip, /Timestamp date=\{post\.created_at\}/, 'Post timestamp renders normally');
 assert.doesNotMatch(headerStrip, /spinner-border/, 'No spinner in the post header strip');
 assert.doesNotMatch(headerStrip, /role="status"/, 'No loading indicator in the post header strip');

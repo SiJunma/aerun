@@ -9,7 +9,7 @@ import { subscribeToRtdbStatuses } from '../api/rtdb-presence';
 import { resolveAvatarUrl } from '../api/avatars';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import ForumRoleBadge from '../components/common/ForumRoleBadge';
-import { getRoleVisuals, resolveUserRoleId } from '../constants/permissions';
+import { getRoleVisuals, resolveUserRole } from '../constants/permissions';
 import Timestamp from '../components/common/Timestamp';
 import { toMillis as sharedToMillis } from '../utils/dates';
 
@@ -190,7 +190,7 @@ const MembersPage = () => {
   // that sorting by role and reading the column can never disagree.
   //
   // It deliberately goes through the same two resolvers ForumRoleBadge uses --
-  // resolveUserRoleId for the root alias, getRoleVisuals for the registry row
+  // resolveUserRole for the root alias, getRoleVisuals for the registry row
   // and its Player fallback. Calling them here rather than reimplementing the
   // lookup is the point: the previous hardcoded ROLE_PRIORITY table ranked
   // roles by permission weight instead of by the label on screen, and it only
@@ -199,9 +199,9 @@ const MembersPage = () => {
   // 60 -- all of them tied with player, with their real order then decided by
   // the nickname tiebreak.
   const roleLabel = useCallback((u) => {
-    const pseudo = LEGACY_PSEUDO_ROLE_LABELS[u.role_id];
+    const pseudo = LEGACY_PSEUDO_ROLE_LABELS[u.role];
     if (pseudo) return pseudo;
-    return getRoleVisuals(resolveUserRoleId(u.email, u.role_id), roles).name;
+    return getRoleVisuals(resolveUserRole(u.email, u.role), roles).name;
   }, [roles]);
 
   const sortedAndFilteredUsers = useMemo(() => {
@@ -212,7 +212,7 @@ const MembersPage = () => {
     result.sort((a, b) => {
       let aVal, bVal;
 
-      if (sortField === 'role_id') {
+      if (sortField === 'role') {
         // Alphabetical by the rendered label, and it has to be its own compare:
         // the generic branch below orders with < / >, which is a code-unit
         // comparison. That sorts by UTF-16 unit, so "NorthbayСitizen" (Cyrillic
@@ -270,7 +270,7 @@ const MembersPage = () => {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      // Default to desc for count/date fields, asc for text. role_id is a text
+      // Default to desc for count/date fields, asc for text. role is a text
       // sort now (alphabetical by the rendered label), so it belongs with the
       // ascending group: opening it on Z-A would put the rarest label first for
       // no reason.
@@ -284,7 +284,7 @@ const MembersPage = () => {
 
   const getRoleBadge = (u) => (
     <ForumRoleBadge
-      roleId={u.role_id}
+      roleId={u.role}
       userEmail={u.email}
     />
   );
@@ -356,8 +356,8 @@ const MembersPage = () => {
                   {/* Role is alphabetical by the label shown on the badge, so the
                       options are named A-Z / Z-A. They used to read "Ранг"
                       (Rank), which described the old permission-weight order. */}
-                  <option value="role_id-asc">{lang === 'ru' ? 'Роль (А-Я)' : 'Role (A-Z)'}</option>
-                  <option value="role_id-desc">{lang === 'ru' ? 'Роль (Я-А)' : 'Role (Z-A)'}</option>
+                  <option value="role-asc">{lang === 'ru' ? 'Роль (А-Я)' : 'Role (A-Z)'}</option>
+                  <option value="role-desc">{lang === 'ru' ? 'Роль (Я-А)' : 'Role (Z-A)'}</option>
                   <option value="post_count-desc">{lang === 'ru' ? 'Больше постов' : 'Most Posts'}</option>
                   <option value="post_count-asc">{lang === 'ru' ? 'Меньше постов' : 'Fewest Posts'}</option>
                   <option value="reputation-desc">{lang === 'ru' ? 'Выше репутация' : 'Highest Rep'}</option>
@@ -396,7 +396,7 @@ const MembersPage = () => {
                 </div>
               </th>
               <th className="py-3" style={{ width: '15%', border: 'none' }}>
-                <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('role_id')}>
+                <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('role')}>
                   {lang === 'ru' ? 'Роль' : 'Role'}
                   <ArrowUpDown size={12} />
                 </div>

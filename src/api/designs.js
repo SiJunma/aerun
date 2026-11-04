@@ -54,7 +54,7 @@ const _designSubscribers = new Set();
 
 const notifySubscribers = async () => {
   try {
-    const list = await getDesigns();
+    const list = await getDesigns(true);
     _cachedDesigns = list;
     _designSubscribers.forEach(cb => {
       try { cb(list); } catch (e) { console.error(e); }
@@ -82,7 +82,13 @@ export const subscribeToDesigns = (callback) => {
   };
 };
 
-export const getDesigns = async () => {
+export const getDesigns = async (force = false) => {
+  // The cache used to be write-only: every fetch stored into _cachedDesigns and
+  // nothing ever read it back, so a remount of DesignProvider paid a full
+  // refetch instead of a cache hit. Mutations bypass the cache on purpose —
+  // notifySubscribers must answer with the SERVER's state after a write, not
+  // with the pre-write snapshot.
+  if (!force && _cachedDesigns) return _cachedDesigns;
   try {
     const res = await sendApi('/api/aerun/designs');
     const items = res?.items || [];

@@ -592,6 +592,10 @@ export const translations = {
         error_reject: "Error rejecting user",
         error_delete: "Error deleting user",
         error_approve: "Error approving user",
+        // Server pagination footer + load failure (the page read failed).
+        total: "Total: {count}",
+        empty: "No accounts match this search.",
+        error_load: "Failed to load the user list.",
         error_role_update: "Error updating user role",
         // The panel never offers a role change the server would refuse; this
         // is what it says if one is attempted anyway.
@@ -1478,6 +1482,10 @@ export const translations = {
         error_reject: "Ошибка при отклонении пользователя",
         error_delete: "Ошибка при удалении пользователя",
         error_approve: "Ошибка при одобрении пользователя",
+        // Серверная пагинация: подвал таблицы и ошибка загрузки страницы.
+        total: "Всего: {count}",
+        empty: "По этому запросу аккаунтов не найдено.",
+        error_load: "Не удалось загрузить список пользователей.",
         error_role_update: "Ошибка при обновлении роли",
         // Панель не предлагает смену роли, которую сервер отвергнет; это сообщение —
         // на случай, если попытка всё же произошла.

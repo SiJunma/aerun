@@ -332,8 +332,13 @@ test('a hidden tab is not polled, and is read once on return', async () => {
       // otherwise the handler reads 'hidden' and correctly does nothing.
       doc.visibilityState = 'visible';
       doc.emit();
-      await tick();
+      // The catch-up read is SYNCHRONOUS: the visibility handler calls read()
+      // and the fetch stub increments before its first await, so the count is
+      // final the moment emit() returns. Asserting here is what makes the test
+      // deterministic — asserting after `await tick()` raced the 5ms poll
+      // interval, and under load the interval won, counting a third read.
       assert.equal(calls, 2, 'returning to the tab re-reads once');
+      await tick();
     } finally {
       stop();
     }

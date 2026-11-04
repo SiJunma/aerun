@@ -183,7 +183,7 @@ export default function TopicPage() {
         ? selChar.avatar_url
         : (profile?.avatar_url || ''),
       character_id: charId || null,
-      role_id: profile?.role_id || 'spectator',
+      role: profile?.role || 'spectator',
       status_line: selChar ? (selChar.status_line || '') : (profile?.status_line || ''),
       signature: selChar ? (selChar.signature || '') : (profile?.settings?.signature || ''),
     };
@@ -196,7 +196,7 @@ export default function TopicPage() {
     const char = characters.find((c) => c.id === maskId);
     const authorName = char ? char.name : (profile?.nickname || user?.displayName || 'Guest');
     const authorAvatar = char ? char.avatar_url : (profile?.avatar_url || '');
-    const roleId = profile?.role_id || (user ? 'player' : 'guest');
+    const roleId = profile?.role || (user ? 'player' : 'guest');
     const authorUid = user?.uid || draft.author_id || null;
 
     return {
@@ -216,7 +216,7 @@ export default function TopicPage() {
         display_name: authorName,
         avatar_url: authorAvatar,
         character_id: char ? char.id : null,
-        role_id: roleId,
+        role: roleId,
       },
     };
   };
@@ -601,7 +601,7 @@ export default function TopicPage() {
       author_name: selectedChar ? selectedChar.name : (profile?.nickname || guestNickname.trim() || user?.displayName || 'Guest'),
       author_avatar: selectedChar ? selectedChar.avatar_url : (profile?.avatar_url || ''),
       author_status_line: selectedChar ? (selectedChar.status_line || '') : (profile?.status_line || ''),
-      author_role_id: profile?.role_id || 'spectator',
+      author_role_id: profile?.role || 'spectator',
       is_character: !!selectedChar,
       author_character_id: selectedCharacterId || null,
       author_signature: selectedChar ? (selectedChar.signature || '') : (profile?.settings?.signature || ''),
@@ -735,7 +735,7 @@ export default function TopicPage() {
         [user.uid]: {
           ...(prev[user.uid] || {}),
           ...ownNewStats,
-          role_id: prev[user.uid]?.role_id || profile?.role_id || 'player',
+          role: prev[user.uid]?.role || profile?.role || 'player',
           status_line: prev[user.uid]?.status_line ?? profile?.status_line ?? '',
           settings: prev[user.uid]?.settings || (profile?.settings ? { ...profile.settings } : { signature: '' }),
         },
@@ -765,7 +765,7 @@ export default function TopicPage() {
         author_id: user?.uid || null,
         author_name: publishedDraft?.author_name || profile?.nickname || 'User',
         author_avatar: publishedDraft?.author_avatar || profile?.avatar_url || '',
-        author_role_id: profile?.role_id || 'player',
+        author_role_id: profile?.role || 'player',
         is_character: !!publishedDraft?.is_character,
         author_character_id: publishedDraft?.author_character_id || null,
         created_at: new Date().toISOString(),
@@ -837,7 +837,7 @@ export default function TopicPage() {
           author_id: pubResult?.author?.user_id || user?.uid || null,
           author_name: pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
           author_avatar: pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
-          author_role_id: pubResult?.author_role_id || profile?.role_id || 'player',
+          author_role_id: pubResult?.author_role_id || profile?.role || 'player',
           is_character: pubResult?.is_character ?? !!publishedDraft?.is_character,
           author_character_id: pubResult?.author_character_id || publishedDraft?.author_character_id || null,
           created_at: new Date().toISOString(),
@@ -863,7 +863,7 @@ export default function TopicPage() {
               display_name: serverAuthor.display_name || pubResult?.author_name || publishedDraft?.author_name || profile?.nickname || 'User',
               avatar_url: serverAuthor.avatar_url || pubResult?.author_avatar || publishedDraft?.author_avatar || profile?.avatar_url || '',
               character_id: serverAuthor.character_id || pubResult?.author_character_id || null,
-              role_id: serverAuthor.role_id || profile?.role_id || 'player',
+              role: serverAuthor.role || profile?.role || 'player',
             };
             return prev.map((p) => {
               if (p.id === tempId) {
@@ -977,7 +977,7 @@ export default function TopicPage() {
         [user.uid]: {
           ...(prev[user.uid] || {}),
           ...ownNewStats,
-          role_id: prev[user.uid]?.role_id || profile?.role_id || 'player',
+          role: prev[user.uid]?.role || profile?.role || 'player',
           status_line: prev[user.uid]?.status_line ?? profile?.status_line ?? '',
           settings: prev[user.uid]?.settings || (profile?.settings ? { ...profile.settings } : { signature: '' }),
         },
@@ -1019,7 +1019,7 @@ export default function TopicPage() {
         author_id: user?.uid || null,
         author_name: optimisticPost.author_name || profile?.nickname || guestNickname || 'User',
         author_avatar: optimisticPost.author_avatar || profile?.avatar_url || '',
-        author_role_id: profile?.role_id || 'player',
+        author_role_id: profile?.role || 'player',
         is_character: !!optimisticPost.is_character,
         author_character_id: optimisticPost.author_character_id || null,
         created_at: new Date().toISOString(),
@@ -1093,7 +1093,7 @@ export default function TopicPage() {
                 author_id: user?.uid || null,
                 author_name: optimisticPost.author_name || profile?.nickname || savedGuestNickname || 'User',
                 author_avatar: optimisticPost.author_avatar || profile?.avatar_url || '',
-                author_role_id: profile?.role_id || 'player',
+                author_role_id: profile?.role || 'player',
                 is_character: !!optimisticPost.is_character,
                 author_character_id: optimisticPost.author_character_id || null,
                 created_at: new Date().toISOString(),
@@ -1448,7 +1448,7 @@ export default function TopicPage() {
 
   useEffect(() => {
     if (!user?.uid || !id || posts.length === 0) return;
-    if (profile?.role_id === 'spectator') return;
+    if (profile?.role === 'spectator') return;
     const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + (posts.length - 1);
     if (lastMarkedOffsetRef.current === lastMessageIndex) return;
     lastMarkedOffsetRef.current = lastMessageIndex;
@@ -1459,7 +1459,7 @@ export default function TopicPage() {
     const lastRealPost = [...posts].reverse().find((p) => !p._isOptimistic && p.id);
     if (!lastRealPost) return;
     markTopicRead(id, lastMessageIndex, lastRealPost.id);
-  }, [user?.uid, id, posts, currentPage, ITEMS_PER_PAGE, markTopicRead, profile?.role_id]);
+  }, [user?.uid, id, posts, currentPage, ITEMS_PER_PAGE, markTopicRead, profile?.role]);
 
   // 15b. Pin the reply composer under the typing caret while live updates
   // insert or remove posts above it.
@@ -1878,7 +1878,7 @@ export default function TopicPage() {
         currentPage={currentPage}
         totalPages={paginationTotalPages}
         onPageChange={onPageChange}
-        showSubscription={!!(user && profile?.role_id !== 'pending' && profile?.role_id !== 'banned' && profile?.role_id !== 'spectator')}
+        showSubscription={!!(user && profile?.role !== 'pending' && profile?.role !== 'banned' && profile?.role !== 'spectator')}
         isSubscribed={isSubscribed}
         togglingSub={togglingSub}
         onToggleSubscription={handleToggleSubscription}

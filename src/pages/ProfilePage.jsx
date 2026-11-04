@@ -92,7 +92,7 @@ const ProfilePage = () => {
 
   // `pending`, `banned` and `deleted` are ACCOUNT STATUSES, not roles
   // (internal/auth), so they are read from the status column; only `spectator`
-  // is a role. Testing them against role_id could never match, which left a
+  // is a role. Testing them against role could never match, which left a
   // banned member with a full profile — the messaging button and the
   // reputation controls included.
   const isDeletedProfile = viewedProfile?.deleted === true;
@@ -109,7 +109,7 @@ const ProfilePage = () => {
   // with them).
   const isPendingProfile = viewedProfile?.status === 'pending';
   const isLimitedProfile = viewedProfile?.status === 'banned'
-    || viewedProfile?.role_id === 'spectator'
+    || viewedProfile?.role === 'spectator'
     || isDeletedProfile;
   const isOwn = profile?.uid === uid;
   const canEditNickname = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_NICKNAME) : hasPermission(PERMISSIONS.EDIT_OTHERS_NICKNAMES);
@@ -669,7 +669,7 @@ const ProfilePage = () => {
   const handleSaveAccount = handleSaveProfileTab;
 
   const handleRepVote = async () => {
-    if (!profile || profile.uid === uid || profile.role_id === 'spectator') return;
+    if (!profile || profile.uid === uid || profile.role === 'spectator') return;
 
     // Prevention: Block URLs in reputation comments
     const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
@@ -862,7 +862,7 @@ const ProfilePage = () => {
                               side keeps its own rule — a pending viewer holds
                               no use_reputation, so it must not offer the
                               buttons at all. */}
-                          {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role_id !== 'spectator' && viewedProfile?.status !== 'banned' && (
+                          {profile && profile.status !== 'pending' && profile.uid !== uid && profile.role !== 'spectator' && viewedProfile?.status !== 'banned' && (
                             <div className="d-flex gap-1 align-items-center">
                               {!myVote ? (
                                 <>
@@ -892,7 +892,7 @@ const ProfilePage = () => {
                       <Skeleton width="80px" height="1.4rem" className="mx-lg-auto" />
                     ) : (
                       <ForumRoleBadge
-                        roleId={viewedProfile?.role_id}
+                        roleId={viewedProfile?.role}
                         status={viewedProfile?.status}
                         userEmail={viewedProfile?.email}
                         isDeleted={viewedProfile === null}
@@ -1677,7 +1677,7 @@ const ProfilePage = () => {
                             allowGifs={settings?.allowGifAvatars !== false}
                             storagePath={`users/${uid}/avatar`}
                             size={100}
-                            canUpload={profile?.role_id !== 'pending'}
+                            canUpload={profile?.role !== 'pending'}
                             disabled={false}
                           />
                         </Form.Group>
@@ -1908,7 +1908,7 @@ const ProfilePage = () => {
                         </Col>
                       </Row>
 
-                      {profile?.role_id !== 'spectator' && (
+                      {profile?.role !== 'spectator' && (
                         <>
                           <hr className="my-4" />
                           <h6 className="mb-3 text-primary uppercase small fw-bold">Reputation Privacy</h6>

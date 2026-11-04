@@ -15,18 +15,17 @@ import { sharedPoll } from './shared-poll';
 // ── User profile normalisation ──────────────────────────────────────────────
 
 /**
- * normalizeUserProfile maps a PocketBase `users` record onto the field names the
- * pages actually speak.
+ * normalizeUserProfile maps a PocketBase `users` record onto the field names
+ * the pages speak.
  *
  * WHY THIS EXISTS. The pages predate the backend and read the Firestore
- * vocabulary: `role_id`, `post_count`, `uid`. PocketBase spells the same facts
- * `role`, `posts_count` and (only) `id`, and nothing in between renames them.
- * Two independent mappers then read different fields and missed different ones:
+ * vocabulary for the facts PocketBase spells differently: `uid` and
+ * `post_count` here mean `id` and `posts_count` on the wire. Two independent
+ * mappers once read different fields and missed different ones:
  *
- *   - subscribeToUser spread the raw record, so every `role_id` read was
- *     undefined. `resolveUserRoleId(undefined)` falls back to 'player', which is
- *     why a member with a custom role was badged "Player"; `post_count` was
- *     undefined for the same reason, so the profile card read 0 posts.
+ *   - subscribeToUser spread the raw record, so every `uid` read was
+ *     undefined and the profile card read 0 posts; a member with a custom
+ *     role was badged "Player" for the same shape reason.
  *   - AuthProvider built the signed-in user's profile from a hand-written
  *     whitelist that listed neither the profile block (bio, location, birthday,
  *     occupation, interests, contacts) nor the real counter names, so opening
@@ -36,6 +35,14 @@ import { sharedPoll } from './shared-poll';
  * One mapper, used by both, is what stops them drifting apart a second time.
  * The `??` chains read the PocketBase name first and fall back to the legacy
  * one, so a row written before the rename keeps rendering.
+ *
+ * THE ROLE AXIS NEEDS NO MAPPING. The `users` column is `role`, the staff
+ * DTO, `/me`, the profile route and the presence snapshot all spell it
+ * `role`, and the pages do too. The old client-side rename into the Firestore
+ * `role_id` is gone: that name survives only where the SERVER uses it — the
+ * key of the `roles` collection (`roles.role_id`, `base_role_id`) and the
+ * users companion column `custom_role_id`. A reader that asks a user row for
+ * `role_id` is reading a field that does not exist.
  *
  * `status` is carried through unchanged: `banned` and `pending` are ACCOUNT
  * STATUSES, not roles (internal/auth), and a caller that tests them against the
@@ -52,10 +59,11 @@ export const normalizeUserProfile = (rec) => {
     // removed (see backend soft-delete). A deleted account keeps its baked
     // nickname/avatar/counters so its profile and posts keep rendering.
     deleted: rec.deleted ?? false,
-    // The join key on `users` is `role`; `role_id` only exists on `roles`.
-    role_id: rec.role ?? rec.role_id ?? 'player',
-    // `custom_role_id` is the derived-role companion column. Exposed under the
-    // legacy name so a caller never has to know the pair.
+    // The join key on `users` is `role`; `role_id` only exists on the
+    // `roles` collection. No legacy fallback: the server always names it.
+    role: rec.role || 'player',
+    // `custom_role_id` is the derived-role companion column, under its own
+    // server name — that IS the column, not a rename of it.
     custom_role_id: rec.custom_role_id ?? '',
     avatar_url: recordAvatarUrl(rec) || resolveAvatarUrl(rec.avatar_url),
     post_count: rec.posts_count ?? rec.post_count ?? 0,
@@ -471,24 +479,37 @@ export const subscribeToUser = (uid, callback) => {
 // It is polled rather than subscribed because /me is a projection: it changes when
 // the role registry or the account's status changes, which is a moderator's action
 // in another session, not a row write this tab can observe.
+// It is polled rather than subscribed because /me is a projection: it changes when
+// the role registry or the account's status changes, which is a moderator's action
+// in another session, not a row write this tab can observe.
+//
+// The poll carries the whole /me answer the client needs — the effective
+// permission set AND the stored role beside it — so a consumer of either
+// never pays a second read for the other half: the admin panel ranks its
+// role gates off the same answer that feeds `hasPermission`.
 export const subscribeToEffectivePermissions = (uid, callback) => {
   const key = uid || 'guest';
-  const poll = sharedPoll(`effective-permissions:${key}`, {
+  const poll = sharedPoll(`me-projection:${key}`, {
     fetch: async () => {
       const me = await sendApi('/api/aerun/me');
-      return Array.isArray(me?.permissions) ? me.permissions : [];
+      return {
+        permissions: Array.isArray(me?.permissions) ? me.permissions : [],
+        role: me?.role || '',
+        status: me?.status || '',
+      };
     },
     // Slow on purpose: this is a moderator's action in another browser, and a
     // 30s stale window is invisible next to a 20s presence poll.
     intervalMs: 30000,
-    // An empty list is NOT the same as "no permissions", and the two must not look
-    // alike: it is the honest "we have not asked yet" value, and hasPermission
+    // null is NOT the same as "no permissions", and the two must not look
+    // alike: it is the honest "we have not asked yet" value. Consumers keep
+    // their previous value until the first answer lands; hasPermission then
     // falls back to the compiled matrix rather than locking every control.
-    initialValue: [],
+    initialValue: null,
     onError: (err) => console.warn('[effective permissions]', err),
   });
 
-  return poll.subscribe((perms) => callback(perms));
+  return poll.subscribe((me) => callback(me));
 };
 
 // Presence subscriptions (active users / guest ids / daily actives) moved to
@@ -518,80 +539,90 @@ export const subscribeToEffectivePermissions = (uid, callback) => {
  * and the console error was the visible half of a design that reaches around the
  * command layer for this screen entirely.
  *
- * `{ staff: true }` is passed only by AdminPage, which is itself behind the admin
- * gate and genuinely needs the staff DTO (status and verified are on that route
- * and nowhere else). Its fallback to the SDK read is kept: an admin whose
- * `/admin/users` call fails for a transport reason should still see a table.
+ * No current caller passes `{ staff: true }`: AdminPage — the only consumer
+ * entitled to the staff DTO (`status` and `verified` are on that route and
+ * nowhere else) — reads the paged list through `fetchAdminUsers` (src/api/
+ * admin.js) instead, normalising each row through the SAME `toMembersRow`
+ * the walk uses. The staff branch stays because scripts/check-forum-read-
+ * contract.mjs pins the explicit-staff contract: the next staff consumer
+ * must opt into it visibly rather than inherit it silently.
  */
+
+// The pages still speak the legacy vocabulary: MembersPage renders its
+// JOINED column from `created_at`, and sorts by it. PocketBase names its
+// autodate columns `created`/`updated`, so both sources are normalized to the
+// legacy names here instead of teaching every consumer about the rename.
+//
+// PocketBase serializes a DateTime as "2006-01-02 15:04:05.999Z" — a space
+// where ISO 8601 wants "T". V8 parses it, but it is not a format every
+// browser guarantees to accept, so it is normalized on the way out. Only
+// `created_at` is mapped: `updated_at` is a record *edit* time, and on this
+// backend it moves whenever an import or a settings write touches the row,
+// which would make it actively misleading.
+//
+// `last_seen` is normalized for the same reason and is NOT the same thing as
+// `updated_at`: it is the durable last-visit clock (migration 1767300000),
+// written only by the heartbeat and by account creation. It is what the
+// members table falls back to once a member is no longer in the live
+// presence map.
+const isoFromPB = (value) => (typeof value === 'string' ? value.replace(' ', 'T') : value);
+
+// Exported for the paged admin read: one mapper for both routes is what
+// stops the row shapes drifting apart.
+export const withLegacyDates = (u) => {
+  const created = u.created_at ?? u.created;
+  return {
+    ...u,
+    created_at: isoFromPB(created),
+    last_seen: isoFromPB(u.last_seen),
+  };
+};
+
+// toMembersRow is the single shape the members table and the admin user
+// table consume, and it is an explicit whitelist on purpose: neither source
+// row is spread into page state. The staff endpoint does not serve email at
+// all any more, and the public record carries columns (legacy_firebase_uid
+// is hidden, but settings and the profile block are not) that have no
+// business in a shared table.
+//
+// `created` is listed explicitly because withLegacyDates reads it from this
+// literal — drop it and the JOINED column silently empties.
+//
+// `last_seen` is the durable last-visit timestamp (backend migration
+// 1767300000). It is listed for the same reason as `created`: the staff DTO
+// must be naming it, or the members table loses its only offline answer and
+// degrades to "..." for everyone who is not currently connected.
+//
+// The counters are normalised to the legacy singular names the pages already
+// sort and render on (`post_count`), because the two sources spell them
+// differently: the admin DTO already emits post_count/topics_count, while a
+// public record carries the raw posts_count/topics_count columns.
+//
+// `role` is NOT normalised: both sources spell it `role` (the `users` column
+// and the staff DTO agree), so the row carries the server name verbatim.
+export const toMembersRow = (u) => ({
+  id: u.id,
+  nickname: u.nickname,
+  avatar_url: u.avatar_url,
+  role: u.role,
+  status: u.status,
+  // The one-line status under the nickname. MembersPage renders it
+  // (`u.status_line && <small>…`), and this mapper did not carry it, so the
+  // column was permanently empty for every member on a public page — the
+  // server sent the value and the client threw it away one line above where it
+  // is read. It is a public profile field (it is already denormalised onto
+  // every post as `author_status_line`), so serving it here exposes nothing new.
+  status_line: u.status_line,
+  post_count: u.post_count ?? u.posts_count ?? 0,
+  topics_count: u.topics_count ?? 0,
+  reputation: u.reputation ?? 0,
+  verified: u.verified,
+  created: u.created,
+  last_seen: u.last_seen
+});
+
 export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   let isSubscribed = true;
-
-  // The pages still speak the legacy vocabulary: MembersPage renders its
-  // JOINED column from `created_at`, and sorts by it. PocketBase names its
-  // autodate columns `created`/`updated`, so both sources are normalized to the
-  // legacy names here instead of teaching every consumer about the rename.
-  //
-  // PocketBase serializes a DateTime as "2006-01-02 15:04:05.999Z" — a space
-  // where ISO 8601 wants "T". V8 parses it, but it is not a format every
-  // browser guarantees to accept, so it is normalized on the way out. Only
-  // `created_at` is mapped: `updated_at` is a record *edit* time, and on this
-  // backend it moves whenever an import or a settings write touches the row,
-  // which would make it actively misleading.
-  //
-  // `last_seen` is normalized for the same reason and is NOT the same thing as
-  // `updated_at`: it is the durable last-visit clock (migration 1767300000),
-  // written only by the heartbeat and by account creation. It is what the
-  // members table falls back to once a member is no longer in the live
-  // presence map.
-  const isoFromPB = (value) => (typeof value === 'string' ? value.replace(' ', 'T') : value);
-  const withLegacyDates = (u) => {
-    const created = u.created_at ?? u.created;
-    return {
-      ...u,
-      created_at: isoFromPB(created),
-      last_seen: isoFromPB(u.last_seen),
-    };
-  };
-
-  // toMembersRow is the single shape the members table and the admin user
-  // table consume, and it is an explicit whitelist on purpose: neither source
-  // row is spread into page state. The staff endpoint does not serve email at
-  // all any more, and the public record carries columns (legacy_firebase_uid
-  // is hidden, but settings and the profile block are not) that have no
-  // business in a shared table.
-  //
-  // `created` is listed explicitly because withLegacyDates reads it from this
-  // literal — drop it and the JOINED column silently empties.
-  //
-  // `last_seen` is the durable last-visit timestamp (backend migration
-  // 1767300000). It is listed for the same reason as `created`: the staff DTO
-  // must be naming it, or the members table loses its only offline answer and
-  // degrades to "..." for everyone who is not currently connected.
-  //
-  // The counters are normalised to the legacy singular names the pages already
-  // sort and render on (`post_count`), because the two sources spell them
-  // differently: the admin DTO already emits post_count/topics_count, while a
-  // public record carries the raw posts_count/topics_count columns.
-  const toMembersRow = (u) => ({
-    id: u.id,
-    nickname: u.nickname,
-    avatar_url: u.avatar_url,
-    role_id: u.role_id ?? u.role,
-    status: u.status,
-    // The one-line status under the nickname. MembersPage renders it
-    // (`u.status_line && <small>…`), and this mapper did not carry it, so the
-    // column was permanently empty for every member on a public page — the
-    // server sent the value and the client threw it away one line above where it
-    // is read. It is a public profile field (it is already denormalised onto
-    // every post as `author_status_line`), so serving it here exposes nothing new.
-    status_line: u.status_line,
-    post_count: u.post_count ?? u.posts_count ?? 0,
-    topics_count: u.topics_count ?? 0,
-    reputation: u.reputation ?? 0,
-    verified: u.verified,
-    created: u.created,
-    last_seen: u.last_seen
-  });
 
   // THE PUBLIC READ, AND WHY THE SERVER OWNS THE WHITELIST.
   //
