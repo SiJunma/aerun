@@ -233,6 +233,41 @@ check(
     'question than the label states'
 );
 
+// ── Staff colour on the daily row ──────────────────────────────────────────
+// "Visited today" colours a name by `role` (admin/root red, moderator green)
+// so a staff member is recognisable at a glance. The backend used to emit
+// `role_id` in the daily and newest-user rows while the frontend read
+// `.role`: the comparison was `undefined === 'admin'`, so every name fell
+// back to the default colour and nothing crashed -- the bug on the
+// screenshot. No Go test caught it because the test struct mirrored the
+// wrong key and nobody asserted the value.
+//
+// Both halves of that mismatch are pinned, not just the colour ternary:
+// the server handler must SEND `role` (a frontend-only guard would be
+// unguarded the moment the server changes again, and vice versa).
+check(
+  /"dailyActiveUsers":\s*daily/.test(categoryAccessGo) &&
+    /users := make\(\[\]map\[string\]any/.test(categoryAccessGo) &&
+    /"role":\s*record\.GetString\("role"\)/.test(categoryAccessGo),
+  'dailyActiveMembers must emit the role under `role`, not `role_id`: ForumStats colours the name ' +
+    'off .role, and a role_id key leaves every name in the default colour'
+);
+check(
+  /"role":\s*newestRecord\.GetString\("role"\)/.test(categoryAccessGo),
+  'newestUser must emit the role under `role`, not `role_id`: it is coloured by the same ' +
+    '`.role === ...` ternary as the online and daily rows'
+);
+check(
+  /u\.role === 'admin'/.test(forumStats) && /u\.role === 'moderator'/.test(forumStats),
+  'ForumStats must colour by .role (as presence/activeUsers do), not by a legacy .role_id key ' +
+    'that the server no longer sends for these rows'
+);
+check(
+  !/u\.role_id/.test(stripComments(forumStats)) && !/newestUser\.role_id/.test(stripComments(forumStats)),
+  'ForumStats must not read .role_id off a user row: users rows carry `role` (users.role); ' +
+    'role_id is the key of the roles collection, so the read is always undefined'
+);
+
 // ── Every rendered icon is imported ─────────────────────────────────────────
 // ShieldAlert was rendered in the users table and never imported, so an
 // uncaught ReferenceError took the whole admin users tab down on every render.

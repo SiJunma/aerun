@@ -420,7 +420,13 @@ func dailyActiveMembers(app core.App, now time.Time) ([]map[string]any, int) {
 		users = append(users, map[string]any{
 			"id":       record.Id,
 			"nickname": record.GetString("nickname"),
-			"role_id":  record.GetString("role"),
+			// `role`, not `role_id`: the whole user-facing API names the
+			// column `role` (users.role, presence, staff DTO), and ForumStats
+			// reads `.role` to pick the staff colour. `role_id` is the key
+			// of the roles collection, not of a user row -- sending it here
+			// left the frontend with `undefined` and the name rendered in
+			// the default colour.
+			"role": record.GetString("role"),
 		})
 	}
 	return users, int(count)
@@ -485,7 +491,8 @@ func listForumStatsHandler(e *core.RequestEvent) error {
 		newest = map[string]any{
 			"id":       newestRecord.Id,
 			"nickname": newestRecord.GetString("nickname"),
-			"role_id":  newestRecord.GetString("role"),
+			// `role`, not `role_id` -- same contract as dailyActiveUsers above.
+			"role": newestRecord.GetString("role"),
 		}
 	}
 

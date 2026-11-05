@@ -46,8 +46,20 @@ type dailyStatsResponse struct {
 		DailyActiveUsers []struct {
 			ID       string `json:"id"`
 			Nickname string `json:"nickname"`
-			RoleID   string `json:"role_id"`
+			// The key the panel colours by. It was `role_id` here until the
+			// stats handler stopped emitting it: the Go test struct never
+			// looked at the value, so the rename had no witness and the
+			// admin/mod colour silently vanished from the frontend.
+			Role string `json:"role"`
 		} `json:"dailyActiveUsers"`
+		// newestUser is asserted too, for the same reason: the domain fixture
+		// list can make a staff account the newest one, and the frontend
+		// colours it off this very key.
+		NewestUser *struct {
+			ID       string `json:"id"`
+			Nickname string `json:"nickname"`
+			Role     string `json:"role"`
+		} `json:"newestUser"`
 		DailyActiveUserCount int `json:"dailyActiveUserCount"`
 	} `json:"stats"`
 }
@@ -94,6 +106,70 @@ func TestDailyActiveCountsVisitsInsideTheDayWindow(t *testing.T) {
 	}
 	if got := stats.Stats.DailyActiveUserCount; got != 1 {
 		t.Errorf("dailyActiveUserCount = %d, want 1 (only the member seen inside the window)", got)
+	}
+}
+
+// TestDailyActiveCarriesRole is the staff-colour contract for the row.
+//
+// The name in "Visited today" is coloured by `role` on the frontend (admin /
+// root = red, moderator = green) so a staff member is recognisable at a
+// glance. The handler once emitted `role_id` instead, the frontend read
+// `.role`, got `undefined`, and every name silently fell back to the default
+// colour -- while this test kept passing because its struct mirrored the
+// wrong key and nobody asserted the value.
+//
+// The proof has to live on the wire shape, not in a comment: unmarshal the
+// actual response, look the moderator (and root) up by id and require the
+// `role` field to be exactly what the fixture set.
+func TestDailyActiveCarriesRole(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	server := newTestServer(t, app)
+	defer server.Close()
+
+	tokens := seedIdentityFixtures(t, app)
+
+	// One ordinary member and both staff roles inside the window, so every
+	// branch of the frontend's colour ternary is exercised.
+	seedMemberLastSeen(t, app, fixPlayerID, time.Now().Add(-2*time.Hour))
+	seedMemberLastSeen(t, app, fixModeratorID, time.Now().Add(-time.Hour))
+	seedMemberLastSeen(t, app, fixRootID, time.Now().Add(-3*time.Hour))
+
+	stats := fetchForumStats(t, server.URL, tokens["player"])
+
+	roles := map[string]string{}
+	for _, entry := range stats.Stats.DailyActiveUsers {
+		roles[entry.ID] = entry.Role
+	}
+
+	// The colour contract the panel depends on. `role` is absent under the
+	// old `role_id` key, so an empty match here is a failure, not a detail.
+	for id, want := range map[string]string{
+		fixPlayerID:    "player",
+		fixModeratorID: "moderator",
+		fixRootID:      "root",
+	} {
+		if got := roles[id]; got != want {
+			t.Errorf("dailyActiveUsers[%s].role = %q, want %q — "+
+				"ForumStats colours the name off `role`; a missing or wrong "+
+				"key paints a staff member in the default colour and nothing "+
+				"else fails", id, got, want)
+		}
+	}
+
+	// newestUser is the same contract on the "latest registered" line.
+	// The fixtures register newest-first in the order player, pending,
+	// banned, moderator, root, spectator, so `spectator` is newest here --
+	// the assertion is that whatever account it is, its role arrives under
+	// `role`, not under `role_id`.
+	if got := stats.Stats.NewestUser; got == nil {
+		t.Fatal("stats.newestUser is missing; ForumStats guards on it and the "+
+			"latest-registered line never renders")
+	} else if got.Role == "" {
+		t.Errorf("newestUser.role is empty for %s — the same broken key as the "+
+			"daily row would paint the latest registered member in the "+
+			"default colour", got.ID)
 	}
 }
 
