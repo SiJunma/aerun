@@ -164,7 +164,7 @@ func TestDailyActiveCarriesRole(t *testing.T) {
 	// the assertion is that whatever account it is, its role arrives under
 	// `role`, not under `role_id`.
 	if got := stats.Stats.NewestUser; got == nil {
-		t.Fatal("stats.newestUser is missing; ForumStats guards on it and the "+
+		t.Fatal("stats.newestUser is missing; ForumStats guards on it and the " +
 			"latest-registered line never renders")
 	} else if got.Role == "" {
 		t.Errorf("newestUser.role is empty for %s — the same broken key as the "+
