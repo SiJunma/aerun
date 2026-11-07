@@ -22,6 +22,7 @@
 | Перезапуск сервиса | `python deploy.py restart` |
 | Логи сервиса | `ssh deploy@<vps> journalctl -u aerun.service -f` |
 | Бэкап БД | `python deploy.py db backup` |
+| Скачать бэкап БД с VPS на свой компьютер | `python deploy.py backup` (новейший; `--file <имя>` — конкретный, `--out <путь>` — свой путь) |
 | Применить миграции | `python deploy.py db migrate` (рестарт; обычно не нужно — применяются при старте) |
 | Восстановить БД | `python deploy.py db restore --file ~/project/pb_data-backup-<дата>.tgz` (спросит подтверждение, остановит сервис) |
 | Подтянуть git без заливки | `python deploy.py sync` |

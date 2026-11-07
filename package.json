@@ -17,6 +17,8 @@
     "deploy:vps:health": "python deploy.py health",
     "deploy:vps:restart": "python deploy.py restart",
     "deploy:vps:db": "python deploy.py db",
+    "deploy:vps:backup": "python deploy.py backup",
+    "deploy:vps:backup:latest": "python deploy.py backup --overwrite",
     "dev:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1",
     "dev:backend:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-backend.ps1 -StopOnly",
     "lint:js": "eslint .",
