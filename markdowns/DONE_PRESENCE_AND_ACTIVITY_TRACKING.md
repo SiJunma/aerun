@@ -1,7 +1,7 @@
 # Комплексный аудит трекинга присутствия и активности пользователей и гостей (Presence & Activity Tracking)
 
 > **Документ:** Архитектурный и технический аудит системы отслеживания присутствия, неактивности (idle timeout), синхронизации статусов между посетителями, смены никнеймов, удаления аккаунтов и многовкладочности на форуме Aerun  
-> **Дата обновления:** 7 ноября 2026 г. (версия 2.1 с учётом фидбека по правилу 15 минут, часам активности профиля и многовкладочности)  
+> **Дата обновления:** 8 ноября 2026 г. (версия 2.1 + §10: баг F-1 исправлен — регистрация публикует `presence.update`, форум перечитывает `forumStats`)  
 > **Статус:** Анализ завершён, требования согласованы, сформирована целевая спецификация  
 > **Исследуемые компоненты:**  
 > - Frontend: `src/api/rtdb-presence.js`, `src/contexts/AuthProvider.jsx`, `src/components/layout/ForumStats.jsx`, `src/api/shared-poll.js`, `src/App.jsx`, `src/api/pocketbase.js`  
@@ -498,4 +498,75 @@ sequenceDiagram
 > - `API.md` — если меняются запросы/ответы `/api/aerun/presence/*`, `/api/aerun/status`, SSE-топики (`presence.update`), поля `last_active_at`/`last_seen`.
 > - Прочие доки, прямо описывающие presence/activity/idle/online-list/`last_seen`/гостей (поиск по `presence`, `last_seen`, `online`, `guest_presence`, `heartbeat` в `markdowns/` и `*.md` в корне) — привести в соответствие или явно пометить как устаревшие.
 > - Этот аудит (§1–§8 + журнал §9): отметить выполненные чекпоинты, зафиксировать фактические отклонения от плана §7 (если будут) и итоговую верификацию.
+
+---
+
+## 10. Баг F-1: строка «Последним зарегистрировался» (`stats.newest_member`) не обновляется live при регистрации нового пользователя
+
+> **Статус:** Задокументирован 8 ноября 2026 г. по сообщению пользователя; **исправлено 8 ноября 2026 г.** (backend: регистрация публикует `presence.update`; frontend: `presence.update` перечитывает `forumStats`). Детали — §10.5.
+> **Привязка к аудиту:** тот же класс дефектов, что и §2/§9: данные присутствуют в правильном источнике, но live-канал обновления для них не заведён.
+
+### 10.1. Симптом (репорт пользователя)
+
+> «Если у меня открыт форум и я вижу, что зарегистрировался новый юзер (уведомление + активность в онлайн-списке), то строка последнего зарегистрированного не обновилась. А должна показывать актуального последнего зарегенного».
+
+Воспроизведение:
+
+1. Открыть форум (главная, панель `ForumStats`); зафиксировать строку «Последним зарегистрировался: \<ник\>» (`stats.newest_member` / «Latest registered:», `src/components/layout/ForumStats.jsx:111-124`; значение `forumStats.newestUser`, `ForumStats.jsx:73`).
+2. В другой вкладке/окне зарегистрировать нового пользователя.
+3. У наблюдающего **обновляются**: уведомление `new_registration` (только у staff) и список «Сейчас на форуме» (новый юзер появляется в онлайне).
+4. Строка «Последним зарегистрировался», а также (тот же корень) счётчики `totalUsers`/`totalTopics`/`totalPosts` и список «Был на форуме» (`dailyActiveUsers`) панели **не меняются** до ручной перезагрузки страницы, смены identity (логин/разлогин/смена роли) или 60-секундного fallback-poll (только при мёртвом realtime, см. §10.3).
+
+Ожидаемое поведение: строка показывает актуального последнего зарегистрированного без перезагрузки — в течение debounce-окна (секунды), а не минуты.
+
+### 10.2. Источник данных — правилен, перечитывание — отсутствует
+
+`newestUser` считается на каждом чтении, не кэшируется и не протухает:
+
+- Backend `backend/internal/platform/pocketbase/category_access.go:312-517`, `listForumStatsHandler` (`GET /api/aerun/forum-stats`): `totalUsers` — `COUNT(*)`, `newestUser` — `OrderBy("created DESC", "id DESC").Limit(1)` по `users` с исключением soft-deleted (`category_access.go:483-497`), роль под ключом `role` (`:495`), `dailyActiveUsers`/`dailyActiveUserCount` — из `dailyActiveMembers` (`:499`). Комментарий `:321-325`: «EVERY NUMBER HERE IS COUNTED, NOT CACHED».
+- Frontend: `fetchSecuredMainPageData` (`src/api/categories.js:326-336`) = `fetchForumIndex()` + `fetchForumStats()` (`GET /api/aerun/forum-stats`, `categories.js:343-351`); результат кладётся в контекст `forumStats` (`src/contexts/AuthProvider.jsx:1042`, `setForumStats(data.stats)`).
+
+То есть сам ответ `/forum-stats` при перечитывании вернёт нового юзера. Дефект не в источнике, а в том, что перечитывания не происходит.
+
+### 10.3. Почему уведомление и онлайн обновляются, а `forumStats` — нет
+
+Все три наблюдаемых эффекта питаются от разных каналов, и регистрация будит только два из них.
+
+| Эффект у наблюдающего | Канал обновления | Срабатывает при регистрации? |
+|---|---|---|
+| Уведомление `new_registration` у staff | `createNotification` → `publishSignal(txApp, "notification.new", …)` (`backend/internal/platform/pocketbase/notifications.go:334`) | ✅ Да — `notifyStaffOfRegistration` (`backend/internal/platform/pocketbase/register.go:246-322`, вызов `:191`) |
+| Список «Сейчас на форуме» (`activeUsers`/гости) | shared-poll `GET /api/aerun/status` + realtime `presence.update` (`src/api/rtdb-presence.js:107-114`, фильтр `topic === 'presence.update'`) | ✅ Да, **косвенно**: новый юзер логинится → `initRtdbPresence` → первый heartbeat → серверный join в `onlineMembers` → `publishPresenceSignal` (`backend/internal/platform/pocketbase/realtime_signals.go:83-114`). Наблюдающий перечитывает `/status` и видит новичка |
+| Строка «Последним зарегистрировался» (`forumStats.newestUser`) + счётчики + «Был на форуме» | `refreshForumState` → `fetchSecuredMainPageData` → `GET /forum-stats` (`AuthProvider.jsx:1015-1044`, `categories.js:326-336`) | ❌ Нет: при регистрации этому каналу не приходит ни одного триггера (см. ниже) |
+
+Триггеры `refreshForumState`, которые **не покрывают** регистрацию:
+
+- **Realtime-подписка форума** (`AuthProvider.jsx:1183-1204`): слушает только `topic === 'topic.post'` (`:1187-1189`) → `triggerDebouncedForumRefresh()` (debounce 3,5 с / max-wait 8 с, `:1124-1153`). Ни `presence.update`, ни `notification.new` этот обработчик не обрабатывает: `presence.update` обрабатывает только presence shared-poll (`rtdb-presence.js:109`), `notification.new` — только подписчики уведомлений (`src/api/rtdb-notifications.js:62-64`, без связи с forum-state).
+- **Fallback-poll** (`AuthProvider.jsx:1165-1181`): `setInterval(..., 60000)` стартует только когда realtime мёртв (`onDead`/disconnect) или недоступен (`canReceiveSignals() === false`, `:1202-1204`); при живом SSE он остановлен (`:1194-1199`). При живом realtime строка не обновится и через минуту.
+- **Identity-effect** (`AuthProvider.jsx:1078-1085`): `refreshForumState(true)` при смене `identityKey = uid|role|status` наблюдающего — регистрация *другого* человека его не меняет.
+- **Visibility-refresh** (`AuthProvider.jsx:1155-1160`): только если вкладка была скрыта и был отложенный флаг.
+
+Итог цепочки при регистрации: `registerHandler` (`register.go:158-191`) сохраняет запись и зовёт `notifyStaffOfRegistration` — и **ничего не публикует ни `presence.update`, ни `topic.post`** из самого факта создания аккаунта. `presence.update` появляется позже и только потому, что новичок залогинился и побился heartbeat'ом. А `forumStats` не перечитывается ни на `presence.update`, ни на `notification.new`. Строка обновится лишь при следующем `topic.post`, смене identity наблюдающего или ручной перезагрузке.
+
+### 10.4. Затронутые поверхности (та же причина)
+
+`forumStats` — один объект; панель `ForumStats.jsx` читает из него всё (`ForumStats.jsx:68-73`):
+
+- `newestUser` — строка «Последним зарегистрировался» (репорт F-1);
+- `totalUsers`, `totalTopics`, `totalPosts` — счётчики шапки панели (`ForumStats.jsx:70-72`);
+- `dailyActiveUsers` / `dailyActiveUserCount` — строка «Был на форуме» (`ForumStats.jsx:68-69`); новый юзер с `last_seen = time.Now()` при регистрации (`register.go:173`) должен попасть сюда немедленно, но тоже не попадает до перечитывания.
+
+Общий корень: **нет триггера перечитывания `/forum-stats` на событие «создан аккаунт»**. Любой фикс должен чинить все четыре поля одним перечитыванием, а не точечной правкой `newestUser` на клиенте.
+
+### 10.5. Фикс (реализовано 8 ноября 2026 г.)
+
+Принято решение из §10.5-предыдущей формулировки: **reuse существующего топика `presence.update`** (без нового топика `forum.stats`).
+
+1. **Backend (`register.go:192`):** после `notifyStaffOfRegistration` вызывается `publishPresenceSignal(e.App)`. Сигнал — только nudge без данных (`realtime_signals.go:61-72,83-114`), debounce 2 с, audience `*`. `newestUser`/`totalUsers` — публичные форумные факты (`category_access.go:327-330`), поэтому audience `*` не раскрывает сверх публичного `GET /forum-stats`. Аккаунт уже сохранён (`register.go:177`), поэтому перечитывание после nudge видит новичка. Комментарии `realtime_signals.go` обновлены (регистрация — триггер `presence.update`).
+2. **Frontend (`AuthProvider.jsx:1187`):** подписка форума теперь `if (topic === 'topic.post' || topic === 'presence.update') triggerDebouncedForumRefresh()`. Новых таймеров/poll-циклов нет; debounce 3,5 с / max-wait 8 с переиспользуется. Поэтому регистрация обновляет сразу все поля `forumStats` (`newestUser`, `totalUsers`, `totalTopics`, `totalPosts`, `dailyActiveUsers`).
+3. **Гости:** без изменений — `canReceiveSignals() === false` (`src/api/realtime-signals.js:250`), fallback-poll 60 с. Явно принято: задержка у гостей до минуты.
+4. **Тесты/контракты:**
+   - Новый `backend/internal/platform/pocketbase/register_presence_signal_test.go::TestRegistrationPublishesPresenceUpdateAndStatsShowNewestUser` — регистрация через реальный HTTP → `presence.update` доставляется подписанному члену → `GET /forum-stats` возвращает нового `newestUser` → строка `presence.update` сохранена в `realtime_signals`.
+   - `scripts/check-identity-refresh.mjs` — усилены гейты: регистрация публикует `presence.update`; подписка форума слушает `presence.update` рядом с `topic.post`.
+   - Проверка: `go vet ./internal/platform/pocketbase/` — чисто; целевой Go-тест — PASS (3.28 с); регрессионный набор `TestDailyActive|TestRealtimeSignal|TestTopicPostSignal|TestRegister` — PASS (62.4 с); `node scripts/check-identity-refresh.mjs` — OK.
+5. **Документация:** `API.md` §3.5 дополнен (регистрация публикует `presence.update`); этот §10 — статус «исправлено». `ARCHITECTURE.md` и `.agent/rules/AGENTS.md` не менялись: нового топика и нового контракта не вводилось.
 

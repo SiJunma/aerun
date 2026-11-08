@@ -189,6 +189,7 @@ func registerHandler(e *core.RequestEvent) error {
 	// (functions/index.js). Best-effort: the account already exists, so a
 	// failed notice is logged and the 201 still goes out.
 	notifyStaffOfRegistration(e.App, record, adminMessage)
+	publishPresenceSignal(e.App)
 
 	// Trigger the verification mail through PocketBase's own sender, so it
 	// goes through the same stack as every other auth mail: the Aerun

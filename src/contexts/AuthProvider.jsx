@@ -1184,7 +1184,7 @@ export const AuthProvider = ({ children }) => {
     if (canReceiveSignals()) {
       unsubRealtime = subscribeToRealtimeSignals(
         (topic) => {
-          if (topic === 'topic.post') {
+          if (topic === 'topic.post' || topic === 'presence.update') {
             triggerDebouncedForumRefresh();
           }
         },

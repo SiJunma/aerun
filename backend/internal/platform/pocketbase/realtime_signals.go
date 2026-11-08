@@ -57,7 +57,10 @@ const (
 	// changed (join, TTL eviction, rename, admin delete/ban). The signal
 	// carries no member data — clients re-read /api/aerun/status, where
 	// authorization and the presence windows live, exactly like every
-	// other topic on this bus.
+	// other topic on this bus. A new account is also announced on this
+	// topic: registration moves the forum-wide member count and the
+	// latest-registered member, even when the newcomer has not logged
+	// in or beated yet.
 	realtimeSignalPresenceUpdate = "presence.update"
 )
 
@@ -77,9 +80,11 @@ var (
 
 // publishPresenceSignal announces "the online composition changed" to every
 // signed-in member, debounced. Callers invoke it after mutating the online
-// set (heartbeat join, TTL eviction, nickname change, admin delete/ban);
-// the first call arms a 2-second timer and further calls inside the window
-// only mark the signal pending, so a burst costs exactly one row.
+// set (heartbeat join, TTL eviction, nickname change, admin delete/ban) or
+// after creating an account (registration moves the forum member count and
+// the latest-registered member before any heartbeat); the first call arms a
+// 2-second timer and further calls inside the window only mark the signal
+// pending, so a burst costs exactly one row.
 func publishPresenceSignal(app core.App) {
 	if app == nil {
 		return
