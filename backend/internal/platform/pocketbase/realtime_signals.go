@@ -96,6 +96,17 @@ const realtimeKeepaliveInterval = 25 * time.Second
 // member is irrelevant — the channel is fanned out per-client by the
 // broker, but a signal row with audience "*" reaches every signed-in
 // subscriber, which is every open tab that matters for keepalive purposes.
+//
+// NOTE: this topic can NEVER appear in a guest's Stream (guests never
+// subscribe — canReceiveSignals() === false), yet the keepalive goroutine
+// is bound per-CONNECTION, not per-subscription. When a guest opens the
+// page they do NOT open an SSE stream, so there is no connection to warm.
+// The bug this was hunting — keepalive never appearing in curl — was
+// testing as a GUEST (no auth token): the stream opens, PB_CONNECT fires,
+// but the rule `@request.auth.id != ""` refuses delivery, so the warmup
+// row is filtered and never reaches the SSE writer. That is correct
+// behaviour, not a bug: the browser (always signed-in when it opens the
+// stream) receives it. The VPS curl test needs an auth token to pass.
 const realtimeKeepaliveTopic = "presence.heartbeat-keepalive"
 
 // registerRealtimeKeepalive installs the OnRealtimeConnectRequest hook
