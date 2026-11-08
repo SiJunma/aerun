@@ -42,18 +42,21 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		DefaultEncryptionEnv: "AERUN_ENCRYPTION_KEY",
 	})
 
+	// SSE keepalive — bound on OnBootstrap (not OnServe) so it lives for the
+	// app's lifetime, not just one serve cycle. PocketBase v0.40.4 closes a
+	// realtime connection after IdleTimeout (5m default) of SILENCE on the
+	// client channel; Cloudflare's edge and the browser both idle-close a
+	// stream that carries no bytes for ~100s. An idle forum emits no signals,
+	// so every open page otherwise reconnects every few minutes by design:
+	// that is the "one drop, then a storm" the client sees. Raising the
+	// timeout alone postpones it; keeping the stream warm is what stops it.
+	pb.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
+		registerRealtimeKeepalive(e.App)
+		return e.Next()
+	})
+
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		se.Router.BindFunc(assignRequestID)
-		// SSE keepalive: PocketBase v0.40.4 closes a realtime connection
-		// after IdleTimeout (5m default) of SILENCE on the client channel —
-		// it resets the timer only when an actual message is delivered.
-		// Cloudflare's edge and the browser both idle-close a stream that
-		// carries no bytes for ~100s. An idle forum emits no signals, so
-		// every open page otherwise reconnects every few minutes by design:
-		// that is the "one drop, then a storm" the client sees. Raising the
-		// timeout alone postpones it; keeping the stream warm is what stops
-		// it. We bind here (priority default) so the first bind wins.
-		registerRealtimeKeepalive(se.App)
 		// PocketBase starts its scheduler from an OnServe hook bound at
 		// priority 999, so a job registered here is always in place before the
 		// first tick (see registerGuestPresenceCron).
