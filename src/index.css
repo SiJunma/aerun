@@ -2837,122 +2837,15 @@ a.rep-preview-name:hover {
   background-color: var(--card-bg) !important;
 }
 
-/* Topic List & Row Enhancements */
-.topic-row-hover:hover {
-  background-color: rgba(var(--primary-rgb), 0.05) !important;
-}
+/* Topic List & Row Enhancements — moved to src/styles/topic-row.css.
+   .topic-row-hover / .topic-title-link / .mini-pagination / .unread-dot / .last-post-time
+   are now governed by topic-row tokens without !important. */
 
-.topic-title-link {
-  color: var(--text-color);
-  transition: color 0.15s ease;
-}
-
-.topic-title-link:hover {
-  color: var(--primary-color) !important;
-}
-
-.mini-pagination .mini-page-link {
-  font-size: 0.875rem;
-  padding: 0 4px;
-  background: rgba(var(--primary-rgb), 0.1);
-  border-radius: 3px;
-  color: var(--primary-color) !important;
-  line-height: 1.2;
-  transition: all 0.2s ease;
-}
-
-.mini-pagination .mini-page-link:hover {
-  background: var(--primary-color) !important;
-  color: #fff !important;
-}
-
-[data-theme='dark'] .mini-pagination .mini-page-link:hover,
-[data-theme='neutral'] .mini-pagination .mini-page-link:hover {
-  color: var(--nav-bg) !important;
-}
-
-.unread-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--bs-warning);
-  flex-shrink: 0;
-}
-
-.last-post-time {
-  opacity: 0.8;
-  transition: opacity 0.2s;
-}
-
-.last-post-time:hover {
-  opacity: 1;
-}
-
-.topic-indicator.topic-pinned {
-  color: var(--bs-warning) !important;
-}
-
-.topic-indicator.topic-locked {
-  color: var(--bs-danger) !important;
-}
-
-/* Forum Statistics Styling */
-.forum-stats-card {
-  border: 1px solid var(--border-color) !important;
-  border-radius: 0.75rem !important;
-  overflow: hidden;
-  background-color: var(--card-bg) !important;
-}
-
-.forum-header-text {
-  font-size: 0.875rem !important;
-  font-weight: 700 !important;
-  opacity: 0.8;
-}
-
-.stats-header {
-  background-color: var(--nav-bg) !important;
-  color: #f8fafc !important;
-  /* Always light on dark header background */
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.1) !important;
-  padding: 12px !important;
-  border-bottom-left-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
-}
-
-.stats-header .forum-header-text,
-.stats-header .lucide {
-  opacity: 0.8;
-  /* Matches table thead th opacity */
-}
-
-[data-theme='neutral'] .stats-header {
-  color: #f4f1ea !important;
-}
-
-.stats-grid {
-  background-color: var(--card-bg);
-  border-bottom-color: rgba(var(--primary-rgb), 0.05) !important;
-}
-
-.ms-auto-md {
-  margin-left: auto;
-}
-
-@media (max-width: 768px) {
-  .ms-auto-md {
-    margin-left: 0;
-  }
-}
-
-.stats-item {
-  transition: opacity 0.2s;
-}
-
-.stats-item:hover {
-  opacity: 1;
-}
+/* Forum Statistics Styling — moved to src/styles/forum-stats.css.
+   The legacy !important duplicates of .forum-stats-card, .stats-header,
+   .forum-header-text, .stats-grid, .ms-auto-md, .stats-item, .online-users-panel,
+   .online-indicator-blob, .online-user-link and .stats-footer have been removed
+   so semantic tokens in theme-variables.css govern the look without wars. */
 
 .extra-small {
   font-size: 0.8rem;
@@ -2962,46 +2855,6 @@ a.rep-preview-name:hover {
   padding: 0.125rem 0.25rem;
   font-size: 0.875rem;
   line-height: 1;
-}
-
-.online-users-panel {
-  background-color: var(--block-bg) !important;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.03);
-}
-
-.online-indicator-blob {
-  width: 10px;
-  height: 10px;
-  background-color: #10b981;
-  border-radius: 50%;
-  position: relative;
-  opacity: 0.8;
-}
-
-.online-user-link {
-  transition: all 0.15s ease;
-  position: relative;
-}
-
-.online-user-link:hover {
-  opacity: 1;
-  text-decoration: underline !important;
-  transform: translateY(-1px);
-}
-
-.stats-footer {
-  background-color: rgba(var(--primary-rgb), 0.02);
-  border-top-color: rgba(var(--primary-rgb), 0.05) !important;
-}
-
-[data-theme='neutral'] .stats-footer .btn-link {
-  opacity: 0.8 !important;
-  color: #433422 !important;
-}
-
-[data-theme='neutral'] .stats-footer .btn-link:hover {
-  opacity: 1 !important;
-  color: #8c7152 !important;
 }
 
 .letter-spacing-1 {
@@ -3016,30 +2869,13 @@ a.rep-preview-name:hover {
   row-gap: 0.25rem;
 }
 
-/* Last Post Meta Link Hover Effect (Main Page and Category Views) */
-.last-post-link-meta {
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  padding: 4px 6px !important;
-  margin: -4px -6px !important;
-  /* Counteract padding to avoid layout jump */
-  cursor: pointer;
-  width: fit-content;
-}
-
-.last-post-link-meta:hover {
-  background-color: rgba(var(--primary-rgb), 0.08) !important;
-  color: var(--primary-color) !important;
-  text-decoration: none !important;
-}
-
-[data-theme='dark'] .last-post-link-meta:hover {
-  background-color: rgba(var(--primary-rgb), 0.15) !important;
-}
-
-.last-post-link-meta:hover * {
-  color: inherit !important;
-}
+/* Last Post Meta Link Hover Effect (Main Page and Category Views)
+   — moved to src/styles/author-meta.css (loaded last in main.jsx).
+   The legacy duplicate here (padding/margin from --last-post-link-*
+   tokens + the three !important hover rules) fought the native module
+   on every page using LastPostInfo (MainPage, CategoryPage/TopicRow).
+   Single owner is now author-meta.css; this copy is commented out so
+   it cannot re-apply the bleed + !important hover on top of it. */
 
 /* Forum Topic Navigation Jumping Logic */
 .topic-jump-loading .topic-content-wrapper {
@@ -3113,36 +2949,6 @@ a.rep-preview-name:hover {
 [data-theme='neutral'] .author-sidebar .text-muted strong {
   color: #382d1d !important;
   /* Main highlights */
-}
-
-[data-theme='dark'] .online-users-panel {
-  background-color: rgba(15, 23, 42, 0.3) !important;
-}
-
-[data-theme='neutral'] .online-users-panel {
-  background-color: rgba(67, 52, 34, 0.03) !important;
-}
-
-.online-author-admin {
-  color: var(--role-admin) !important;
-}
-
-.online-author-mod {
-  color: var(--role-mod) !important;
-}
-
-/* Theme overrides if needed */
-[data-theme='neutral'] .online-author-admin {
-  color: #b91c1c !important;
-  /* Darker red for light paper theme */
-}
-
-[data-theme='dark'] .stats-item .h6 {
-  color: #f8fafc;
-}
-
-[data-theme='dark'] .stats-item .text-dark {
-  color: #f8fafc !important;
 }
 
 /* Forum Banner */
@@ -4133,303 +3939,305 @@ a.rep-preview-name:hover {
   filter: invert(1) grayscale(100%) brightness(200%);
 }
 
-.forum-group-card {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08) !important;
-  border-radius: 0 0 12px 12px !important;
-  overflow: hidden;
-}
+/* Forum group card/header — legacy Bootstrap-era group chrome.
+   MainPage no longer renders .forum-group-* (it renders
+   .forum-category / .category-header in forum-index.css); no JSX
+   in src/ uses .forum-group-header. The only live user is
+   DraftsPage skeleton (<Card class="forum-group-card">) — a
+   Bootstrap Card, not forum group chrome, so the dead rules are
+   commented out here (single-owner rule: if a class moved out of
+   index.css it must not keep !important duplicates here). */
 
-[data-theme='dark'] .forum-group-card {
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.35) !important;
-}
+/* .forum-group-card { box-shadow: 0 2px 12px rgba(0,0,0,.08) !important;
+   border-radius: 0 0 12px 12px !important; overflow: hidden; }
+   [data-theme='dark'] .forum-group-card { box-shadow: 0 2px 16px
+   rgba(0,0,0,.35) !important; }
+   [data-theme='neutral'] .forum-group-card { box-shadow: 0 2px 12px
+   rgba(56,45,29,.12) !important; }
+   .forum-group-header { background-color: var(--nav-bg) !important;
+   color: #fff !important; border-bottom: 1px solid var(--border-color);
+   padding: .75rem 1rem !important; border-radius: 12px 12px 0 0 !important;
+   overflow: hidden; }
+   .forum-group-header h4 { color: #fff; font-size: 1rem; font-weight: 700;
+   text-transform: none; letter-spacing: normal; } */
 
-[data-theme='neutral'] .forum-group-card {
-  box-shadow: 0 2px 12px rgba(56, 45, 29, 0.12) !important;
-}
+/* Forum Table — Bootstrap Table era is over for forum lists.
+   MainPage / CategoryPage / ActiveTopics / NewReplies /
+   Subscriptions all render the semantic DOM now (forum-index.css +
+   topic-row.css + author-meta.css); no JSX uses .forum-table* any
+   more, so the dead block below stays commented out until Этап 7
+   deletes it together with Bootstrap. */
 
-.forum-group-header {
-  background-color: var(--nav-bg) !important;
-  color: #ffffff !important;
-  border-bottom: 1px solid var(--border-color);
-  padding: 0.75rem 1rem !important;
-  border-radius: 12px 12px 0 0 !important;
-  overflow: hidden;
-}
-
-.forum-group-header h4 {
-  color: #ffffff !important;
-  font-size: 1rem !important;
-  font-weight: 700 !important;
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.forum-table-sub thead th {
-  border-radius: 0 !important;
-  background-color: var(--block-bg) !important;
-  color: var(--secondary-color) !important;
-  font-size: 0.65rem !important;
-  /* Slightly smaller */
-  font-weight: 700 !important;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 0.35rem 1rem !important;
-  /* Reduced vertical padding and left padding to align better */
-  border-bottom: 1px solid var(--border-color) !important;
-  border-top: none !important;
-}
-
-/* Force uniform columns across different tables (Desktop only) */
-@media (min-width: 768px) {
-  .forum-table {
-    table-layout: fixed !important;
-    width: 100% !important;
-  }
-
-  .forum-table th:nth-child(2),
-  .forum-table td:nth-child(2),
-  .forum-table th:nth-child(3),
-  .forum-table td:nth-child(3) {
-    width: 100px !important;
-  }
-
-  .forum-table th:last-child,
-  .forum-table td:last-child {
-    width: 35% !important;
-  }
-
-  .author-sidebar {
-    width: 200px !important;
-    min-width: 200px !important;
-    flex: 0 0 200px !important;
-  }
-}
-
-/* Hide elements on extremely narrow screens (e.g. iPhone SE / 320px) */
-@media (max-width: 365px) {
-  .hide-on-extra-small-mobile {
-    display: none !important;
-  }
-}
-
-.forum-table thead th {
-  background-color: var(--nav-bg) !important;
-  color: #fff !important;
-  border-bottom: 1px solid var(--border-color) !important;
-  font-size: 0.9rem;
-  font-weight: 600;
-  padding: 0.75rem 1rem !important;
-}
-
-.forum-table td {
-  padding: 1rem 1rem !important;
-}
-
-.forum-table-sub thead th {
-  background-color: rgba(0, 0, 0, 0.03) !important;
-  color: var(--text-color) !important;
-  border-bottom: 1px solid var(--border-color) !important;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.6rem 1rem !important;
-  opacity: 0.75;
-}
-
-[data-theme='dark'] .forum-table-sub thead th {
-  background-color: rgba(255, 255, 255, 0.05) !important;
-  opacity: 0.5;
-}
-
-[data-theme='neutral'] .forum-table-sub thead th {
-  color: var(--text-color) !important;
-  opacity: 0.65;
-}
-
-/* Responsive Forum Tables */
-@media (max-width: 768px) {
-  .forum-table thead {
-    display: none !important;
-  }
-
-  .forum-table,
-  .forum-table tbody,
-  .forum-table tr,
-  .forum-table td {
-    display: block !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-  }
-
-  .forum-table td.d-none {
-    display: none !important;
-  }
-
-  .forum-table {
-    background-color: transparent !important;
-    table-layout: auto !important;
-  }
-
-  /* Dark, prominent group headers */
-  .forum-group-header {
-    background-color: var(--nav-bg) !important;
-    padding: 0.85rem 1.25rem !important;
-    border-bottom: none !important;
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
-  }
-
-  .forum-group-header h4 {
-    color: #fff !important;
-    font-size: 0.85rem !important;
-    text-transform: none;
-    font-weight: 700;
-    letter-spacing: normal;
-    margin: 0 !important;
-  }
-
-  /* Unified group block */
-  .forum-group-card {
-    background-color: var(--card-bg) !important;
-    border: 1px solid var(--border-color) !important;
-    border-top: none !important;
-    border-radius: 0 0 12px 12px !important;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06) !important;
-    margin-bottom: 2.5rem !important;
-    overflow: hidden;
-    /* For header corners */
-  }
-
-  .forum-table tr {
-    margin-bottom: 0 !important;
-    border: none !important;
-    border-bottom: 1px solid var(--border-color) !important;
-    background-color: transparent !important;
-  }
-
-  /* Remove hover on mobile */
-  .forum-table tr:hover,
-  .forum-table tbody tr:hover {
-    background-color: transparent !important;
-  }
-
-  .forum-table tr:last-child {
-    border-bottom: none !important;
-  }
-
-  .forum-table td {
-    padding: 1.25rem 1.25rem !important;
-    /* More airy */
-    border: none !important;
-    text-align: left !important;
-  }
-
-  .forum-table td.forum-td-stat {
-    display: none !important;
-  }
-
-  .forum-table td:first-child {
-    padding-bottom: 0.25rem !important;
-  }
-
-  .forum-table .cat-link,
-  .forum-table .topic-title-link {
-    font-size: 1.1rem !important;
-    margin-bottom: 0.4rem !important;
-    color: var(--text-color) !important;
-  }
-
-  .forum-table .cat-desc,
-  .forum-table .topic-desc-text {
-    font-size: 14px !important;
-    /* Minimum 14px as requested */
-    line-height: 1.5 !important;
-    opacity: 1 !important;
-  }
-
-  .forum-mobile-stats {
-    color: var(--secondary-color) !important;
-    font-weight: 600;
-    margin-top: 0.85rem !important;
-    font-size: 14px !important;
-    /* Also 14px for consistency */
-    opacity: 1 !important;
-  }
-
-  /* Last Post Section - Full Width and Integrated */
-  .forum-table td:last-child {
-    padding: 1rem 1.25rem 1.25rem !important;
-    background-color: rgba(var(--primary-rgb), 0.02) !important;
-    border-top: 1px solid rgba(var(--primary-rgb), 0.03) !important;
-  }
-
-  .forum-table td:last-child:before {
-    content: attr(data-label);
-    display: block !important;
-    margin-bottom: 0.65rem !important;
-    font-size: 0.65rem !important;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--secondary-color);
-    letter-spacing: 0.05em;
-  }
-
-  .last-topic-link {
-    max-width: 100% !important;
-    white-space: normal !important;
-    font-size: 0.95rem !important;
-  }
-
-  /* Responsive Post Author Sidebar */
-  .author-sidebar {
-    border-right: none !important;
-    border-bottom: 1px solid var(--border-color) !important;
-    background-color: rgba(var(--primary-rgb), 0.01) !important;
-    border-radius: 1rem 1rem 0 0 !important;
-  }
-
-  .author-res-avatar {
-    width: 60px !important;
-    height: 60px !important;
-  }
-
-  .author-res-nickname {
-    font-size: 1rem !important;
-  }
-
-  .author-res-status {
-    font-size: 14px !important;
-  }
-
-  .author-res-stat {
-    font-size: 14px !important;
-    /* Minimum 14px as requested */
-    line-height: 1.2;
-    opacity: 1 !important;
-  }
-
-  .author-res-info-lite .role-badge {
-    background-color: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    color: var(--secondary-color) !important;
-    font-size: 14px !important;
-    font-weight: 500;
-  }
-
-  .post-content {
-    line-height: 1.5 !important;
-  }
-
-  .author-res-footer-link {
-    font-size: 14px !important;
-    text-decoration: none !important;
-    color: var(--secondary-color) !important;
-    font-weight: 500;
-  }
-}
-
+/* ============================================================
+   LEGACY forum-table block (Bootstrap Table era) - turned OFF.
+   No JSX in src/ renders .forum-table* / .forum-table-sub /
+   .topic-row-hover / .topic-title-link / .forum-td-stat:
+   MainPage, CategoryPage, ActiveTopicsPage, NewRepliesPage and
+   SubscriptionsPage now render the semantic DOM
+   (<article class="forum-item"> / <article class="topic-item">)
+   governed by forum-index.css + topic-row.css + author-meta.css.
+   Every selector below is an !important duplicate of a rule that
+   now lives in the native modules (see file headers). Keeping
+   them live made DevTools show the overlap (e.g. .last-topic-link
+   mobile 0.95rem from here vs forum-index.css). Commented out
+   until Stage 7 drops Bootstrap entirely; then delete for good.
+   KEEP LIVE outside this block: .hide-on-extra-small-mobile,
+   .bbcode-media-wrapper, .hotkeys-table, .dm-*, .members-table-*,
+   .profile-sidebar-wrapper - used by unmigrated pages.
+   ============================================================ */
+/*
+ * -- Force uniform columns across different tables (Desktop only) --
+ * @media (min-width: 768px) {
+ *   .forum-table {
+ *     table-layout: fixed !important;
+ *     width: 100% !important;
+ *   }
+ *
+ *   .forum-table th:nth-child(2),
+ *   .forum-table td:nth-child(2),
+ *   .forum-table th:nth-child(3),
+ *   .forum-table td:nth-child(3) {
+ *     width: 100px !important;
+ *   }
+ *
+ *   .forum-table th:last-child,
+ *   .forum-table td:last-child {
+ *     width: 35% !important;
+ *   }
+ *
+ *   .author-sidebar {
+ *     width: 200px !important;
+ *     min-width: 200px !important;
+ *     flex: 0 0 200px !important;
+ *   }
+ * }
+ *
+ * -- Hide elements on extremely narrow screens (e.g. iPhone SE / 320px) --
+ * @media (max-width: 365px) {
+ *   .hide-on-extra-small-mobile {
+ *     display: none !important;
+ *   }
+ * }
+ *
+ * .forum-table thead th {
+ *   background-color: var(--nav-bg) !important;
+ *   color: #fff !important;
+ *   border-bottom: 1px solid var(--border-color) !important;
+ *   font-size: 0.9rem;
+ *   font-weight: 600;
+ *   padding: 0.75rem 1rem !important;
+ * }
+ *
+ * .forum-table td {
+ *   padding: 1rem 1rem !important;
+ * }
+ *
+ * .forum-table-sub thead th {
+ *   background-color: rgba(0, 0, 0, 0.03) !important;
+ *   color: var(--text-color) !important;
+ *   border-bottom: 1px solid var(--border-color) !important;
+ *   font-size: 0.75rem;
+ *   font-weight: 700;
+ *   text-transform: uppercase;
+ *   letter-spacing: 0.05em;
+ *   padding: 0.6rem 1rem !important;
+ *   opacity: 0.75;
+ * }
+ *
+ * [data-theme='dark'] .forum-table-sub thead th {
+ *   background-color: rgba(255, 255, 255, 0.05) !important;
+ *   opacity: 0.5;
+ * }
+ *
+ * [data-theme='neutral'] .forum-table-sub thead th {
+ *   color: var(--text-color) !important;
+ *   opacity: 0.65;
+ * }
+ *
+ * -- Responsive Forum Tables --
+ * @media (max-width: 768px) {
+ *   .forum-table thead {
+ *     display: none !important;
+ *   }
+ *
+ *   .forum-table,
+ *   .forum-table tbody,
+ *   .forum-table tr,
+ *   .forum-table td {
+ *     display: block !important;
+ *     width: 100% !important;
+ *     box-sizing: border-box !important;
+ *   }
+ *
+ *   .forum-table td.d-none {
+ *     display: none !important;
+ *   }
+ *
+ *   .forum-table {
+ *     background-color: transparent !important;
+ *     table-layout: auto !important;
+ *   }
+ *
+ *   -- Dark, prominent group headers --
+ *   .forum-group-header {
+ *     background-color: var(--nav-bg) !important;
+ *     padding: 0.85rem 1.25rem !important;
+ *     border-bottom: none !important;
+ *     border-top-left-radius: 12px;
+ *     border-top-right-radius: 12px;
+ *   }
+ *
+ *   .forum-group-header h4 {
+ *     color: #fff !important;
+ *     font-size: 0.85rem !important;
+ *     text-transform: none;
+ *     font-weight: 700;
+ *     letter-spacing: normal;
+ *     margin: 0 !important;
+ *   }
+ *
+ *   -- Unified group block --
+ *   .forum-group-card {
+ *     background-color: var(--card-bg) !important;
+ *     border: 1px solid var(--border-color) !important;
+ *     border-top: none !important;
+ *     border-radius: 0 0 12px 12px !important;
+ *     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06) !important;
+ *     margin-bottom: 2.5rem !important;
+ *     overflow: hidden;
+ *     -- For header corners --
+ *   }
+ *
+ *   .forum-table tr {
+ *     margin-bottom: 0 !important;
+ *     border: none !important;
+ *     border-bottom: 1px solid var(--border-color) !important;
+ *     background-color: transparent !important;
+ *   }
+ *
+ *   -- Remove hover on mobile --
+ *   .forum-table tr:hover,
+ *   .forum-table tbody tr:hover {
+ *     background-color: transparent !important;
+ *   }
+ *
+ *   .forum-table tr:last-child {
+ *     border-bottom: none !important;
+ *   }
+ *
+ *   .forum-table td {
+ *     padding: 1.25rem 1.25rem !important;
+ *     -- More airy --
+ *     border: none !important;
+ *     text-align: left !important;
+ *   }
+ *
+ *   .forum-table td.forum-td-stat {
+ *     display: none !important;
+ *   }
+ *
+ *   .forum-table td:first-child {
+ *     padding-bottom: 0.25rem !important;
+ *   }
+ *
+ *   .forum-table .cat-link,
+ *   .forum-table .topic-title-link {
+ *     font-size: 1.1rem !important;
+ *     margin-bottom: 0.4rem !important;
+ *     color: var(--text-color) !important;
+ *   }
+ *
+ *   .forum-table .cat-desc,
+ *   .forum-table .topic-desc-text {
+ *     font-size: 14px !important;
+ *     -- Minimum 14px as requested --
+ *     line-height: 1.5 !important;
+ *     opacity: 1 !important;
+ *   }
+ *
+ *   .forum-mobile-stats {
+ *     color: var(--secondary-color) !important;
+ *     font-weight: 600;
+ *     margin-top: 0.85rem !important;
+ *     font-size: 14px !important;
+ *     -- Also 14px for consistency --
+ *     opacity: 1 !important;
+ *   }
+ *
+ *   -- Last Post Section - Full Width and Integrated --
+ *   .forum-table td:last-child {
+ *     padding: 1rem 1.25rem 1.25rem !important;
+ *     background-color: rgba(var(--primary-rgb), 0.02) !important;
+ *     border-top: 1px solid rgba(var(--primary-rgb), 0.03) !important;
+ *   }
+ *
+ *   .forum-table td:last-child:before {
+ *     content: attr(data-label);
+ *     display: block !important;
+ *     margin-bottom: 0.65rem !important;
+ *     font-size: 0.65rem !important;
+ *     font-weight: 700;
+ *     text-transform: uppercase;
+ *     color: var(--secondary-color);
+ *     letter-spacing: 0.05em;
+ *   }
+ *
+ *   .last-topic-link {
+ *     max-width: 100% !important;
+ *     white-space: normal !important;
+ *     font-size: 0.95rem !important;
+ *   }
+ *
+ *   -- Responsive Post Author Sidebar --
+ *   .author-sidebar {
+ *     border-right: none !important;
+ *     border-bottom: 1px solid var(--border-color) !important;
+ *     background-color: rgba(var(--primary-rgb), 0.01) !important;
+ *     border-radius: 1rem 1rem 0 0 !important;
+ *   }
+ *
+ *   .author-res-avatar {
+ *     width: 60px !important;
+ *     height: 60px !important;
+ *   }
+ *
+ *   .author-res-nickname {
+ *     font-size: 1rem !important;
+ *   }
+ *
+ *   .author-res-status {
+ *     font-size: 14px !important;
+ *   }
+ *
+ *   .author-res-stat {
+ *     font-size: 14px !important;
+ *     -- Minimum 14px as requested --
+ *     line-height: 1.2;
+ *     opacity: 1 !important;
+ *   }
+ *
+ *   .author-res-info-lite .role-badge {
+ *     background-color: transparent !important;
+ *     border: none !important;
+ *     padding: 0 !important;
+ *     color: var(--secondary-color) !important;
+ *     font-size: 14px !important;
+ *     font-weight: 500;
+ *   }
+ *
+ *   .post-content {
+ *     line-height: 1.5 !important;
+ *   }
+ *
+ *   .author-res-footer-link {
+ *     font-size: 14px !important;
+ *     text-decoration: none !important;
+ *     color: var(--secondary-color) !important;
+ *     font-weight: 500;
+ *   }
+ * }
+ *
+ */
 /* BBCode Media Scaling Fix (for DMs and constrained layouts) */
 .bbcode-media-wrapper {
   width: 100% !important;

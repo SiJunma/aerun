@@ -1,11 +1,11 @@
 
 .cursor-pointer {
-  cursor: pointer !important;
+  cursor: pointer;
 }
 
 
 .user-select-none {
-  user-select: none !important;
+  user-select: none;
 }
 
 /* Topic Indicators */
@@ -17,115 +17,20 @@
 }
 
 .topic-pinned {
-  color: #b45309; /* Deeper Amber for better contrast on white */
+  color: var(--topic-pinned-color, #b45309);
 }
 
 [data-theme='neutral'] .topic-pinned {
-  color: #78350f !important; /* Even deeper brownish-amber for Sepia */
+  color: var(--topic-pinned-color);
 }
 
 .topic-locked {
-  color: #ef4444; /* Red */
+  color: var(--topic-locked-color, #ef4444);
 }
 
-/* Management Toolbar */
-.management-toolbar {
-  position: fixed;
-  bottom: 2rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1050;
-  background: rgba(30, 41, 59, 0.9); /* Slate 800 */
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 1rem;
-  padding: 0.75rem 1.5rem;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  width: max-content;
-  max-width: 95vw;
-  gap: 1rem;
-  animation: toolbarSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@media (max-width: 768px) {
-  .management-toolbar {
-    padding: 0.5rem 0.75rem;
-    gap: 0.6rem;
-    border-radius: 0.75rem;
-    bottom: 1rem;
-  }
-}
-
-@keyframes toolbarSlideUp {
-  from { transform: translate(-50%, 100%); opacity: 0; }
-  to { transform: translate(-50%, 0); opacity: 1; }
-}
-
-.management-toolbar .btn {
-  white-space: nowrap;
-}
-
-/* Instruction shown while manage mode is on and nothing is ticked yet.
-   It sits at the end of the action bar, so the bar itself now explains what to
-   do instead of leaving the page silent after "Manage" was pressed. */
-.management-toolbar-hint {
-  opacity: 0.85;
-  font-style: italic;
-  white-space: normal;
-  max-width: 22rem;
-  line-height: 1.25;
-}
-
-@media (max-width: 768px) {
-  .management-toolbar-hint {
-    max-width: 100%;
-    text-align: center;
-  }
-}
-
-[data-theme='light'] .management-toolbar {
-  background: rgba(255, 255, 255, 0.95);
-  border-color: rgba(0, 0, 0, 0.15);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-  color: #1e293b;
-}
-
-[data-theme='light'] .management-toolbar .btn-outline-light {
-  color: #1e293b !important;
-  border-color: rgba(30, 41, 59, 0.3) !important;
-}
-
-[data-theme='light'] .management-toolbar .btn-outline-light:hover {
-  background-color: #1e293b !important;
-  color: #fff !important;
-}
-
-[data-theme='neutral'] .management-toolbar {
-  background: rgba(244, 241, 234, 0.98);
-  border-color: #dcd7c9;
-  color: #433422;
-  box-shadow: 0 10px 30px rgba(67, 52, 34, 0.15);
-}
-
-[data-theme='neutral'] .management-toolbar .btn-outline-light {
-  color: #433422 !important;
-  border-color: rgba(67, 52, 34, 0.25) !important;
-}
-
-[data-theme='neutral'] .management-toolbar .btn-outline-light:hover {
-  background-color: #433422 !important;
-  color: #fdfaf3 !important;
-}
-
-[data-theme='neutral'] .management-toolbar .vr,
-[data-theme='light'] .management-toolbar .vr {
-  background-color: currentColor;
-  opacity: 0.25;
-}
+/* Management Toolbar — moved to src/styles/forum-view.css.
+   Colours now come from --management-toolbar-* tokens in
+   theme-variables.css (dark/light/neutral), without !important. */
 
 /* The refresh affordance on the members board.
    A spinner that tells the member their click landed. `.spin` is on the ICON

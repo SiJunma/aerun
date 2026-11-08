@@ -25,7 +25,7 @@ const stripComments = (src) =>
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const categoryPage = stripComments(read('../src/pages/CategoryPage.jsx'));
-const utilitiesCss = read('../src/styles/utilities.css');
+const forumViewCss = read('../src/styles/forum-view.css');
 
 const failures = [];
 const check = (ok, message) => {
@@ -43,7 +43,7 @@ check(
   'the toolbar must carry an explicit instruction while nothing is selected'
 );
 check(
-  /selectedTopicIds\.length === 0 && \(\s*<div className="small management-toolbar-hint"/.test(categoryPage),
+  /selectedTopicIds\.length === 0 && \(\s*<div className="management-toolbar-hint"/.test(categoryPage),
   'the hint must be conditional on nothing being selected, so it disappears once the ' +
     'member starts ticking topics instead of competing with the counter'
 );
@@ -53,7 +53,7 @@ check(
     'Delete that silently no-ops is the same dead end the hint exists to prevent'
 );
 check(
-  /\.management-toolbar-hint\s*\{/.test(utilitiesCss),
+  /\.management-toolbar-hint\s*\{/.test(forumViewCss),
   'the hint needs its own CSS rule: without it the text wraps badly inside the fixed bar'
 );
 

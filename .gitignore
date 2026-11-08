@@ -113,3 +113,7 @@ eslint-report.txt
 # Python bytecode cache
 __pycache__/
 *.py[cod]
+
+# Local-only helpers (device-specific, must not be committed).
+# The nvm-env fix embeds absolute paths for this machine.
+scripts/fix-nvm-env.ps1

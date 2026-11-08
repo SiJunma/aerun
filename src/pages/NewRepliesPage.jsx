@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table } from 'react-bootstrap';
 import { MessageSquare, Bell } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -171,35 +170,39 @@ const NewRepliesPage = () => {
   const loading = topicsLoading;
 
   return (
-    <Container className="py-4">
-      <ForumBreadcrumbs
-        items={[{ label: t('stats.latest_replies', 'Активные темы'), active: true }]}
-      />
+    <main id="forum-view" className="forum-view" data-forum-id="new-replies">
+      <nav id="forum-breadcrumbs-top" aria-label="breadcrumb">
+        <ForumBreadcrumbs
+          items={[{ label: t('stats.latest_replies', 'Активные темы'), active: true }]}
+        />
+      </nav>
 
-      <div className="mb-3 d-flex justify-content-between align-items-end">
-        <div>
-          <h2 className="mb-0">{t('stats.latest_replies', 'Активные темы')}</h2>
+      <header id="forum-view-header" className="forum-view-header">
+        <div className="forum-view-heading">
+          <h1 className="forum-view-title">{t('stats.latest_replies', 'Активные темы')}</h1>
         </div>
         {activeTab === TABS.NEW && user && (
-          <button
-            className="btn btn-outline-primary btn-sm rounded-pill px-3 d-flex align-items-center gap-2"
-            // markAllRead sends {all: true} and lets the SERVER resolve the full
-            // unread set from the same predicate that drives the badge counter —
-            // the client-supplied id list is not trusted (a polled page can only
-            // ever be a partial snapshot).
-            onClick={() => markAllRead(unreadTopics.map(t => t.id))}
-            // Gated on isMarkingAllRead alone, not on badge counter.
-            disabled={isMarkingAllRead}
-          >
-            {isMarkingAllRead && (
-              <div className="spinner-border spinner-border-sm" role="status">
-                <span className="visually-hidden">Loading...</span>
-              </div>
-            )}
-            {t('forum.mark_all_read')}
-          </button>
+          <div id="forum-actions-top" className="forum-view-actions">
+            <button
+              className="forum-view-action-btn forum-view-action-btn--secondary"
+              // markAllRead sends {all: true} and lets the SERVER resolve the full
+              // unread set from the same predicate that drives the badge counter —
+              // the client-supplied id list is not trusted (a polled page can only
+              // ever be a partial snapshot).
+              onClick={() => markAllRead(unreadTopics.map(t => t.id))}
+              // Gated on isMarkingAllRead alone, not on badge counter.
+              disabled={isMarkingAllRead}
+            >
+              {isMarkingAllRead && (
+                <span className="forum-view-spinner" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </span>
+              )}
+              {t('forum.mark_all_read')}
+            </button>
+          </div>
         )}
-      </div>
+      </header>
 
       {!isGuest && (
         <>
@@ -227,17 +230,17 @@ const NewRepliesPage = () => {
       )}
 
       {loading ? (
-        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-          <div className="p-5 text-center text-muted">
-            <div className="spinner-border spinner-border-sm me-2" role="status" />
+        <section id="forum-topic-list" className="forum-topic-list">
+          <div className="forum-view-empty forum-view-loading">
+            <span className="forum-view-spinner" role="status" />
             {t('common.loading')}
           </div>
-        </Card>
+        </section>
       ) : currentTopics.length === 0 ? (
         /* The empty list replaces the table card entirely: a table header over
          * zero rows reads as a populated list whose data failed to load. */
         <ForumEmptyState
-          className="mb-4"
+          className="forum-view-empty-state"
           icon={activeTab === TABS.NEW ? Bell : MessageSquare}
           title={
             activeTab === TABS.NEW
@@ -251,17 +254,15 @@ const NewRepliesPage = () => {
           }
         />
       ) : (
-        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-          <Table hover responsive className="mb-0 align-middle forum-table">
-            <thead>
-              <tr>
-                <th style={{ width: '40%' }}>{t('forum.topic')}</th>
-                <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category')}</th>
-                <th className="text-center">{t('forum.replies')}</th>
-                <th>{t('forum.last_post')}</th>
-              </tr>
-            </thead>
-            <tbody>
+        <>
+          <section id="forum-topic-list" className="forum-topic-list">
+            <div className="topic-list-head has-category">
+              <span className="topic-col-topic">{t('forum.topic')}</span>
+              <span className="topic-col-category">{t('forum.category')}</span>
+              <span className="topic-col-replies">{t('forum.replies')}</span>
+              <span className="topic-col-lastpost">{t('forum.last_post')}</span>
+            </div>
+            <div className="topic-list">
               {currentTopics.map(topic => (
                 <TopicRow
                   key={topic.id}
@@ -273,27 +274,27 @@ const NewRepliesPage = () => {
                   categoryName={getCategoryName(topic.category_id)}
                 />
               ))}
-            </tbody>
-          </Table>
+            </div>
+          </section>
 
           {totalPages > 1 && (
-            <div className="p-3 border-top d-flex justify-content-center">
+            <nav id="forum-pagination-bottom" className="forum-view-pagination">
               <ForumPagination
                 currentPage={currentPage}
                 totalPages={totalPages}
                 onPageChange={handlePageChange}
               />
-            </div>
+            </nav>
           )}
-        </Card>
+        </>
       )}
 
-      <div className="mt-4">
-        <Link to="/" className="btn btn-outline-secondary">
+      <div className="forum-view-footer">
+        <Link to="/" className="forum-view-back">
           &larr; {t('forum.back_to_categories')}
         </Link>
       </div>
-    </Container>
+    </main>
   );
 };
 

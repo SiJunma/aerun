@@ -1,0 +1,220 @@
+/**
+ * Aerun Forum Statistics Styles
+ *
+ * Implements semantic structure from SPEC_forum-index-theme-dom.md:
+ * #forum-statistics, .forum-stats-card, .stats-header, .stats-title,
+ * .stats-grid, .stats-item, .stat-topics, .stat-posts, .stat-members,
+ * .stat-newest-member, .online-users-panel, .stat-online, .stat-visited-today,
+ * .stats-footer.
+ */
+
+#forum-statistics,
+.forum-statistics {
+  margin-top: 3rem;
+  margin-bottom: 2rem;
+}
+
+.forum-stats-card {
+  background-color: var(--stats-card-bg);
+  /* border: 1px solid var(--stats-border); */
+  border-radius: var(--stats-card-radius);
+  box-shadow: var(--stats-card-shadow);
+  overflow: hidden;
+}
+
+.stats-header {
+  padding: 0.75rem 1rem;
+  /* border-bottom: 1px solid var(--stats-header-border); */
+  background-color: var(--stats-header-bg);
+  color: var(--stats-header-text);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stats-title {
+  font-weight: 700;
+  font-size: .875rem;
+  color: var(--stats-header-text);
+  opacity: .8;
+}
+
+.stats-header-icon {
+  color: var(--stats-header-icon-color);
+  opacity: 0.8;
+}
+
+.stats-grid {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--stats-panel-border);
+  background-color: var(--stats-card-bg);
+}
+
+.stats-row-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.stats-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  opacity: 0.9;
+  transition: opacity 0.2s ease;
+}
+
+.stats-item:hover {
+  opacity: 1;
+}
+
+.stats-item-icon {
+  color: var(--stats-item-muted);
+  opacity: 0.6;
+}
+
+.stats-item-text-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+}
+
+.stat-count {
+  font-weight: 700;
+  color: var(--stats-item-text);
+}
+
+.stat-label {
+  font-size: 0.875rem;
+  color: var(--stats-item-muted);
+}
+
+.ms-auto-md {
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .ms-auto-md {
+    margin-left: 0;
+  }
+
+  .stats-row-compact {
+    gap: 0.4rem 1.5rem;
+  }
+}
+
+/* ── Online & Visited Panels ────────────────────────────────── */
+.online-users-panel {
+  background-color: var(--stats-panel-bg);
+  padding: 0.4rem 1rem;
+  border-bottom: 1px solid var(--stats-panel-border);
+}
+
+.online-users-panel:last-of-type {
+  border-bottom: none;
+}
+
+.online-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+}
+
+.online-list-label {
+  color: var(--stats-item-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-right: 0.35rem;
+}
+
+.online-indicator-blob {
+  width: 7px;
+  height: 7px;
+  background-color: var(--stat-online-indicator);
+  border-radius: 50%;
+  display: inline-block;
+  opacity: 0.9;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.online-user-entry {
+  font-size: 0.875rem;
+}
+
+.online-user-link {
+  text-decoration: none;
+  font-weight: 400;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  display: inline-block;
+}
+
+.online-user-link:hover {
+  text-decoration: underline;
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.stat-user-default {
+  color: var(--stat-user-default-color);
+  font-weight: 500;
+}
+
+.stat-user-default:hover {
+  color: var(--stat-user-default-hover-color);
+}
+
+.online-author-admin {
+  color: var(--role-admin);
+}
+
+.online-author-mod {
+  color: var(--role-mod);
+}
+
+[data-theme='neutral'] .online-author-admin {
+  color: #b91c1c;
+}
+
+.online-separator {
+  color: var(--stats-item-muted);
+  margin-right: 3px;
+}
+
+.stat-silence {
+  font-size: 0.875rem;
+  color: var(--stats-item-muted);
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* ── Statistics Footer ──────────────────────────────────────── */
+.stats-footer {
+  padding: .25rem 1rem;
+  border-top: 1px solid var(--stats-footer-border);
+  background-color: var(--stats-footer-bg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stats-footer-link {
+  font-size: .875rem;
+  text-decoration: none;
+  font-weight: 500;
+  color: var(--stats-footer-link-color);
+  opacity: 0.75;
+  transition: opacity 0.2s ease;
+}
+
+.stats-footer-link:hover {
+  opacity: 1;
+  text-decoration: none;
+  color: var(--stats-footer-link-hover-color);
+}

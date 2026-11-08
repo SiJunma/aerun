@@ -1,8 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Form, Image } from 'react-bootstrap';
 import { Pin, Lock, MessageSquare } from 'lucide-react';
-import ForumAuthorName from './ForumAuthorName';
 import LastPostInfo from './LastPostInfo';
 import AuthorMeta from './AuthorMeta';
 import { useAuth } from '../../contexts/AuthProvider';
@@ -58,102 +56,106 @@ const TopicRow = ({
     }
 
     return (
-      <span className="mini-pagination ms-2 d-inline-flex gap-1 align-items-center">
-        <span className="text-muted" style={{ fontSize: '0.75rem' }}>[</span>
+      <span className="mini-pagination">
+        <span>[</span>
         {pages.map((p, i) => (
           <React.Fragment key={i}>
             {p === '...' ? (
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>...</span>
+              <span>...</span>
             ) : (
-              <Link 
-                to={`/topic/${topic.id}?page=${p}`} 
-                className="mini-page-link text-decoration-none"
+              <Link
+                to={`/topic/${topic.id}?page=${p}`}
+                className="mini-page-link"
               >
                 {p}
               </Link>
             )}
-          </ React.Fragment>
+          </React.Fragment>
         ))}
-        <span className="text-muted" style={{ fontSize: '0.75rem' }}>]</span>
+        <span>]</span>
       </span>
     );
   };
 
+  const stateClasses = [
+    topic.is_pinned ? 'is-pinned' : '',
+    topic.is_locked ? 'is-locked' : '',
+    hasUnread ? 'is-unread' : isUnreadByState ? 'is-new' : 'is-read',
+    isSelected ? 'is-selected' : '',
+    isManaging ? 'is-managing' : '',
+    showCategoryInColumn ? 'has-category' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <tr className={`${isSelected ? 'table-active' : ''} topic-row-hover`}>
+    <article
+      id={`topic-${topic.id}`}
+      className={`topic-item ${stateClasses}`}
+      data-topic-id={topic.id}
+      data-category-id={topic.category_id}
+    >
       {isManaging && (
-        <td>
-          <Form.Check 
+        <div className="topic-select">
+          <input
             type="checkbox"
+            className="topic-select-input"
             checked={isSelected}
             onChange={() => onSelect(topic.id)}
           />
-        </td>
-      )}
-      <td data-label={lang === 'ru' ? 'Тема' : 'Topic'}>
-        <div className="d-flex align-items-start gap-2 topic-main-cell">
-          <div className="flex-grow-1">
-            <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
-              {topic.is_pinned && (
-                <Pin size={14} className="topic-indicator topic-pinned" fill="currentColor" />
-              )}
-              {topic.is_locked && (
-                <Lock size={14} className="topic-indicator topic-locked" />
-              )}
-              <Link
-                to={`/topic/${topic.id}`}
-                className="fw-bold d-block text-decoration-none h6 mb-0 topic-title-link"
-                title={t('stats.to_first_post')}
-              >
-                {topic.title}
-              </Link>
-              {renderMiniPagination()}
-            </div>
-            {topic.description && (
-              <div className="text-muted small mb-1 topic-desc-text">
-                {topic.description}
-              </div>
-            )}
-            <div className="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-1 mt-1">
-            <div className="d-none d-md-block mt-1">
-              <AuthorMeta
-                date={topic.created_at}
-                author={topic.author}
-                showAvatar={false}
-                lang={lang}
-              />
-            </div>
-              {showCategory && categoryName && (
-                <div className={`d-flex align-items-center gap-1 ${showCategoryInColumn ? 'd-md-none' : ''}`}>
-                  <span className="text-muted small d-none d-sm-inline">·</span>
-                  <Link to={`/category/${topic.category_id}`} className="text-decoration-none small text-primary hover-opacity-100">
-                    {categoryName}
-                  </Link>
-                </div>
-              )}
-            </div>
-            {/* Mobile Replies Line */}
-            <div className="d-md-none mt-2 d-flex gap-3 small forum-mobile-stats text-muted">
-              <span className="d-flex align-items-center gap-1">
-                <MessageSquare size={12} /> {Math.max(0, (topic.posts_count || 1) - 1)}
-              </span>
-            </div>
-          </div>
         </div>
-      </td>
+      )}
+      <div className="topic-main">
+        <div className="topic-head">
+          {topic.is_pinned && (
+            <span className="topic-icon topic-pinned" aria-hidden="true"><Pin size={14} fill="currentColor" /></span>
+          )}
+          {topic.is_locked && (
+            <span className="topic-icon topic-locked" aria-hidden="true"><Lock size={14} /></span>
+          )}
+          <h3 className="topic-title">
+            <Link to={`/topic/${topic.id}`} title={t('stats.to_first_post')}>
+              {topic.title}
+            </Link>
+          </h3>
+          {renderMiniPagination()}
+        </div>
+        {topic.description && (
+          <p className="topic-description">{topic.description}</p>
+        )}
+        <div className="topic-meta">
+          <div className="topic-author">
+            <AuthorMeta
+              date={topic.created_at}
+              author={topic.author}
+              showAvatar={false}
+              lang={lang}
+            />
+          </div>
+          {showCategory && categoryName && (
+            <div className={`topic-category ${showCategoryInColumn ? 'topic-category--inline' : ''}`}>
+              <Link to={`/category/${topic.category_id}`}>
+                {categoryName}
+              </Link>
+            </div>
+          )}
+        </div>
+        <div className="topic-mobile-stats">
+          <span><MessageSquare size={12} /> {Math.max(0, (topic.posts_count || 1) - 1)}</span>
+        </div>
+      </div>
       {showCategoryInColumn && (
-        <td className="d-none d-md-table-cell align-middle" data-label={lang === 'ru' ? 'Категория' : 'Category'}>
-          <Link to={`/category/${topic.category_id}`} className="text-decoration-none small text-muted hover-opacity-100">
+        <div
+          className="topic-category"
+          data-label={lang === 'ru' ? 'Категория' : 'Category'}
+        >
+          <Link to={`/category/${topic.category_id}`}>
             {categoryName}
           </Link>
-        </td>
-      )}
-      <td className="text-center forum-td-stat" data-label={lang === 'ru' ? 'Ответов' : 'Replies'}>
-        <div className="d-flex align-items-center justify-content-center">
-          <span className="topic-count-val">{Math.max(0, (topic.posts_count || 1) - 1)}</span>
         </div>
-      </td>
-      <td data-label={lang === 'ru' ? 'Последнее' : 'Last Post'}>
+      )}
+      <div className="topic-replies" data-label={lang === 'ru' ? 'Ответов' : 'Replies'}>
+        <span className="topic-count">{Math.max(0, (topic.posts_count || 1) - 1)}</span>
+      </div>
+      <div className="topic-last-post" data-label={lang === 'ru' ? 'Последнее' : 'Last Post'}>
         <LastPostInfo
           topicId={topic.id}
           lastPostAt={topic.last_post_at}
@@ -163,8 +165,8 @@ const TopicRow = ({
           postsCount={topic.posts_count}
           lang={lang}
         />
-      </td>
-    </tr>
+      </div>
+    </article>
   );
 };
 

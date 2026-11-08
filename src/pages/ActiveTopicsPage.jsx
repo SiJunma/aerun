@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table } from 'react-bootstrap';
 import { MessageSquare } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -15,17 +14,16 @@ import { usePageTitle } from '../contexts/TitleProvider';
 
 const ITEMS_PER_PAGE = 20;
 
-// THE PAGER IS ALWAYS RENDERED, and this is the floor.
+// THE PAGER IS ALWAYS RENDERED when there is more than one page, and
+// this is the floor.
 //
 // The list previously had no pagination at all: it drew whatever fifty rows came
 // back and reported "everything" — so past that point the forums simply stopped
-// being listed, with nothing on screen to say so. A pager that appears only once
-// there is more than one page cannot solve that, because the member who is
-// already missing pages never sees the control that would reveal it.
+// being listed, with nothing on screen to say so.
 //
-// So the control is always present. Empty pages beyond the data are honest —
-// they say the list is shorter than the pager — while a missing pager says
-// nothing at all.
+// So the control is rendered whenever totalPages > 1 (ForumPagination itself
+// returns null for a single page). An empty <nav> wrapper must never render:
+// it adds a 1rem margin and an empty box to the DOM.
 const ActiveTopicsPage = () => {
   const { t, lang } = useI18n();
   const { user, hasPermission, PERMISSIONS, categories } = useAuth();
@@ -83,78 +81,79 @@ const ActiveTopicsPage = () => {
   };
 
   return (
-    <Container className="py-4">
-      <ForumBreadcrumbs 
-        items={[{ label: t('stats.active_topics'), active: true }]} 
-      />
+    <main id="forum-view" className="forum-view" data-forum-id="active-topics">
+      <nav id="forum-breadcrumbs-top" aria-label="breadcrumb">
+        <ForumBreadcrumbs
+          items={[{ label: t('stats.active_topics'), active: true }]}
+        />
+      </nav>
 
-      <div className="mb-4">
-        <h2>{t('stats.top_discussed')}</h2>
-        <p className="text-muted small">
-          {t('stats.top_discussed_desc')}
-        </p>
-      </div>
+      <header id="forum-view-header" className="forum-view-header">
+        <div className="forum-view-heading">
+          <h1 className="forum-view-title">{t('stats.top_discussed')}</h1>
+          <p className="forum-view-description">
+            {t('stats.top_discussed_desc')}
+          </p>
+        </div>
+      </header>
 
       {loading ? (
-        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-          <div className="p-5 text-center text-muted">
-            <div className="spinner-border spinner-border-sm me-2" role="status" />
+        <section id="forum-topic-list" className="forum-topic-list">
+          <div className="forum-view-empty forum-view-loading">
+            <span className="forum-view-spinner" role="status" />
             {t('common.loading')}
           </div>
-        </Card>
+        </section>
       ) : visibleTopics.length === 0 ? (
         <ForumEmptyState
-          className="mb-4"
+          className="forum-view-empty-state"
           icon={MessageSquare}
           title={t('stats.no_topics', 'Тем пока нет')}
           description={t('stats.no_topics_desc', 'Как только появится тема, она отобразится здесь.')}
         />
       ) : (
-        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-          <Table hover responsive className="mb-0 align-middle forum-table">
-            <thead>
-              <tr>
-                <th style={{ width: '40%' }} className="text-start">{t('forum.topic')}</th>
-                <th className="d-none d-md-table-cell text-start" style={{ width: '15%' }}>{t('forum.category')}</th>
-                <th className="text-center">{t('forum.replies')}</th>
-                <th className="text-start">{t('forum.last_post')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleTopics.map(topic => (
-                <TopicRow
-                  key={topic.id}
-                  topic={topic}
-                  user={user}
-                  lang={lang}
-                  showCategory={true}
-                  showCategoryInColumn={true}
-                  categoryName={getCategoryName(topic.category_id)}
-                />
-              ))}
-            </tbody>
-          </Table>
-        </Card>
+        <section id="forum-topic-list" className="forum-topic-list">
+          <div className="topic-list-head has-category">
+            <span className="topic-col-topic">{t('forum.topic')}</span>
+            <span className="topic-col-category">{t('forum.category')}</span>
+            <span className="topic-col-replies">{t('forum.replies')}</span>
+            <span className="topic-col-lastpost">{t('forum.last_post')}</span>
+          </div>
+          <div className="topic-list">
+            {visibleTopics.map(topic => (
+              <TopicRow
+                key={topic.id}
+                topic={topic}
+                user={user}
+                lang={lang}
+                showCategory={true}
+                showCategoryInColumn={true}
+                categoryName={getCategoryName(topic.category_id)}
+              />
+            ))}
+          </div>
+        </section>
       )}
 
-      {/* Unconditional: the control must be visible even when the list is short,
-          so the member always sees the pager and knows the list is finite. */}
-      {!loading && (
-        <div className="mt-4">
+      {/* Only render the wrapper when the pager actually shows pages;
+          ForumPagination returns null for a single page, so an empty
+          <nav> would only add margin and an empty box to the DOM. */}
+      {!loading && totalPages > 1 && (
+        <nav id="forum-pagination-bottom" className="forum-view-pagination">
           <ForumPagination
             currentPage={Math.min(currentPage, totalPages)}
             totalPages={totalPages}
             onPageChange={handlePageChange}
           />
-        </div>
+        </nav>
       )}
 
-      <div className="mt-4">
-        <Link to="/" className="btn btn-outline-secondary">
+      <div className="forum-view-footer">
+        <Link to="/" className="forum-view-back">
           &larr; {t('forum.back_to_categories')}
         </Link>
       </div>
-    </Container>
+    </main>
   );
 };
 

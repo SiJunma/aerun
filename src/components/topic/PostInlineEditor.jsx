@@ -155,10 +155,10 @@ export const PostInlineEditor = ({
           disabled={isSaving}
         >
           {isSaving
-            ? (t?.('common.saving') || (lang === 'ru' ? 'Сохранение...' : 'Saving...'))
+            ? t?.('common.saving', {}, lang === 'ru' ? 'Сохранение...' : 'Saving...')
             : isDraft
-            ? (t?.('forum.draft_update_btn') || (lang === 'ru' ? 'Обновить черновик' : 'Update draft'))
-            : (t?.('common.save') || (lang === 'ru' ? 'Сохранить' : 'Save'))}
+            ? t?.('forum.draft_update_btn', {}, lang === 'ru' ? 'Обновить черновик' : 'Update draft')
+            : t?.('common.save', {}, lang === 'ru' ? 'Сохранить' : 'Save')}
         </Button>
         <Button
           size="sm"

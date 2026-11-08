@@ -10,7 +10,7 @@ const LastPostInfo = ({
   lang,
   className = ""
 }) => {
-  if (!lastPostAt) return <span className="text-muted small">—</span>;
+  if (!lastPostAt) return <span className="last-post-empty">—</span>;
 
   // The page is resolved SERVER-side (?goLast=1): getSecuredPosts counts posts
   // up to the stored visit timestamp, so deleted posts, inflated read offsets
@@ -23,7 +23,7 @@ const LastPostInfo = ({
   return (
     <Link
       to={targetUrl}
-      className={`text-decoration-none d-flex align-items-center gap-1 text-muted last-post-link-meta ${className}`}
+      className={`last-post-link-meta ${className}`}
       title={hasUnread
         ? (lang === 'ru' ? 'К первому непрочитанному сообщению' : 'To first unread message')
         : (lang === 'ru' ? 'К последнему сообщению' : 'To last message')
@@ -32,14 +32,14 @@ const LastPostInfo = ({
       {hasUnread && (
         <span
           title={lang === 'ru' ? 'Новые сообщения' : 'New posts'}
-          className="unread-dot me-1"
+          className="unread-dot"
         />
       )}
       <AuthorMeta
         date={lastPostAt}
         author={author}
         lang={lang}
-        className="w-100"
+        className="last-post-meta"
       />
     </Link>
   );

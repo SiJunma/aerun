@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Container } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -56,8 +55,7 @@ const MainPage = () => {
   }, [catsLoading, profileLoading]);
 
   return (
-    <div className="pt-5 pb-4">
-
+    <div id="forum-index" className="forum-index">
       {(catsLoading || profileLoading) ? (
         timeoutExpired ? (
           <ErrorCard
@@ -71,45 +69,42 @@ const MainPage = () => {
             onRetry={() => refreshForumState(true, true)}
           />
         ) : (
-        <Card className="shadow-sm border-0">
-          <div className="p-0">
-            <Table responsive className="mb-0 align-middle">
-              <thead>
-                <tr>
-                  <th style={{ minWidth: 260 }}>{t('forum.category')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.topics')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.posts')}</th>
-                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...Array(4)].map((_, i) => (
-                  <tr key={i}>
-                    <td className="py-3 px-3">
-                      <Skeleton width="50%" height="1.4rem" className="mb-2" />
-                      <Skeleton width="80%" height="0.9rem" />
-                    </td>
-                    <td className="text-center">
-                      <Skeleton width={30} height="1rem" className="mx-auto" />
-                    </td>
-                    <td className="text-center">
-                      <Skeleton width={30} height="1rem" className="mx-auto" />
-                    </td>
-                    <td>
-                      <div className="d-flex align-items-center gap-2">
-                        <Skeleton variant="avatar" width={32} height={32} className="rounded-circle" />
-                        <div className="flex-grow-1">
-                          <Skeleton width="80%" height="0.9rem" className="mb-1" />
-                          <Skeleton width="40%" height="0.7rem" />
-                        </div>
+          <div className="forum-skeleton-group">
+            <div className="category-header skeleton-category-header">
+              <Skeleton width="180px" height="1.4rem" />
+            </div>
+            <div className="category-content skeleton-category-content">
+              <div className="category-head">
+                <span className="category-col-forum">{t('forum.category')}</span>
+                <span className="category-col-topics">{t('forum.topics')}</span>
+                <span className="category-col-posts">{t('forum.posts')}</span>
+                <span className="category-col-lastpost">{t('forum.last_post')}</span>
+              </div>
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="forum-item skeleton-forum-item">
+                  <div className="forum-info">
+                    <Skeleton width="50%" height="1.4rem" className="mb-2" />
+                    <Skeleton width="80%" height="0.9rem" />
+                  </div>
+                  <div className="forum-topics">
+                    <Skeleton width={30} height="1rem" className="mx-auto" />
+                  </div>
+                  <div className="forum-posts">
+                    <Skeleton width={30} height="1rem" className="mx-auto" />
+                  </div>
+                  <div className="forum-last-post">
+                    <div className="d-flex align-items-center gap-2">
+                      <Skeleton variant="avatar" width={32} height={32} className="rounded-circle flex-shrink-0" />
+                      <div className="flex-grow-1">
+                        <Skeleton width="80%" height="0.9rem" className="mb-1" />
+                        <Skeleton width="40%" height="0.7rem" />
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </Card>
         )
       ) : (() => {
         // The list has already been filtered by getSecuredMainPageData. Do not
@@ -121,98 +116,110 @@ const MainPage = () => {
         // visible — otherwise a stale/empty groups cache blanks the whole page.
         const ungroupedCats = visibleCats.filter(c => !c.group_id || !safeGroups.some(g => g.id === c.group_id));
 
-        const renderCategoryRows = (cats) => cats.map(cat => (
-          <tr key={cat.id}>
-            <td data-label={t('forum.category')}>
-              <Link to={`/category/${cat.id}`} className="fw-bold d-block text-decoration-none h5 mb-1 cat-link">
-                {resolveField(cat.title, lang)}
-              </Link>
-              <div className="text-muted cat-desc" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
-                {resolveField(cat.description, lang)}
-              </div>
-              {/* Mobile Stats Line */}
-              <div className="d-md-none mt-2 d-flex gap-3 small forum-mobile-stats text-muted">
-                <span className="d-flex align-items-center gap-1">
-                  <MessageSquare size={12} /> {cat.topics_count || 0}
-                </span>
-                <span className="d-flex align-items-center gap-1">
-                  <FileText size={12} /> {cat.posts_count || 0}
-                </span>
-              </div>
-            </td>
-            <td className="text-center align-middle forum-td-stat" data-label={t('forum.topics')}>
-              {cat.topics_count || 0}
-            </td>
-            <td className="text-center align-middle forum-td-stat" data-label={t('forum.posts')}>
-              {cat.posts_count || 0}
-            </td>
-            <td className="align-middle" data-label={t('forum.last_post')}>
-              {cat.last_post_topic_id ? (
-                <div>
-                  <Link
-                    to={`/topic/${cat.last_post_topic_id}`}
-                    className="d-block fw-semibold text-decoration-none text-truncate mb-1 last-topic-link"
-                    title={t('stats.to_first_post')}
-                  >
-                    {cat.last_post_topic_title || '—'}
+        const renderCategoryRows = (cats) => cats.map(cat => {
+          const lastVisitRaw = readMap[cat.last_post_topic_id];
+          const lastReadOffset = lastVisitRaw?.offset ?? null;
+          const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
+          const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
+          const lastPostMs = toMillis(cat.last_post_at);
+          // The server owns read state, but local session visits
+          // (effectiveLastVisitMs >= lastPostMs) take immediate precedence
+          // over a stale server-side snapshot. A category is unread only if
+          // the server considers it unread AND this device has not visited
+          // it since the last post.
+          const serverUnread = typeof cat.unread === 'boolean' ? cat.unread : null;
+          const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
+          const isUnreadByServer = serverUnread !== null ? serverUnread : true;
+          const hasUnread = !!user &&
+            profile?.role !== 'pending' &&
+            cat.last_post_author_ref?.user_id !== user?.uid &&
+            isUnreadByServer &&
+            !isLocallyRead;
+
+          return (
+            <article
+              key={cat.id}
+              id={`forum-item-${cat.id}`}
+              className={`forum-item forum-item-${cat.id}${hasUnread ? ' is-unread is-new' : ''}`}
+              data-forum-id={cat.id}
+            >
+              <div className="forum-info">
+                <h3 className="forum-title">
+                  <Link to={`/category/${cat.id}`} className="cat-link">
+                    {resolveField(cat.title, lang)}
                   </Link>
-
-                  {(() => {
-                    const lastVisitRaw = readMap[cat.last_post_topic_id];
-                    const lastReadOffset = lastVisitRaw?.offset ?? null;
-                    const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-                    const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
-                    const lastPostMs = toMillis(cat.last_post_at);
-                    // The server owns read state, but local session visits
-                    // (effectiveLastVisitMs >= lastPostMs) take immediate precedence
-                    // over a stale server-side snapshot. A category is unread only if
-                    // the server considers it unread AND this device has not visited
-                    // it since the last post.
-                    const serverUnread = typeof cat.unread === 'boolean' ? cat.unread : null;
-                    const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
-                    const isUnreadByServer = serverUnread !== null ? serverUnread : true;
-                    const hasUnread = !!user &&
-                      profile?.role !== 'pending' &&
-                      cat.last_post_author_ref?.user_id !== user?.uid &&
-                      isUnreadByServer &&
-                      !isLocallyRead;
-
-                    return (
-                      <LastPostInfo
-                        topicId={cat.last_post_topic_id}
-                        lastPostAt={cat.last_post_at}
-                        author={cat.last_post_author_ref}
-                        hasUnread={hasUnread}
-                        lastReadOffset={lastReadOffset}
-                        postsCount={cat.last_post_topic_posts_count || null}
-                        lang={lang}
-                      />
-                    );
-                  })()}
+                </h3>
+                {cat.description && (
+                  <div className="forum-description cat-desc">
+                    {resolveField(cat.description, lang)}
+                  </div>
+                )}
+                {/* Mobile Stats Line */}
+                <div className="forum-mobile-stats d-md-none">
+                  <span className="forum-mobile-stat">
+                    <MessageSquare size={12} /> {cat.topics_count || 0}
+                  </span>
+                  <span className="forum-mobile-stat">
+                    <FileText size={12} /> {cat.posts_count || 0}
+                  </span>
                 </div>
-              ) : (
-                <span className="text-muted small">{t('forum.no_posts')}</span>
-              )}
-            </td>
-          </tr>
-        ));
+              </div>
+              <div className="forum-topics" data-value={cat.topics_count || 0}>
+                {cat.topics_count || 0}
+              </div>
+              <div className="forum-posts" data-value={cat.posts_count || 0}>
+                {cat.posts_count || 0}
+              </div>
+              <div className="forum-last-post" data-label={t('forum.last_post')}>
+                {cat.last_post_topic_id ? (
+                  <div className="last-post-content">
+                    <Link
+                      to={`/topic/${cat.last_post_topic_id}`}
+                      className="last-topic-link"
+                      title={t('stats.to_first_post')}
+                    >
+                      {cat.last_post_topic_title || '—'}
+                    </Link>
+                    <LastPostInfo
+                      topicId={cat.last_post_topic_id}
+                      lastPostAt={cat.last_post_at}
+                      author={cat.last_post_author_ref}
+                      hasUnread={hasUnread}
+                      lastReadOffset={lastReadOffset}
+                      postsCount={cat.last_post_topic_posts_count || null}
+                      lang={lang}
+                    />
+                  </div>
+                ) : (
+                  <span className="forum-no-posts">{t('forum.no_posts')}</span>
+                )}
+              </div>
+            </article>
+          );
+        });
 
-        const renderTable = (cats, key) => (
-          <Card key={key} className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-            <Table hover responsive className="mb-0 forum-table forum-table-sub">
-              <thead>
-                <tr>
-                  <th style={{ minWidth: 260 }}>{t('forum.category')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.topics')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.posts')}</th>
-                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {renderCategoryRows(cats)}
-              </tbody>
-            </Table>
-          </Card>
+        const renderCategoryGroup = (cats, key, groupTitle, groupId) => (
+          <section
+            key={key}
+            id={groupId ? `forum-category-${groupId}` : 'forum-category-ungrouped'}
+            className={`forum-category ${groupId ? ` category-${groupId}` : ' category-ungrouped'}`}
+            data-category-id={groupId || 'ungrouped'}
+          >
+            <header className="category-header">
+              <h2 className="category-title">
+                {groupTitle}
+              </h2>
+            </header>
+            <div className="category-content">
+              <div className="category-head">
+                <span className="category-col-forum">{t('forum.category')}</span>
+                <span className="category-col-topics">{t('forum.topics')}</span>
+                <span className="category-col-posts">{t('forum.posts')}</span>
+                <span className="category-col-lastpost">{t('forum.last_post')}</span>
+              </div>
+              {renderCategoryRows(cats)}
+            </div>
+          </section>
         );
 
         if (visibleCats.length === 0) {
@@ -227,31 +234,24 @@ const MainPage = () => {
         }
 
         return (
-          <>
-            {groupsWithCats.map(group => (
-              <React.Fragment key={group.id}>
-                <div className="d-flex align-items-center forum-group-header">
-                  <h4 className="mb-0">
-                    {resolveField(group.title, lang)}
-                  </h4>
-                </div>
-                {renderTable(
-                  visibleCats.filter(cat => cat.group_id === group.id),
-                  `group-${group.id}`
-                )}
-              </React.Fragment>
-            ))}
-            {ungroupedCats.length > 0 && (
-              <>
-                {groupsWithCats.length > 0 && (
-                  <div className="d-flex align-items-center forum-group-header">
-                    <h4 className="mb-0">{t('forum.uncategorized')}</h4>
-                  </div>
-                )}
-                {renderTable(ungroupedCats, 'ungrouped')}
-              </>
+          <main id="forum-main" className="forum-main">
+            {groupsWithCats.map(group =>
+              renderCategoryGroup(
+                visibleCats.filter(cat => cat.group_id === group.id),
+                `group-${group.id}`,
+                resolveField(group.title, lang),
+                group.id
+              )
             )}
-          </>
+            {ungroupedCats.length > 0 &&
+              renderCategoryGroup(
+                ungroupedCats,
+                'ungrouped',
+                t('forum.uncategorized'),
+                null
+              )
+            }
+          </main>
         );
       })()}
 

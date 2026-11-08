@@ -1,0 +1,280 @@
+/**
+ * Aerun Topic Row — shared module.
+ * Used on every topic list: CategoryPage, ActiveTopicsPage, NewRepliesPage,
+ * TopTopicsPage, SubscriptionsPage.
+ *
+ * DOM (SPEC_forum-and-members-theme-dom.md §5):
+ *   <article class="topic-item" id="topic-{id}" data-topic-id="{id}">
+ *     <div class="topic-select">…</div>          (manage mode)
+ *     <div class="topic-main">
+ *       <div class="topic-head">
+ *         <span class="topic-icon">…</span>      (pin/lock)
+ *         <h3 class="topic-title"><a>…</a></h3>
+ *         <nav class="topic-pagination">…</nav>
+ *       </div>
+ *       <p class="topic-description">…</p>
+ *       <div class="topic-meta">…</div>
+ *       <div class="topic-mobile-stats">…</div>
+ *     </div>
+ *     <div class="topic-category">…</div>        (optional column)
+ *     <div class="topic-replies"><span class="topic-count">…</span></div>
+ *     <div class="topic-last-post">…</div>
+ *   </article>
+ * Replaces <tr class="topic-row-hover"> / forum-table (Bootstrap Table).
+ */
+
+.topic-item {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 100px minmax(200px, 35%);
+  align-items: center;
+  gap: .75rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--topic-item-border);
+  background-color: var(--topic-item-bg);
+  transition: background-color 0.15s ease;
+}
+
+.topic-item:last-child { border-bottom: none; }
+.topic-item:hover { background-color: var(--topic-item-hover-bg); }
+.topic-item.is-selected { background-color: var(--topic-item-selected-bg); }
+
+.topic-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 0.5rem;
+}
+
+.topic-main {
+  display: flex;
+  flex-direction: column;
+  padding-right: 1rem;
+  min-width: 0;
+}
+
+.topic-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.topic-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.topic-pinned { color: var(--topic-pinned-color); }
+.topic-locked { color: var(--topic-locked-color); }
+
+.topic-title {
+  margin: 0;
+  font-size: var(--topic-title-font-size);
+  font-weight: var(--topic-title-font-weight);
+  line-height: 1.25;
+}
+
+.topic-title a {
+  color: var(--topic-title-color);
+  text-decoration: none;
+  font-weight: 700;
+  transition: color 0.15s ease;
+}
+
+.topic-title a:hover,
+.topic-title a:focus { color: var(--topic-title-hover-color); }
+
+/* Locked state is conveyed by the red lock icon
+   (.topic-locked on .topic-icon) only; the title keeps the
+   regular .topic-title colour. The former .topic-locked-title
+   branch (which turned the title red via
+   --topic-locked-title-color) is removed. */
+
+.topic-description {
+  color: var(--topic-description-color);
+  font-size: var(--topic-description-font-size);
+  line-height: 1.35;
+  margin-bottom: 0.25rem;
+  overflow-wrap: break-word;
+}
+
+.topic-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  align-items: flex-start;
+}
+
+.topic-meta .topic-author {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--topic-meta-color);
+  font-size: 0.875rem;
+}
+
+.topic-category {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.topic-category--inline { }
+@media (max-width: 768px) {
+  .topic-category--inline {
+    display: flex;
+    margin-top: 0.35rem;
+  }
+}
+
+.topic-category a {
+  color: var(--topic-category-color);
+  text-decoration: none;
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-category a:hover,
+.topic-category a:focus { color: var(--topic-category-hover-color); }
+
+.topic-mobile-stats { display: none; }
+
+/* Mini pagination ([1 2 3 … 9]) */
+.topic-pagination,
+.mini-pagination {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--topic-meta-color);
+}
+
+.mini-page-link {
+  font-size: 0.875rem;
+  padding: 0 4px;
+  background: var(--mini-pagination-bg);
+  border-radius: 3px;
+  color: var(--mini-pagination-color);
+  line-height: 1.2;
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.mini-page-link:hover,
+.mini-page-link:focus {
+  background: var(--mini-pagination-hover-bg);
+  color: var(--mini-pagination-hover-color);
+}
+
+.topic-replies {
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--topic-count-color);
+  font-weight: 400;
+}
+
+.topic-count { display: inline-block; }
+
+.topic-last-post {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--topic-last-post-bg);
+  min-width: 0;
+}
+
+/* Cross-page state (LastPostInfo unread marker) */
+.unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--unread-dot-color);
+  display: inline-block;
+  flex-shrink: 0;
+  animation: pulse 2s infinite;
+}
+
+.topic-author .author-meta {
+  color: var(--topic-author-color);
+}
+
+/* Optional category column / manage-mode leading column */
+.topic-item.has-category {
+  grid-template-columns: minmax(260px, 1fr) 140px 100px minmax(200px, 35%);
+}
+
+.topic-item.is-managing {
+  grid-template-columns: 36px minmax(260px, 1fr) 100px minmax(200px, 35%);
+}
+
+.topic-item.is-managing.has-category {
+  grid-template-columns: 36px minmax(260px, 1fr) 140px 100px minmax(200px, 35%);
+}
+
+/* ── Mobile (max-width: 768px): card layout ─────────────────── */
+@media (max-width: 768px) {
+  .topic-item,
+  .topic-item.has-category,
+  .topic-item.is-managing,
+  .topic-item.is-managing.has-category {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 1.25rem 1.25rem;
+  }
+
+  .topic-item:hover { background-color: transparent; }
+
+  .topic-main { padding-right: 0; padding-bottom: 0.25rem; }
+  .topic-title a { font-size: 1.1rem; }
+  .topic-description { font-size: 14px; line-height: 1.5; }
+  .topic-replies { display: none; }
+  /* Mobile card layout: the author/date line duplicates the
+     last-post meta below and has no other content, so the whole
+     .topic-meta wrapper is removed from the flow (not just its
+     child) — otherwise the empty flex column still takes space. */
+  .topic-meta {
+    display: none;
+  }
+
+  .topic-category {
+    display: none;
+  }
+
+  .topic-mobile-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.3rem;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--topic-meta-color);
+  }
+
+  .topic-last-post {
+    padding: 1rem 1.25rem 1.25rem;
+    margin-left: -1.25rem;
+    margin-right: -1.25rem;
+    margin-bottom: -1.25rem;
+    background-color: var(--topic-last-post-mobile-bg);
+    border-top: 1px solid var(--topic-last-post-mobile-border);
+  }
+
+  .topic-last-post::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.65rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--topic-meta-color);
+    letter-spacing: 0.05em;
+  }
+}
+

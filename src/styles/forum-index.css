@@ -1,0 +1,303 @@
+/**
+ * Aerun Forum Index Styles
+ * 
+ * Implements semantic structure from SPEC_forum-index-theme-dom.md:
+ * #forum-index, #forum-main, .forum-category, .category-header,
+ * .category-title, .category-content, .category-head, .forum-item,
+ * .forum-info, .forum-title, .forum-description, .forum-topics,
+ * .forum-posts, .forum-last-post, .is-unread, .is-new.
+ */
+
+#forum-index,
+.forum-index {
+  width: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+#forum-main,
+.forum-main {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Category / Group ───────────────────────────────────────── */
+.forum-category {
+  margin-bottom: 1.5rem;
+  border-radius: var(--category-header-radius);
+}
+
+.forum-category:last-child {
+  margin-bottom: 0;
+}
+
+.category-header {
+  background-color: var(--category-header-bg);
+  color: var(--category-header-text);
+  padding: var(--category-header-padding);
+  border-radius: var(--category-header-radius);
+  border-bottom: 1px solid var(--category-border);
+  display: flex;
+  align-items: center;
+}
+
+.category-title {
+  margin: 0;
+  color: var(--category-header-text);
+  font-size: var(--category-header-font-size);
+  font-weight: var(--category-header-font-weight);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.category-content {
+  background-color: var(--category-card-bg);
+  /* border: 1px solid var(--category-border);
+  border-top: none; */
+  border-radius: var(--category-card-radius);
+  box-shadow: var(--category-card-shadow);
+  overflow: hidden;
+}
+
+/* ── Category Head (Desktop Column Titles) ──────────────────── */
+.category-head {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 100px 100px minmax(200px, 35%);
+  align-items: center;
+  padding: 0.4rem 1rem;
+  background-color: var(--category-head-bg);
+  color: var(--category-head-text);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-bottom: 1px solid var(--category-border);
+}
+
+.category-col-topics,
+.category-col-posts {
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ── Forum Item (Row) ───────────────────────────────────────── */
+.forum-item {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 100px 100px minmax(200px, 35%);
+  align-items: center;
+  padding: var(--forum-item-padding);
+  border-bottom: 1px solid var(--forum-item-border);
+  background-color: var(--forum-item-bg);
+  transition: background-color 0.15s ease;
+}
+
+.forum-item:last-child {
+  border-bottom: none;
+}
+
+.forum-item:hover {
+  background-color: var(--forum-item-hover-bg);
+}
+
+/* ── Forum Information ──────────────────────────────────────── */
+.forum-info {
+  display: flex;
+  flex-direction: column;
+  padding-right: 1rem;
+}
+
+.forum-title {
+  margin: 0;
+  font-size: var(--forum-title-font-size);
+  font-weight: var(--forum-title-font-weight);
+  line-height: 1.25;
+}
+
+.forum-title a,
+.cat-link {
+  color: var(--forum-title-color);
+  text-decoration: none;
+  font-weight: 700;
+  transition: color 0.15s ease;
+}
+
+.forum-title a:hover,
+.cat-link:hover {
+  text-decoration: none;
+}
+
+.forum-description,
+.cat-desc {
+  color: var(--forum-description-color);
+  font-size: var(--forum-description-font-size);
+  line-height: var(--forum-description-line-height);
+}
+
+/* ── Topic & Post Counts ────────────────────────────────────── */
+.forum-topics,
+.forum-posts {
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--forum-stat-color);
+  font-weight: 400;
+}
+
+/* ── Last Post ──────────────────────────────────────────────── */
+.forum-last-post {
+  display: flex;
+  flex-direction: column;
+}
+
+.last-topic-link {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  white-space: normal;
+  overflow: visible;
+  text-transform: none;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: var(--last-post-title-line-height);
+  margin-bottom: var(--last-post-title-margin-bottom);
+  color: var(--last-post-title-color);
+}
+
+.last-topic-link:hover {
+  text-decoration: none;
+}
+
+.forum-no-posts {
+  color: var(--forum-description-color);
+  font-size: 0.875rem;
+}
+
+/* ── Skeletons ──────────────────────────────────────────────── */
+.forum-skeleton-group {
+  margin-bottom: 2rem;
+}
+
+.skeleton-category-header {
+  height: 48px;
+}
+
+.skeleton-forum-item {
+  padding: 1.25rem 1rem;
+}
+
+/* ── Mobile Responsive View (max-width: 768px) ──────────────── */
+@media (max-width: 768px) {
+  .category-head {
+    display: none;
+  }
+
+  .category-header {
+    padding: 0.85rem 1.25rem;
+  }
+
+  .category-title {
+    font-size: 0.85rem;
+  }
+
+  .forum-category {
+    margin-bottom: 2.5rem;
+  }
+
+  .category-content {
+    border-radius: 0 0 12px 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+  }
+
+  .forum-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    /* Base rule sets align-items:center for the desktop grid row; in a
+     * mobile column that would shrink every child to its content width
+     * and center it, so the last-post strip would never span the card
+     * (and its border-top would stop mid-card). Stretch instead. */
+    align-items: stretch;
+    padding: 1.25rem 1.25rem;
+    border-bottom: 1px solid var(--forum-item-border);
+  }
+
+  .forum-item:hover {
+    background-color: transparent;
+  }
+
+  .forum-info {
+    padding-right: 0;
+    padding-bottom: 0.25rem;
+  }
+
+  .cat-link {
+    font-size: 1.1rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .forum-description,
+  .cat-desc {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .forum-topics,
+  .forum-posts {
+    display: none;
+  }
+
+  .forum-mobile-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--forum-mobile-stats-color);
+  }
+
+  .forum-mobile-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .forum-last-post {
+    /* margin-top: 0.75rem; */
+    padding: 1rem 1.25rem 1.25rem;
+    margin-left: -1.25rem;
+    margin-right: -1.25rem;
+    margin-bottom: -1.25rem;
+    background-color: transparent;
+    border-top: 1px solid var(--forum-last-post-mobile-border);
+    min-width: 0;
+  }
+
+  .forum-last-post::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.65rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--forum-description-color);
+    letter-spacing: 0.05em;
+  }
+
+  .last-topic-link {
+    max-width: 100%;
+    font-size: 0.95rem;
+  }
+}
+
+/* Mobile last-post meta. The panel chrome and the meta layout for the
+ * forum-index last-post strip live in author-meta.css — the shared
+ * AuthorMeta/LastPostInfo module — because that file is imported after
+ * forum-index.css in main.jsx, so its rules cascade over the old tinted
+ * mobile panel declared here. Target (screenshot 2): the block is a
+ * full-width strip under the description, not an inset panel to the
+ * right, and "Today, 07:46 · [avatar] Arin" lives on ONE line when it
+ * fits. The avatar + nickname stay one indivisible flex item; only an
+ * over-long nickname wraps, inside its own box. */
+
+
