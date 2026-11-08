@@ -31,7 +31,7 @@
 | `dm_members` | членство в диалоге | `conversation_id`, `user_id`, `sequence`, `cleared_at`, `erased_sequence`, папки/флаги |
 | `dm_messages` | сообщения ЛС | `conversation_id`, отправитель, `content`, tombstone-удаление |
 | `guest_principals` | cookie-идентичность гостей | гостевой ID, аватар/имя |
-| `guest_presence` | присутствие гостей | `first_seen`, TTL, чистится кроном |
+| `guest_presence` | присутствие гостей | `first_seen`, `last_seen` = момент последнего клика (15-мин окно онлайна), TTL, чистится кроном |
 | `forum_settings` | глобальные настройки | название, темы/дизайн, `email_templates`, `topics_per_page`, флаги dice/reputation/characters/masks, SMTP |
 | `idempotency_keys` | идемпотентность | `actor`, `key`, `request_hash`, `response_json`, `status`; UNIQUE(actor, key) |
 
@@ -82,7 +82,7 @@
 - Маски: `GET /characters/{id}`, `POST /me/characters`, `POST /users/{id}/characters` (create_others_mask), `PATCH|DELETE /characters/{id}`, `PUT /characters/{id}/avatar` (multipart).
 
 ### 3.7 Presence и гости
-- `POST /presence/heartbeat`, `POST /presence/leave`, `POST /presence/guest/leave` (sendBeacon), `GET /presence/guests`, `GET /presence/online-users`.
+- `POST /presence/heartbeat` (принимает `last_active_at` — момент последнего клика; см. `API.md` §3.5), `POST /presence/leave`, `POST /presence/guest/leave` (явный leave при логине/разлогине; закрытие вкладки не удаляет гостя — строка живёт 15 минут от последнего клика), `GET /presence/guests`, `GET /presence/online-users`, `GET /status` (консолидированный снапшот присутствия; перечитывается по SSE `presence.update`).
 - `POST /guest/principal` — выдача/подтверждение гостевой cookie-идентичности.
 
 ### 3.8 Темы и посты

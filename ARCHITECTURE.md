@@ -86,6 +86,7 @@ HTTP-запрос → assignRequestID (X-Request-ID)
 - **Аудит:** значимые действия пишутся в `audit_logs` с `request_id` и ролью актора; это единственный след hard-удалений.
 - **Почта:** только через общий шаблон (`mail_templates.go`), режимы `disabled`/`dashboard`/`smtp`; mail guard запрещает отправку на чужой email через test-эндпоинт.
 - **Уведомления:** in-app (`notifications`) + email через outbox; realtime через SSE-сигналы + polling.
+- **Presence:** member — in-process map (`onlineMembers`), guest — строки `guest_presence`; оба считают «онлайн» **15 минут от последнего клика** (`last_active_at` в heartbeat), а не от heartbeat-тика; закрытие вкладки гостя не удаляет (нет beacon); изменения состава онлайна публикуют SSE `presence.update` (debounce 2 с), клиенты перечитывают `GET /status`. `users.last_seen` = время последнего клика (троттлинг 5 мин; при выбывании — точный момент клика). Подробнее: `markdowns/AUDIT_PRESENCE_AND_ACTIVITY_TRACKING.md`.
 
 ## 6. Топология прод-деплоя
 

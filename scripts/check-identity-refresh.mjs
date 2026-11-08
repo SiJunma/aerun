@@ -27,6 +27,7 @@ const profilePage = read('../src/pages/ProfilePage.jsx');
 const app = read('../src/App.jsx');
 const presence = read('../src/api/rtdb-presence.js');
 const presenceGo = read('../backend/internal/platform/pocketbase/presence.go');
+const realtimeGo = read('../backend/internal/platform/pocketbase/realtime_signals.go');
 const runGo = read('../backend/internal/platform/pocketbase/run.go');
 const forumStats = read('../src/components/layout/ForumStats.jsx');
 const adminPage = read('../src/pages/AdminPage.jsx');
@@ -39,6 +40,15 @@ const failures = [];
 const check = (ok, message) => {
   if (!ok) failures.push(message);
 };
+
+// Comments must be stripped first when a gate asserts the ABSENCE of a code
+// shape: the files still NAME the old shapes while explaining why they are
+// gone, and a gate that failed on its own documentation would be deleted
+// rather than obeyed.
+const stripComments = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 // ── Presence must NOT re-beat on every profile identity change ─────────────
 // initRtdbPresence immediately sends one heartbeat, so depending the presence
@@ -62,8 +72,32 @@ check(
 // identity on every profile write either — it is a plain function now keyed
 // only by uid, reading profile from the ref.
 check(
-  /const recordActivity = useCallback\(\(\) => \{\s+const now = Date\.now\(\);\s+lastActivityRef\.current = now;\s+if \(user\?\.\uid && profileRef\.current\)/.test(authProvider),
-  'recordActivity must read profile via profileRef and depend only on uid'
+  /const recordActivity = useCallback\(\(\) => \{\s+const now = Date\.now\(\);\s+lastActivityRef\.current = now;[\s\S]*?setLastActivityAt\(now\);[\s\S]*?if \(user\?\.\uid && profileRef\.current\)/.test(authProvider),
+  'recordActivity must publish the click to the shared last-activity clock and read profile via profileRef'
+);
+// Click tracking has NO identity gate (AUDIT §1 п.1/§6.2): the old
+// `if (!user?.uid || !profile) return` excluded guests entirely, so a
+// guest's clicks were never tracked and the guest stayed counted long
+// after they stopped doing anything.
+check(
+  !/useEffect\(\(\) => \{\s+if \(!user\?\.\uid \|\| !profile\) return;/.test(authProvider),
+  'click tracking must not gate on identity — guests must be tracked too'
+);
+check(
+  /useEffect\(\(\) => \{[\s\S]*?window\.addEventListener\('click'/.test(authProvider),
+  'click/keypress listeners must be registered'
+);
+// The presence effect must not fall through to the guest branch while the
+// profile is still loading (AUDIT §3.1 factor B / §6.2).
+check(
+  /if \(user\?\.\uid\) \{[\s\S]*?guestPresenceStartedRef\.current = false;[\s\S]*?return initRtdbPresence\(user\.uid/.test(authProvider),
+  'the presence effect must branch on uid alone — a null profile must not open a guest row for a member'
+);
+// Multi-tab sync: a login/logout in another tab must switch this tab's
+// presence role without a reload (AUDIT §1 п.4).
+check(
+  /window\.addEventListener\('storage', onStorage\)/.test(authProvider),
+  'AuthProvider must listen for pocketbase_auth storage changes to sync identity across tabs'
 );
 // ActivityTracker must skip its mount beat: presence already beats on cold
 // start, so a mount recordActivity is a guaranteed duplicate.
@@ -180,6 +214,69 @@ check(
     'never the body, so there is nothing to remove without one'
 );
 
+// ── Presence is counted from the last CLICK, not the last beat ─────────────
+// AUDIT §1 п.1/§6.1: the server accepts last_active_at from both heartbeats,
+// stores LastActiveAt, and evicts 15 minutes after the last click.
+check(
+  /LastActiveAt json\.RawMessage `json:"last_active_at"`/.test(presenceGo),
+  'heartbeatForm must accept last_active_at — without it the server cannot count from the last click'
+);
+check(
+  /func parseLastActiveAt\(raw json\.RawMessage, now time\.Time\) time\.Time/.test(presenceGo),
+  'last_active_at must be resolved through parseLastActiveAt (clamped to the online window)'
+);
+check(
+  /lastActiveAt := parseLastActiveAt\(form\.LastActiveAt, now\)/.test(presenceGo),
+  'the member heartbeat must store the click moment, not the beat moment'
+);
+check(
+  /func activeMembersAt\(now time\.Time, app \.\.\.core\.App\)/.test(presenceGo) &&
+    /lastActiveAt := presenceActivityTime\(member\)/.test(presenceGo),
+  'activeMembersAt must evict by the last click (presenceActivityTime), not by the last beat'
+);
+check(
+  /writeMemberLastSeenAt\(app\[0\], member\.id, member\.lastActiveAt\)/.test(presenceGo),
+  'eviction must write the exact click moment to users.last_seen, not the eviction moment'
+);
+check(
+  /upsertGuestPresence\(e\.App, form\.GuestID, parseLastActiveAt\(form\.LastActiveAt, now\), now\)/.test(presenceGo),
+  'the guest heartbeat must store the click moment in guest_presence.last_seen'
+);
+check(
+  /publishPresenceSignal\(app\[0\]\)/.test(presenceGo) &&
+    /realtimeSignalPresenceUpdate = "presence\.update"/.test(realtimeGo) &&
+    /func publishPresenceSignal\(app core\.App\)/.test(realtimeGo),
+  'presence transitions must publish a debounced presence.update signal'
+);
+// The client half of the same contract.
+check(
+  /last_active_at: lastActivityAt \|\| Date\.now\(\)/.test(presence) &&
+    /body: \{ guest_id: guestId, last_active_at:/.test(presence),
+  'both heartbeats must send last_active_at with the last click'
+);
+check(
+  /if \(!heartbeatTimer\) \{[\s\S]*?heartbeatTimer = setInterval\(\(\) => \{\s+sendHeartbeat\(currentActiveCharacter\);/.test(presence),
+  'setRtdbOnline must restart the heartbeat timer on wake — otherwise the member vanishes 2 minutes after waking'
+);
+check(
+  !/sendGuestLeaveBeacon/.test(stripComments(presence)) && !/pagehide/.test(stripComments(presence)),
+  'there must be no pagehide beacon: a closed tab is counted 15 minutes after its last click, ' +
+    'exactly like an open one'
+);
+check(
+  /topic === 'presence\.update'/.test(presence),
+  'the status poll must re-read on presence.update instead of waiting for the next tick'
+);
+// No local guest masking (AUDIT §3.1): the server removes the guest row on
+// login, so whatever remains is a real guest. A client-side hide only works
+// on the tab sharing the same localStorage.
+check(
+  !/g\.id === currentGuestId/.test(stripComments(forumStats)) &&
+    !/localStorage\.getItem\('guest_id'\)/.test(stripComments(forumStats)),
+  'ForumStats must not mask the browser own guest row — it only worked on one tab and counted ' +
+    'the same guest elsewhere'
+);
+
 // ── One guest per browser, not one per tab ──────────────────────────────────
 // guest_id is a PER-BROWSER identity in shared localStorage, but tabs run
 // independent JavaScript: a get-then-set there is a race, so a simultaneous
@@ -202,14 +299,8 @@ check(
 // had already left. It is a 24h window over users.last_seen, served by
 // /forum-stats, and presence cannot answer it: the map is windowed to 75s and
 // is empty after a restart.
-// Comments must be stripped first. Both files still NAME the old export while
-// explaining why it is gone, and a gate that failed on its own documentation
-// would be deleted rather than obeyed — which is exactly what happened the
-// first time this check was written elsewhere in this repo.
-const stripComments = (src) =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+// (stripComments is defined at the top of this file; comments must be
+// stripped before absence-gates, or a gate fails on its own documentation.)
 
 check(
   !/subscribeToDailyActiveUsers/.test(stripComments(forumStats)) &&

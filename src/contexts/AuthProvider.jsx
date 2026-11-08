@@ -19,7 +19,8 @@ import {
   setRtdbOffline,
   subscribeToOnlineUsers,
   initRtdbGuestPresence,
-  removeRtdbGuestPresence
+  removeRtdbGuestPresence,
+  setLastActivityAt
 } from '../api/rtdb-presence';
 import { subscribeToUnreadCounts, refreshUnreadCounts } from '../api/dms';
 import { subscribeToRealtimeSignals, canReceiveSignals } from '../api/realtime-signals';
@@ -337,6 +338,30 @@ export const AuthProvider = ({ children }) => {
       syncUserFromAuthStore();
     });
 
+    // Multi-tab sync. All tabs of one browser share localStorage, so a
+    // login or logout in one tab changes the auth store the other tabs are
+    // sitting on. The `storage` event fires in every OTHER tab when the
+    // key changes; without this listener a tab left open kept beating as a
+    // member after the account had been signed out of the browser (or kept
+    // beating as a guest after a login), until it was reloaded (§1 п.4).
+    const onStorage = (event) => {
+      if (event.key === 'pocketbase_auth') {
+        syncUserFromAuthStore();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    // The belt to the storage event's braces: a tab that was hidden while
+    // another tab signed in or out re-syncs its identity on becoming
+    // visible again, so it never keeps beating in the old role until the
+    // next storage event that may never come (§1 п.4).
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncUserFromAuthStore();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     // Load global settings
     const unsubSettings = getGlobalSettings(data => {
       if (data) setSettings(prev => ({ ...prev, ...data }));
@@ -354,6 +379,8 @@ export const AuthProvider = ({ children }) => {
 
     return () => {
       unsubAuth();
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       unsubSettings();
       unsubRoles();
       clearTimeout(timer);
@@ -393,9 +420,12 @@ export const AuthProvider = ({ children }) => {
   const guestPresenceStartedRef = useRef(false);
   useEffect(() => {
     if (!restored) return;
-    if (user?.uid && profileRef.current) {
-      // This session no longer owns a guest presence, so a later sign-out must
-      // not try to remove one.
+    if (user?.uid) {
+      // A member beats as a member. The profile may still be null while the
+      // first /me read is in flight — that must NOT fall through to the
+      // guest branch (the init race of §3.1: a signed-in member opening a
+      // guest row). initRtdbPresence needs only the uid; the profile is
+      // re-read from the ref on every later beat.
       guestPresenceStartedRef.current = false;
       return initRtdbPresence(user.uid, profileRef.current, profileRef.current?.last_selected_character_id || null);
     }
@@ -486,10 +516,16 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user?.uid]);
 
-  // Activity tracking
+  // Activity tracking. The 15-minute rule is one rule for members AND
+  // guests: a visitor counts as online exactly IDLE_TIMEOUT_MS after their
+  // last click/keypress, whether the tab is open or closed (§1 п.1). The
+  // click itself is the only thing that extends presence — heartbeat ticks
+  // are transport and never move last_active_at.
   const recordActivity = useCallback(() => {
     const now = Date.now();
     lastActivityRef.current = now;
+    // The shared clock both heartbeats read (member and guest).
+    setLastActivityAt(now);
     if (user?.uid && profileRef.current) {
       const PUSH_INTERVAL_MS = 2 * 60 * 1000;
       if (!isRtdbOnlineRef.current || (now - lastPushTimeRef.current >= PUSH_INTERVAL_MS)) {
@@ -501,13 +537,23 @@ export const AuthProvider = ({ children }) => {
   }, [user?.uid]);
 
   useEffect(() => {
-    if (!user?.uid || !profile) return;
+    // NO identity gate here. The old `if (!user?.uid || !profile) return`
+    // meant a guest's clicks were never tracked at all, so a guest stayed
+    // counted long after they stopped doing anything (the phantom-guest
+    // factor of §3.1). Guests age out by the same 15-minute click clock as
+    // members; the server window does the counting, the client only reports
+    // the last click.
     const interval = setInterval(() => {
       const now = Date.now();
       const idleTime = now - (lastActivityRef.current || now);
       if (idleTime >= IDLE_TIMEOUT_MS && isRtdbOnlineRef.current) {
         isRtdbOnlineRef.current = false;
-        setRtdbOffline(user.uid, false).catch(() => {});
+        // Idle is not a departure: no leave call, the member simply stops
+        // beating and the server expires them presenceTTL after the last
+        // click, writing that exact moment to users.last_seen.
+        if (user?.uid) {
+          setRtdbOffline(user.uid, false).catch(() => {});
+        }
       }
     }, 15000);
 
@@ -528,7 +574,7 @@ export const AuthProvider = ({ children }) => {
       window.removeEventListener('click', onUserInteraction);
       window.removeEventListener('keydown', onUserInteraction);
     };
-  }, [user?.uid, profile, recordActivity]);
+  }, [user?.uid, recordActivity]);
 
   const loginWithGoogle = useCallback(async () => {
     const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
@@ -672,6 +718,11 @@ export const AuthProvider = ({ children }) => {
   const logout = useCallback(async (skipPresenceCleanup = false) => {
     const uid = user?.uid;
     if (uid && !skipPresenceCleanup) {
+      // The sign-out click is the last activity: stamp last_seen with it
+      // (instant update on logout, §1 п.3), before the leave call goes out.
+      const now = Date.now();
+      lastActivityRef.current = now;
+      setLastActivityAt(now);
       await setRtdbOffline(uid, true);
     }
     // No cache to wipe here any more. The DM local cache existed so one member's

@@ -242,6 +242,12 @@ func applyNickname(txApp core.App, record *core.Record, nickname, actorID string
 		return internalError("failed to save the new nickname", err)
 	}
 
+	// The online list must show the new name immediately, not at the next
+	// heartbeat — and every other browser must hear about it through the
+	// presence signal instead of at its next poll.
+	updateOnlineMemberNickname(record.Id, nickname)
+	publishPresenceSignal(txApp)
+
 	return recordAuditLog(txApp, "nickname_change", actorID, map[string]any{
 		"target_id":    record.Id,
 		"old_nickname": old,

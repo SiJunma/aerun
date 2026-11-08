@@ -2,6 +2,7 @@ package pocketbase
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -52,7 +53,65 @@ const (
 	// on any signal, and only topic-stats filters DM topics out (forum.js).
 	realtimeSignalDMRead    = "dm.read"
 	realtimeSignalTopicPost = "topic.post"
+	// realtimeSignalPresenceUpdate announces that the online composition
+	// changed (join, TTL eviction, rename, admin delete/ban). The signal
+	// carries no member data — clients re-read /api/aerun/status, where
+	// authorization and the presence windows live, exactly like every
+	// other topic on this bus.
+	realtimeSignalPresenceUpdate = "presence.update"
 )
+
+// presenceSignalDebounce collapses a burst of presence transitions into one
+// nudge. Presence is chatty by nature (every login, rename and eviction is
+// a transition, and several can land within seconds of each other), and a
+// client only needs to re-read the status snapshot once per burst — the
+// snapshot always reflects the latest composition, so intermediate nudges
+// carry no additional information.
+const presenceSignalDebounce = 2 * time.Second
+
+var (
+	presenceSignalMu       sync.Mutex
+	presenceSignalTimer    *time.Timer
+	presenceSignalPending  bool
+)
+
+// publishPresenceSignal announces "the online composition changed" to every
+// signed-in member, debounced. Callers invoke it after mutating the online
+// set (heartbeat join, TTL eviction, nickname change, admin delete/ban);
+// the first call arms a 2-second timer and further calls inside the window
+// only mark the signal pending, so a burst costs exactly one row.
+func publishPresenceSignal(app core.App) {
+	if app == nil {
+		return
+	}
+	presenceSignalMu.Lock()
+	if presenceSignalPending {
+		presenceSignalMu.Unlock()
+		return
+	}
+	presenceSignalPending = true
+	// The timer captures the app it was armed with. A test app is torn down
+	// (its DB closed) long before a 2-second timer fires, and publishSignal
+	// on a dead app panics inside PocketBase. The guard below makes a dead
+	// app a no-op: a signal is a latency optimisation, so losing one to a
+	// teardown is always safe.
+	presenceSignalTimer = time.AfterFunc(presenceSignalDebounce, func() {
+		presenceSignalMu.Lock()
+		presenceSignalPending = false
+		presenceSignalTimer = nil
+		presenceSignalMu.Unlock()
+		if app == nil {
+			return
+		}
+		defer func() {
+			// A closed DB panics rather than erroring; swallow it — the
+			// signal is best-effort by design and polling covers the gap.
+			_ = recover()
+		}()
+		publishSignal(app, realtimeSignalPresenceUpdate, "", realtimeSignalAudienceAll)
+	})
+	presenceSignalMu.Unlock()
+}
 
 // publishTopicSignal announces that a topic changed, to exactly the audience the
 // topic is already visible to.

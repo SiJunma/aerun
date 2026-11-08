@@ -46,6 +46,15 @@ type userPresence struct {
 	AvatarURL       string         `json:"avatar_url"`
 	Role            string         `json:"role"`
 	LastSeen        time.Time      `json:"last_seen"`
+	// LastActiveAt is the moment of the member's last active click/keypress,
+	// as reported by the client in last_active_at. It — not LastSeen (the
+	// last heartbeat transport tick) — decides when the member drops out of
+	// "online now": presenceTTL after the last click, exactly like a closed
+	// tab (AUDIT_PRESENCE_AND_ACTIVITY_TRACKING.md §1 п.1). It is also the
+	// value written to users.last_seen when the member is evicted, so the
+	// profile shows when they last DID something, not when the server
+	// noticed they had gone quiet (§1 п.3).
+	LastActiveAt    time.Time      `json:"last_active_at"`
 	ActiveCharacter map[string]any `json:"active_character,omitempty"`
 }
 
@@ -138,8 +147,17 @@ const userLastSeenField = "last_seen"
 // four out of five beats — free of any extra query.
 func touchMemberLastSeen(app core.App, authRecord *core.Record, now time.Time) {
 	stored := authRecord.GetDateTime(userLastSeenField)
-	if !stored.IsZero() && now.Sub(stored.Time()) < memberLastSeenWriteInterval {
-		return
+	if !stored.IsZero() {
+		storedTime := stored.Time()
+		// The durable column records the last CLICK. A value that does not
+		// advance it must never be written: it is either transport-only or a
+		// stale beat, and writing it would rewind "last seen".
+		if !now.After(storedTime) {
+			return
+		}
+		if now.Sub(storedTime) < memberLastSeenWriteInterval {
+			return
+		}
 	}
 	writeMemberLastSeen(app, authRecord, now)
 }
@@ -153,14 +171,26 @@ func touchMemberLastSeen(app core.App, authRecord *core.Record, now time.Time) {
 // minutes stale is the difference between "left a moment ago" and "left five
 // minutes ago" on the row everybody looks at after a member goes.
 func writeMemberLastSeen(app core.App, authRecord *core.Record, now time.Time) {
-	record, err := app.FindRecordById(usersCollectionName, authRecord.Id)
+	writeMemberLastSeenAt(app, authRecord.Id, now)
+}
+
+// writeMemberLastSeenAt persists users.last_seen for userID at the given
+// moment. It exists for callers that hold no auth record — evicting an
+// expired member from the in-process map, where only the id survives. Like
+// writeMemberLastSeen it never rewinds the column: the value is the moment
+// of the last click, and a later write must not move it backwards.
+func writeMemberLastSeenAt(app core.App, userID string, at time.Time) {
+	record, err := app.FindRecordById(usersCollectionName, userID)
 	if err != nil {
-		app.Logger().Warn("member last seen could not be read", "user", authRecord.Id, "error", err)
+		app.Logger().Warn("member last seen could not be read", "user", userID, "error", err)
 		return
 	}
-	record.Set(userLastSeenField, now)
+	if stored := record.GetDateTime(userLastSeenField); !stored.IsZero() && !at.After(stored.Time()) {
+		return
+	}
+	record.Set(userLastSeenField, at)
 	if err := app.Save(record); err != nil {
-		app.Logger().Warn("member last seen could not be persisted", "user", authRecord.Id, "error", err)
+		app.Logger().Warn("member last seen could not be persisted", "user", userID, "error", err)
 	}
 }
 
@@ -299,6 +329,59 @@ type heartbeatForm struct {
 	// (a character id). Resolved server-side against the caller's own
 	// characters, so a forged id cannot borrow somebody else's mask.
 	ActiveCharacter string `json:"active_character"`
+	// LastActiveAt is the client's moment of the last active click/keypress
+	// (unix millis, unix seconds, or an RFC3339 string). Absent on old
+	// clients: the heartbeat moment is then used, which is the pre-existing
+	// meaning of the beat.
+	LastActiveAt json.RawMessage `json:"last_active_at"`
+}
+
+// parseLastActiveAt resolves a heartbeat's last_active_at against now.
+//
+// A client timestamp is a claim, not a fact, so it is clamped on both ends:
+// a future value (clock skew, a forged field) must not keep a member online
+// forever, and a value older than the online window must not be RESURRECTED
+// into a fresh online presence by a new beat. Both clamps move the value to
+// the nearest edge of the honest range — future to now, stale to the window
+// edge (now - presenceTTL) — never to now, which would fabricate a click
+// the client never reported. Anything unparseable, and an absent field on an
+// old client, falls back to now: the beat itself is the only trustworthy
+// signal on that path, and that is the pre-existing meaning of a beat.
+func parseLastActiveAt(raw json.RawMessage, now time.Time) time.Time {
+	clamp := func(t time.Time) time.Time {
+		if t.After(now) {
+			return now
+		}
+		if t.Before(now.Add(-presenceTTL)) {
+			return now.Add(-presenceTTL)
+		}
+		return t
+	}
+	if len(raw) == 0 {
+		return now
+	}
+	var millis int64
+	if err := json.Unmarshal(raw, &millis); err == nil && millis != 0 {
+		return clamp(time.UnixMilli(millis).UTC())
+	}
+	var seconds float64
+	if err := json.Unmarshal(raw, &seconds); err == nil && seconds != 0 {
+		return clamp(time.Unix(int64(seconds), int64((seconds-float64(int64(seconds)))*float64(time.Second))).UTC())
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil && text != "" {
+		if t, err := time.Parse(time.RFC3339, text); err == nil {
+			return clamp(t.UTC())
+		}
+	}
+	return now
+}
+
+func presenceActivityTime(member userPresence) time.Time {
+	if !member.LastActiveAt.IsZero() {
+		return member.LastActiveAt
+	}
+	return member.LastSeen
 }
 
 // heartbeatHandler records one presence beat. The route serves both identities
@@ -328,22 +411,37 @@ func heartbeatHandler(e *core.RequestEvent) error {
 				}
 			}
 		}
+		lastActiveAt := parseLastActiveAt(form.LastActiveAt, now)
 		presenceMu.Lock()
+		// A delayed or out-of-order beat must not rewind the click clock: a
+		// stale heartbeat arriving after a newer click would otherwise move
+		// "online until" backwards and evict a member who just acted.
+		if prev, ok := onlineMembers[e.Auth.Id]; ok {
+			if prevLast := presenceActivityTime(prev); lastActiveAt.Before(prevLast) {
+				lastActiveAt = prevLast
+			}
+		}
 		onlineMembers[e.Auth.Id] = userPresence{
 			UserID:          e.Auth.Id,
 			Nickname:        e.Auth.GetString("nickname"),
 			AvatarURL:       e.Auth.GetString("avatar_url"),
 			Role:            e.Auth.GetString("role"),
 			LastSeen:        now,
+			LastActiveAt:    lastActiveAt,
 			ActiveCharacter: activeCharacter,
 		}
 		presenceMu.Unlock()
 
 		// The in-process map above answers "online right now" and is thrown
-		// away  presenceTTL later. This is the durable half: it is what the
-		// members table renders once the member is gone from the map, which is
-		// the entire reason that column could previously only ever show "...".
-		touchMemberLastSeen(e.App, e.Auth, now)
+		// away presenceTTL after the last click. This is the durable half: it
+		// is what the members table renders once the member is gone from the
+		// map, which is the entire reason that column could previously only
+		// ever show "...". It records the last CLICK (§1 п.3), not this beat:
+		// a beat proves the tab is alive, not that the member did anything.
+		// A beat carrying only transport (no click newer than the stored
+		// value) writes nothing — otherwise a background tab's 30-second
+		// ticks would keep "last seen" fresh forever.
+		touchMemberLastSeen(e.App, e.Auth, lastActiveAt)
 
 		snapshot, _ := buildStatusSnapshot(e.App, now)
 		resp := map[string]any{
@@ -362,7 +460,11 @@ func heartbeatHandler(e *core.RequestEvent) error {
 	if !guestLimiter.allow(e.RealIP(), now) {
 		return rateLimitedError("too many guest heartbeats from this address")
 	}
-	if err := upsertGuestPresence(e.App, form.GuestID, now); err != nil {
+	// The guest row's last_seen is the last CLICK, exactly like the member
+	// map: a closed tab therefore ages out guestPresenceWindow after its
+	// last click, identically to a tab left open (§1 п.1). The explicit
+	// leave endpoint remains for login/logout transitions only.
+	if err := upsertGuestPresence(e.App, form.GuestID, parseLastActiveAt(form.LastActiveAt, now), now); err != nil {
 		return internalError("guest presence could not be recorded", err)
 	}
 
@@ -517,7 +619,7 @@ func validGuestID(id string) bool {
 // double mount, two tabs sharing one storage id) both try to insert, the unique
 // index rejects the slower one, and that writer updates the row its competitor
 // created instead of surfacing a 500 for a successful beat.
-func upsertGuestPresence(app core.App, guestID string, now time.Time) error {
+func upsertGuestPresence(app core.App, guestID string, lastActiveAt time.Time, now time.Time) error {
 	collection, err := app.FindCachedCollectionByNameOrId(guestPresenceCollectionTable)
 	if err != nil {
 		return err
@@ -526,7 +628,15 @@ func upsertGuestPresence(app core.App, guestID string, now time.Time) error {
 	record, err := app.FindFirstRecordByFilter(collection, "guest_id = {:guestID}", dbx.Params{"guestID": guestID})
 	switch {
 	case err == nil:
-		record.Set("last_seen", now)
+		// last_seen is the last click and never moves backwards, for the
+		// same reason as the member column: a stale or transport-only beat
+		// must not rewind when the guest was last seen doing something.
+		// first_seen is the beat moment, i.e. when this row was first
+		// created, and is kept for the unique-visitors question.
+		if stored := record.GetDateTime("last_seen"); !stored.IsZero() && !lastActiveAt.After(stored.Time()) {
+			return nil
+		}
+		record.Set("last_seen", lastActiveAt)
 		return app.Save(record)
 	case !errors.Is(err, sql.ErrNoRows):
 		return err
@@ -535,10 +645,13 @@ func upsertGuestPresence(app core.App, guestID string, now time.Time) error {
 	record = core.NewRecord(collection)
 	record.Set("guest_id", guestID)
 	record.Set("first_seen", now)
-	record.Set("last_seen", now)
+	record.Set("last_seen", lastActiveAt)
 	if err := app.Save(record); err != nil {
 		if existing, findErr := app.FindFirstRecordByFilter(collection, "guest_id = {:guestID}", dbx.Params{"guestID": guestID}); findErr == nil {
-			existing.Set("last_seen", now)
+			if stored := existing.GetDateTime("last_seen"); !stored.IsZero() && !lastActiveAt.After(stored.Time()) {
+				return nil
+			}
+			existing.Set("last_seen", lastActiveAt)
 			return app.Save(existing)
 		}
 		return err
@@ -655,7 +768,7 @@ func registerGuestPresenceCron(app core.App) error {
 func listOnlineUsersHandler(e *core.RequestEvent) error {
 	now := time.Now()
 
-	activeMembers := activeMembersAt(now)
+	activeMembers := activeMembersAt(now, e.App)
 
 	guestsCount := 0
 	if records, err := activeGuestRecords(e.App, now); err != nil {
@@ -675,17 +788,30 @@ func listOnlineUsersHandler(e *core.RequestEvent) error {
 	})
 }
 
-// activeMembersAt collects the members seen inside presenceTTL and drops the
-// expired ones, which is the only cleanup this map ever gets.
-func activeMembersAt(now time.Time) []map[string]any {
+// activeMembersAt collects the members whose last CLICK is inside
+// presenceTTL and drops the expired ones, which is the only cleanup this map
+// ever gets. The criterion is the click clock (LastActiveAt), not the
+// heartbeat transport (LastSeen): a member who stopped clicking 16 minutes
+// ago is offline even if a background tab kept beating (§1 п.1).
+//
+// On eviction the exact click moment is written to users.last_seen (§1 п.3):
+// "was here at 12:00" for a 12:00 click, not "was here at 12:15" for the
+// moment the collector noticed. transitionApp carries the app for that
+// write; it may be nil in tests that only exercise the map.
+func activeMembersAt(now time.Time, app ...core.App) []map[string]any {
 	presenceMu.Lock()
-	defer presenceMu.Unlock()
-
 	cutoff := now.Add(-presenceTTL)
 	activeMembers := []map[string]any{}
+	type expiredMember struct {
+		id           string
+		lastActiveAt time.Time
+	}
+	expired := []expiredMember{}
 	for id, member := range onlineMembers {
-		if member.LastSeen.Before(cutoff) {
+		lastActiveAt := presenceActivityTime(member)
+		if lastActiveAt.Before(cutoff) {
 			delete(onlineMembers, id)
+			expired = append(expired, expiredMember{id: id, lastActiveAt: lastActiveAt})
 			continue
 		}
 		activeMembers = append(activeMembers, map[string]any{
@@ -693,7 +819,7 @@ func activeMembersAt(now time.Time) []map[string]any {
 			"nickname":   member.Nickname,
 			"avatar_url": member.AvatarURL,
 			"role":       member.Role,
-			// The actual time of the last beat, not the time of this read.
+			// The actual time of the last click, not the time of this read.
 			// The frontend used to receive no value here and substitute
 			// Date.now() for the missing field, which made every connected
 			// member read as "seen this exact second" — a value that is wrong
@@ -701,8 +827,51 @@ func activeMembersAt(now time.Time) []map[string]any {
 			// rather than measured. RFC 3339 rather than DateTime.String(),
 			// because the string form uses a space where ISO 8601 wants a "T"
 			// and `new Date()` is not guaranteed to accept it everywhere.
-			"last_seen": member.LastSeen.UTC().Format(time.RFC3339),
+			"last_seen": lastActiveAt.UTC().Format(time.RFC3339),
 		})
 	}
+	presenceMu.Unlock()
+
+	// The durable write happens outside presenceMu: it is a database call
+	// and must not hold the presence lock while it runs.
+	if len(expired) > 0 && len(app) > 0 && app[0] != nil {
+		for _, member := range expired {
+			writeMemberLastSeenAt(app[0], member.id, member.lastActiveAt)
+		}
+		// The online composition just changed — every other browser's
+		// status poll must hear about it now, not at its next tick.
+		publishPresenceSignal(app[0])
+	}
 	return activeMembers
+}
+
+// evictOnlineMember removes a member from the online map immediately. It is
+// the immediate-removal counterpart of the TTL expiry in activeMembersAt:
+// used when the account itself goes away (admin delete, ban), where "online
+// for another 15 minutes" would be a wrong answer with a name on it. The
+// durable users.last_seen is NOT touched here — deletion and banning already
+// stamp it through their own paths, and for a deleted account the row is
+// gone anyway.
+func evictOnlineMember(userID string) {
+	if userID == "" {
+		return
+	}
+	presenceMu.Lock()
+	delete(onlineMembers, userID)
+	presenceMu.Unlock()
+}
+
+// updateOnlineMemberNickname renames a member in the online map in place, so
+// the online list shows the new nickname without waiting for the next
+// heartbeat (which may be up to a click-and-beat away).
+func updateOnlineMemberNickname(userID, newNickname string) {
+	if userID == "" || newNickname == "" {
+		return
+	}
+	presenceMu.Lock()
+	if member, ok := onlineMembers[userID]; ok {
+		member.Nickname = newNickname
+		onlineMembers[userID] = member
+	}
+	presenceMu.Unlock()
 }

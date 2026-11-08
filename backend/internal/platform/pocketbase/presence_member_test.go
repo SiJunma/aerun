@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,20 @@ func memberBeat(t testing.TB, baseURL, token string) {
 		t.Fatalf("member heartbeat: expected 200, got %d: %s", status, payload)
 	}
 }
+
+// memberBeatAt posts one authenticated heartbeat carrying last_active_at (unix
+// millis), the moment of the member's last click — the AUDIT §1 п.1 clock.
+func memberBeatAt(t testing.TB, baseURL, token string, lastActiveAt time.Time) {
+	t.Helper()
+
+	status, payload := postAerun(t, baseURL+"/api/aerun/presence/heartbeat",
+		`{"last_active_at":`+itoa(lastActiveAt.UnixMilli())+`}`, token)
+	if status != http.StatusOK {
+		t.Fatalf("member heartbeat: expected 200, got %d: %s", status, payload)
+	}
+}
+
+func itoa(v int64) string { return strconv.FormatInt(v, 10) }
 
 func storedLastSeen(t testing.TB, app *tests.TestApp, userID string) time.Time {
 	t.Helper()
@@ -530,6 +545,130 @@ func TestUserImportPreservesLiveLastSeen(t *testing.T) {
 	}
 	if len(report.Updated) != 0 {
 		t.Fatalf("a dump replay that rewinds nothing must report no updates, got %v", report.Updated)
+	}
+}
+
+// TestMemberEvictionWritesTheClickMoment pins AUDIT §1 п.3: when a member
+// drops out of "online now" the durable users.last_seen must hold the moment
+// of their LAST CLICK, not the moment the server noticed they had gone quiet.
+// A 12:00 click must read "was here at 12:00", never "12:15".
+func TestMemberEvictionWritesTheClickMoment(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	clickAt := time.Now().Add(-presenceTTL - time.Minute).UTC().Truncate(time.Second)
+	presenceMu.Lock()
+	onlineMembers[fixPlayerID] = userPresence{
+		UserID:       fixPlayerID,
+		Nickname:     "PlayerOne",
+		Role:         "player",
+		LastSeen:     time.Now().UTC(),
+		LastActiveAt: clickAt,
+	}
+	presenceMu.Unlock()
+
+	// Any read evicts the expired member (this is the map's only cleanup).
+	_ = activeMembersAt(time.Now(), app)
+
+	presenceMu.Lock()
+	_, stillThere := onlineMembers[fixPlayerID]
+	presenceMu.Unlock()
+	if stillThere {
+		t.Fatal("an expired member must be evicted from the online map")
+	}
+
+	seen := storedLastSeen(t, app, fixPlayerID)
+	if !seen.Equal(clickAt) {
+		t.Fatalf("users.last_seen must be the exact click moment (%s), got %s", clickAt, seen)
+	}
+}
+
+// TestMemberStillBeatingWithoutClicksStillExpires pins the other half of
+// §1 п.1: a fresh heartbeat TRANSPORT must not keep a member online. Only a
+// fresh CLICK does.
+func TestMemberStillBeatingWithoutClicksStillExpires(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	staleClick := time.Now().Add(-presenceTTL - 5*time.Minute).UTC()
+	presenceMu.Lock()
+	onlineMembers[fixPlayerID] = userPresence{
+		UserID:       fixPlayerID,
+		Nickname:     "PlayerOne",
+		Role:         "player",
+		LastSeen:     time.Now().UTC(), // fresh beat, stale click
+		LastActiveAt: staleClick,
+	}
+	presenceMu.Unlock()
+
+	members := activeMembersAt(time.Now(), app)
+	for _, m := range members {
+		if m["id"] == fixPlayerID {
+			t.Fatal("a member whose last click is outside the window must not be online, " +
+				"even if a heartbeat transport just arrived")
+		}
+	}
+}
+
+// TestNicknameChangeUpdatesTheOnlineList pins the CP2 contract: a rename is
+// visible in "online now" immediately, without waiting for the next beat.
+func TestNicknameChangeUpdatesTheOnlineList(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+	seedIdentityFixtures(t, app)
+
+	presenceMu.Lock()
+	onlineMembers[fixPlayerID] = userPresence{
+		UserID:       fixPlayerID,
+		Nickname:     "PlayerOne",
+		Role:         "player",
+		LastSeen:     time.Now().UTC(),
+		LastActiveAt: time.Now().UTC(),
+	}
+	presenceMu.Unlock()
+	defer func() {
+		presenceMu.Lock()
+		delete(onlineMembers, fixPlayerID)
+		presenceMu.Unlock()
+	}()
+
+	updateOnlineMemberNickname(fixPlayerID, "RenamedOne")
+
+	members := activeMembersAt(time.Now())
+	for _, m := range members {
+		if m["id"] == fixPlayerID {
+			if m["nickname"] != "RenamedOne" {
+				t.Fatalf("the online list must carry the new nickname immediately, got %v", m["nickname"])
+			}
+			return
+		}
+	}
+	t.Fatal("the member must be in the online list")
+}
+
+// TestEvictOnlineMemberRemovesImmediately pins the admin delete/ban
+// counterpart of TTL expiry: no 15-minute linger for a removed account.
+func TestEvictOnlineMemberRemovesImmediately(t *testing.T) {
+	presenceMu.Lock()
+	onlineMembers[fixPlayerID] = userPresence{
+		UserID:       fixPlayerID,
+		Nickname:     "PlayerOne",
+		Role:         "player",
+		LastSeen:     time.Now().UTC(),
+		LastActiveAt: time.Now().UTC(),
+	}
+	presenceMu.Unlock()
+
+	evictOnlineMember(fixPlayerID)
+	evictOnlineMember("does-not-exist") // must be a safe no-op
+
+	presenceMu.Lock()
+	_, ok := onlineMembers[fixPlayerID]
+	presenceMu.Unlock()
+	if ok {
+		t.Fatal("evictOnlineMember must remove the member from the online map immediately")
 	}
 }
 

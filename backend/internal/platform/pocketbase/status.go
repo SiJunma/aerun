@@ -19,7 +19,7 @@ import (
 // warning and degrades to guests_count = 0 with a degraded flag instead of
 // failing the entire status payload.
 func buildStatusSnapshot(app core.App, now time.Time) (map[string]any, error) {
-	activeMembers := activeMembersAt(now)
+	activeMembers := activeMembersAt(now, app)
 
 	guestsCount := 0
 	guestDegraded := false

@@ -48,7 +48,7 @@
 2. **Удаление обязано зачищать денормализованные копии** (счётчики, голоса, подписки) в той же транзакции, что и tombstone; агрегация до мутации; выплата репутации — exactly-once по построению. См. `markdowns/Archive/CLOSED_INCIDENT_POST_DELETE_WIPED_TOPIC.md`.
 3. **Идемпотентность:** мутационные маршруты `/api/aerun/*` принимают заголовок `Idempotency-Key`; таблица `idempotency_keys` хранит ответ. Для multipart-загрузок (аватары) — намеренно не применяется.
 4. **Доступ решается на сервере**, никогда только в UI. Права — по ключам permissions (`backend/internal/auth/permission.go`), с сужением по статусу аккаунта и rank-матрице между ролями.
-5. **Presence через heartbeat**, не через push: member — in-process map, guest — строки `guest_presence` с cron-уборкой.
+5. **Presence через heartbeat**, не через push: member — in-process map, guest — строки `guest_presence` с cron-уборкой. «Онлайн» = **15 минут от последнего клика** (`last_active_at` в heartbeat), одинаково для открытой и закрытой вкладки; heartbeat-тик без нового клика онлайн не продлевает. `users.last_seen` = время последнего клика (не момента выбывания); изменения состава онлайна — SSE `presence.update` + перечитывание `GET /status` (§9 аудита присутствия).
 6. **Realtime:** SSE/сигналы + polling-fallback через общий `src/api/shared-poll.js` (один poll на ресурс, без голых `setInterval`).
 7. **Вся почта** — через общий шаблон `loadEmailTemplates` (`backend/internal/platform/pocketbase/mail_templates.go`); дефолт сидируется из `functions/email.js`, значение в `forum_settings.email_templates` всегда приоритетнее и не перезаписывается при рестарте.
 8. **i18n:** никаких хардкод-строк в UI, только `t()`; словарь `src/i18n/dictionary.js`, EN + RU.

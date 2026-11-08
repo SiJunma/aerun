@@ -384,6 +384,15 @@ func adminUpdateUserHandler(e *core.RequestEvent) error {
 			"status":          targetUser.GetString("status"),
 		})
 
+		// A fresh ban must vanish from "online now" immediately, and other
+		// browsers must hear about it through the presence signal. An
+		// unban changes nothing here: the member reappears on their next
+		// click/heartbeat like any returning visitor.
+		if targetUser.GetString("status") == string(auth.StatusBanned) && oldStatus != string(auth.StatusBanned) {
+			evictOnlineMember(userID)
+			publishPresenceSignal(e.App)
+		}
+
 		return http.StatusOK, map[string]any{
 			"id":         targetUser.Id,
 			"role":       targetUser.GetString("role"),
@@ -666,6 +675,12 @@ func adminDeleteUserHandler(e *core.RequestEvent) error {
 			"delete_posts":    deletePosts,
 		})
 
+		// A deleted account must vanish from "online now" immediately, and
+		// every other browser must hear about it through the presence
+		// signal — otherwise the name lingers for up to 15 minutes.
+		evictOnlineMember(userID)
+		publishPresenceSignal(e.App)
+
 		return http.StatusOK, map[string]any{
 			"deleted":      true,
 			"delete_posts": deletePosts,
@@ -695,13 +710,16 @@ type adminBulkDeleteForm struct {
 }
 
 // bulkItem is one target's result inside a bulk command response.
+// PreviousStatus is internal only (never serialised): the post-commit
+// presence eviction needs to know whether a ban actually changed anything.
 type bulkItem struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-	Code   string `json:"code,omitempty"`
-	Role   string `json:"role,omitempty"`
-	Status string `json:"status,omitempty"`
+	ID               string `json:"id"`
+	OK               bool   `json:"ok"`
+	Error            string `json:"error,omitempty"`
+	Code             string `json:"code,omitempty"`
+	Role             string `json:"role,omitempty"`
+	Status           string `json:"status,omitempty"`
+	PreviousStatus   string `json:"-"`
 }
 
 // dedupeIDs returns ids in first-seen order without duplicates.
@@ -906,6 +924,7 @@ func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 			item.OK = true
 			item.Role = targetUser.GetString("role")
 			item.Status = targetUser.GetString("status")
+			item.PreviousStatus = oldStatus
 			succeeded++
 			items = append(items, item)
 			targets = append(targets, map[string]any{
@@ -915,6 +934,20 @@ func adminBulkUpdateUsersHandler(e *core.RequestEvent) error {
 				"old_role":   oldRole,
 				"old_status": oldStatus,
 			})
+		}
+
+		// Ban/unban moves accounts in and out of the online composition:
+		// freshly banned members must vanish from "online now" immediately,
+		// and other browsers must hear about it through the presence
+		// signal. Evicted per succeeded target whose status actually
+		// changed; refused targets were never touched.
+		if hasStatus && succeeded > 0 {
+			for _, item := range items {
+				if item.OK && item.PreviousStatus != status {
+					evictOnlineMember(item.ID)
+				}
+			}
+			publishPresenceSignal(e.App)
 		}
 
 		// THE audit event of this bulk command (§9.7 of the spec): one row
@@ -1070,6 +1103,19 @@ func adminBulkDeleteUsersHandler(e *core.RequestEvent) error {
 			"failed":       len(form.IDs) - succeeded,
 			"targets":      targets,
 		})
+
+		// Deleted accounts must vanish from "online now" immediately, and
+		// every other browser must hear about it through the presence
+		// signal. Evicted per succeeded target; refused targets were never
+		// touched, so their presence (if any) correctly survives.
+		for _, item := range items {
+			if item.OK {
+				evictOnlineMember(item.ID)
+			}
+		}
+		if succeeded > 0 {
+			publishPresenceSignal(e.App)
+		}
 
 		return http.StatusOK, map[string]any{
 			"processed":  len(form.IDs),

@@ -1,11 +1,23 @@
-import { sendApi, pb } from './pocketbase';
+import { sendApi } from './pocketbase';
 import { createSharedPoll } from './shared-poll';
+import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
 import { toMillis } from '../utils/dates';
 
 let heartbeatTimer = null;
 let currentActiveCharacter = null;
+let lastActivityAt = 0;
 let cachedOnlineUsers = [];
 let cachedGuests = [];
+
+// The client's last-activity clock, shared by the member and guest
+// heartbeats. AuthProvider writes it on every click/keypress (and on the
+// login/wake/sign-out transitions); this module only reads it. last_active_at
+// is what the server counts 15 minutes from — a heartbeat tick without a
+// newer click must not move it.
+export const setLastActivityAt = (ts) => {
+  lastActivityAt = Number(ts) || Date.now();
+};
+
 const onlineSubscribers = new Set();
 const guestSubscribers = new Set();
 
@@ -77,6 +89,12 @@ const handlePresenceSnapshot = (presence) => {
 // endpoint, for one piece of information — so the status snapshot is a shared
 // resource now, and the banner is simply another subscriber. Its failure signal
 // is delivered alongside the value, which is what lets it keep working.
+//
+// The online composition changes on events, not on a clock: a join, a TTL
+// eviction, a rename or an admin delete/ban all publish presence.update,
+// and this poll re-reads /api/aerun/status on that nudge instead of waiting
+// for the next 20-second tick. Visitors who cannot receive signals (guests)
+// keep polling — the same degradation as every other shared-poll resource.
 const statusPoll = createSharedPoll({
   name: 'status',
   fetch: async () => {
@@ -86,6 +104,13 @@ const statusPoll = createSharedPoll({
   },
   intervalMs: 20000,
   initialValue: null,
+  realtime: canReceiveSignals()
+    ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+      (topic) => { if (topic === 'presence.update') onDelivered(); },
+      () => onDead(),
+      onStateChange,
+    )
+    : null,
 });
 
 // The loop is reference-counted by the shared resource itself: the first
@@ -106,13 +131,18 @@ export const subscribeToStatus = (onStatus) => statusPoll.subscribe(onStatus);
 // "the network just came back" is worth a read now rather than at the next tick.
 export const probeStatus = () => statusPoll.refresh();
 
+const MEMBER_HEARTBEAT_MS = 60000;
+
 const sendHeartbeat = async (character = null) => {
-  if (!pb.authStore.isValid) return;
   try {
     const res = await sendApi('/api/aerun/presence/heartbeat', {
       method: 'POST',
       body: {
-        active_character: character || currentActiveCharacter || null
+        active_character: character || currentActiveCharacter || null,
+        // The moment of the last click, not the moment of this tick: the
+        // server counts the 15-minute online window from here, so a tick
+        // must never refresh it on its own.
+        last_active_at: lastActivityAt || Date.now()
       }
     });
     if (res?.presence) {
@@ -131,20 +161,18 @@ const sendHeartbeat = async (character = null) => {
  * heartbeat every MEMBER_HEARTBEAT_MS while the tab is open. Presence is also
  * refreshed on explicit user activity (clicks / key presses) — see the
  * `onUserInteraction` listeners in AuthProvider, which call `recordActivity`
- * → `setRtdbOnline`. A passive interval is kept so a member who is merely
- * reading (not clicking) does not age out of the live map while the tab stays
- * open; when the tab closes or the user goes idle beyond presenceTTL, the map
- * entry expires on its own.
+ * → `setRtdbOnline`. The interval is transport only: every beat carries
+ * last_active_at (the last click), so a tab that merely stays open does NOT
+ * keep the member "online" — the server ages them out presenceTTL after
+ * the last click, exactly like a closed tab (§1 п.1).
  */
-const MEMBER_HEARTBEAT_MS = 60 * 1000;
-
 export const initRtdbPresence = (uid, profile, activeCharacter = null) => {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
   }
 
-  if (!uid || !pb.authStore.isValid) return () => {};
+  if (!uid) return () => {};
 
   currentActiveCharacter = activeCharacter;
   sendHeartbeat(activeCharacter);
@@ -181,6 +209,15 @@ export const updateRtdbActiveCharacter = async (uid, character) => {
 export const setRtdbOnline = async (uid, profile, activeCharacter = null) => {
   currentActiveCharacter = activeCharacter;
   await sendHeartbeat(activeCharacter);
+  // Waking up from idle: the timer may have been stopped by setRtdbOffline,
+  // and a member who just clicked again must get a FULL heartbeat cycle.
+  // Without this restart the tab would beat no more, and the member would
+  // vanish from the online list 2 minutes after waking (§5.1).
+  if (!heartbeatTimer) {
+    heartbeatTimer = setInterval(() => {
+      sendHeartbeat(currentActiveCharacter);
+    }, MEMBER_HEARTBEAT_MS);
+  }
 };
 
 /**
@@ -306,7 +343,12 @@ export const subscribeToRtdbStatuses = (callback) =>
 //   - unsubscribing only stops the timer and the listeners. It does not delete
 //     the row: the unsubscribe runs again on every effect re-run (twice under
 //     React StrictMode in dev), and a delete racing the next beat would drop a
-//     live visitor for a whole interval. Only pagehide and login remove it.
+//     live visitor for a whole interval. Only an explicit login (which turns
+//     the visitor into a member) removes the row.
+//   - closing the tab does NOT remove the row. A closed tab is counted for
+//     exactly 15 minutes after its last click, identically to a tab left
+//     open (§1 п.1) — the row ages out of the server window by itself, so
+//     there is no pagehide beacon to send.
 const GUEST_HEARTBEAT_MS = 60 * 1000;
 
 let guestHeartbeatTimer = null;
@@ -316,27 +358,13 @@ const sendGuestHeartbeat = async (guestId) => {
   try {
     const res = await sendApi('/api/aerun/presence/heartbeat', {
       method: 'POST',
-      body: { guest_id: guestId }
+      body: { guest_id: guestId, last_active_at: lastActivityAt || Date.now() }
     });
     if (res?.presence) {
       handlePresenceSnapshot(res.presence);
     }
   } catch {
     // Non-fatal: presence is best effort and the next beat retries.
-  }
-};
-
-const sendGuestLeaveBeacon = (guestId) => {
-  try {
-    if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return;
-    // sendBeacon can only POST and cannot set headers; a string body also keeps
-    // the request CORS-simple, so pagehide never waits on a preflight.
-    navigator.sendBeacon(
-      `${pb.baseURL}/api/aerun/presence/guest/leave`,
-      JSON.stringify({ guest_id: guestId })
-    );
-  } catch {
-    // A tab that is going away has nobody left to report to.
   }
 };
 
@@ -381,15 +409,12 @@ export const initRtdbGuestPresence = (guestId) => {
     // Coming back to a tab is the most likely moment for the row to be stale.
     if (document.visibilityState === 'visible') beat();
   };
-  const onPageHide = () => sendGuestLeaveBeacon(guestId);
 
   beat();
   guestHeartbeatTimer = setInterval(beat, GUEST_HEARTBEAT_MS);
   document.addEventListener('visibilitychange', onVisibilityChange);
-  window.addEventListener('pagehide', onPageHide);
   guestDetachListeners = () => {
     document.removeEventListener('visibilitychange', onVisibilityChange);
-    window.removeEventListener('pagehide', onPageHide);
   };
 
   return () => {

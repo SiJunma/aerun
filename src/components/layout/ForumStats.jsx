@@ -9,7 +9,7 @@ import { CHIEF_ADMIN_ID } from '../../constants/permissions';
 
 const ForumStats = () => {
   const { t } = useI18n();
-  const { user, categories, activeUsers, forumStats, dailyActiveUsers: contextDailyUsers } = useAuth();
+  const { categories, activeUsers, forumStats, dailyActiveUsers: contextDailyUsers } = useAuth();
 
   const [activeGuestsRaw, setActiveGuestsRaw] = useState([]);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -33,13 +33,17 @@ const ForumStats = () => {
   const { onlineUsers, activeGuestsCount } = useMemo(() => {
     const FIFTEEN_MINS_MS = 15 * 60 * 1000;
     const threshold = currentTime - FIFTEEN_MINS_MS;
-    const currentGuestId = localStorage.getItem('guest_id');
-    
+
+    // No local masking. The old `if (user && g.id === currentGuestId) return
+    // false` hid the browser's own guest row only on the tab that happened to
+    // share the same localStorage — on a second monitor, in a private window
+    // or on a phone the same guest was counted (AUDIT §3.1). The server
+    // already removes the guest row when the visitor logs in, so whatever
+    // remains in guest_presence is a real guest and is counted as one.
     const filteredGuests = activeGuestsRaw.filter(g => {
       const lastSeenMs = typeof g.last_seen === 'number'
         ? g.last_seen
         : (g.last_seen?.toMillis ? g.last_seen.toMillis() : (typeof g.last_seen === 'string' ? new Date(g.last_seen).getTime() : 0));
-      if (user && g.id === currentGuestId) return false;
       return lastSeenMs >= threshold;
     });
 
@@ -47,7 +51,7 @@ const ForumStats = () => {
       onlineUsers: activeUsers,
       activeGuestsCount: filteredGuests.length
     };
-  }, [activeUsers, activeGuestsRaw, currentTime, user]);
+  }, [activeUsers, activeGuestsRaw, currentTime]);
 
   // "Visited today" is a DIFFERENT clock from the list above it, and it used to
   // be the same array: subscribeToDailyActiveUsers was a one-line alias of the
