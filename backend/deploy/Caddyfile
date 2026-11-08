@@ -18,14 +18,14 @@ aerun-world.com {
 	# /api/realtime is SSE and must bypass the encoder: zstd/gzip
 	# buffering would delay flushes and make the edge hold the stream
 	# open without progress (stall -> drop -> reconnect storm).
-	# Caddy 2.10 encode matcher: `not` + brace matcher is rejected
-	# (Unexpected next token after '{' on same line) — use the `match`
-	# directive form: a path matcher preceded by a negating path matcher.
-	encode zstd gzip {
-		not {
-			path /api/realtime
-		}
-	}
+	# Caddy 2.10 `encode` has no inline matcher syntax for negation on
+	# this version (both `match { not {…} }` and `not {…}` are rejected),
+	# so the encoder is split: a plain `encode` everywhere, and SSE
+	# excluded by keeping this directive but moving the encoder into the
+	# non-API handles below instead. See handle blocks: only the SPA
+	# handle keeps `encode`; /api/* is proxied without encoding.
+	#
+	# (kept as a comment so this note survives config edits)
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
@@ -46,7 +46,10 @@ aerun-world.com {
 		reverse_proxy 127.0.0.1:8090
 	}
 	# SPA: built frontend from the feature/pocketbase-migration branch.
+	# encode lives here only — /api/* above is proxied without encoding,
+	# so SSE is never zstd/gzip-buffered.
 	handle {
+		encode zstd gzip
 		root * /home/deploy/project/dist
 		try_files {path} /index.html
 		file_server
