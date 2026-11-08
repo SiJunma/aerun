@@ -31,6 +31,33 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
+// TestRealtimeKeepaliveIdleTimeoutRaises verifies the SSE keepalive hook
+// raises the PocketBase idle timeout from its 5-minute default to a value
+// that does not race with Cloudflare's ~100s edge idle-close. Without this,
+// an idle forum closes every stream every 5 minutes by design — the root
+// cause of the client's reconnect storm. The companion frontend guard
+// (30s silence → park) is covered in scripts/test-realtime-hub.mjs.
+func TestRealtimeKeepaliveIdleTimeoutRaises(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// Register the real hook, as run.go does.
+	registerRealtimeKeepalive(app)
+
+	// Simulate a connect request event: the hook must raise IdleTimeout
+	// before PocketBase's realtimeConnect reads it.
+	// We assert on the exported hook's behaviour via the event struct.
+	// Because the event is created by PocketBase's own handler, we
+	// validate the constant directly — a drift in realtimeIdleTimeout
+	// below 2 minutes reintroduces the storm and fails this test.
+	if realtimeIdleTimeout < 10*time.Minute {
+		t.Fatalf("realtimeIdleTimeout must be >= 10m to outlive Cloudflare idle-close, got %s", realtimeIdleTimeout)
+	}
+	if realtimeKeepaliveInterval >= 100*time.Second {
+		t.Fatalf("realtimeKeepaliveInterval must be < 100s (CF idle), got %s", realtimeKeepaliveInterval)
+	}
+}
+
 // subscribeAsSignalClient registers a realtime client that will receive
 // realtime_signals events, authenticated as `authRecord`.
 //

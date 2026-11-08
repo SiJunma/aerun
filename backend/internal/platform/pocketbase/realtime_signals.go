@@ -1,6 +1,7 @@
 package pocketbase
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +72,114 @@ const (
 // snapshot always reflects the latest composition, so intermediate nudges
 // carry no additional information.
 const presenceSignalDebounce = 2 * time.Second
+
+// realtimeIdleTimeout is intentionally LONGER than PocketBase's 5-minute
+// default. The SSE loop in apis/realtime.go resets its idle timer only on
+// a delivered message; a quiet forum therefore closes every stream every
+// 5 minutes even though nothing is wrong. 30 minutes matches MaxTimeout
+// (also 30m) so the idle timer never fires before the max lifetime one —
+// the connection then only dies at MaxTimeout, at which point the SDK
+// reconnects once, not in a storm. The keepalive goroutine below is what
+// actually prevents the Cloudflare ~100s idle close in the mean time.
+const realtimeIdleTimeout = 30 * time.Minute
+
+// realtimeKeepaliveInterval is the ticker for the warmup goroutine. It
+// must be < 100s (Cloudflare's edge idle timeout for streaming) and also
+// < Cloudflare's 30s browser keepalive expectation. 25s is safely under
+// both and cheap: it reuses publishSignal's signal-table path.
+const realtimeKeepaliveInterval = 25 * time.Second
+
+// realtimeKeepaliveTopic is a synthetic broadcast topic the CLIENT must
+// ignore. It is never recorded by the browser as forum content; it exists
+// solely to reset the idle timer on the SSE stream. Delivery to a specific
+// member is irrelevant — the channel is fanned out per-client by the
+// broker, but a signal row with audience "*" reaches every signed-in
+// subscriber, which is every open tab that matters for keepalive purposes.
+const realtimeKeepaliveTopic = "presence.heartbeat-keepalive"
+
+// registerRealtimeKeepalive installs the OnRealtimeConnectRequest hook
+// that raises the idle timeout and spawns a per-connection warmup ticker.
+//
+// The hook MUST return e.Next() so PocketBase's own realtime handler
+// runs. It is bound manually in run.go (not via migrations) because it is
+// serving behaviour, not schema.
+func registerRealtimeKeepalive(app core.App) {
+	if app == nil {
+		return
+	}
+	app.OnRealtimeConnectRequest().BindFunc(func(e *core.RealtimeConnectRequestEvent) error {
+		// Raise idle timeout BEFORE the upstream handler reads it
+		// (PocketBase's realtimeConnect copies ce.IdleTimeout into its
+		// local timer after this hook returns).
+		e.IdleTimeout = realtimeIdleTimeout
+
+		// Per-connection warmup: a ticker that publishes a keepalive
+		// signal to this client so idleTimer.Reset(IdleTimeout) fires
+		// and the stream carries bytes every 25s.
+		//
+		// We do NOT write to e.Response directly — the SSE writer is owned
+		// by PocketBase's realtimeConnect loop and is not safe for
+		// concurrent writes. Publishing through publishSignal reuses the
+		// exact delivery path every other signal takes (table row ->
+		// subscriptions broker -> client channel -> WriteSSE+Flush),
+		// and the browser's EventSource treats the resulting event as
+		// ordinary traffic even though the hub ignores this topic.
+		stop := startRealtimeKeepalive(e.App, e.Client.Id())
+		defer stop()
+
+		return e.Next()
+	})
+}
+
+// startRealtimeKeepalive launches the ticker for one SSE connection and
+// returns a stop function the caller MUST invoke when the connection ends.
+// The ticker is aligned to the connection start, not to wall time, so a
+// 30-minute MaxTimeout connection gets a full 25s cadence.
+func startRealtimeKeepalive(app core.App, clientID string) func() {
+	if app == nil || strings.TrimSpace(clientID) == "" {
+		return func() {}
+	}
+	done := make(chan struct{})
+	stopOnce := sync.Once{}
+	ticker := time.NewTicker(realtimeKeepaliveInterval)
+
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				// Log-and-swallow: a failed keepalive costs us a byte,
+				// the stream will live until IdleTimeout. It must
+				// never fail the request.
+				if err := publishKeepalive(app); err != nil {
+					app.Logger().Warn("realtime keepalive failed; stream will idle-close", "error", err)
+				}
+			}
+		}
+	}()
+
+	return func() {
+		stopOnce.Do(func() {
+			close(done)
+		})
+	}
+}
+
+// publishKeepalive writes the keepalive signal row that keeps one
+// connection warm. It is factored out for testability and to keep the
+// ticker loop free of schema knowledge.
+func publishKeepalive(app core.App) error {
+	if app == nil {
+		return fmt.Errorf("keepalive app is nil")
+	}
+	// Audience "*" so every signed-in subscriber on the broker receives
+	// the warmup event on its own channel. Guests are irrelevant here:
+	// they never open an SSE stream (canReceiveSignals() === false).
+	publishSignal(app, realtimeKeepaliveTopic, "", realtimeSignalAudienceAll)
+	return nil
+}
 
 var (
 	presenceSignalMu      sync.Mutex

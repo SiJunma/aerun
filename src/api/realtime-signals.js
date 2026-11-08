@@ -53,6 +53,24 @@ import { pb } from './pocketbase.js';
 const CONNECTION_POLL_MS = 5000;
 
 /**
+ * How long a stream may be SILENT before we count it as flapping.
+ *
+ * PocketBase v0.40.4 has no SSE keepalive: an idle forum emits nothing, and
+ * Cloudflare's edge idle-closes a stream that carries no bytes for ~100s.
+ * Every idle open page would otherwise reconnect every few minutes — the
+ * client sees one drop and then a reconnect storm. The server now publishes
+ * a keepalive signal every 25s (see realtimeKeepaliveInterval in
+ * realtime_signals.go), which resets PocketBase's idle timer AND the edge's.
+ * The client must NEVER treat keepalive as forum content, but it DOES prove
+ * the stream is carrying bytes. If we see no keepalive AND no real signal
+ * for SILENT_MS we assume a Cloudflare idle-close / QUIC reset and park the
+ * hub into polling so the page does not storm — the next genuine member join
+ * or token rotation reopens it. This is the frontend half of the fix; the
+ * backend half is the ticker.
+ */
+const SILENT_MS = 30_000;
+
+/**
  * Circuit breaker for the realtime hub.
  *
  * The PocketBase SDK reconnects its EventSource on its own with backoff and
@@ -94,7 +112,7 @@ const RETRY_BASE_MS = 2000;
 // rebinds on a token change with the SAME uid — their effects key on
 // `user?.uid`. The hub watches the auth store and rebuilds the stream when the
 // token actually changes under live membership.
-const hubMembers = new Set();
+let hubMembers = new Set();
 let hubUnsubscribe = null;
 let hubWatcher = null;
 let hubEstablished = false;
@@ -112,6 +130,12 @@ let hubLastToken = null;
 let hubFailures = 0;
 let hubRetryTimer = null;
 let hubCircuitOpen = false;
+// Last time ANY bytes arrived on the SSE stream (real signal or keepalive).
+// Used by the silent-stream guard in the watcher: a stream that has been
+// established for a while but has delivered nothing — not even keepalive —
+// is a Cloudflare idle-close / QUIC reset that the SDK is papering over
+// with silent reconnects. We count that as dead and park the hub.
+let hubLastBytesAt = 0;
 
 const broadcastState = (connected) => {
   if (connected === hubLastConnected) return;
@@ -173,6 +197,13 @@ const ensureHub = (force = false) => {
     // `connect()`, which resolves its pending connects inside the PB_CONNECT
     // handler, after the client id has been negotiated.
     const pending = pb.collection('realtime_signals').subscribe('*', (_event, record) => {
+      // ANY bytes prove the stream is carrying. The backend keepalive
+      // (presence.heartbeat-keepalive, every 25s) is deliberately NOT forum
+      // content: it updates hubLastBytesAt and then is swallowed, never
+      // forwarded to members. Real signals update the timestamp AND are
+      // forwarded as nudges.
+      hubLastBytesAt = Date.now();
+      if (record?.topic === 'presence.heartbeat-keepalive') return;
       // The id is a nudge target, not a permission: the client still has to ask
       // `/api/aerun` for anything real, and that request is what enforces access.
       hubMembers.forEach((member) => {
@@ -193,12 +224,39 @@ const ensureHub = (force = false) => {
         hubEstablished = true;
         hubFailures = 0;
         hubCircuitOpen = false;
+        hubLastBytesAt = Date.now();
         broadcastState(true);
         // Watches for the drop the SDK does not announce, and for the reconnect
         // it makes on its own. ONE watcher for every member of the hub.
         hubWatcher = setInterval(() => {
           if (hubMembers.size === 0) return;
-          broadcastState(!!pb.realtime?.isConnected);
+          const connected = !!pb.realtime?.isConnected;
+          if (!connected) {
+            broadcastState(false);
+            return;
+          }
+          // Stream is "connected" per the SDK, but has it CARRIED bytes
+          // recently? PocketBase v0.40.4 has no keepalive: an idle forum
+          // emits nothing, Cloudflare idle-closes at ~100s, and the SDK
+          // silently reconnects — from the page's perspective that is a
+          // healthy stream that never delivers. The backend keepalive
+          // (every 25s) now proves carriage; if we have seen NOTHING
+          // (not even keepalive) for SILENT_MS we assume an idle-close /
+          // QUIC reset and park the hub into polling instead of storming.
+          // The next genuine member join reopens it (see subscribeToRealtimeSignals).
+          if (hubLastBytesAt && Date.now() - hubLastBytesAt > SILENT_MS) {
+            console.warn('[realtime-signals] stream silent for >30s (no keepalive, no signal); parking hub into polling');
+            broadcastDead();
+            hubCircuitOpen = true;
+            const keepMembers = new Set(hubMembers);
+            closeHub();
+            // closeHub cleared the unsub but members are still present;
+            // restore them so the "next join reopens" logic works — without
+            // members the hub would never retry.
+            hubMembers = keepMembers;
+            return;
+          }
+          broadcastState(true);
         }, CONNECTION_POLL_MS);
       })
       .catch((err) => {
