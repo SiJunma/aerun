@@ -401,11 +401,23 @@ def cmd_caddy(args) -> None:
     def install_and_reload(extra_verify=False):
         # NOTE: root's HOME is /root, deploy's is /home/deploy. Using
         # ~/project under ROOT_USER fails; use the absolute path.
+        # git under root trips "dubious ownership" on the deploy-owned
+        # tree, so fetch/show happen as `deploy` and only the privileged
+        # copy/validate/reload runs as root. safe.directory is set for
+        # deploy already (see _ensure_git_safe).
+        def _ensure_git_safe():
+            code, _, _ = ssh_exec(
+                "git config --global --add safe.directory /home/deploy/project",
+                user=DEPLOY_USER, timeout=10)
+
+        _ensure_git_safe()
+        fetch = "cd /home/deploy/project && git fetch origin --prune && git show origin/main:backend/deploy/Caddyfile > backend/deploy/Caddyfile"
+        code, out, err = ssh_exec(fetch, user=DEPLOY_USER, timeout=60)
+        if code != 0:
+            raise Fail("git fetch/show failed (%d): %s %s" % (code, out, err))
         cmd = (
-            "cd /home/deploy/project && git fetch origin --prune && "
-            "git show origin/main:backend/deploy/Caddyfile > backend/deploy/Caddyfile && "
             "cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d) && "
-            "cp backend/deploy/Caddyfile /etc/caddy/Caddyfile && "
+            "cp /home/deploy/project/backend/deploy/Caddyfile /etc/caddy/Caddyfile && "
             "caddy validate --config /etc/caddy/Caddyfile && "
             "systemctl reload caddy"
         )
