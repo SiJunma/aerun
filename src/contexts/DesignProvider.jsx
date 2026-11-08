@@ -72,6 +72,9 @@ export const DesignProvider = ({ children }) => {
 
   useEffect(() => {
     if (activeDesign) {
+      // Custom design active → mark the page as themeable so semantic
+      // DOM hooks (always rendered) become the theme API.
+      document.body.setAttribute('data-theme-engine', 'themeable');
       // 1. Inject CSS
       let styleEl = document.getElementById('custom-design-style');
       if (!styleEl) {
@@ -93,6 +96,7 @@ export const DesignProvider = ({ children }) => {
         document.body.appendChild(scriptEl);
       }
     } else {
+      document.body.removeAttribute('data-theme-engine');
       // Cleanup
       document.getElementById('custom-design-style')?.remove();
       document.getElementById('custom-design-script')?.remove();

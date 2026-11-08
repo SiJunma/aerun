@@ -641,10 +641,50 @@ if (activeDesign) {
 
 ---
 
-# Спринт 4 — Topic View (TopicPage)
+# Спринт 4 — Topic View (TopicPage) — ✅ ВЫПОЛНЕНО
 
 ## Спецификация
-**Основной источник:** `markdowns/forum-topic-view-theme-dom-spec.md`
+**Основной источник:** `markdowns/SPEC_forum-topic-view-theme-dom.md`
+
+## Статус реализации (Ноябрь 2026, исправлено после повторной верификации)
+
+> ⚠️ **Первая верификация (2026-11-08):** предыдущий агент добавил семантику
+> **условно** через `isThemeable ? ... : undefined` и junk-классы `themeable-*`, что противоречит
+> решению Этапа 1 («Семантический DOM первого класса»: разметка всегда, без веток `isThemeable`).
+>
+> ⚠️ **Повторная проверка архитектурного пункта 1 (2026-11-08):** в топик-компонентах оставались
+> Bootstrap-утилиты (`mt-4`, `d-flex`, `shadow-sm`, `text-muted`, `px-4`, `bg-dark`) и инлайн
+> `style={{ ... }}`, а также react-bootstrap-компоненты (`Container`, `Row`, `Col`, `Card`,
+> `Dropdown`). Это прямо противоречит пункту 1. Исправлено по образцу Этапов 1–2: страница и её
+> topic-компоненты полностью переведены на семантические теги и классы, стили — в
+> `src/styles/topic-view.css`, размер/цвет/зазор — через токены в `theme-variables.css`.
+> Импорты react-bootstrap удалены из TopicPage и topic-компонентов. Глобальный Bootstrap CSS
+> оставлен только как переходный Compass — он удаляется только после Этапов 3–7, когда в
+> `src/` не останется ни одного react-bootstrap-импорта.
+
+TopicPage.jsx остаётся модульным контроллером (hooks/`src/components/topic/*`); бизнес-логика,
+state, API и обработчики событий не менялись. Семантические DOM-атрибуты добавлены **безусловно**.
+
+### Создано
+
+- `src/hooks/useThemeable.js` — хук `{ isThemeable, engineName }`, читает `activeDesign` из `DesignProvider`. Оставлен как детект custom design; **не** используется для условного рендера разметки.
+- `src/contexts/DesignProvider.jsx` (`data-theme-engine`): при активном custom design `document.body.setAttribute('data-theme-engine', 'themeable')`, иначе `removeAttribute`.
+- `src/styles/topic-view.css` — компонентные стили Topic View: `#topic-page`, `#topic-header`, `#topic-posts`, `.topic-post`, `.post-author`, `.post-body`, `.post-content`, `.post-footer`, reply/editor/action/skeleton; все свойства — через `--topic-*` токены. Подключён в `src/main.jsx` рядом с `forum-view.css`/`topic-row.css`.
+- `src/styles/theme-variables.css` — блок «Topic View»: page/breadcrumbs/header/post/author/reply/actions/skeleton токены (`--topic-*`); dark-переопределение карточки.
+
+### Изменено (только DOM-атрибуты/классы/теги + native-элементы вместо react-bootstrap; бизнес-логика не затронута)
+
+| Файл | Что добавлено (безусловно, без Bootstrap-классов и без `style={{ ... }}`) |
+|------|--------------|
+| `src/pages/TopicPage.jsx` | Удалены `Container/Card/Row/Col` из react-bootstrap; корень — `<main id="topic-page" data-topic-id>`; state-классы `is-pinned`/`is-locked`/`is-closed`; `<section id="topic-posts" class="topic-posts">`; skeleton — `<article class="topic-skeleton">` (был `Card/Row/Col` с Bootstrap-утилитами и `style={{ minHeight: '200px' }}`); `<nav id="topic-breadcrumbs-bottom">` + `.topic-back-link` |
+| `src/components/topic/TopicHeader.jsx` | Удалены `Dropdown` и все Bootstrap-классы/инлайн-стили; `<nav id="topic-breadcrumbs-top">`, `<header id="topic-header">`, `.topic-head/.topic-title-row/.topic-title/.topic-description/.topic-header-layout/.topic-meta/.topic-actions`, нативный `details/summary.topic-manage` + `.topic-manage-menu` вместо Dropdown, `<nav id="topic-pagination-top" class="topic-pagination">` |
+| `src/components/topic/TopicPostCard.jsx` | Удалены `Card/Button` и все Bootstrap-классы/инлайн-стили; `id="post-{id}"`, `data-post-id`, `data-user-id`, state-классы `is-first`/`is-topic-starter`/`is-edited`/`is-deleted`, `.topic-post` + `.post-{id}`, `<aside class="post-author">` (`is-online`/`is-offline`, `data-user-id`/`data-group-id`), `.post-header/.post-meta/.post-permalink/.post-number`, `.post-body/.post-content/.post-content__text`, `.post-signature`, `.post-dice/.post-rep`, `<footer class="post-footer">` с нативными `button.footer-link`, pinned-strip без Bootstrap |
+| `src/components/topic/TopicActionsBar.jsx` | Удалены `Button` и Bootstrap-классы; `<nav id="topic-pagination-top/bottom" class="topic-pagination">`, `#topic-actions-bottom` + нативный `button.topic-actions-subscription` |
+| `src/components/topic/TopicReplyComposer.jsx` | Удалены `Card/Form/Button/Dropdown` и все Bootstrap-классы/инлайн-стили; `<section id="topic-reply" class="topic-reply">`, `.topic-reply__card/__header/__title/__body`, `.reply-form`, нативные `input.topic-reply__input`, `details.topic-reply__mask` + меню, `button.topic-btn`, `.reply-header/.reply-editor/.reply-actions/.reply-submit`, notice-стейты через `.topic-reply-notice` |
+| `src/components/topic/PostInlineEditor.jsx` | Удалены `Form/Button/Dropdown` и Bootstrap-классы/инлайн-стили; `.topic-post-editor*`, нативный checkbox `.topic-select-input`, `details.topic-reply__mask`, кнопки `.topic-btn` |
+| `src/styles/topic-view.css` + `theme-variables.css` + `src/main.jsx` | Новые CSS-токены и компонентный файл (см. «Создано»); JSX хранит только данные/state |
+
+**Проверка после исправления:** `npx eslint` по затронутым файлам — чисто; `npm run build` — OK; `npm test` (35 гейтов + `lint:js`) — OK. В `TopicPage.jsx` и `src/components/topic/*.jsx` (кроме `TopicModalsContainer`, который вне этого спринта) нет `react-bootstrap`-импортов, `style={{ ... }}` и Bootstrap-утилитных классов. Глобальный `bootstrap.min.css` **не** удалялся (Compass: финальный шаг после Этапов 3–7).
 
 ## ⚠️ Предупреждение
 
