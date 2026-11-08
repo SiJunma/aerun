@@ -18,11 +18,12 @@ aerun-world.com {
 	# /api/realtime is SSE and must bypass the encoder: zstd/gzip
 	# buffering would delay flushes and make the edge hold the stream
 	# open without progress (stall -> drop -> reconnect storm).
-	encode {
-		zstd
-		gzip
-		match {
-			not { path /api/realtime }
+	# Caddy 2.10 encode matcher: `not` + brace matcher is rejected
+	# (Unexpected next token after '{' on same line) — use the `match`
+	# directive form: a path matcher preceded by a negating path matcher.
+	encode zstd gzip {
+		not {
+			path /api/realtime
 		}
 	}
 	header {
