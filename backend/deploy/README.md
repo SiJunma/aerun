@@ -18,8 +18,9 @@ Caddy is the TLS termination and reverse proxy for `aerun-world.com`. Use the
 local `deploy.py` CLI to manage it without SSHing to the VPS manually:
 
 ```bash
-# Hot-reload Caddyfile (pick up config changes without dropping connections)
-python deploy.py caddy reload
+# Install repo Caddyfile (origin/main), validate, reload gracefully
+python deploy.py caddy install
+python deploy.py caddy reload   # same as install (kept for existing docs)
 
 # Full restart of Caddy service
 python deploy.py caddy restart
@@ -28,12 +29,17 @@ python deploy.py caddy restart
 python deploy.py caddy status
 ```
 
-- `reload` reads the new `backend/deploy/Caddyfile` and applies it gracefully.
+- `install`/`reload` pull `backend/deploy/Caddyfile` from `origin/main`
+  on the VPS, back up `/etc/caddy/Caddyfile`, run `caddy validate`, then
+  reload. A bare `systemctl reload caddy` is NOT enough — the file has
+  drifted from the repo before and the QUIC/SSE fix never reached the VPS.
 - `restart` fully restarts the Caddy systemd unit.
 - `status` prints `is-active`, `is-enabled` and the last journal lines.
 
-Remember to `git commit` and `git push` any `Caddyfile` change first, then run
-`python deploy.py sync` so the VPS clone has the updated file before reloading.
+Caddyfile changes must be committed and pushed first. After `install`,
+verify `alt-svc` is gone from `https://aerun-world.com/api/realtime` — if
+it still shows `h3=":443"` it is emitted by the Cloudflare edge (dashboard:
+SSL/TLS → HTTP/3 off) and is not fixable from this repo.
 
 ## Deploy sequence (feature/pocketbase-migration only)
 

@@ -1,19 +1,30 @@
 {
-	# Отключаем HTTP-3 (QUIC), иначе Chrome на продакшене получает
-	# net::ERR_QUI_PROTOCOL_ERROR на долгоживущих SSE-подключениях
-	# к /api/realtime. На локалке HTTP-3 не используется (обычный HTTP),
-	# поэтому ошибки там нет.
-	servers :443 {
-		protocol {
-			experimental_http3 {
-				disabled
-			}
-		}
+	# HTTP/3 (QUIC) is what puts ERR_QUIC_PROTOCOL_ERROR on long-lived
+	# SSE streams to /api/realtime (one stream carries every realtime
+	# subscription; QUIC resets it and the PocketBase SDK reconnects in
+	# a storm). `protocols h1 h2` serves HTTP/1.1 + HTTP/2 only and,
+	# unlike the old `experimental_http3 { disabled }` block, also stops
+	# Caddy from advertising `alt-svc: h3=` to the browser. The browser-
+	# facing HTTP/3 toggle lives in the Cloudflare dashboard
+	# (SSL/TLS -> Edge Certificates -> HTTP/3): until that is switched
+	# there too, `alt-svc: h3=":443"` is still emitted by the CF edge —
+	# verified in prod responses. That header is a CF-dashboard-only fix.
+	servers {
+		protocols h1 h2
 	}
 }
 
 aerun-world.com {
-	encode zstd gzip
+	# /api/realtime is SSE and must bypass the encoder: zstd/gzip
+	# buffering would delay flushes and make the edge hold the stream
+	# open without progress (stall -> drop -> reconnect storm).
+	encode {
+		zstd
+		gzip
+		match {
+			not { path /api/realtime }
+		}
+	}
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
@@ -21,8 +32,14 @@ aerun-world.com {
 		Referrer-Policy strict-origin-when-cross-origin
 	}
 	# Backend API and the PocketBase admin dashboard.
+	# flush_interval -1: forward /api/realtime (SSE) the moment
+	# PocketBase writes it. Without it Caddy buffers into a reconnect
+	# storm (see markdowns/Archive/DONE_INIT_PAGE_REQUESTS_DUPLICATES.md).
+	# -1 is the documented "flush immediately" sentinel.
 	handle /api/* {
-		reverse_proxy 127.0.0.1:8090
+		reverse_proxy 127.0.0.1:8090 {
+			flush_interval -1
+		}
 	}
 	handle /_/* {
 		reverse_proxy 127.0.0.1:8090

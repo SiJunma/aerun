@@ -52,6 +52,27 @@ import { pb } from './pocketbase.js';
  */
 const CONNECTION_POLL_MS = 5000;
 
+/**
+ * Circuit breaker for the realtime hub.
+ *
+ * The PocketBase SDK reconnects its EventSource on its own with backoff and
+ * never tells us a connection died. When the edge keeps resetting the stream
+ * (the QUIC-protocol-error storm: the browser sees `net::ERR_QUIC_PROTOCOL_ERROR`
+ * on every `GET /api/realtime`), the SDK alone would keep reopening a doomed
+ * socket for the whole session — that is what fills DevTools with the same
+ * error line for minutes while polling already covers freshness. One dead
+ * hub retry the SDK makes is free; an endless per-session storm is not.
+ *
+ * So the hub gives up after MAX_FAILURES failed handshakes (with
+ * increasing backoff between retries) and stays dead — callers are already on
+ * their polling fallback — until the next genuine open: a new member joins,
+ * the last member leaves and returns, or the auth token rotates. A success
+ * resets the counter, so a stream that flaps once and then holds is never
+ * parked for the session.
+ */
+const MAX_FAILURES = 3;
+const RETRY_BASE_MS = 2000;
+
 // ── The hub ──────────────────────────────────────────────────────────────────
 //
 // Every call site used to open its OWN SDK subscription to the same topic. The
@@ -86,6 +107,11 @@ let hubPending = false;
 let hubLastConnected = null;
 let hubGeneration = 0;
 let hubLastToken = null;
+// Circuit-breaker state (see MAX_FAILURES): consecutive failed handshakes
+// since the last success, and the parked-until timer.
+let hubFailures = 0;
+let hubRetryTimer = null;
+let hubCircuitOpen = false;
 
 const broadcastState = (connected) => {
   if (connected === hubLastConnected) return;
@@ -108,6 +134,11 @@ const closeHub = () => {
   hubGeneration += 1;
   hubPending = false;
   if (hubWatcher) { clearInterval(hubWatcher); hubWatcher = null; }
+  if (hubRetryTimer) { clearTimeout(hubRetryTimer); hubRetryTimer = null; }
+  // An empty membership is a fresh start, not a continuation: the next
+  // member joins a hub that has never failed, so the failure count earned
+  // by a previous session of members does not follow it.
+  if (hubMembers.size === 0) hubFailures = 0;
   const unsub = hubUnsubscribe;
   hubUnsubscribe = null;
   hubEstablished = false;
@@ -117,8 +148,13 @@ const closeHub = () => {
   }
 };
 
-const ensureHub = () => {
+const ensureHub = (force = false) => {
   if (hubEstablished || hubPending || hubUnsubscribe) return;
+  // Circuit breaker: after MAX_FAILURES consecutive failed handshakes the
+  // hub parks itself and only retries on a genuine open (a new member, or
+  // a token rotation), not on every timer tick — otherwise a doomed stream
+  // reproduces the exact reconnect storm this guard exists to stop.
+  if (hubCircuitOpen && !force) return;
   const generation = hubGeneration;
   hubPending = true;
   hubLastToken = pb.authStore.token;
@@ -155,6 +191,8 @@ const ensureHub = () => {
         }
         hubUnsubscribe = unsub;
         hubEstablished = true;
+        hubFailures = 0;
+        hubCircuitOpen = false;
         broadcastState(true);
         // Watches for the drop the SDK does not announce, and for the reconnect
         // it makes on its own. ONE watcher for every member of the hub.
@@ -171,7 +209,34 @@ const ensureHub = () => {
         if (generation !== hubGeneration || hubMembers.size === 0) return;
         console.warn('[realtime-signals] subscription failed; polling will cover it', err);
         broadcastDead();
+        hubFailures += 1;
+        // Set the retry timer BEFORE closing: closeHub clears any pending
+        // retry timer, so a timer created after the close would still work
+        // here, but ordering it before keeps one code path — close cancels
+        // retries it does not own, never the one this failure just earned.
+        if (hubFailures < MAX_FAILURES) {
+          // Back off before the SDK is asked again: an immediate tight
+          // retry loop is the same storm as an unbounded one, just faster.
+          const generationAtFail = hubGeneration;
+          hubRetryTimer = setTimeout(() => {
+            hubRetryTimer = null;
+            if (generationAtFail !== hubGeneration) return;
+            if (hubMembers.size === 0) return;
+            ensureHub();
+          }, RETRY_BASE_MS * Math.pow(2, hubFailures - 1));
+        } else {
+          // MAX_FAILURES strikes: park the hub. Polling carries freshness
+          // from here; the stream only comes back on a genuine open
+          // (new member, last-leave reset, or token rotation).
+          hubCircuitOpen = true;
+          console.warn('[realtime-signals] realtime stream parked; polling will cover it until the next join or token change');
+          return;
+        }
+        const keepTimer = hubRetryTimer;
         closeHub();
+        // closeHub cancels pending retries — restore the one this failure
+        // just scheduled, it is the backoff this failure earned.
+        hubRetryTimer = keepTimer;
       });
   } catch (err) {
     console.warn('[realtime-signals] could not subscribe; polling will cover it', err);
@@ -191,7 +256,7 @@ pb.authStore.onChange(() => {
   hubLastToken = token;
   if (hubMembers.size === 0) return;
   closeHub();
-  ensureHub();
+  ensureHub(true);
 });
 
 /**
@@ -217,6 +282,11 @@ export const subscribeToRealtimeSignals = (onEvent, onDead, onStateChange) => {
   let cancelled = false;
 
   hubMembers.add(member);
+  // A new member joining a parked hub is a genuine open: the circuit opens
+  // only so the hub stops retrying on its own timers — a fresh caller gets
+  // one force-retry. Without this a long-lived page whose stream parked
+  // during one network blip would never try realtime again.
+  if (hubCircuitOpen) hubCircuitOpen = false;
   ensureHub();
   // A caller joining an already-established hub learns its state immediately:
   // the hub's own subscribe promise resolved long ago and will not fire again,

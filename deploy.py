@@ -393,9 +393,30 @@ def step_verify() -> None:
 
 def cmd_caddy(args) -> None:
     action = args.caddy_action
-    if action == "reload":
-        log("== reload caddy ==")
-        ssh("systemctl reload caddy", user=ROOT_USER, timeout=60)
+    # IaC drift that caused the QUIC/SSE reconnect storm: the repo Caddyfile
+    # had been edited after the live /etc/caddy/Caddyfile was installed,
+    # so the fix never reached the VPS. This pulls the repo file from
+    # origin/main, validates it, and reloads — never a bare reload of a
+    # stale file.
+    def install_and_reload(extra_verify=False):
+        cmd = (
+            "cd ~/project && git fetch origin --prune && "
+            "git show origin/main:backend/deploy/Caddyfile > backend/deploy/Caddyfile && "
+            "cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d) && "
+            "cp backend/deploy/Caddyfile /etc/caddy/Caddyfile && "
+            "caddy validate --config /etc/caddy/Caddyfile && "
+            "systemctl reload caddy"
+        )
+        if extra_verify:
+            cmd += " && sleep 1 && curl -sI http://127.0.0.1/api/realtime | head -20 || true"
+        ssh(cmd, user=ROOT_USER, timeout=60)
+
+    if action == "install":
+        log("== install Caddyfile (origin/main) + validate + reload ==")
+        install_and_reload(extra_verify=True)
+    elif action == "reload":
+        log("== install Caddyfile (origin/main) + validate + reload ==")
+        install_and_reload()
     elif action == "restart":
         log("== restart caddy ==")
         ssh("systemctl restart caddy", user=ROOT_USER, timeout=60)
@@ -458,8 +479,8 @@ def build_parser():
     sub.add_parser("sync", help="git fetch/reset on VPS only (no artifacts)")
     sub.add_parser("status", help="service state + deployed commit + disk use")
     sub.add_parser("health", help="VPS loopback + public API + frontend checks")
-    caddy = sub.add_parser("caddy", help="manage Caddy reverse proxy (reload/restart/status)")
-    caddy.add_argument("caddy_action", choices=["reload", "restart", "status"])
+    caddy = sub.add_parser("caddy", help="manage Caddy reverse proxy (install/reload/restart/status)")
+    caddy.add_argument("caddy_action", choices=["install", "reload", "restart", "status"])
     db = sub.add_parser("db", help="pre-release database helpers")
     db.add_argument("db_action", choices=["backup", "migrate", "restore"])
     db.add_argument("--file", default=None, help="backup file for db restore")
