@@ -399,8 +399,10 @@ def cmd_caddy(args) -> None:
     # origin/main, validates it, and reloads — never a bare reload of a
     # stale file.
     def install_and_reload(extra_verify=False):
+        # NOTE: root's HOME is /root, deploy's is /home/deploy. Using
+        # ~/project under ROOT_USER fails; use the absolute path.
         cmd = (
-            "cd ~/project && git fetch origin --prune && "
+            "cd /home/deploy/project && git fetch origin --prune && "
             "git show origin/main:backend/deploy/Caddyfile > backend/deploy/Caddyfile && "
             "cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d) && "
             "cp backend/deploy/Caddyfile /etc/caddy/Caddyfile && "
