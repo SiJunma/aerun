@@ -8,6 +8,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/subscriptions"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
 
@@ -124,7 +125,15 @@ func registerRealtimeKeepalive(app core.App) {
 		// subscriptions broker -> client channel -> WriteSSE+Flush),
 		// and the browser's EventSource treats the resulting event as
 		// ordinary traffic even though the hub ignores this topic.
-		stop := startRealtimeKeepalive(e.App, e.Client.Id())
+		//
+		// CRITICAL: save the client BEFORE calling e.Next() — the broker's
+		// Register/Unregister is done by PocketBase's own handler using
+		// ce.Client inside Next(). We need that same client instance to
+		// receive the warmup event. If we capture e.Client.Id() in the
+		// ticker but the broker later discards that client, the message
+		// still goes through but the idle timer won't reset.
+		// startRealtimeKeepalive takes the client object, not the id.
+		stop := startRealtimeKeepalive(e.App, e.Client)
 		defer stop()
 
 		return e.Next()
@@ -135,8 +144,15 @@ func registerRealtimeKeepalive(app core.App) {
 // returns a stop function the caller MUST invoke when the connection ends.
 // The ticker is aligned to the connection start, not to wall time, so a
 // 30-minute MaxTimeout connection gets a full 25s cadence.
-func startRealtimeKeepalive(app core.App, clientID string) func() {
-	if app == nil || strings.TrimSpace(clientID) == "" {
+//
+// It takes the client OBJECT (not an id) because the subscriptions broker
+// delivers a message by sending on client.Channel() — only the exact
+// DefaultClient instance the broker registered will receive it and reset
+// ITS connection's idle timer. Sending to a different instance (or to the
+// broker with no registered client) is a no-op for that connection: the
+// signal row exists, but the live stream never carries a warmup byte.
+func startRealtimeKeepalive(app core.App, client subscriptions.Client) func() {
+	if app == nil || client == nil {
 		return func() {}
 	}
 	done := make(chan struct{})
