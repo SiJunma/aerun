@@ -70,9 +70,9 @@ const (
 const presenceSignalDebounce = 2 * time.Second
 
 var (
-	presenceSignalMu       sync.Mutex
-	presenceSignalTimer    *time.Timer
-	presenceSignalPending  bool
+	presenceSignalMu      sync.Mutex
+	presenceSignalTimer   *time.Timer
+	presenceSignalPending bool
 )
 
 // publishPresenceSignal announces "the online composition changed" to every

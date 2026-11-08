@@ -41,11 +41,11 @@ import (
 )
 
 type userPresence struct {
-	UserID          string         `json:"id"`
-	Nickname        string         `json:"nickname"`
-	AvatarURL       string         `json:"avatar_url"`
-	Role            string         `json:"role"`
-	LastSeen        time.Time      `json:"last_seen"`
+	UserID    string    `json:"id"`
+	Nickname  string    `json:"nickname"`
+	AvatarURL string    `json:"avatar_url"`
+	Role      string    `json:"role"`
+	LastSeen  time.Time `json:"last_seen"`
 	// LastActiveAt is the moment of the member's last active click/keypress,
 	// as reported by the client in last_active_at. It — not LastSeen (the
 	// last heartbeat transport tick) — decides when the member drops out of

@@ -713,13 +713,13 @@ type adminBulkDeleteForm struct {
 // PreviousStatus is internal only (never serialised): the post-commit
 // presence eviction needs to know whether a ban actually changed anything.
 type bulkItem struct {
-	ID               string `json:"id"`
-	OK               bool   `json:"ok"`
-	Error            string `json:"error,omitempty"`
-	Code             string `json:"code,omitempty"`
-	Role             string `json:"role,omitempty"`
-	Status           string `json:"status,omitempty"`
-	PreviousStatus   string `json:"-"`
+	ID             string `json:"id"`
+	OK             bool   `json:"ok"`
+	Error          string `json:"error,omitempty"`
+	Code           string `json:"code,omitempty"`
+	Role           string `json:"role,omitempty"`
+	Status         string `json:"status,omitempty"`
+	PreviousStatus string `json:"-"`
 }
 
 // dedupeIDs returns ids in first-seen order without duplicates.
