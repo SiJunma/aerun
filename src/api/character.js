@@ -47,6 +47,13 @@ export const subscribeToCharacters = (uid, callback) => {
     fetch: () => fetchCharacters(uid),
     intervalMs: 0,
     initialValue: [],
+    // Re-subscribing within 30s of a successful read hands the cached masks
+    // over instead of re-reading. ProfilePage's profile effect re-runs when
+    // `profile` gets a new identity (AuthProvider's presence write-back can
+    // re-render the tree), so the subscribe/unsubscribe pair repeats inside
+    // the same page view and — without this — costs a second identical
+    // GET /users/{uid}/characters each time.
+    restartFreshMs: 30_000,
     onError: (err) => console.warn('[subscribeToCharacters err]', err),
   });
 

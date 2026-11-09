@@ -542,6 +542,87 @@ test('different names are different resources', () => {
   assert.notEqual(first, second, 'two accounts must not share a cached value');
 });
 
+test('a restart within restartFreshMs hands the cached value and costs no request', async () => {
+  // The profile-page duplicate: the effect that subscribes to the resource
+  // cleans up and re-runs (its deps changed identity) inside the same page
+  // view, so the resource stops (last subscriber left) and starts again
+  // moments after a successful read. Without the fresh-restart window each
+  // such cycle pays a second identical request — the network log showed
+  // the pair the user reported (characters ×2, users/{uid} ×2).
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'restart-fresh',
+    intervalMs: 0,
+    restartFreshMs: 30_000,
+    fetch: async () => { calls += 1; return calls; },
+  });
+
+  const seen = [];
+  const stopFirst = poll.subscribe((v) => seen.push(v));
+  await tick();
+  assert.equal(calls, 1);
+  stopFirst(); // the effect's cleanup — the resource goes idle
+
+  // Re-mount moments later, with the last read still inside the window.
+  const stopSecond = poll.subscribe((v) => seen.push(v));
+  try {
+    await tick();
+    assert.equal(calls, 1, 'a fresh restart must not re-read');
+    assert.deepEqual(seen, [1, 1], 'both subscribers see the one read');
+  } finally {
+    stopSecond();
+    poll.stopIfIdle();
+  }
+});
+
+test('a restart outside restartFreshMs re-reads, and without the opt-in always re-reads', async () => {
+  let calls = 0;
+  const poll = createSharedPoll({
+    name: 'restart-stale',
+    intervalMs: 0,
+    restartFreshMs: 1, // immediately stale
+    fetch: async () => { calls += 1; return calls; },
+  });
+
+  const stopFirst = poll.subscribe(() => {});
+  await tick();
+  assert.equal(calls, 1);
+  stopFirst();
+
+  // Past the (1ms) window: the restart is stale, so it must re-read.
+  await wait(5);
+  const stopSecond = poll.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(calls, 2, 'a stale restart must re-read');
+  } finally {
+    stopSecond();
+    poll.stopIfIdle();
+  }
+
+  // Without the opt-in the behaviour is exactly the old one: every restart reads.
+  let plainCalls = 0;
+  const plain = createSharedPoll({
+    name: 'restart-plain',
+    intervalMs: 0,
+    fetch: async () => { plainCalls += 1; return plainCalls; },
+  });
+
+  const stopA = plain.subscribe(() => {});
+  await tick();
+  assert.equal(plainCalls, 1);
+  stopA();
+
+  const stopB = plain.subscribe(() => {});
+  try {
+    await tick();
+    assert.equal(plainCalls, 2, 'no opt-in means no cache across a restart');
+  } finally {
+    stopB();
+    plain.stopIfIdle();
+  }
+});
+
 test('the poll still starts when no realtime hook is passed', async () => {
   // The guard above must refuse ONLY a hook. A resource without one is the normal
   // case today and has to keep working, or the guard would take the whole app

@@ -405,15 +405,50 @@ export const isAbortedRequest = (err) =>
 // cancelled this one is the answer the caller wants. Every OTHER failure still
 // throws, because `subscribeToUser` renders nothing at all for a caller it could
 // not answer.
+// Single-flight per uid: two callers reaching for the same row while a read
+// is still in the air join one GET instead of doubling it. The shared promise
+// is stored until it settles; a caller joining a live request shares its
+// outcome instead of issuing a rival one. A settled request is NOT cached: the
+// next caller after it settles reads fresh, which is what keeps a mutation
+// from being shadowed by the pre-write answer. In practice the two callers
+// here are AuthProvider's own-profile refresh and ProfilePage's subscribeToUser
+// when they happen to read the SAME account.
+const _profileFlights = new Map();
+
+// A settled profile snapshot is kept for a short window so a remount that
+// happens moments later (ProfilePage's effect re-running because `t` changed
+// identity after AuthProvider's own-profile write) reuses the last answer
+// instead of paying a second identical GET. The window is intentionally
+// short — a mutation is never responsible for the STALENESS here, because a
+// caller that WRITES and then needs the row re-reads through a fresh flight
+// once this cache expires.
+const _profileCache = new Map();
+const PROFILE_CACHE_MS = 30_000;
+
 export const fetchUserProfile = async (uid) => {
   if (!uid) return null;
-  try {
-    const record = await sendApi(`/api/aerun/users/${uid}`);
-    return normalizeUserProfile({ ...record });
-  } catch (err) {
-    if (isAbortedRequest(err)) return null;
-    throw err;
-  }
+  // Short-TTL hit: a remount that arrives right after a successful read gets
+  // the cached snapshot instead of a second identical GET.
+  const cached = _profileCache.get(uid);
+  if (cached && Date.now() - cached.at < PROFILE_CACHE_MS) return cached.value;
+  const live = _profileFlights.get(uid);
+  if (live) return live;
+  const flight = (async () => {
+    try {
+      const record = await sendApi(`/api/aerun/users/${uid}`);
+      const value = normalizeUserProfile({ ...record });
+      _profileCache.set(uid, { value, at: Date.now() });
+      return value;
+    } catch (err) {
+      if (isAbortedRequest(err)) return null;
+      throw err;
+    }
+  })();
+  _profileFlights.set(uid, flight);
+  flight.finally(() => {
+    if (_profileFlights.get(uid) === flight) _profileFlights.delete(uid);
+  });
+  return flight;
 };
 
 // A single read of one account, delivered once.
@@ -434,6 +469,13 @@ export const fetchUserProfile = async (uid) => {
 // always rendered from this one read. If the profile ever gets a signal-based
 // refresh, this is the place the subscription comes back — carrying the same
 // DTO as the read, never the record.
+// The profile page's subscribe and AuthProvider's own-profile refresh for the
+// SAME account share one read through fetchUserProfile's single-flight above
+// only when they happen to read the same uid. When they do not — the normal
+// case, a member viewing somebody else's profile — this fires its own GET and
+// stays independent of the viewer's own uid. The promise is joined, not
+// cached: after it settles the next caller reads fresh, so a rename elsewhere
+// is never masked by a prior answer.
 export const subscribeToUser = (uid, callback) => {
   if (!uid) {
     callback(null);

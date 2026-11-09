@@ -235,7 +235,20 @@ const ProfilePage = () => {
       unsubscribe();
       unsubProfile();
     };
-  }, [uid, profile, setPageTitle, t]);
+    // Deps are the IDENTITIES, not the object. `profile` gets a new identity
+    // on every AuthProvider write (the own-profile refresh on every boot sync),
+    // so depending on the object re-ran this whole effect — and with it the
+    // subscribeToUser/subscribeToCharacters pair and the votes read — for
+    // state that had not changed. What this effect needs from the viewer is
+    // its uid and whether this is the viewer's own row, so those (plus the
+    // viewed uid) are the deps.
+  // `t` is deliberately NOT a dep: useI18n re-creates it whenever its provider
+  // re-renders, and that happens on AuthProvider's own-profile write — the
+  // exact write this effect is trying to ignore. The translation it needs is
+  // a static fallback string, so re-running for it only re-issued the
+  // subscribeToUser/subscribeToCharacters/votes reads.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, profile?.uid, setPageTitle]);
 
   // Tracks if we've already done the initial seek for a deep-linked log
   const didSeekRef = useRef(false);
