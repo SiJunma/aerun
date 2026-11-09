@@ -393,6 +393,9 @@ func (t *authThrottle) reset() {
 // guestLimiter guards the anonymous heartbeat path.
 var guestLimiter = newGuestThrottle(guestHeartbeatsPerMinute, time.Minute)
 
+// globalAuthLimiter guards the unauthenticated auth write paths (SEC-05).
+var globalAuthLimiter = newAuthThrottle(authRateLimitPerMinute, time.Minute)
+
 type heartbeatForm struct {
 	GuestID string `json:"guest_id"`
 	// ActiveCharacter is the mask the member is currently posting under

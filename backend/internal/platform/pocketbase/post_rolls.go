@@ -17,6 +17,7 @@ import (
 	"fmt"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 	"github.com/SiJunma/aerun/backend/internal/forum"

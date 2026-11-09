@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
@@ -773,7 +775,7 @@ func TestGuestPrincipalCookieIsSecure(t *testing.T) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/aerun/guest/principal", strings.NewReader(`{}`))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Idempotency-Key", "idem-guest-principal-secure-"+forwardedProto+"-"+fmt.Sprint(ts.URL))
+		req.Header.Set("Idempotency-Key", "idem-guest-principal-secure-"+forwardedProto+"-"+strconv.FormatInt(time.Now().UnixNano(), 10))
 		if forwardedProto != "" {
 			req.Header.Set("X-Forwarded-Proto", forwardedProto)
 		}

@@ -409,7 +409,7 @@ func rollValueEqual(a, b any) bool {
 
 // ErrRollFreezeConflict is ErrRollConflict under its canonical name — the
 // create-edit freeze refusal.
-const ErrRollFreezeConflict = ErrRollConflict
+var ErrRollFreezeConflict = ErrRollConflict
 
 // sanitizeRoll normalises one roll entry into the stored shape
 // `{id, sides, value, type}`.

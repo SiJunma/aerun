@@ -171,12 +171,10 @@ const parkHubSilently = () => {
     clearTimeout(hubSilentRecoveryTimer);
     hubSilentRecoveryTimer = null;
   }
-  const generationBeforePark = hubGeneration;
   hubCircuitOpen = true;
   const keepMembers = new Set(hubMembers);
   closeHub();
   hubMembers = keepMembers;
-  hubParkedAt = Date.now();
   // Re-arm the timer after closeHub() cleared any pre-existing one. The
   // recovery callback is independent of closeHub's generation guard because
   // closeHub() intentionally bumps it; instead, watch membership — the only
@@ -196,7 +194,6 @@ const SILENT_RETRY_MS = 30_000;
 // hubCircuitOpen: the breaker parks until a genuine open, whereas the silent
 // guard parks only for a bounded retry cycle.
 let hubSilentRecoveryTimer = null;
-let hubParkedAt = 0;
 
 const closeHub = () => {
   // Bump the generation first: a subscription promise that was still

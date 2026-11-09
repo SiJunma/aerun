@@ -338,14 +338,10 @@ func TestMeRejectsSuperusers(t *testing.T) {
 	scenario.Test(t)
 }
 
-// TestSecureReadRules verifies the public profile read contract of the users
-// collection directly against the PocketBase record APIs.
-//
-// Profiles are public regardless of account status — 1768100000 removed the
-// `status = "active"` branch that used to hide pending and banned accounts, and
-// canReadCharactersOf follows the same rule. The properties still pinned here
-// are the ones that must survive that: email addresses and the legacy firebase
-// uid never reach another account.
+// TestSecureReadRules verifies deny-by-default on the users collection (SEC-03):
+// direct browser reads of `/api/collections/users/records` are locked (nil rules),
+// so only superusers can read the collection directly. All public profile reads
+// must go through the whitelist DTO endpoints under `/api/aerun/users*`.
 func TestSecureReadRules(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -358,75 +354,41 @@ func TestSecureReadRules(t *testing.T) {
 		notExpect []string
 	}{
 		{
-			// Status is not a visibility switch. A suspended or unapproved
-			// account stays as readable as an active one: a restriction applies to
-			// the ACCOUNT, not to what other people may see of it. What still must
-			// not leak is the identity plumbing — email and the legacy uid.
-			name:   "guest lists every profile regardless of status",
+			name:   "guest cannot list users collection directly",
 			method: http.MethodGet,
 			url:    "/api/collections/users/records",
-			status: http.StatusOK,
+			status: http.StatusForbidden,
 			expect: []string{
-				`"PlayerOne"`,
-				`"PendingOne"`,
-				`"BannedOne"`,
-				`"emailVisibility":false`,
-			},
-			notExpect: []string{
-				`player@example.com`,
-				`banned@example.com`,
-				`pending@example.com`,
-				`legacy_firebase_uid`,
+				`Only superusers`,
 			},
 		},
 		{
-			name:   "pending user lists every profile",
+			name:   "pending user cannot list users collection directly",
 			method: http.MethodGet,
 			url:    "/api/collections/users/records",
 			actor:  "pending",
-			status: http.StatusOK,
+			status: http.StatusForbidden,
 			expect: []string{
-				`"PlayerOne"`,
-				`"PendingOne"`,
-				`"BannedOne"`,
-			},
-			notExpect: []string{
-				// Listing never leaks email addresses of other accounts.
-				`player@example.com`,
-				`mod@example.com`,
-				`root@example.com`,
-				`banned@example.com`,
-				`legacy_firebase_uid`,
+				`Only superusers`,
 			},
 		},
 		{
-			name:      "guest views a pending profile by id",
-			method:    http.MethodGet,
-			url:       "/api/collections/users/records/" + fixPendingID,
-			status:    http.StatusOK,
-			expect:    []string{`"PendingOne"`, `"status":"pending"`},
-			notExpect: []string{`pending@example.com`, `legacy_firebase_uid`},
+			name:   "guest cannot view user record directly by id",
+			method: http.MethodGet,
+			url:    "/api/collections/users/records/" + fixPendingID,
+			status: http.StatusForbidden,
+			expect: []string{
+				`Only superusers`,
+			},
 		},
 		{
-			name:   "pending user views its own record",
+			name:   "pending user cannot view its own record directly by id",
 			method: http.MethodGet,
 			url:    "/api/collections/users/records/" + fixPendingID,
 			actor:  "pending",
-			status: http.StatusOK,
+			status: http.StatusForbidden,
 			expect: []string{
-				`"PendingOne"`,
-				`"status":"pending"`,
-				// PocketBase always reveals the email to the record's own
-				// author (apis/record_helpers.go calls IgnoreEmailVisibility
-				// for e.Auth) — the profile owner needs it, and it is not a
-				// public response. Anonymity is enforced for every *other*
-				// account, which the notExpect list pins down.
-				`pending@example.com`,
-			},
-			notExpect: []string{
-				`player@example.com`,
-				`mod@example.com`,
-				`legacy_firebase_uid`,
+				`Only superusers`,
 			},
 		},
 	}

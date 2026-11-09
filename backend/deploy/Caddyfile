@@ -31,6 +31,8 @@ aerun-world.com {
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https: wss:; frame-src 'self' https:; object-src 'none'; base-uri 'self';"
 	}
 	# Backend API and the PocketBase admin dashboard.
 	# flush_interval -1: forward /api/realtime (SSE) the moment
@@ -42,7 +44,10 @@ aerun-world.com {
 			flush_interval -1
 		}
 	}
+	# SEC-04: PocketBase admin dashboard — restrict to localhost and operator IP.
 	handle /_/* {
+		@denied not remote_ip 127.0.0.1 202.148.54.64
+		respond @denied "Access denied" 403
 		reverse_proxy 127.0.0.1:8090
 	}
 	# SPA: built frontend from the feature/pocketbase-migration branch.

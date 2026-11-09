@@ -264,7 +264,7 @@ func listUserPostsHandler(e *core.RequestEvent) error {
 		dbx.HashExp{"author_id": authorID},
 		dbx.NewExp("(is_draft = {:no} OR is_draft IS NULL)", params),
 		dbx.NewExp(
-			"topic_id IN (SELECT id FROM "+topicsCollectionName+" WHERE category_id IN ("+strings.Join(placeholders, ", ")+"))",
+			"topic_id IN (SELECT id FROM " + topicsCollectionName + " WHERE category_id IN (" + strings.Join(placeholders, ", ") + "))",
 		),
 	}
 	if filterExpr := filter.expr(); filterExpr != nil {

@@ -36,7 +36,7 @@ import { resolveField } from '../utils/text';
  */
 const DraftsPage = () => {
   const { t, lang } = useI18n();
-  const { user, categories } = useAuth();
+  const { user, categories, profile } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const navigate = useNavigate();

@@ -4,6 +4,8 @@ import ProtectedRoute from './components/common/ProtectedRoute';
 import Layout from './components/layout/Layout';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import ConfirmVerificationPage from './pages/ConfirmVerificationPage';
+import ConfirmPasswordResetPage from './pages/ConfirmPasswordResetPage';
 import PendingPage from './pages/PendingPage';
 import BannedPage from './pages/BannedPage';
 import MainPage from './pages/MainPage';
@@ -123,6 +125,8 @@ const App = () => {
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/auth/confirm-verification/:token" element={<ConfirmVerificationPage />} />
+        <Route path="/auth/confirm-password-reset/:token" element={<ConfirmPasswordResetPage />} />
         <Route path="/pending" element={<ProtectedRoute requireActive={false}><Layout><PendingPage /></Layout></ProtectedRoute>} />
         <Route path="/banned" element={<ProtectedRoute requireActive={false}><Layout><BannedPage /></Layout></ProtectedRoute>} />
 

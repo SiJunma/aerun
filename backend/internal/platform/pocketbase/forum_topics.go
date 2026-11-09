@@ -32,9 +32,9 @@ type createTopicForm struct {
 	// the OPENING post only; there is no other post in this transaction that
 	// could carry it.
 	PinFirstPost bool `json:"pin_first_post"`
-	// Rolls is the result of the opening post's dice. SEC-08: ignored —
-	// the server generates them from the RAW `[dice=N]` tags.
-	Rolls map[string]any `json:"rolls // ignored — SEC-08"`
+	// Rolls is ignored on create (SEC-08): the server generates them
+	// from the RAW `[dice=N]` tags in the content.
+	Rolls map[string]any `json:"rolls,omitempty"`
 	// GuestNickname is the display name a guest picks when posting without an
 	// account. Empty for authenticated users.
 	GuestNickname string `json:"guest_nickname"`

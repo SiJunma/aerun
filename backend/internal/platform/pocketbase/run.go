@@ -78,6 +78,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		if err := registerDMCollectorCron(se.App); err != nil {
 			return err
 		}
+		// SEC-09: prune idempotency keys older than 48 hours
+		if err := registerIdempotencyPruneCron(se.App); err != nil {
+			return err
+		}
 		// Fail fast on a binary/data-directory mismatch. touchMemberLastSeen
 		// cannot report this: it is best-effort by design, so a missing column
 		// would degrade the members table to registration dates with a 200 on

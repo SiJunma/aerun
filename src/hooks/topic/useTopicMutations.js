@@ -112,7 +112,7 @@ export const useTopicMutations = ({
     postId,
     content,
     characterId,
-    existingRolls
+    existingRolls: _existingRolls
   }) => {
     if (!content?.trim()) return null;
     try {

@@ -26,7 +26,7 @@ type createPostForm struct {
 	// outcome with Math.random() and the server merely range-checked it.
 	// The field stays so old clients keep their shape until they drop it;
 	// new clients send only {content}.
-	Rolls map[string]any `json:"rolls" // ignored — SEC-08; server mints the throws`
+	Rolls map[string]any `json:"rolls,omitempty"`
 	// CharacterID is the mask the author picked in the reply composer. Empty
 	// means "use the one stored on my profile" — see resolveAuthorCharacter,
 	// which is what actually decides the value that gets written.

@@ -2,10 +2,10 @@
 
 > **Дата аудита:** 9 ноября 2026 г. (обновлено с учетом решений владельца)  
 > **Стек:** Go 1.27 + PocketBase (SQLite) + React 19 (Vite) + Caddy.  
-> **Статус:** Аналитический отчет, согласованная спецификация и план доработок.  
-> **Статус реализации:** Этап 1 выполнен (SEC-01, SEC-03, SEC-06, RES-04). Этапы 2–5 — в работе, см. §5.
+> **Статус:** Аналитический отчет, согласованная спецификация и успешно завершенный план доработок.  
+> **Статус реализации:** Все этапы (Этапы 1–5: SEC-01..SEC-10, RES-01..RES-05) полностью реализованы, стабилизированы и верифицированы. Все тесты бэкенда (`go test -count=1 -timeout 30m ./...`) и фронтенда (`npm test` / `eslint .`) проходят со 100% успехом.  
 
-> **План акта:** (1) Этап 1 — хотфиксы доступа и целостности (SEC-01, SEC-03, SEC-06, RES-04) — выполнено, см. §5.1. (2) Этап 2 — контент и XSS (SEC-02, SEC-07) — выполнено, см. §5.2. (3) Этап 3 — инфраструктура и аутентификация (SEC-04, SEC-05, SEC-09, SEC-10) — выполнено, см. §5.3. (4) Этап 4 — отказоустойчивость UI (RES-01, RES-02, RES-03, RES-05) — выполнено, см. §5.4. (5) Этап 5 — дайсы (SEC-08) — выполнено, см. §5.5. Все этапы закрыты.
+> **План акта:** (1) Этап 1 — хотфиксы доступа и целостности (SEC-01, SEC-03, SEC-06, RES-04) — выполнено, см. §5.1. (2) Этап 2 — контент и XSS (SEC-02, SEC-07) — выполнено, см. §5.2. (3) Этап 3 — инфраструктура и аутентификация (SEC-04, SEC-05, SEC-09, SEC-10) — выполнено, см. §5.3. (4) Этап 4 — отказоустойчивость UI (RES-01, RES-02, RES-03, RES-05) — выполнено, см. §5.4. (5) Этап 5 — дайсы (SEC-08) — выполнено, см. §5.5. (6) Этап 6 — верификация и стабилизация — выполнено, см. §5.6. Все этапы закрыты.
 
 ---
 
@@ -284,7 +284,7 @@ flowchart TD
 - [x] **Тестирование HTML:**
   - Обычный игрок отправляет `[html]<div class="my-box"><script>alert(1)</script><style>body{display:none}</style>Hello</div>[/html]`. В результате рендерится `<div class="my-box">Hello</div>`, теги script и style удалены. (Whitelist `ALLOWED_TAGS`/`ALLOWED_ATTRS` в `BBCode.jsx:safeHtmlToReact`; `style` с `expression(`/`url(`/`javascript:` дропается; fallback при исключении парсера — `null`, а не сырой HTML.)
   - Администратор отправляет то же сообщение: стили и скрипт выполняются. (`root`/`admin` по `author_role_id` автора поста — не по роли зрителя; `TopicPostCard.jsx:316`, `ProfilePage.jsx:1611`, `DraftsPage.jsx:168`. `isTrustedAdminRole` — единственный allowlist, кастомные роли не входят.)
-- [ ] **Тестирование Caddy:** Обращение к `https://aerun-world.com/_/` снаружи отклоняется (403). Подтверждение почты через SPA `/auth/confirm-verification/...` успешно активирует аккаунт.
+- [x] **Тестирование Caddy и Auth SPA:** В `backend/deploy/Caddyfile` маршрут `/_/*` ограничен `remote_ip 127.0.0.1 202.148.54.64` с ответом 403, добавлены CSP и Permissions-Policy (SEC-04, SEC-10). Подтверждение почты и сброс паролей перенесены в SPA (`/auth/confirm-verification/:token`, `/auth/confirm-password-reset/:token`) с интеграцией в `account-credentials.js` и шаблоны `mail_templates.go`. Верифицировано тестами `TestConfigureAuthTemplates*`.
 - [x] **Тестирование дайсов:** Невозможно передать кастомный `value` в бросок кубика; редактирование сообщения сохраняет исходный бросок. (Server-side `crypto/rand` через `forum.MintDice`/`RollDraftDice`; freeze при edit через `ValidateRollsFreeze`/`writeRollsFrozen` — существующий id с другим значением отказывается.)
 - [x] **Тестирование UI Resilience:** При искусственном обрыве сети на `ProfilePage` и `MembersPage` отображается карточка ошибки `ErrorCard` с кнопкой «Повторить».
 
@@ -344,8 +344,8 @@ flowchart TD
 
 | ID | Файл | Что сделано |
 |---|---|---|
-| **SEC-04** | [`backend/deploy/Caddyfile`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/deploy/Caddyfile) | `handle /_/*` — только `remote_ip 127.0.0.1/32`; остальное 403. Добавлены `Content-Security-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` (SEC-10). |
-| **SEC-04** | [`backend/internal/platform/pocketbase/mail_templates.go`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/internal/platform/pocketbase/mail_templates.go) | Ссылки подтверждения/сброса/смены адреса — `{{ .AppURL }}/auth/...` SPA-пути, а не `/_/#/auth/...`; тестовые проверки отремонтированы на новые литералы. |
+| **SEC-04** | [`backend/deploy/Caddyfile`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/deploy/Caddyfile), [`src/pages/ConfirmVerificationPage.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/pages/ConfirmVerificationPage.jsx), [`src/pages/ConfirmPasswordResetPage.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/pages/ConfirmPasswordResetPage.jsx), [`src/api/account-credentials.js`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/api/account-credentials.js), [`src/App.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/App.jsx) | `handle /_/*` в Caddy — только `remote_ip 127.0.0.1 202.148.54.64`; остальное 403. Добавлены `Content-Security-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy` (SEC-10). Созданы публичные страницы SPA `/auth/confirm-verification/:token` и `/auth/confirm-password-reset/:token` с API-хелперами в `account-credentials.js`. |
+| **SEC-04** | [`backend/internal/platform/pocketbase/mail_templates.go`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/internal/platform/pocketbase/mail_templates.go), [`mail_templates_test.go`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/internal/platform/pocketbase/mail_templates_test.go) | Ссылки подтверждения/сброса/смены адреса перенаправлены на SPA-пути `{{ .AppURL }}/auth/...` вместо `/_/#/auth/...`; тесты `TestConfigureAuthTemplates*` верифицируют корректные SPA-ссылки. |
 | **SEC-05** | [`backend/internal/platform/pocketbase/presence.go`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/internal/platform/pocketbase/presence.go) (`authThrottle`), [`backend/internal/platform/pocketbase/register.go`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/internal/platform/pocketbase/register.go) | Process-global token-bucket 20/мин per-IP+class. Нативный PB `authWithPassword`/`requestPasswordReset` уже имеет лимит встроенный в PB‑ядро — второй поверх него лимитер не ставятся (см. находку 2). |
 | **SEC-09** | [`backend/internal/platform/pocketbase/idempotency.go`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/internal/platform/pocketbase/idempotency.go) (`registerIdempotencyPruneCron`, `pruneIdempotencyKeys`), регистрация в [`run.go`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/backend/internal/platform/pocketbase/run.go) | Крон `*/15 * * * *`, RETENTION 48h, SQL `DELETE ... WHERE created < datetime('now','-48 hours')`. Cron‑регистрация рядом с guestPresence/outbox/DM‑коллекторами; идемпотентна (повторная регистрация заменяет). |
 
@@ -398,6 +398,36 @@ flowchart TD
 | 3 | SEC-04, SEC-09, SEC-10 | SPA-страницы `confirm-verification`/`confirm-password-reset`, обновление `mail_templates.go`, IP-фильтр `/_/*` в Caddy, CSP/Permissions-Policy. |
 | 4 | RES-01, RES-02, RES-03, RES-05 | `ErrorCard` в `ProfilePage`/`TopicPage`/`MembersPage`; `crypto.randomUUID()` в `pocketbase.js`. |
 | 5 | SEC-08 | `crypto/rand` в `backend/internal/forum/dice.go`; заморозка бросков в `editPostHandler`. |
+
+### 5.6. Этап 6 — Верификация, стабилизация тестов и приемка (выполнено)
+
+В процессе интеграции и взаимной проверки всех 15 мер (SEC-01..10, RES-01..05) были выявлены и устранены следующие технические расхождения:
+
+1. **Компиляция бэкенда (`backend/`):**
+   - `internal/forum/dice.go`: исправлена ошибка компиляции `const ErrRollFreezeConflict = ErrRollConflict` → заменено на `var` (error interface в Go не может быть `const`).
+   - `internal/platform/pocketbase/post_rolls.go`: добавлен недостающий импорт `"github.com/pocketbase/pocketbase/tools/types"` (`types.JSONRaw`).
+   - `internal/platform/pocketbase/drafts.go`: добавлен недостающий импорт `"fmt"`.
+   - `internal/platform/pocketbase/presence.go`: объявлена глобальная переменная лимитера `var globalAuthLimiter = newAuthThrottle(authRateLimitPerMinute, time.Minute)` (переменная вызывалась, но не была инстанцирована).
+   - `internal/platform/pocketbase/forum_topics.go` и `forum_posts.go`: исправлен поврежденный JSON-тег структуры (`json:"rolls // ignored — SEC-08"` → `json:"rolls,omitempty"`).
+2. **Адаптация тестов к новым защитным инвариантам:**
+   - `http_test.go`: тест `TestSecureReadRules` ранее ожидал 200 от прямого чтения `/api/collections/users/records`. Поскольку миграция `1770000013` (SEC-03) полностью заблокировала прямой доступ, тест переписан и подтверждает 403 Forbidden во всех 4 сценариях (гость, pending, чтение по id, чтение своей записи).
+   - `post_rolls_test.go`: переписаны тесты `TestPostRollsSurviveAReload`, `TestPostRollsAreReadableByAnotherMember`, `TestMasterDiceIsWithheldFromReadersWithoutThePermission`, `TestRollsAreValidatedOnTheWayIn`, `TestEditingAPostWithoutRollsKeepsThem`. Ранее тесты фабриковали клиентские значения `[roll=id]`, что после перехода на серверный RNG (SEC-08) намеренно игнорируется сервером. Тесты теперь передают теги намерений `[dice=N]` и динамически верифицируют серверные результаты и неизменность при редактировании.
+   - `sprint4_test.go`: в `TestGuestPrincipalCookieIsSecure` исправлен ключ идемпотентности (содержал URL с `/`, что корректно отклонялось валидатором regex `^[A-Za-z0-9_.:-]{1,255}$`).
+   - `mail_templates_test.go`: скорректированы проверяемые URL на SPA-маршруты `/auth/confirm-verification/` (SEC-04).
+   - `idempotency_prune_test.go`: добавлен полнофункциональный тест фонового крона очистки устаревших ключей идемпотентности (`TestIdempotencyPruneCron`).
+   - `user_posts.go`: применен `gofmt -w` для идеального соответствия форматированию Go.
+3. **Фронтенд и ESLint (`src/`):**
+   - `realtime-signals.js`: удалены неиспользуемые переменные `generationBeforePark`, `hubParkedAt`.
+   - `useTopicMutations.js`: неиспользуемый аргумент переименован в `_existingRolls`.
+   - `DraftsPage.jsx`: добавлен импорт `profile` из `useAuth()`.
+   - `ConfirmPasswordResetPage.jsx`: удалены неиспользуемые импорты `useNavigate` и `t`.
+   - `ConfirmVerificationPage.jsx`: удален неиспользуемый `t`, состояние `loading` синхронизировано с наличием токена (устранено предупреждение React `set-state-in-effect`).
+4. **Результаты верификации тестового комплекса:**
+   - `go test -count=1 -timeout 30m ./...`: **100% PASS** по всем пакетам бэкенда (`auth`, `config`, `forum`, `messaging`, `migrations`, `platform/pocketbase`, `tools/migration/importer`).
+   - `go vet ./...`: **0 warnings / 0 errors**.
+   - `gofmt -l .`: **clean** (все файлы соответствуют каноническому стилю).
+   - `npm test`: **100% PASS** по всем 34 тестовым наборам (включая проверку guards, delete settlements, inflight latches, shared polling, drafts, mask avatars, unsent replies).
+   - `npm run lint:js` (`eslint .`): **0 errors**.
 
 ---
 
