@@ -31,6 +31,37 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
 
+// TestRealtimeKeepaliveReachesAuthenticatedClient proves the complete
+// server-side path the browser relies on: an authenticated client whose
+// subscription is registered on the broker receives the exact keepalive
+// record, not merely a row that happens to exist in realtime_signals.
+// The client is registered manually because the test helper copies the
+// broker registration without driving a real EventSource transport;
+// the important part is that publishKeepalive's audience="*" row passes
+// realtimeBroadcastRecord's rule check for this authenticated client.
+func TestRealtimeKeepaliveReachesAuthenticatedClient(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	_ = tokens
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	client := subscribeAsSignalClient(t, app, authRecordFor(t, app, fixPlayerID))
+	if err := publishKeepalive(app); err != nil {
+		t.Fatalf("publishKeepalive: %v", err)
+	}
+
+	msg, ok := awaitSignal(t, client, 3*time.Second)
+	if !ok {
+		t.Fatal("keepalive was not delivered to an authenticated realtime client")
+	}
+	if body := signalBody(t, msg); strings.Contains(body, realtimeKeepaliveTopic) == false {
+		t.Fatalf("delivered keepalive does not name the keepalive topic: %s", body)
+	}
+}
+
 // TestRealtimeKeepaliveIdleTimeoutRaises verifies the SSE keepalive hook
 // raises the PocketBase idle timeout from its 5-minute default to a value
 // that does not race with Cloudflare's ~100s edge idle-close. Without this,
