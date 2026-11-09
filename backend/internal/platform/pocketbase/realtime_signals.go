@@ -84,6 +84,9 @@ const presenceSignalDebounce = 2 * time.Second
 // actually prevents the Cloudflare ~100s idle close in the mean time.
 const realtimeIdleTimeout = 30 * time.Minute
 
+// TEMP DEBUG keepalive
+var _ = fmt.Sprint
+
 // realtimeKeepaliveInterval is the ticker for the warmup goroutine. It
 // must be < 100s (Cloudflare's edge idle timeout for streaming) and also
 // < Cloudflare's 30s browser keepalive expectation. 25s is safely under
@@ -119,7 +122,9 @@ func registerRealtimeKeepalive(app core.App) {
 	if app == nil {
 		return
 	}
+	app.Logger().Info("registerRealtimeKeepalive binding OnRealtimeConnectRequest")
 	app.OnRealtimeConnectRequest().BindFunc(func(e *core.RealtimeConnectRequestEvent) error {
+		e.App.Logger().Info("OnRealtimeConnectRequest fired", "clientId", e.Client.Id())
 		// Raise idle timeout BEFORE the upstream handler reads it
 		// (PocketBase's realtimeConnect copies ce.IdleTimeout into its
 		// local timer after this hook returns).
@@ -201,6 +206,7 @@ func publishKeepalive(app core.App) error {
 	if app == nil {
 		return fmt.Errorf("keepalive app is nil")
 	}
+	app.Logger().Info("publishKeepalive tick")
 	// Audience "*" so every signed-in subscriber on the broker receives
 	// the warmup event on its own channel. Guests are irrelevant here:
 	// they never open an SSE stream (canReceiveSignals() === false).
