@@ -101,6 +101,91 @@ const ColumnsStacker = ({ children, stackAt }) => {
   );
 };
 
+/**
+ * isTrustedAdminRole — is this role id entitled to raw `[html]` execution
+ * (SEC-02, owner-approved role model)?
+ *
+ * This is the ONLY allowlist: `root` and `admin` — the trusted roles.
+ * Custom roles are deliberately NOT included: a granted permission is
+ * revocable state, while the role id here is who the account was authored
+ * as. The earlier implementation compared against the VIEWER's own role
+ * (profile) rather than the AUTHOR's, so any member who could view a post
+ * could also see its raw script execution.
+ */
+const isTrustedAdminRole = (roleId) => {
+  return roleId === 'root' || roleId === 'admin';
+};
+
+// --- SEC-02: strict, whitelist-based sanitisation of `[html]` content ---
+//
+// The old walk trusted arbitrary tags from anyone: it only skipped `script`
+// and `noscript`, and it passed through `on*` handlers after stripping the
+// `javascript:` prefix from a handful of URL attributes. A player could
+// inject `<style>` to redraw the forum layout, `<iframe src="...">` to
+// embed an arbitrary page, or `<img onerror>` routed through a `data:` URL.
+// DOMParser makes the traversal total, so the correct shape is a WHITELIST:
+// a tag or attribute that is not listed is dropped, never evaluated.
+//
+//   - ALLOWED_TAGS: presentational tags a role-play forum legitimately
+//     needs. Everything raw-active (script, style, iframe, object, embed,
+//     meta, link, form, input, button, textarea, select, base, audio, video,
+//     source, track, svg, math, template) is simply not in the list.
+//   - ALLOWED_ATTRS: the presentation surface only (class, id, href, src,
+//     alt, title, width, height, style, colspan, rowspan, type). No event
+//     handler, no `srcdoc`, no `formaction`, no `xlink:href`.
+//   - URL attributes (href/src) go through isSafeUrl: a non-allowlisted
+//     scheme is dropped (javascript:, vbscript:, data:text/html, blob:,
+//     file:, ftp:, mailto:, tel: …). `data:image/*` is allowed for inline
+//     images ONLY because the avatar pipeline stores them.
+//   - `style` values are parsed by parseStyleString AND filtered: a value
+//     containing expression(), a bare url(, or a javascript: token is
+//     dropped, so the CSS parser never sees an execution attempt.
+const ALLOWED_TAGS = new Set([
+  'div', 'span', 'p', 'br', 'hr',
+  'b', 'strong', 'i', 'em', 'u', 's', 'del', 'strike', 'small', 'sub', 'sup',
+  'a', 'img', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+  'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'blockquote', 'pre', 'code', 'q', 'cite',
+  'section', 'article', 'header', 'footer', 'main', 'figure', 'figcaption'
+]);
+const ALLOWED_ATTRS = new Set([
+  'class', 'id', 'href', 'src', 'alt', 'title', 'width', 'height',
+  'colspan', 'rowspan', 'type', 'style'
+]);
+const URL_ATTRS = new Set(['href', 'src']);
+
+/**
+ * isSafeUrl(value) — is this attribute value safe to render as href/src?
+ *
+ * The raw scheme is tested, never resolved against a base URI: trim,
+ * case-fold, then allow http/https, a relative path, or a data:image/*
+ * image. Everything else (javascript:, vbscript:, data:text/html, blob:,
+ * file:, ftp:, mailto:, tel:, …) is dropped — the attribute is removed,
+ * not the tag.
+ */
+const isSafeUrl = (value) => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^(?:\/|\.\/|\.\.\/)/.test(trimmed)) return true;
+  const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+  if (!schemeMatch) return true; // no scheme — a relative path or bare host
+  const scheme = schemeMatch[1].toLowerCase();
+  if (scheme === 'http' || scheme === 'https') return true;
+  if (scheme === 'data') {
+    return /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(trimmed);
+  }
+  return false;
+};
+
+/**
+ * parseStyleString(styleStr) — parse a style attribute into a React style
+ * object, dropping declarations whose VALUE would smuggle execution
+ * (expression(, url(, javascript:) rather than passing the raw string to
+ * React. The old version handed the whole value through unexamined, so
+ * `style="x:expression(alert(1))"` reached the DOM.
+ */
 const parseStyleString = (styleStr) => {
   if (!styleStr) return {};
   const styleObj = {};
@@ -112,14 +197,42 @@ const parseStyleString = (styleStr) => {
     if (colonIdx === -1) return;
     const property = trimmed.substring(0, colonIdx).trim();
     const value = trimmed.substring(colonIdx + 1).trim();
+    if (!property || !value) return;
+
+    const lowerValue = value.toLowerCase();
+    if (lowerValue.includes('expression(') || lowerValue.includes('url(') || lowerValue.includes('javascript:')) {
+      return; // offending declaration — drop it, keep the rest of the style
+    }
+
     const camelProperty = property.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
     styleObj[camelProperty] = value;
   });
   return styleObj;
 };
 
-const safeHtmlToReact = (htmlStr, index) => {
-  if (typeof window === 'undefined') return htmlStr;
+/**
+ * safeHtmlToReact(htmlStr, index, isAdminAuthor) — render `[html]` content
+ * through the whitelist sanitiser (SEC-02).
+ *
+ *   - `isAdminAuthor === true`: the AUTHOR's role is root/admin, so the post
+ *     may embed script/style/iframe (media, widgets, custom styling). The
+ *     whitelist still applies to attributes: even trusted JS must arrive as
+ *     a tag, not as an `on*` handler or a javascript: URL trick.
+ *   - otherwise: strict whitelist. A tag not in ALLOWED_TAGS drops its
+ *     whole subtree — there is no safe way to grow content out of an
+ *     unlisted wrapper, and the children of a removed node are never
+ *     re-walked.
+ *
+ * Failure mode: if the parser throws, render NOTHING rather than the raw
+ * string. Returning raw HTML on error was the old fallback and re-opened
+ * the injection window precisely when the sanitiser was unavailable.
+ */
+const safeHtmlToReact = (htmlStr, index, isAdminAuthor) => {
+  if (typeof htmlStr !== 'string') return null;
+  if (typeof window === 'undefined') return null;
+
+  const admin = isAdminAuthor === true;
+
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlStr, 'text/html');
@@ -132,9 +245,23 @@ const safeHtmlToReact = (htmlStr, index) => {
       // Element Node
       if (domNode.nodeType === 1) {
         const tagName = domNode.tagName.toLowerCase();
-        if (tagName === 'script' || tagName === 'noscript') {
-          return null;
+
+        // Trusted roles: style/script/iframe pass through verbatim.
+        if (admin && tagName === 'style') {
+          return <style key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
         }
+        if (admin && tagName === 'script') {
+          return <script key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
+        }
+        if (admin && tagName === 'iframe') {
+          const src = domNode.getAttribute('src') || '';
+          if (!isSafeUrl(src)) return null;
+          const title = domNode.getAttribute('title') || 'embedded media';
+          return <iframe key={key} src={src} title={title} />;
+        }
+
+        // Everyone else (and the tags above when not admin):
+        if (!ALLOWED_TAGS.has(tagName)) return null;
 
         const attribs = { key };
         for (let i = 0; i < domNode.attributes.length; i++) {
@@ -142,15 +269,10 @@ const safeHtmlToReact = (htmlStr, index) => {
           const attrName = attr.name.toLowerCase();
           const attrValue = attr.value;
 
-          if (attrName.startsWith('on')) {
-            continue;
-          }
-          if (['href', 'src', 'action', 'formaction'].includes(attrName)) {
-            const sanitizedVal = attrValue.trim().toLowerCase();
-            if (sanitizedVal.startsWith('javascript:') || sanitizedVal.startsWith('data:text/html')) {
-              continue;
-            }
-          }
+          if (attrName.startsWith('on')) continue; // inline event handlers
+          if (!ALLOWED_ATTRS.has(attrName)) continue; // not on the allowlist — dropped
+
+          if (URL_ATTRS.has(attrName) && !isSafeUrl(attrValue)) continue;
 
           let reactAttrName = attrName;
           if (attrName === 'class') reactAttrName = 'className';
@@ -168,10 +290,6 @@ const safeHtmlToReact = (htmlStr, index) => {
         const childNodes = Array.from(domNode.childNodes);
         const reactChildren = childNodes.map((child, i) => domNodeToReact(child, `${key}-${i}`)).filter(Boolean);
 
-        if (tagName === 'style') {
-          return <style key={key} dangerouslySetInnerHTML={{ __html: domNode.textContent }} />;
-        }
-
         return React.createElement(tagName, attribs, ...reactChildren);
       }
       return null;
@@ -181,12 +299,12 @@ const safeHtmlToReact = (htmlStr, index) => {
     const elements = bodyChildren.map((child, i) => domNodeToReact(child, `${index}-${i}`)).filter(Boolean);
     return <React.Fragment key={index}>{elements}</React.Fragment>;
   } catch (err) {
-    console.error('Error parsing HTML tag in BBCode:', err);
-    return htmlStr;
+    console.error('HTML parse error:', err);
+    return null;
   }
 };
 
-const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
+const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) => {
   const navigate = useNavigate();
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
   const { t, lang } = useI18n();
@@ -797,9 +915,13 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId }) => {
       }
       case 'html': {
         const rawHtml = (node.children || []).map(getRawContent).join('');
+        // The AUTHOR's role, not the viewer's: a member who happens to be
+        // viewing must not get the author's script execution, and an
+        // author's own post must not execute when a non-admin views it.
+        const isAdminAuthor = isTrustedAdminRole(authorRole);
         return (
           <div key={index} className="custom-html-content">
-            {safeHtmlToReact(rawHtml, index)}
+            {safeHtmlToReact(rawHtml, index, isAdminAuthor)}
           </div>
         );
       }

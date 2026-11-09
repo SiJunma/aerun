@@ -956,6 +956,9 @@ export default function TopicPage() {
     const savedReplyContent = replyContent;
     const savedGuestNickname = guestNickname;
 
+    // The optimistic card gets the rewritten [roll=id] shape + provisional
+    // rolls; the REAL throw is drawn server-side (SEC-08), so the card's
+    // `rolls` is short-lived and never becomes the request body.
     const { content: processedContent, rolls } = processDiceRolls(replyContent.trim());
     const authorDTO = buildAuthorDTO(selectedCharacterId);
 
@@ -1593,7 +1596,44 @@ export default function TopicPage() {
 
   // Render Skeleton / ErrorCard
   if (isTopicLoading) return <Skeleton />;
-  if (topicNotFound || accessError || !topic) return <ErrorCard />;
+  if (topicNotFound || accessError || !topic) {
+    // RES-02: parametrize the card. The branch used to render a bare
+    // `<ErrorCard />` — no title, no diagnosis, no retry — so a 404, a 403
+    // and a network failure were indistinguishable and the reader had no
+    // way to act on any of them. `accessErrRaw` is the raw ApiError the
+    // stats loop surfaced (sendApi preserves status/code/requestId) and the
+    // card already classifies a transport failure vs a server fault vs an
+    // auth refusal; the title carries the human answer: 404 means the topic
+    // is gone, 403 means the category is closed to this reader, anything
+    // else is a transient load failure worth retrying.
+    const status = accessErrRaw?.status ?? 0;
+    const isNotFound = topicNotFound || status === 404;
+    const isAccessDenied = status === 403;
+    const errorTitle = isNotFound
+      ? (lang === 'ru' ? 'Тема не найдена' : 'Topic Not Found')
+      : isAccessDenied
+        ? (lang === 'ru' ? 'Доступ запрещён' : 'Access Denied')
+        : (lang === 'ru' ? 'Не удалось загрузить тему' : 'Failed to load topic');
+    return (
+      <ErrorCard
+        title={errorTitle}
+        error={accessErrRaw}
+        onRetry={
+          !isNotFound && !isAccessDenied
+            ? () => {
+                // The stats loop is the re-read: it subscribes once on
+                // mount and never re-subscribes, so a fresh error state
+                // cannot refire it from here alone. The URL is stable,
+                // so a full reload is the one honest retry this page
+                // owns — the card already carries the request id the
+                // admin needs.
+                window.location.reload();
+              }
+            : undefined
+        }
+      />
+    );
+  }
 
   const category = topic.category || categories.find((c) => c.id === topic.category_id);
   const categoryTitle = category ? resolveField(category.title, lang) : '...';

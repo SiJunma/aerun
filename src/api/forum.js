@@ -1,5 +1,4 @@
 import { sendApi } from './pocketbase';
-import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
 import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
 
@@ -314,9 +313,7 @@ export const subscribeToLastTopicInCategory = (categoryId, callback) => {
 // where the topic-not-found card greeted a topic that had in fact been created
 // successfully. A missing id is now an error the caller shows, not a URL.
 export const createTopic = async (topicData, firstPostData) => {
-  // Same reason as createPost: the dice results are part of the opening message
-  // and were being dropped, so a throw in a new topic never resolved for anyone.
-  const { content: processedContent, rolls } = processDiceRolls(firstPostData.content);
+  // SEC-08: raw body only; the server throws [dice=N] with crypto/rand.
 
   const res = await sendApi('/api/aerun/topics', {
     method: 'POST',
@@ -328,8 +325,7 @@ export const createTopic = async (topicData, firstPostData) => {
       // forwarded it, so the server stored an empty description and the
       // header/category list lost it on every reload.
       description: topicData.description || '',
-      content: processedContent.trim(),
-      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
+      content: firstPostData.content.trim(),
       // Both of these used to be dropped on the floor. The form held
       // `selectedCharacterId` and `pinFirstPost` in state and sent neither, so
       // the server had nothing to record: every message came out under the
@@ -521,28 +517,28 @@ export const subscribeToUserPosts = (uid, limitCount, callback) => {
 // the SAME key for every request of one logical submit makes the server replay
 // the first response instead. See utils/inflight.js.
 export const createPost = async (postData, idempotencyKey) => {
-  // The throws MUST travel with the text. `rolls` used to be destructured away
-  // here — `const { content } = processDiceRolls(...)` — so the roll was rendered
-  // in the optimistic card and then dropped on the floor: the `[roll=<id>]` tag
-  // reached the server with nothing pointing at it, and every reader after a
-  // reload saw the raw tag. The tag is a pointer; this map is the payload.
-  // The reply path (useTopicMutations) has ALREADY run processDiceRolls on
-  // the text and hands the THROWN rolls over in postData.rolls — running the
-  // scan a SECOND time over the already-processed content finds no [dice]
-  // tags, yields an empty map, and wipes the throws again. When the caller
-  // passes rolls, they are authoritative; the scan is only a fallback for
-  // callers that still send raw [dice] text.
-  const preRolled = postData.rolls && Object.keys(postData.rolls).length > 0
-    ? { content: postData.content, rolls: postData.rolls }
-    : processDiceRolls(postData.content);
-  const { content: processedContent, rolls } = preRolled;
-
+  // SEC-08: the server decides the dice values (crypto/rand).
+  //
+  // The old path ran processDiceRolls here and sent the map it produced —
+  // the browser decided the outcome and the server merely range-checked
+  // it. That is the forgery this step removed: a client could submit any
+  // value in 1..sides and have it rendered to every reader.
+  //
+  // The body is therefore sent UNSCANнed: the reply path (useTopicMutations)
+  // sent already-processed content with an optimistic map, and re-scanning
+  // here finds no [dice] tags, yields an empty map, and wipes the throws
+  // again. When the caller passes rolls, we DROP them — the server has no
+  // map from them. We send only the body; the server parses [dice=N] and
+  // builds the real map with crypto/rand.
+  //
+  // The optimistic card keeps its placeholder: src/utils/dice.js still
+  // rewrites [dice] into [roll=id] for the card to paint, but its `rolls`
+  // map is provisional and never becomes the form body.
   const res = await sendApi(`/api/aerun/topics/${postData.topic_id}/posts`, {
     method: 'POST',
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
-      content: processedContent.trim(),
-      rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
+      content: postData.content.trim(),
       // The reply composer's mask picker, sent for the same reason the topic
       // form's is. Empty falls back to the mask stored on the profile, which is
       // what the picker writes when the author selects one.
@@ -678,23 +674,16 @@ export const locateUnreadPost = async (_topicId, _lastVisitMs, _itemsPerPage = 2
 // inside the same transaction (see forum_posts.go / forum_topics.go). The
 // parameters stay so call sites do not change.
 export const updatePost = async (postId, content, metadata = {}, _performerId, _authorId, _topicUpdates = null) => {
-  const { content: processedContent, rolls: freshRolls } = processDiceRolls(content);
-  const body = { content: processedContent.trim() };
-
-  // Editing a post is the one write where the throws need MERGING rather than
-  // replacing. The text being edited already carries the post's existing
-  // `[roll=<id>]` references, so processDiceRolls finds no `[dice=…]` and returns
-  // nothing — sending that alone would leave the stored results untouched, and a
-  // throw typed fresh into the edit would be lost. Merging with what the post
-  // already has covers both.
-  //
-  // Deleting a throw needs no special case: the server only keeps rolls the new
-  // body still references, so entries the edit removed are dropped server-side.
-  const existingRolls = metadata?.rolls || {};
-  const mergedRolls = { ...existingRolls, ...(freshRolls || {}) };
-  if (Object.keys(mergedRolls).length > 0) {
-    body.rolls = mergedRolls;
-  }
+  // SEC-08: edit sends the RAW body (with [dice=N] tags intact), exactly
+  // as on create. The server:
+  //   - freezes the values of already-stored rolls (an incoming roll id
+  //     whose entry differs from what's stored is rejected), and
+  //   - throws each fresh [dice=N] tag with crypto/rand.
+  // Merging client-side (existing + fresh) built a map from optimistic
+  // client values and sent them to the server to be validated — the
+  // forgery the freeze exists to catch. No client map is sent at all
+  // now; the server has the stored map and re-rolls the fresh tags.
+  const body = { content: content.trim() };
 
   // The edit form's mask picker used to be dropped here: `metadata` was named
   // `_metadata` and never read, so the server received only `content` and the

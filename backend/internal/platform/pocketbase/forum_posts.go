@@ -20,15 +20,13 @@ const maxPostContentBodyBytes = 128 * 1024
 
 type createPostForm struct {
 	Content string `json:"content"`
-	// Rolls is the result of the dice the author threw: a map keyed by the
-	// `[roll=<id>]` reference that processDiceRolls wrote into the body.
-	//
-	// It was DROPPED on the floor before — createPost destructured only
-	// `{ content }` out of processDiceRolls and sent the text alone — so the
-	// throw was rendered from the optimistic card and then lost, and every
-	// reader after a reload saw the raw `[roll=…]` tag. The tag is a pointer
-	// with no payload of its own; this map is the payload.
-	Rolls map[string]any `json:"rolls"`
+	// Rolls is ignored on create: the server generates the throws from the
+	// RAW `[dice=N]` tags the author typed (SEC-08). A client-supplied map
+	// was the forgery this step removed — the browser used to decide the
+	// outcome with Math.random() and the server merely range-checked it.
+	// The field stays so old clients keep their shape until they drop it;
+	// new clients send only {content}.
+	Rolls map[string]any `json:"rolls" // ignored — SEC-08; server mints the throws`
 	// CharacterID is the mask the author picked in the reply composer. Empty
 	// means "use the one stored on my profile" — see resolveAuthorCharacter,
 	// which is what actually decides the value that gets written.
@@ -214,12 +212,21 @@ func createPostHandler(e *core.RequestEvent) error {
 		}
 		post.Set("content", content)
 
-		// The dice results are validated against the body that references them
-		// and stored in the same transaction as the post, so a throw can never
-		// outlive the tag that points at it or vice versa.
-		if err := writeRolls(post, content, form.Rolls); err != nil {
+		// The dice results are server-generated (SEC-08). The client only
+		// submits the BODY, which still carries the RAW `[dice=N]` tags.
+		// The server throws them and stores the companion map.
+		//
+		// The client sends the RAW content with [dice=N] tags intact:
+		// ProcessDiceRolls rewrote them into [roll=id] references only
+		// on the optimistic card, never on the wire.
+		serverContent, serverRolls, err := forum.MintDice(content)
+		if err != nil {
+			return 0, nil, internalError("dice generation failed", err)
+		}
+		if err := writeRolls(post, serverContent, serverRolls); err != nil {
 			return 0, nil, validationError(err.Error())
 		}
+		post.Set("content", serverContent)
 
 		// The mask is resolved HERE, inside the transaction, so the post and the
 		// profile it was chosen from cannot disagree. A reply never carries a
@@ -638,10 +645,21 @@ func loadTopicFirstPost(app core.App, topicID string, acc AccessContext) map[str
 // A draft is NOT reachable here even by id: it is not in the public feed, and
 // this route is public. The author reads their own draft through the drafts
 // routes, which are authenticated and owner-scoped.
+//
+// The topic's category is checked BEFORE the payload is built, for the same
+// reason listPostsHandler checks it (SEC-01 / BOLA): a post id is guessable
+// and enumerable, so without this check a signed-out visitor who learns an id
+// reads a post from a category they may not view. An unreadable topic answers
+// the same 404 as a missing post — returning 403 or a distinct "forbidden"
+// would confirm the post exists and hand the probe an oracle.
 func getPostHandler(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
 	record, err := e.App.FindRecordById(postsCollectionName, id)
 	if err != nil || record == nil || record.GetBool("is_draft") {
+		return notFoundError("post not found")
+	}
+	allowed, _, err := canViewTopic(e.App, AccessFrom(e), record.GetString("topic_id"))
+	if err != nil || !allowed {
 		return notFoundError("post not found")
 	}
 	payload := postPayload(record)
@@ -733,8 +751,18 @@ func editPostHandler(e *core.RequestEvent) error {
 		// this edit" and the stored results are left exactly as they were —
 		// which is the common case, since the edit form only re-rolls when the
 		// author typed a fresh `[dice=…]`.
+		//
+		// SEC-08 freeze: a roll that is already stored keeps its value. The
+		// edit form reaches writeRolls with the client's map, which the
+		// browser built from an optimistic card — its values are the hooks
+		// it was given. An incoming entry whose id already has a stored entry
+		// AND whose entry differs is a forgery, so it is refused as a
+		// conflict, not accepted as a re-roll. The stored map is passed
+		// explicitly so the freeze check compares against what the row
+		// holds, not what the request claims.
 		if form.Rolls != nil {
-			if err := writeRolls(post, content, *form.Rolls); err != nil {
+			stored := storedRolls(post)
+			if err := writeRollsFrozen(post, content, *form.Rolls, stored); err != nil {
 				return 0, nil, validationError(err.Error())
 			}
 		}

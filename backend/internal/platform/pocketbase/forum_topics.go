@@ -32,10 +32,9 @@ type createTopicForm struct {
 	// the OPENING post only; there is no other post in this transaction that
 	// could carry it.
 	PinFirstPost bool `json:"pin_first_post"`
-	// Rolls is the result of the opening post's dice, keyed by the `[roll=<id>]`
-	// reference processDiceRolls wrote into the content. Dropped before, so a
-	// new topic with a throw in it showed the raw tag to every reader.
-	Rolls map[string]any `json:"rolls"`
+	// Rolls is the result of the opening post's dice. SEC-08: ignored —
+	// the server generates them from the RAW `[dice=N]` tags.
+	Rolls map[string]any `json:"rolls // ignored — SEC-08"`
 	// GuestNickname is the display name a guest picks when posting without an
 	// account. Empty for authenticated users.
 	GuestNickname string `json:"guest_nickname"`
@@ -234,11 +233,17 @@ func createTopicHandler(e *core.RequestEvent) error {
 		// The topic and its opening message are always the same voice, so the
 		// mask is resolved ONCE and written to both rows.
 		post.Set("author_character_id", characterID)
-		// Same for the throws: validated against this body and stored with it,
-		// in the transaction that creates the post.
-		if err := writeRolls(post, content, form.Rolls); err != nil {
+		// Same for the throws: SEC-08 — server-generated from the RAW
+		// `[dice=N]` tags in the body, stored with it, in the same
+		// transaction as the post.
+		serverContent, serverRolls, err := forum.MintDice(content)
+		if err != nil {
+			return 0, nil, internalError("dice generation failed", err)
+		}
+		if err := writeRolls(post, serverContent, serverRolls); err != nil {
 			return 0, nil, validationError(err.Error())
 		}
+		post.Set("content", serverContent)
 
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to create initial post", err)

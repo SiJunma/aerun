@@ -23,6 +23,45 @@ func seedTargetUser(t testing.TB, app *tests.TestApp) (string, string) {
 	return id, token
 }
 
+// seedTopicInCategory seeds a topic and its opening post in the given category.
+func seedTopicInCategory(t testing.TB, app *tests.TestApp, categoryID, authorID string) (string, string) {
+	t.Helper()
+
+	topicsCol, err := app.FindCollectionByNameOrId(topicsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := core.NewRecord(topicsCol)
+	topic.Set("category_id", categoryID)
+	topic.Set("author_id", authorID)
+	topic.Set("title", "Test Topic")
+	topic.Set("posts_count", 1)
+	topic.Set("locked", false)
+	topic.Set("pinned", false)
+	if err := app.Save(topic); err != nil {
+		t.Fatal(err)
+	}
+
+	postsCol, err := app.FindCollectionByNameOrId(postsCollectionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := core.NewRecord(postsCol)
+	post.Set("topic_id", topic.Id)
+	post.Set("author_id", authorID)
+	post.Set("content", "Initial post content")
+	if err := app.Save(post); err != nil {
+		t.Fatal(err)
+	}
+
+	topic.Set("last_post_id", post.Id)
+	topic.Set("last_post_created", post.GetDateTime("created"))
+	topic.Set("last_post_author_id", authorID)
+	_ = app.Save(topic)
+
+	return topic.Id, post.Id
+}
+
 // Helper to seed a topic and initial post in General category
 func seedTopicAndPost(t testing.TB, app *tests.TestApp, authorID string) (string, string) {
 	t.Helper()
@@ -607,6 +646,164 @@ func TestSprint4DoDHiddenCategoryLeakPrevention(t *testing.T) {
 		}
 	}
 	_ = genTopicID
+}
+
+// TestGetPostHidesAPostInARestrictedCategory pins SEC-01 for the deep-link
+// route: a post id alone must not be a way around category visibility.
+//
+// The category is gated by allowed_roles (ADR-1), the store the readers
+// consult — not by the legacy `permissions` map, which nothing reads any more.
+// The check runs for a guest and for a signed-in player who is not listed, and
+// both must get the same 404 a missing post gets: a 403 would confirm the
+// post exists and turn the id space into a probe.
+func TestGetPostHidesAPostInARestrictedCategory(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	targetID, _ := seedTargetUser(t, app)
+
+	// A category readable only by moderation and above.
+	colCat, _ := app.FindCollectionByNameOrId(categoriesCollectionName)
+	secretCat := core.NewRecord(colCat)
+	secretCat.Set("name", "Staff Secret Chamber")
+	secretCat.Set("slug", "staff-secret-deep-link")
+	secretCat.Set("allowed_roles", []string{"moderator", "admin", "root"})
+	if err := app.Save(secretCat); err != nil {
+		t.Fatal(err)
+	}
+	secretTopicID, secretPostID := seedTopicInCategory(t, app, secretCat.Id, targetID)
+
+	// A post in General, which every role may read, so the route itself is
+	// proven to answer 200 in the same test.
+	_, publicPostID := seedTopicAndPost(t, app, targetID)
+
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	get := func(postID, token string) (int, []byte) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/aerun/posts/"+postID, nil)
+		if token != "" {
+			req.Header.Set("Authorization", token)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, body
+	}
+
+	// A guest cannot open the deep link, and the answer is indistinguishable
+	// from a post that does not exist.
+	if status, _ := get(secretPostID, ""); status != http.StatusNotFound {
+		t.Fatalf("guest deep link into a restricted category: want 404, got %d", status)
+	}
+	// A signed-in player who is not listed gets the same answer.
+	if status, _ := get(secretPostID, tokens["player"]); status != http.StatusNotFound {
+		t.Fatalf("player deep link into a restricted category: want 404, got %d", status)
+	}
+	// A moderator, who is listed, reads it.
+	if status, _ := get(secretPostID, tokens["moderator"]); status != http.StatusOK {
+		t.Fatalf("moderator deep link into a listed category: want 200, got %d", status)
+	}
+	// And the public post is reachable by a guest, so the gate is the
+	// category and not the route.
+	status, body := get(publicPostID, "")
+	if status != http.StatusOK {
+		t.Fatalf("guest deep link into a public category: want 200, got %d (%s)", status, body)
+	}
+	if !strings.Contains(string(body), "Initial post content") {
+		t.Fatalf("public deep link must carry the post content, got %s", body)
+	}
+
+	// A post in a category the caller cannot see must not move the author's
+	// profile Posts tab either: neither the row nor its title nor a count.
+	{
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/aerun/users/"+targetID+"/posts", nil)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("profile posts: want 200, got %d", res.StatusCode)
+		}
+		var payload struct {
+			Items []map[string]any `json:"items"`
+			Total int64            `json:"total"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Total != 1 {
+			t.Fatalf("guest must see only the public post of the author, total=%d", payload.Total)
+		}
+		for _, item := range payload.Items {
+			if item["id"] == secretPostID {
+				t.Fatalf("LEAK: a post from a restricted category appeared in the profile tab: %v", item)
+			}
+			// The restricted topic carries the same seed title ("Test Topic")
+			// as the public one, so a title check needs the topic id: the
+			// secret topic's title must not reach a guest at all.
+			if item["topic_id"] == secretTopicID {
+				t.Fatalf("LEAK: a topic title from a restricted category appeared in the profile tab: %v", item)
+			}
+		}
+	}
+}
+
+// TestGuestPrincipalCookieIsSecure pins SEC-06: the capability cookie is
+// issued Secure even though the backend sits behind a TLS-terminating proxy
+// and r.TLS is nil.
+func TestGuestPrincipalCookieIsSecure(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	// The test server runs the app's own router, so registerRoutes' middleware
+	// stashes the configured public origin (an http loopback origin here, as in
+	// every other test) — and the Secure decision therefore has to come from
+	// the forwarded-proto header, which Caddy sets in production.
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	create := func(forwardedProto string) *http.Cookie {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/aerun/guest/principal", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "idem-guest-principal-secure-"+forwardedProto+"-"+fmt.Sprint(ts.URL))
+		if forwardedProto != "" {
+			req.Header.Set("X-Forwarded-Proto", forwardedProto)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusCreated {
+			body, _ := io.ReadAll(res.Body)
+			t.Fatalf("principal create: want 201, got %d (%s)", res.StatusCode, body)
+		}
+		for _, c := range res.Cookies() {
+			if c.Name == guestPrincipalCookieName {
+				return c
+			}
+		}
+		t.Fatal("creation must set the capability cookie")
+		return nil
+	}
+
+	// Over the plain loopback socket with no proxy header, the cookie is not
+	// Secure: there is no TLS to hand it to.
+	if c := create(""); c.Secure {
+		t.Fatal("a plain loopback request must not get a Secure cookie")
+	}
+	// Behind the proxy the header says HTTPS, and the cookie is Secure.
+	if c := create("https"); !c.Secure {
+		t.Fatal("X-Forwarded-Proto: https must yield a Secure cookie")
+	}
 }
 
 // ---------------------------------------------------------------------------

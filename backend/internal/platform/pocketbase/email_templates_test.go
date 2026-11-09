@@ -233,6 +233,47 @@ func TestRenderEmailFromTemplateEscapesBodyNotSubject(t *testing.T) {
 	}
 }
 
+// TestRenderEmailFromTemplateStripsCRLFFromSubject pins SEC-07 at the
+// template layer: a user value carrying a CRLF must not survive into the
+// subject as a header line. The {TITLE} pair and the value maps are both
+// sanitised, and the resolved template is sanitised as a whole, so a CRLF
+// that arrives in ANY placeholder (including the title) is gone.
+func TestRenderEmailFromTemplateStripsCRLFFromSubject(t *testing.T) {
+	tpl := emailTemplate{
+		Subject: "About " + phTopicTitle + " from " + phSenderName,
+		Body:    "<h1>" + phTopicTitle + "</h1>",
+	}
+	const crlf = "Injected\r\nX-Injected: yes"
+	subject, _ := renderEmailFromTemplate(tpl, "A & B", "About "+crlf, map[string]string{
+		phTopicTitle: crlf,
+		phSenderName: crlf,
+	})
+	if strings.ContainsAny(subject, "\r\n") {
+		t.Errorf("the subject must not carry CRLF, got %q", subject)
+	}
+	for _, want := range []string{"About Injected X-Injected: yes", "from Injected X-Injected: yes"} {
+		if !strings.Contains(subject, want) {
+			t.Errorf("the CRLF must become a single space in %q, got %q", want, subject)
+		}
+	}
+}
+
+// TestSanitizeMailSubjectCollapsesCRLF pins the exact normalisation:
+// "\r\n" becomes ONE space (not two), and a bare CR or LF becomes one.
+func TestSanitizeMailSubjectCollapsesCRLF(t *testing.T) {
+	cases := map[string]string{
+		"a\r\nb":     "a b",
+		"a\rb":       "a b",
+		"a\nb":       "a b",
+		"a\r\n\r\nb": "a  b",
+	}
+	for in, want := range cases {
+		if got := sanitizeMailSubject(in); got != want {
+			t.Errorf("sanitizeMailSubject(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestLoadEmailWrapperResolvesDefaultAndCustomWrapper pins the wrapper resolution:
 // default wrapper out of the box, custom wrapper when stored in forum_settings,
 // and graceful fallback if the custom wrapper omits {CONTENT}.

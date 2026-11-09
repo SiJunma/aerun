@@ -12,6 +12,8 @@ import ForumRoleBadge from '../components/common/ForumRoleBadge';
 import ForumPagination from '../components/common/ForumPagination';
 import Timestamp from '../components/common/Timestamp';
 import { toMillis as sharedToMillis } from '../utils/dates';
+import ErrorCard from '../components/common/ErrorCard';
+import Skeleton from '../components/common/Skeleton';
 
 // The legacy pseudo-role labels are no longer used for sorting: the server
 // orders by the stored role id, since the rendered label lives in the roles
@@ -59,6 +61,10 @@ const MembersPage = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   // Bumped by the refresh button; the loader effect re-reads the current page.
   const [refreshNonce, setRefreshNonce] = useState(0);
+  // RES-03: load-failure state. The old catch zeroed the board, so a
+  // network failure and an actually-empty board were the same render.
+  const [membersError, setMembersError] = useState(null);
+  const [membersLoading, setMembersLoading] = useState(true);
   const sortKey = MEMBER_SORT_OPTIONS[sortField] ? `${sortField}-${sortOrder}` : 'last_seen-desc';
   const sortParams = useMemo(() => {
     const option = MEMBER_SORT_OPTIONS[sortField] || MEMBER_SORT_OPTIONS.last_seen;
@@ -121,9 +127,11 @@ const MembersPage = () => {
   // server, so the envelope's totals are the NARROWED set's.
   useEffect(() => {
     let alive = true;
+    setMembersLoading(true);
     fetchMembers({ page, search, sort: sortParams.sort, order: sortParams.order })
       .then(res => {
         if (!alive) return;
+        setMembersError(null);
         const items = (res?.items || []).map(u => withLegacyDates(toMembersRow(u)));
         const tp = Math.max(1, res?.totalPages ?? 1);
         setUsers(items);
@@ -134,12 +142,19 @@ const MembersPage = () => {
         // of showing an empty table forever.
         if (items.length === 0 && page > tp) setPage(tp);
       })
-      .catch(() => {
+      .catch((err) => {
         if (alive) {
-          setUsers([]);
-          setTotalItems(0);
-          setTotalPages(1);
+          // RES-03: save the error instead of zeroing the board. The
+          // old catch set users/totalItems/totalPages to empty values,
+          // so a network failure rendered exactly like "0 participants"
+          // — the silent half of the bug. The ErrorCard branch below
+          // carries the error and the retry nonce instead.
+          setMembersError(err);
+          console.error('[MembersPage] fetchMembers failed:', err);
         }
+      })
+      .finally(() => {
+        if (alive) setMembersLoading(false);
       });
     return () => { alive = false; };
   }, [page, search, sortParams, refreshNonce]);
@@ -241,6 +256,27 @@ const MembersPage = () => {
       userEmail={u.email}
     />
   );
+
+  // RES-03: a load failure renders the error card, not an empty table.
+  // The old catch zeroed users/totalItems/totalPages, so "no members"
+  // and "the request failed" were the same render. The guard keeps the
+  // card off a board that already has rows from an earlier page — a
+  // pagination error during search must not blank the table the member
+  // is already reading; only a first-load failure is the card's job.
+  if (membersError && !membersLoading && users.length === 0) {
+    return (
+      <Container className="py-4">
+        <ErrorCard
+          title={lang === 'ru' ? 'Не удалось загрузить список участников' : 'Failed to load members'}
+          error={membersError}
+          onRetry={() => {
+            setMembersError(null);
+            setRefreshNonce((n) => n + 1);
+          }}
+        />
+      </Container>
+    );
+  }
 
   return (
     <Container className="py-4">
@@ -384,7 +420,13 @@ const MembersPage = () => {
             </tr>
           </thead>
           <tbody className="border-0">
-            {tableUsers.length > 0 ? (
+            {membersLoading && users.length === 0 ? (
+              <tr>
+                <td colSpan="6" className="py-5 border-0">
+                  <Skeleton width="100%" height="14rem" className="mb-2" />
+                </td>
+              </tr>
+            ) : tableUsers.length > 0 ? (
               tableUsers.map(u => (
                 <tr key={u.id} className="align-middle members-table-row">
                   <td className="ps-4 py-3 border-0" data-label={lang === 'ru' ? 'Участник' : 'Member'}>

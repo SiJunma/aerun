@@ -313,14 +313,22 @@ func deletePostVoteHandler(e *core.RequestEvent) error {
 
 		val := existingVote.GetInt("value")
 
+		// The compensating writes return their error (RES-04). Ignoring it
+		// deleted the vote and committed the idempotency record while the
+		// totals kept the value, so the read model disagreed with the vote
+		// ledger until a recompute ran — a silent divergence, not a failure.
 		if post, err := txApp.FindRecordById(postsCollectionName, postID); err == nil && post != nil {
 			post.Set("reputation", post.GetInt("reputation")-val)
-			_ = txApp.Save(post)
+			if err := txApp.Save(post); err != nil {
+				return 0, nil, internalError("failed to save post reputation", err)
+			}
 		}
 
 		if targetUser, err := txApp.FindRecordById(usersCollectionName, existingVote.GetString("target_id")); err == nil && targetUser != nil {
 			targetUser.Set("reputation", targetUser.GetInt("reputation")-val)
-			_ = txApp.Save(targetUser)
+			if err := txApp.Save(targetUser); err != nil {
+				return 0, nil, internalError("failed to save user reputation", err)
+			}
 		}
 
 		if err := txApp.Delete(existingVote); err != nil {
@@ -483,7 +491,9 @@ func deleteUserVoteHandler(e *core.RequestEvent) error {
 
 		if targetUser, err := txApp.FindRecordById(usersCollectionName, targetUserID); err == nil && targetUser != nil {
 			targetUser.Set("reputation", targetUser.GetInt("reputation")-val)
-			_ = txApp.Save(targetUser)
+			if err := txApp.Save(targetUser); err != nil {
+				return 0, nil, internalError("failed to save user reputation", err)
+			}
 		}
 
 		if err := txApp.Delete(existingVote); err != nil {
@@ -678,15 +688,22 @@ func deleteReputationHandler(e *core.RequestEvent) error {
 		voterID := vote.GetString("voter_id")
 		postID := vote.GetString("post_id")
 
+		// Same as the vote-retract handlers above: a swallowed Save here would
+		// delete the entry and leave both totals carrying a value the ledger
+		// no longer holds (RES-04).
 		if targetUser, err := txApp.FindRecordById(usersCollectionName, targetID); err == nil && targetUser != nil {
 			targetUser.Set("reputation", targetUser.GetInt("reputation")-val)
-			_ = txApp.Save(targetUser)
+			if err := txApp.Save(targetUser); err != nil {
+				return 0, nil, internalError("failed to save user reputation", err)
+			}
 		}
 
 		if postID != "" {
 			if post, err := txApp.FindRecordById(postsCollectionName, postID); err == nil && post != nil {
 				post.Set("reputation", post.GetInt("reputation")-val)
-				_ = txApp.Save(post)
+				if err := txApp.Save(post); err != nil {
+					return 0, nil, internalError("failed to save post reputation", err)
+				}
 			}
 		}
 

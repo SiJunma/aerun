@@ -476,7 +476,16 @@ export const fetchUserProfile = async (uid) => {
 // stays independent of the viewer's own uid. The promise is joined, not
 // cached: after it settles the next caller reads fresh, so a rename elsewhere
 // is never masked by a prior answer.
-export const subscribeToUser = (uid, callback) => {
+// subscribeToUser resolves the profile for uid and hands it to callback.
+//
+// The error, when there is one, goes to errorCallback and the callback is
+// still called with null — the two channels are independent on purpose.
+// The profile page needs the error to render the retryable ErrorCard
+// (RES-01) instead of an endless skeleton, while existing callers that
+// only pass `callback` keep the original "profile could not be read"
+// shape. A 404 and a network failure therefore surface differently only
+// when the caller reads the second argument.
+export const subscribeToUser = (uid, callback, errorCallback) => {
   if (!uid) {
     callback(null);
     return () => {};
@@ -487,8 +496,13 @@ export const subscribeToUser = (uid, callback) => {
     if (isSubscribed) {
       callback(record);
     }
-  }).catch(() => {
-    if (isSubscribed) callback(null);
+  }).catch((err) => {
+    if (isSubscribed) {
+      if (errorCallback) {
+        errorCallback(err);
+      }
+      callback(null);
+    }
   });
 
   return () => {

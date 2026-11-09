@@ -165,7 +165,7 @@ const handleCopyText = async (draft) => {
         {/* No authorId: draftPayload does not carry one, and every draft on this
             page is the caller's own by construction (GET /me/drafts), so there is
             nothing for a per-author BBCode branch to resolve. */}
-        <BBCode rolls={draft.rolls}>{content}</BBCode>
+        <BBCode rolls={draft.rolls} authorRole={profile?.role}>{content}</BBCode>
       </div>
     );
   };

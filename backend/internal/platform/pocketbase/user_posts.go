@@ -26,6 +26,7 @@ package pocketbase
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/pocketbase/dbx"
@@ -59,6 +60,14 @@ func collectPostTopicIDs(payloads []map[string]any) []string {
 // A failed lookup degrades the headline, it does not fail the read — the same
 // rule loadAuthorDisplays follows.
 func loadTopicTitles(app core.App, topicIDs []string) map[string]string {
+	return loadReadableTopicTitles(app, topicIDs, nil)
+}
+
+// loadReadableTopicTitles is loadTopicTitles, additionally restricted to the
+// given categories. A nil allowedCategoryIDs disables the restriction, so the
+// plain lookup stays available to callers that have already established the
+// right to see the topics; an empty non-nil list matches nothing.
+func loadReadableTopicTitles(app core.App, topicIDs []string, allowedCategoryIDs []string) map[string]string {
 	out := make(map[string]string, len(topicIDs))
 
 	ids := make([]string, 0, len(topicIDs))
@@ -73,6 +82,9 @@ func loadTopicTitles(app core.App, topicIDs []string) map[string]string {
 	if len(ids) == 0 {
 		return out
 	}
+	if allowedCategoryIDs != nil && len(allowedCategoryIDs) == 0 {
+		return out
+	}
 
 	var records []*core.Record
 	// dbx.In takes []any: a []string is a compile error rather than a silent
@@ -81,8 +93,16 @@ func loadTopicTitles(app core.App, topicIDs []string) map[string]string {
 	for i, id := range ids {
 		inArgs[i] = id
 	}
-	if err := app.RecordQuery(topicsCollectionName).
-		AndWhere(dbx.In("id", inArgs...)).
+	query := app.RecordQuery(topicsCollectionName).
+		AndWhere(dbx.In("id", inArgs...))
+	if allowedCategoryIDs != nil {
+		catArgs := make([]any, len(allowedCategoryIDs))
+		for i, id := range allowedCategoryIDs {
+			catArgs[i] = id
+		}
+		query = query.AndWhere(dbx.In("category_id", catArgs...))
+	}
+	if err := query.
 		Limit(int64(len(ids))).
 		All(&records); err != nil {
 		return out
@@ -189,12 +209,63 @@ func listUserPostsHandler(e *core.RequestEvent) error {
 		return err
 	}
 
+	// The caller's readable categories, resolved through the same predicate the
+	// topic feed uses (SEC-01 / BOLA). Without this the profile's Posts tab
+	// handed a signed-out visitor every public post the account ever wrote —
+	// including posts in categories they may not view, plus the title of the
+	// private topic each one sits in. Visibility is resolved in Go and passed
+	// as bound ids: allowed_roles is a JSON list with an inherit marker, so it
+	// cannot be re-expressed as SQL without a second copy of the rule.
+	allowedCategoryIDs, err := resolveAllowedCategoryIDs(e.App, AccessFrom(e))
+	if err != nil {
+		return internalError("failed to resolve readable categories", err)
+	}
+	if len(allowedCategoryIDs) == 0 {
+		return e.JSON(http.StatusOK, map[string]any{
+			"items":       []map[string]any{},
+			"author_id":   authorID,
+			"total":       int64(0),
+			"page":        page,
+			"per_page":    limit,
+			"total_pages": int64(0),
+			"request_id":  requestIDFrom(e),
+		})
+	}
+
 	// The WHERE clause is built ONCE and handed to both the page query and the
 	// count. Re-deriving it in two places is how a filtered read ends up
 	// paginating against an unfiltered total.
+	//
+	// The category restriction is expressed as a topic-id subquery over the
+	// BOUND id list, not by interpolating ids into the string. dbx only
+	// expands a slice into `IN (...)` inside a HashExp, so a []string bound
+	// into raw SQL reaches SQLite as one quoted token and 500s (the same
+	// lesson unreadTopicsPredicate documents); inlining the ids would keep the
+	// query working but make every category id a SQL injection point.
+	//
+	// The placeholders are named per id (cat0, cat1, …) rather than bound as
+	// one slice param: PocketBase's dbx does NOT expand a slice bound inside
+	// a raw NewExp — it interpolates the slice's Go-syntax text into the
+	// statement, which SQLite rejects with "unrecognized token". The same
+	// construction unreadTopicsPredicate uses for its category list.
+	//
+	// `params` also reaches the `(is_draft = {:no} …)` expression, which is why
+	// the keys live on one map rather than on the subquery: dbx merges the
+	// params of every expression in the chain, and an unbound placeholder
+	// would fail the query before SQLite ever saw it.
+	placeholders := make([]string, 0, len(allowedCategoryIDs))
+	params := dbx.Params{"no": false}
+	for i, id := range allowedCategoryIDs {
+		key := "cat" + strconv.Itoa(i)
+		placeholders = append(placeholders, "{:"+key+"}")
+		params[key] = id
+	}
 	scope := []dbx.Expression{
 		dbx.HashExp{"author_id": authorID},
-		dbx.NewExp("(is_draft = {:no} OR is_draft IS NULL)", dbx.Params{"no": false}),
+		dbx.NewExp("(is_draft = {:no} OR is_draft IS NULL)", params),
+		dbx.NewExp(
+			"topic_id IN (SELECT id FROM "+topicsCollectionName+" WHERE category_id IN ("+strings.Join(placeholders, ", ")+"))",
+		),
 	}
 	if filterExpr := filter.expr(); filterExpr != nil {
 		scope = append(scope, filterExpr)
@@ -237,8 +308,11 @@ func listUserPostsHandler(e *core.RequestEvent) error {
 	// headlines behind on every reply.
 	//
 	// One lookup per page, not per post: the page is already bounded by
-	// posts_per_page, and a profile can span 5000 posts across pages.
-	titles := loadTopicTitles(e.App, collectPostTopicIDs(items))
+	// posts_per_page, and a profile can span 5000 posts across pages. The
+	// lookup is scoped to the categories the caller may view, holding the same
+	// line as the post query above: a private topic's title must not reach a
+	// reader the post itself was withheld from.
+	titles := loadReadableTopicTitles(e.App, collectPostTopicIDs(items), allowedCategoryIDs)
 	for _, item := range items {
 		if title, ok := titles[item["topic_id"].(string)]; ok && title != "" {
 			item["topic_title"] = title

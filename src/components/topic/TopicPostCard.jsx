@@ -313,7 +313,7 @@ export const TopicPostCard = ({
                 ) : (
                   <>
                     <div className="post-content">
-                      <BBCode rolls={post.rolls} authorId={authorId}>
+                      <BBCode rolls={post.rolls} authorId={authorId} authorRole={post.author_role_id}>
                         {post.content}
                       </BBCode>
                     </div>

@@ -1275,7 +1275,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                               </div>
                             ) : (
                               <div className="w-100">
-                                <BBCode rolls={allConversationRolls} isDM={true}>{msg.text}</BBCode>
+                                <BBCode rolls={allConversationRolls} isDM={true} authorRole={isMe ? profile?.role : undefined}>{msg.text}</BBCode>
                               </div>
                             )}
                             <div

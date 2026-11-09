@@ -2,7 +2,6 @@ import { useState, useRef, useCallback } from 'react';
 import { createPost, updatePost, deletePost } from '../../api/forum';
 import { voteOnPost, updateReputationComment } from '../../api/reputation';
 import { createInFlight, newIdempotencyKey } from '../../utils/inflight';
-import { processDiceRolls } from '../../utils/dice';
 import {
   saveUnsentReply,
   clearUnsentReply,
@@ -56,13 +55,16 @@ export const useTopicMutations = ({
     const idempotencyKey = newIdempotencyKey();
 
     try {
-      const { content: processedContent, rolls } = processDiceRolls(savedReplyContent);
-
+      // SEC-08: the raw reply content — with [dice=N] tags UNREWRITTEN —
+      // is the body. processDiceRolls only rewrites them into [roll=id]
+      // references so the optimistic card has something to paint; its
+      // `rolls` map is provisional and never becomes the request body.
+      // The server (forum.MintDice) re-parses the raw tags and generates
+      // the real values with crypto/rand.
       const payload = {
         topic_id: topicId,
-        content: processedContent,
+        content: savedReplyContent,
         character_id: selectedCharacterId || null,
-        rolls: rolls && Object.keys(rolls).length > 0 ? rolls : undefined,
         guest_nickname: !currentUser ? (guestNickname?.trim() || undefined) : undefined
       };
 
@@ -114,11 +116,11 @@ export const useTopicMutations = ({
   }) => {
     if (!content?.trim()) return null;
     try {
-      const { content: processedContent, rolls: freshRolls } = processDiceRolls(content.trim());
-      const mergedRolls = { ...(existingRolls || {}), ...(freshRolls || {}) };
-
-      const updated = await updatePost(postId, processedContent, {
-        rolls: Object.keys(mergedRolls).length > 0 ? mergedRolls : undefined,
+      // SEC-08: edit sends the RAW body, exactly as on create. The
+      // server freezes existing values and throws each fresh [dice=N]
+      // tag with crypto/rand. Client-side merging of optimistic maps
+      // was the forgery shape this step removes.
+      const updated = await updatePost(postId, content.trim(), {
         author_character_id: characterId || ''
       });
 

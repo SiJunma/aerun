@@ -138,9 +138,12 @@ func upsertDraftHandler(e *core.RequestEvent) error {
 		}
 		post.Set("is_draft", true)
 		post.Set("content", content)
-		// Validated against the draft's own body, exactly as on create, so a
-		// draft promoted later carries the same throws the author saw.
-		if err := writeRolls(post, content, form.Rolls); err != nil {
+		// A draft holds its dice tags RAW — the throw happens at
+		// publication (publishDraftHandler → RollDraftDice), exactly
+		// as before. The client-supplied map is ignored here: it was
+		// provisional (optimistic card), and the server decides each
+		// value at publication with crypto/rand.
+		if err := writeRolls(post, content, nil); err != nil {
 			return 0, nil, validationError(err.Error())
 		}
 		// The client names the mask it wants and the server answers with
@@ -396,6 +399,11 @@ func publishDraftHandler(e *core.RequestEvent) error {
 			}
 			for rollID, rollEntry := range freshRolls {
 				mergedRolls[rollID] = rollEntry
+			}
+			if rolledContent == "" {
+				// crypto/rand failure surface — refuse rather than publish
+				// unresolved tags.
+				return 0, nil, internalError("dice generation failed", fmt.Errorf("entropy source failed"))
 			}
 			post.Set("content", rolledContent)
 			if err := writeRolls(post, rolledContent, mergedRolls); err != nil {

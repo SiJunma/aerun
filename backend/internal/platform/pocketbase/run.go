@@ -277,6 +277,14 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// AFTER the resolver, because the status it reads comes from the resolved
 	// access context.
 	group.BindFunc(requireLiveAccount)
+	// The configured public origin, stashed so handlers that need it (the
+	// guest principal cookie's Secure decision) can read it without taking
+	// config.Config — the same reason RequirePermission closes over the
+	// resolver's context rather than a parameter.
+	group.BindFunc(func(e *core.RequestEvent) error {
+		e.Set(publicURLContextKey, cfg.PublicURL)
+		return e.Next()
+	})
 
 	group.GET("/health", func(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, map[string]any{
