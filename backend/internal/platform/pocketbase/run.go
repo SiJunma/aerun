@@ -56,7 +56,7 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 	// warm is what stops it.
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		registerRealtimeKeepalive(se.App)
-		se.App.Logger().Info("realtime keepalive hook registered")
+		logger.Info("realtime keepalive hook registered")
 		se.Router.BindFunc(assignRequestID)
 		// PocketBase starts its scheduler from an OnServe hook bound at
 		// priority 999, so a job registered here is always in place before the

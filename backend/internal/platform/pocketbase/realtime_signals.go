@@ -122,9 +122,9 @@ func registerRealtimeKeepalive(app core.App) {
 	if app == nil {
 		return
 	}
-	app.Logger().Info("registerRealtimeKeepalive binding OnRealtimeConnectRequest")
+	fmt.Println("registerRealtimeKeepalive binding OnRealtimeConnectRequest")
 	app.OnRealtimeConnectRequest().BindFunc(func(e *core.RealtimeConnectRequestEvent) error {
-		e.App.Logger().Info("OnRealtimeConnectRequest fired", "clientId", e.Client.Id())
+		fmt.Println("OnRealtimeConnectRequest fired clientId=" + e.Client.Id())
 		// Raise idle timeout BEFORE the upstream handler reads it
 		// (PocketBase's realtimeConnect copies ce.IdleTimeout into its
 		// local timer after this hook returns).
@@ -206,7 +206,7 @@ func publishKeepalive(app core.App) error {
 	if app == nil {
 		return fmt.Errorf("keepalive app is nil")
 	}
-	app.Logger().Info("publishKeepalive tick")
+	fmt.Println("publishKeepalive tick")
 	// Audience "*" so every signed-in subscriber on the broker receives
 	// the warmup event on its own channel. Guests are irrelevant here:
 	// they never open an SSE stream (canReceiveSignals() === false).
