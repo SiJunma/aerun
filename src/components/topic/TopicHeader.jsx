@@ -37,7 +37,6 @@ export const TopicHeader = ({
       <nav
         id="topic-breadcrumbs-top"
         aria-label="breadcrumb"
-        className="topic-breadcrumbs"
       >
         <ForumBreadcrumbs
           items={[
@@ -75,7 +74,7 @@ export const TopicHeader = ({
                 characterId={topic.author_character_id}
                 isCharacter={!!topic.is_character}
                 fallbackName={topic.author_name || topic.guest_nickname}
-                className="topic-author"
+                className="topic-author-name"
               />
             </span>
             <span className="topic-meta-separator">·</span>
@@ -97,6 +96,7 @@ export const TopicHeader = ({
                 <summary className="topic-manage-link">
                   <Settings size={14} />
                   <span>{t('forum.manage_topic')}</span>
+                  <span className="topic-manage-caret" aria-hidden="true" />
                 </summary>
 
                 <div className="topic-manage-menu">
@@ -139,13 +139,12 @@ export const TopicHeader = ({
 
             {/* Top pagination — lives inside the header's action group (legacy parity) */}
             {totalPages > 1 && (
-              <nav id="topic-pagination-top" className="topic-pagination topic-pagination-top">
-                <ForumPagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={onPageChange}
-                />
-              </nav>
+              <ForumPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={onPageChange}
+                className="forum-pagination-topic"
+              />
             )}
           </div>
         </div>

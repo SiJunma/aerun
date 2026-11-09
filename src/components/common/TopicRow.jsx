@@ -111,11 +111,11 @@ const TopicRow = ({
           {topic.is_locked && (
             <span className="topic-icon topic-locked" aria-hidden="true"><Lock size={14} /></span>
           )}
-          <h3 className="topic-title">
+          <h6 className="topic-title">
             <Link to={`/topic/${topic.id}`} title={t('stats.to_first_post')}>
               {topic.title}
             </Link>
-          </h3>
+          </h6>
           {renderMiniPagination()}
         </div>
         {topic.description && (

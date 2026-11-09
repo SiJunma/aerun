@@ -241,13 +241,12 @@ const CategoryPage = () => {
       </header>
 
       {totalPages > 1 && (
-        <nav id="forum-pagination-top" className="forum-view-pagination">
-          <ForumPagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-          />
-        </nav>
+        <ForumPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          className="forum-pagination-view"
+        />
       )}
 
       <section id="forum-topic-list" className="forum-topic-list">
@@ -318,13 +317,12 @@ const CategoryPage = () => {
       </section>
 
       {totalPages > 1 && (
-        <nav id="forum-pagination-bottom" className="forum-view-pagination">
-          <ForumPagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-          />
-        </nav>
+        <ForumPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          className="forum-pagination-view"
+        />
       )}
 
 

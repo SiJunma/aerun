@@ -9,7 +9,7 @@
  *     <div class="topic-main">
  *       <div class="topic-head">
  *         <span class="topic-icon">…</span>      (pin/lock)
- *         <h3 class="topic-title"><a>…</a></h3>
+ *         <h6 class="topic-title"><a>…</a></h6>
  *         <nav class="topic-pagination">…</nav>
  *       </div>
  *       <p class="topic-description">…</p>
@@ -72,10 +72,15 @@
 
 .topic-title {
   margin: 0;
-  font-size: var(--topic-title-font-size);
+  font-size: var(--topic-title-size);
   font-weight: var(--topic-title-font-weight);
   line-height: 1.25;
 }
+
+/* The token --topic-title-size is the size for BOTH the list row
+   (CategoryPage) and — through --topic-header-title-size — the topic
+   header. Earlier there was ONE --topic-title-size weighed down by
+   the header's 2rem, so the row titles went giant. */
 
 .topic-title a {
   color: var(--topic-title-color);
@@ -101,12 +106,26 @@
   overflow-wrap: break-word;
 }
 
+/* Single owner of .topic-meta layout across list rows and Topic View.
+   List rows are a vertical list; Topic View opts into the horizontal
+   row only inside .topic-header-layout. */
 .topic-meta {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   margin-top: 0.25rem;
   align-items: flex-start;
+  color: var(--topic-meta-color);
+  font-size: var(--topic-meta-size);
+  line-height: var(--topic-meta-line-height);
+}
+
+.topic-header-layout .topic-meta {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  margin-top: 0;
+  gap: var(--topic-meta-gap, 0.5rem);
 }
 
 .topic-meta .topic-author {
@@ -154,6 +173,11 @@
   align-items: center;
   font-size: 0.75rem;
   color: var(--topic-meta-color);
+}
+
+.topic-header-layout .topic-pagination {
+  flex-direction: row;
+  flex-wrap: nowrap;
 }
 
 .mini-page-link {
@@ -239,7 +263,7 @@
      last-post meta below and has no other content, so the whole
      .topic-meta wrapper is removed from the flow (not just its
      child) — otherwise the empty flex column still takes space. */
-  .topic-meta {
+  .topic-meta:not(.topic-header-layout .topic-meta) {
     display: none;
   }
 

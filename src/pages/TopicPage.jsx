@@ -1925,7 +1925,7 @@ export default function TopicPage() {
       />
 
       {/* Bottom breadcrumbs & back-to-category (legacy parity) */}
-      <nav id="topic-breadcrumbs-bottom" aria-label="breadcrumb" className="topic-breadcrumbs">
+      <nav id="topic-breadcrumbs-bottom" aria-label="breadcrumb">
         <ForumBreadcrumbs
           items={[
             ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),

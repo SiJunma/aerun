@@ -1,22 +1,23 @@
 /**
- * Aerun Forum Pagination — shared module.
+ * Aerun Forum Pagination — shared module (the ONLY owner of the look).
  *
  * Used on CategoryPage, ActiveTopicsPage, NewRepliesPage, TopTopicsPage,
- * SubscriptionsPage, MembersPage and any other paginated list.
- * NOT used on the forum index (MainPage) — there the statistics
- * panel is the only footer.
+ * SubscriptionsPage, MembersPage, Topic View top/bottom and any other
+ * paginated list. NOT used on the forum index (MainPage) — there the
+ * statistics panel is the only footer.
  *
- * DOM: the component renders <nav class="forum-pagination"> wrapping
- * Bootstrap Pagination items. Semantic wrappers on the page side are
- * #forum-pagination-top / #forum-pagination-bottom (Forum View) and
- * #members-pagination-* (Members View). The inner class carries the look.
- *
- * Replaces src/components/common/ForumPagination.css (Bootstrap-heavy,
- * !important overrides) — that file was deleted; imported only in main.jsx.
+ * DOM: ForumPagination renders <ul class="forum-pagination"> directly.
+ * A page wraps it in <nav id="...pagination-..."> only when it needs a
+ * semantic landmark; the look itself is always .forum-pagination.
+ * Modifiers carry only placement:
+ *   .forum-pagination-view   — full-width centered row (list pages)
+ *   .forum-pagination-topic  — compact row inside a header (Topic View)
+ * No topic-*/forum-pagination-* component classes per page.
  */
 
 .forum-pagination {
   display: flex;
+  flex-direction: row;
   gap: 0.15rem;
   align-items: center;
   flex-wrap: wrap;
@@ -29,6 +30,17 @@
   justify-content: center;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* Placement modifiers — same look, different position. */
+.forum-pagination-view {
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+/* Topic View only changes alignment inside the header row. */
+.forum-pagination-topic {
+  flex: 0 0 auto;
 }
 
 .forum-pagination .page-item .page-link {

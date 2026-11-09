@@ -1,0 +1,59 @@
+/**
+ * Aerun Forum Breadcrumbs — shared module (the ONLY owner of the look).
+ *
+ * Used on every page that renders ForumBreadcrumbs: CategoryPage and
+ * list pages (#forum-breadcrumbs-top), Topic View (#topic-breadcrumbs-
+ * top/bottom), Members View and any other page with navigation crumbs.
+ * One component everywhere — no per-page component classes.
+ *
+ * DOM: ForumBreadcrumbs renders <ol class="forum-breadcrumbs">
+ * (Breadcrumb) with .breadcrumb-item / .breadcrumb-link children.
+ * A page wraps it in <nav id="..."> only when it needs a semantic
+ * landmark (#forum-breadcrumbs-top, #topic-breadcrumbs-top/, etc.).
+ * Spacing around the breadcrumbs is the page's business, carried ONLY
+ * by that id (see forum-view.css / topic-view.css) — this module
+ * deliberately has no margin tokens so pages cannot introduce extra
+ * outer space through the shared class.
+ */
+
+.forum-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--breadcrumb-gap);
+  margin: 0;
+  padding: 0;
+  background-color: transparent;
+  list-style: none;
+  font-size: var(--breadcrumb-font-size, 1rem);
+  line-height: 1.2;
+}
+
+.forum-breadcrumbs .breadcrumb-item {
+  display: inline;
+  padding: 0;
+  color: var(--breadcrumb-active-color);
+}
+
+.forum-breadcrumbs .breadcrumb-item + .breadcrumb-item::before {
+  content: "/";
+  padding-right: 0.5em;
+  padding-left: 0.5em;
+  color: var(--breadcrumb-active-color);
+}
+
+.forum-breadcrumbs .breadcrumb-item a {
+  color: var(--breadcrumb-color);
+  text-decoration: none;
+}
+
+.forum-breadcrumbs .breadcrumb-item a:hover,
+.forum-breadcrumbs .breadcrumb-item a:focus {
+  color: var(--breadcrumb-active-color);
+  text-decoration: none;
+}
+
+.forum-breadcrumbs .breadcrumb-item.active {
+  color: var(--breadcrumb-active-color);
+}
+

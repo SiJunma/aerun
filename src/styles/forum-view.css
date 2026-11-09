@@ -144,17 +144,14 @@
 }
 
 /* ── Pagination wrappers ────────────────────────────────────── */
-#forum-pagination-top,
-#forum-pagination-bottom,
-.forum-view-pagination {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 1rem;
-}
-
-#forum-pagination-bottom {
-  margin-top: 1rem;
-  margin-bottom: 0;
+/* The pagination look lives in forum-pagination.css (.forum-pagination,
+   modifier .forum-pagination-view). Any page-level #id wrapper only
+   carries placement/margin, never its own colors/fonts. */
+/* #forum-pagination-top / #forum-pagination-bottom are the legacy
+   page-level landmarks; #*-page pages keep them for theme hooks. */
+#forum-pagination-top .forum-pagination,
+#forum-pagination-bottom .forum-pagination {
+  margin: 0 auto;
 }
 
 /* ── Topic list card ────────────────────────────────────────── */

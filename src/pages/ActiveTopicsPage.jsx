@@ -139,13 +139,12 @@ const ActiveTopicsPage = () => {
           ForumPagination returns null for a single page, so an empty
           <nav> would only add margin and an empty box to the DOM. */}
       {!loading && totalPages > 1 && (
-        <nav id="forum-pagination-bottom" className="forum-view-pagination">
-          <ForumPagination
-            currentPage={Math.min(currentPage, totalPages)}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-          />
-        </nav>
+        <ForumPagination
+          currentPage={Math.min(currentPage, totalPages)}
+          totalPages={totalPages}
+          onPageChange={handlePageChange}
+          className="forum-pagination-view"
+        />
       )}
 
       <div className="forum-view-footer">

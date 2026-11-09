@@ -189,16 +189,18 @@ export const TopicPostCard = ({
 
               {/* 4. Posts Count */}
               {post.author?.user_id && (
-                <div className="post-author__meta">
-                  {t?.('profile.posts_count') || lang === 'ru' ? 'Posts' : 'Posts'}: <strong>{postCount}</strong>
-                </div>
-              )}
+                <dl className="post-author__meta">
+                  <div className="post-author__meta-row">
+                    <dt>{t?.('profile.posts_count') || lang === 'ru' ? 'Posts' : 'Posts'}:</dt>
+                    <dd><strong>{postCount}</strong></dd>
+                  </div>
 
-              {/* 5. Reputation */}
-              {post.author?.user_id && (
-                <div className="post-author__meta">
-                  {t?.('profile.reputation') || lang === 'ru' ? 'Reputation' : 'Reputation'}: <strong>{reputation}</strong>
-                </div>
+                  {/* 5. Reputation */}
+                  <div className="post-author__meta-row">
+                    <dt>{t?.('profile.reputation') || lang === 'ru' ? 'Reputation' : 'Reputation'}:</dt>
+                    <dd><strong>{reputation}</strong></dd>
+                  </div>
+                </dl>
               )}
 
               {/* 6. Role/Mask */}

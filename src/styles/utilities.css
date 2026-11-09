@@ -17,7 +17,7 @@
 }
 
 .topic-pinned {
-  color: var(--topic-pinned-color, #b45309);
+  color: var(--topic-pinned-color, #ffc107);
 }
 
 [data-theme='neutral'] .topic-pinned {

@@ -18,23 +18,13 @@
   margin: var(--topic-page-margin);
 }
 
-#topic-breadcrumbs-top,
-#topic-breadcrumbs-bottom {
-  margin-top: var(--topic-breadcrumbs-margin-top);
-  margin-bottom: var(--topic-breadcrumbs-margin-bottom);
-}
-
 #topic-breadcrumbs-bottom {
   margin-top: var(--topic-reply-margin-top);
   margin-bottom: var(--topic-reply-margin-top);
 }
 
-.topic-breadcrumbs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--topic-breadcrumb-gap);
-}
+/* Topic View only adjusts placement of the shared breadcrumbs module;
+   the look itself is .forum-breadcrumbs in forum-breadcrumbs.css. */
 
 #topic-header,
 .topic-header {
@@ -46,6 +36,22 @@
   margin-bottom: var(--topic-title-row-margin-bottom);
 }
 
+.topic-header-layout {
+  margin-top: var(--topic-head-meta-margin-top, 0.75rem);
+}
+
+.topic-header-layout .topic-meta strong {
+  color: var(--text-color);
+  opacity: 1;
+  font-weight: 700;
+}
+
+.topic-header-layout .topic-meta .topic-author-name {
+  color: var(--text-color);
+  opacity: 1;
+  font-weight: 700;
+}
+
 .topic-title-row {
   display: flex;
   align-items: center;
@@ -53,13 +59,20 @@
   margin-bottom: var(--topic-title-row-margin-bottom);
 }
 
-.topic-title {
+.topic-header .topic-title {
   margin: 0;
-  font-size: var(--topic-title-size);
+  font-size: var(--topic-header-title-size);
   font-weight: var(--topic-title-weight);
   line-height: var(--topic-title-line-height);
   color: var(--text-color);
 }
+
+.topic-indicator {
+  flex: 0 0 auto;
+}
+
+/* Pin/lock look lives in utilities.css (.topic-pinned/.topic-locked).
+   Topic View only places the icon inside the title row. */
 
 .topic-description {
   margin: 0;
@@ -77,36 +90,57 @@
   gap: var(--topic-header-layout-gap);
 }
 
-.topic-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--topic-meta-gap);
-  color: var(--secondary-color);
-  font-size: var(--topic-meta-size);
-  line-height: var(--topic-meta-line-height);
-  opacity: 0.75;
-}
-
-.topic-meta__item {
-  white-space: nowrap;
-}
-
-.topic-meta .topic-author {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--topic-meta-gap);
-}
-
-.topic-meta-separator {
-  white-space: nowrap;
-}
-
 .topic-actions {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--topic-actions-gap);
+}
+
+@media (min-width: 768px) {
+  /* Top pagination lives inside the header's action group, so meta and
+     actions share one horizontal line (see target screenshot 2). */
+  .topic-header-layout {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .topic-actions {
+    flex-direction: row;
+    align-items: center;
+    flex: 0 0 auto;
+    flex-shrink: 0;
+  }
+}
+
+.topic-header-layout .topic-meta {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The pagination element itself is the shared .forum-pagination
+   (forum-pagination.css, modifier .forum-pagination-topic).
+   The wrappers below only carry page placement, never the look. */
+
+/* The list-row layout for .topic-meta lives in topic-row.css
+   (column, align-items: flex-start). Topic View only scopes it to a
+   horizontal row inside the header; the chrome is shared. */
+
+.topic-meta__item {
+  white-space: nowrap;
+}
+
+.topic-meta .topic-author-name {
+  display: inline;
+  font-weight: 600;
+}
+
+.topic-meta-separator {
+  white-space: nowrap;
 }
 
 .topic-manage {
@@ -128,6 +162,15 @@
 .topic-manage-link:focus {
   color: var(--text-color);
   text-decoration: none;
+}
+
+.topic-manage-caret {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 0.3em solid transparent;
+  border-right: 0.3em solid transparent;
+  border-top: 0.4em solid currentColor;
 }
 
 .topic-manage-menu {
@@ -171,14 +214,11 @@
   border-top: 1px solid var(--topic-post-footer-border);
 }
 
-#topic-pagination-top {
-  margin-top: var(--topic-pagination-top-margin-top);
-  margin-bottom: var(--topic-pagination-top-margin-bottom);
-}
-
-#topic-pagination-bottom {
-  display: flex;
-  justify-content: center;
+/* Pagination wrappers on Topic View are the page-level #ids only.
+   The look itself lives in forum-pagination.css (.forum-pagination).
+   Bottom pagination is centered by .forum-pagination-view on other pages. */
+#topic-pagination-bottom .forum-pagination {
+  margin: 0 auto;
 }
 
 #topic-actions-bottom {
@@ -246,10 +286,46 @@
   margin-bottom: 0.5rem;
 }
 
+.post-author__role .role-badge {
+  background-color: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.post-author__role-wrapper {
+  text-align: center;
+  width: 100%;
+}
+
 .post-author__role-label {
   font-size: var(--topic-post-sidebar-role-size);
 }
 
+
+.post-author__avatar {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.5rem;
+}
+
+.post-author .author-avatar__wrap {
+  width: 100%;
+  max-width: var(--topic-post-avatar-size, 150px);
+  aspect-ratio: 1;
+  height: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+.post-author .author-avatar__img {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border-radius: var(--topic-post-avatar-radius, 6px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
 
 .post-author__status {
   display: flex;
@@ -272,6 +348,7 @@
   flex-direction: column;
   width: 100%;
   gap: 0.25rem;
+  margin: 0;
   align-items: center;
   font-size: var(--topic-post-sidebar-meta-size);
   line-height: var(--topic-post-sidebar-meta-line-height);
@@ -279,16 +356,30 @@
 
 .post-author__meta-row {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.125rem;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.25rem;
   width: 100%;
   text-align: center;
 }
 
+.post-author__meta-row dt {
+  color: var(--topic-post-sidebar-meta-color, var(--secondary-color));
+}
+
+.post-author__meta-row dd {
+  color: var(--text-color);
+}
+
+.post-author__meta-row dt,
+.post-author__meta-row dd {
+  margin: 0;
+}
+
 .post-author__contact {
   margin-top: auto;
-  border-top: 1px dashed var(--topic-post-footer-border);
+  border-top: 1px solid var(--topic-post-footer-border);
   width: 100%;
   display: flex;
   flex-wrap: wrap;
@@ -374,7 +465,7 @@
 .post-signature {
   margin-top: var(--topic-post-signature-padding-top);
   padding-top: var(--topic-post-signature-padding-top);
-  border-top: 1px dashed var(--topic-post-signature-border);
+  border-top: 1px solid var(--topic-post-signature-border);
   color: var(--topic-post-signature-color);
   font-size: var(--topic-post-signature-size);
   font-style: italic;
@@ -405,13 +496,22 @@
 .post-footer {
   margin-top: auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
   gap: var(--topic-post-footer-gap);
-  min-height: var(--topic-post-footer-height);
-  padding: var(--topic-post-footer-padding-y) var(--topic-post-footer-padding-x);
-  border-top: 1px dashed var(--topic-post-footer-border);
+  min-height: var(--topic-post-footer-height, 32px);
+  padding: var(--topic-post-footer-padding-y, 6px) var(--topic-post-footer-padding-x, 0);
+  border-top: 1px solid var(--topic-post-footer-border);
+}
+
+.post-footer__links {
+  flex: 0 0 auto;
+}
+
+.post-footer__actions {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .post-footer__links {
@@ -454,18 +554,18 @@
 }
 
 .footer-link--publication {
-  color: var(--primary-color);
-  font-weight: var(--topic-post-action-weight);
+  color: var(--secondary-color);
+  font-weight: var(--topic-post-action-weight, 600);
 }
 
 .footer-link--delete {
-  color: var(--topic-locked-color);
-  opacity: 0.75;
+  color: var(--secondary-color);
+  opacity: 1;
 }
 
 .footer-link--delete:hover,
 .footer-link--delete:focus {
-  color: var(--topic-locked-color);
+  color: var(--text-color);
 }
 
 .topic-actions-row {
@@ -794,16 +894,6 @@
 }
 
 @media (min-width: 768px) {
-  .topic-header-layout {
-    flex-direction: row;
-    align-items: flex-end;
-  }
-
-  .topic-actions {
-    flex-direction: row;
-    align-items: center;
-  }
-
   .topic-post-inner,
   .topic-skeleton__grid {
     flex-direction: row;

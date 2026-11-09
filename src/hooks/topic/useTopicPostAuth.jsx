@@ -109,10 +109,10 @@ export const useTopicPostAuth = ({
     return isUserOnline(post.author?.user_id);
   }, [currentUser, isUserOnline]);
 
-  const getRoleBadge = useCallback((post, extraClass = 'mb-2') => {
+  const getRoleBadge = useCallback((post, extraClass = '') => {
     if (post.is_character) {
       return (
-        <div className={`mt-0 ${extraClass} text-center w-100`}>
+        <div className={`${extraClass} post-author__role-wrapper`}>
           <ForumCharacterBadge ownerName={getLiveOwnerName(post)} />
         </div>
       );

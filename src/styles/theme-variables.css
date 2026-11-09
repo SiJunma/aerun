@@ -52,6 +52,7 @@ body {
      on light/neutral; dark below recolors it to Slate 500. */
   --category-head-bg: var(--secondary-color);
   --category-head-text: var(--secondary-color);
+  --category-head-letter-spacing: 0.05em;
 
   /* ── Forum Item tokens ────────────────────────────────────── */
   --forum-item-bg: transparent;
@@ -171,7 +172,7 @@ body {
   --topic-item-padding: 1rem 1rem;
   --topic-title-color: var(--text-color);
   --topic-title-hover-color: var(--primary-color);
-  --topic-title-font-size: 1rem;
+  --topic-title-size: 1rem;
   --topic-title-font-weight: 700;
   --topic-description-color: var(--secondary-color);
   --topic-description-font-size: 0.875rem;
@@ -182,7 +183,7 @@ body {
   --topic-last-post-bg: transparent;
   --topic-last-post-mobile-bg: rgba(var(--primary-rgb), 0.02);
   --topic-last-post-mobile-border: rgba(var(--primary-rgb), 0.05);
-  --topic-pinned-color: #b45309;
+  --topic-pinned-color: #ffc107;
   --topic-locked-color: #ef4444;
   --mini-pagination-bg: rgba(var(--primary-rgb), 0.1);
   --mini-pagination-hover-bg: var(--primary-color);
@@ -216,6 +217,12 @@ body {
   --pagination-active-border: rgba(var(--primary-rgb), 0.3);
   --pagination-disabled-opacity: 0.2;
 
+  /* ── Forum Breadcrumbs (shared; one component everywhere) ───── */
+  --breadcrumb-gap: 0.25rem;
+  --breadcrumb-color: var(--link-color);
+  --breadcrumb-active-color: var(--text-color);
+  --breadcrumb-font-size: 1rem;
+
   /* ── Management Toolbar (CategoryPage manage mode) ─────────── */
   --management-toolbar-bg: rgba(30, 41, 59, 0.9);
   --management-toolbar-text: #ffffff;
@@ -227,59 +234,60 @@ body {
      Declared here (not inherited from index.css :root): values below
      are aliases of the base theme tokens on body. */
   --topic-page-margin: 0;
-  --topic-breadcrumbs-margin-top: 1.5rem;
-  --topic-breadcrumbs-margin-bottom: 0;
-  --topic-breadcrumb-gap: 0.25rem;
   --topic-header-margin-bottom: 1.5rem;
   --topic-header-margin-top: 0.5rem;
   --topic-title-row-gap: 0.5rem;
   --topic-title-row-margin-bottom: 0.25rem;
-  --topic-title-size: 2rem;
-  --topic-title-weight: 500;
-  --topic-title-line-height: 1.5;
+  --topic-head-meta-margin-top: 0.75rem;
+  --topic-header-title-size: 2rem;
+  --topic-title-weight: 600;
+  --topic-title-line-height: 1.2;
   --topic-description-size: 0.875rem;
   --topic-description-line-height: 1.2;
-  --topic-meta-size: 0.875rem;
+  --topic-meta-size: 1rem;
   --topic-meta-line-height: 1.2;
   --topic-meta-gap: 0.5rem;
+  --topic-meta-color: var(--secondary-color);
   --topic-header-layout-gap: 1rem;
   --topic-actions-gap: 0.5rem;
-  --topic-pagination-top-margin-top: 0.5rem;
-  --topic-pagination-top-margin-bottom: 1rem;
+
   --topic-posts-margin-bottom: 1.5rem;
   --topic-post-margin-bottom: 1.5rem;
   --topic-post-card-bg: var(--card-bg);
   --topic-post-card-border: var(--border-color);
-  --topic-post-card-radius: 0.375rem;
+  --topic-post-card-radius: 1rem;
   --topic-post-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   --topic-post-sidebar-bg: transparent;
   --topic-post-sidebar-border: var(--border-color);
-  --topic-post-sidebar-padding: 0.5rem;
-  --topic-post-sidebar-name-size: 0.95rem;
+  --topic-post-sidebar-padding: 1rem;
+  --topic-post-sidebar-name-size: 1rem;
   --topic-post-sidebar-name-weight: 700;
   --topic-post-sidebar-name-line-height: 1.2;
-  --topic-post-sidebar-meta-size: 0.775rem;
+  --topic-post-sidebar-meta-size: 0.875rem;
   --topic-post-sidebar-meta-line-height: 1.2;
-  --topic-post-sidebar-role-size: 0.75rem;
-  --topic-post-sidebar-role-size-mobile: 0.775rem;
+  --topic-post-sidebar-role-size: 0.875rem;
+  --topic-post-sidebar-role-size-mobile: 0.875rem;
   --topic-post-sidebar-status-max-width: 100%;
   --topic-post-sidebar-status-size: 0.875rem;
-  --topic-post-header-padding-y: 0.25rem;
-  --topic-post-header-padding-x: 1rem;
+  --topic-post-avatar-size: 150px;
+  --topic-post-avatar-radius: 0.5rem;
+  --topic-post-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --topic-post-header-padding-y: 0.5rem;
+  --topic-post-header-padding-x: 1.25rem;
   --topic-post-header-border: var(--border-color);
-  --topic-post-body-padding-y: 0.5rem;
-  --topic-post-body-padding-x: 1rem;
-  --topic-post-footer-padding-y: 0;
-  --topic-post-footer-padding-x: 1rem;
-  --topic-post-footer-height: 34px;
+  --topic-post-body-padding-y: 1rem;
+  --topic-post-body-padding-x: 1.25rem;
+  --topic-post-footer-padding-y: 0.625rem;
+  --topic-post-footer-padding-x: 1.25rem;
+  --topic-post-footer-height: 40px;
   --topic-post-footer-border: var(--border-color);
   --topic-post-footer-gap: 1rem;
   --topic-post-footer-text-size: 0.95rem;
   --topic-post-footer-link-size: 0.875rem;
-  --topic-post-number-size: 0.775rem;
+  --topic-post-number-size: 0.875rem;
   --topic-post-number-weight: 600;
   --topic-post-number-color: var(--secondary-color);
-  --topic-post-date-size: 0.75rem;
+  --topic-post-date-size: 0.875rem;
   --topic-post-date-color: var(--secondary-color);
   --topic-post-signature-size: 0.875rem;
   --topic-post-signature-color: var(--secondary-color);
@@ -364,7 +372,6 @@ body {
 
 [data-theme='dark'] {
   --topic-post-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
-}
   /* Equivalent of light #475569 (Slate 600) on dark: Slate 500 */
   --forum-view-description-color: #b0b0b0;
   /* Exact target home colors (screenshot 2026-11-06, user-confirmed):
@@ -411,6 +418,7 @@ body {
 }
 
 [data-theme='light'] {
+  --category-head-bg: #f9f9f9;
   --management-toolbar-bg: rgba(255, 255, 255, 0.95);
   --management-toolbar-text: #1e293b;
   --management-toolbar-border: rgba(0, 0, 0, 0.15);

@@ -19,16 +19,12 @@ export const TopicActionsBar = ({
   if (position === 'top') {
     if (totalPages <= 1) return null;
     return (
-      <nav
-        id="topic-pagination-top"
-        className="topic-pagination topic-pagination-top"
-      >
-        <ForumPagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          onPageChange={onPageChange}
-        />
-      </nav>
+      <ForumPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={onPageChange}
+        className="forum-pagination-topic"
+      />
     );
   }
 
