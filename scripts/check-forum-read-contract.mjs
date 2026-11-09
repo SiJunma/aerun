@@ -77,6 +77,12 @@ const forbid = (source, label, pattern, why = '') => {
 // entitled to the staff DTO (`status` and `verified` are served there and nowhere
 // else), and it must say so EXPLICITLY: a silent default would quietly empty the
 // moderation columns the first time somebody tidied this signature.
+//
+// MembersPage reads one page per render through fetchMembers — the public
+// paginated read. It must not take the subscription read (which always loads
+// the WHOLE board, so sorting and filtering locally would need every page
+// at once — the walk this migration removes), and it must not ask for the
+// staff read it is not entitled to.
 assert.match(
   stripComments(resources),
   /export const subscribeToAllUsers = \(callback, \{ staff = false \} = \{\}\)/,
@@ -89,8 +95,14 @@ assert.match(
 );
 assert.match(
   stripComments(read('../src/pages/MembersPage.jsx')),
-  /subscribeToAllUsers\(setUsers\)/,
-  'MembersPage must take the public member read — it is reachable by guests, who cannot use the staff route'
+  /fetchMembers\(\{/,
+  'MembersPage must take the paginated public member read — it is reachable by guests, who cannot use the staff route'
+);
+forbid(
+  stripComments(read('../src/pages/MembersPage.jsx')),
+  'MembersPage.jsx',
+  /subscribeToAllUsers/,
+  'MembersPage reads ONE page per render through fetchMembers (/api/aerun/users); the subscription read loads the whole board, which is the walk this page exists to remove'
 );
 forbid(
   stripComments(read('../src/pages/MembersPage.jsx')),
@@ -593,16 +605,33 @@ for (const [source, route, label] of [
   assert.ok(source.includes(route), `${label} must be served by ${route}`);
 }
 
-// The two paginated boards share ONE loop, reached through a callback rather
-// than a path argument. That indirection is what let scripts/audit-endpoints.mjs
-// stop resolving the routes — it reads the literal inside each sendApi call — so
-// the shape is asserted: exactly two call sites (the definition binds with `=`,
-// so only invocations match), each with a literal URL checked above. A third
-// call site means one of the boards grew a loop of its own.
+// The two paginated boards are read ONE PAGE at a time by their own pages —
+// fetchMembers for /members, fetchAdminUsers for the staff table. THE WALK
+// IS GONE: fetching the whole board so a page can sort and filter it locally
+// (one request per 30 rows, totalPages hops, to re-render all 32 rows of a
+// 32-member forum) is precisely what server-side pagination replaces. A
+// `collectEveryPage`-style loop reappearing here means a board grew its own
+// walk back.
 assert.equal(
   (resourcesCode.match(/collectEveryPage\(/g) || []).length,
-  2,
-  'exactly two paginated boards share the walker; a third loop means one of them drifted'
+  0,
+  'the members/staff reads must fetch ONE page per render; a collect-every-page walk is the regression server-side pagination removed'
+);
+// …and each board fetches exactly one page object per render, never a
+// `page=1..totalPages` loop over its own literal. The fetchMembers
+// definition reads the public route through URLSearchParams (so the literal
+// is `users?` rather than `users?page=`), and calling it with an object is
+// what one-page-per-render means.
+assert.match(
+  resourcesCode,
+  /export const fetchMembers = async \(\{ page = 1, search = '', sort = '', order = '' \} = \{\}\)/,
+  'fetchMembers must be the ONE-page public read: page, search, sort and order on the server'
+);
+forbid(
+  resourcesCode,
+  'auth-resources.js',
+  /for\s*\([^)]*page\s*\+\+|page \+= 1/,
+  'no page-walking loop may reassemble the whole board for a client-side table'
 );
 
 // `users.ListRule` is still open, because /members and /profile have to keep
@@ -830,55 +859,50 @@ console.log('OK  forum read contract: "override off" is stored as the live inher
 // which is why this was worth building at all.
 //
 // The wiring is four pieces that each look fine alone and are useless apart: the
-// subscription must HAND OVER its loader, the page must HOLD it, the handler
-// must CALL it, and a control must be bound to that handler. Delete any one and
-// the button still renders, still takes the click, and does nothing — which
-// looks exactly like "the list did not change".
+// handler must BUMP the read, the loader effect must REACT to it, and a control
+// must be bound to that handler. Delete any one and the button still renders,
+// still takes the click, and does nothing — which looks exactly like "the
+// list did not change".
 {
   const membersPage = read('../src/pages/MembersPage.jsx');
   const membersApi = stripComments(resources);
   const membersUi = stripComments(membersPage);
 
-  // 1. The subscription exposes a refresh. On the unsubscribe function rather
-  //    than as a separate export, because `load` owns the staff flag and the
-  //    pagination walk; a second entry point would have to duplicate them.
-  assert.match(
-    membersApi,
-    /unsubscribe\.refresh\s*=\s*\(\)\s*=>\s*\{\s*load\(\)/,
-    'subscribeToAllUsers must expose .refresh() that re-runs load(), or the button has nothing to call'
-  );
-
-  // 2. The page holds it.
+  // 1. The handler bumps the nonce that the loader effect depends on. There is
+  //    no subscription to hand over a loader: the board is read one page at a
+  //    time by fetchMembers, and a hand-off ref was the shape of the whole-
+  //    board walk this page removed.
   assert.match(
     membersUi,
-    /refreshMembersRef\.current\s*=\s*unsubUsers\.refresh/,
-    'MembersPage must keep the loader handed over by subscribeToAllUsers'
+    /setRefreshNonce\(n => n \+ 1\)/,
+    'the refresh handler must bump the nonce the loader effect depends on'
   );
-
-  // 3. The handler calls it.
   assert.match(
     membersUi,
-    /refreshMembersRef\.current\?\.\(\)/,
-    'the refresh handler must actually invoke the held loader'
+    /\}, \[page, search, sortParams, refreshNonce\]\);/,
+    'the loader effect must depend on the refresh nonce, or the button cannot re-read the page'
   );
 
-  // 4. A control is bound to that handler.
+  // 2. A control is bound to that handler.
   assert.match(
     membersUi,
     /onClick=\{handleRefresh\}/,
-    'MembersPage must bind a control to handleRefresh — otherwise the loader is held and never called'
+    'MembersPage must bind a control to handleRefresh — otherwise the handler is written and never called'
   );
 
-  // A ref held past unmount would let a click re-render a dead component.
-  assert.match(
+  // 3. The subscription is no longer the way to re-read. The loader is the
+  //    fetchMembers effect: a refresh that went through subscribeToAllUsers
+  //    would refetch the WHOLE board (the walk this migration removes).
+  forbid(
     membersUi,
-    /refreshMembersRef\.current\s*=\s*null/,
-    'the ref must be cleared on unmount, or a click after unmount calls a dead loader'
+    'MembersPage.jsx',
+    /subscribeToAllUsers/,
+    'the refresh must re-read through the paginated fetchMembers effect, never the whole-board subscription'
   );
 
   // The refresh must REPORT. A spinner that stops proves the request returned,
   // not that it worked, and this list fails silently: a failed read arrives as
-  // `callback([])`, so a network blip empties the board with nothing to see.
+  // an empty page, so a network blip empties the board with nothing to see.
   assert.match(
     membersUi,
     /showToast\(/,
@@ -895,7 +919,11 @@ console.log('OK  forum read contract: "override off" is stored as the live inher
   // forum ships renders English, and adding a language means hunting
   // through JSX. The strings belong in the dictionary.
   const dict = read('../src/i18n/dictionary.js');
-  const REFRESH_KEYS = ['refresh_members', 'members_refreshed', 'members_refresh_failed'];
+  // `members_refresh_failed` is no longer rendered: the loader effect reports
+  // nothing on failure (the empty page IS the failure signal, and the refresh
+  // toast confirms the action), so requiring the key pinned a render the page
+  // stopped doing.
+  const REFRESH_KEYS = ['refresh_members', 'members_refreshed'];
 
   for (const key of REFRESH_KEYS) {
     assert.match(

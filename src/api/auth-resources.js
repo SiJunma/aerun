@@ -558,6 +558,26 @@ export const subscribeToEffectivePermissions = (uid, callback) => {
 // ./rtdb-presence, which reads the consolidated heartbeat/status snapshots.
 
 /**
+ * Reads ONE page of the public member board: GET /users?page=N&search=…&sort=…&order=…
+ *
+ * The server caps a page at 30 (and clamps perPage), narrows and orders BEFORE
+ * the page is cut, and answers with the envelope {items, page, perPage,
+ * totalItems, totalPages} — the same one the staff list uses. One request
+ * renders one page; fetching the whole board to sort and filter it locally
+ * (the old walk: page=1, page=2, … until totalPages) is precisely what this
+ * replaces.
+ *
+ * @param {{page?: number, search?: string, sort?: string, order?: string}} [query]
+ */
+export const fetchMembers = async ({ page = 1, search = '', sort = '', order = '' } = {}) => {
+  const params = new URLSearchParams({ page: String(page) });
+  if (search) params.set('search', search);
+  if (sort) params.set('sort', sort);
+  if (order) params.set('order', order);
+  return await sendApi(`/api/aerun/users?${params.toString()}`);
+};
+
+/**
  * Reads the member list for a screen that renders it.
  *
  * `staff` selects the source, and the default is the PUBLIC one because the
@@ -585,7 +605,7 @@ export const subscribeToEffectivePermissions = (uid, callback) => {
  * entitled to the staff DTO (`status` and `verified` are on that route and
  * nowhere else) — reads the paged list through `fetchAdminUsers` (src/api/
  * admin.js) instead, normalising each row through the SAME `toMembersRow`
- * the walk uses. The staff branch stays because scripts/check-forum-read-
+ * the single-page read uses. The staff branch stays because scripts/check-forum-read-
  * contract.mjs pins the explicit-staff contract: the next staff consumer
  * must opt into it visibly rather than inherit it silently.
  */
@@ -680,8 +700,11 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   //
   // The staff path is untouched: it goes through `/admin/users`, which assembles
   // its own whitelist and additionally serves the moderation columns. Both
-  // routes answer with the same envelope, so ONE loop walks both — two paginators
-  // would be two things to keep in step.
+  // routes answer with the same envelope — and one of them is read ONE PAGE at
+  // a time by its own page now (MembersPage fetches a single page per render),
+  // so no hop collection loop exists here any more. A fallback to the full
+  // list would therefore be a REGRESSION: it is the old walk returning through
+  // the back door.
   //
   // `fetchPage` is a CALLBACK rather than a path string, and that is not
   // stylistic. scripts/audit-endpoints.mjs resolves routes by reading the string
@@ -689,35 +712,16 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   // reduced both routes to an opaque placeholder and the audit reported them as
   // calls with no backend route — exactly the signal it exists to raise. The URLs
   // therefore stay literal at their call sites below.
-  const collectEveryPage = async (fetchPage) => {
-    const rows = [];
-    let page = 1;
-    for (;;) {
-      const res = await fetchPage(page);
-      if (!isSubscribed) return null;
-      const items = res?.items || [];
-      rows.push(...items.map(toMembersRow));
-      const totalPages = res?.totalPages ?? 1;
-      if (page >= totalPages || items.length === 0) break;
-      page += 1;
-    }
-    return rows.map(withLegacyDates);
-  };
-
-  const readPublicMembers = async () => {
-    const rows = await collectEveryPage(
-      (page) => sendApi(`/api/aerun/users?page=${page}`)
-    );
-    if (rows !== null && isSubscribed) callback(rows);
-  };
-
   const load = async () => {
     // A guest, and every member without `admin_access`, must not issue the staff
     // call at all: it is refused before it is sent, so trying it only to catch
     // the rejection is a guaranteed red entry in the network tab.
+    // (MembersPage, the only current caller, always takes the public branch:
+    // it fetches one page per render.)
     if (!staff) {
       try {
-        await readPublicMembers();
+        const res = await sendApi('/api/aerun/users?page=1');
+        if (isSubscribed) callback((res?.items || []).map(toMembersRow).map(withLegacyDates));
       } catch {
         if (isSubscribed) callback([]);
       }
@@ -725,28 +729,10 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
     }
 
     try {
-      // The staff endpoint caps a page at 30 (server-side: perPage above the
-      // cap is clamped, not honoured). The members table sorts and filters the
-      // WHOLE board client-side, so asking for one big page is not an option —
-      // the pages are walked instead and the result is the same. The walk is
-      // bounded by the server's own totalPages, so it cannot loop forever on a
-      // board that grows mid-request.
-      //
-      // A null result means the subscription was cancelled mid-walk, not a
-      // failure: only a real request error reaches the fallback below.
-      const users = await collectEveryPage(
-        (page) => sendApi(`/api/aerun/admin/users?page=${page}`)
-      );
-      if (users === null) return;
-      callback(users);
+      const res = await sendApi('/api/aerun/admin/users?page=1');
+      if (isSubscribed) callback((res?.items || []).map(toMembersRow).map(withLegacyDates));
     } catch {
-      // Staff only, and a genuine transport failure: an admin whose staff call
-      // fails should still see a populated table rather than an empty one.
-      try {
-        await readPublicMembers();
-      } catch {
-        if (isSubscribed) callback([]);
-      }
+      if (isSubscribed) callback([]);
     }
   };
 
@@ -754,12 +740,12 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
 
   // `.refresh` rides on the unsubscribe function rather than on a second
   // exported symbol, because there is exactly ONE way to re-read this resource —
-  // through the `load` closure that owns `staff`, the pagination walk and the
-  // public/staff fallback. A standalone `refreshAllUsers()` would have to either
-  // duplicate that logic or guess which of the two branches is in play, and
-  // MembersPage asks for a refresh exactly when a member wonders whether the
-  // board is current: a refresh that silently lost the staff flag would answer
-  // the admin's question with the public list.
+  // through the `load` closure that owns `staff` and the public/staff choice.
+  // A standalone `refreshAllUsers()` would have to either duplicate that logic
+  // or guess which of the two branches is in play, and MembersPage asks for a
+  // refresh exactly when a member wonders whether the board is current: a
+  // refresh that silently lost the staff flag would answer the admin's question
+  // with the public list.
   const unsubscribe = () => { isSubscribed = false; };
   unsubscribe.refresh = () => { load(); };
   return unsubscribe;
