@@ -130,6 +130,7 @@ func TestPublicProfileHidesPrivateSettings(t *testing.T) {
 		}
 	}
 }
+
 // seedPrivateProfile fills the personal (non-settings) profile fields so a
 // leak test can distinguish "the key exists but is empty" from "the value
 // itself leaked".
@@ -239,7 +240,7 @@ func TestLoggedInMemberSeesAnotherMembersPersonalFields(t *testing.T) {
 			}
 		}
 	}
-}// The profile page genuinely needs SOME keys off another account. A test that only
+} // The profile page genuinely needs SOME keys off another account. A test that only
 // asserted absence would still pass on a payload that broke the page, so the keys
 // the UI renders are pinned here too.
 func TestPublicProfileStillCarriesWhatThePageRenders(t *testing.T) {
