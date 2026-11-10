@@ -133,6 +133,8 @@ export default function TopicPage() {
     replyRef,
     topic,
     topicNotFound,
+    topicRestricted,
+    topicRestrictedMessage,
     accessError,
     accessErrRaw,
     isTopicLoading,
@@ -1318,14 +1320,14 @@ export default function TopicPage() {
 
   // Topic stats freshness contract (contract: check-forum-read-contract.mjs)
   useEffect(() => {
-    if (!id) return;
+    if (!id || topicRestricted) return;
     const unsub = subscribeToTopicStats(id, () => {});
     return () => unsub();
-  }, [id]);
+  }, [id, topicRestricted]);
 
   // 11. Topic context fetch (server draft, votes, subscription)
   useEffect(() => {
-    if (!user?.uid || !id || !topic || topicNotFound) return;
+    if (!user?.uid || !id || !topic || topicNotFound || topicRestricted) return;
     let cancelled = false;
     (async () => {
       try {
@@ -1345,16 +1347,16 @@ export default function TopicPage() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, id, topic?.id, topicNotFound]);
+  }, [user?.uid, id, topic?.id, topicNotFound, topicRestricted]);
 
   // 12. Quote notifications subscription (contract)
   useEffect(() => {
-    if (!user?.uid || !id || !topic || topicNotFound) return;
+    if (!user?.uid || !id || !topic || topicNotFound || topicRestricted) return;
     const unsub = subscribeToTopicNotifications(user.uid, id, (activeQuotes) => {
       setUnreadQuotes(activeQuotes || []);
     });
     return () => unsub();
-  }, [user?.uid, id, topic, topicNotFound]);
+  }, [user?.uid, id, topic, topicNotFound, topicRestricted]);
 
   // Guest page fallback wait guard — contract marker for check-golast-overlay.mjs
   useEffect(() => {
@@ -1522,9 +1524,9 @@ export default function TopicPage() {
   loadPostsRef.current = loadPosts;
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !topic || topicNotFound || topicRestricted) return;
     loadPostsRef.current();
-  }, [id, currentPage]);
+  }, [id, topic, topicNotFound, topicRestricted, currentPage]);
 
   // 16b. Live updates from OTHER readers (legacy monolith parity).
   //
@@ -1551,7 +1553,7 @@ export default function TopicPage() {
   }, [posts]);
 
   useEffect(() => {
-    if (!id || !topic || topicNotFound) return;
+    if (!id || !topic || topicNotFound || topicRestricted) return;
 
     // A different topic (or the first delivery for this one) is effect 16's
     // initial load, not news — re-arm the key and step aside.
@@ -1592,7 +1594,7 @@ export default function TopicPage() {
     // answer around the still-pending optimistic cards.
     loadPostsRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, topic, topicNotFound, currentPage, searchParams]);
+  }, [id, topic, topicNotFound, topicRestricted, currentPage, searchParams]);
 
   // Render Skeleton / ErrorCard
   if (isTopicLoading) return <Skeleton />;
@@ -1606,31 +1608,25 @@ export default function TopicPage() {
     // auth refusal; the title carries the human answer: 404 means the topic
     // is gone, 403 means the category is closed to this reader, anything
     // else is a transient load failure worth retrying.
-    const status = accessErrRaw?.status ?? 0;
-    const isNotFound = topicNotFound || status === 404;
-    const isAccessDenied = status === 403;
-    const errorTitle = isNotFound
-      ? (lang === 'ru' ? 'Тема не найдена' : 'Topic Not Found')
-      : isAccessDenied
-        ? (lang === 'ru' ? 'Доступ запрещён' : 'Access Denied')
+    const isRestricted = topicRestricted;
+    const isNotFound = topicNotFound && !isRestricted;
+    const errorTitle = isRestricted
+      ? (lang === 'ru' ? 'Доступ запрещён' : 'Access Denied')
+      : isNotFound
+        ? (lang === 'ru' ? 'Тема не найдена' : 'Topic Not Found')
         : (lang === 'ru' ? 'Не удалось загрузить тему' : 'Failed to load topic');
+
     return (
       <ErrorCard
         title={errorTitle}
-        error={accessErrRaw}
-        onRetry={
-          !isNotFound && !isAccessDenied
-            ? () => {
-                // The stats loop is the re-read: it subscribes once on
-                // mount and never re-subscribes, so a fresh error state
-                // cannot refire it from here alone. The URL is stable,
-                // so a full reload is the one honest retry this page
-                // owns — the card already carries the request id the
-                // admin needs.
-                window.location.reload();
-              }
-            : undefined
-        }
+        message={topicRestrictedMessage || undefined}
+        error={null}
+        hideTechnicalDetails={isRestricted}
+        // restricted и not found — осознанные ответы сервера, а не обрыв
+        // соединения. classifyError(null) без явного флага ставит диагноз
+        // "network", что вводит читателя в заблуждение.
+        isNetworkError={isNotFound || isRestricted ? false : undefined}
+        onRetry={undefined}
       />
     );
   }

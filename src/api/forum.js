@@ -139,8 +139,11 @@ export const fetchTopicStats = async (topicId) => {
   if (!res) return null;
   // Deleted / missing topic answers 200 {deleted: true} instead of a cascade
   // of 404s. Fold into null so the page renders the "Topic Not Found" card
-  // via the existing !stats branch in TopicPage.
-  if (res.deleted) return null;
+  // via the existing !stats branch in TopicPage. A restricted topic also
+  // answers 200 {deleted: true, restricted: true} — that is folded into a
+  // stats object carrying the restricted flag so the client can show
+  // "Access denied" instead of "Topic not found".
+  if (res.deleted && !res.restricted) return null;
   const createdDate = res.created || res.created_at || null;
   const lastPostDate = res.last_post_at || res.last_post_created || createdDate;
   return {
@@ -185,7 +188,13 @@ export const subscribeToTopicStats = (topicId, callback) => {
     fetch: () => fetchTopicStats(topicId),
     intervalMs: 15000,
     initialValue: null,
-    onError: (err) => console.warn('[subscribeToTopicStats err]', err),
+    // 403 is a truthful server answer (restricted category), not a failure —
+    // no point flooding the console with it on every 15s poll.
+    onError: (err) => {
+      if (err?.status !== 403) {
+        console.warn('[subscribeToTopicStats err]', err);
+      }
+    },
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
         (signalTopic, entityId) => {
@@ -205,11 +214,14 @@ export const subscribeToTopicStats = (topicId, callback) => {
   });
 
   // Same (data, err) SHAPE as subscribeToTopic: 404/403 means "not visible
-  // to you" (renders the not-found card), anything else is a real error.
+  // to you". 404 keeps the topic-not-found card (topic is gone). 403 means
+  // the topic exists but the caller's role is not in the category's
+  // allowed_roles — the caller must see "access denied", not "not found",
+  // so the raw error is passed through with its status intact.
   return poll.subscribe((stats, err) => {
     if (!err) {
       callback(stats, null);
-    } else if (err?.status === 404 || err?.status === 403) {
+    } else if (err?.status === 404) {
       callback(null, null);
     } else {
       callback(null, err);

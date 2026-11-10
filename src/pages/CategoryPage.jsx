@@ -32,6 +32,7 @@ const CategoryPage = () => {
   const [category, setCategory] = useState(null);
   const [pinnedTopics, setPinnedTopics] = useState([]);
   const [regularTopics, setRegularTopics] = useState([]);
+  const [categoryRestricted, setCategoryRestricted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -51,6 +52,16 @@ const CategoryPage = () => {
     setLoadError(null);
     try {
       const result = await fetchSecuredTopics(id, currentPage, ITEMS_PER_PAGE);
+      // The server answers 200 with restricted: true when the caller's role
+      // is not in the category's allowed_roles — render "access denied"
+      // instead of an empty topic list.
+      if (result.restricted) {
+        setCategoryRestricted(true);
+        setPinnedTopics([]);
+        setRegularTopics([]);
+        return;
+      }
+      setCategoryRestricted(false);
       setPinnedTopics(result.pinned || []);
       setRegularTopics(result.topics || []);
     } catch (err) {
@@ -163,11 +174,14 @@ const CategoryPage = () => {
       showToast(error.message, 'danger');
     }
   };
-  if (!loading && category && !hasPermission(PERMISSIONS.VIEW_FORUM, { category })) {
+  if (!loading && categoryRestricted) {
     return (
-      <Container className="py-5 text-center">
-        <h3 className="text-muted">{lang === 'ru' ? 'Категория не найдена или доступ запрещён' : 'Category not found or access denied'}</h3>
-      </Container>
+      <ErrorCard
+        title={lang === 'ru' ? 'Доступ запрещён' : 'Access Denied'}
+        error={null}
+        hideTechnicalDetails
+        onRetry={undefined}
+      />
     );
   }
 

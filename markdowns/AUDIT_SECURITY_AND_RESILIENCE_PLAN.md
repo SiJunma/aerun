@@ -30,7 +30,7 @@
 
 | ID | Область | Уровень риска | Суть проблемы | Согласованное решение |
 |---|---|---|---|---|
-| **SEC-01** | Авторизация / BOLA | **Критический** | Утечка постов приватных разделов через `GET /posts/{id}` и `GET /users/{id}/posts`. | Добавить валидацию `canViewTopic` в `getPostHandler` и фильтр доступных категорий в `listUserPostsHandler`. |
+| **SEC-01** | Авторизация / BOLA | **Критический** | Утечка постов приватных разделов через `GET /posts/{id}` и `GET /users/{id}/posts`. | Добавить валидацию `canViewTopic` в `getPostHandler` и фильтр доступных категорий в `listUserPostsHandler`. `getTopicHandler`/`getTopicStatsHandler` отвечают `200 {deleted: true, restricted: true, message: "topic is in a restricted category"}` для тем в закрытых категориях — без HTTP-ошибки, клиент показывает «Доступ запрещён» без технических деталей и без лишних запросов на посты/stats. |
 | **SEC-02** | XSS / HTML-контент | **Высокий** | Хрупкий regex-санитизатор и инъекция `<style>`/`<script>` обычными пользователями. | Собственный строгий санитизатор AST без внешних библиотек. Разделение прав: admin/root разрешены script/style/iframe, игрокам — жесткий whitelist тегов и атрибутов. |
 | **SEC-03** | PocketBase Rules | **Высокий** | `users.ViewRule` и `users.ListRule` открыты (`""`), утечка `users.settings` в обход DTO. | Новая Go-миграция, устанавливающая `users.ViewRule = nil` и `users.ListRule = nil`. |
 | **SEC-04** | Инфраструктура | **Высокий** | Панель `/_/` PocketBase открыта для брутфорса из публичного интернета. | Закрыть `/_/*` в Caddy IP-фильтром. Эндпоинты верификации почты и сброса паролей перенести в SPA. |
@@ -313,6 +313,7 @@ flowchart TD
 5. **`settings` в собственной записи это не утечка.** `authData.record` (authWithPassword/authRefresh) содержит полный `settings` — но только для самого владельца; публичные чтения идут через DTO. Проверено по коду: совпадений с прямыми чтениями коллекции в `src/` не осталось, кроме auth-вызовов.
 6. **Windows-окружение.** `go test` на этом хосте не запускается (shell не сообщает о завершении) — тесты компилируются и проверяются через `gofmt` + `go vet`, а полный прогон выполняется CI (`ci-report`). Не заменять локальный прогон на «кажется компилируется».
 7. **Тест `TestIdentityRbacMigration` в миграции тоже утверждал открытие.** Точка на `users.ListRule/ViewRule == openReadRule` контракта 1768100000 упала после 1770000013; тест обновлён на закрытые правила (nil), чтобы гейт не врал о безопасности.
+8. **Restricted категории отвечают `200`, а не `403`.** `getTopicHandler`/`getTopicStatsHandler`/`listTopicsHandler` возвращают `200 {deleted: true, restricted: true, message: "topic is in a restricted category"}` для тем/категорий в закрытых разделах. Клиент (`useTopicData` → `topicRestricted`, `CategoryPage` → `categoryRestricted`) показывает карточку «Доступ запрещён» с текстом сервера, без технических деталей и без запросов на посты/stats. Это避免вает HTTP-ошибки в Network-tab и оракул существования темы/категории.
 
 ### 5.2. Этап 2 — Контент и XSS (выполнено)
 

@@ -379,12 +379,16 @@ func listTopicsHandler(e *core.RequestEvent) error {
 	if categoryID != "" {
 		allowed, err := canViewCategory(e.App, acc, categoryID)
 		if err != nil || !allowed {
+			// Category exists but the caller's role is not in the category's
+			// allowed_roles — answer 200 with restricted flag so the client
+			// renders "access denied" without an HTTP error in Network tab.
 			return e.JSON(http.StatusOK, map[string]any{
 				"items":       []map[string]any{},
 				"total":       0,
 				"page":        page,
 				"per_page":    limit,
 				"next_cursor": "",
+				"restricted":  true,
 				"request_id":  requestIDFrom(e),
 			})
 		}
@@ -650,13 +654,29 @@ func getTopicStatsHandler(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
 	acc := AccessFrom(e)
 	allowed, topic, err := canViewTopic(e.App, acc, id)
-	if err != nil || !allowed || topic == nil {
+	if topic == nil {
 		// Deleted / missing topic answers 200 with a deleted flag instead of
 		// a cascade of 404s: the client gets one successful response and can
 		// render the "topic not found" card without round-tripping every
 		// endpoint.
 		return e.JSON(http.StatusOK, map[string]any{
 			"deleted":    true,
+			"topic_id":   id,
+			"request_id": requestIDFrom(e),
+		})
+	}
+	if err != nil {
+		return internalError("failed to read topic", err)
+	}
+	if !allowed {
+		// Topic exists but the caller's role is not in the category's
+		// allowed_roles — answer 200 with deleted + restricted so the
+		// client renders "access denied" without an HTTP error in the
+		// network tab.
+		return e.JSON(http.StatusOK, map[string]any{
+			"deleted":    true,
+			"restricted": true,
+			"message":    "topic is in a restricted category",
 			"topic_id":   id,
 			"request_id": requestIDFrom(e),
 		})
@@ -738,9 +758,25 @@ func getTopicHandler(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
 	acc := AccessFrom(e)
 	allowed, topic, err := canViewTopic(e.App, acc, id)
-	if err != nil || !allowed || topic == nil {
+	if topic == nil {
 		return e.JSON(http.StatusOK, map[string]any{
 			"deleted":    true,
+			"topic_id":   id,
+			"request_id": requestIDFrom(e),
+		})
+	}
+	if err != nil {
+		return internalError("failed to read topic", err)
+	}
+	if !allowed {
+		// Topic exists but the caller's role is not in the category's
+		// allowed_roles — answer 200 with deleted + restricted so the
+		// client renders "access denied" without an HTTP error in the
+		// network tab.
+		return e.JSON(http.StatusOK, map[string]any{
+			"deleted":    true,
+			"restricted": true,
+			"message":    "topic is in a restricted category",
 			"topic_id":   id,
 			"request_id": requestIDFrom(e),
 		})

@@ -72,6 +72,8 @@ export const useTopicPageCore = ({
   const {
     topic,
     topicNotFound,
+    topicRestricted,
+    topicRestrictedMessage,
     accessError,
     accessErrRaw,
     isTopicLoading,
@@ -147,6 +149,8 @@ export const useTopicPageCore = ({
     // Data
     topic,
     topicNotFound,
+    topicRestricted,
+    topicRestrictedMessage,
     accessError,
     accessErrRaw,
     isTopicLoading,
