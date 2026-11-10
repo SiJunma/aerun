@@ -182,9 +182,10 @@ func TestPublicProfileKeepsItsOwnerWhole(t *testing.T) {
 	}
 }
 
-// A stranger — guest, member, moderator or root — must receive empty strings
-// for personal profile fields of another account.
-func TestPublicProfileHidesPersonalFieldsFromStrangers(t *testing.T) {
+// A guest (no session) must receive empty strings for personal profile fields
+// of another account; any logged-in member (root, moderator, player) receives
+// the real values.
+func TestPublicProfileHidesPersonalFieldsFromGuest(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
@@ -193,18 +194,48 @@ func TestPublicProfileHidesPersonalFieldsFromStrangers(t *testing.T) {
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
-	// Every reader that is NOT the subject. (player IS the subject.)
-	for _, who := range []string{"", "root", "moderator"} {
+	// Guest only — no auth cookie.
+	status, body := getAerunAuthed(t, ts.URL+"/api/aerun/users/"+fixPlayerID, tokens[""])
+	if status != http.StatusOK {
+		t.Fatalf("guest: expected 200 reading another profile, got %d: %s", status, body)
+	}
+	// Guest must receive the response WITHOUT these keys at all.
+	for _, private := range []string{
+		`"bio"`, `"location"`, `"birthday"`, `"occupation"`,
+		`"interests"`, `"contacts"`,
+	} {
+		if bytes.Contains([]byte(body), []byte(private)) {
+			t.Errorf("guest's profile must not contain key %s at all: %s", private, body)
+		}
+	}
+}
+
+// Any logged-in member reading another member's profile receives the real
+// personal field values — they are not owner-only.
+func TestLoggedInMemberSeesAnotherMembersPersonalFields(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	seedPrivateProfile(t, app, fixPlayerID)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	for _, who := range []string{"root", "moderator"} {
 		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/users/"+fixPlayerID, tokens[who])
 		if status != http.StatusOK {
 			t.Fatalf("%q: expected 200 reading another profile, got %d: %s", who, status, body)
 		}
-		for _, private := range []string{
-			`"bio":""`, `"location":""`, `"birthday":""`, `"occupation":""`,
-			`"interests":""`, `"contacts":""`,
+		for _, want := range []string{
+			`"bio":"A wandering bard from the North."`,
+			`"location":"Winterfell"`,
+			`"birthday":"288-03-15"`,
+			`"occupation":"Bard"`,
+			`"interests":"Songs, stories, travel"`,
+			`"contacts":"raven@winterfell.wf"`,
 		} {
-			if !bytes.Contains([]byte(body), []byte(private)) {
-				t.Errorf("%q: stranger's profile must not leak %s: %s", who, private, body)
+			if !bytes.Contains([]byte(body), []byte(want)) {
+				t.Errorf("%q: logged-in member must see %s: %s", who, want, body)
 			}
 		}
 	}
@@ -237,14 +268,14 @@ func TestPublicProfileStillCarriesWhatThePageRenders(t *testing.T) {
 		}
 	}
 
-	// Personal profile fields must be empty for a guest: they are private
-	// to the account owner.
+	// Personal profile fields are NOT sent to a guest at all — the keys are
+	// simply absent from the response.
 	for _, private := range []string{
-		`"bio":""`, `"location":""`, `"birthday":""`, `"occupation":""`,
-		`"interests":""`, `"contacts":""`,
+		`"bio"`, `"location"`, `"birthday"`, `"occupation"`,
+		`"interests"`, `"contacts"`,
 	} {
-		if !bytes.Contains([]byte(body), []byte(private)) {
-			t.Errorf("guest's profile must not leak %s (got non-empty or missing): %s", private, body)
+		if bytes.Contains([]byte(body), []byte(private)) {
+			t.Errorf("guest's profile must not contain key %s at all: %s", private, body)
 		}
 	}
 }

@@ -94,17 +94,6 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		"avatar":         record.GetString("avatar"),
 		"avatar_url":     record.GetString("avatar_url"),
 		"status_line":    record.GetString("status_line"),
-		// Personal profile fields (bio, location, birthday, occupation,
-		// interests, contacts) are PRIVATE: they belong to the account owner
-		// alone. A stranger — guest or member — must not receive them. The owner
-		// gets them because Settings/ProfilePage pre-fills the edit form from this
-		// very payload.
-		"bio":            ownerOnlyField(e, record, "bio"),
-		"location":       ownerOnlyField(e, record, "location"),
-		"birthday":       ownerOnlyField(e, record, "birthday"),
-		"occupation":     ownerOnlyField(e, record, "occupation"),
-		"interests":      ownerOnlyField(e, record, "interests"),
-		"contacts":       ownerOnlyField(e, record, "contacts"),
 		"posts_count":    record.GetInt("posts_count"),
 		"topics_count":   record.GetInt("topics_count"),
 		"reputation":     record.GetInt("reputation"),
@@ -128,6 +117,16 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		"settings":   publicSettings,
 		"request_id": requestIDFrom(e),
 	}
+	// Personal profile fields (bio, location, birthday, occupation,
+	// interests, contacts) are added ONLY for logged-in callers. A guest
+	// receives the response without these keys at all — clean and empty.
+	addLoggedIn(e, payload, "bio", record.GetString("bio"))
+	addLoggedIn(e, payload, "location", record.GetString("location"))
+	addLoggedIn(e, payload, "birthday", record.GetString("birthday"))
+	addLoggedIn(e, payload, "occupation", record.GetString("occupation"))
+	addLoggedIn(e, payload, "interests", record.GetString("interests"))
+	addLoggedIn(e, payload, "contacts", record.GetString("contacts"))
+
 	if limit, err := characterLimitFor(e.App, record.Id); err == nil && limit > 0 {
 		payload["character_limit"] = limit
 	}
@@ -207,15 +206,14 @@ func registrationDay(record *core.Record) string {
 	return created.UTC().Format(time.DateOnly)
 }
 
-// ownerOnlyField returns the record's field value when the caller is the
-// account's owner, and an empty string otherwise. Personal profile fields
-// (bio, location, birthday, occupation, interests, contacts) are private to
-// the owner: a guest or another member must not receive them.
-func ownerOnlyField(e *core.RequestEvent, record *core.Record, field string) string {
-	if e.Auth == nil || e.Auth.Id != record.Id {
-		return ""
+// loggedInOnlyField returns the record's field value when the caller is
+// addLoggedIn adds key to payload only when the caller is authenticated.
+// Guests never receive the key at all — not even as an empty string — so
+// the response stays clean.
+func addLoggedIn(e *core.RequestEvent, payload map[string]any, key string, value any) {
+	if e.Auth != nil {
+		payload[key] = value
 	}
-	return record.GetString(field)
 }
 
 // GET /api/aerun/users — the public member board, the LIST counterpart of the
