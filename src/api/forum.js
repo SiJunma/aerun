@@ -290,7 +290,9 @@ export const fetchSecuredTopics = async (categoryId, page = 1, pageSize = 20) =>
     topics: items.filter(t => !t.is_pinned),
     total: res?.total ?? items.length,
     page: res?.page || page,
-    limit: res?.per_page || pageSize
+    limit: res?.per_page || pageSize,
+    restricted: res?.restricted || false,
+    message: res?.message || ''
   };
 };
 

@@ -33,6 +33,7 @@ const CategoryPage = () => {
   const [pinnedTopics, setPinnedTopics] = useState([]);
   const [regularTopics, setRegularTopics] = useState([]);
   const [categoryRestricted, setCategoryRestricted] = useState(false);
+  const [categoryRestrictedMessage, setCategoryRestrictedMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -57,6 +58,7 @@ const CategoryPage = () => {
       // instead of an empty topic list.
       if (result.restricted) {
         setCategoryRestricted(true);
+        setCategoryRestrictedMessage(result.message || '');
         setPinnedTopics([]);
         setRegularTopics([]);
         return;
@@ -178,6 +180,7 @@ const CategoryPage = () => {
     return (
       <ErrorCard
         title={lang === 'ru' ? 'Доступ запрещён' : 'Access Denied'}
+        message={categoryRestrictedMessage || undefined}
         error={null}
         hideTechnicalDetails
         onRetry={undefined}
