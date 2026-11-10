@@ -389,6 +389,7 @@ func listTopicsHandler(e *core.RequestEvent) error {
 				"per_page":    limit,
 				"next_cursor": "",
 				"restricted":  true,
+				"message":     "topic is in a restricted category",
 				"request_id":  requestIDFrom(e),
 			})
 		}
