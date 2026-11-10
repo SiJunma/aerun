@@ -130,12 +130,33 @@ func TestPublicProfileHidesPrivateSettings(t *testing.T) {
 		}
 	}
 }
+// seedPrivateProfile fills the personal (non-settings) profile fields so a
+// leak test can distinguish "the key exists but is empty" from "the value
+// itself leaked".
+func seedPrivateProfile(t *testing.T, app core.App, userID string) {
+	t.Helper()
+	record, err := app.FindRecordById(usersCollectionName, userID)
+	if err != nil || record == nil {
+		t.Fatalf("account %s missing: %v", userID, err)
+	}
+	record.Set("bio", "A wandering bard from the North.")
+	record.Set("location", "Winterfell")
+	record.Set("birthday", "288-03-15")
+	record.Set("occupation", "Bard")
+	record.Set("interests", "Songs, stories, travel")
+	record.Set("contacts", "raven@winterfell.wf")
+	if err := app.Save(record); err != nil {
+		t.Fatalf("failed to seed private profile: %v", err)
+	}
+}
+
 func TestPublicProfileKeepsItsOwnerWhole(t *testing.T) {
 	app := newAerunTestApp(t)
 	defer app.Cleanup()
 
 	tokens := seedIdentityFixtures(t, app)
 	seedPrivateSettings(t, app, fixPlayerID)
+	seedPrivateProfile(t, app, fixPlayerID)
 	ts := newTestServer(t, app)
 	defer ts.Close()
 
@@ -152,9 +173,42 @@ func TestPublicProfileKeepsItsOwnerWhole(t *testing.T) {
 			t.Errorf("your own profile must carry %s: %s", own, body)
 		}
 	}
+	// The owner must also receive their personal profile fields — ProfilePage
+	// pre-fills the edit form from this payload.
+	for _, own := range []string{`"bio"`, `"location"`, `"birthday"`, `"occupation"`, `"interests"`, `"contacts"`} {
+		if !bytes.Contains([]byte(body), []byte(own)) {
+			t.Errorf("your own profile must carry %s: %s", own, body)
+		}
+	}
 }
 
-// The profile page genuinely needs SOME keys off another account. A test that only
+// A stranger — guest, member, moderator or root — must receive empty strings
+// for personal profile fields of another account.
+func TestPublicProfileHidesPersonalFieldsFromStrangers(t *testing.T) {
+	app := newAerunTestApp(t)
+	defer app.Cleanup()
+
+	tokens := seedIdentityFixtures(t, app)
+	seedPrivateProfile(t, app, fixPlayerID)
+	ts := newTestServer(t, app)
+	defer ts.Close()
+
+	// Every reader that is NOT the subject. (player IS the subject.)
+	for _, who := range []string{"", "root", "moderator"} {
+		status, body := getAerunAuthed(t, ts.URL+"/api/aerun/users/"+fixPlayerID, tokens[who])
+		if status != http.StatusOK {
+			t.Fatalf("%q: expected 200 reading another profile, got %d: %s", who, status, body)
+		}
+		for _, private := range []string{
+			`"bio":""`, `"location":""`, `"birthday":""`, `"occupation":""`,
+			`"interests":""`, `"contacts":""`,
+		} {
+			if !bytes.Contains([]byte(body), []byte(private)) {
+				t.Errorf("%q: stranger's profile must not leak %s: %s", who, private, body)
+			}
+		}
+	}
+}// The profile page genuinely needs SOME keys off another account. A test that only
 // asserted absence would still pass on a payload that broke the page, so the keys
 // the UI renders are pinned here too.
 func TestPublicProfileStillCarriesWhatThePageRenders(t *testing.T) {
@@ -171,15 +225,26 @@ func TestPublicProfileStillCarriesWhatThePageRenders(t *testing.T) {
 	}
 
 	// The sidebar card reads nickname, status_line, avatar, post_count,
-	// reputation and role; the profile block reads bio, location, birthday,
-	// occupation, interests and contacts.
+	// reputation and role. The profile block reads bio, location, birthday,
+	// occupation, interests and contacts — but ONLY the account owner
+	// receives them; a guest gets empty strings.
 	for _, needed := range []string{
 		`"nickname"`, `"status_line"`, `"avatar_url"`, `"posts_count"`,
-		`"reputation"`, `"role"`, `"status"`, `"bio"`, `"location"`,
-		`"birthday"`, `"occupation"`, `"interests"`, `"contacts"`,
+		`"reputation"`, `"role"`, `"status"`,
 	} {
 		if !bytes.Contains([]byte(body), []byte(needed)) {
 			t.Errorf("the profile page renders %s, so the DTO must carry it: %s", needed, body)
+		}
+	}
+
+	// Personal profile fields must be empty for a guest: they are private
+	// to the account owner.
+	for _, private := range []string{
+		`"bio":""`, `"location":""`, `"birthday":""`, `"occupation":""`,
+		`"interests":""`, `"contacts":""`,
+	} {
+		if !bytes.Contains([]byte(body), []byte(private)) {
+			t.Errorf("guest's profile must not leak %s (got non-empty or missing): %s", private, body)
 		}
 	}
 }

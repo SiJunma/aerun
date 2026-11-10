@@ -94,12 +94,17 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		"avatar":         record.GetString("avatar"),
 		"avatar_url":     record.GetString("avatar_url"),
 		"status_line":    record.GetString("status_line"),
-		"bio":            record.GetString("bio"),
-		"location":       record.GetString("location"),
-		"birthday":       record.GetString("birthday"),
-		"occupation":     record.GetString("occupation"),
-		"interests":      record.GetString("interests"),
-		"contacts":       record.GetString("contacts"),
+		// Personal profile fields (bio, location, birthday, occupation,
+		// interests, contacts) are PRIVATE: they belong to the account owner
+		// alone. A stranger — guest or member — must not receive them. The owner
+		// gets them because Settings/ProfilePage pre-fills the edit form from this
+		// very payload.
+		"bio":            ownerOnlyField(e, record, "bio"),
+		"location":       ownerOnlyField(e, record, "location"),
+		"birthday":       ownerOnlyField(e, record, "birthday"),
+		"occupation":     ownerOnlyField(e, record, "occupation"),
+		"interests":      ownerOnlyField(e, record, "interests"),
+		"contacts":       ownerOnlyField(e, record, "contacts"),
 		"posts_count":    record.GetInt("posts_count"),
 		"topics_count":   record.GetInt("topics_count"),
 		"reputation":     record.GetInt("reputation"),
@@ -200,6 +205,17 @@ func registrationDay(record *core.Record) string {
 		return ""
 	}
 	return created.UTC().Format(time.DateOnly)
+}
+
+// ownerOnlyField returns the record's field value when the caller is the
+// account's owner, and an empty string otherwise. Personal profile fields
+// (bio, location, birthday, occupation, interests, contacts) are private to
+// the owner: a guest or another member must not receive them.
+func ownerOnlyField(e *core.RequestEvent, record *core.Record, field string) string {
+	if e.Auth == nil || e.Auth.Id != record.Id {
+		return ""
+	}
+	return record.GetString(field)
 }
 
 // GET /api/aerun/users — the public member board, the LIST counterpart of the
