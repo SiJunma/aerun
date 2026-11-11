@@ -466,6 +466,11 @@ export const translations = {
     admin: {
       title: "Admin Panel",
       dashboard: "Admin Dashboard",
+      nav: {
+        userAndAccess: "User & Access",
+        forumContent: "Forum Content",
+        system: "System"
+      },
       tabs: {
         settings: "Settings",
         designs: "Designs",
@@ -475,6 +480,13 @@ export const translations = {
         audit: "Audit Log"
       },
       settings: {
+        sections: {
+          general: "General",
+          limits: "Limits & Counts",
+          features: "Features",
+          identity: "Identity & Assets",
+          email: "Email Templates"
+        },
         general: "General Configuration",
         forum_name: "Forum Name",
         logo_url: "Forum Logo URL",
@@ -1358,6 +1370,11 @@ export const translations = {
     admin: {
       title: "Панель управления",
       dashboard: "Панель управления",
+      nav: {
+        userAndAccess: "Пользователи и Доступ",
+        forumContent: "Контент Форума",
+        system: "Система"
+      },
       tabs: {
         settings: "Настройки",
         designs: "Дизайны",
@@ -1367,6 +1384,13 @@ export const translations = {
         audit: "Журнал изменений"
       },
       settings: {
+        sections: {
+          general: "Общие",
+          limits: "Лимиты сообщений",
+          features: "Функции форума",
+          identity: "Идентичность и Брендинг",
+          email: "Почтовые шаблоны"
+        },
         general: "Общие настройки",
         forum_name: "Название форума",
         logo_url: "URL логотипа",

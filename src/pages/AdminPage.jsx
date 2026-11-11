@@ -22,8 +22,9 @@ import {
   UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2,
   Search, Award, Pin, Lock, Settings, MessageSquareOff,
   Bell, BellOff, ArrowRightLeft, Send, FilePen, User, Palette, Copy, Eye, EyeOff,
-  Layers, FolderTree, ShieldAlert
+  Layers, FolderTree, ShieldAlert, Menu
 } from 'lucide-react';
+import AdminSidebar from '../components/admin/AdminSidebar';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -56,6 +57,8 @@ const AdminPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'settings';
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -3079,58 +3082,58 @@ const AdminPage = () => {
   };
 
   return (
-    <Container className="py-5">
-      <ForumBreadcrumbs
-        items={[{ label: t('nav.admin'), active: true }]}
+    <div className="admin-dashboard-layout">
+      {/* Sidebar with Desktop Sticky and Mobile Offcanvas */}
+      <AdminSidebar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
       />
-      <h2 className="mb-4">{t('admin.dashboard')}</h2>
 
-      <Nav variant="tabs" activeKey={activeTab} className="mb-4 border-0" onSelect={(k) => setActiveTab(k)}>
-        {hasPermission(PERMISSIONS.MANAGE_FORUM) && (
-          <Nav.Item>
-            <Nav.Link eventKey="settings" className="px-4 fw-bold border-0">{t('admin.tabs.settings')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
-          <Nav.Item>
-            <Nav.Link eventKey="designs" className="px-4 fw-bold border-0">{t('admin.tabs.designs')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {(hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && (
-          <Nav.Item>
-            <Nav.Link eventKey="users" className="px-4 fw-bold border-0">{t('admin.tabs.users')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
-          <Nav.Item>
-            <Nav.Link eventKey="roles" className="px-4 fw-bold border-0">{t('admin.tabs.roles')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
-          <Nav.Item>
-            <Nav.Link eventKey="categories" className="px-4 fw-bold border-0">{t('admin.tabs.categories')}</Nav.Link>
-          </Nav.Item>
-        )}
-        {hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && (
-          <Nav.Item>
-            <Nav.Link eventKey="audit" className="px-4 fw-bold border-0">{t('admin.tabs.audit')}</Nav.Link>
-          </Nav.Item>
-        )}
-      </Nav>
+      {/* Main Content Area */}
+      <div className="admin-dashboard-content">
+        {/* Mobile top toggle bar (visible only on < lg screens) */}
+        <div className="admin-mobile-toggle-bar d-lg-none">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label="Open admin navigation"
+          >
+            <Menu size={18} className="me-2" />
+            <span>{t('admin.dashboard')}</span>
+          </Button>
+          <span className="text-muted small ms-auto fw-medium">
+            {t(`admin.tabs.${activeTab}`)}
+          </span>
+        </div>
 
-      {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
-      {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
-        <DesignsTab
-          designs={designs}
-          settings={settings}
-          updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
-          userId={user.uid}
-        />
-      )}
-      {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
-      {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
-      {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
-      {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
+        <div className="admin-dashboard-body p-3 p-md-4">
+          <ForumBreadcrumbs
+            items={[
+              { label: t('nav.admin'), active: false, link: '/admin' },
+              { label: t(`admin.tabs.${activeTab}`), active: true }
+            ]}
+          />
+
+          {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
+          {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
+            <DesignsTab
+              designs={designs}
+              settings={settings}
+              updateSettings={(newSettings) => updateGlobalSettings(newSettings, user.uid)}
+              userId={user.uid}
+            />
+          )}
+          {activeTab === 'users' && (hasPermission(PERMISSIONS.APPROVE_USERS) || hasPermission(PERMISSIONS.BAN_USERS) || hasPermission(PERMISSIONS.CHANGE_ROLES)) && renderUsers()}
+          {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
+          {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
+          {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
+        </div>
+      </div>
 
       {/* Role Modal */}
       <ForumModal
@@ -3948,7 +3951,7 @@ const AdminPage = () => {
         currentUserId={user?.uid || ''}
         onReauthWithGoogle={handleReauthForTransfer}
       />
-    </Container>
+    </div>
   );
 };
 

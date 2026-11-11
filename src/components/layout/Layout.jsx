@@ -16,6 +16,7 @@ const Layout = ({ children }) => {
   const { lang, t } = useI18n();
   const { activeDesign } = useDesign();
   const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   const sanitizedBanner = useMemo(() => {
     let rawHtml = '';
@@ -37,7 +38,7 @@ const Layout = ({ children }) => {
     <>
       <ForumBackground />
 
-      <div className="app-wrapper">
+      <div className={`app-wrapper ${isAdminRoute ? 'app-wrapper--admin' : ''}`}>
         <ConnectionStatusBanner />
         <Navigation />
 
@@ -55,25 +56,33 @@ const Layout = ({ children }) => {
           <div dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />
         )}
 
-        <main className="py-2">
-          <Container>
-            {children}
-          </Container>
+        <main className={isAdminRoute ? "admin-main-fullwidth" : "py-2"}>
+          {isAdminRoute ? (
+            <div className="admin-viewport-wrapper">
+              {children}
+            </div>
+          ) : (
+            <Container>
+              {children}
+            </Container>
+          )}
         </main>
       </div>
-      <footer className="footer-custom py-2 text-center">
-        <Container>
-          <p className="mb-0 small">
-            &copy; {new Date().getFullYear()} {
-              activeDesign?.forumTitle ? activeDesign.forumTitle : (
-                (typeof settings?.forumName === 'object' && settings.forumName !== null)
-                  ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-                  : (settings?.forumName || 'Aerun Forum')
-              )
-            }
-          </p>
-        </Container>
-      </footer>
+      {!isAdminRoute && (
+        <footer className="footer-custom py-2 text-center">
+          <Container>
+            <p className="mb-0 small">
+              &copy; {new Date().getFullYear()} {
+                activeDesign?.forumTitle ? activeDesign.forumTitle : (
+                  (typeof settings?.forumName === 'object' && settings.forumName !== null)
+                    ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+                    : (settings?.forumName || 'Aerun Forum')
+                )
+              }
+            </p>
+          </Container>
+        </footer>
+      )}
       <ScrollButtons />
     </>
   );
