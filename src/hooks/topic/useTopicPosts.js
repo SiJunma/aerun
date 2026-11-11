@@ -30,6 +30,7 @@ export const useTopicPosts = ({
   const [postsLoadError, setPostsLoadError] = useState(null);
 
   const activeFetchIdRef = useRef(0);
+  const activeFetchPromiseRef = useRef(null);
   const isFetchingPostsRef = useRef(false);
   const loadedPageRef = useRef(null);
   const skipNextLoadForPageRef = useRef(null);
@@ -75,8 +76,30 @@ export const useTopicPosts = ({
       return [];
     }
 
+    // In-flight deduplication: if an identical request is already traveling over
+    // the network, reuse its promise instead of issuing a second parallel GET.
+    const fetchKey = `${topicId}:${pageToFetch}:${itemsPerPage}:${targetPostId || ''}:${lastVisitMs || ''}`;
+    if (activeFetchPromiseRef.current && activeFetchPromiseRef.current.key === fetchKey) {
+      return activeFetchPromiseRef.current.promise;
+    }
+
     const currentFetchId = ++activeFetchIdRef.current;
     isFetchingPostsRef.current = pageToFetch;
+
+    const performFetch = async () => {
+      try {
+        return await fetchSecuredPosts(topicId, pageToFetch, itemsPerPage, lastVisitMs, targetPostId);
+      } finally {
+        if (activeFetchPromiseRef.current?.key === fetchKey) {
+          activeFetchPromiseRef.current = null;
+        }
+      }
+    };
+
+    activeFetchPromiseRef.current = {
+      key: fetchKey,
+      promise: performFetch(),
+    };
 
     try {
       const {
@@ -88,7 +111,7 @@ export const useTopicPosts = ({
         targetFound,
         movedToTopicId,
         deleted
-      } = await fetchSecuredPosts(topicId, pageToFetch, itemsPerPage, lastVisitMs, targetPostId);
+      } = await activeFetchPromiseRef.current.promise;
 
       // Discard stale responses from superseded requests
       if (currentFetchId !== activeFetchIdRef.current) {

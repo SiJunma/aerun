@@ -370,6 +370,7 @@ export default function TopicPage() {
   const [myDraft, setMyDraft] = useState(null);
   const [draftSaving, setDraftSaving] = useState(false);
   const draftJustPublishedRef = useRef(false);
+  const isSubmittingReplyRef = useRef(false);
   const replyInFlightRef = useRef(createInFlight());
   const rescueWrittenRef = useRef(null);
 
@@ -694,6 +695,7 @@ export default function TopicPage() {
     const publishedDraft = myDraft;
     if (!publishedDraft) return;
 
+    isSubmittingReplyRef.current = true;
     draftJustPublishedRef.current = true;
     setDraftSaving(true);
     recordActivity?.();
@@ -936,6 +938,7 @@ export default function TopicPage() {
       draftJustPublishedRef.current = false;
       showToast(friendlyDiceError(err, lang) || t('forum.draft_publish_error'), 'danger');
     } finally {
+      isSubmittingReplyRef.current = false;
       if (isMountedRef.current) {
         setDraftSaving(false);
       }
@@ -951,6 +954,7 @@ export default function TopicPage() {
       showToast(lang === 'ru' ? 'Введите ваш никнейм' : 'Please enter your nickname', 'danger');
       return;
     }
+    isSubmittingReplyRef.current = true;
     recordActivity?.();
 
     // 1. Generate unique temporary ID and save rollback snapshot
@@ -992,9 +996,6 @@ export default function TopicPage() {
         ...(ownNewStats ? { posts_count: ownNewStats.post_count, reputation: ownNewStats.reputation } : {}),
       };
     }
-
-    // Mark as read immediately (server-side)
-    markTopicRead?.(id);
 
     // Calculate pagination target (legacy parity: the REAL topic counter
     // decides where the optimistic post lands — a placeholder formula here
@@ -1040,6 +1041,11 @@ export default function TopicPage() {
         return next;
       }, { preventScrollReset: true, state: { pendingPostId: tempId } });
     } else {
+      // Same-page send: reset the jump latch so the unified scroll controller
+      // can position on post-${newPostId} once the server confirms it
+      // (onSuccess below sets pendingCreatedPostIdRef.current).
+      setAlreadyJumped(false);
+
       setPosts((prev) => {
         if (prev.some((p) => p.id === tempId)) return prev;
         return [...prev, optimisticPost];
@@ -1092,6 +1098,10 @@ export default function TopicPage() {
             // `post-${newPostId}` once the optimistic placeholder swaps to
             // the server ID.
             pendingCreatedPostIdRef.current = newPostId;
+            // Reset the jump latch so the scroll effect in useTopicJumpScroll
+            // (guarded by alreadyJumpedRef.current) can reposition on the
+            // confirmed post after a same-page send.
+            setAlreadyJumped(false);
             if (curCategoryId) {
               updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
                 id: newPostId,
@@ -1180,6 +1190,7 @@ export default function TopicPage() {
       // restore). Swallowed here — rethrowing just surfaced an unhandled
       // promise rejection.
     } finally {
+      isSubmittingReplyRef.current = false;
       if (isMountedRef.current) setSubmitting(false);
     }
   };
@@ -1350,13 +1361,17 @@ export default function TopicPage() {
   }, [user?.uid, id, topic?.id, topicNotFound, topicRestricted]);
 
   // 12. Quote notifications subscription (contract)
+  // Depend on topic?.id (primitive) instead of the `topic` object so that
+  // live stats updates (which create a new topic identity on every tick) do
+  // not tear down and re-open the subscription — that was Effect 12's
+  // "срыв подписки" generating duplicate quote-notification fetches.
   useEffect(() => {
-    if (!user?.uid || !id || !topic || topicNotFound || topicRestricted) return;
+    if (!user?.uid || !id || !topic?.id || topicNotFound || topicRestricted) return;
     const unsub = subscribeToTopicNotifications(user.uid, id, (activeQuotes) => {
       setUnreadQuotes(activeQuotes || []);
     });
     return () => unsub();
-  }, [user?.uid, id, topic, topicNotFound, topicRestricted]);
+  }, [user?.uid, id, topic?.id, topicNotFound, topicRestricted]);
 
   // Guest page fallback wait guard — contract marker for check-golast-overlay.mjs
   useEffect(() => {
@@ -1488,6 +1503,12 @@ export default function TopicPage() {
   // at the composer root element (forwardRef).
   const composerDocTopRef = useRef(null);
   useLayoutEffect(() => {
+    // While the member's own reply is in flight the local posts_count bump and
+    // optimistic insert already move content; compensating the scroll here
+    // would fight the same movement and produce jitter. Skip until the server
+    // confirms and isSubmittingReplyRef flips back to false.
+    if (isSubmittingReplyRef.current) return;
+
     const el = replyRef.current;
     if (!el || !el.isConnected) {
       composerDocTopRef.current = null;
@@ -1519,14 +1540,15 @@ export default function TopicPage() {
     // replyRef is a stable ref object; including it only satisfies the linter.
   }, [posts, replyRef]);
 
-  // 16. Load posts on page change
+  // 16. Load posts on page change or initial topic resolution
   const loadPostsRef = useRef(loadPosts);
   loadPostsRef.current = loadPosts;
+  const hasTopic = Boolean(topic);
 
   useEffect(() => {
-    if (!id || !topic || topicNotFound || topicRestricted) return;
+    if (!id || !hasTopic || topicNotFound || topicRestricted) return;
     loadPostsRef.current();
-  }, [id, topic, topicNotFound, topicRestricted, currentPage]);
+  }, [id, hasTopic, topicNotFound, topicRestricted, currentPage]);
 
   // 16b. Live updates from OTHER readers (legacy monolith parity).
   //
@@ -1586,6 +1608,18 @@ export default function TopicPage() {
     // needs no refetch — scrolling is the navigation effect's job.
     const jumpTargetId = searchParams.get('post');
     if (jumpTargetId && loadedPageRef.current === currentPage && postsRef.current.some((p) => p.id === jumpTargetId)) {
+      return;
+    }
+
+    // Own reply in flight: the posts_count bump came from our local optimistic update,
+    // not from a server post. Fetching now would only read stale pre-submit rows.
+    if (isSubmittingReplyRef.current) {
+      return;
+    }
+
+    // If the server's newest last_post_id is ALREADY rendered on this page (e.g. reconciled
+    // from our own submit onSuccess), there is nothing new to re-fetch from the server.
+    if (topic.last_post_id && postsRef.current.some((p) => p.id === topic.last_post_id)) {
       return;
     }
 

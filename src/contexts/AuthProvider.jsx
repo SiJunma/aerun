@@ -78,6 +78,21 @@ export const AuthProvider = ({ children }) => {
   // forum read that the member phase then has to duplicate or cancel.
   const [restored, setRestored] = useState(false);
 
+  // Debounce guard for refreshUnreadCounts: rapid successive reads
+  // (markTopicRead after a reply, then markAllRead, then notification mark-read)
+  // collapse into a single network request instead of firing one per call.
+  const refreshUnreadCountsTimerRef = useRef(null);
+  const debouncedRefreshUnreadCounts = useCallback((uid) => {
+    if (!uid) return;
+    if (refreshUnreadCountsTimerRef.current) {
+      clearTimeout(refreshUnreadCountsTimerRef.current);
+    }
+    refreshUnreadCountsTimerRef.current = setTimeout(() => {
+      refreshUnreadCountsTimerRef.current = null;
+      refreshUnreadCounts(uid);
+    }, 250);
+  }, []);
+
   // canPostGlobally mirrors the backend's AccessContext.CanPostGlobally():
   // staff always pass; everyone else needs active status AND a confirmed email.
   const canPostGlobally = useMemo(() => {
@@ -1272,9 +1287,9 @@ export const AuthProvider = ({ children }) => {
     // Without an explicit re-read they stay stale — the exact "clears itself
     // after a while" from the report. Best effort: a missed refresh only
     // delays the badge to the next tick.
-    refreshUnreadCounts(user.uid);
+    debouncedRefreshUnreadCounts(user.uid);
     refreshUnreadTopics();
-  }, [user?.uid, readMap]);
+  }, [user?.uid, readMap, debouncedRefreshUnreadCounts]);
 
   // markAllRead sends the ids to the server, which owns the read state now.
   //
@@ -1319,12 +1334,12 @@ export const AuthProvider = ({ children }) => {
       apiRecordAllTopicVisits(user.uid, ids);
       // Same staleness as the single read above: the badge counts the whole
       // board server-side, so re-read it instead of waiting for the next tick.
-      refreshUnreadCounts(user.uid);
+      debouncedRefreshUnreadCounts(user.uid);
       refreshUnreadTopics();
     } finally {
       setIsMarkingAllRead(false);
     }
-  }, [user?.uid, isMarkingAllRead]);
+  }, [user?.uid, isMarkingAllRead, debouncedRefreshUnreadCounts]);
 
   // Permission checks.
   //
