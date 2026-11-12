@@ -157,6 +157,10 @@ export const AuthProvider = ({ children }) => {
   const readMapRef = useRef({});
   readMapRef.current = readMap;
   const inFlightTopicVisitsRef = useRef(new Map());
+  // The last read cursor each topic was pinned to by a COMPLETED server write,
+  // keyed by `uid:topicId` — read state is per-account, so keying by uid keeps
+  // a shared-machine account switch from suppressing the new member's write.
+  const recordedTopicReadCursorsRef = useRef(new Map());
   // The same latest-value mirror for profile: presence and recordActivity
   // read it so they do not depend on the whole profile object (a new identity
   // on every refreshOwnProfile write re-beat presence twice per cold start).
@@ -1269,7 +1273,20 @@ export const AuthProvider = ({ children }) => {
     // topic look unread again, and relight the navbar badge (1).
     const existing = readMapRef.current[topicId];
     const existingOffset = existing?.offset ?? null;
-    if (offset !== null && existingOffset !== null && offset <= existingOffset) {
+    // Strictly-less, not equal. An EQUAL offset with a DIFFERENT last post is
+    // exactly "one new reply landed inside the same last page since the
+    // previous visit" — the cursor must move forward onto that reply.
+    // Blocking on equality deadlocked the mark-read: a goLast visit's
+    // jump-scroll caller recorded an offset one HIGHER than Effect 15 computes
+    // next time (posts.length vs length - 1 — the caller is fixed now, but
+    // readMap entries persisted by older builds still carry the inflated
+    // value), so the next visit's offset came back EQUAL and the guard
+    // silently swallowed the mark-read: the topic never left the unread list,
+    // and the network log showed no /read at all. Equal-offset same-post
+    // visits are still skipped — by the cursor guard below, which knows the
+    // pinned id — and a genuine backward navigation computes a STRICTLY
+    // SMALLER offset, which stays blocked.
+    if (offset !== null && existingOffset !== null && offset < existingOffset) {
       // We are not moving the server cursor here, so there is nothing to
       // refresh on the client — the server state is already correct. Do not
       // touch refreshUnreadCounts/refreshUnreadTopics, or we risk overwriting a
@@ -1286,14 +1303,37 @@ export const AuthProvider = ({ children }) => {
       c.last_post_topic_id === topicId ? { ...c, unread: false } : c
     )) : prev));
 
-    // Single-flight deduplication per topicId: if an identical visit is already traveling,
-    // reuse its promise so back-to-back callers don't issue concurrent duplicate POSTs.
-    const inFlightKey = `${topicId}:${offset ?? ''}:${lastVisiblePostId ?? ''}`;
+    // The server cursor is pinned to (created, id) of last_visible_post_id, so
+    // a second POST whose body carries the SAME post id cannot move anything —
+    // it is a byte-for-byte no-op. Two entry-path callers legitimately pin the
+    // same cursor: Effect 15 (posts displayed) and the jump-scroll effect
+    // (?post= / ?goLast=1 landing) both compute it from the last rendered
+    // post, with offsets that differ by one. The in-flight map below only
+    // collapses CONCURRENT callers, and the second call usually lands after
+    // the first POST has completed — exactly the duplicate pair the network
+    // log showed. This session-level record closes that gap. Only a pinned
+    // cursor is deduplicated: a null lastVisiblePostId stamps "now", and
+    // re-stamping later is NOT a no-op (it can swallow a reply that landed
+    // between the stamps), so those stay retryable.
+    const cursorKey = `${user.uid}:${topicId}`;
+    if (lastVisiblePostId && recordedTopicReadCursorsRef.current.get(cursorKey) === lastVisiblePostId) {
+      return;
+    }
+
+    // Single-flight deduplication per topic: if an identical visit is already
+    // traveling, reuse its promise so back-to-back callers don't issue
+    // concurrent duplicate POSTs. The key is the REQUEST BODY — offset is
+    // local bookkeeping the server never sees, so keying on it (as this used
+    // to) split identical bodies into two flights.
+    const inFlightKey = `${topicId}:${lastVisiblePostId ?? ''}`;
     let visitPromise = inFlightTopicVisitsRef.current.get(inFlightKey);
     if (!visitPromise) {
       visitPromise = (async () => {
         try {
-          await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+          const recorded = await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+          if (recorded && lastVisiblePostId) {
+            recordedTopicReadCursorsRef.current.set(cursorKey, lastVisiblePostId);
+          }
         } finally {
           inFlightTopicVisitsRef.current.delete(inFlightKey);
         }

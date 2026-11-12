@@ -623,6 +623,8 @@ if (el) {
 - `topicNotificationsResource` (строка ~96)
 Это гарантирует, что свежевыполненный первичный запрос при входе (< 1 с назад) не будет дублироваться реалтайм-переподключением.
 
+> **Дополнение (11 ноября 2026 г., верификация — раздел 11):** этот фикс оказался **недостаточным**. Guard `!inFlight` покрывал только случай «read в полёте», но синхронный replay позднего подписчика уже установленного хаба срабатывал **до** старта холодного `read()` — когда `lastReadOkAt === 0 && !inFlight` было всегда истинно. Полное устранение — перестановка `read()` перед `bindRealtimeHook` в `start()` (`shared-poll.js`), см. раздел 11.
+
 ---
 
 ### 9.3 Обновлённая матрица чекпоинтов
@@ -638,7 +640,7 @@ if (el) {
 
 ## 10. Итоги финализации и верификации (11 ноября 2026 г.)
 
-Все остаточные дефекты из разделов 9.1–9.2 устранены.
+Все остаточные дефекты из разделов 9.1–9.2 устранены. **Пост-релизная находка (раздел 11): фикс 9.2 оказался неполным — дубль `notifications` при входе в тему сохранялся и закрыт дополнительным исправлением в `shared-poll.js`.**
 
 ### 10.1 Список изменённых файлов
 
@@ -667,5 +669,270 @@ if (el) {
 | **3** | Цитаты и Realtime SSE | ✅ |
 | **4** | Скролл и jump-навигация | ✅ |
 
-**Документ готов к переименованию в `DONE_TOPIC_REPLY_NETWORK_STORM_AND_CLIENT_STATE.md`.**
+---
+
+## 11. Пост-релизная верификация: дубль `notifications` при входе в тему сохранялся после фикса 9.2 (11 ноября 2026 г.)
+
+### 11.1 Симптом и постановка
+
+После деплоя исправлений разделов 9.1–9.2 при входе в тему в DevTools по-прежнему фиксируются **ровно 2 одинаковых запроса** `GET /api/aerun/me/notifications?unread=true&type=quote&topic_id={id}` с разными `request_id`.
+
+Контрольный факт: прод-бандл `index-BLhe6Dhx.js` содержит `skipConnectReplayMs: 1e3` в **обоих** ресурсных конфигурациях (`notificationsResource` и `topicNotificationsResource`) — фикс 9.2 задеплоен, значит истинная причина — **другой механизм**, а не отсутствие опции.
+
+### 11.2 Опровержение предварительной гипотезы («медленный SSE»)
+
+Гипотеза: холодный `read()` из `start()` завершается быстро, SSE-соединение устанавливается позже, чем через `skipConnectReplayMs` (1000 мс) после успешного ответа → replay.
+
+Опровержение:
+1. PB_CONNECT ≈ 0.17 с (замер Фазы 5 в `DONE_INIT_PAGE_REQUESTS_DUPLICATES.md`). SSE-хэндшейк дольше 1 с — редкий edge case, а не стабильный дубль «на каждую загрузку темы».
+2. Хаб — **синглтон приложения**: `AuthProvider` (строка ~1202) и realtime-ресурсы счётчиков подписываются на маунте приложения; к моменту навигации в тему `hubEstablished = true`.
+3. Initiator-стек: **оба** запроса rooted в `subscribe` (React effect → subscribe → … → fetch); во втором стеке присутствует `await in S` — след очереди `queued`-replay, исполняемого из `finally` первого `read()`. При сценарии «таймер через >1 с» второй запрос был бы rooted в таймере с `onConnected` в async-цепочке — этого в наблюдаемых стеках нет.
+
+### 11.3 Истинный корневой механизм — синхронный replay позднего подписчика ДО старта холодного `read()`
+
+Ключевой узел, пропущенный фиксом 9.2 — `src/api/realtime-signals.js:404–406`:
+
+```js
+// A caller joining an already-established hub learns its state immediately
+if (hubEstablished && hubLastConnected !== null) {
+  try { onStateChange?.(hubLastConnected); } catch (e) { console.error(e); }
+}
+```
+
+Порядок внутри `start()` (`shared-poll.js`) до исправления: `bindRealtimeHook` (строка 362) выполнялся **раньше**, чем `read()` (строка 430).
+
+Пошаговая трассировка при входе в тему (хаб уже поднят):
+
+| Шаг | Место | Событие |
+|---|---|---|
+| 1 | `TopicPage.jsx:1370` → `subscribe()` → `start()` | старт ресурса |
+| 2 | `shared-poll.js:362` → `bindRealtimeHook` → `subscribeToRealtimeSignals` | **синхронный** `onStateChange(true)` (хаб уже установлен) → `onConnected()` |
+| 3 | `shared-poll.js:377–381` | `lastReadOkAt === 0` (читаний ещё не было) **и** `!inFlight` (`read()` ещё не вызван — он стоял на строке 430, ПОСЛЕ bind) → `requestRefresh()` → coalesce-таймер 250 мс |
+| 4 | `shared-poll.js:430` | `read()` → **Запрос №1**, `inFlight = true` |
+| 5 | через 250 мс | таймер coalescing → `read()` → `inFlight` → `queued = true` |
+| 6 | ответ Запроса №1 → `finally` (`shared-poll.js:304–309`) | `queued` → повторный `read()` → **Запрос №2** |
+
+**Почему `skipConnectReplayMs` структурно не работает на этом пути:** решение о replay принимается *до* того, как первичный `read()` вообще начат. Условие `(lastReadOkAt === 0 && !inFlight)` при таком порядке вызовов **всегда истинно**. Фикс из коммита `4b7e765` добавил guard `!inFlight` для случая «read в полёте», но не покрыл случай «read ещё не начат» — потому что `read()` стоял *после* привязки realtime.
+
+**Радиус поражения шире topic-уведомлений:** тот же механизм бьёт по любому realtime-ресурсу `sharedPoll`, чей хаб уже поднят на момент подписки (в т.ч. `notifications?limit=100`, `dm-unread`, topic stats).
+
+### 11.4 Исправление
+
+`src/api/shared-poll.js`, функция `start()`: холодный `read()` перенесён **до** `bindRealtimeHook`:
+
+```js
+const start = () => {
+  if (running) return;
+  running = true;
+  // ...visibilitychange...
+  read();                    // холодный read начинается ПЕРВЫМ: inFlight = true
+  if (realtime) {
+    setTransport('connecting');
+    realtimeBinding = bindRealtimeHook(realtime, { ... });  // синхронный onConnected
+    graceTimer = ...;                                       // видит inFlight = true → skip
+  } else {
+    setTransport('polling');
+    startTimer();
+  }
+};
+```
+
+- Синхронный `onConnected` (поздний подписчик поднятого хаба) теперь видит `inFlight = true` → skip существующим guard'ом `!inFlight`.
+- Асинхронное установление соединения в течение `skipConnectReplayMs` после read → skip; позже → replay по семантике freshness (корректный catch-up).
+- Немедленная отдача данных при холодном старте сохраняется.
+
+**Отвергнутая альтернатива** (перенос `read()` в `else`-ветку, только для polling): устранила бы дубль, но при настроенном realtime и мёртвом SSE лишила бы первичных данных до grace-таймера — до **10 секунд** пустого состояния (`REALTIME_GRACE_MS`).
+
+### 11.5 Верификация
+
+1. **Новый регрессионный тест** в `scripts/test-shared-poll.mjs`: «a SYNCHRONOUSLY connected hub costs ONE read» — realtime-хук вызывает `onStateChange(true)` **синхронно** внутри хука (точная модель позднего подписчика установленного хаба). На старом порядке — 2 read (холодный + coalesced replay), на новом — 1.
+2. `npm run test:shared-poll` — 23/23 ✅.
+3. `node scripts/check-dm-mutation-state.mjs` ✅ (контракт realtime-здоровья не задет).
+4. `npx eslint src/api/shared-poll.js` — 0 ошибок ✅.
+
+| Файл | Изменения |
+|---|---|
+| `src/api/shared-poll.js` | `read()` перенесён в начало `start()` (до `bindRealtimeHook`) + поясняющий комментарий о контракте. |
+| `scripts/test-shared-poll.mjs` | +регрессионный тест синхронного connect-replay. |
+
+**Прод-верификация после деплоя frontend:** открыть тему, в DevTools Network убедиться, что `notifications?unread=true&type=quote&topic_id=...` уходит **один** раз при входе.
+
+---
+
+## 12. Пост-релизная верификация: дубль `POST /topics/:id/read` при входе в тему с непрочитанными (11 ноября 2026 г.)
+
+### 12.1 Симптом
+
+После устранения дублей раздела 11 вход в тему с непрочитанными сообщениями фиксирует в DevTools **два** `POST /topics/:id/read` с **байт-в-байт идентичным** телом `{last_visible_post_id: "…"}` (подтверждено вкладкой Payload), между которыми вклинивается посторонний запрос. Рядом — повторные `unread-counts` и `topics?unread=1&…`.
+
+### 12.2 Механизм: два входных вызывающих пинняют один курсор, дедуп их не видит
+
+На входе в тему (переход из списка непрочитанных — ссылка с `?goLast=1`, либо deep-link `?post=`) срабатывают **два** независимых вызывающих `markTopicRead`, оба реализуют контракт «пин курса к последнему отрендеренному посту»:
+
+| Вызывающий | Место | Offset |
+|---|---|---|
+| **Effect 15** (посты отображены) | `TopicPage.jsx:1482` | `(page−1)·IPP + (posts.length − 1)` |
+| **Jump-scroll** (`?goLast=1` / `?post=` / `#post-`) | `useTopicJumpScroll.js:79` | `(page−1)·IPP + posts.length` |
+
+Оба вычисляют `lastRealPost.id` одинаково → **тела POST идентичны**, но offset'ы различаются на 1:
+
+1. Ключ single-flight `topicId:offset:postId` (`AuthProvider.jsx:1291`) включал offset → ключи различны → даже конкурентные вызовы не схлопывались.
+2. Более того, single-flight схлопывает только **конкуррентные** вызовы: second call обычно приходит после завершения первого POST (в логе между ними вклинивается другой запрос) → запись уже удалена из in-flight Map из `finally` → второй POST уходит в сеть.
+3. Серверная семантика (ADR ReadCursor): курсор пиннится к `(created, id)` поста из `last_visible_post_id`; offset сервером не принимается. Второй POST — чистый no-op.
+4. Повторные `unread-counts` / `topics?unread=1` — след `debouncedRefreshUnreadCounts` второго вызова (дебаунс 250 мс не покрывает разнесённые по времени вызовы).
+
+### 12.3 Исправление
+
+**`src/contexts/AuthProvider.jsx` (`markTopicRead`):**
+- Новый ref `recordedTopicReadCursorsRef` — Map `uid:topicId → lastVisiblePostId` **завершённых** серверных записей. Sequential guard: тот же post id уже успешно отправлен для этой темы → ранний выход. Локальные `readMap`/`setCategories` обновляются и при skip (offset-буккинг остаётся корректным), но сеть и `debouncedRefreshUnreadCounts` — нет (второй refresh порождал дубль `unread-counts`).
+- Дедупликация **только для pinned-cursor** записей: «now»-штамп (пустой `lastVisiblePostId`) посессионно не дедуплицируется — повторный «now» не является no-op (может поглотить реплику, пришедшую между штампами).
+- Ключ in-flight переключён с `topicId:offset:postId` на **тело запроса** `topicId:postId` — offset в теле отсутствует, поэтому старый ключ расщеплял идентичные тела на два полёта.
+- Ref заполняется только после **успешной** записи → упавший POST остаётся ретраебельным.
+- Ключ по `uid:topicId` — read state пер-аккаунтен, смена аккаунта на общей машине не подавляет запись нового участника.
+
+**`src/api/auth-resources.js` (`recordTopicVisit`):** возвращает boolean — завершилась ли серверная запись. Ранее возвращала `undefined` и глотала ошибки, из-за чего вызывающий не мог отличить успех от провала (нужно для пункта «ref только после успеха»).
+
+### 12.4 Что намеренно НЕ изменено
+
+- Расхождение offset'ов на 1 между Effect 15 и jump-scroll (legacy-несоответствие `posts.length` vs `posts.length − 1`) оставлено как есть: offset — локальный буккинг, курсор определяется post id; правка вызывающих потребовала бы ревизии гейтов `check-golast-overlay`/`check-forum-read-contract` без сетевой выгоды.
+- «Now»-штампы (`markTopicRead(newTopicId)` из `TopicFormPage`) — без посессионного дедупа, по причине выше.
+
+### 12.5 Верификация
+
+1. `npx eslint` изменённых файлов — 0 ошибок ✅.
+2. `node scripts/check-forum-read-contract.mjs`, `node scripts/check-golast-overlay.mjs`, `node scripts/check-identity-refresh.mjs` — зелёные ✅ (контракты вызова `markTopicRead` не задеты — правки только внутри `AuthProvider`).
+3. `npm run build` ✅.
+4. **Прод-верификация после деплоя frontend:** вход в тему с непрочитанными из списка (`?goLast=1`) → в Network ровно **один** `POST /topics/:id/read` и один пакет `unread-counts` + `topics?unread=1`.
+
+| Файл | Изменения |
+|---|---|
+| `src/contexts/AuthProvider.jsx` | `recordedTopicReadCursorsRef` + sequential cursor-guard; ключ in-flight переведён на тело (`topicId:postId`); запись ref только после успешного POST. |
+| `src/api/auth-resources.js` | `recordTopicVisit` возвращает boolean успеха серверной записи. |
+
+---
+
+## 13. Пост-релизная верификация: «второй» `topics?unread=1` после входа в тему — refresh остановленного ресурса (11 ноября 2026 г.)
+
+### 13.1 Симптом
+
+После устранения дублей `read` (раздел 12) вход в тему с непрочитанными из `/new-replies` показывает после единственного `POST /topics/:id/read` пару `unread-counts` + `topics?unread=1&page=1&limit=20`, а следом — ещё один `unread-counts` (Initiator второго `topics?unread`: цепочка `setTimeout ×2` — дебаунс 250 мс → coalesce 250 мс; таймлайн ставит его сразу за кластером входа в тему).
+
+### 13.2 Механизм 1 — refresh остановленного ресурса (пустой запрос в никуда)
+
+1. `subscribeToUnreadTopics` вызывается **только** из `NewRepliesPage.jsx:93` — ресурс `unread-topics:{page}:{pageSize}` живёт ровно пока открыта страница непрочитанных. Переход в тему размонтирует её → подписчиков 0 → `stop()` (транспорт → `idle`).
+2. `markTopicRead` после записи вызывает `debouncedRefreshUnreadCounts` → `refreshUnreadTopics()` → `poll.refresh()` — а `requestRefresh`/`read` в `shared-poll.js` **не проверяют `running`**: fetch уходит в сеть и на остановленном ресурсе, ответ доставляется нулю подписчиков.
+3. Результат: каждый вход в тему с непрочитанными платит **холостой** `GET /topics?unread=1` — ровно тот «второй вызов топика» из лога. Обратный путь в `/new-replies` в любом случае пере-подписывается и перечитывает (у ресурса нет `restartFreshMs`), так что пропущенный refresh ничего не стоил.
+4. Отчасти это объясняет и «unread-counts ×2» из Фазы 6: класс «refresh остановленного ресурса» не был закрыт системно.
+
+### 13.3 Механизм 2 — нефильтрованный realtime у счётчиков
+
+`subscribeToUnreadCounts` (`dms.js:230-238`) имеет realtime-обработчик `() => onDelivered()` **без фильтрации сигналов** — в отличие от всех остальных ресурсов (уведомления: `notification.new`, presence: `presence.update`, stats: по теме). Любой сигнал — включая `presence.update` (собственная активность при входе в тему, входы других участников) — будил `GET /me/unread-counts`. Комментарий над обработчиком при этом сам утверждает, что счётчики двигают только `dm.post` и `notification.new` — фильтр был забыт.
+
+### 13.4 Исправление
+
+**`src/api/auth-resources.js` (`refreshUnreadTopics`):** пропускать poll'ы с `getTransport() === 'idle'` (остановлен/не запускался) — refresh осмыслен только для ресурса, чьё значение кто-то рендерит.
+
+**`src/api/dms.js` (`refreshUnreadCounts`):** тот же liveness-guard — остановленный poll (например, оставшийся в карте после sign-out) не будится.
+
+**`src/api/dms.js` (realtime счётчиков):** фильтр `(signalTopic) => { if (signalTopic !== 'presence.update') onDelivered(); }` — минимальное исключение: убирает presence-шум, сохраняет реакцию на все прочие сигналы (включая `topic.post`, который действительно двигает `unread_topics` для прочитанных тем — консервативнее фильтра «только dm.post/notification.new»).
+
+### 13.5 Верификация
+
+1. `npx eslint` изменённых файлов — 0 ошибок ✅.
+2. `node scripts/check-dm-mutation-state.mjs` ✅ (структура realtime-обработчиков dms.js: `onStateChange,` сохранён построчно, число вызовов `subscribeToRealtimeSignals(` не изменено).
+3. `npm run build` ✅.
+4. **Прод-верификация после деплоя frontend:** вход в тему с непрочитанными из `/new-replies` → после `read` остаётся только `unread-counts` (нужный refresh живого ресурса-счётчика); `topics?unread=1` отсутствует до возврата на страницу непрочитанных; повторные `unread-counts` от presence-активности исчезают.
+
+| Файл | Изменения |
+|---|---|
+| `src/api/auth-resources.js` | `refreshUnreadTopics`: liveness-guard (`idle` → skip). |
+| `src/api/dms.js` | `refreshUnreadCounts`: liveness-guard; realtime-фильтр счётчиков — `presence.update` больше не будит `GET /me/unread-counts`. |
+
+---
+
+## 14. Пост-релизная верификация: дубль `notifications?unread=...` на ПОВТОРНОМ входе в тему (11 ноября 2026 г.)
+
+### 14.1 Симптом
+
+После фиксов разделов 11–13 первый вход в тему после инита — чистый (один `notifications?unread=true&type=quote&topic_id=…`). Но **повторный** вход (тема → главная → тема) даёт **два** одинаковых запроса. Initiator: оба запроса rooted в `subscribe`, у второго в цепочке `w → w → await in w` — след очереди `queued`-replay из `finally` первого чтения.
+
+### 14.2 Механизм: stale-clause connect-replay поверх в-полёте cold read на ре-входе
+
+1. Первый визит: cold read завершился → `lastReadOkAt` = timestamp того визита. Выход из темы → подписчиков 0 → ресурс stop.
+2. Повторный вход: `subscribe()` → `start()` → **сначала** cold read (`inFlight = true`, фикс раздела 11), затем bind realtime. Хаб уже поднят → `subscribeToRealtimeSignals` синхронно отдаёт `onStateChange(true)` → `onConnected()`.
+3. Проверка replay в `onConnected`: первая ветка (`lastReadOkAt === 0 && !inFlight`) — ложь (читания уже были); третья ветка `lastReadOkAt > 0 && Date.now() - lastReadOkAt > skipConnectReplayMs` — **истина**: timestamp предыдущего визита «протух» за минуты → `requestRefresh()` → coalesce-таймер 250 мс → cold read ещё в полёте → `queued = true` → после его завершения `finally` запускает повтор → **дубль**.
+
+Первый вход после инта чист, т.к. там `lastReadOkAt === 0` и `inFlight` отсекают replay. Третья ветка игнорировала тот факт, что cold read **прямо сейчас** в полёте и принесёт данные свежее любого `lastReadOkAt`.
+
+Тот же дефект бил и ресурсы **без** opt-in (`skipConnectReplayMs = 0`): первая ветка `!skipConnectReplayMs` срабатывала безусловно, в т.ч. поверх в-полёте cold read — отсюда `stats ×2` в кластере входа в тему (topic-stats resource).
+
+### 14.3 Исправление
+
+`src/api/shared-poll.js`, `onConnected`: replay пропускается **всегда, когда чтение уже в полёте** — его завершение и есть catch-up, fresher любой сталеc-арифметики; живой SSE дальше покрывает изменения сигналами (`notification.new` → `onDelivered` → refresh), а падение потента — `onDead` → `requestRefresh`. Условие сведено к:
+
+```js
+if (!inFlight
+  && (!skipConnectReplayMs
+    || lastReadOkAt === 0
+    || Date.now() - lastReadOkAt > skipConnectReplayMs)) {
+  requestRefresh();
+}
+```
+
+JSDoc `skipConnectReplayMs` обновлён: «0 = always replay (still skipped while a read is in flight…)». Grace-таймер (10 с, fallback «SSE так и не открылся») намеренно не изменён — там in-flight к моменту срабатывания давно нет, а catch-up при мёртвом стриме оправдан.
+
+### 14.4 Верификация
+
+1. **Новый регрессионный тест** `scripts/test-shared-poll.mjs`: «a STALE re-entry connect does not replay behind the in-flight cold read» — первый визит → stop → 1100 мс (за окном свежести) → ре-подписка + синхронный `onStateChange(true)` посреди в-полёте cold read. На старом условии — 3 read (визит + cold + replay), на новом — 2.
+2. `node --test scripts/test-shared-poll.mjs` — 24/24 ✅ (все прежние replay-кейсы — skip fresh / skip in-flight / stale / never-succeeded / unconditional — остались зелёными).
+3. `npx eslint` — 0 ошибок ✅; `check-dm-mutation-state` ✅; `npm run build` ✅.
+4. **Прод-верификация после деплоя frontend:** тема → главная → тема → ровно один `notifications?unread=…` на каждый вход; заодно `stats` в кластере входа должен появляться один раз.
+
+| Файл | Изменения |
+|---|---|
+| `src/api/shared-poll.js` | `onConnected`: replay пропускается при любом in-flight чтении (не только при `lastReadOkAt === 0`); JSDoc уточнён. |
+| `scripts/test-shared-poll.mjs` | +регрессионный тест stale re-entry. |
+
+---
+
+## 15. Пост-релизная верификация: `read` ВООБЩЕ не вызывается на входе в непрочитанную тему — deadlock на offset-арифметике (11 ноября 2026 г.)
+
+### 15.1 Симптом
+
+Вход в тему со страницы новых сообщений: **ни одного** `POST /topics/:id/read` в сети — тема не помечается прочитанной и остаётся в списке непрочитанных. (Пустой ответ `notifications?unread=true&type=quote&topic_id=…` — отдельная история: этот фильтр возвращает только непрочитанные ЦИТАТЫ/упоминания; если новое сообщение не цитировало автора, пусто — норма; в предыдущих тестовых визитах quote-уведомление было отрендерено и помечено прочитанным IntersectionObserver'ом.)
+
+### 15.2 Механизм: backward-offset guard + завышенный на 1 offset jump-scroll вызова
+
+Offset в `markTopicRead` — синтетический индекс последнего отрендеренного поста: `(page−1)·IPP + (posts.length − 1)` (Effect 15, `TopicPage.jsx:1473`). Но jump-scroll вызыватель (`useTopicJumpScroll.js:79`) считал `(page−1)·IPP + posts.length` — **на 1 больше**.
+
+Хронология (IPP=30, страница 22, «+1 новый ответ в пределах последней страницы»):
+
+| Шаг | Событие | readMap[topic].offset |
+|---|---|---|
+| Визит N (641 пост, len=11) | Effect 15: offset 630+10=**640** → POST, курсор → #641 | 640 |
+| Визит N, jump-scroll | offset 630+**11**=**641** → cursor-guard/in-flight гасят POST (то же тело), но **readMap обновляется до 641** | **641** |
+| Визит N+1 (642 поста — новый ответ #642, всё ещё страница 22, len=12) | Effect 15: offset 630+11=**641** → backward-guard `641 <= 641` → **RETURN, POST не вызывается** | 641 |
+
+**Deadlock:** каждый визит с ровно одним новым ответом в пределах последней страницы вычисляет offset, РАВНЫЙ записанному jump-вызовом предыдущего визита, и молча глотается. Тема навсегда непрочитана, `read` отсутствует в сети. Корень — до-исторический (инфляция +1 в jump-вызове и сравнение `<=` существовали до правок раздела 12), но проявился именно сейчас.
+
+Существенность: отравленное значение живёт в `localStorage` (`aerun_readmap_<uid>`) и переживает сессии; «самоизлечение» требовало бы двух новых ответов (offset +2).
+
+### 15.3 Исправление
+
+1. **`src/hooks/topic/useTopicJumpScroll.js:79`** — offset приведён к арифметике Effect 15: `+ (posts.length - 1)`. Оба вызывающих теперь вычисляют идентичный offset для одного экрана → расхождение, породившее отравление, устранено в корне.
+2. **`src/contexts/AuthProvider.jsx` (backward-guard)** — `offset <= existingOffset` → `offset < existingOffset`. Равный offset при **другом** post id («+1 ответ в той же странице») проходит guard → cursor-guard пропускает только совпадение по id → POST уходит, курсор двигается вперёд. Это также **лечит уже отравленные записи** немедленно (не требуя двух ответов). Назад-навигация вычисляет строго меньший offset и остаётся заблокированной; равный offset при том же post id отсекается cursor-guard'ом (созданным в разделе 12).
+
+### 15.4 Верификация
+
+1. `npx eslint` изменённых файлов — 0 ошибок ✅.
+2. `check-golast-overlay`, `check-forum-read-contract`, `check-dm-mutation-state` — зелёные ✅ (выражения offset ни одним гейтом не закреплены — проверено grep'ом).
+3. `npm run build` ✅.
+4. **Прод-верификация после деплоя frontend:** войти в непрочитанную тему (из раздела 15 сценарий: тема уже посещалась, затем +1 ответ) → `POST /topics/:id/read` уходит, тема покидает список непрочитанных; повторный вход без новых ответов → `read` отсутствует (cursor-guard — корректно).
+
+| Файл | Изменения |
+|---|---|
+| `src/hooks/topic/useTopicJumpScroll.js` | offset jump-вызова приведён к `+ (posts.length - 1)` (унификация с Effect 15). |
+| `src/contexts/AuthProvider.jsx` | backward-guard: `<=` → `<` — равный offset при другом post id больше не глотает mark-read (лечит отравленные записи). |
+
+**Документ готов к переименованию в `DONE_TOPIC_REPLY_NETWORK_STORM_AND_CLIENT_STATE.md` после прод-верификации исправлений разделов 11–15.**
 
