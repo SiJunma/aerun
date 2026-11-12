@@ -78,6 +78,36 @@ func canViewCategory(app core.App, acc AccessContext, categoryID string) (bool, 
 	return slices.Contains(allowedRoles, string(acc.Role)), nil
 }
 
+// resolveAllowedCategoryIDs returns the ids of every category the caller may
+// view, by consulting canViewCategory for each stored category.
+//
+// The list is resolved in Go rather than in SQL because the decision lives
+// there: allowed_roles is a JSON list, the inherit marker delegates to the
+// caller's own view_forum permission, root bypasses, and a banned account is
+// denied before the bypass is consulted. None of that is expressible as an
+// SQL predicate without a second copy of the rule to drift.
+//
+// An empty result is a real state, not an error: a caller with no readable
+// category reads nothing, and callers answer with an empty page rather than a
+// `dbx.In` over an empty slice, which renders as invalid SQL.
+func resolveAllowedCategoryIDs(app core.App, acc AccessContext) ([]string, error) {
+	cats, err := app.FindAllRecords(categoriesCollectionName, nil)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make([]string, 0, len(cats))
+	for _, c := range cats {
+		ok, err := canViewCategory(app, acc, c.Id)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			allowed = append(allowed, c.Id)
+		}
+	}
+	return allowed, nil
+}
+
 // canViewTopic checks whether the given AccessContext has permission to view
 // the topic (and its parent category).
 func canViewTopic(app core.App, acc AccessContext, topicID string) (bool, *core.Record, error) {

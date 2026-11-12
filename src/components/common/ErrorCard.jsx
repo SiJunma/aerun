@@ -67,6 +67,11 @@ const ErrorCard = ({
   // kind, which is right only when the caller genuinely knows better than the
   // status code (a client-side timeout, for instance).
   isNetworkError,
+  // When true, the "Technical Details" button and stack-trace block are
+  // suppressed entirely. Right for access-denied (403) responses: the reader
+  // already has the server's explanation, and dumping the stack trace is
+  // noise, not help.
+  hideTechnicalDetails = false,
   className = 'my-4'
 }) => {
   const { lang } = useI18n();
@@ -136,7 +141,7 @@ const ErrorCard = ({
           >
             {lang === 'ru' ? 'Перезагрузить страницу' : 'Reload Page'}
           </Button>
-          {errorString && (
+          {!hideTechnicalDetails && errorString && (
             <Button
               variant="outline-danger"
               size="sm"
@@ -149,7 +154,7 @@ const ErrorCard = ({
           )}
         </div>
 
-        {errorString && (
+        {!hideTechnicalDetails && errorString && (
           <Collapse in={showDetails}>
             <div className="mt-3 text-start mx-auto" style={{ maxWidth: '700px' }}>
               <div className="p-3 rounded" style={{ background: 'var(--block-bg, rgba(0,0,0,0.1))', border: '1px solid var(--border-color)', fontSize: '0.8rem', fontFamily: 'monospace' }}>

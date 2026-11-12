@@ -52,6 +52,45 @@ import { pb } from './pocketbase.js';
  */
 const CONNECTION_POLL_MS = 5000;
 
+/**
+ * How long a stream may be SILENT before we count it as flapping.
+ *
+ * PocketBase v0.40.4 has no SSE keepalive: an idle forum emits nothing, and
+ * Cloudflare's edge idle-closes a stream that carries no bytes for ~100s.
+ * Every idle open page would otherwise reconnect every few minutes — the
+ * client sees one drop and then a reconnect storm. The server now publishes
+ * a keepalive signal every 25s (see realtimeKeepaliveInterval in
+ * realtime_signals.go), which resets PocketBase's idle timer AND the edge's.
+ * The client must NEVER treat keepalive as forum content, but it DOES prove
+ * the stream is carrying bytes. If we see no keepalive AND no real signal
+ * for SILENT_MS we assume a Cloudflare idle-close / QUIC reset and park the
+ * hub into polling so the page does not storm — the next genuine member join
+ * or token rotation reopens it. This is the frontend half of the fix; the
+ * backend half is the ticker.
+ */
+const SILENT_MS = 90_000;
+
+/**
+ * Circuit breaker for the realtime hub.
+ *
+ * The PocketBase SDK reconnects its EventSource on its own with backoff and
+ * never tells us a connection died. When the edge keeps resetting the stream
+ * (the QUIC-protocol-error storm: the browser sees `net::ERR_QUIC_PROTOCOL_ERROR`
+ * on every `GET /api/realtime`), the SDK alone would keep reopening a doomed
+ * socket for the whole session — that is what fills DevTools with the same
+ * error line for minutes while polling already covers freshness. One dead
+ * hub retry the SDK makes is free; an endless per-session storm is not.
+ *
+ * So the hub gives up after MAX_FAILURES failed handshakes (with
+ * increasing backoff between retries) and stays dead — callers are already on
+ * their polling fallback — until the next genuine open: a new member joins,
+ * the last member leaves and returns, or the auth token rotates. A success
+ * resets the counter, so a stream that flaps once and then holds is never
+ * parked for the session.
+ */
+const MAX_FAILURES = 3;
+const RETRY_BASE_MS = 2000;
+
 // ── The hub ──────────────────────────────────────────────────────────────────
 //
 // Every call site used to open its OWN SDK subscription to the same topic. The
@@ -73,7 +112,7 @@ const CONNECTION_POLL_MS = 5000;
 // rebinds on a token change with the SAME uid — their effects key on
 // `user?.uid`. The hub watches the auth store and rebuilds the stream when the
 // token actually changes under live membership.
-const hubMembers = new Set();
+let hubMembers = new Set();
 let hubUnsubscribe = null;
 let hubWatcher = null;
 let hubEstablished = false;
@@ -86,6 +125,23 @@ let hubPending = false;
 let hubLastConnected = null;
 let hubGeneration = 0;
 let hubLastToken = null;
+// Circuit-breaker state (see MAX_FAILURES): consecutive failed handshakes
+// since the last success, and the parked-until timer.
+let hubFailures = 0;
+let hubRetryTimer = null;
+let hubCircuitOpen = false;
+// Last time ANY bytes arrived on the SSE stream (real signal or keepalive).
+// Used by the silent-stream guard in the watcher: a stream that has been
+// established for a while but has delivered nothing — not even keepalive —
+// is a Cloudflare idle-close / QUIC reset that the SDK is papering over
+// with silent reconnects. We count that as dead and park the hub.
+let hubLastBytesAt = 0;
+// Latest `pb.realtime.isConnected` value read by the watcher. The silent
+// check must never park over a sample taken from the previous connection
+// generation: during an SDK reconnect it can briefly look false/true while
+// server delivery is irrelevant. A false→true transition therefore starts a
+// fresh observation window.
+let hubConnectedAtLastCheck = null;
 
 const broadcastState = (connected) => {
   if (connected === hubLastConnected) return;
@@ -101,6 +157,44 @@ const broadcastDead = () => {
   });
 };
 
+// Parks the hub for the silent-guard path (as opposed to the handshake
+// circuit breaker). Unlike the breaker, a silently parked hue MUST come
+// back on its own after a delay, so an open page is never permanently stuck
+// on polling until the browser is reloaded. closeHub clears the recovery
+// timer, so a deliberate final departure cannot resurrect it.
+const parkHubSilently = () => {
+  if (!hubMembers.size) return;
+  // The recovery timeout must survive closeHub() clearing a retry timer
+  // scheduled by the failing handshake, but an old timer from another cycle
+  // must not resurrect this hub twice. Keep the freshest sender.
+  if (hubSilentRecoveryTimer) {
+    clearTimeout(hubSilentRecoveryTimer);
+    hubSilentRecoveryTimer = null;
+  }
+  hubCircuitOpen = true;
+  const keepMembers = new Set(hubMembers);
+  closeHub();
+  hubMembers = keepMembers;
+  // Re-arm the timer after closeHub() cleared any pre-existing one. The
+  // recovery callback is independent of closeHub's generation guard because
+  // closeHub() intentionally bumps it; instead, watch membership — the only
+  // genuine close is the last member leaving.
+  hubSilentRecoveryTimer = setTimeout(() => {
+    hubSilentRecoveryTimer = null;
+    if (hubMembers.size === 0) return;
+    hubCircuitOpen = false;
+    ensureHub(true);
+  }, SILENT_RETRY_MS);
+};
+
+const SILENT_RETRY_MS = 30_000;
+
+// Set by parkHubSilently(); consulted by ensureHub so a parked watch may
+// re-establish itself once its delay has expired. It is kept separate from
+// hubCircuitOpen: the breaker parks until a genuine open, whereas the silent
+// guard parks only for a bounded retry cycle.
+let hubSilentRecoveryTimer = null;
+
 const closeHub = () => {
   // Bump the generation first: a subscription promise that was still
   // negotiating must see itself stale instead of re-opening the stream for
@@ -108,17 +202,30 @@ const closeHub = () => {
   hubGeneration += 1;
   hubPending = false;
   if (hubWatcher) { clearInterval(hubWatcher); hubWatcher = null; }
+  if (hubRetryTimer) { clearTimeout(hubRetryTimer); hubRetryTimer = null; }
+  if (hubSilentRecoveryTimer) { clearTimeout(hubSilentRecoveryTimer); hubSilentRecoveryTimer = null; }
+  // An empty membership is a fresh start, not a continuation: the next
+  // member joins a hub that has never failed, so the failure count earned
+  // by a previous session of members does not follow it.
+  if (hubMembers.size === 0) hubFailures = 0;
   const unsub = hubUnsubscribe;
   hubUnsubscribe = null;
   hubEstablished = false;
   hubLastConnected = null;
+  hubLastBytesAt = 0;
+  hubConnectedAtLastCheck = null;
   if (typeof unsub === 'function') {
     try { unsub(); } catch { /* already closed */ }
   }
 };
 
-const ensureHub = () => {
+const ensureHub = (force = false) => {
   if (hubEstablished || hubPending || hubUnsubscribe) return;
+  // Circuit breaker: after MAX_FAILURES consecutive failed handshakes the
+  // hub parks itself and only retries on a genuine open (a new member, or
+  // a token rotation), not on every timer tick — otherwise a doomed stream
+  // reproduces the exact reconnect storm this guard exists to stop.
+  if (hubCircuitOpen && !force) return;
   const generation = hubGeneration;
   hubPending = true;
   hubLastToken = pb.authStore.token;
@@ -137,6 +244,13 @@ const ensureHub = () => {
     // `connect()`, which resolves its pending connects inside the PB_CONNECT
     // handler, after the client id has been negotiated.
     const pending = pb.collection('realtime_signals').subscribe('*', (_event, record) => {
+      // ANY bytes prove the stream is carrying. The backend keepalive
+      // (presence.heartbeat-keepalive, every 25s) is deliberately NOT forum
+      // content: it updates hubLastBytesAt and then is swallowed, never
+      // forwarded to members. Real signals update the timestamp AND are
+      // forwarded as nudges.
+      hubLastBytesAt = Date.now();
+      if (record?.topic === 'presence.heartbeat-keepalive') return;
       // The id is a nudge target, not a permission: the client still has to ask
       // `/api/aerun` for anything real, and that request is what enforces access.
       hubMembers.forEach((member) => {
@@ -155,12 +269,44 @@ const ensureHub = () => {
         }
         hubUnsubscribe = unsub;
         hubEstablished = true;
+        hubFailures = 0;
+        hubCircuitOpen = false;
+        hubLastBytesAt = Date.now();
+        hubConnectedAtLastCheck = false;
         broadcastState(true);
         // Watches for the drop the SDK does not announce, and for the reconnect
         // it makes on its own. ONE watcher for every member of the hub.
         hubWatcher = setInterval(() => {
           if (hubMembers.size === 0) return;
-          broadcastState(!!pb.realtime?.isConnected);
+          const connected = !!pb.realtime?.isConnected;
+          if (!connected) {
+            broadcastState(false);
+            hubConnectedAtLastCheck = false;
+            return;
+          }
+          // Stream is "connected" per the SDK, but has it CARRIED bytes
+          // recently? PocketBase v0.40.4 has no keepalive: an idle forum
+          // emits nothing, Cloudflare idle-closes at ~100s, and the SDK
+          // silently reconnects — from the page's perspective that is a
+          // healthy stream that never delivers. The backend keepalive
+          // (every 25s) now proves carriage; if we have seen NOTHING
+          // (not even keepalive) for SILENT_MS we assume an idle-close /
+          // QUIC reset and park the hub into polling instead of storming.
+          // A false→true sample is an SDK reconnect, so start a fresh
+          // observation window instead of parking over bytes from the
+          // previous generation of the connection.
+          if (!hubConnectedAtLastCheck) {
+            hubLastBytesAt = Date.now();
+            hubConnectedAtLastCheck = true;
+          }
+          // The next genuine member join reopens it (see subscribeToRealtimeSignals).
+          if (hubLastBytesAt && Date.now() - hubLastBytesAt > SILENT_MS) {
+            console.warn('[realtime-signals] stream silent for >90s (no keepalive, no signal); parking hub into polling');
+            broadcastDead();
+            parkHubSilently();
+            return;
+          }
+          broadcastState(true);
         }, CONNECTION_POLL_MS);
       })
       .catch((err) => {
@@ -171,7 +317,34 @@ const ensureHub = () => {
         if (generation !== hubGeneration || hubMembers.size === 0) return;
         console.warn('[realtime-signals] subscription failed; polling will cover it', err);
         broadcastDead();
+        hubFailures += 1;
+        // Set the retry timer BEFORE closing: closeHub clears any pending
+        // retry timer, so a timer created after the close would still work
+        // here, but ordering it before keeps one code path — close cancels
+        // retries it does not own, never the one this failure just earned.
+        if (hubFailures < MAX_FAILURES) {
+          // Back off before the SDK is asked again: an immediate tight
+          // retry loop is the same storm as an unbounded one, just faster.
+          const generationAtFail = hubGeneration;
+          hubRetryTimer = setTimeout(() => {
+            hubRetryTimer = null;
+            if (generationAtFail !== hubGeneration) return;
+            if (hubMembers.size === 0) return;
+            ensureHub();
+          }, RETRY_BASE_MS * Math.pow(2, hubFailures - 1));
+        } else {
+          // MAX_FAILURES strikes: park the hub. Polling carries freshness
+          // from here; the stream only comes back on a genuine open
+          // (new member, last-leave reset, or token rotation).
+          hubCircuitOpen = true;
+          console.warn('[realtime-signals] realtime stream parked; polling will cover it until the next join or token change');
+          return;
+        }
+        const keepTimer = hubRetryTimer;
         closeHub();
+        // closeHub cancels pending retries — restore the one this failure
+        // just scheduled, it is the backoff this failure earned.
+        hubRetryTimer = keepTimer;
       });
   } catch (err) {
     console.warn('[realtime-signals] could not subscribe; polling will cover it', err);
@@ -191,7 +364,7 @@ pb.authStore.onChange(() => {
   hubLastToken = token;
   if (hubMembers.size === 0) return;
   closeHub();
-  ensureHub();
+  ensureHub(true);
 });
 
 /**
@@ -217,6 +390,11 @@ export const subscribeToRealtimeSignals = (onEvent, onDead, onStateChange) => {
   let cancelled = false;
 
   hubMembers.add(member);
+  // A new member joining a parked hub is a genuine open: the circuit opens
+  // only so the hub stops retrying on its own timers — a fresh caller gets
+  // one force-retry. Without this a long-lived page whose stream parked
+  // during one network blip would never try realtime again.
+  if (hubCircuitOpen) hubCircuitOpen = false;
   ensureHub();
   // A caller joining an already-established hub learns its state immediately:
   // the hub's own subscribe promise resolved long ago and will not fire again,

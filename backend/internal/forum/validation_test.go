@@ -30,6 +30,22 @@ func TestValidateTopicTitle(t *testing.T) {
 			input:   strings.Repeat("a", forum.MaxTopicTitleLen+1),
 			wantErr: forum.ErrTopicTitleTooLong,
 		},
+		{
+			name:    "CRLF title is refused (SEC-07 header injection)",
+			input:   "Hello\r\nX-Injected: yes",
+			wantErr: forum.ErrTopicTitleCRLF,
+		},
+		{
+			name:    "bare LF title is refused (SEC-07 header injection)",
+			input:   "Hello\nworld",
+			wantErr: forum.ErrTopicTitleCRLF,
+		},
+		{
+			name:    "leading newline is trimmed away, not an error",
+			input:   "\nHello World",
+			wantErr: nil,
+			want:    "Hello World",
+		},
 	}
 
 	for _, tc := range cases {
@@ -42,6 +58,19 @@ func TestValidateTopicTitle(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tc.want, got)
 			}
 		})
+	}
+}
+
+// TestValidateGuestNicknameCRLF pins SEC-07 for the guest nickname, which
+// reaches the DM subject exactly like a topic title reaches its template.
+func TestValidateGuestNicknameCRLF(t *testing.T) {
+	for _, input := range []string{"Nickname\r\nX-Injected: 1", "Nick\nname", "A\rB"} {
+		if _, err := forum.ValidateGuestNickname(input); err != forum.ErrGuestNicknameCRLF {
+			t.Fatalf("expected ErrGuestNicknameCRLF for %q, got %v", input, err)
+		}
+	}
+	if got, err := forum.ValidateGuestNickname("Regular Nick"); err != nil || got != "Regular Nick" {
+		t.Fatalf("a clean nickname must pass, got %q / %v", got, err)
 	}
 }
 

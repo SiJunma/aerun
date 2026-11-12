@@ -245,8 +245,9 @@ check(
 check(
   /publishPresenceSignal\(app\[0\]\)/.test(presenceGo) &&
     /realtimeSignalPresenceUpdate = "presence\.update"/.test(realtimeGo) &&
-    /func publishPresenceSignal\(app core\.App\)/.test(realtimeGo),
-  'presence transitions must publish a debounced presence.update signal'
+    /func publishPresenceSignal\(app core\.App\)/.test(realtimeGo) &&
+    /notifyStaffOfRegistration\(e\.App, record, adminMessage\)[\s\S]{0,300}publishPresenceSignal\(e\.App\)/.test(read('../backend/internal/platform/pocketbase/register.go')),
+  'registration must publish a debounced presence.update signal so forumStats re-reads'
 );
 // The client half of the same contract.
 check(
@@ -266,6 +267,11 @@ check(
 check(
   /topic === 'presence\.update'/.test(presence),
   'the status poll must re-read on presence.update instead of waiting for the next tick'
+);
+check(
+  /topic === 'topic\.post' \|\| topic === 'presence\.update'/.test(authProvider),
+  'the forum-state realtime subscription must re-read on presence.update as well as topic.post — ' +
+    'registration publishes presence.update, and without it the latest-registered row stays stale until a post'
 );
 // No local guest masking (AUDIT §3.1): the server removes the guest row on
 // login, so whatever remains is a real guest. A client-side hide only works

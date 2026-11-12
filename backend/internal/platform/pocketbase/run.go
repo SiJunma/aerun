@@ -42,7 +42,21 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		DefaultEncryptionEnv: "AERUN_ENCRYPTION_KEY",
 	})
 
+	// SSE keepalive — bound on OnServe (AFTER apis.Serve has run
+	// RunAllMigrations; OnBootstrap fires BEFORE migrations, and at that
+	// point the realtime_signals collection does not exist yet, so
+	// publishSignal fails silently and no keepalive bytes ever flow —
+	// the stream idles out exactly as before). PocketBase v0.40.4 closes
+	// a realtime connection after IdleTimeout (5m default) of SILENCE on
+	// the client channel; Cloudflare's edge and the browser both idle-
+	// close a stream that carries no bytes for ~100s. An idle forum emits
+	// no signals, so every open page otherwise reconnects every few
+	// minutes by design: that is the "one drop, then a storm" the client
+	// sees. Raising the timeout alone postpones it; keeping the stream
+	// warm is what stops it.
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		registerRealtimeKeepalive(se.App)
+		logger.Info("realtime keepalive hook registered")
 		se.Router.BindFunc(assignRequestID)
 		// PocketBase starts its scheduler from an OnServe hook bound at
 		// priority 999, so a job registered here is always in place before the
@@ -62,6 +76,10 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		// physical removal is a separate job that runs after every participant
 		// has released the messages.
 		if err := registerDMCollectorCron(se.App); err != nil {
+			return err
+		}
+		// SEC-09: prune idempotency keys older than 48 hours
+		if err := registerIdempotencyPruneCron(se.App); err != nil {
 			return err
 		}
 		// Fail fast on a binary/data-directory mismatch. touchMemberLastSeen
@@ -263,6 +281,14 @@ func registerRoutes(se *core.ServeEvent, cfg config.Config) {
 	// AFTER the resolver, because the status it reads comes from the resolved
 	// access context.
 	group.BindFunc(requireLiveAccount)
+	// The configured public origin, stashed so handlers that need it (the
+	// guest principal cookie's Secure decision) can read it without taking
+	// config.Config — the same reason RequirePermission closes over the
+	// resolver's context rather than a parameter.
+	group.BindFunc(func(e *core.RequestEvent) error {
+		e.Set(publicURLContextKey, cfg.PublicURL)
+		return e.Next()
+	})
 
 	group.GET("/health", func(e *core.RequestEvent) error {
 		return e.JSON(http.StatusOK, map[string]any{

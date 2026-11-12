@@ -125,30 +125,46 @@ func TestTopicStatsAndTopicHideARestrictedCategory(t *testing.T) {
 		"/api/aerun/topics/" + topic.Id,
 		"/api/aerun/topics/" + topic.Id + "/stats",
 	} {
+		// A player who is not in the category's allowed_roles gets 200 with
+		// deleted + restricted — not 403. The server tells the truth without
+		// an HTTP error.
 		status, payload := doJSON(t, server.URL, http.MethodGet, path, tokens["player"], "", "")
-		if status != http.StatusOK || payload["deleted"] != true {
-			t.Errorf("GET %s as player: got %d (%v), want 200 with deleted:true — a hidden thread must read as missing/deleted", path, status, payload)
+		if status != http.StatusOK {
+			t.Errorf("GET %s as player: got %d (%v), want 200 with restricted", path, status, payload)
+			continue
 		}
+		if payload["deleted"] != true || payload["restricted"] != true {
+			t.Errorf("GET %s as player: got deleted=%v restricted=%v, want both true", path, payload["deleted"], payload["restricted"])
+		}
+		// Same for a guest.
 		status, payload = doJSON(t, server.URL, http.MethodGet, path, "", "", "")
-		if status != http.StatusOK || payload["deleted"] != true {
-			t.Errorf("GET %s as guest: got %d (%v), want 200 with deleted:true — a hidden thread must read as missing/deleted", path, status, payload)
+		if status != http.StatusOK {
+			t.Errorf("GET %s as guest: got %d (%v), want 200 with restricted", path, status, payload)
+			continue
 		}
+		if payload["deleted"] != true || payload["restricted"] != true {
+			t.Errorf("GET %s as guest: got deleted=%v restricted=%v, want both true", path, payload["deleted"], payload["restricted"])
+		}
+		// A moderator who IS listed reads the topic normally.
 		status, payload = doJSON(t, server.URL, http.MethodGet, path, tokens["moderator"], "", "")
 		if status != http.StatusOK || payload["deleted"] == true {
-			t.Errorf("GET %s as moderator: got %d, want 200 without deleted (%v)", path, status, payload)
+			t.Errorf("GET %s as moderator: got %d (%v), want 200 without deleted", path, status, payload)
 		}
 	}
 
 	// A banned member is refused by canViewCategory before the role is even
-	// consulted, so both routes answer 200 with deleted=true for them too —
-	// the same silent non-disclosure.
+	// consulted, so both routes answer 200 with deleted+restricted for them too.
 	for _, path := range []string{
 		"/api/aerun/topics/" + topic.Id,
 		"/api/aerun/topics/" + topic.Id + "/stats",
 	} {
 		status, payload := doJSON(t, server.URL, http.MethodGet, path, tokens["banned"], "", "")
-		if status != http.StatusOK || payload["deleted"] != true {
-			t.Errorf("GET %s as banned: got %d (%v), want 200 with deleted:true", path, status, payload)
+		if status != http.StatusOK {
+			t.Errorf("GET %s as banned: got %d (%v), want 200 with restricted", path, status, payload)
+			continue
+		}
+		if payload["deleted"] != true || payload["restricted"] != true {
+			t.Errorf("GET %s as banned: got deleted=%v restricted=%v, want both true", path, payload["deleted"], payload["restricted"])
 		}
 	}
 }

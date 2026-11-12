@@ -104,6 +104,13 @@ const statusPoll = createSharedPoll({
   },
   intervalMs: 20000,
   initialValue: null,
+  // A restart within the freshness window (subscriber count 0→1) hands the
+  // cached snapshot instead of paying a second identical GET. ConnectionStatusBanner
+  // and AuthProvider's subscribeToOnlineUsers both subscribe; the last one to
+  // leave stops the poll, and the next mount — navigation, a provider
+  // re-render — restarts it inside a second. Without this the network log
+  // showed a /status pair on every page open.
+  restartFreshMs: 30_000,
   realtime: canReceiveSignals()
     ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
       (topic) => { if (topic === 'presence.update') onDelivered(); },
@@ -115,12 +122,30 @@ const statusPoll = createSharedPoll({
 
 // The loop is reference-counted by the shared resource itself: the first
 // subscriber starts it, the last one to leave stops it.
-const startStatusPolling = () => statusPoll.subscribe(() => {});
+//
+// ConnectionStatusBanner subscribes directly to statusPoll.subscribe (not
+// through startStatusPolling), so stopStatusPollingIfIdle is only a partial
+// view — but it is the second stop that used to race the first: the two
+// subscriber sets drain independently, and whichever unsubscribes first
+// called stopIfIdle() while the other still held a statusPoll subscription.
+// That stopped the shared loop under a live subscriber, and the next
+// subscribe started it again — the second /status GET in every screenshot.
+let _statusPollUnsub = null;
+
+const startStatusPolling = () => {
+  if (!_statusPollUnsub) {
+    _statusPollUnsub = statusPoll.subscribe(() => {});
+  }
+};
 
 const stopStatusPollingIfIdle = () => {
   if (onlineSubscribers.size > 0 || guestSubscribers.size > 0) return;
-  // Nothing is watching the status loop any more.
-  statusPoll.stopIfIdle();
+  if (_statusPollUnsub) {
+    _statusPollUnsub();
+    _statusPollUnsub = null;
+  }
+  // The banner's own subscription may still be live; this is only the
+  // presence-module half of the reference count.
 };
 
 // Lets the connection banner ride the presence snapshot instead of polling
@@ -133,25 +158,40 @@ export const probeStatus = () => statusPoll.refresh();
 
 const MEMBER_HEARTBEAT_MS = 60000;
 
+// Latest heartbeat flight: two beats arriving while one is already in the
+// air (initRtdbPresence's immediate beat + a setRtdbOnline/recordActivity
+// beat + a 60s tick landing on top of a slow response) must not stack two
+// identical POSTs. The flight is cleared on settle, so a later beat always
+// goes out — this is single-flight, not a lock.
+let _heartbeatFlight = null;
+
 const sendHeartbeat = async (character = null) => {
-  try {
-    const res = await sendApi('/api/aerun/presence/heartbeat', {
-      method: 'POST',
-      body: {
-        active_character: character || currentActiveCharacter || null,
-        // The moment of the last click, not the moment of this tick: the
-        // server counts the 15-minute online window from here, so a tick
-        // must never refresh it on its own.
-        last_active_at: lastActivityAt || Date.now()
+  if (_heartbeatFlight) return _heartbeatFlight;
+  const flight = (async () => {
+    try {
+      const res = await sendApi('/api/aerun/presence/heartbeat', {
+        method: 'POST',
+        body: {
+          active_character: character || currentActiveCharacter || null,
+          // The moment of the last click, not the moment of this tick: the
+          // server counts the 15-minute online window from here, so a tick
+          // must never refresh it on its own.
+          last_active_at: lastActivityAt || Date.now()
+        }
+      });
+      if (res?.presence) {
+        handlePresenceSnapshot(res.presence);
       }
-    });
-    if (res?.presence) {
-      handlePresenceSnapshot(res.presence);
+    } catch {
+      // Non-fatal presence heartbeat failure: the caller keeps its optimistic
+      // local state and the next 30s tick retries.
     }
-  } catch {
-    // Non-fatal presence heartbeat failure: the caller keeps its optimistic
-    // local state and the next 30s tick retries.
-  }
+  })();
+  _heartbeatFlight = flight;
+  flight.finally(() => {
+    if (_heartbeatFlight === flight) _heartbeatFlight = null;
+  });
+  return flight;
 };
 
 /**
@@ -354,18 +394,30 @@ const GUEST_HEARTBEAT_MS = 60 * 1000;
 let guestHeartbeatTimer = null;
 let guestDetachListeners = null;
 
+// Single-flight for the guest beat, symmetric with sendHeartbeat's: an init
+// beat, a visibility-change beat and a 60s tick must not stack POSTs.
+let _guestFlight = null;
+
 const sendGuestHeartbeat = async (guestId) => {
-  try {
-    const res = await sendApi('/api/aerun/presence/heartbeat', {
-      method: 'POST',
-      body: { guest_id: guestId, last_active_at: lastActivityAt || Date.now() }
-    });
-    if (res?.presence) {
-      handlePresenceSnapshot(res.presence);
+  if (_guestFlight) return _guestFlight;
+  const flight = (async () => {
+    try {
+      const res = await sendApi('/api/aerun/presence/heartbeat', {
+        method: 'POST',
+        body: { guest_id: guestId, last_active_at: lastActivityAt || Date.now() }
+      });
+      if (res?.presence) {
+        handlePresenceSnapshot(res.presence);
+      }
+    } catch {
+      // Non-fatal: presence is best effort and the next beat retries.
     }
-  } catch {
-    // Non-fatal: presence is best effort and the next beat retries.
-  }
+  })();
+  _guestFlight = flight;
+  flight.finally(() => {
+    if (_guestFlight === flight) _guestFlight = null;
+  });
+  return flight;
 };
 
 const stopGuestHeartbeat = () => {

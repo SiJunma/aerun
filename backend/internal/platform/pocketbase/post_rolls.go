@@ -83,6 +83,39 @@ func writeRolls(record *core.Record, content string, incoming map[string]any) er
 	return nil
 }
 
+// writeRollsFrozen is writeRolls with the freeze applied (SEC-08 edit).
+//
+// stored is the map the record already holds (decodeRolls of the current
+// column). An incoming entry whose id already exists in stored AND whose
+// entry differs is a forgery attempt and is refused as ErrRollConflict — a
+// different error kind from a malformed entry, so the API layer can surface
+// the freeze rather than a validation failure.
+//
+// A master roll stored with a nil value is byte-identical to itself: the
+// incoming value that redacts to nil (author does not hold
+// view_master_dice) is not treated as an overwrite, because rollEntryEqual
+// compares the sanitized form and a nil stays nil.
+func writeRollsFrozen(record *core.Record, content string, incoming, stored map[string]any) error {
+	if err := forum.ValidateRollsFreeze(stored, incoming); err != nil {
+		return err
+	}
+	return writeRolls(record, content, incoming)
+}
+
+// storedRolls reads the rolls column from a record and returns it as a map
+// (empty when absent). Used by the edit path to hand the freeze checker
+// what is already frozen on the row.
+func storedRolls(record *core.Record) map[string]any {
+	if record == nil {
+		return map[string]any{}
+	}
+	rolls, err := decodeRolls(record.Get("rolls"))
+	if err != nil || rolls == nil {
+		return map[string]any{}
+	}
+	return rolls
+}
+
 // rollsFor renders the stored map for one reader.
 //
 // This is the security boundary. `view_master_dice` decides whether a master

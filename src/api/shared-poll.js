@@ -53,6 +53,20 @@ const REFRESH_COALESCE_MS = 250;
 // cheap, caller-scoped, and double-read on every cold start).
 const REPLAY_FRESH_MS = 1000;
 
+// How long a successful read stays fresh for the REMOUNT decision (opt-in via
+// `restartFreshMs` on createSharedPoll). This window answers a different
+// question: "the resource was stopped because its last subscriber left (the
+// effect cleaned up and the page is re-mounting the same subscription moments
+// later — e.g. ProfilePage's effect re-running because `profile` got a new
+// object identity), so is the cached value still fresh enough to hand over
+// instead of re-reading?" YES within the window: a restart stamped moments
+// after the previous read's completion is the same data re-fetched, not a new
+// read that found anything different. Resources that opt in are the
+// intervalMs:0 ones (characters, designs) that are re-read on remount by
+// design but never on a timer — the window is what keeps "re-read on remount"
+// from turning into "re-read on every effect cleanup in between".
+// Not exported: the window itself is opt-in per resource.
+
 // Exported for the transport tests, which assert against the REAL windows rather
 // than a shortened stand-in. Asserting on a faked timer would only prove the fake
 // behaves; asserting on the shipped value proves the shipped value.
@@ -213,7 +227,13 @@ const bindRealtimeHook = (hook, { onDelivered, onConnected, onDead }) => {
  * @param {string} [options.name] label for diagnostics
  * @param {number} [options.skipConnectReplayMs] opt-in freshness window for the
  *   connect-replay: when > 0, onConnected skips its catch-up refresh if the
- *   last successful read is younger than this many ms. 0 = always replay.
+ *   last successful read is younger than this many ms. 0 = always replay
+ *   (still skipped while a read is in flight — its completion IS the
+ *   catch-up, fresher than any staleness arithmetic).
+ * @param {number} [options.restartFreshMs] opt-in freshness window for RESTART:
+ *   when > 0, a stop→start cycle (subscriber count 0→1) whose last successful
+ *   read is younger than this delivers the cached value and skips the read.
+ *   0 = always re-read, the previous behaviour.
  */
 export const createSharedPoll = ({
   fetch,
@@ -223,6 +243,7 @@ export const createSharedPoll = ({
   realtime = null,
   name = 'resource',
   skipConnectReplayMs = 0,
+  restartFreshMs = 0,
 }) => {
   const subscribers = new Set();
 
@@ -338,6 +359,23 @@ export const createSharedPoll = ({
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
 
+    // The primary read is initiated BEFORE the realtime bind, deliberately.
+    //
+    // subscribeToRealtimeSignals reports an ALREADY-ESTABLISHED hub's state to
+    // a late joiner synchronously ("a caller joining an already-established
+    // hub learns its state immediately"). That onStateChange(true) lands
+    // inside start() — before this resource has initiated ANY read — so
+    // onConnected below saw `lastReadOkAt === 0 && !inFlight` and scheduled
+    // its catch-up refresh, which then executed behind the cold read as a
+    // byte-for-byte duplicate: two identical GETs on every cold start of a
+    // resource whose hub was already up (every topic page paid it for the
+    // topic-notifications loop). skipConnectReplayMs cannot help there,
+    // because the replay decision happens BEFORE the primary read it is
+    // meant to respect. Starting the read first puts `inFlight = true` under
+    // the connect callback's feet, and the existing `!inFlight` guard does
+    // exactly what it was written to do.
+    read();
+
     if (realtime) {
       setTransport('connecting');
       realtimeBinding = bindRealtimeHook(realtime, {
@@ -350,14 +388,23 @@ export const createSharedPoll = ({
           stopTimer();
           setTransport('realtime');
           // Catch up now. Everything that changed while this resource believed it
-          // had no realtime was never fetched. OPT-IN exception: a resource that
-          // set skipConnectReplayMs and whose last successful read is younger
-          // than that window (or is still in flight) skips this replay — the
-          // primary read has just delivered this exact answer, and the replay
-          // would be a byte-for-byte duplicate ~250ms behind it.
-          if (!skipConnectReplayMs
-            || lastReadOkAt === 0
-            || Date.now() - lastReadOkAt > skipConnectReplayMs) {
+          // had no realtime was never fetched. Two exceptions skip the replay:
+          //
+          // - A read is IN FLIGHT right now. Its answer, on completion, is the
+          //   catch-up — and it is FRESHER than any staleness arithmetic over
+          //   lastReadOkAt, which on a RE-entry (leave the topic, come back)
+          //   still holds the PREVIOUS visit's timestamp. The stale clause used
+          //   to fire there and schedule a replay ~250ms behind the cold read:
+          //   two identical quote-notification GETs on every topic re-entry
+          //   (the queued replay rooted in the first read's finally, visible
+          //   as "await in" in the initiator stack).
+          // - skipConnectReplayMs opted in and the last successful read is
+          //   younger than the window: the primary read just delivered this
+          //   exact answer, and the replay would be a byte-for-byte duplicate.
+          if (!inFlight
+            && (!skipConnectReplayMs
+              || lastReadOkAt === 0
+              || Date.now() - lastReadOkAt > skipConnectReplayMs)) {
             requestRefresh();
           }
         },
@@ -397,8 +444,8 @@ export const createSharedPoll = ({
           // opens falls back to polling, but within the window the primary
           // read has already landed — do not immediately pay twice.
           if (!skipConnectReplayMs
-            || lastReadOkAt === 0
-            || Date.now() - lastReadOkAt > skipConnectReplayMs) {
+            || (lastReadOkAt === 0 && !inFlight)
+            || (lastReadOkAt > 0 && Date.now() - lastReadOkAt > skipConnectReplayMs)) {
             requestRefresh();
           }
         }
@@ -407,8 +454,6 @@ export const createSharedPoll = ({
       setTransport('polling');
       startTimer();
     }
-
-    read();
   };
 
   const stop = () => {
@@ -428,8 +473,27 @@ export const createSharedPoll = ({
   };
 
   const subscribe = (cb) => {
+    const wasIdle = subscribers.size === 0;
     subscribers.add(cb);
     if (subscribers.size === 1) {
+      if (wasIdle && restartFreshMs > 0 && loaded && Date.now() - lastReadOkAt < restartFreshMs) {
+        // Restart within the fresh window: hand over the cached value and do
+        // NOT pay for another read. The caller is re-subscribing for its own
+        // reasons (its effect cleaned up), not because the data is stale.
+        running = true;
+        if (typeof document !== 'undefined') {
+          document.addEventListener('visibilitychange', onVisibilityChange);
+        }
+        setTransport('polling');
+        startTimer();
+        try { cb(value, error); } catch (err) {
+          console.warn(`[shared-poll:${name}] subscriber threw`, err);
+        }
+        return () => {
+          subscribers.delete(cb);
+          if (subscribers.size === 0) stop();
+        };
+      }
       start();
     } else if (loaded) {
       // Already running: hand over what this resource knows. A second component

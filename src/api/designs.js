@@ -51,6 +51,13 @@ const getLocalDesigns = () => {
 
 let _cachedDesigns = null;
 const _designSubscribers = new Set();
+// Modules-level dedupe for the read: DesignProvider and ProfilePage both
+// read /api/aerun/designs on mount (DesignProvider on boot, ProfilePage
+// inside its profile effect), so on a profile open the same request was in
+// flight twice. The two callers are not always in the same tick — a provider
+// re-render can re-run a consumer's effect seconds later — so an in-flight
+// join alone is not enough; the cache is the coordination point there.
+let _inFlightDesigns = null;
 
 const notifySubscribers = async () => {
   try {
@@ -89,16 +96,27 @@ export const getDesigns = async (force = false) => {
   // notifySubscribers must answer with the SERVER's state after a write, not
   // with the pre-write snapshot.
   if (!force && _cachedDesigns) return _cachedDesigns;
-  try {
-    const res = await sendApi('/api/aerun/designs');
-    const items = res?.items || [];
-    const mapped = items.map(toDesign);
-    _cachedDesigns = mapped;
-    return mapped;
-  } catch (err) {
-    console.warn('[designs] failed to fetch from server, checking local fallback', err);
-    return getLocalDesigns().map(toDesign);
+  if (force) {
+    _inFlightDesigns = null;
   }
+  if (!force && _inFlightDesigns) return _inFlightDesigns;
+  const flight = (async () => {
+    try {
+      const res = await sendApi('/api/aerun/designs');
+      const items = res?.items || [];
+      const mapped = items.map(toDesign);
+      _cachedDesigns = mapped;
+      return mapped;
+    } catch (err) {
+      console.warn('[designs] failed to fetch from server, checking local fallback', err);
+      return getLocalDesigns().map(toDesign);
+    }
+  })();
+  if (!force) _inFlightDesigns = flight;
+  flight.finally(() => {
+    if (_inFlightDesigns === flight) _inFlightDesigns = null;
+  });
+  return flight;
 };
 
 export const getDesign = async (id) => {

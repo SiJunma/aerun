@@ -13,11 +13,11 @@
 
 | Коллекция | Назначение | Ключевые поля (не исчерпывающе) |
 |-----------|-----------|--------------------------------|
-| `users` | аккаунты | `nickname`, `nickname_normalized` (уник.), `role_id`, `status` (`pending`/`active`/`banned`), `is_deleted` (soft-delete), `avatar`, `avatar_url`, `settings`, `post_count`, `topics_count`, `reputation`, `last_seen`, `email` (опц.), `legacy_firebase_uid` (историч.) |
+| `users` | аккаунты | `nickname` (без CRLF), `nickname_normalized` (уник.), `role_id`, `status` (`pending`/`active`/`banned`), `is_deleted` (soft-delete), `avatar`, `avatar_url`, `settings`, `post_count`, `topics_count`, `reputation`, `last_seen`, `email` (опц.), `legacy_firebase_uid` (историч.); чтение superuser-only (`ViewRule=nil`, `ListRule=nil`) |
 | `roles` | роли и права | `role_id`, `name`, `rank` (ранг-матрица), `permissions` (JSON-список ключей), `is_system`, `color` |
 | `categories` | категории форума | `name`, `slug` (уник.), `description`, `sort_order`, `allowed_roles`, права по постам/темам, bilingual-названия |
 | `category_groups` | группы категорий | `name`, `sort_order` |
-| `topics` | темы | `category_id`, `author_id`, `title`, `slug`, `description`, `locked`, `pinned`, `posts_count`, `last_post_id`, `last_post_created`, `last_post_author_id` |
+| `topics` | темы | `category_id`, `author_id`, `title` (без CRLF), `slug`, `description`, `locked`, `pinned`, `posts_count`, `last_post_id`, `last_post_created`, `last_post_author_id` |
 | `posts` | посты И черновики | `topic_id`, `author_id`, `content`, `sequence` (порядковый номер в теме), `is_draft` (черновик = пост с этим флагом), `edited`, `editor_id`, автор-маска (`author_ref`), `rolls`, гостевой `nickname` |
 | `characters` | маски/персонажи | владелец, имя, аватар, статус/подпись; лимит масок — настройка |
 | `designs` | темы оформления | CSS/настройки темы, `default_design_id` |
@@ -33,7 +33,7 @@
 | `guest_principals` | cookie-идентичность гостей | гостевой ID, аватар/имя |
 | `guest_presence` | присутствие гостей | `first_seen`, `last_seen` = момент последнего клика (15-мин окно онлайна), TTL, чистится кроном |
 | `forum_settings` | глобальные настройки | название, темы/дизайн, `email_templates`, `topics_per_page`, флаги dice/reputation/characters/masks, SMTP |
-| `idempotency_keys` | идемпотентность | `actor`, `key`, `request_hash`, `response_json`, `status`; UNIQUE(actor, key) |
+| `idempotency_keys` | идемпотентность | `actor`, `key`, `request_hash`, `response_json`, `status`; UNIQUE(actor, key); автоочистка кроном (старше 48ч) |
 
 > Полные списки полей и правила индексов — в соответствующих файлах миграций (`1765900000_domain_foundation.go` … `1780000000_topic_description.go`).
 
@@ -63,7 +63,8 @@
 - `PATCH /users/{id}/nickname`, `PATCH /users/{id}/profile` — редактирование других (права + ранг-матрица).
 
 ### 3.3 Аутентификация и админ-управление
-- `POST /auth/register`; `POST /auth/resend-verification`.
+- `POST /auth/register` (rate-limited token bucket 20/мин); `POST /auth/resend-verification`.
+- Публичные SPA-маршруты: `/auth/confirm-verification/:token` и `/auth/confirm-password-reset/:token` (панель `/_/*` PocketBase изолирована в Caddy для loopback/admin IP).
 - `GET|PATCH|DELETE /admin/users[...]`: список, `{id}`, bulk-обновление, bulk-удаление (admin_access).
 - `POST /admin/transfer-root` — передача root-роли (root-роль + пароль вызывающего).
 
@@ -83,11 +84,13 @@
 
 ### 3.7 Presence и гости
 - `POST /presence/heartbeat` (принимает `last_active_at` — момент последнего клика; см. `API.md` §3.5), `POST /presence/leave`, `POST /presence/guest/leave` (явный leave при логине/разлогине; закрытие вкладки не удаляет гостя — строка живёт 15 минут от последнего клика), `GET /presence/guests`, `GET /presence/online-users`, `GET /status` (консолидированный снапшот присутствия; перечитывается по SSE `presence.update`).
-- `POST /guest/principal` — выдача/подтверждение гостевой cookie-идентичности.
+- `POST /guest/principal` — выдача/подтверждение гостевой cookie-идентичности (`aerun_guest_cap`, с флагом `Secure` при HTTPS).
 
 ### 3.8 Темы и посты
 - `POST|GET /topics`, `GET /topics/{id}`, `GET /topics/{id}/stats`, `GET /topics/{id}/context`, `PATCH|DELETE /topics/{id}`, `POST /topics/{id}/move` (move_topics).
 - `POST|GET /topics/{id}/posts`, `GET|PATCH|DELETE /posts/{id}`, `POST /topics/{id}/posts/move` (move_topics).
+- `getPostHandler` проверяет `canViewTopic`, возвращая 404 для недоступных постов; `listUserPostsHandler` фильтрует сообщения по `allowedCategoryIDs`.
+- Серверная генерация кубиков (`crypto/rand`) при публикации по тегам `[dice=N]`; заморозка существующих бросков при редактировании (`ValidateRollsFreeze`), отказ при конфликте `roll_id`. Ролевой AST-санитизатор HTML: админам разрешены script/style/iframe, обычным пользователям — строгий whitelist тегов/атрибутов без внешних зависимостей.
 
 ### 3.9 Черновики
 - `GET /me/drafts`, `GET|PUT /topics/{id}/draft`, `DELETE /drafts/{id}`, `POST /drafts/{id}/publish`.

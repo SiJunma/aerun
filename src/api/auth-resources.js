@@ -97,7 +97,11 @@ export const normalizeUserProfile = (rec) => {
 const getReadMapKey = (uid) => `aerun_readmap_${uid}`;
 
 export const recordTopicVisit = async (uid, topicId, offset = null, lastVisiblePostId = null) => {
-  if (!uid || !topicId) return;
+  if (!uid || !topicId) return false;
+  // Returns whether the SERVER write completed. The caller (markTopicRead)
+  // records the pinned cursor only from a completed write, so a failed POST
+  // stays retryable instead of being remembered as done.
+  let recorded = false;
   try {
     // Server first: this is the write that makes the badge correct elsewhere. It is
     // awaited but not allowed to block the caller — a failed read-state write must
@@ -110,6 +114,7 @@ export const recordTopicVisit = async (uid, topicId, offset = null, lastVisibleP
       method: 'POST',
       body: { last_visible_post_id: lastVisiblePostId || '' },
     });
+    recorded = true;
   } catch (err) {
     console.warn('[recordTopicVisit] server read state failed', err);
   }
@@ -123,6 +128,7 @@ export const recordTopicVisit = async (uid, topicId, offset = null, lastVisibleP
   } catch (err) {
     console.warn('[recordTopicVisit err]', err);
   }
+  return recorded;
 };
 
 export const subscribeToReadMap = (uid, callback) => {
@@ -289,7 +295,17 @@ export const subscribeToUnreadTopics = (callback, page = 1, pageSize = 20) => {
 // the next 20s tick.
 export const refreshUnreadTopics = () => {
   try {
-    unreadTopicsPolls.forEach((poll) => poll?.refresh());
+    unreadTopicsPolls.forEach((poll) => {
+      // A poll whose page nobody renders must not be woken. markTopicRead's
+      // debounced refresh runs on the TOPIC page — the /new-replies screen
+      // that subscribed this poll unmounted when the member navigated away —
+      // and a refresh on a stopped resource still costs the network GET while
+      // delivering the answer to zero subscribers. Every path back to the
+      // feed re-subscribes, and a subscribe re-reads (this resource opts out
+      // of restartFreshMs), so the skipped refresh loses nothing.
+      if (poll?.getTransport() === 'idle') return;
+      poll?.refresh();
+    });
   } catch {
     // Same contract as the counters refresh: best effort, never throws.
   }
@@ -405,15 +421,50 @@ export const isAbortedRequest = (err) =>
 // cancelled this one is the answer the caller wants. Every OTHER failure still
 // throws, because `subscribeToUser` renders nothing at all for a caller it could
 // not answer.
+// Single-flight per uid: two callers reaching for the same row while a read
+// is still in the air join one GET instead of doubling it. The shared promise
+// is stored until it settles; a caller joining a live request shares its
+// outcome instead of issuing a rival one. A settled request is NOT cached: the
+// next caller after it settles reads fresh, which is what keeps a mutation
+// from being shadowed by the pre-write answer. In practice the two callers
+// here are AuthProvider's own-profile refresh and ProfilePage's subscribeToUser
+// when they happen to read the SAME account.
+const _profileFlights = new Map();
+
+// A settled profile snapshot is kept for a short window so a remount that
+// happens moments later (ProfilePage's effect re-running because `t` changed
+// identity after AuthProvider's own-profile write) reuses the last answer
+// instead of paying a second identical GET. The window is intentionally
+// short — a mutation is never responsible for the STALENESS here, because a
+// caller that WRITES and then needs the row re-reads through a fresh flight
+// once this cache expires.
+const _profileCache = new Map();
+const PROFILE_CACHE_MS = 30_000;
+
 export const fetchUserProfile = async (uid) => {
   if (!uid) return null;
-  try {
-    const record = await sendApi(`/api/aerun/users/${uid}`);
-    return normalizeUserProfile({ ...record });
-  } catch (err) {
-    if (isAbortedRequest(err)) return null;
-    throw err;
-  }
+  // Short-TTL hit: a remount that arrives right after a successful read gets
+  // the cached snapshot instead of a second identical GET.
+  const cached = _profileCache.get(uid);
+  if (cached && Date.now() - cached.at < PROFILE_CACHE_MS) return cached.value;
+  const live = _profileFlights.get(uid);
+  if (live) return live;
+  const flight = (async () => {
+    try {
+      const record = await sendApi(`/api/aerun/users/${uid}`);
+      const value = normalizeUserProfile({ ...record });
+      _profileCache.set(uid, { value, at: Date.now() });
+      return value;
+    } catch (err) {
+      if (isAbortedRequest(err)) return null;
+      throw err;
+    }
+  })();
+  _profileFlights.set(uid, flight);
+  flight.finally(() => {
+    if (_profileFlights.get(uid) === flight) _profileFlights.delete(uid);
+  });
+  return flight;
 };
 
 // A single read of one account, delivered once.
@@ -434,7 +485,23 @@ export const fetchUserProfile = async (uid) => {
 // always rendered from this one read. If the profile ever gets a signal-based
 // refresh, this is the place the subscription comes back — carrying the same
 // DTO as the read, never the record.
-export const subscribeToUser = (uid, callback) => {
+// The profile page's subscribe and AuthProvider's own-profile refresh for the
+// SAME account share one read through fetchUserProfile's single-flight above
+// only when they happen to read the same uid. When they do not — the normal
+// case, a member viewing somebody else's profile — this fires its own GET and
+// stays independent of the viewer's own uid. The promise is joined, not
+// cached: after it settles the next caller reads fresh, so a rename elsewhere
+// is never masked by a prior answer.
+// subscribeToUser resolves the profile for uid and hands it to callback.
+//
+// The error, when there is one, goes to errorCallback and the callback is
+// still called with null — the two channels are independent on purpose.
+// The profile page needs the error to render the retryable ErrorCard
+// (RES-01) instead of an endless skeleton, while existing callers that
+// only pass `callback` keep the original "profile could not be read"
+// shape. A 404 and a network failure therefore surface differently only
+// when the caller reads the second argument.
+export const subscribeToUser = (uid, callback, errorCallback) => {
   if (!uid) {
     callback(null);
     return () => {};
@@ -445,8 +512,13 @@ export const subscribeToUser = (uid, callback) => {
     if (isSubscribed) {
       callback(record);
     }
-  }).catch(() => {
-    if (isSubscribed) callback(null);
+  }).catch((err) => {
+    if (isSubscribed) {
+      if (errorCallback) {
+        errorCallback(err);
+      }
+      callback(null);
+    }
   });
 
   return () => {
@@ -516,6 +588,26 @@ export const subscribeToEffectivePermissions = (uid, callback) => {
 // ./rtdb-presence, which reads the consolidated heartbeat/status snapshots.
 
 /**
+ * Reads ONE page of the public member board: GET /users?page=N&search=…&sort=…&order=…
+ *
+ * The server caps a page at 30 (and clamps perPage), narrows and orders BEFORE
+ * the page is cut, and answers with the envelope {items, page, perPage,
+ * totalItems, totalPages} — the same one the staff list uses. One request
+ * renders one page; fetching the whole board to sort and filter it locally
+ * (the old walk: page=1, page=2, … until totalPages) is precisely what this
+ * replaces.
+ *
+ * @param {{page?: number, search?: string, sort?: string, order?: string}} [query]
+ */
+export const fetchMembers = async ({ page = 1, search = '', sort = '', order = '' } = {}) => {
+  const params = new URLSearchParams({ page: String(page) });
+  if (search) params.set('search', search);
+  if (sort) params.set('sort', sort);
+  if (order) params.set('order', order);
+  return await sendApi(`/api/aerun/users?${params.toString()}`);
+};
+
+/**
  * Reads the member list for a screen that renders it.
  *
  * `staff` selects the source, and the default is the PUBLIC one because the
@@ -543,7 +635,7 @@ export const subscribeToEffectivePermissions = (uid, callback) => {
  * entitled to the staff DTO (`status` and `verified` are on that route and
  * nowhere else) — reads the paged list through `fetchAdminUsers` (src/api/
  * admin.js) instead, normalising each row through the SAME `toMembersRow`
- * the walk uses. The staff branch stays because scripts/check-forum-read-
+ * the single-page read uses. The staff branch stays because scripts/check-forum-read-
  * contract.mjs pins the explicit-staff contract: the next staff consumer
  * must opt into it visibly rather than inherit it silently.
  */
@@ -638,8 +730,11 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   //
   // The staff path is untouched: it goes through `/admin/users`, which assembles
   // its own whitelist and additionally serves the moderation columns. Both
-  // routes answer with the same envelope, so ONE loop walks both — two paginators
-  // would be two things to keep in step.
+  // routes answer with the same envelope — and one of them is read ONE PAGE at
+  // a time by its own page now (MembersPage fetches a single page per render),
+  // so no hop collection loop exists here any more. A fallback to the full
+  // list would therefore be a REGRESSION: it is the old walk returning through
+  // the back door.
   //
   // `fetchPage` is a CALLBACK rather than a path string, and that is not
   // stylistic. scripts/audit-endpoints.mjs resolves routes by reading the string
@@ -647,35 +742,16 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
   // reduced both routes to an opaque placeholder and the audit reported them as
   // calls with no backend route — exactly the signal it exists to raise. The URLs
   // therefore stay literal at their call sites below.
-  const collectEveryPage = async (fetchPage) => {
-    const rows = [];
-    let page = 1;
-    for (;;) {
-      const res = await fetchPage(page);
-      if (!isSubscribed) return null;
-      const items = res?.items || [];
-      rows.push(...items.map(toMembersRow));
-      const totalPages = res?.totalPages ?? 1;
-      if (page >= totalPages || items.length === 0) break;
-      page += 1;
-    }
-    return rows.map(withLegacyDates);
-  };
-
-  const readPublicMembers = async () => {
-    const rows = await collectEveryPage(
-      (page) => sendApi(`/api/aerun/users?page=${page}`)
-    );
-    if (rows !== null && isSubscribed) callback(rows);
-  };
-
   const load = async () => {
     // A guest, and every member without `admin_access`, must not issue the staff
     // call at all: it is refused before it is sent, so trying it only to catch
     // the rejection is a guaranteed red entry in the network tab.
+    // (MembersPage, the only current caller, always takes the public branch:
+    // it fetches one page per render.)
     if (!staff) {
       try {
-        await readPublicMembers();
+        const res = await sendApi('/api/aerun/users?page=1');
+        if (isSubscribed) callback((res?.items || []).map(toMembersRow).map(withLegacyDates));
       } catch {
         if (isSubscribed) callback([]);
       }
@@ -683,28 +759,10 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
     }
 
     try {
-      // The staff endpoint caps a page at 30 (server-side: perPage above the
-      // cap is clamped, not honoured). The members table sorts and filters the
-      // WHOLE board client-side, so asking for one big page is not an option —
-      // the pages are walked instead and the result is the same. The walk is
-      // bounded by the server's own totalPages, so it cannot loop forever on a
-      // board that grows mid-request.
-      //
-      // A null result means the subscription was cancelled mid-walk, not a
-      // failure: only a real request error reaches the fallback below.
-      const users = await collectEveryPage(
-        (page) => sendApi(`/api/aerun/admin/users?page=${page}`)
-      );
-      if (users === null) return;
-      callback(users);
+      const res = await sendApi('/api/aerun/admin/users?page=1');
+      if (isSubscribed) callback((res?.items || []).map(toMembersRow).map(withLegacyDates));
     } catch {
-      // Staff only, and a genuine transport failure: an admin whose staff call
-      // fails should still see a populated table rather than an empty one.
-      try {
-        await readPublicMembers();
-      } catch {
-        if (isSubscribed) callback([]);
-      }
+      if (isSubscribed) callback([]);
     }
   };
 
@@ -712,12 +770,12 @@ export const subscribeToAllUsers = (callback, { staff = false } = {}) => {
 
   // `.refresh` rides on the unsubscribe function rather than on a second
   // exported symbol, because there is exactly ONE way to re-read this resource —
-  // through the `load` closure that owns `staff`, the pagination walk and the
-  // public/staff fallback. A standalone `refreshAllUsers()` would have to either
-  // duplicate that logic or guess which of the two branches is in play, and
-  // MembersPage asks for a refresh exactly when a member wonders whether the
-  // board is current: a refresh that silently lost the staff flag would answer
-  // the admin's question with the public list.
+  // through the `load` closure that owns `staff` and the public/staff choice.
+  // A standalone `refreshAllUsers()` would have to either duplicate that logic
+  // or guess which of the two branches is in play, and MembersPage asks for a
+  // refresh exactly when a member wonders whether the board is current: a
+  // refresh that silently lost the staff flag would answer the admin's question
+  // with the public list.
   const unsubscribe = () => { isSubscribed = false; };
   unsubscribe.refresh = () => { load(); };
   return unsubscribe;

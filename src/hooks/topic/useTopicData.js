@@ -15,6 +15,8 @@ export const useTopicData = (id) => {
   const { setPageTitle } = usePageTitle();
   const [topic, setTopic] = useState(null);
   const [topicNotFound, setTopicNotFound] = useState(false);
+  const [topicRestricted, setTopicRestricted] = useState(false);
+  const [topicRestrictedMessage, setTopicRestrictedMessage] = useState('');
   const [accessError, setAccessError] = useState(null);
   const [accessErrRaw, setAccessErrRaw] = useState(null);
   const [isTopicLoading, setIsTopicLoading] = useState(() => Boolean(id));
@@ -24,6 +26,8 @@ export const useTopicData = (id) => {
     setPrevId(id);
     setTopic(null);
     setTopicNotFound(false);
+    setTopicRestricted(false);
+    setTopicRestrictedMessage('');
     setAccessError(null);
     setAccessErrRaw(null);
     setIsTopicLoading(Boolean(id));
@@ -44,6 +48,22 @@ export const useTopicData = (id) => {
       if (err) {
         setAccessError(err.message || 'Access denied');
         setAccessErrRaw(err);
+        return;
+      }
+
+      if (stats.restricted) {
+        // Topic exists but the caller's role is not in the category's
+        // allowed_roles. The server answered 200 {deleted: true, restricted: true}
+        // so there is no HTTP error — the client renders "access denied"
+        // without any console noise.
+        setTopic(null);
+        setTopicNotFound(true);
+        setTopicRestricted(true);
+        setTopicRestrictedMessage(stats.message || '');
+        if (unsubStats) {
+          unsubStats();
+          unsubStats = null;
+        }
         return;
       }
 
@@ -118,6 +138,8 @@ export const useTopicData = (id) => {
     topic,
     setTopic,
     topicNotFound,
+    topicRestricted,
+    topicRestrictedMessage,
     accessError,
     accessErrRaw,
     isTopicLoading,

@@ -1,5 +1,4 @@
 import { sendApi } from './pocketbase';
-import { processDiceRolls } from '../utils/dice';
 import { sharedPoll } from './shared-poll';
 import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
 import { removeDraft, draftIdFor } from './dm-drafts';
@@ -80,8 +79,7 @@ export const resolveConversation = async (myUid, theirUid, knownConversations = 
  */
 export const startConversationWithMessage = async (peerUid, title, text, idempotencyKey) => {
   if (!peerUid || !text) return null;
-  const { content: processedContent, rolls } = processDiceRolls(text);
-
+  // SEC-08: raw body only; the server throws [dice=N] with crypto/rand.
   const res = await sendApi('/api/aerun/dms', {
     method: 'POST',
     // A stable key per logical send: sendApi otherwise mints a fresh random one
@@ -91,8 +89,7 @@ export const startConversationWithMessage = async (peerUid, title, text, idempot
     body: {
       recipient_ids: [peerUid],
       title: title || 'Direct Message',
-      text: processedContent.trim(),
-      ...(rolls && Object.keys(rolls).length > 0 ? { rolls } : {})
+      text: text.trim(),
     }
   });
 
@@ -232,7 +229,12 @@ export const subscribeToUnreadCounts = (uid, callback) => {
     // two do.
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
-        () => onDelivered(),
+        // Same strict filtering the notification resources got: only a signal
+        // that can actually move a counter may wake this read. dm.post and
+        // notification.new can; presence.update — every member join, every
+        // activity push — cannot, and the unfiltered handler turned each one
+        // into a GET /me/unread-counts nobody needed.
+        (signalTopic) => { if (signalTopic !== 'presence.update') onDelivered(); },
         () => onDead(),
         // Without this a quiet DM thread abandons a perfectly healthy stream
         // after the grace window and polls for the rest of the session.
@@ -259,7 +261,12 @@ export const subscribeToUnreadCounts = (uid, callback) => {
 // last POLLED value, so without this it stays stale until the next interval.
 export const refreshUnreadCounts = (uid) => {
   try {
-    unreadCountsPolls.get(uid)?.refresh();
+    const poll = unreadCountsPolls.get(uid);
+    // Same liveness rule as refreshUnreadTopics: a stopped resource — its last
+    // subscriber left, e.g. a signed-out member's poll left in this map — must
+    // not be woken into a fetch nobody will hear.
+    if (!poll || poll.getTransport() === 'idle') return;
+    poll.refresh();
   } catch {
     // A missed refresh only delays the badge to the next tick — never fail a
     // navigation or a mark-read for it.
@@ -416,19 +423,14 @@ export const subscribeToDmMessages = (conversationId, limitCount, callback, erro
 // from the auth token and refuses to let a client post as somebody else.
 export const sendDmMessage = async (conversationId, _senderUid, text, _recipientUid, idempotencyKey) => {
   if (!conversationId || !text) return null;
-  // Sent alongside the text for the same reason as on the forum: without the
-  // map the `[roll=<id>]` tag in the body is an unresolved pointer, and a DM
-  // rendered the raw tag on both sides of the conversation.
-  const { content: processedContent, rolls } = processDiceRolls(text);
-
+  // SEC-08: raw body only; the server throws [dice=N] with crypto/rand.
   const res = await sendApi(`/api/aerun/dms/${conversationId}/messages`, {
     method: 'POST',
     // A stable key per logical send. sendApi otherwise mints a fresh random one
     // per call, so a double-click that escapes the in-flight latch is two posts.
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     body: {
-      text: processedContent.trim(),
-      ...(rolls && Object.keys(rolls).length > 0 ? { rolls } : {})
+      text: text.trim(),
     }
   });
 
@@ -529,10 +531,11 @@ export const subscribeToPeerCard = (uid, callback, errorCallback) => {
  */
 export const editDmMessage = async (messageId, text) => {
   if (!messageId || !text) return null;
-  const { content: processedContent } = processDiceRolls(text);
+  // SEC-08: raw body only; the server freezes existing values and
+  // throws fresh [dice=N] tags.
   const res = await sendApi(`/api/aerun/dm-messages/${messageId}`, {
     method: 'PATCH',
-    body: { text: processedContent.trim() }
+    body: { text: text.trim() }
   });
   return res?.message ? normalizeDmMessage(res.message) : null;
 };

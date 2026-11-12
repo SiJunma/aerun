@@ -94,12 +94,6 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		"avatar":         record.GetString("avatar"),
 		"avatar_url":     record.GetString("avatar_url"),
 		"status_line":    record.GetString("status_line"),
-		"bio":            record.GetString("bio"),
-		"location":       record.GetString("location"),
-		"birthday":       record.GetString("birthday"),
-		"occupation":     record.GetString("occupation"),
-		"interests":      record.GetString("interests"),
-		"contacts":       record.GetString("contacts"),
 		"posts_count":    record.GetInt("posts_count"),
 		"topics_count":   record.GetInt("topics_count"),
 		"reputation":     record.GetInt("reputation"),
@@ -123,6 +117,16 @@ func getUserProfileHandler(e *core.RequestEvent) error {
 		"settings":   publicSettings,
 		"request_id": requestIDFrom(e),
 	}
+	// Personal profile fields (bio, location, birthday, occupation,
+	// interests, contacts) are added ONLY for logged-in callers. A guest
+	// receives the response without these keys at all — clean and empty.
+	addLoggedIn(e, payload, "bio", record.GetString("bio"))
+	addLoggedIn(e, payload, "location", record.GetString("location"))
+	addLoggedIn(e, payload, "birthday", record.GetString("birthday"))
+	addLoggedIn(e, payload, "occupation", record.GetString("occupation"))
+	addLoggedIn(e, payload, "interests", record.GetString("interests"))
+	addLoggedIn(e, payload, "contacts", record.GetString("contacts"))
+
 	if limit, err := characterLimitFor(e.App, record.Id); err == nil && limit > 0 {
 		payload["character_limit"] = limit
 	}
@@ -202,6 +206,16 @@ func registrationDay(record *core.Record) string {
 	return created.UTC().Format(time.DateOnly)
 }
 
+// loggedInOnlyField returns the record's field value when the caller is
+// addLoggedIn adds key to payload only when the caller is authenticated.
+// Guests never receive the key at all — not even as an empty string — so
+// the response stays clean.
+func addLoggedIn(e *core.RequestEvent, payload map[string]any, key string, value any) {
+	if e.Auth != nil {
+		payload[key] = value
+	}
+}
+
 // GET /api/aerun/users — the public member board, the LIST counterpart of the
 // profile DTO above.
 //
@@ -215,8 +229,17 @@ func registrationDay(record *core.Record) string {
 // "these keys and not those".
 //
 // The response envelope is deliberately IDENTICAL to /api/aerun/admin/users
-// (items/totalPages/page/perPage), so the client walks both with one loop. That
-// is not cosmetic: two envelopes mean two paginators, and two paginators drift.
+// (items/totalPages/page/perPage/totalItems), so both boards are paginated by
+// one client pattern: one request renders one page. That is not cosmetic: two
+// envelopes mean two paginators, and two paginators drift.
+//
+// `search` and the `sort`/`order` pair narrow and order BEFORE the page is
+// cut — exactly as the staff list does — so a client that sorted or filtered
+// locally would need the WHOLE board, which is the walk this page used to do
+// (one request per 30 rows, totalPages hops, entirely to re-render all 32 rows
+// of a 32-member forum). Sorting by the rendered role label is deliberately
+// not offered: the label lives in the roles registry, which this public route
+// must not join; `role` orders by the stored role id instead.
 //
 // NOT IN THE WHITELIST, unlike the staff DTO:
 //   - `settings`, in any part. The members table reads none of it, and on the
@@ -234,17 +257,33 @@ func listUsersHandler(e *core.RequestEvent) error {
 	// row for its profile page and its posts, but the board is a directory of
 	// people you can meet — a baked nickname with no one behind it does not
 	// belong there.
-	records := make([]*core.Record, 0, perPage)
-	if err := e.App.RecordQuery(usersCollectionName).
-		AndWhere(notDeletedUsersExpr()).
-		OrderBy("nickname ASC", "id ASC").
+	where := []dbx.Expression{notDeletedUsersExpr()}
+	if search := strings.TrimSpace(query.Get("search")); search != "" {
+		// Bound, never interpolated — see the staff list (admin_users.go) and the
+		// mention picker below. The filter applies BEFORE the page is cut, so
+		// totalItems/totalPages count the narrowed set.
+		where = append(where, dbx.Like("nickname", search))
+	}
+
+	// One allow-list, so an unknown sort can never reach OrderBy. Anything
+	// unrecognised falls back to the board's default: most recently active
+	// first. Every order ends in `id ASC` — a stable tiebreak is what keeps a
+	// page boundary from reordering rows that compare equal.
+	order := memberListOrder(query.Get("sort"), query.Get("order"))
+
+	listQuery := e.App.RecordQuery(usersCollectionName)
+	for _, expr := range where {
+		listQuery.AndWhere(expr)
+	}
+	listQuery.OrderBy(order...).
 		Limit(int64(perPage)).
-		Offset(int64((page - 1) * perPage)).
-		All(&records); err != nil {
+		Offset(int64((page - 1) * perPage))
+	records := make([]*core.Record, 0, perPage)
+	if err := listQuery.All(&records); err != nil {
 		return internalError("failed to query accounts", err)
 	}
 
-	total, err := e.App.CountRecords(usersCollectionName, notDeletedUsersExpr())
+	total, err := e.App.CountRecords(usersCollectionName, where...)
 	if err != nil {
 		return internalError("failed to count accounts", err)
 	}
@@ -279,6 +318,36 @@ func listUsersHandler(e *core.RequestEvent) error {
 		"items":      items,
 		"request_id": requestIDFrom(e),
 	})
+}
+
+// memberListOrder maps the board's ?sort=&order= pair onto a fixed OrderBy.
+// The keys are the ones MembersPage's control and headers send; anything else
+// — an unknown field, an unknown direction — falls back to the default order
+// rather than erroring, because the board must render for a caller that spells
+// the pair differently. `last_seen` orders the DURABLE column (the value the
+// DTO serves through lastSeenOrCreated), not the live presence cache, which
+// only exists on the client.
+func memberListOrder(sortRaw, orderRaw string) []string {
+	dir := "DESC"
+	if strings.EqualFold(strings.TrimSpace(orderRaw), "asc") {
+		dir = "ASC"
+	}
+	var column string
+	switch strings.TrimSpace(sortRaw) {
+	case "nickname":
+		column = "nickname"
+	case "role":
+		column = "role"
+	case "post_count":
+		column = "posts_count"
+	case "reputation":
+		column = "reputation"
+	case "created_at":
+		column = "created"
+	default: // "last_seen" and anything unrecognised
+		column = userLastSeenField
+	}
+	return []string{column + " " + dir, "id ASC"}
 }
 
 // ── Nickname availability and member search ──────────────────────────────────

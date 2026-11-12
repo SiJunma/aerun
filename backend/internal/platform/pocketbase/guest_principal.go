@@ -32,6 +32,11 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
+	// publicURLContextKey is the RequestEvent key registerRoutes stashes the
+	// configured public origin under, so handlers can read it without taking
+	// config.Config as a parameter.
+	publicURLContextKey = "aerun_public_url"
+
 	// guestPrincipalsCollectionName is the server-only collection that stores
 	// anonymous visitor identities (created by 1770000003_guest_principal_schema).
 	// Mirrors the migration constant; each package owns its own spelling by
@@ -187,19 +192,52 @@ func guestPrincipalIDFromRequest(e *core.RequestEvent) string {
 	return rec.GetString("guest_id")
 }
 
+// requestIsSecure reports whether the request arrived over HTTPS, for cookie
+// Secure decisions (SEC-06).
+//
+// The backend listens on loopback and Caddy terminates TLS, so r.TLS is always
+// nil on a production request and a cookie keyed on it alone is issued WITHOUT
+// Secure — the capability secret is then transmissible over a plain-HTTP hop
+// anywhere in the browser's future. Both deployed signals are consulted:
+// X-Forwarded-Proto, which Caddy sets, and the configured public origin, which
+// config.Validate already forces to HTTPS in production.
+//
+// X-Forwarded-Proto is trusted only because the socket is loopback-only: the
+// only writers of the header are this process's own proxy. A client that can
+// reach the socket directly can already write anything, and the header is only
+// ever used to make a cookie MORE restrictive, never less.
+func requestIsSecure(e *core.RequestEvent) bool {
+	if e.Request.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(e.Request.Header.Get("X-Forwarded-Proto")), "https") {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfgPublicURLFromRequest(e))), "https://")
+}
+
+// cfgPublicURLFromRequest returns the configured public origin for the request
+// that is being served. The value is stashed on the router by registerRoutes
+// (see publicURLContextKey); a request that never passed through it gets "".
+func cfgPublicURLFromRequest(e *core.RequestEvent) string {
+	if v, ok := e.Get(publicURLContextKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // setGuestPrincipalCookie writes the HttpOnly capability cookie. It is called
 // exactly once, at principal creation; the browser round-trips the same value
 // on every subsequent request and the server verifies it through
 // guestPrincipalFromRequest.
 func setGuestPrincipalCookie(e *core.RequestEvent, guestID, secret string) {
-	secure := e.Request.TLS != nil
 	http.SetCookie(e.Response, &http.Cookie{
 		Name:     guestPrincipalCookieName,
 		Value:    guestPrincipalCookieValue(guestID, secret),
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
+		Secure:   requestIsSecure(e),
 		MaxAge:   int(guestPrincipalCookieTTL.Seconds()),
 	})
 }
@@ -213,7 +251,7 @@ func clearGuestPrincipalCookie(e *core.RequestEvent) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   e.Request.TLS != nil,
+		Secure:   requestIsSecure(e),
 		MaxAge:   -1,
 	})
 }

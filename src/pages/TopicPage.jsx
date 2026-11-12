@@ -132,6 +132,8 @@ export default function TopicPage() {
     replyRef,
     topic,
     topicNotFound,
+    topicRestricted,
+    topicRestrictedMessage,
     accessError,
     accessErrRaw,
     isTopicLoading,
@@ -367,6 +369,7 @@ export default function TopicPage() {
   const [myDraft, setMyDraft] = useState(null);
   const [draftSaving, setDraftSaving] = useState(false);
   const draftJustPublishedRef = useRef(false);
+  const isSubmittingReplyRef = useRef(false);
   const replyInFlightRef = useRef(createInFlight());
   const rescueWrittenRef = useRef(null);
 
@@ -691,6 +694,7 @@ export default function TopicPage() {
     const publishedDraft = myDraft;
     if (!publishedDraft) return;
 
+    isSubmittingReplyRef.current = true;
     draftJustPublishedRef.current = true;
     setDraftSaving(true);
     recordActivity?.();
@@ -716,9 +720,8 @@ export default function TopicPage() {
     // shows the unrolled "pending" placeholder until the server response
     // reconciles it with the thrown value.
 
-    // Optimistically hide draft and mark as read
+    // Optimistically hide draft
     setMyDraft(null);
-    markTopicRead?.(id);
 
     // Client-side post count updates (legacy parity)
     let ownNewStats = null;
@@ -825,6 +828,7 @@ export default function TopicPage() {
       const newPostId = pubResult?.postId || pubResult?.id;
       if (newPostId) {
         resolveOptimisticPost(id, tempId, newPostId);
+        markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId);
       }
       navigateToCreatedPost(tempId, newPostId);
 
@@ -933,6 +937,7 @@ export default function TopicPage() {
       draftJustPublishedRef.current = false;
       showToast(friendlyDiceError(err, lang) || t('forum.draft_publish_error'), 'danger');
     } finally {
+      isSubmittingReplyRef.current = false;
       if (isMountedRef.current) {
         setDraftSaving(false);
       }
@@ -948,6 +953,7 @@ export default function TopicPage() {
       showToast(lang === 'ru' ? 'Введите ваш никнейм' : 'Please enter your nickname', 'danger');
       return;
     }
+    isSubmittingReplyRef.current = true;
     recordActivity?.();
 
     // 1. Generate unique temporary ID and save rollback snapshot
@@ -955,6 +961,9 @@ export default function TopicPage() {
     const savedReplyContent = replyContent;
     const savedGuestNickname = guestNickname;
 
+    // The optimistic card gets the rewritten [roll=id] shape + provisional
+    // rolls; the REAL throw is drawn server-side (SEC-08), so the card's
+    // `rolls` is short-lived and never becomes the request body.
     const { content: processedContent, rolls } = processDiceRolls(replyContent.trim());
     const authorDTO = buildAuthorDTO(selectedCharacterId);
 
@@ -986,9 +995,6 @@ export default function TopicPage() {
         ...(ownNewStats ? { posts_count: ownNewStats.post_count, reputation: ownNewStats.reputation } : {}),
       };
     }
-
-    // Mark as read immediately (server-side)
-    markTopicRead?.(id);
 
     // Calculate pagination target (legacy parity: the REAL topic counter
     // decides where the optimistic post lands — a placeholder formula here
@@ -1034,6 +1040,11 @@ export default function TopicPage() {
         return next;
       }, { preventScrollReset: true, state: { pendingPostId: tempId } });
     } else {
+      // Same-page send: reset the jump latch so the unified scroll controller
+      // can position on post-${newPostId} once the server confirms it
+      // (onSuccess below sets pendingCreatedPostIdRef.current).
+      setAlreadyJumped(false);
+
       setPosts((prev) => {
         if (prev.some((p) => p.id === tempId)) return prev;
         return [...prev, optimisticPost];
@@ -1080,12 +1091,16 @@ export default function TopicPage() {
               return prev.map((p) => (p.id === tempIdRef ? { ...p, ...post, id: newPostId, _isOptimistic: false } : p));
             });
             navigateToCreatedPost(tempIdRef, newPostId);
-            markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
+            markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId);
             // Same-page sends never touch `location.state`, so remember the
             // real post ID here — the unified scroll controller will focus
             // `post-${newPostId}` once the optimistic placeholder swaps to
             // the server ID.
             pendingCreatedPostIdRef.current = newPostId;
+            // Reset the jump latch so the scroll effect in useTopicJumpScroll
+            // (guarded by alreadyJumpedRef.current) can reposition on the
+            // confirmed post after a same-page send.
+            setAlreadyJumped(false);
             if (curCategoryId) {
               updateLocalTopicLastPost?.(id, curCategoryId, curTitle, {
                 id: newPostId,
@@ -1174,6 +1189,7 @@ export default function TopicPage() {
       // restore). Swallowed here — rethrowing just surfaced an unhandled
       // promise rejection.
     } finally {
+      isSubmittingReplyRef.current = false;
       if (isMountedRef.current) setSubmitting(false);
     }
   };
@@ -1314,14 +1330,14 @@ export default function TopicPage() {
 
   // Topic stats freshness contract (contract: check-forum-read-contract.mjs)
   useEffect(() => {
-    if (!id) return;
+    if (!id || topicRestricted) return;
     const unsub = subscribeToTopicStats(id, () => {});
     return () => unsub();
-  }, [id]);
+  }, [id, topicRestricted]);
 
   // 11. Topic context fetch (server draft, votes, subscription)
   useEffect(() => {
-    if (!user?.uid || !id || !topic || topicNotFound) return;
+    if (!user?.uid || !id || !topic || topicNotFound || topicRestricted) return;
     let cancelled = false;
     (async () => {
       try {
@@ -1341,16 +1357,20 @@ export default function TopicPage() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, id, topic?.id, topicNotFound]);
+  }, [user?.uid, id, topic?.id, topicNotFound, topicRestricted]);
 
   // 12. Quote notifications subscription (contract)
+  // Depend on topic?.id (primitive) instead of the `topic` object so that
+  // live stats updates (which create a new topic identity on every tick) do
+  // not tear down and re-open the subscription — that was Effect 12's
+  // "срыв подписки" generating duplicate quote-notification fetches.
   useEffect(() => {
-    if (!user?.uid || !id || !topic || topicNotFound) return;
+    if (!user?.uid || !id || !topic?.id || topicNotFound || topicRestricted) return;
     const unsub = subscribeToTopicNotifications(user.uid, id, (activeQuotes) => {
       setUnreadQuotes(activeQuotes || []);
     });
     return () => unsub();
-  }, [user?.uid, id, topic, topicNotFound]);
+  }, [user?.uid, id, topic?.id, topicNotFound, topicRestricted]);
 
   // Guest page fallback wait guard — contract marker for check-golast-overlay.mjs
   useEffect(() => {
@@ -1448,6 +1468,7 @@ export default function TopicPage() {
   useEffect(() => {
     if (!user?.uid || !id || posts.length === 0) return;
     if (profile?.role === 'spectator') return;
+    if (isSubmittingReplyRef.current) return;
     const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + (posts.length - 1);
     if (lastMarkedOffsetRef.current === lastMessageIndex) return;
     lastMarkedOffsetRef.current = lastMessageIndex;
@@ -1482,6 +1503,12 @@ export default function TopicPage() {
   // at the composer root element (forwardRef).
   const composerDocTopRef = useRef(null);
   useLayoutEffect(() => {
+    // While the member's own reply is in flight the local posts_count bump and
+    // optimistic insert already move content; compensating the scroll here
+    // would fight the same movement and produce jitter. Skip until the server
+    // confirms and isSubmittingReplyRef flips back to false.
+    if (isSubmittingReplyRef.current) return;
+
     const el = replyRef.current;
     if (!el || !el.isConnected) {
       composerDocTopRef.current = null;
@@ -1513,14 +1540,15 @@ export default function TopicPage() {
     // replyRef is a stable ref object; including it only satisfies the linter.
   }, [posts, replyRef]);
 
-  // 16. Load posts on page change
+  // 16. Load posts on page change or initial topic resolution
   const loadPostsRef = useRef(loadPosts);
   loadPostsRef.current = loadPosts;
+  const hasTopic = Boolean(topic);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !hasTopic || topicNotFound || topicRestricted) return;
     loadPostsRef.current();
-  }, [id, currentPage]);
+  }, [id, hasTopic, topicNotFound, topicRestricted, currentPage]);
 
   // 16b. Live updates from OTHER readers (legacy monolith parity).
   //
@@ -1547,7 +1575,7 @@ export default function TopicPage() {
   }, [posts]);
 
   useEffect(() => {
-    if (!id || !topic || topicNotFound) return;
+    if (!id || !topic || topicNotFound || topicRestricted) return;
 
     // A different topic (or the first delivery for this one) is effect 16's
     // initial load, not news — re-arm the key and step aside.
@@ -1583,16 +1611,59 @@ export default function TopicPage() {
       return;
     }
 
+    // Own reply in flight: the posts_count bump came from our local optimistic update,
+    // not from a server post. Fetching now would only read stale pre-submit rows.
+    if (isSubmittingReplyRef.current) {
+      return;
+    }
+
+    // If the server's newest last_post_id is ALREADY rendered on this page (e.g. reconciled
+    // from our own submit onSuccess), there is nothing new to re-fetch from the server.
+    if (topic.last_post_id && postsRef.current.some((p) => p.id === topic.last_post_id)) {
+      return;
+    }
+
     // Silent refetch: the rendered page stays on screen while the request is
     // in flight (stale-while-revalidate), and loadPosts merges the server
     // answer around the still-pending optimistic cards.
     loadPostsRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, topic, topicNotFound, currentPage, searchParams]);
+  }, [id, topic, topicNotFound, topicRestricted, currentPage, searchParams]);
 
   // Render Skeleton / ErrorCard
   if (isTopicLoading) return <Skeleton />;
-  if (topicNotFound || accessError || !topic) return <ErrorCard />;
+  if (topicNotFound || accessError || !topic) {
+    // RES-02: parametrize the card. The branch used to render a bare
+    // `<ErrorCard />` — no title, no diagnosis, no retry — so a 404, a 403
+    // and a network failure were indistinguishable and the reader had no
+    // way to act on any of them. `accessErrRaw` is the raw ApiError the
+    // stats loop surfaced (sendApi preserves status/code/requestId) and the
+    // card already classifies a transport failure vs a server fault vs an
+    // auth refusal; the title carries the human answer: 404 means the topic
+    // is gone, 403 means the category is closed to this reader, anything
+    // else is a transient load failure worth retrying.
+    const isRestricted = topicRestricted;
+    const isNotFound = topicNotFound && !isRestricted;
+    const errorTitle = isRestricted
+      ? (lang === 'ru' ? 'Доступ запрещён' : 'Access Denied')
+      : isNotFound
+        ? (lang === 'ru' ? 'Тема не найдена' : 'Topic Not Found')
+        : (lang === 'ru' ? 'Не удалось загрузить тему' : 'Failed to load topic');
+
+    return (
+      <ErrorCard
+        title={errorTitle}
+        message={topicRestrictedMessage || undefined}
+        error={null}
+        hideTechnicalDetails={isRestricted}
+        // restricted и not found — осознанные ответы сервера, а не обрыв
+        // соединения. classifyError(null) без явного флага ставит диагноз
+        // "network", что вводит читателя в заблуждение.
+        isNetworkError={isNotFound || isRestricted ? false : undefined}
+        onRetry={undefined}
+      />
+    );
+  }
 
   const category = topic.category || categories.find((c) => c.id === topic.category_id);
   const categoryTitle = category ? resolveField(category.title, lang) : '...';

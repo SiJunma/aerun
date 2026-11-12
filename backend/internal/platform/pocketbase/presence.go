@@ -320,8 +320,81 @@ func (t *guestThrottle) reset() {
 	t.lastSweep = time.Time{}
 }
 
+// authRateLimitPerMinute caps unauthenticated auth writes from one client IP.
+const authRateLimitPerMinute = 20
+
+// --- SEC-05: token-bucket limiter for the auth write paths ---
+
+// authRate limit is always evaluated against the REAL client IP (`e.RealIP()`).
+// Caddy supplies it and a client cannot forge it over loopback-only listen.
+func authRateLimit(e *core.RequestEvent, class string) bool {
+	return globalAuthLimiter.allow(e.RealIP()+":"+class, time.Now())
+}
+
+// resetAuthLimiter drops every bucket; used by tests to start from a clean
+// budget for every scenario.
+func resetAuthLimiter() {
+	globalAuthLimiter.reset()
+}
+
+type authThrottle struct {
+	mu        sync.Mutex
+	limit     int
+	window    time.Duration
+	lastSweep time.Time
+	buckets   map[string]*authBucket
+}
+
+type authBucket struct {
+	start time.Time
+	count int
+}
+
+func newAuthThrottle(limit int, window time.Duration) *authThrottle {
+	return &authThrottle{
+		limit:   limit,
+		window:  window,
+		buckets: make(map[string]*authBucket),
+	}
+}
+
+func (t *authThrottle) allow(key string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.lastSweep.IsZero() || now.Sub(t.lastSweep) >= t.window {
+		for k, bucket := range t.buckets {
+			if now.Sub(bucket.start) >= t.window {
+				delete(t.buckets, k)
+			}
+		}
+		t.lastSweep = now
+	}
+
+	bucket, ok := t.buckets[key]
+	if !ok || now.Sub(bucket.start) >= t.window {
+		t.buckets[key] = &authBucket{start: now, count: 1}
+		return true
+	}
+	if bucket.count >= t.limit {
+		return false
+	}
+	bucket.count++
+	return true
+}
+
+func (t *authThrottle) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buckets = make(map[string]*authBucket)
+	t.lastSweep = time.Time{}
+}
+
 // guestLimiter guards the anonymous heartbeat path.
 var guestLimiter = newGuestThrottle(guestHeartbeatsPerMinute, time.Minute)
+
+// globalAuthLimiter guards the unauthenticated auth write paths (SEC-05).
+var globalAuthLimiter = newAuthThrottle(authRateLimitPerMinute, time.Minute)
 
 type heartbeatForm struct {
 	GuestID string `json:"guest_id"`

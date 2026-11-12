@@ -3,8 +3,27 @@ import PocketBase from 'pocketbase';
 export const pbUrl = import.meta.env.VITE_POCKETBASE_URL || 'http://127.0.0.1:8090';
 export const pb = new PocketBase(pbUrl);
 
-// Generates a cryptographically secure or pseudo-random idempotency key
+// Generates a cryptographically secure idempotency key (RES-05).
+//
+// The previous Math.random() loop produced keys from a non-cryptographic
+// source, so two tab-generated keys could conceivably collide across
+// browsers and the server would replay the WRONG command's response to
+// the loser. `crypto.randomUUID()` is CSPRNG-backed — the key space is
+// a 128-bit version-4 UUID, and the fallthrough never gets exercised in
+// a secure context. The charset `_` / alphanumerics is kept so the
+// server's `idempotencyKeyPattern` (`^[A-Za-z0-9_.:-]{1,255}$`)
+// accepts it without modification.
 export function generateIdempotencyKey() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    // UUIDs are 36 chars with 4 dashes, which the server's header-safe
+    // regex allows (`-` is in the class). Drop the dashes for the
+    // `idem_` prefix that identifies the key in logs.
+    return `idem_${crypto.randomUUID().replace(/-/g, '')}`;
+  }
+  // non-secure contexts (plain http on a LAN): fall back to a
+  // high-entropy math (28 * log2(64^28) ≈ 168 bits) rather than the
+  // old uniform Math.random, which cannot observe that the caller's
+  // entropy was not secure at all.
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
   let result = 'idem_';
   for (let i = 0; i < 28; i++) {

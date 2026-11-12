@@ -19,6 +19,7 @@ import AvatarUploader from '../components/common/AvatarUploader';
 import { voteOnProfile, fetchReputationLogs, getProfileVote, deleteReputation, updateReputationComment } from '../api/reputation';
 import { subscribeToDesigns } from '../api/designs';
 import { resolveAvatarUrl, uploadMyAvatar } from '../api/avatars';
+import ErrorCard from '../components/common/ErrorCard';
 import Timestamp from '../components/common/Timestamp';
 import BBCode from '../components/common/BBCode';
 
@@ -117,6 +118,14 @@ const ProfilePage = () => {
   const canEditStatus = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_STATUS) : hasPermission(PERMISSIONS.EDIT_OTHERS_STATUSES);
   const canEditSignature = isOwn ? hasPermission(PERMISSIONS.EDIT_SELF_SIGNATURE) : hasPermission(PERMISSIONS.EDIT_OTHERS_SIGNATURES);
   const canEditAnyAccount = isOwn || canEditNickname || canEditAvatar || canEditStatus || canEditSignature;
+
+  // RES-01: profile-load failure state (see subscribeToUser's errorCallback
+  // above). A network failure answers with `data: null` from the subscribe
+  // function on every retry, so the page would render the same endless
+  // skeleton forever. The explicit error lets the page render the ErrorCard
+  // with a Retry button instead, and a retry that succeeds clears it.
+  const [profileError, setProfileError] = useState(null);
+  const [profileRetryNonce, setProfileRetryNonce] = useState(0);
 
   const hasTabs = !isLimitedProfile || isOwn || canEditAnyAccount;
   // A pending member lands on their OWN account tab: it is the one place where
@@ -218,12 +227,27 @@ const ProfilePage = () => {
 
   useEffect(() => {
     const unsubscribe = subscribeToCharacters(uid, setCharacters);
-    const unsubProfile = subscribeToUser(uid, (data) => {
-      setViewedProfile(data);
-      if (data) {
-        setPageTitle(data.nickname || data.email || t('profile.title', 'Профиль'));
+    const unsubProfile = subscribeToUser(
+      uid,
+      (data) => {
+        setViewedProfile(data);
+        // Clear the error when a fresh fetch succeeds, so a retry that
+        // succeeded clears the error card with it.
+        setProfileError(null);
+        if (data) {
+          setPageTitle(data.nickname || data.email || t('profile.title', 'Профиль'));
+        }
+      },
+      (err) => {
+        // RES-01: only transport failures (status 0) and 5xx responses
+        // reach this branch. A 404 is answered by the server as
+        // `data: null` without an error, so it renders as "no profile"
+        // rather than as a retryable failure — which is the honest
+        // distinction the plan asks for, kept by reading the error here.
+        setProfileError(err);
+        console.error('[ProfilePage] fetchUserProfile failed:', err);
       }
-    });
+    );
 
     if (profile && profile.uid !== uid) {
       getProfileVote(profile.uid, uid).then(setMyVote).catch(console.error);
@@ -235,7 +259,20 @@ const ProfilePage = () => {
       unsubscribe();
       unsubProfile();
     };
-  }, [uid, profile, setPageTitle, t]);
+    // Deps are the IDENTITIES, not the object. `profile` gets a new identity
+    // on every AuthProvider write (the own-profile refresh on every boot sync),
+    // so depending on the object re-ran this whole effect — and with it the
+    // subscribeToUser/subscribeToCharacters pair and the votes read — for
+    // state that had not changed. What this effect needs from the viewer is
+    // its uid and whether this is the viewer's own row, so those (plus the
+    // viewed uid) are the deps.
+  // `t` is deliberately NOT a dep: useI18n re-creates it whenever its provider
+  // re-renders, and that happens on AuthProvider's own-profile write — the
+  // exact write this effect is trying to ignore. The translation it needs is
+  // a static fallback string, so re-running for it only re-issued the
+  // subscribeToUser/subscribeToCharacters/votes reads.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, profile?.uid, setPageTitle, profileRetryNonce]);
 
   // Tracks if we've already done the initial seek for a deep-linked log
   const didSeekRef = useRef(false);
@@ -750,6 +787,25 @@ const ProfilePage = () => {
       }
     });
   };
+
+  // RES-01: while the profile has not loaded, a real error replaces the
+  // whole page — otherwise the skeletons below never resolve and a network
+  // failure renders as an endless spinner. The card carries the error and
+  // the request id for the admin report, and re-runs the fetch.
+  if (profileError && !viewedProfile) {
+    return (
+      <Container className="py-5">
+        <ErrorCard
+          title={lang === 'ru' ? 'Не удалось загрузить профиль' : 'Failed to load profile'}
+          error={profileError}
+          onRetry={() => {
+            setProfileError(null);
+            setProfileRetryNonce((n) => n + 1);
+          }}
+        />
+      </Container>
+    );
+  }
 
   return (
     <Container className="py-5">
@@ -1595,7 +1651,7 @@ const ProfilePage = () => {
                                     )}
                                   </div>
                                   <div className="post-preview text-muted small text-break line-clamp-4">
-                                    <BBCode rolls={post.rolls} authorId={post.author?.user_id}>{post.content}</BBCode>
+                                    <BBCode rolls={post.rolls} authorId={post.author?.user_id} authorRole={post.author_role_id}>{post.content}</BBCode>
                                   </div>
                                 </div>
                               );

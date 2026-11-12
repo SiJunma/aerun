@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -294,4 +295,51 @@ func writeJSON(e *core.RequestEvent, status int, body json.RawMessage) error {
 	e.Response.WriteHeader(status)
 	_, err := e.Response.Write(body)
 	return err
+}
+
+// SEC-09: Idempotency keys retention and cleanup.
+const (
+	// idempotencyRetention is how long an idempotency record survives before pruning (48h).
+	idempotencyRetention = 48 * time.Hour
+
+	// idempotencyPruneJobID identifies the cron job in PocketBase's scheduler.
+	idempotencyPruneJobID = "__aerunIdempotencyPrune__"
+)
+
+// pruneIdempotencyKeys deletes idempotency records older than the retention window.
+func pruneIdempotencyKeys(app core.App, now time.Time) (int, error) {
+	threshold := now.Add(-idempotencyRetention).UTC().Format("2006-01-02 15:04:05.000Z")
+	records, err := app.FindRecordsByFilter(
+		idempotencyCollection,
+		"created < {:threshold}",
+		"-created",
+		500,
+		0,
+		dbx.Params{"threshold": threshold},
+	)
+	if err != nil {
+		return 0, err
+	}
+	pruned := 0
+	for _, rec := range records {
+		if err := app.Delete(rec); err != nil {
+			return pruned, err
+		}
+		pruned++
+	}
+	return pruned, nil
+}
+
+// registerIdempotencyPruneCron registers the recurring cleanup in PocketBase scheduler.
+func registerIdempotencyPruneCron(app core.App) error {
+	return app.Cron().Add(idempotencyPruneJobID, "*/30 * * * *", func() {
+		pruned, err := pruneIdempotencyKeys(app, time.Now())
+		if err != nil {
+			app.Logger().Warn("idempotency prune failed", "error", err)
+			return
+		}
+		if pruned > 0 {
+			app.Logger().Info("pruned idempotency keys", "count", pruned)
+		}
+	})
 }

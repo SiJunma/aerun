@@ -41,6 +41,14 @@ func ValidateNickname(nickname string) error {
 	if trimmed == "" {
 		return fmt.Errorf("nickname must not be empty")
 	}
+	// SEC-07: nicknames reach a mail header (DM subject "New Direct Message
+	// from {SENDER_NAME}"). A carriage return / line feed inside one would
+	// inject a second header line, so it is refused here — strings.Fields
+	// in NormalizeNickname would otherwise quietly collapse it away and
+	// the display form would keep it.
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return fmt.Errorf("nickname must not contain line breaks")
+	}
 	runes := []rune(trimmed)
 	if len(runes) < MinNicknameLen || len(runes) > MaxNicknameLen {
 		return fmt.Errorf("nickname must be %d..%d characters", MinNicknameLen, MaxNicknameLen)

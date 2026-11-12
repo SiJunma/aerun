@@ -76,7 +76,15 @@ export const useTopicJumpScroll = ({
         // whether anyone saw it or not. Optimistic temp ids are skipped: the
         // cursor only holds persisted rows.
         const lastRealPost = [...posts].reverse().find((p) => !p._isOptimistic && p.id);
-        markTopicRead?.(topicId, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, lastRealPost?.id);
+        // The offset is the INDEX of the last rendered post — the same
+        // arithmetic Effect 15 uses. It used to be one HIGHER here
+        // (posts.length, not length - 1), and markTopicRead's backward-offset
+        // guard compared against it: a goLast visit recorded base + length,
+        // the next visit's Effect 15 computed base + (length - 1) + one new
+        // reply = the SAME number, and the guard silently swallowed the
+        // mark-read — the topic never left the unread list and no /read hit
+        // the network at all.
+        markTopicRead?.(topicId, (currentPage - 1) * ITEMS_PER_PAGE + (posts.length - 1), lastRealPost?.id);
       }
     }
     // If targetId resolved but the DOM element isn't mounted yet (cold start),

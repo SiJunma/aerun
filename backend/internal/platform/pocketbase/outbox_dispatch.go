@@ -140,10 +140,16 @@ func (s pocketBaseMailSender) Send(ctx context.Context, payload MailPayload) err
 	// plain-text alternative. PocketBase builds a multipart/alternative
 	// message when both are set and a text-only one when HTML is empty, so a
 	// payload from before HTML delivery keeps sending exactly as it did.
+	//
+	// The subject goes through sanitizeMailSubject once more, here, as the
+	// last line before the wire (SEC-07): payloads already in the outbox
+	// were rendered before renderEmailFromTemplate sanitised, and a payload
+	// that arrives by another path than that renderer would otherwise
+	// cross the transport with its newlines intact.
 	return client.Send(&mailer.Message{
 		From:    mail.Address{Name: s.app.Settings().Meta.SenderName, Address: sender},
 		To:      []mail.Address{{Address: to}},
-		Subject: payload.Subject,
+		Subject: sanitizeMailSubject(payload.Subject),
 		Text:    payload.BodyText,
 		HTML:    payload.BodyHTML,
 	})
