@@ -30,7 +30,7 @@
 // post, with no permission key at all (see the comment on `delete_others_topics`
 // in deleteTopicHandler). Gating on that key here would hide an action the
 // server accepts, which is the bug this file exists to prevent.
-import { PERMISSIONS } from '../constants/permissions.js';
+import { translations } from '../i18n/dictionary';
 
 /**
  * The account id that opened the topic, or null when there is none.
@@ -93,15 +93,12 @@ export const canDeleteTopic = ({ topic, user, hasPermission }) => {
  * @returns {string} a message that names the reason
  */
 export const topicDeleteErrorText = (err, lang) => {
+  const dict = translations[lang] || translations.en;
   if (err?.status === 409) {
-    return lang === 'ru'
-      ? 'В теме есть ответы других участников. Удалить тему вместе с их сообщениями может только администратор.'
-      : 'This topic has replies from other members. Only an administrator can remove it with their posts.';
+    return dict.common.topic_delete_has_replies;
   }
   if (err?.status === 403) {
-    return lang === 'ru'
-      ? 'Недостаточно прав для удаления этой темы.'
-      : 'You are not allowed to delete this topic.';
+    return dict.common.topic_delete_forbidden;
   }
-  return err?.message || (lang === 'ru' ? 'Не удалось удалить тему' : 'Failed to delete the topic');
+  return err?.message || dict.common.topic_delete_failed;
 };

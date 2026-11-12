@@ -27,37 +27,6 @@ const classifyError = (error) => {
   return 'generic';
 };
 
-const COPY = {
-  network: {
-    title: ['Ошибка соединения с сервером', 'Server Connection Error'],
-    message: [
-      'Не удалось установить соединение с сервером. Пожалуйста, проверьте подключение к интернету или попробуйте обновить страницу.',
-      'Unable to connect to the server. Please check your internet connection or try refreshing the page.'
-    ]
-  },
-  server: {
-    title: ['Сервер не смог выполнить запрос', 'The Server Could Not Complete This Request'],
-    message: [
-      'Сервер ответил ошибкой. Это проблема на стороне сервера, а не ваше подключение — повторная попытка может помочь. Если ошибка повторяется, сообщите администратору: номер запроса указан в технических деталях.',
-      'The server returned an error. This is a server-side problem, not your connection — retrying may help. If it keeps happening, tell an administrator; the request id is in the technical details.'
-    ]
-  },
-  auth: {
-    title: ['Нет доступа', 'Access Denied'],
-    message: [
-      'Сервер не дал доступ к этим данным. Возможно, у вас нет прав или сессия истекла.',
-      'The server refused access to this data. You may lack permission, or the session has expired.'
-    ]
-  },
-  generic: {
-    title: ['Не удалось загрузить данные', 'Failed to Load Data'],
-    message: [
-      'Произошла непредвиденная ошибка при получении данных. Попробуйте обновить страницу или повторить попытку.',
-      'An unexpected error occurred while fetching data. Please try refreshing or retrying.'
-    ]
-  }
-};
-
 const ErrorCard = ({
   title,
   message,
@@ -74,7 +43,7 @@ const ErrorCard = ({
   hideTechnicalDetails = false,
   className = 'my-4'
 }) => {
-  const { lang } = useI18n();
+  const { t } = useI18n();
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -85,11 +54,9 @@ const ErrorCard = ({
   const kind = typeof isNetworkError === 'boolean'
     ? (isNetworkError ? 'network' : 'generic')
     : classifyError(error);
-  const copy = COPY[kind];
-  const pick = (pair) => (lang === 'ru' ? pair[0] : pair[1]);
 
-  const defaultTitle = pick(copy.title);
-  const defaultMessage = pick(copy.message);
+  const defaultTitle = t(`error.${kind}_title`);
+  const defaultMessage = t(`error.${kind}_message`);
   const isNetwork = kind === 'network';
 
   const handleCopy = () => {
@@ -131,7 +98,7 @@ const ErrorCard = ({
           {onRetry && (
             <Button variant="primary" onClick={onRetry} className="d-flex align-items-center gap-2 px-3">
               <RefreshCw size={16} />
-              {lang === 'ru' ? 'Повторить попытку' : 'Retry'}
+              {t('error.retry')}
             </Button>
           )}
           <Button
@@ -139,7 +106,7 @@ const ErrorCard = ({
             onClick={() => window.location.reload()}
             className="d-flex align-items-center gap-2 px-3"
           >
-            {lang === 'ru' ? 'Перезагрузить страницу' : 'Reload Page'}
+            {t('error.reload_page')}
           </Button>
           {!hideTechnicalDetails && errorString && (
             <Button
@@ -148,7 +115,7 @@ const ErrorCard = ({
               onClick={() => setShowDetails(!showDetails)}
               className="d-flex align-items-center gap-1"
             >
-              {lang === 'ru' ? 'Технические детали' : 'Technical Details'}
+              {t('error.technical_details')}
               {showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </Button>
           )}
@@ -160,7 +127,7 @@ const ErrorCard = ({
               <div className="p-3 rounded" style={{ background: 'var(--block-bg, rgba(0,0,0,0.1))', border: '1px solid var(--border-color)', fontSize: '0.8rem', fontFamily: 'monospace' }}>
                 <div className="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
                   <span className="text-muted fw-bold">
-                    {lang === 'ru' ? 'Отчёт об ошибке для администратора:' : 'Error report for administrator:'}
+                    {t('error.error_report')}
                   </span>
                   <Button
                     variant="link"
@@ -171,12 +138,12 @@ const ErrorCard = ({
                     {copied ? (
                       <>
                         <Check size={14} className="text-success" />
-                        <span className="text-success">{lang === 'ru' ? 'Скопировано' : 'Copied'}</span>
+                        <span className="text-success">{t('error.copied')}</span>
                       </>
                     ) : (
                       <>
                         <Copy size={14} />
-                        <span>{lang === 'ru' ? 'Скопировать' : 'Copy'}</span>
+                        <span>{t('error.copy')}</span>
                       </>
                     )}
                   </Button>

@@ -80,14 +80,15 @@ import ErrorCard from '../components/common/ErrorCard';
 
 const ITEMS_PER_PAGE_DEFAULT = 20;
 
+import { translations } from '../i18n/dictionary';
+
 // The server refuses content that references [roll=<id>] throws it did not
 // receive. Translate the terse validation message into an actionable one.
 const friendlyDiceError = (err, lang) => {
   const message = String(err?.message || '');
   if (message.includes('dice rolls but no rolls were provided')) {
-    return lang === 'ru'
-      ? 'В тексте есть тег [roll=…] без значения: бросьте кубик заново или уберите этот тег.'
-      : 'The text contains a [roll=…] tag with no thrown value: roll the dice again or remove the tag.';
+    const dict = translations[lang] || translations.en;
+    return dict.topic_page.dice_invalid_tag;
   }
   return err?.message;
 };
@@ -646,7 +647,7 @@ export default function TopicPage() {
     if (draftSaving) return;
     const { editCharacterId, editContent } = modalState;
     if (!editContent.trim()) {
-      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      showToast(t('topic_page.enter_content'), 'danger');
       return;
     }
     setDraftSaving(true);
@@ -947,11 +948,11 @@ export default function TopicPage() {
 
   const submitReply = async () => {
     if (!replyContent.trim()) {
-      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      showToast(t('topic_page.enter_content'), 'danger');
       return;
     }
     if (!user && !guestNickname.trim()) {
-      showToast(lang === 'ru' ? 'Введите ваш никнейм' : 'Please enter your nickname', 'danger');
+      showToast(t('topic_page.enter_nickname'), 'danger');
       return;
     }
     isSubmittingReplyRef.current = true;
@@ -1172,7 +1173,7 @@ export default function TopicPage() {
           } catch {
             // ignore
           }
-          showToast(friendlyDiceError(err, lang) || (lang === 'ru' ? 'Не удалось отправить сообщение' : 'Failed to post reply'), 'danger');
+          showToast(friendlyDiceError(err, lang) || t('topic_page.post_failed'), 'danger');
         },
       });
       // A successful send means the text reached the topic, so there is
@@ -1239,7 +1240,7 @@ export default function TopicPage() {
         await deleteDraft(deletingPost.id);
         setMyDraft(null);
         setModalState((prev) => ({ ...prev, deletingPost: null }));
-        showToast(lang === 'ru' ? 'Черновик удален' : 'Draft deleted');
+        showToast(t('topic_page.draft_deleted')); 
         return;
       } else {
         const isFirstPost = isTopicFirstPost(modalState.deletingPost, posts, currentPage, ITEMS_PER_PAGE);
@@ -1304,9 +1305,9 @@ export default function TopicPage() {
           }
 
           if (result?.isGhost) {
-            showToast(lang === 'ru' ? 'Устаревшее сообщение удалено из кэша' : 'Ghost post cleared', 'info');
+            showToast(t('topic_page.ghost_post_cleared'), 'info'); 
           } else {
-            showToast(lang === 'ru' ? 'Сообщение удалено' : 'Post deleted', 'success');
+            showToast(t('topic_page.post_deleted'), 'success'); 
           }
 
           // The deleted post was the only one on this page — go back one page.
@@ -1323,7 +1324,7 @@ export default function TopicPage() {
         setModalState((prev) => ({ ...prev, deletingPost: null }));
         return;
       }
-      showToast(lang === 'ru' ? 'Не удалось удалить сообщение' : 'Error deleting post', 'danger');
+      showToast(t('topic_page.delete_post_error'), 'danger'); 
       // Resync with the server: the optimistic removal may have been wrong.
       await loadPosts?.();
     }
@@ -1646,10 +1647,10 @@ export default function TopicPage() {
     const isRestricted = topicRestricted;
     const isNotFound = topicNotFound && !isRestricted;
     const errorTitle = isRestricted
-      ? (lang === 'ru' ? 'Доступ запрещён' : 'Access Denied')
+      ? t('topic_page.access_denied')
       : isNotFound
-        ? (lang === 'ru' ? 'Тема не найдена' : 'Topic Not Found')
-        : (lang === 'ru' ? 'Не удалось загрузить тему' : 'Failed to load topic');
+        ? t('topic_page.topic_not_found')
+        : t('topic_page.failed_load_topic');
 
     return (
       <ErrorCard
@@ -1698,7 +1699,7 @@ export default function TopicPage() {
       <div className="topic-posts-list">
         {postsLoadError && posts.length === 0 ? (
           <ErrorCard
-            title={lang === 'ru' ? 'Не удалось загрузить сообщения' : 'Failed to load posts'}
+            title={t('topic_page.failed_load_posts')}
             error={postsLoadError}
             onRetry={() => loadPosts(currentPage)}
           />

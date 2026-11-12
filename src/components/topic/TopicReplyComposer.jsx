@@ -59,12 +59,10 @@ export const TopicReplyComposer = React.forwardRef(({
                 <Lock size={32} />
               </div>
               <h4 className="fw-bold mb-2">
-                {lang === 'ru' ? 'Тема закрыта' : 'Topic Closed'}
+                {t('forum.topic_closed')}
               </h4>
               <p className="text-muted mb-0 mx-auto" style={{ maxWidth: '400px' }}>
-                {lang === 'ru'
-                  ? `В теме достигнут лимит сообщений (${settings?.maxPostsPerTopic ?? 1000}/${settings?.maxPostsPerTopic ?? 1000}). Новые ответы более не принимаются.`
-                  : `The message limit (${settings?.maxPostsPerTopic ?? 1000}/${settings?.maxPostsPerTopic ?? 1000}) has been reached for this topic. New replies are no longer accepted.`}
+                {t('forum.topic_post_limit', { max: settings?.maxPostsPerTopic ?? 1000, limit: settings?.maxPostsPerTopic ?? 1000 })}
               </p>
             </div>
           </Card.Body>
@@ -105,11 +103,11 @@ export const TopicReplyComposer = React.forwardRef(({
             {!user && (
               <Form.Group className="mb-3" controlId="guestNickname">
                 <Form.Label className="fw-semibold small">
-                  {lang === 'ru' ? 'Ваш никнейм' : 'Your Nickname'} <span className="text-danger">*</span>
+                  {t('forum.your_nickname')} <span className="text-danger">*</span>
                 </Form.Label>
                 <Form.Control
                   type="text"
-                  placeholder={lang === 'ru' ? 'Введите имя...' : 'Enter your name...'}
+                  placeholder={t('forum.nickname_placeholder')}
                   value={guestNickname}
                   onChange={(e) => setGuestNickname(e.target.value)}
                   required
@@ -165,10 +163,10 @@ export const TopicReplyComposer = React.forwardRef(({
                 variant="outline-management"
                 className={`ms-auto d-none d-md-flex align-items-center gap-2 ${!(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? 'mb-2' : ''}`}
                 onClick={() => replyEditorRef.current?.openHotkeysModal()}
-                title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+                title={t('forum.hotkeys')}
               >
                 <Keyboard size={18} />
-                <span className="d-none d-md-inline small">{lang === 'ru' ? 'Справка' : 'Help'}</span>
+                <span className="d-none d-md-inline small">{t('forum.help')}</span>
               </Button>
             </div>
 

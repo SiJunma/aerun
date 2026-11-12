@@ -164,7 +164,7 @@ const Navigation = () => {
           {settings?.maintenanceMode && (
             <Badge bg="warning" text="dark" className="d-none d-sm-flex align-items-center gap-1 shadow-sm px-2 py-1" style={{ fontSize: '0.75rem', letterSpacing: '0.5px' }}>
               <div className="bg-dark rounded-circle me-1" style={{ width: '6px', height: '6px', animation: 'pulse 1.5s infinite' }}></div>
-              {lang === 'ru' ? 'ТЕХРАБОТЫ' : 'MAINTENANCE'}
+              {t('navbar.maintenance')}
             </Badge>
           )}
 
@@ -175,7 +175,7 @@ const Navigation = () => {
               to="/notifications"
               onClick={() => setExpanded(false)}
               className="position-relative p-1 d-flex align-items-center text-light opacity-75 hover-opacity-100"
-              title={lang === 'ru' ? 'Уведомления' : 'Notifications'}
+              title={t('navbar.notifications')}
             >
               <Bell size={20} />
               {totalUnread > 0 && (
@@ -198,7 +198,7 @@ const Navigation = () => {
               to="/messages"
               onClick={() => setExpanded(false)}
               className="position-relative p-1 d-flex align-items-center text-light opacity-75 hover-opacity-100"
-              title={lang === 'ru' ? 'Личные сообщения' : 'Messages'}
+              title={t('navbar.messages')}
             >
               <MessageCircle size={20} />
               {dmUnread > 0 && (
@@ -349,7 +349,7 @@ const Navigation = () => {
                 title={
                   <div className="d-flex align-items-center gap-2 text-light opacity-75 hover-opacity-100">
                     <Palette size={18} />
-                    <span>{lang === 'ru' ? 'Тема оформления' : 'Theme'}</span>
+                    <span>{t('navbar.theme')}</span>
                   </div>
                 }
                 id="guest-theme-dropdown-collapse"

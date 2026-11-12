@@ -147,7 +147,7 @@ export const useTopicPosts = ({
         }
         if (targetFound === false) {
           locatingPostIdRef.current = null;
-          showToast?.(lang === 'ru' ? 'Исходное сообщение было удалено' : 'The original post was deleted', 'warning');
+          showToast?.(t('forum.original_post_deleted'), 'warning');
           setSearchParams(prev => {
             const next = new URLSearchParams(prev);
             next.delete('post');

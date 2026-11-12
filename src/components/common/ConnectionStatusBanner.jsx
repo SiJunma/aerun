@@ -9,7 +9,7 @@ import { notifyConnectionRestored } from '../../api/connection';
  * ConnectionStatusBanner — Global sticky alert when network or backend connection is lost.
  */
 const ConnectionStatusBanner = () => {
-  const { lang } = useI18n();
+  const { lang, t } = useI18n();
   const [isDisconnected, setIsDisconnected] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const disconnectTimerRef = useRef(null);
@@ -110,15 +110,7 @@ const ConnectionStatusBanner = () => {
         <div className="d-flex align-items-center gap-2">
           <WifiOff size={20} className="flex-shrink-0" />
           <span>
-            {lang === 'ru' ? (
-              <>
-                <strong>Нет связи с сервером.</strong> Проверьте подключение к интернету или попробуйте обновить страницу.
-              </>
-            ) : (
-              <>
-                <strong>Connection to server lost.</strong> Please check your internet connection or try refreshing the page.
-              </>
-            )}
+            {t('connection.lost')}
           </span>
         </div>
         <div className="d-flex align-items-center gap-2 ms-auto">
@@ -130,15 +122,15 @@ const ConnectionStatusBanner = () => {
             style={{ fontSize: '0.8rem' }}
           >
             <RefreshCw size={12} />
-            {lang === 'ru' ? 'Обновить' : 'Refresh'}
+            {t('connection.refresh')}
           </Button>
           <Button
             variant="link"
             size="sm"
             onClick={() => setDismissed(true)}
             className="btn-dismiss p-1"
-            title={lang === 'ru' ? 'Скрыть предупреждение' : 'Dismiss'}
-            aria-label={lang === 'ru' ? 'Скрыть предупреждение' : 'Dismiss'}
+            title={t('connection.dismiss')}
+            aria-label={t('connection.dismiss')}
           >
             <X size={18} />
           </Button>

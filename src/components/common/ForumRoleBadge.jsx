@@ -22,13 +22,13 @@ const ForumRoleBadge = ({
   isDeleted = false,
   className = ''
 }) => {
-  const { lang } = useI18n();
+  const { t } = useI18n();
   const { roles } = useAuth();
 
   if (isDeleted) {
     return (
       <Badge className={`role-badge badge-deleted ${className}`}>
-        {lang === 'ru' ? 'Удален' : 'Deleted'}
+        {t('role.deleted')}
       </Badge>
     );
   }
@@ -44,7 +44,7 @@ const ForumRoleBadge = ({
   if (effectiveStatus === 'banned') {
     return (
       <Badge className={`role-badge badge-banned ${className}`}>
-        {lang === 'ru' ? 'Забанен' : 'Banned'}
+        {t('role.banned')}
       </Badge>
     );
   }
@@ -52,7 +52,7 @@ const ForumRoleBadge = ({
   if (effectiveStatus === 'pending') {
     return (
       <Badge className={`role-badge badge-pending ${className}`}>
-        {lang === 'ru' ? 'Ожидает' : 'Pending'}
+        {t('role.pending')}
       </Badge>
     );
   }

@@ -1,4 +1,5 @@
 import { resolveAvatarUrl } from '../api/avatars';
+import { translations } from '../i18n/dictionary';
 
 // identity.js — the single source for a MISSING identity's placeholder display.
 //
@@ -37,7 +38,8 @@ import { resolveAvatarUrl } from '../api/avatars';
  */
 export function deletedDisplayName(lang, name) {
   if (typeof name === 'string' && name.trim()) return name.trim();
-  return lang === 'ru' ? 'Удалённый пользователь' : 'Deleted user';
+  const dict = translations[lang] || translations.en;
+  return dict?.common?.deleted_user || translations.en.common.deleted_user;
 }
 
 /**
