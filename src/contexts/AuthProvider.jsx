@@ -78,7 +78,7 @@ export const AuthProvider = ({ children }) => {
   // forum read that the member phase then has to duplicate or cancel.
   const [restored, setRestored] = useState(false);
 
-  // Debounce guard for refreshUnreadCounts: rapid successive reads
+  // Debounce guard for refreshUnreadCounts & refreshUnreadTopics: rapid successive reads
   // (markTopicRead after a reply, then markAllRead, then notification mark-read)
   // collapse into a single network request instead of firing one per call.
   const refreshUnreadCountsTimerRef = useRef(null);
@@ -90,6 +90,7 @@ export const AuthProvider = ({ children }) => {
     refreshUnreadCountsTimerRef.current = setTimeout(() => {
       refreshUnreadCountsTimerRef.current = null;
       refreshUnreadCounts(uid);
+      refreshUnreadTopics();
     }, 250);
   }, []);
 
@@ -155,6 +156,7 @@ export const AuthProvider = ({ children }) => {
   const lastForumRefreshTimeRef = useRef(0);
   const readMapRef = useRef({});
   readMapRef.current = readMap;
+  const inFlightTopicVisitsRef = useRef(new Map());
   // The same latest-value mirror for profile: presence and recordActivity
   // read it so they do not depend on the whole profile object (a new identity
   // on every refreshOwnProfile write re-beat presence twice per cold start).
@@ -1265,7 +1267,7 @@ export const AuthProvider = ({ children }) => {
     // apiRecordTopicVisit pins topic_read_states to last_visible_post_id, so a
     // backward page navigation would move the server cursor back, make the
     // topic look unread again, and relight the navbar badge (1).
-    const existing = readMap[topicId];
+    const existing = readMapRef.current[topicId];
     const existingOffset = existing?.offset ?? null;
     if (offset !== null && existingOffset !== null && offset <= existingOffset) {
       // We are not moving the server cursor here, so there is nothing to
@@ -1274,6 +1276,8 @@ export const AuthProvider = ({ children }) => {
       // just-arrived correct 0 with a stale cached 1 from an earlier visit.
       return;
     }
+    // Update ref immediately so rapid subsequent calls in the same tick don't double-fire
+    readMapRef.current[topicId] = offset !== null ? { timestamp: now, offset } : now;
     setReadMap(prev => ({
       ...prev,
       [topicId]: offset !== null ? { timestamp: now, offset } : now,
@@ -1281,15 +1285,29 @@ export const AuthProvider = ({ children }) => {
     setCategories(prev => (Array.isArray(prev) ? prev.map(c => (
       c.last_post_topic_id === topicId ? { ...c, unread: false } : c
     )) : prev));
-    await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+
+    // Single-flight deduplication per topicId: if an identical visit is already traveling,
+    // reuse its promise so back-to-back callers don't issue concurrent duplicate POSTs.
+    const inFlightKey = `${topicId}:${offset ?? ''}:${lastVisiblePostId ?? ''}`;
+    let visitPromise = inFlightTopicVisitsRef.current.get(inFlightKey);
+    if (!visitPromise) {
+      visitPromise = (async () => {
+        try {
+          await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+        } finally {
+          inFlightTopicVisitsRef.current.delete(inFlightKey);
+        }
+      })();
+      inFlightTopicVisitsRef.current.set(inFlightKey, visitPromise);
+    }
+    await visitPromise;
+
     // The server state already moved, but the navbar badge, the tab title and
     // the /new-replies tab render the last POLLED values (15s / 20s ticks).
-    // Without an explicit re-read they stay stale — the exact "clears itself
-    // after a while" from the report. Best effort: a missed refresh only
-    // delays the badge to the next tick.
+    // debouncedRefreshUnreadCounts collapses unread-counts and unread-topics
+    // refreshes into a single 250ms debounced window.
     debouncedRefreshUnreadCounts(user.uid);
-    refreshUnreadTopics();
-  }, [user?.uid, readMap, debouncedRefreshUnreadCounts]);
+  }, [user?.uid, debouncedRefreshUnreadCounts]);
 
   // markAllRead sends the ids to the server, which owns the read state now.
   //
@@ -1325,6 +1343,9 @@ export const AuthProvider = ({ children }) => {
       // full set, so rows that were never on screen (page two, or posted after the
       // last poll) go dark here as well, matching the badge and the feed.
       const now = Date.now();
+      ids.forEach(id => {
+        readMapRef.current[id] = now;
+      });
       setReadMap(prev => {
         const next = { ...prev };
         ids.forEach(id => { next[id] = now; });
@@ -1335,7 +1356,6 @@ export const AuthProvider = ({ children }) => {
       // Same staleness as the single read above: the badge counts the whole
       // board server-side, so re-read it instead of waiting for the next tick.
       debouncedRefreshUnreadCounts(user.uid);
-      refreshUnreadTopics();
     } finally {
       setIsMarkingAllRead(false);
     }

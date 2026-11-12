@@ -721,9 +721,8 @@ export default function TopicPage() {
     // shows the unrolled "pending" placeholder until the server response
     // reconciles it with the thrown value.
 
-    // Optimistically hide draft and mark as read
+    // Optimistically hide draft
     setMyDraft(null);
-    markTopicRead?.(id);
 
     // Client-side post count updates (legacy parity)
     let ownNewStats = null;
@@ -830,6 +829,7 @@ export default function TopicPage() {
       const newPostId = pubResult?.postId || pubResult?.id;
       if (newPostId) {
         resolveOptimisticPost(id, tempId, newPostId);
+        markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId);
       }
       navigateToCreatedPost(tempId, newPostId);
 
@@ -1092,7 +1092,7 @@ export default function TopicPage() {
               return prev.map((p) => (p.id === tempIdRef ? { ...p, ...post, id: newPostId, _isOptimistic: false } : p));
             });
             navigateToCreatedPost(tempIdRef, newPostId);
-            markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
+            markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId);
             // Same-page sends never touch `location.state`, so remember the
             // real post ID here — the unified scroll controller will focus
             // `post-${newPostId}` once the optimistic placeholder swaps to
@@ -1469,6 +1469,7 @@ export default function TopicPage() {
   useEffect(() => {
     if (!user?.uid || !id || posts.length === 0) return;
     if (profile?.role === 'spectator') return;
+    if (isSubmittingReplyRef.current) return;
     const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + (posts.length - 1);
     if (lastMarkedOffsetRef.current === lastMessageIndex) return;
     lastMarkedOffsetRef.current = lastMessageIndex;

@@ -511,5 +511,161 @@ if (el) {
    - Все архитектурные контракты (`check-forum-read-contract`, `check-golast-overlay`, `check-post-navigation`, `check-first-post-guard`) пройдены без единого замечания.
 
 ### 8.3 Заключение
-Инцидент с сетевым штормом при публикации сообщений полностью разрешён. Все 4 чекпоинта успешно внедрены, проверены на практике и зафиксированы в кодовой базе. Архитектура клиентского взаимодействия с PocketBase и SSE приведена в соответствие принципам Single-Flight, монотонности курсоров прочтения и стабильности подписок React 19.
+Инцидент с сетевым штормом при публикации сообщений разрешён в основном сценарии. Все 4 чекпоинта внедрены, сетевой трафик при отправке снижен на ~87.5%. Однако повторное тестирование на продакшене (11 ноября 2026 г.) выявило два остаточных явления, которые документированы ниже в разделах 9–10.
+
+---
+
+## 9. Повторное тестирование на проде: новые наблюдения и результаты верификации (Production Re-test & Verification)
+
+### 9.1 Проблема №5: «Холодная» тема — остаточный шторм ридсов при публикации поста
+
+**Симптом:** когда тема «холодная» (давно не было постов, читательский курсор далеко сзади или отсутствует в `readMap`), при публикации нового поста всё ещё наблюдается остаточный сетевой шторм на чтение — несколько вызовов `POST /api/aerun/topics/:id/read`, а также последующие `GET /me/unread-counts` и `GET /me/topics?unread=true`.
+
+**Результаты глубокой верификации по коду:**
+
+1. **Множественные точки вызова `markTopicRead` в `TopicPage.jsx`:**
+   - **Effect 15 (`TopicPage.jsx:1469–1482`):** срабатывает при *каждом* изменении массива `posts`. Когда в `submitReply` добавляется оптимистичный пост, `posts.length` увеличивается. Effect 15 немедленно вычисляет `lastMessageIndex` и находит `lastRealPost` (которым на данный момент является *предыдущее* сообщение темы!). В сеть уходит первый `POST /topics/:id/read` ещё до того, как бэкенд сохранил создаваемое сообщение!
+   - **`onSuccess` мутации (`TopicPage.jsx:1095`):**
+     ```javascript
+     markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length);
+     ```
+     **Критический дефект:** вызов передаёт только 2 аргумента, **НЕ передавая `newPostId` третьим аргументом (`lastVisiblePostId`)**! В `AuthProvider.jsx:1284` в функцию `apiRecordTopicVisit` уходит `lastVisiblePostId = null`. На сервере обработчик `markTopicReadHandler` при пустом ID поста сбрасывает курсор на текущее серверное время `now`, сбивая точный пиннинг курсора.
+   - **`handlePublishDraft` (`TopicPage.jsx:726`):** слепой вызов `markTopicRead?.(id)` без смещения и без ID поста.
+   - **`useTopicJumpScroll.js:79`:** вызов при jump-навигации (`?post=` или `?goLast=1`).
+
+2. **Отсутствие Single-Flight в `markTopicRead` (`AuthProvider.jsx:1257–1292`):**
+   - Внутри `markTopicRead` проверка монотонности:
+     ```javascript
+     if (offset !== null && existingOffset !== null && offset <= existingOffset) return;
+     ```
+   - На «холодной» теме `readMap[topicId]` либо отсутствует, либо `existingOffset === null`. Условие `existingOffset !== null` ложно, поэтому стража пропускает вызов!
+   - Так как обновление `setReadMap` в React асинхронно, два вызова `markTopicRead`, произошедшие подряд (например, от Effect 15 и затем из `onSuccess`), **оба видят устаревший `readMap`** и оба отправляют параллельные сетевые запросы `POST /api/aerun/topics/:id/read`.
+
+3. **Синхронный не-дебаунсированный вызов `refreshUnreadTopics()`:**
+   - В `AuthProvider.jsx` строка 1290 использует `debouncedRefreshUnreadCounts(user.uid)` (дебаунс 250 мс).
+   - Однако сразу на строке 1291 следует:
+     ```javascript
+     refreshUnreadTopics();
+     ```
+     Этот вызов **не имеет никакого дебаунса**! Он синхронно обходит `unreadTopicsPolls` и немедленно форсирует опрос `GET /api/aerun/me/topics?unread=true...` на каждый чих `markTopicRead`.
+
+**Статус:** ✅ **ИСПРАВЛЕНО** (11 ноября 2026 г.).
+
+**Внесённые исправления Проблемы №5:**
+1. В `TopicPage.jsx` Effect 15 (`:1469`): добавлен guard `if (isSubmittingReplyRef.current) return;` — оптимистичный пост не триггерит преждевременную отметку прочтения.
+2. В `TopicPage.jsx:830` (`onSuccess` после publish): `markTopicRead` теперь вызывается с реальным `newPostId`:
+   ```javascript
+   markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId);
+   ```
+3. В `TopicPage.jsx:724` (`handlePublishDraft`): удалён преждевременный вызов `markTopicRead?.(id)` без offset/postId.
+4. В `TopicPage.jsx:1092` (`onSuccess` inline): передаётся `newPostId` третьим аргументом.
+5. В `AuthProvider.jsx`:
+   - `readMapRef` — синхронный ref-зеркало `readMap`, обновляется мгновенно до `setReadMap`, чтобы два вызова в одном тике не видели устаревшее состояние.
+   - `inFlightTopicVisitsRef` — `Map()` для single-flight защиты: concurrent вызовы `apiRecordTopicVisit` с одинаковым ключом `topicId:offset:postId` переиспользуют одну промису.
+   - `refreshUnreadTopics()` интегрирован в `debouncedRefreshUnreadCounts` (250 мс) — больше не вызывается синхронно.
+   - Зависимости `markTopicRead` очищены: убран `readMap` (заменён на `readMapRef.current`).
+
+---
+
+### 9.2 Проблема №6: Двойной запрос `notifications?unread=true&type=quote&topic_id=...` при входе в тему
+
+**Симптом:** при входе в тему в сетевом логе DevTools всегда фиксируется **ровно 2 одинаковых запроса** подряд:
+`GET /api/aerun/me/notifications?unread=true&type=quote&topic_id={topicId}`.
+
+**Результаты глубокой верификации по коду (Опровержение предварительной гипотезы и выявление истинной причины):**
+
+1. **Предварительная гипотеза из черновика НЕ подтвердилась:**
+   В коде `src/api/rtdb-notifications.js` (строки 97–103) аргумент `onStateChange` **передаётся** в `subscribeToRealtimeSignals`:
+   ```javascript
+   realtime: canReceiveSignals()
+     ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
+       (signalTopic) => { if (signalTopic === 'notification.new') onDelivered(); },
+       () => onDead(),
+       onStateChange, // <-- Передаётся корректно!
+     )
+     : null,
+   ```
+   Связка хука `bindRealtimeHook` и SSE-хаба работает штатно: `onStateChange(true)` успешно вызывает `onConnected()`.
+
+2. **ИСТИННАЯ КОРНЕВАЯ ПРИЧИНА — безусловный Connect Replay в `shared-poll.js`:**
+   В `src/api/shared-poll.js` (строки 46–54 и 375–381) задокументирован и реализован механизм:
+   ```javascript
+   // start() ВСЕГДА выполняет немедленный первичный запрос (строка 430):
+   read();
+
+   // При получении сигнала о готовности транспорта вызывается onConnected:
+   onConnected: () => {
+     stopTimer();
+     setTransport('realtime');
+     // CONNECT REPLAY — opt-in freshness skip
+     if (!skipConnectReplayMs
+       || lastReadOkAt === 0
+       || Date.now() - lastReadOkAt > skipConnectReplayMs) {
+       requestRefresh(); // <-- ПЛАНИРУЕТ ПОВТОРНЫЙ ЗАПРОС ЧЕРЕЗ 250 мс!
+     }
+   },
+   ```
+   - Опция `skipConnectReplayMs` является **opt-in** (по умолчанию `0`).
+   - В `topicNotificationsResource` (`src/api/rtdb-notifications.js:88–104`) опция `skipConnectReplayMs` **НЕ задана** (равна `0`).
+   - Поэтому условие `!skipConnectReplayMs` **всегда истинно**!
+   - **Хронология при входе в тему:**
+     1. Компонент монтируется $\to$ `subscribe()` $\to$ `start()` $\to$ мгновенный `read()` $\to$ **Запрос №1**.
+     2. В это же время SSE-соединение подтверждает статус `connected = true` $\to$ срабатывает `onConnected()`.
+     3. Так как `skipConnectReplayMs` не задан, `onConnected()` безусловно вызывает `requestRefresh()`.
+     4. Таймер coalescing (250 мс) срабатывает и запускает второй `read()` $\to$ **Запрос №2**.
+   - Этот же баг ранее существовал в DM, где его решили явным пробросом `skipConnectReplayMs: 1000` (`src/api/dms.js:52`). В `topicNotificationsResource` этот параметр просто забыли указать!
+
+**Статус:** ✅ **ИСПРАВЛЕНО** (11 ноября 2026 г.).
+
+**Внесённые исправления Проблемы №6:**
+В `src/api/rtdb-notifications.js` добавлен `skipConnectReplayMs: 1000` в **обе** ресурсные конфигурации:
+- `notificationsResource` (строка ~49)
+- `topicNotificationsResource` (строка ~96)
+Это гарантирует, что свежевыполненный первичный запрос при входе (< 1 с назад) не будет дублироваться реалтайм-переподключением.
+
+---
+
+### 9.3 Обновлённая матрица чекпоинтов
+
+| Чекпоинт | Область | Статус | Детализация верификации |
+|---|---|:---:|---|
+| **1** | Загрузка постов (`GET /posts`) | ✅ **ВЫПОЛНЕНО** | In-flight deduplication (`activeFetchPromiseRef` в `useTopicPosts.js`), развязка Effect 16 (`hasTopic`), блокировка 16b во время отправки (`isSubmittingReplyRef`). 4 лишних запроса постов устранены полностью. |
+| **2** | Отметки прочтения (`/read`) и счётчики | ✅ **ВЫПОЛНЕНО** | Слепой пролог в `submitReply` удалён. Effect 15 защищён guard'ом `isSubmittingReplyRef`. `onSuccess` теперь передаёт `newPostId` третьим аргументом. `refreshUnreadTopics()` объединён с `debouncedRefreshUnreadCounts` (250 мс). In-flight single-flight защита через `inFlightTopicVisitsRef` по ключу `topicId:offset:postId`. Преждевременный `markTopicRead` из `handlePublishDraft` удалён — вызов перенесён в `onSuccess` после получения реального `newPostId`. |
+| **3** | Цитаты и Realtime SSE | ✅ **ВЫПОЛНЕНО** | Эффект 12 стабилизирован (`topic?.id`), сигналы отфильтрованы (`notification.new`). `skipConnectReplayMs: 1000` добавлен в `topicNotificationsResource` и `notificationsResource`. Двойной запрос при входе в тему устранён. |
+| **4** | Скролл и jump-навигация | ✅ **ВЫПОЛНЕНО** | Сброс `alreadyJumpedRef` при same-page отправке, блокировка `useLayoutEffect` формы ответа во время `isSubmittingReplyRef`, корректное позиционирование на подтверждённый пост. |
+
+---
+
+## 10. Итоги финализации и верификации (11 ноября 2026 г.)
+
+Все остаточные дефекты из разделов 9.1–9.2 устранены.
+
+### 10.1 Список изменённых файлов
+
+| Файл | Изменения |
+|---|---|
+| `src/api/rtdb-notifications.js` | +`skipConnectReplayMs: 1000` в `notificationsResource` и `topicNotificationsResource`. |
+| `src/pages/TopicPage.jsx` | Удалён слепой `markTopicRead?.(id)` в `handlePublishDraft`. Добавлен `newPostId` в оба `onSuccess`-вызова. Guard `isSubmittingReplyRef` в Effect 15. |
+| `src/contexts/AuthProvider.jsx` | `readMapRef` для синхронного доступа к readMap. `inFlightTopicVisitsRef` для single-flight дедупликации. `refreshUnreadTopics()` интегрирован в `debouncedRefreshUnreadCounts`. Зависимости `markTopicRead` очищены. |
+
+### 10.2 Результаты верификации
+
+1. **Линтер (`npx eslint`):** 0 ошибок, 1 warning (известный `MembersPage.jsx:130` — вне скоупа).
+2. **Тесты (`npm test`):** Полный сьют пройден — 0 фейлов, включая:
+   - `test:shared-poll` — 21 тест (connect replay skip/stale/unconditional).
+   - `test:inflight-guard` — 4 теста.
+   - `test:forum-read-contract` — контракт отметок прочтения.
+   - Все остальные архитектурные контракты пройдены.
+3. **Итоговое сокращение сетевого трафика при отправке поста: ~87.5%** (с ~16 до 2 целевых запросов).
+
+### 10.3 Финальная матрица чекпоинтов
+
+| Чекпоинт | Область | Статус |
+|---|---|:---:|
+| **1** | Загрузка постов (`GET /posts`) | ✅ |
+| **2** | Отметки прочтения (`/read`) и счётчики | ✅ |
+| **3** | Цитаты и Realtime SSE | ✅ |
+| **4** | Скролл и jump-навигация | ✅ |
+
+**Документ готов к переименованию в `DONE_TOPIC_REPLY_NETWORK_STORM_AND_CLIENT_STATE.md`.**
 
