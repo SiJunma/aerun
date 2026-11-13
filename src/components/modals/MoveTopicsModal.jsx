@@ -53,29 +53,27 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
     <ForumModal
       show={show}
       onHide={onHide}
-      title={lang === 'ru' ? 'Перенос тем' : 'Move Topics'}
+      title={t('move_topics.title')}
       footer={
         <>
           <Button variant="link" onClick={onHide} className="text-decoration-none text-muted">
             {t('common.cancel')}
           </Button>
           <Button variant="primary" onClick={handleConfirm} disabled={!targetId}>
-            {lang === 'ru' ? 'Перенести' : 'Move'}
+            {t('move_topics.move')}
           </Button>
         </>
       }
     >
       <div className="mb-3">
-        {lang === 'ru' 
-          ? `Выберите форум, в который вы хотите перенести выбранные темы (${topicCount}):`
-          : `Select the target forum for the selected topics (${topicCount}):`}
+        {t('move_topics.description', { topicCount })}
       </div>
       <Form.Select 
         value={targetId} 
         onChange={(e) => setTargetId(e.target.value)}
         className="mb-2"
       >
-        <option value="">{lang === 'ru' ? 'Выберите форум...' : 'Select forum...'}</option>
+        <option value="">{t('move_topics.select_forum')}</option>
         {groupsWithCats.map(group => (
           <optgroup key={group.id} label={resolveField(group.title, lang)}>
             {categories
@@ -88,7 +86,7 @@ const MoveTopicsModal = ({ show, onHide, onConfirm, topicCount, excludeCategoryI
           </optgroup>
         ))}
         {uncategorizedCats.length > 0 && (
-          <optgroup label={lang === 'ru' ? 'Без категории' : 'Uncategorized'}>
+          <optgroup label={t('move_topics.uncategorized')}>
             {uncategorizedCats.map(cat => (
               <option key={cat.id} value={cat.id}>
                 {resolveField(cat.title, lang)}

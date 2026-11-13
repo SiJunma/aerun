@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { MessageSquare } from 'lucide-react';
 import { fetchPostVoters } from '../../api/reputation';
 import { useAuth } from '../../contexts/AuthProvider';
+import { useI18n } from '../../contexts/I18nProvider';
 
 /**
  * ReputationHoverPreview
@@ -18,6 +19,7 @@ import { useAuth } from '../../contexts/AuthProvider';
  *  - disabled      {boolean}  – if true, no overlay is shown (just renders children)
  */
 const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disabled = false }) => {
+  const { t } = useI18n();
   const { user } = useAuth();
   const [show, setShow] = useState(false);
   const [voters, setVoters] = useState(null);   // null = not fetched, [] = empty
@@ -101,26 +103,26 @@ const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disa
         <div className="rep-preview-inner">
           {loading && (
             <div className="rep-preview-status text-muted small">
-              {lang === 'ru' ? 'Загрузка...' : 'Loading...'}
+              {t('reputation.loading')}
             </div>
           )}
 
           {!loading && error && (
             <div className="rep-preview-status text-muted small">
-              {lang === 'ru' ? 'Не удалось загрузить' : 'Failed to load'}
+              {t('reputation.load_error')}
             </div>
           )}
 
           {!loading && !error && voters !== null && voters.length === 0 && (
             <div className="rep-preview-status text-muted small">
-              {lang === 'ru' ? 'Голосов пока нет' : 'No votes yet'}
+              {t('reputation.none')}
             </div>
           )}
 
           {!loading && !error && voters && voters.length > 0 && (
             <>
               <div className="rep-preview-title small text-muted px-3 pt-2 pb-1">
-                {lang === 'ru' ? 'Проголосовали:' : 'Voted:'}
+                {t('reputation.voted')}
               </div>
               <ul className="rep-preview-list">
                 {voters.map((v, i) => (
@@ -144,7 +146,7 @@ const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disa
                           <Link
                             to={`/profile/${targetUid}?tab=reputation&log=${v.voter_id}_post_${postId}`}
                             className="rep-preview-detail-link ms-auto"
-                            title={lang === 'ru' ? 'Посмотреть комментарий в профиле' : 'View comment in profile'}
+                            title={t('reputation.view_comment')}
                             onClick={(e) => e.stopPropagation()}
                           >
                             <MessageSquare size={12} />
@@ -153,7 +155,7 @@ const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disa
                       </div>
                     ) : (
                       <span className="rep-preview-name text-muted">
-                        {lang === 'ru' ? 'Аноним' : 'Anonymous'}
+                        {t('reputation.anonymous')}
                       </span>
                     )}
                   </li>
@@ -161,9 +163,7 @@ const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disa
               </ul>
               {total > voters.length && (
                 <div className="rep-preview-more small text-muted px-3 pb-2 pt-1 border-top mt-1">
-                  {lang === 'ru'
-                    ? `+${total - voters.length} ещё`
-                    : `+${total - voters.length} more`}
+                  {t('reputation.more', { count: total - voters.length })}
                 </div>
               )}
             </>

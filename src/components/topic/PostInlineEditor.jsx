@@ -45,7 +45,7 @@ export const PostInlineEditor = ({
         <div className="mb-3">
           <Form.Group className="mb-2">
             <Form.Label className="fw-semibold small">
-              {lang === 'ru' ? 'Название темы' : 'Topic Title'}
+              {t('forum.topic_title_label')}
             </Form.Label>
             <Form.Control
               type="text"
@@ -57,21 +57,21 @@ export const PostInlineEditor = ({
           </Form.Group>
           <Form.Group className="mb-2">
             <Form.Label className="fw-semibold small">
-              {lang === 'ru' ? 'Описание темы' : 'Topic Description'}
+              {t('forum.topic_description_label')}
             </Form.Label>
             <Form.Control
               type="text"
               value={editTopicDescription}
               onChange={(e) => setEditTopicDescription?.(e.target.value)}
               maxLength={200}
-              placeholder={lang === 'ru' ? 'Краткое описание...' : 'Short description...'}
+              placeholder={t('forum.short_description_placeholder')}
             />
           </Form.Group>
           {setEditPinFirstPost && (
             <Form.Check
               type="checkbox"
               id="editPinFirstPost"
-              label={t?.('forum.pin_first_post') || (lang === 'ru' ? 'Закрепить первое сообщение' : 'Pin first post')}
+              label={t('forum.pin_first_post')}
               checked={editPinFirstPost}
               onChange={(e) => setEditPinFirstPost(e.target.checked)}
               className="mt-2"
@@ -95,8 +95,8 @@ export const PostInlineEditor = ({
                 <User size={14} />
                 <span className="text-truncate" style={{ maxWidth: '200px' }}>
                   {editCharacterId
-                    ? `${t?.('forum.post_as_character') || (lang === 'ru' ? 'От лица персонажа' : 'Post as character')}: ${characters.find((c) => c.id === editCharacterId)?.name || '...'}`
-                    : `${t?.('forum.post_as_user') || (lang === 'ru' ? 'От своего имени' : 'Post as user')}: ${profile?.nickname || profile?.email?.split('@')[0] || 'User'}`}
+                    ? `${t('forum.post_as_character')}: ${characters.find((c) => c.id === editCharacterId)?.name || '...'}`
+                    : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0] || 'User'}`}
                 </span>
               </Dropdown.Toggle>
               <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
@@ -104,7 +104,7 @@ export const PostInlineEditor = ({
                   active={editCharacterId === ''}
                   onClick={() => setEditCharacterId?.('')}
                 >
-                  {t?.('forum.post_as_user') || (lang === 'ru' ? 'От своего имени' : 'Post as user')}: {profile?.nickname || profile?.email?.split('@')[0] || 'User'}
+                  {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0] || 'User'}
                 </Dropdown.Item>
                 {characters.length > 0 && <Dropdown.Divider />}
                 {characters.map((char) => (
@@ -113,7 +113,7 @@ export const PostInlineEditor = ({
                     active={editCharacterId === char.id}
                     onClick={() => setEditCharacterId?.(char.id)}
                   >
-                    {t?.('forum.post_as_character') || (lang === 'ru' ? 'От лица персонажа' : 'Post as character')}: {char.name}
+                    {t('forum.post_as_character')}: {char.name}
                   </Dropdown.Item>
                 ))}
               </Dropdown.Menu>
@@ -125,7 +125,7 @@ export const PostInlineEditor = ({
             size="sm"
             className="ms-auto d-none d-md-flex align-items-center"
             onClick={() => editorRef.current?.openHotkeysModal()}
-            title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+            title={t('forum.hotkeys')}
           >
             <Keyboard size={16} />
           </Button>
@@ -155,10 +155,10 @@ export const PostInlineEditor = ({
           disabled={isSaving}
         >
           {isSaving
-            ? (t?.('common.saving') || (lang === 'ru' ? 'Сохранение...' : 'Saving...'))
+            ? t('common.saving')
             : isDraft
-            ? (t?.('forum.draft_update_btn') || (lang === 'ru' ? 'Обновить черновик' : 'Update draft'))
-            : (t?.('common.save') || (lang === 'ru' ? 'Сохранить' : 'Save'))}
+            ? t('forum.draft_update_btn')
+            : t('common.save')}
         </Button>
         <Button
           size="sm"
@@ -166,7 +166,7 @@ export const PostInlineEditor = ({
           onClick={onCancel}
           disabled={isSaving}
         >
-          {t?.('common.cancel') || (lang === 'ru' ? 'Отмена' : 'Cancel')}
+          {t('common.cancel')}
         </Button>
       </div>
     </div>

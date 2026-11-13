@@ -267,7 +267,7 @@ const MembersPage = () => {
     return (
       <Container className="py-4">
         <ErrorCard
-          title={lang === 'ru' ? 'Не удалось загрузить список участников' : 'Failed to load members'}
+          title={t('forum.failed_load_members')}
           error={membersError}
           onRetry={() => {
             setMembersError(null);
@@ -292,7 +292,7 @@ const MembersPage = () => {
           </Badge>
         </h2>
         <p className="text-muted">
-          {lang === 'ru' ? 'Список всех зарегистрированных участников форума' : 'List of all registered forum participants'}
+          {t('forum.members_title')}
         </p>
       </div>
 
@@ -305,7 +305,7 @@ const MembersPage = () => {
                   <Search size={18} />
                 </InputGroup.Text>
                 <Form.Control
-                  placeholder={lang === 'ru' ? 'Поиск по нику...' : 'Search by nickname...'}
+                  placeholder={t('forum.search_placeholder')}
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   className="border-start-0 ps-2"
@@ -325,7 +325,7 @@ const MembersPage = () => {
                 />
               </div>
               <div className="d-flex align-items-center gap-2">
-                <span className="text-muted small me-1">{lang === 'ru' ? 'Сортировка:' : 'Sort by:'}</span>
+                <span className="text-muted small me-1">{t('forum.sort_by')}</span>
                 <Form.Select
                   size="sm"
                   className="d-inline-block w-auto shadow-sm"
@@ -339,21 +339,21 @@ const MembersPage = () => {
                 >
                   {/* Activity first: it is the default order, so the control opens
                       on the option that is actually in effect. */}
-                  <option value="last_seen-desc">{lang === 'ru' ? 'Сначала активные' : 'Recently Active'}</option>
-                  <option value="last_seen-asc">{lang === 'ru' ? 'Сначала неактивные' : 'Least Recently Active'}</option>
-                  <option value="nickname-asc">{lang === 'ru' ? 'Имя (A-Z)' : 'Name (A-Z)'}</option>
-                  <option value="nickname-desc">{lang === 'ru' ? 'Имя (Z-A)' : 'Name (Z-A)'}</option>
+                  <option value="last_seen-desc">{t('forum.sort_recently_active')}</option>
+                  <option value="last_seen-asc">{t('forum.sort_least_active')}</option>
+                  <option value="nickname-asc">{t('forum.sort_name_az')}</option>
+                  <option value="nickname-desc">{t('forum.sort_name_za')}</option>
                   {/* Role is alphabetical by the label shown on the badge, so the
                       options are named A-Z / Z-A. They used to read "Ранг"
                       (Rank), which described the old permission-weight order. */}
-                  <option value="role-asc">{lang === 'ru' ? 'Роль (А-Я)' : 'Role (A-Z)'}</option>
-                  <option value="role-desc">{lang === 'ru' ? 'Роль (Я-А)' : 'Role (Z-A)'}</option>
-                  <option value="post_count-desc">{lang === 'ru' ? 'Больше постов' : 'Most Posts'}</option>
-                  <option value="post_count-asc">{lang === 'ru' ? 'Меньше постов' : 'Fewest Posts'}</option>
-                  <option value="reputation-desc">{lang === 'ru' ? 'Выше репутация' : 'Highest Rep'}</option>
-                  <option value="reputation-asc">{lang === 'ru' ? 'Ниже репутация' : 'Lowest Rep'}</option>
-                  <option value="created_at-desc">{lang === 'ru' ? 'Сначала новые' : 'Newest First'}</option>
-                  <option value="created_at-asc">{lang === 'ru' ? 'Сначала старые' : 'Oldest First'}</option>
+                  <option value="role-asc">{t('forum.sort_role_az')}</option>
+                  <option value="role-desc">{t('forum.sort_role_za')}</option>
+                  <option value="post_count-desc">{t('forum.sort_most_posts')}</option>
+                  <option value="post_count-asc">{t('forum.sort_fewest_posts')}</option>
+                  <option value="reputation-desc">{t('forum.sort_highest_rep')}</option>
+                  <option value="reputation-asc">{t('forum.sort_lowest_rep')}</option>
+                  <option value="created_at-desc">{t('forum.sort_newest')}</option>
+                  <option value="created_at-asc">{t('forum.sort_oldest')}</option>
                 </Form.Select>
               </div>
               <Button
@@ -381,25 +381,25 @@ const MembersPage = () => {
             <tr>
               <th className="py-3 ps-4" style={{ width: '30%', border: 'none' }}>
                 <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('nickname')}>
-                  {lang === 'ru' ? 'Участник' : 'Member'}
+                  {t('forum.member')}
                   <ArrowUpDown size={12} />
                 </div>
               </th>
               <th className="py-3" style={{ width: '15%', border: 'none' }}>
                 <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('role')}>
-                  {lang === 'ru' ? 'Роль' : 'Role'}
+                  {t('forum.role')}
                   <ArrowUpDown size={12} />
                 </div>
               </th>
               <th className="py-3" style={{ width: '15%', border: 'none' }}>
                 <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('created_at')}>
-                  {lang === 'ru' ? 'Регистрация' : 'Joined'}
+                  {t('forum.joined')}
                   <ArrowUpDown size={12} />
                 </div>
               </th>
               <th className="py-3" style={{ width: '20%', border: 'none' }}>
                 <div className="d-flex align-items-center gap-1 cursor-pointer user-select-none" onClick={() => handleSort('last_seen')}>
-                  {lang === 'ru' ? 'Активность' : 'Last Seen'}
+                  {t('forum.last_seen')}
                   <ArrowUpDown size={12} />
                 </div>
               </th>
@@ -429,7 +429,7 @@ const MembersPage = () => {
             ) : tableUsers.length > 0 ? (
               tableUsers.map(u => (
                 <tr key={u.id} className="align-middle members-table-row">
-                  <td className="ps-4 py-3 border-0" data-label={lang === 'ru' ? 'Участник' : 'Member'}>
+                  <td className="ps-4 py-3 border-0" data-label={t('forum.member')}>
                     <div className="d-flex align-items-center gap-3">
                       <Image
                         src={resolveAvatarUrl(u.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.nickname || 'U')}&background=random`}
@@ -452,22 +452,22 @@ const MembersPage = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="border-0" data-label={lang === 'ru' ? 'Роль' : 'Role'}>{getRoleBadge(u)}</td>
-                  <td className="small text-muted border-0" data-label={lang === 'ru' ? 'Регистрация' : 'Joined'}>
+                  <td className="border-0" data-label={t('forum.role')}>{getRoleBadge(u)}</td>
+                  <td className="small text-muted border-0" data-label={t('forum.joined')}>
                     <div className="d-flex align-items-center gap-1">
                       <Calendar size={14} className="flex-shrink-0" />
                       {formatDate(u.created_at || u.registered_at || u.joined_at)}
                     </div>
                   </td>
-                  <td className="small text-muted border-0" data-label={lang === 'ru' ? 'Активность' : 'Last Seen'}>
+                  <td className="small text-muted border-0" data-label={t('forum.last_seen')}>
                     <div className="d-flex align-items-center gap-1">
                       <Clock size={14} className="flex-shrink-0" />
                       {formatLastSeen(getUserLastSeen(u))}
                     </div>
                   </td>
-                  <td className="text-center fw-semibold text-primary border-0" data-label={lang === 'ru' ? 'Посты' : 'Posts'}>{u.post_count || 0}</td>
+                  <td className="text-center fw-semibold text-primary border-0" data-label={t('forum.posts')}>{u.post_count || 0}</td>
                   {settings?.enableReputation && (
-                    <td className="text-center pe-4 border-0" data-label={lang === 'ru' ? 'Репутация' : 'Rep'}>
+                    <td className="text-center pe-4 border-0" data-label={t('forum.rep')}>
                       <Badge bg="light" text="dark" className="border">
                         {u.reputation || 0}
                       </Badge>
@@ -478,7 +478,7 @@ const MembersPage = () => {
             ) : (
               <tr>
                 <td colSpan="6" className="text-center py-5 text-muted border-0">
-                  {lang === 'ru' ? 'Участники не найдены' : 'No members found'}
+                  {t('forum.no_members')}
                 </td>
               </tr>
             )}

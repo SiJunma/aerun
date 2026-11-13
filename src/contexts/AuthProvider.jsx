@@ -78,7 +78,7 @@ export const AuthProvider = ({ children }) => {
   // forum read that the member phase then has to duplicate or cancel.
   const [restored, setRestored] = useState(false);
 
-  // Debounce guard for refreshUnreadCounts: rapid successive reads
+  // Debounce guard for refreshUnreadCounts & refreshUnreadTopics: rapid successive reads
   // (markTopicRead after a reply, then markAllRead, then notification mark-read)
   // collapse into a single network request instead of firing one per call.
   const refreshUnreadCountsTimerRef = useRef(null);
@@ -90,6 +90,7 @@ export const AuthProvider = ({ children }) => {
     refreshUnreadCountsTimerRef.current = setTimeout(() => {
       refreshUnreadCountsTimerRef.current = null;
       refreshUnreadCounts(uid);
+      refreshUnreadTopics();
     }, 250);
   }, []);
 
@@ -155,6 +156,11 @@ export const AuthProvider = ({ children }) => {
   const lastForumRefreshTimeRef = useRef(0);
   const readMapRef = useRef({});
   readMapRef.current = readMap;
+  const inFlightTopicVisitsRef = useRef(new Map());
+  // The last read cursor each topic was pinned to by a COMPLETED server write,
+  // keyed by `uid:topicId` — read state is per-account, so keying by uid keeps
+  // a shared-machine account switch from suppressing the new member's write.
+  const recordedTopicReadCursorsRef = useRef(new Map());
   // The same latest-value mirror for profile: presence and recordActivity
   // read it so they do not depend on the whole profile object (a new identity
   // on every refreshOwnProfile write re-beat presence twice per cold start).
@@ -1265,15 +1271,30 @@ export const AuthProvider = ({ children }) => {
     // apiRecordTopicVisit pins topic_read_states to last_visible_post_id, so a
     // backward page navigation would move the server cursor back, make the
     // topic look unread again, and relight the navbar badge (1).
-    const existing = readMap[topicId];
+    const existing = readMapRef.current[topicId];
     const existingOffset = existing?.offset ?? null;
-    if (offset !== null && existingOffset !== null && offset <= existingOffset) {
+    // Strictly-less, not equal. An EQUAL offset with a DIFFERENT last post is
+    // exactly "one new reply landed inside the same last page since the
+    // previous visit" — the cursor must move forward onto that reply.
+    // Blocking on equality deadlocked the mark-read: a goLast visit's
+    // jump-scroll caller recorded an offset one HIGHER than Effect 15 computes
+    // next time (posts.length vs length - 1 — the caller is fixed now, but
+    // readMap entries persisted by older builds still carry the inflated
+    // value), so the next visit's offset came back EQUAL and the guard
+    // silently swallowed the mark-read: the topic never left the unread list,
+    // and the network log showed no /read at all. Equal-offset same-post
+    // visits are still skipped — by the cursor guard below, which knows the
+    // pinned id — and a genuine backward navigation computes a STRICTLY
+    // SMALLER offset, which stays blocked.
+    if (offset !== null && existingOffset !== null && offset < existingOffset) {
       // We are not moving the server cursor here, so there is nothing to
       // refresh on the client — the server state is already correct. Do not
       // touch refreshUnreadCounts/refreshUnreadTopics, or we risk overwriting a
       // just-arrived correct 0 with a stale cached 1 from an earlier visit.
       return;
     }
+    // Update ref immediately so rapid subsequent calls in the same tick don't double-fire
+    readMapRef.current[topicId] = offset !== null ? { timestamp: now, offset } : now;
     setReadMap(prev => ({
       ...prev,
       [topicId]: offset !== null ? { timestamp: now, offset } : now,
@@ -1281,15 +1302,52 @@ export const AuthProvider = ({ children }) => {
     setCategories(prev => (Array.isArray(prev) ? prev.map(c => (
       c.last_post_topic_id === topicId ? { ...c, unread: false } : c
     )) : prev));
-    await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+
+    // The server cursor is pinned to (created, id) of last_visible_post_id, so
+    // a second POST whose body carries the SAME post id cannot move anything —
+    // it is a byte-for-byte no-op. Two entry-path callers legitimately pin the
+    // same cursor: Effect 15 (posts displayed) and the jump-scroll effect
+    // (?post= / ?goLast=1 landing) both compute it from the last rendered
+    // post, with offsets that differ by one. The in-flight map below only
+    // collapses CONCURRENT callers, and the second call usually lands after
+    // the first POST has completed — exactly the duplicate pair the network
+    // log showed. This session-level record closes that gap. Only a pinned
+    // cursor is deduplicated: a null lastVisiblePostId stamps "now", and
+    // re-stamping later is NOT a no-op (it can swallow a reply that landed
+    // between the stamps), so those stay retryable.
+    const cursorKey = `${user.uid}:${topicId}`;
+    if (lastVisiblePostId && recordedTopicReadCursorsRef.current.get(cursorKey) === lastVisiblePostId) {
+      return;
+    }
+
+    // Single-flight deduplication per topic: if an identical visit is already
+    // traveling, reuse its promise so back-to-back callers don't issue
+    // concurrent duplicate POSTs. The key is the REQUEST BODY — offset is
+    // local bookkeeping the server never sees, so keying on it (as this used
+    // to) split identical bodies into two flights.
+    const inFlightKey = `${topicId}:${lastVisiblePostId ?? ''}`;
+    let visitPromise = inFlightTopicVisitsRef.current.get(inFlightKey);
+    if (!visitPromise) {
+      visitPromise = (async () => {
+        try {
+          const recorded = await apiRecordTopicVisit(user.uid, topicId, offset, lastVisiblePostId);
+          if (recorded && lastVisiblePostId) {
+            recordedTopicReadCursorsRef.current.set(cursorKey, lastVisiblePostId);
+          }
+        } finally {
+          inFlightTopicVisitsRef.current.delete(inFlightKey);
+        }
+      })();
+      inFlightTopicVisitsRef.current.set(inFlightKey, visitPromise);
+    }
+    await visitPromise;
+
     // The server state already moved, but the navbar badge, the tab title and
     // the /new-replies tab render the last POLLED values (15s / 20s ticks).
-    // Without an explicit re-read they stay stale — the exact "clears itself
-    // after a while" from the report. Best effort: a missed refresh only
-    // delays the badge to the next tick.
+    // debouncedRefreshUnreadCounts collapses unread-counts and unread-topics
+    // refreshes into a single 250ms debounced window.
     debouncedRefreshUnreadCounts(user.uid);
-    refreshUnreadTopics();
-  }, [user?.uid, readMap, debouncedRefreshUnreadCounts]);
+  }, [user?.uid, debouncedRefreshUnreadCounts]);
 
   // markAllRead sends the ids to the server, which owns the read state now.
   //
@@ -1325,6 +1383,9 @@ export const AuthProvider = ({ children }) => {
       // full set, so rows that were never on screen (page two, or posted after the
       // last poll) go dark here as well, matching the badge and the feed.
       const now = Date.now();
+      ids.forEach(id => {
+        readMapRef.current[id] = now;
+      });
       setReadMap(prev => {
         const next = { ...prev };
         ids.forEach(id => { next[id] = now; });
@@ -1335,7 +1396,6 @@ export const AuthProvider = ({ children }) => {
       // Same staleness as the single read above: the badge counts the whole
       // board server-side, so re-read it instead of waiting for the next tick.
       debouncedRefreshUnreadCounts(user.uid);
-      refreshUnreadTopics();
     } finally {
       setIsMarkingAllRead(false);
     }

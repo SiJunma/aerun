@@ -12,7 +12,6 @@ import { toMillis, unreadFloor } from '../../utils/dates';
 const TopicRow = ({ 
   topic, 
   user, 
-  lang, 
   isManaging = false, 
   isSelected = false, 
   onSelect = () => {},
@@ -90,7 +89,7 @@ const TopicRow = ({
           />
         </td>
       )}
-      <td data-label={lang === 'ru' ? 'Тема' : 'Topic'}>
+      <td data-label={t('topic_row.topic')}>
         <div className="d-flex align-items-start gap-2 topic-main-cell">
           <div className="flex-grow-1">
             <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
@@ -120,7 +119,6 @@ const TopicRow = ({
                 date={topic.created_at}
                 author={topic.author}
                 showAvatar={false}
-                lang={lang}
               />
             </div>
               {showCategory && categoryName && (
@@ -142,18 +140,18 @@ const TopicRow = ({
         </div>
       </td>
       {showCategoryInColumn && (
-        <td className="d-none d-md-table-cell align-middle" data-label={lang === 'ru' ? 'Категория' : 'Category'}>
+        <td className="d-none d-md-table-cell align-middle" data-label={t('topic_row.category')}>
           <Link to={`/category/${topic.category_id}`} className="text-decoration-none small text-muted hover-opacity-100">
             {categoryName}
           </Link>
         </td>
       )}
-      <td className="text-center forum-td-stat" data-label={lang === 'ru' ? 'Ответов' : 'Replies'}>
+      <td className="text-center forum-td-stat" data-label={t('topic_row.replies')}>
         <div className="d-flex align-items-center justify-content-center">
           <span className="topic-count-val">{Math.max(0, (topic.posts_count || 1) - 1)}</span>
         </div>
       </td>
-      <td data-label={lang === 'ru' ? 'Последнее' : 'Last Post'}>
+      <td data-label={t('topic_row.last_post')}>
         <LastPostInfo
           topicId={topic.id}
           lastPostAt={topic.last_post_at}
@@ -161,7 +159,6 @@ const TopicRow = ({
           hasUnread={hasUnread}
           lastReadOffset={lastReadOffset}
           postsCount={topic.posts_count}
-          lang={lang}
         />
       </td>
     </tr>

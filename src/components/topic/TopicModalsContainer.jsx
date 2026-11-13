@@ -85,15 +85,13 @@ export const TopicModalsContainer = ({
         onConfirm={onConfirmDeletePost}
         title={
           isFirstPostDeleting
-            ? (lang === 'ru' ? 'Удалить тему?' : 'Delete topic?')
-            : (t?.('forum.delete_post_title') || 'Delete Post')
+            ? t('forum.delete_topic_title')
+            : t('forum.delete_post_title')
         }
         message={
           isFirstPostDeleting
-            ? (lang === 'ru'
-                ? 'Внимание: удаление первого сообщения приведет к удалению всей темы целиком. Это действие необратимо.'
-                : 'Warning: deleting the first post will delete the entire topic. This action cannot be undone.')
-            : (t?.('forum.delete_post_confirm') || 'Are you sure you want to delete this post?')
+            ? t('forum.delete_topic_message')
+            : t('forum.delete_post_confirm')
         }
         confirmText={t?.('common.delete') || 'Delete'}
         cancelText={t?.('common.cancel') || 'Cancel'}
@@ -104,13 +102,9 @@ export const TopicModalsContainer = ({
         show={showDeleteTopicModal}
         onHide={onCancelDeleteTopic}
         onConfirm={onConfirmDeleteTopic}
-        title={lang === 'ru' ? 'Удалить тему целиком?' : 'Delete entire topic?'}
-        message={
-          lang === 'ru'
-            ? 'Это действие удалит саму тему и все сообщения в ней навсегда. Вы уверены?'
-            : 'This action will permanently delete the topic and all its posts. Are you sure?'
-        }
-        confirmText={lang === 'ru' ? 'Удалить полностью' : 'Delete permanently'}
+        title={t('forum.delete_topic_title')}
+        message={t('forum.delete_topic_message')}
+        confirmText={t('forum.delete_topic_confirm')}
         cancelText={t?.('common.cancel') || 'Cancel'}
       />
 
@@ -163,14 +157,12 @@ export const TopicModalsContainer = ({
             {repValue > 0 ? `+${repValue}` : repValue}
           </Badge>
           <div className="mt-3 text-muted small px-3">
-            {lang === 'ru'
-              ? 'Этот голос изменит репутацию данного поста и будет зачислен в общую репутацию (карму) автора.'
-              : "This vote will change the reputation of this post and contribute to the author's total reputation (karma)."}
+            {t('forum.rep_vote_explanation')}
           </div>
         </div>
         <Form.Group>
           <Form.Label className="fw-bold small">
-            {lang === 'ru' ? 'Комментарий (опционально)' : 'Leave a comment (optional)'}
+            {t('forum.vote_comment')}
           </Form.Label>
           <Form.Control
             as="textarea"
@@ -187,7 +179,7 @@ export const TopicModalsContainer = ({
       <ForumModal
         show={showVoteInfoModal}
         onHide={onCancelVoteInfo}
-        title={lang === 'ru' ? 'Информация о вашем голосе' : 'Your Vote Information'}
+        title={t('forum.vote_title')}
         className="premium-modal shadow-lg"
         footer={
           <Button variant="outline-secondary" className="w-100" onClick={onCancelVoteInfo}>
@@ -199,13 +191,13 @@ export const TopicModalsContainer = ({
           <div className="d-flex flex-column gap-3">
             <div className="d-flex justify-content-between align-items-center modal-inner-card p-3">
               <div>
-                <div className="small text-muted">{lang === 'ru' ? 'Ваш голос' : 'Your vote'}</div>
+                <div className="small text-muted">{t('forum.your_vote')}</div>
                 <Badge bg={selectedVote.value > 0 ? 'success' : 'danger'} className="fs-5 mt-1">
                   {selectedVote.value > 0 ? `+${selectedVote.value}` : selectedVote.value}
                 </Badge>
               </div>
               <div className="text-end">
-                <div className="small text-muted">{lang === 'ru' ? 'Дата' : 'Date'}</div>
+                <div className="small text-muted">{t('forum.vote_date')}</div>
                 <div className="fw-bold">
                   <Timestamp date={selectedVote.created_at} />
                 </div>
@@ -214,7 +206,7 @@ export const TopicModalsContainer = ({
 
             <div>
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <div className="small text-muted">{lang === 'ru' ? 'Ваш комментарий' : 'Your comment'}</div>
+                <div className="small text-muted">{t('forum.vote_comment')}</div>
                 {(selectedVote.voter_id === currentUserId || !selectedVote.voter_id) && !isEditingRepComment && (
                   <Button
                     variant="link"
@@ -225,7 +217,7 @@ export const TopicModalsContainer = ({
                       setIsEditingRepComment(true);
                     }}
                   >
-                    {selectedVote.comment ? (lang === 'ru' ? 'Изменить' : 'Edit') : (lang === 'ru' ? 'Добавить' : 'Add')}
+                    {selectedVote.comment ? t('forum.vote_edit') : t('forum.vote_add')}
                   </Button>
                 )}
               </div>
@@ -237,7 +229,7 @@ export const TopicModalsContainer = ({
                     rows={2}
                     value={editingRepComment}
                     onChange={(e) => setEditingRepComment(e.target.value)}
-                    placeholder={lang === 'ru' ? 'Введите комментарий...' : 'Enter your comment...'}
+                    placeholder={t('forum.vote_comment_placeholder')}
                     className="modal-section-themed mb-2"
                   />
                   <div className="d-flex justify-content-end gap-2">
@@ -255,21 +247,19 @@ export const TopicModalsContainer = ({
                       onClick={onUpdateRepComment}
                       disabled={savingRepComment}
                     >
-                      {savingRepComment ? t?.('common.loading') || 'Loading...' : (lang === 'ru' ? 'Сохранить' : 'Save')}
+                      {savingRepComment ? t('common.loading') : t('forum.vote_save')}
                     </Button>
                   </div>
                 </div>
               ) : (
                 <div className="p-3 modal-inner-card border-start border-4 border-accent" style={{ minHeight: '60px' }}>
-                  {selectedVote.comment || (lang === 'ru' ? <span className="opacity-50 italic">Без комментария</span> : <span className="opacity-50 italic">No comment left</span>)}
+                  {selectedVote.comment || <span className="opacity-50 italic">{t('forum.vote_no_comment')}</span>}
                 </div>
               )}
             </div>
 
             <div className="small text-muted opacity-75 italic text-center mt-2">
-              {lang === 'ru'
-                ? 'Этот голос зачислен автору поста.'
-                : 'This vote has been contributed to the post author.'}
+              {t('forum.vote_contributed')}
             </div>
           </div>
         )}

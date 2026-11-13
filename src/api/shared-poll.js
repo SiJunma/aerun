@@ -227,7 +227,9 @@ const bindRealtimeHook = (hook, { onDelivered, onConnected, onDead }) => {
  * @param {string} [options.name] label for diagnostics
  * @param {number} [options.skipConnectReplayMs] opt-in freshness window for the
  *   connect-replay: when > 0, onConnected skips its catch-up refresh if the
- *   last successful read is younger than this many ms. 0 = always replay.
+ *   last successful read is younger than this many ms. 0 = always replay
+ *   (still skipped while a read is in flight — its completion IS the
+ *   catch-up, fresher than any staleness arithmetic).
  * @param {number} [options.restartFreshMs] opt-in freshness window for RESTART:
  *   when > 0, a stop→start cycle (subscriber count 0→1) whose last successful
  *   read is younger than this delivers the cached value and skips the read.
@@ -357,6 +359,23 @@ export const createSharedPoll = ({
       document.addEventListener('visibilitychange', onVisibilityChange);
     }
 
+    // The primary read is initiated BEFORE the realtime bind, deliberately.
+    //
+    // subscribeToRealtimeSignals reports an ALREADY-ESTABLISHED hub's state to
+    // a late joiner synchronously ("a caller joining an already-established
+    // hub learns its state immediately"). That onStateChange(true) lands
+    // inside start() — before this resource has initiated ANY read — so
+    // onConnected below saw `lastReadOkAt === 0 && !inFlight` and scheduled
+    // its catch-up refresh, which then executed behind the cold read as a
+    // byte-for-byte duplicate: two identical GETs on every cold start of a
+    // resource whose hub was already up (every topic page paid it for the
+    // topic-notifications loop). skipConnectReplayMs cannot help there,
+    // because the replay decision happens BEFORE the primary read it is
+    // meant to respect. Starting the read first puts `inFlight = true` under
+    // the connect callback's feet, and the existing `!inFlight` guard does
+    // exactly what it was written to do.
+    read();
+
     if (realtime) {
       setTransport('connecting');
       realtimeBinding = bindRealtimeHook(realtime, {
@@ -369,14 +388,23 @@ export const createSharedPoll = ({
           stopTimer();
           setTransport('realtime');
           // Catch up now. Everything that changed while this resource believed it
-          // had no realtime was never fetched. OPT-IN exception: a resource that
-          // set skipConnectReplayMs and whose last successful read is younger
-          // than that window (or is still in flight) skips this replay — the
-          // primary read has just delivered this exact answer, and the replay
-          // would be a byte-for-byte duplicate ~250ms behind it.
-          if (!skipConnectReplayMs
-            || lastReadOkAt === 0
-            || Date.now() - lastReadOkAt > skipConnectReplayMs) {
+          // had no realtime was never fetched. Two exceptions skip the replay:
+          //
+          // - A read is IN FLIGHT right now. Its answer, on completion, is the
+          //   catch-up — and it is FRESHER than any staleness arithmetic over
+          //   lastReadOkAt, which on a RE-entry (leave the topic, come back)
+          //   still holds the PREVIOUS visit's timestamp. The stale clause used
+          //   to fire there and schedule a replay ~250ms behind the cold read:
+          //   two identical quote-notification GETs on every topic re-entry
+          //   (the queued replay rooted in the first read's finally, visible
+          //   as "await in" in the initiator stack).
+          // - skipConnectReplayMs opted in and the last successful read is
+          //   younger than the window: the primary read just delivered this
+          //   exact answer, and the replay would be a byte-for-byte duplicate.
+          if (!inFlight
+            && (!skipConnectReplayMs
+              || lastReadOkAt === 0
+              || Date.now() - lastReadOkAt > skipConnectReplayMs)) {
             requestRefresh();
           }
         },
@@ -416,8 +444,8 @@ export const createSharedPoll = ({
           // opens falls back to polling, but within the window the primary
           // read has already landed — do not immediately pay twice.
           if (!skipConnectReplayMs
-            || lastReadOkAt === 0
-            || Date.now() - lastReadOkAt > skipConnectReplayMs) {
+            || (lastReadOkAt === 0 && !inFlight)
+            || (lastReadOkAt > 0 && Date.now() - lastReadOkAt > skipConnectReplayMs)) {
             requestRefresh();
           }
         }
@@ -426,8 +454,6 @@ export const createSharedPoll = ({
       setTransport('polling');
       startTimer();
     }
-
-    read();
   };
 
   const stop = () => {

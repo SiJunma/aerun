@@ -229,7 +229,12 @@ export const subscribeToUnreadCounts = (uid, callback) => {
     // two do.
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(
-        () => onDelivered(),
+        // Same strict filtering the notification resources got: only a signal
+        // that can actually move a counter may wake this read. dm.post and
+        // notification.new can; presence.update — every member join, every
+        // activity push — cannot, and the unfiltered handler turned each one
+        // into a GET /me/unread-counts nobody needed.
+        (signalTopic) => { if (signalTopic !== 'presence.update') onDelivered(); },
         () => onDead(),
         // Without this a quiet DM thread abandons a perfectly healthy stream
         // after the grace window and polls for the rest of the session.
@@ -256,7 +261,12 @@ export const subscribeToUnreadCounts = (uid, callback) => {
 // last POLLED value, so without this it stays stale until the next interval.
 export const refreshUnreadCounts = (uid) => {
   try {
-    unreadCountsPolls.get(uid)?.refresh();
+    const poll = unreadCountsPolls.get(uid);
+    // Same liveness rule as refreshUnreadTopics: a stopped resource — its last
+    // subscriber left, e.g. a signed-out member's poll left in this map — must
+    // not be woken into a fetch nobody will hear.
+    if (!poll || poll.getTransport() === 'idle') return;
+    poll.refresh();
   } catch {
     // A missed refresh only delays the badge to the next tick — never fail a
     // navigation or a mark-read for it.

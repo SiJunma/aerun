@@ -96,7 +96,7 @@ export const useTopicModalState = ({
   const handleSaveEdit = useCallback(async (postId) => {
     if (modalState.savingEdit) return;
     if (!modalState.editContent.trim()) {
-      showToast(lang === 'ru' ? 'Пожалуйста, введите текст сообщения' : 'Please enter the post content', 'danger');
+      showToast(t('forum.enter_post_content'), 'danger');
       return;
     }
     setModalState((prev) => ({ ...prev, savingEdit: true }));
@@ -176,7 +176,7 @@ export const useTopicModalState = ({
       }
 
       setModalState((prev) => ({ ...prev, editingPostId: null, editContent: '', editCharacterId: '' }));
-      showToast(lang === 'ru' ? 'Сообщение обновлено' : 'Post updated', 'success');
+      showToast(t('forum.post_updated'), 'success');
 
       setTimeout(() => {
         const el = document.getElementById(`post-${postId}`);
@@ -188,7 +188,7 @@ export const useTopicModalState = ({
       }, 100);
     } catch (err) {
       console.error('[update post error]', err);
-      showToast(lang === 'ru' ? 'Ошибка при редактировании сообщения' : 'Error editing post', 'danger');
+      showToast(t('forum.edit_post_error'), 'danger');
     } finally {
       if (isMountedRef.current) setModalState((prev) => ({ ...prev, savingEdit: false }));
     }
@@ -207,7 +207,7 @@ export const useTopicModalState = ({
       navigate(`/category/${topic.category?.id || topic.category_id}`);
     } catch (err) {
       console.error('[delete topic error]', err);
-      showToast(lang === 'ru' ? 'Ошибка при удалении темы' : 'Error deleting topic', 'danger');
+      showToast(t('forum.delete_topic_error'), 'danger');
     }
   };
 
@@ -221,7 +221,7 @@ export const useTopicModalState = ({
       navigate(`/category/${targetCategoryId}`);
     } catch (err) {
       console.error('[move topic error]', err);
-      showToast(lang === 'ru' ? 'Ошибка при перемещении темы' : 'Error moving topic', 'danger');
+      showToast(t('forum.move_topic_error'), 'danger');
     }
   };
 
@@ -245,7 +245,7 @@ export const useTopicModalState = ({
   
       await movePosts(postIds, topicId, targetTopicId, currentUser?.uid);
       scheduleForumStateRefresh?.();
-      showToast(lang === 'ru' ? 'Посты перемещены' : 'Posts moved', 'success');
+      showToast(t('forum.posts_moved'), 'success');
   
       if (topicNowEmpty) {
         if (categoryId) {
@@ -272,7 +272,7 @@ export const useTopicModalState = ({
       }
     } catch (err) {
       console.error('[move posts error]', err);
-      showToast(err.message || (lang === 'ru' ? 'Ошибка при перемещении постов' : 'Error moving posts'), 'danger');
+      showToast(err.message || t('forum.move_posts_error'), 'danger');
     }
   };
   const handleOpenRepVote = useCallback((post, postNumber) => {
@@ -352,7 +352,7 @@ export const useTopicModalState = ({
       }));
 
       recordActivity?.();
-      showToast(lang === 'ru' ? 'Репутация изменена!' : 'Reputation updated!');
+      showToast(t('forum.reputation_updated'));
     } catch (err) {
       console.error('[rep vote error]', err);
       showToast(err.message || 'Failed to submit vote', 'danger');
@@ -392,7 +392,7 @@ export const useTopicModalState = ({
         ...prev,
         [modalState.selectedVote.post_id]: updatedVote,
       }));
-      showToast(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
+      showToast(t('forum.reputation_comment_updated'));
     } catch (err) {
       console.error('[update rep comment error]', err);
       showToast(err.message || 'Failed to update reputation comment', 'danger');

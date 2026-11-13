@@ -62,11 +62,9 @@ const MainPage = () => {
         timeoutExpired ? (
           <ErrorCard
             isNetworkError={true}
-            title={lang === 'ru' ? 'Не удалось загрузить разделы форума' : 'Failed to load forum categories'}
-            message={lang === 'ru'
-              ? 'Сервер не ответил вовремя. Пожалуйста, проверьте подключение к интернету или попробуйте обновить страницу.'
-              : 'The server did not respond in time. Please check your internet connection or try refreshing the page.'
-            }
+            title={t('forum.failed_load_categories')}
+            message={t('forum.server_timeout')
+              }
             error={forumStateError}
             onRetry={() => refreshForumState(true, true)}
           />
@@ -185,7 +183,6 @@ const MainPage = () => {
                         hasUnread={hasUnread}
                         lastReadOffset={lastReadOffset}
                         postsCount={cat.last_post_topic_posts_count || null}
-                        lang={lang}
                       />
                     );
                   })()}

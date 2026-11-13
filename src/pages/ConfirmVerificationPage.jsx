@@ -8,15 +8,15 @@ import { confirmEmailVerification } from '../api/account-credentials';
 
 const ConfirmVerificationPage = () => {
   const { token } = useParams();
-  const { lang } = useI18n();
+  const { t, lang } = useI18n();
   const { setPageTitle } = usePageTitle();
 
   const [loading, setLoading] = useState(Boolean(token));
   const [success, setSuccess] = useState(false);
-  const [error, setError] = useState(() => (token ? null : (lang === 'ru' ? 'Токен подтверждения не передан' : 'Missing verification token')));
+  const [error, setError] = useState(() => (token ? null : t('forum.missing_token')));
 
   useEffect(() => {
-    setPageTitle(lang === 'ru' ? 'Подтверждение email' : 'Email Verification');
+    setPageTitle(t('forum.email_verification'));
   }, [setPageTitle, lang]);
 
   useEffect(() => {
@@ -32,7 +32,7 @@ const ConfirmVerificationPage = () => {
       .catch((err) => {
         if (!alive) return;
         setSuccess(false);
-        setError(err?.message || (lang === 'ru' ? 'Ссылка подтверждения недействительна или устарела' : 'Verification link is invalid or expired'));
+        setError(err?.message || t('forum.invalid_link'));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -41,7 +41,7 @@ const ConfirmVerificationPage = () => {
     return () => {
       alive = false;
     };
-  }, [token, lang]);
+  }, [token]);
 
   return (
     <Container className="d-flex align-items-center justify-content-center min-vh-100 py-5">
@@ -57,7 +57,7 @@ const ConfirmVerificationPage = () => {
             <div className="py-4">
               <Spinner animation="border" variant="primary" className="mb-3" />
               <p className="text-muted">
-                {lang === 'ru' ? 'Подтверждаем ваш адрес электронной почты...' : 'Verifying your email address...'}
+                {t('forum.verifying_email')}
               </p>
             </div>
           )}
@@ -68,15 +68,13 @@ const ConfirmVerificationPage = () => {
                 <CheckCircle2 size={54} className="mx-auto" />
               </div>
               <h4 className="fw-bold mb-2">
-                {lang === 'ru' ? 'Email успешно подтверждён!' : 'Email Verified Successfully!'}
+                {t('forum.email_verified_success')}
               </h4>
               <p className="text-muted mb-4">
-                {lang === 'ru'
-                  ? 'Ваш аккаунт теперь активирован. Вы можете войти и использовать все возможности форума.'
-                  : 'Your account is now fully active. You can sign in and participate in discussions.'}
+                {t('forum.email_verified_message')}
               </p>
               <Button as={Link} to="/login" variant="primary" className="w-100 d-flex align-items-center justify-content-center gap-2">
-                <span>{lang === 'ru' ? 'Войти в аккаунт' : 'Sign In'}</span>
+                <span>{t('forum.sign_in')}</span>
                 <ArrowRight size={18} />
               </Button>
             </div>
@@ -88,17 +86,17 @@ const ConfirmVerificationPage = () => {
                 <AlertTriangle size={54} className="mx-auto" />
               </div>
               <h4 className="fw-bold mb-2">
-                {lang === 'ru' ? 'Ошибка подтверждения' : 'Verification Failed'}
+                {t('forum.verification_failed')}
               </h4>
               <Alert variant="danger" className="text-start py-2 small mb-4">
                 {error}
               </Alert>
               <div className="d-flex flex-column gap-2">
                 <Button as={Link} to="/login" variant="primary" className="w-100">
-                  {lang === 'ru' ? 'Перейти ко входу' : 'Go to Sign In'}
+                  {t('forum.go_to_sign_in')}
                 </Button>
                 <Button as={Link} to="/" variant="outline-secondary" className="w-100">
-                  {lang === 'ru' ? 'На главную' : 'Back to Home'}
+                  {t('forum.back_to_home')}
                 </Button>
               </div>
             </div>

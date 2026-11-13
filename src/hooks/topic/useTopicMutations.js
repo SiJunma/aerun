@@ -160,7 +160,7 @@ export const useTopicMutations = ({
     try {
       await voteOnPost(currentUser.uid, targetUid, postId, topicId, value, comment, undefined, undefined, voterNickname);
       recordActivity?.();
-      showToast?.(lang === 'ru' ? 'Голос за репутацию учтен' : 'Reputation vote recorded', 'success');
+      showToast?.(t('forum.reputation_vote_recorded'), 'success');
     } catch (err) {
       console.error('[voteOnPost error]', err);
       showToast?.(err.message || 'Failed to submit vote', 'danger');
@@ -174,7 +174,7 @@ export const useTopicMutations = ({
   const editRepComment = useCallback(async (voteId, newComment) => {
     try {
       await updateReputationComment(voteId, newComment);
-      showToast?.(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
+      showToast?.(t('forum.reputation_comment_updated'));
     } catch (err) {
       console.error('[updateReputationComment error]', err);
       showToast?.(err.message || 'Failed to update reputation comment', 'danger');

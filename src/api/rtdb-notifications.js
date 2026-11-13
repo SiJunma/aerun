@@ -46,6 +46,7 @@ export const notificationsResource = (uid) =>
     },
     intervalMs: 15000,
     initialValue: [],
+    skipConnectReplayMs: 1000,
     onError: (err) => console.warn('[subscribeToUserNotifications error]', err),
     // THE FIRST RESOURCE TO RIDE REALTIME, and the reason it is this one.
     //
@@ -93,6 +94,7 @@ export const topicNotificationsResource = (uid, topicId) =>
     },
     intervalMs: 15000,
     initialValue: [],
+    skipConnectReplayMs: 1000,
     onError: (err) => console.warn('[subscribeToTopicNotifications error]', err),
     realtime: canReceiveSignals()
       ? (onDelivered, onDead, onStateChange) => subscribeToRealtimeSignals(

@@ -97,7 +97,11 @@ export const normalizeUserProfile = (rec) => {
 const getReadMapKey = (uid) => `aerun_readmap_${uid}`;
 
 export const recordTopicVisit = async (uid, topicId, offset = null, lastVisiblePostId = null) => {
-  if (!uid || !topicId) return;
+  if (!uid || !topicId) return false;
+  // Returns whether the SERVER write completed. The caller (markTopicRead)
+  // records the pinned cursor only from a completed write, so a failed POST
+  // stays retryable instead of being remembered as done.
+  let recorded = false;
   try {
     // Server first: this is the write that makes the badge correct elsewhere. It is
     // awaited but not allowed to block the caller — a failed read-state write must
@@ -110,6 +114,7 @@ export const recordTopicVisit = async (uid, topicId, offset = null, lastVisibleP
       method: 'POST',
       body: { last_visible_post_id: lastVisiblePostId || '' },
     });
+    recorded = true;
   } catch (err) {
     console.warn('[recordTopicVisit] server read state failed', err);
   }
@@ -123,6 +128,7 @@ export const recordTopicVisit = async (uid, topicId, offset = null, lastVisibleP
   } catch (err) {
     console.warn('[recordTopicVisit err]', err);
   }
+  return recorded;
 };
 
 export const subscribeToReadMap = (uid, callback) => {
@@ -289,7 +295,17 @@ export const subscribeToUnreadTopics = (callback, page = 1, pageSize = 20) => {
 // the next 20s tick.
 export const refreshUnreadTopics = () => {
   try {
-    unreadTopicsPolls.forEach((poll) => poll?.refresh());
+    unreadTopicsPolls.forEach((poll) => {
+      // A poll whose page nobody renders must not be woken. markTopicRead's
+      // debounced refresh runs on the TOPIC page — the /new-replies screen
+      // that subscribed this poll unmounted when the member navigated away —
+      // and a refresh on a stopped resource still costs the network GET while
+      // delivering the answer to zero subscribers. Every path back to the
+      // feed re-subscribes, and a subscribe re-reads (this resource opts out
+      // of restartFreshMs), so the skipped refresh loses nothing.
+      if (poll?.getTransport() === 'idle') return;
+      poll?.refresh();
+    });
   } catch {
     // Same contract as the counters refresh: best effort, never throws.
   }

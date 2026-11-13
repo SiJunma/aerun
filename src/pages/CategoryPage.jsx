@@ -120,9 +120,7 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await batchUpdateTopics(selectedTopicIds, { is_pinned: pinned }, user.uid);
-      showToast(lang === 'ru' 
-          ? (pinned ? 'Темы закреплены' : 'Темы откреплены') 
-          : (pinned ? 'Topics pinned' : 'Topics unpinned'), 'success');
+      showToast(t(pinned ? 'forum.topics_pinned' : 'forum.topics_unpinned'), 'success');
       loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
@@ -133,9 +131,7 @@ const CategoryPage = () => {
     if (selectedTopicIds.length === 0) return;
     try {
       await batchUpdateTopics(selectedTopicIds, { is_locked: locked }, user.uid);
-      showToast(lang === 'ru' 
-          ? (locked ? 'Темы закрыты' : 'Темы открыты') 
-          : (locked ? 'Topics locked' : 'Topics unlocked'), 'success');
+      showToast(t(locked ? 'forum.topics_locked' : 'forum.topics_unlocked'), 'success');
       loadTopics();
     } catch (error) {
       showToast(error.message, 'danger');
@@ -151,7 +147,7 @@ const CategoryPage = () => {
       } else {
         scheduleForumStateRefresh();
       }
-      showToast(lang === 'ru' ? 'Темы удалены' : 'Topics deleted', 'success');
+      showToast(t('forum.topics_deleted'), 'success');
       setSelectedTopicIds([]);
       loadTopics();
     } catch (error) {
@@ -168,7 +164,7 @@ const CategoryPage = () => {
       } else {
         scheduleForumStateRefresh();
       }
-      showToast(lang === 'ru' ? 'Темы перенесены' : 'Topics moved', 'success');
+      showToast(t('forum.topics_moved'), 'success');
       setSelectedTopicIds([]);
       setIsManaging(false);
       loadTopics();
@@ -179,7 +175,7 @@ const CategoryPage = () => {
   if (!loading && categoryRestricted) {
     return (
       <ErrorCard
-        title={lang === 'ru' ? 'Доступ запрещён' : 'Access Denied'}
+        title={t('forum.access_denied')}
         message={categoryRestrictedMessage || undefined}
         error={null}
         hideTechnicalDetails
@@ -220,7 +216,7 @@ const CategoryPage = () => {
                   className="d-flex align-items-center gap-2"
                 >
                   <Settings size={18} />
-                  {lang === 'ru' ? (isManaging ? 'Готово' : 'Управление') : (isManaging ? 'Done' : 'Manage')}
+                  {t(isManaging ? 'forum.done' : 'forum.manage')}
                 </Button>
               )}
               {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
@@ -276,7 +272,7 @@ const CategoryPage = () => {
         ) : loadError ? (
           <div className="p-3">
             <ErrorCard
-              title={lang === 'ru' ? 'Не удалось загрузить темы' : 'Failed to load topics'}
+              title={t('forum.failed_load_topics')}
               error={loadError}
               onRetry={() => loadTopics(true)}
             />
@@ -285,12 +281,10 @@ const CategoryPage = () => {
           <div className="p-5 text-center">
             <div className="mb-3" style={{ fontSize: '3rem', opacity: 0.3 }}>💬</div>
             <h5 className="text-muted mb-2">
-              {lang === 'ru' ? 'Тем пока нет' : 'No topics yet'}
+              {t('forum.no_topics_yet')}
             </h5>
             <p className="text-muted mb-4" style={{ fontSize: '0.875rem' }}>
-              {lang === 'ru'
-                ? 'Будь первым — создай тему!'
-                : 'Be the first to start a discussion!'}
+              {t('forum.be_first')}
             </p>
             {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
               <Button as={Link} to={`/category/${id}/new-topic`} variant="primary">
@@ -357,37 +351,33 @@ const CategoryPage = () => {
       {isManaging && (
         <div className="management-toolbar user-select-none">
           <div className="me-2 small fw-bold">
-            {lang === 'ru'
-              ? `Выбрано: ${selectedTopicIds.length}`
-              : `Selected: ${selectedTopicIds.length}`}
+            {t('forum.selected_count', { count: selectedTopicIds.length })}
           </div>
           <div className="vr d-none d-md-block mx-2"></div>
           <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(true)} disabled={selectedTopicIds.length === 0}>
-            <Pin size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрепить' : 'Pin'}</span>
+            <Pin size={16} /> <span className="d-none d-lg-inline">{t('forum.pin')}</span>
           </Button>
           <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchPin(false)} disabled={selectedTopicIds.length === 0}>
-            <PinOff size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открепить' : 'Unpin'}</span>
+            <PinOff size={16} /> <span className="d-none d-lg-inline">{t('forum.unpin')}</span>
           </Button>
           <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(true)} disabled={selectedTopicIds.length === 0}>
-            <Lock size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Закрыть' : 'Lock'}</span>
+            <Lock size={16} /> <span className="d-none d-lg-inline">{t('forum.lock')}</span>
           </Button>
           <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => handleBatchLock(false)} disabled={selectedTopicIds.length === 0}>
-            <Unlock size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Открыть' : 'Unlock'}</span>
+            <Unlock size={16} /> <span className="d-none d-lg-inline">{t('forum.unlock')}</span>
           </Button>
           <Button variant="outline-light" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowMoveModal(true)} disabled={selectedTopicIds.length === 0}>
-            <Move size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Перенести' : 'Move'}</span>
+            <Move size={16} /> <span className="d-none d-lg-inline">{t('forum.move')}</span>
           </Button>
           <Button variant="danger" size="sm" className="d-flex align-items-center gap-1" onClick={() => setShowDeleteModal(true)} disabled={selectedTopicIds.length === 0}>
-            <Trash2 size={16} /> <span className="d-none d-lg-inline">{lang === 'ru' ? 'Удалить' : 'Delete'}</span>
+            <Trash2 size={16} /> <span className="d-none d-lg-inline">{t('forum.delete')}</span>
           </Button>
           {/* The instruction itself. It replaces the toolbar's role as the only
               thing on screen, and it disappears the moment the first topic is
               ticked, so the two states are never both talking at once. */}
           {selectedTopicIds.length === 0 && (
             <div className="small management-toolbar-hint">
-              {lang === 'ru'
-                ? 'Отметьте темы галочками слева, чтобы применить действия'
-                : 'Tick the topics on the left to apply actions'}
+              {t('forum.tick_topics')}
             </div>
           )}
         </div>
@@ -397,12 +387,9 @@ const CategoryPage = () => {
         show={showDeleteModal}
         onHide={() => setShowDeleteModal(false)}
         onConfirm={handleBatchDelete}
-        title={lang === 'ru' ? 'Удалить темы?' : 'Delete topics?'}
-        message={lang === 'ru' 
-          ? `Вы уверены, что хотите навсегда удалить выбранные темы (${selectedTopicIds.length})? Это действие нельзя отменить.` 
-          : `Are you sure you want to permanently delete the selected topics (${selectedTopicIds.length})? This action cannot be undone.`
-        }
-        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+        title={t('forum.delete_topics_title')}
+        message={t('forum.delete_topics_message', { count: selectedTopicIds.length })}
+        confirmText={t('forum.delete_confirm')}
       />
 
       <MoveTopicsModal 

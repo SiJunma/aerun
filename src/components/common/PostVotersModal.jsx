@@ -6,6 +6,7 @@ import ForumModal from './ForumModal';
 import Timestamp from './Timestamp';
 import { fetchPostVoters } from '../../api/reputation';
 import { resolveAvatarUrl } from '../../api/avatars';
+import { useI18n } from '../../contexts/I18nProvider';
 
 /**
  * PostVotersModal
@@ -18,6 +19,7 @@ const PostVotersModal = ({
   postNumber,
   lang = 'ru'
 }) => {
+  const { t } = useI18n();
   const [voters, setVoters] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -31,11 +33,11 @@ const PostVotersModal = ({
       setVoters(data?.voters || []);
     } catch (err) {
       console.error('[PostVotersModal] Failed to load voters:', err);
-      setError(lang === 'ru' ? 'Не удалось загрузить список оценок' : 'Failed to load evaluations');
+      setError(t('post_voters.load_error'));
     } finally {
       setLoading(false);
     }
-  }, [postId, lang]);
+  }, [postId]);
 
   useEffect(() => {
     if (show && postId) {
@@ -46,9 +48,7 @@ const PostVotersModal = ({
     }
   }, [show, postId, loadVoters]);
 
-  const modalTitle = lang === 'ru'
-    ? `Оценки к посту #${postNumber || ''}`
-    : `Evaluations for post #${postNumber || ''}`;
+  const modalTitle = t('post_voters.title', { postNumber: postNumber || '' });
 
   return (
     <ForumModal
@@ -62,7 +62,7 @@ const PostVotersModal = ({
         {loading && (
           <div className="d-flex flex-column align-items-center justify-content-center py-4 gap-2 text-muted">
             <Spinner animation="border" size="sm" />
-            <span className="small">{lang === 'ru' ? 'Загрузка оценок...' : 'Loading evaluations...'}</span>
+            <span className="small">{t('post_voters.loading')}</span>
           </div>
         )}
 
@@ -71,14 +71,14 @@ const PostVotersModal = ({
             <div className="text-danger small mb-2">{error}</div>
             <Button variant="outline-secondary" size="sm" onClick={loadVoters}>
               <RefreshCw size={13} className="me-1" />
-              {lang === 'ru' ? 'Повторить' : 'Retry'}
+              {t('post_voters.retry')}
             </Button>
           </div>
         )}
 
         {!loading && !error && voters.length === 0 && (
           <div className="text-center py-4 text-muted small">
-            {lang === 'ru' ? 'Оценок пока нет' : 'No evaluations yet'}
+            {t('post_voters.none')}
           </div>
         )}
 
@@ -87,7 +87,7 @@ const PostVotersModal = ({
             {voters.map((voter, idx) => {
               const isPositive = (voter.value ?? 1) > 0;
               const hasAvatar = !!voter.avatar_url;
-              const voterName = voter.voter_nickname || (lang === 'ru' ? 'Пользователь' : 'User');
+              const voterName = voter.voter_nickname || t('post_voters.user');
 
               return (
                 <div key={voter.log_id || voter.id || `voter-${idx}`} className="post-voter-card">
@@ -127,7 +127,7 @@ const PostVotersModal = ({
                         </Link>
                       ) : (
                         <span className="post-voter-name text-muted">
-                          {lang === 'ru' ? 'Аноним' : 'Anonymous'}
+                          {t('post_voters.anonymous')}
                         </span>
                       )}
 

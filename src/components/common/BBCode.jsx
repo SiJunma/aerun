@@ -35,7 +35,7 @@ import { ALL_SMILES_MAP } from '../../config/smiles';
  *    standard Bootstrap text-alignment classes.
  */
 
-const BBCodeSpoiler = ({ title, children }) => {
+const BBCodeSpoiler = ({ title, children, t }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -46,7 +46,7 @@ const BBCodeSpoiler = ({ title, children }) => {
         style={{ cursor: 'pointer' }}
       >
         <span className="spoiler-title fw-bold small">
-          {title || ((localStorage.getItem('language') || localStorage.getItem('i18nextLng')) === 'ru' ? 'Спойлер' : 'Spoiler')}
+          {title || t('bbcode.spoiler_default')}
         </span>
         <span className="spoiler-icon opacity-50">
           {isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
@@ -561,7 +561,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
                     className="text-decoration-none d-flex align-items-center gap-1"
                     style={{ color: 'inherit', userSelect: 'text', cursor: 'pointer' }}
                     draggable="false"
-                    title={lang === 'ru' ? 'Перейти к сообщению' : 'Go to message'}
+                    title={t('bbcode.goto_message')}
                     onClick={(e) => {
                       e.preventDefault();
                       const el = document.getElementById(`post-${postId}`);
@@ -617,7 +617,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
         const isGif = imgUrl.toLowerCase().split('?')[0].endsWith('.gif');
 
         if (isGif && settings?.allowGifInPosts === false) {
-          return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{lang === 'ru' ? 'GIF-изображение' : 'GIF Image'}: {imgUrl}]</a>;
+          return <a key={index} href={imgUrl} target="_blank" rel="noopener noreferrer" className="small text-muted italic">[{t('bbcode.gif_image')}: {imgUrl}]</a>;
         }
 
         const imgStyle = {};
@@ -686,7 +686,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
             <div className="d-flex align-items-center gap-2">
               <Dices size={18} style={{ color: 'var(--secondary-color)' }} />
               <div className="small fw-bold" style={{ color: 'var(--input-text)' }}>
-                {lang === 'ru' ? `Бросок d${sides} (в ожидании...)` : `d${sides} Roll (pending...)`}
+                {t('bbcode.dice_roll_pending', { sides })}
               </div>
             </div>
           </div>
@@ -714,7 +714,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
               <div className="d-flex align-items-center gap-2">
                 <EyeOff size={18} style={{ color: 'var(--secondary-color)' }} />
                 <div className="small fw-bold" style={{ color: 'var(--input-text)', opacity: 0.8 }}>
-                  {lang === 'ru' ? 'Мастерский бросок (скрыто)' : 'Master Roll (hidden)'}
+                  {t('bbcode.master_roll_hidden')}
                 </div>
               </div>
             </div>
@@ -737,8 +737,8 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
                   {roll.value}
                 </span>
                 <span style={{ fontSize: '0.7rem', color: 'var(--secondary-color)' }}>
-                  {lang === 'ru' ? `из ${roll.sides}` : `of ${roll.sides}`}
-                  {isMaster && (lang === 'ru' ? ' • Мастерский' : ' • Master')}
+                  {t('bbcode.of_sides', { sides: roll.sides })}
+                  {isMaster && t('bbcode.master_badge')}
                 </span>
               </div>
             </div>
@@ -746,7 +746,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
         );
       }
       case 'spoiler': {
-        return <BBCodeSpoiler key={index} title={params.default}>{content}</BBCodeSpoiler>;
+        return <BBCodeSpoiler key={index} title={params.default} t={t}>{content}</BBCodeSpoiler>;
       }
       case 'video':
       case 'youtube':
@@ -785,7 +785,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
         let hint = t('forum.hide_moderator_only');
         if (threshold.startsWith('@')) {
           const nickText = params.nick ? `: ${params.nick}` : '';
-          hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
+          hint = t('bbcode.hidden_for_addressee', { nickText });
         } else if (threshold !== 'hidden') {
           const thresholdNum = parseInt(threshold, 10);
           const userPosts = profile?.post_count || profile?.postCount || user?.post_count || user?.postCount || 0;
@@ -844,7 +844,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
               <div className="bbcode-hide-header">
                 <EyeOff size={14} /> {t('forum.hidden_content')}
                 {isVisible && user && user.uid !== authorId && (hasPermission && hasPermission(PERMISSIONS.BYPASS_HIDE_TAGS)) && <span className="opacity-50 ms-1">(Admin View)</span>}
-                {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({lang === 'ru' ? 'Адресно' : 'Addressed'}{params.nick ? `: ${params.nick}` : ''})</span>}
+                {threshold.startsWith('@') && <span className="opacity-50 ms-1 text-primary">({t('bbcode.addressed', { nick: params.nick ? `: ${params.nick}` : '' })})</span>}
               </div>
               <div className="bbcode-hide-content">
                 {node.children.map(renderNode)}
@@ -857,7 +857,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
           let hint = t('forum.hide_moderator_only');
           if (threshold.startsWith('@')) {
             const nickText = params.nick ? `: ${params.nick}` : '';
-            hint = lang === 'ru' ? `Скрыто (только для адресата${nickText})` : `Hidden (for addressee${nickText})`;
+            hint = t('bbcode.hidden_for_addressee', { nickText });
           }
           else if (threshold !== 'hidden') {
             hint = remainingPosts > 0
