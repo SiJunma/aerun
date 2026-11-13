@@ -24,7 +24,7 @@ const ForumAuthorAvatar = ({
   className = '',
   isOnline = false,
 }) => {
-  const { lang } = useI18n();
+  const { t } = useI18n();
   const { settings } = useAuth();
 
   // The DTO carries the resolved ids; fall back to the explicit props so
@@ -91,7 +91,7 @@ const ForumAuthorAvatar = ({
       {isOnline && (
         <span
           className={`online-status-dot author-avatar__dot ${dotSizeClass}`}
-          title={lang === 'ru' ? 'В сети' : 'Online'}
+          title={t('avatar.online')}
         />
       )}
     </span>

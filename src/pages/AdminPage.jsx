@@ -1168,12 +1168,7 @@ const AdminPage = () => {
     // version of the same rule.
     if (!catForm.group_id) {
       revealFirstInvalid([catGroupRef]);
-      showToast(
-        currentLang === 'ru'
-          ? 'Категория должна принадлежать группе. Сначала создайте группу.'
-          : 'The category must belong to a group. Create a group first.',
-        'danger'
-      );
+      showToast(t('admin.categories.group_required'), 'danger');
       return;
     }
 
@@ -1212,9 +1207,7 @@ const AdminPage = () => {
         kind: 'category',
         name: resolveTitle(cat?.title),
         items: [],
-        summary: currentLang === 'ru'
-          ? `В этой категории ${topics} тем. Перенесите их в другую категорию или удалите — и только потом удаляйте категорию.`
-          : `This category holds ${topics} topics. Move them to another category or delete them first, then delete the category.`
+        summary: t('admin.categories.category_blocked_topics_summary', { topics })
       });
       return;
     }
@@ -1236,9 +1229,7 @@ const AdminPage = () => {
               kind: 'category',
               name: resolveTitle(cat?.title),
               items: [],
-              summary: currentLang === 'ru'
-                ? 'В этой категории появились темы. Перенесите или удалите их, затем удалите категорию.'
-                : 'Topics appeared in this category. Move or delete them, then delete the category.'
+              summary: t('admin.categories.category_blocked_topics_appeared_summary')
             });
             return;
           }
@@ -1319,9 +1310,7 @@ const AdminPage = () => {
         items: blocking.map(c => ({
           id: c.id,
           label: resolveTitle(c.title),
-          meta: currentLang === 'ru'
-            ? `${c.topics_count || 0} тем · ${c.posts_count || 0} сообщ.`
-            : `${c.topics_count || 0} topics · ${c.posts_count || 0} posts`
+          meta: t('admin.categories.stats', { topics: c.topics_count || 0, posts: c.posts_count || 0 })
         }))
       });
       return;
@@ -1460,11 +1449,7 @@ const AdminPage = () => {
       const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
       if (authData?.record?.id !== user?.uid) {
         pb.authStore.save(previousToken, previousRecord);
-        throw new Error(
-          currentLang === 'ru'
-            ? 'Этот Google-аккаунт не тот, под которым вы вошли. Проверка отменена.'
-            : 'That Google account is not the one you are signed in as. Confirmation cancelled.'
-        );
+        throw new Error(t('auth.wrong_google_account'));
       }
       return authData;
     } catch (err) {
@@ -1511,19 +1496,14 @@ const AdminPage = () => {
     setTransferring(true);
     try {
       const res = await transferRoot({ successorId, password, confirmPhrase });
-      showToast(
-        currentLang === 'ru'
-          ? `Роль передана. Новый главный администратор: ${res?.new_root_nickname || ''}`
-          : `Role transferred. New chief admin: ${res?.new_root_nickname || ''}`,
-        'success'
-      );
+      showToast(t('admin.users.transfer_role_success', { new_root_nickname: res?.new_root_nickname || '' }), 'success');
       setShowTransferRoot(false);
       // The caller is now an admin and this page's role assignment is stale —
       // reload so the badge and the button both change.
       window.location.reload();
     } catch (err) {
       showToast(
-        err?.message || (currentLang === 'ru' ? 'Не удалось передать роль' : 'Failed to transfer the role'),
+        err?.message || t('admin.users.transfer_role_failed'),
         'danger'
       );
     } finally {
@@ -2269,7 +2249,7 @@ const AdminPage = () => {
             </InputGroup.Text>
             <Form.Control
               type="text"
-              placeholder={currentLang === 'ru' ? 'Поиск...' : 'Search...'}
+              placeholder={t('common.search_placeholder')}
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
               className="border-start-0 ps-0"
@@ -2509,7 +2489,7 @@ const AdminPage = () => {
                           onClick={handleOpenTransferRoot}
                         >
                           <ShieldAlert size={14} className="me-1" />
-                          {currentLang === 'ru' ? 'Передать роль' : 'Transfer role'}
+                          {t('admin.users.transfer_role_btn')}
                         </Button>
                       )}
                     </div>
@@ -2955,14 +2935,14 @@ const AdminPage = () => {
               <InputGroup size="sm">
                 <InputGroup.Text><Search size={14} /></InputGroup.Text>
                 <Form.Control
-                  placeholder={currentLang === 'ru' ? 'Поиск...' : 'Search...'}
+                  placeholder={t('common.search_placeholder')}
                   value={auditSearch}
                   onChange={e => { setAuditSearch(e.target.value); setAuditPage(1); }}
                 />
               </InputGroup>
             </div>
             <Form.Select size="sm" style={{ width: 'auto' }} value={auditActionFilter} onChange={e => { setAuditActionFilter(e.target.value); setAuditPage(1); }}>
-              <option value="all">{currentLang === 'ru' ? 'Все действия' : 'All actions'}</option>
+              <option value="all">{t('common.all_actions')}</option>
               {allActions.map(a => (
                 <option key={a} value={a}>{auditActionLabel(a)}</option>
               ))}
@@ -3037,7 +3017,7 @@ const AdminPage = () => {
                                 );
                               })}
                             <Button variant="link" size="sm" className="p-0 text-decoration-none text-muted" onClick={() => setSelectedAuditLog(log)}>
-                              {currentLang === 'ru' ? 'Подробнее...' : 'View details...'}
+                              {t('admin.audit.view_details')}
                             </Button>
                           </div>
                         ) : <span className="opacity-50">—</span>}
@@ -3056,8 +3036,8 @@ const AdminPage = () => {
 
           <div className="d-flex flex-wrap justify-content-between align-items-center mt-3 gap-2">
             <div className="small text-muted">
-              {currentLang === 'ru' ? `Записей: ${filtered.length}` : `Entries: ${filtered.length}`}
-              {auditSearch || auditActionFilter !== 'all' ? ` (${currentLang === 'ru' ? 'фильтр)' : 'filtered)'}` : ''}
+              {t('admin.audit.entries_count', { count: filtered.length })}
+              {auditSearch || auditActionFilter !== 'all' ? ` (${t('admin.audit.filtered_label')})` : ''}
             </div>
             <ForumPagination
               currentPage={correctedPage}
@@ -3069,7 +3049,7 @@ const AdminPage = () => {
           {hasMoreAudit && (
             <div className="text-center mt-2">
               <Button variant="link" size="sm" onClick={handleLoadMoreAudit} disabled={loadingAudit}>
-                {loadingAudit ? t('common.loading') : (currentLang === 'ru' ? 'Загрузить еще...' : 'Load more entries...')}
+                {loadingAudit ? t('common.loading') : t('admin.audit.load_more')}
               </Button>
             </div>
           )}
@@ -3757,13 +3737,11 @@ const AdminPage = () => {
         onConfirm={() => { }}
         hideConfirm
         confirmText=""
-        cancelText={currentLang === 'ru' ? 'Понятно' : 'Got it'}
-        title={currentLang === 'ru' ? 'Удаление невозможно' : 'Cannot delete'}
+        cancelText={t('common.got_it')}
+        title={t('common.cannot_delete')}
         message={blockedDelete?.summary || (
           blockedDelete?.kind === 'group'
-            ? (currentLang === 'ru'
-              ? `В группе «${blockedDelete?.name}» ещё есть категории. Удалите их или перенесите в другую группу — после этого группу можно будет удалить.`
-              : `The group “${blockedDelete?.name}” still holds categories. Delete them or move them to another group, then the group can be removed.`)
+            ? t('admin.categories.group_still_holds_categories', { name: blockedDelete?.name })
             : ''
         )}
       >

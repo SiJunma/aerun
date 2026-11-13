@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { Form, Button, Dropdown } from 'react-bootstrap';
 import { User, Keyboard } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
 
@@ -31,7 +32,6 @@ export const PostInlineEditor = ({
   onSave,
   onCancel,
   isSaving = false,
-  lang = 'ru',
   t,
 }) => {
   const editorRef = useRef(null);
@@ -39,98 +39,95 @@ export const PostInlineEditor = ({
   const canUseDice = hasPermission?.(PERMISSIONS.USE_DICE, { category });
 
   return (
-    <div className="topic-post-editor">
+    <div className="pb-3">
       {isFirstPost && !isDraft && (
-        <div className="topic-post-editor__fields">
-          <div className="topic-post-editor__field">
-            <label className="topic-post-editor__label" htmlFor="editTopicTitle">
-              {lang === 'ru' ? 'Название темы' : 'Topic Title'}
-            </label>
-            <input
-              id="editTopicTitle"
+        <div className="mb-3">
+          <Form.Group className="mb-2">
+            <Form.Label className="fw-semibold small">
+              {t('forum.topic_title_label')}
+            </Form.Label>
+            <Form.Control
               type="text"
               value={editTopicTitle}
               onChange={(e) => setEditTopicTitle?.(e.target.value)}
               maxLength={100}
               required
-              className="topic-reply__input"
             />
-          </div>
-          <div className="topic-post-editor__field">
-            <label className="topic-post-editor__label" htmlFor="editTopicDescription">
-              {lang === 'ru' ? 'Описание темы' : 'Topic Description'}
-            </label>
-            <input
-              id="editTopicDescription"
+          </Form.Group>
+          <Form.Group className="mb-2">
+            <Form.Label className="fw-semibold small">
+              {t('forum.topic_description_label')}
+            </Form.Label>
+            <Form.Control
               type="text"
               value={editTopicDescription}
               onChange={(e) => setEditTopicDescription?.(e.target.value)}
               maxLength={200}
-              placeholder={lang === 'ru' ? 'Краткое описание...' : 'Short description...'}
-              className="topic-reply__input"
+              placeholder={t('forum.short_description_placeholder')}
             />
-          </div>
+          </Form.Group>
           {setEditPinFirstPost && (
-            <label className="topic-post-editor__pin" htmlFor="editPinFirstPost">
-              <input
-                id="editPinFirstPost"
-                type="checkbox"
-                checked={editPinFirstPost}
-                onChange={(e) => setEditPinFirstPost(e.target.checked)}
-                className="topic-select-input"
-              />
-              <span>{t?.('forum.pin_first_post') || (lang === 'ru' ? 'Закрепить первое сообщение' : 'Pin first post')}</span>
-            </label>
+            <Form.Check
+              type="checkbox"
+              id="editPinFirstPost"
+              label={t('forum.pin_first_post')}
+              checked={editPinFirstPost}
+              onChange={(e) => setEditPinFirstPost(e.target.checked)}
+              className="mt-2"
+            />
           )}
         </div>
       )}
 
-      <div className="topic-post-editor__field">
-        <div className="topic-post-editor__mask-row">
+      <div className="mb-2">
+        <div className="d-flex align-items-center justify-content-between mb-2">
           {/* Mask re-filing is the AUTHOR's decision: the server ignores the
               character_id of a non-author edit, so the picker is hidden for
               moderated edits of other members' posts. */}
           {canUseMasks && canChangeMask && (
-            <details className="topic-reply__mask">
-              <summary className="topic-btn topic-btn--accent">
+            <Dropdown className="w-auto">
+              <Dropdown.Toggle
+                variant="outline-management"
+                size="sm"
+                className="d-flex align-items-center gap-2 custom-select-toggle"
+              >
                 <User size={14} />
-                <span className="topic-post-editor__mask-text">
+                <span className="text-truncate" style={{ maxWidth: '200px' }}>
                   {editCharacterId
-                    ? `${t?.('forum.post_as_character') || (lang === 'ru' ? 'От лица персонажа' : 'Post as character')}: ${characters.find((c) => c.id === editCharacterId)?.name || '...'}`
-                    : `${t?.('forum.post_as_user') || (lang === 'ru' ? 'От своего имени' : 'Post as user')}: ${profile?.nickname || profile?.email?.split('@')[0] || 'User'}`}
+                    ? `${t('forum.post_as_character')}: ${characters.find((c) => c.id === editCharacterId)?.name || '...'}`
+                    : `${t('forum.post_as_user')}: ${profile?.nickname || profile?.email?.split('@')[0] || 'User'}`}
                 </span>
-              </summary>
-              <div className="topic-reply__mask-menu">
-                <button
-                  type="button"
-                  className={`topic-reply__mask-item ${editCharacterId === '' ? 'is-active' : ''}`}
+              </Dropdown.Toggle>
+              <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                <Dropdown.Item
+                  active={editCharacterId === ''}
                   onClick={() => setEditCharacterId?.('')}
                 >
-                  {t?.('forum.post_as_user') || (lang === 'ru' ? 'От своего имени' : 'Post as user')}: {profile?.nickname || profile?.email?.split('@')[0] || 'User'}
-                </button>
-                {characters.length > 0 && <hr className="topic-reply__mask-divider" />}
+                  {t('forum.post_as_user')}: {profile?.nickname || profile?.email?.split('@')[0] || 'User'}
+                </Dropdown.Item>
+                {characters.length > 0 && <Dropdown.Divider />}
                 {characters.map((char) => (
-                  <button
-                    type="button"
+                  <Dropdown.Item
                     key={char.id}
-                    className={`topic-reply__mask-item ${editCharacterId === char.id ? 'is-active' : ''}`}
+                    active={editCharacterId === char.id}
                     onClick={() => setEditCharacterId?.(char.id)}
                   >
-                    {t?.('forum.post_as_character') || (lang === 'ru' ? 'От лица персонажа' : 'Post as character')}: {char.name}
-                  </button>
+                    {t('forum.post_as_character')}: {char.name}
+                  </Dropdown.Item>
                 ))}
-              </div>
-            </details>
+              </Dropdown.Menu>
+            </Dropdown>
           )}
 
-          <button
-            type="button"
-            className="topic-btn topic-btn--accent"
+          <Button
+            variant="outline-management"
+            size="sm"
+            className="ms-auto d-none d-md-flex align-items-center"
             onClick={() => editorRef.current?.openHotkeysModal()}
-            title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+            title={t('forum.hotkeys')}
           >
             <Keyboard size={16} />
-          </button>
+          </Button>
         </div>
 
         <RichEditor
@@ -149,27 +146,27 @@ export const PostInlineEditor = ({
         />
       </div>
 
-      <div className="topic-post-editor__actions">
-        <button
-          type="button"
-          className={`topic-btn ${isDraft ? 'topic-btn--secondary' : 'topic-btn--primary'}`}
+      <div className="d-flex gap-2">
+        <Button
+          size="sm"
+          variant={isDraft ? 'outline-secondary' : 'primary'}
           onClick={onSave}
           disabled={isSaving}
         >
           {isSaving
-            ? t?.('common.saving', {}, lang === 'ru' ? 'Сохранение...' : 'Saving...')
+            ? t('common.saving')
             : isDraft
-            ? t?.('forum.draft_update_btn', {}, lang === 'ru' ? 'Обновить черновик' : 'Update draft')
-            : t?.('common.save', {}, lang === 'ru' ? 'Сохранить' : 'Save')}
-        </button>
-        <button
-          type="button"
-          className="topic-btn topic-btn--secondary"
+            ? t('forum.draft_update_btn')
+            : t('common.save')}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline-secondary"
           onClick={onCancel}
           disabled={isSaving}
         >
-          {t?.('common.cancel') || (lang === 'ru' ? 'Отмена' : 'Cancel')}
-        </button>
+          {t('common.cancel')}
+        </Button>
       </div>
     </div>
   );

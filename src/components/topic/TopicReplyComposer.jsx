@@ -1,4 +1,5 @@
 import React from 'react';
+import { Card, Form, Button, Dropdown } from 'react-bootstrap';
 import { User, Keyboard, FilePen, Lock, MessageSquareOff } from 'lucide-react';
 import RichEditor from '../common/RichEditor';
 
@@ -28,7 +29,6 @@ export const TopicReplyComposer = React.forwardRef(({
   hasPermission,
   PERMISSIONS,
   computedMaxChars,
-  lang,
   t
 }, ref) => {
   const replyEditorRef = React.useRef(null);
@@ -37,11 +37,11 @@ export const TopicReplyComposer = React.forwardRef(({
   if (!hasPermission(PERMISSIONS.POST_REPLY, { category })) {
     if (user && profile?.role !== 'pending' && profile?.role !== 'banned') {
       return (
-        <section className="topic-reply-notice" ref={ref}>
-          <span className="topic-reply-notice__text">
+        <div className="mt-5 p-4 text-center text-muted border rounded" ref={ref}>
+          <span className="opacity-75">
             {t?.('forum.spectator_mode') || 'Spectator mode'}
           </span>
-        </section>
+        </div>
       );
     }
     return null;
@@ -50,128 +50,126 @@ export const TopicReplyComposer = React.forwardRef(({
   // Topic post limit reached
   if (topic.posts_count >= (settings?.maxPostsPerTopic ?? 1000)) {
     return (
-      <section className="topic-reply" ref={ref}>
-        <div className="topic-reply__card">
-          <div className="topic-reply-notice__stack">
-              <div className="topic-reply-notice__icon">
+      <div className="mt-5" ref={ref}>
+        <Card className="shadow-sm border-0 bg-card overflow-hidden">
+          <Card.Body className="p-4 text-center">
+            <div className="d-flex flex-column align-items-center py-2">
+              <div className="bg-light rounded-circle p-3 mb-3" style={{ color: 'var(--role-banned)' }}>
                 <Lock size={32} />
               </div>
-              <h4 className="topic-reply-notice__title">
-                {lang === 'ru' ? 'Тема закрыта' : 'Topic Closed'}
+              <h4 className="fw-bold mb-2">
+                {t('forum.topic_closed')}
               </h4>
-              <p className="topic-reply-notice__text">
-                {lang === 'ru'
-                  ? `В теме достигнут лимит сообщений (${settings?.maxPostsPerTopic ?? 1000}/${settings?.maxPostsPerTopic ?? 1000}). Новые ответы более не принимаются.`
-                  : `The message limit (${settings?.maxPostsPerTopic ?? 1000}/${settings?.maxPostsPerTopic ?? 1000}) has been reached for this topic. New replies are no longer accepted.`}
+              <p className="text-muted mb-0 mx-auto" style={{ maxWidth: '400px' }}>
+                {t('forum.topic_post_limit', { max: settings?.maxPostsPerTopic ?? 1000, limit: settings?.maxPostsPerTopic ?? 1000 })}
               </p>
             </div>
-        </div>
-      </section>
+          </Card.Body>
+        </Card>
+      </div>
     );
   }
 
   // Topic locked
   if (topic.is_locked && !hasPermission(PERMISSIONS.CLOSE_TOPICS)) {
     return (
-      <section
-        className="topic-reply-notice"
+      <div
+        className="mt-5 p-4 text-center text-muted rounded"
+        style={{ backgroundColor: 'var(--bg-color)', border: '1px solid var(--border-color)', opacity: 0.75 }}
         ref={ref}
       >
-        <div className="topic-reply-notice__stack">
-          <MessageSquareOff size={48} />
+        <div className="mb-3">
+          <MessageSquareOff size={48} className="opacity-25" />
         </div>
-        <h5 className="topic-reply-notice__title">
+        <h5 className="mb-2">
           {t?.('forum.topic_locked') || 'Topic Locked'}
         </h5>
-        <p className="topic-reply-notice__text">
+        <p className="small mb-0 opacity-75">
           {t?.('forum.topic_locked_desc') || 'This topic is locked. You cannot reply.'}
         </p>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section
-      className="topic-reply"
-      ref={ref}
-      id="topic-reply"
-    >
-      <div className="topic-reply__card">
-        <div className="topic-reply__header reply-header">
-          <h5 className="topic-reply__title">{t?.('forum.create_post') || 'Reply'}</h5>
-        </div>
-        <div className="topic-reply__body">
-          <form onSubmit={handleReply} className="reply-form">
+    <div className="mt-5" ref={ref} id="reply-composer-form">
+      <Card className="shadow-sm border-0 bg-card">
+        <Card.Header className="bg-dark text-white py-3">
+          <h5 className="mb-0">{t?.('forum.create_post') || 'Reply'}</h5>
+        </Card.Header>
+        <Card.Body className="p-3 p-md-4">
+          <Form onSubmit={handleReply}>
             {!user && (
-              <div className="topic-reply__field">
-                <label className="topic-reply__label" htmlFor="guestNickname">
-                  {lang === 'ru' ? 'Ваш никнейм' : 'Your Nickname'} <span className="topic-reply__required">*</span>
-                </label>
-                <input
-                  id="guestNickname"
+              <Form.Group className="mb-3" controlId="guestNickname">
+                <Form.Label className="fw-semibold small">
+                  {t('forum.your_nickname')} <span className="text-danger">*</span>
+                </Form.Label>
+                <Form.Control
                   type="text"
-                  placeholder={lang === 'ru' ? 'Введите имя...' : 'Enter your name...'}
+                  placeholder={t('forum.nickname_placeholder')}
                   value={guestNickname}
                   onChange={(e) => setGuestNickname(e.target.value)}
                   required
-                  className="topic-reply__input"
+                  className="w-auto"
+                  style={{ minWidth: '250px' }}
                 />
-              </div>
+              </Form.Group>
             )}
 
-            <div className="topic-reply__mask-row">
+            <div className="d-flex align-items-center justify-content-between mb-2">
               {user && settings?.enableCharacters !== false && hasPermission(PERMISSIONS.USE_MASKS, { category }) && (
-                <details className="topic-reply__mask">
-                  <summary className="topic-btn topic-btn--accent">
+                <Dropdown className="w-auto">
+                  <Dropdown.Toggle
+                    variant="outline-management"
+                    className="d-flex align-items-center gap-2 custom-select-toggle"
+                  >
                     <User size={16} />
-                    <span className="topic-reply__mask-text">
+                    <span className="text-truncate" style={{ maxWidth: '250px' }}>
                       {selectedCharacterId
                         ? `${t?.('forum.post_as_character') || 'Character'}: ${characters.find(c => c.id === selectedCharacterId)?.name || '...'}`
                         : `${t?.('forum.post_as_user') || 'User'}: ${profile?.nickname || profile?.email?.split('@')[0]}`
                       }
                     </span>
-                  </summary>
-                  <div className="topic-reply__mask-menu">
-                    <button
-                      type="button"
-                      className={`topic-reply__mask-item ${selectedCharacterId === '' ? 'is-active' : ''}`}
+                  </Dropdown.Toggle>
+                  <Dropdown.Menu className="shadow-sm border-0 custom-select-menu">
+                    <Dropdown.Item
+                      active={selectedCharacterId === ''}
                       onClick={() => {
                         setSelectedCharacterId('');
                         if (user && setLastSelectedMask) setLastSelectedMask('');
                       }}
                     >
                       {t?.('forum.post_as_user') || 'User'}: {profile?.nickname || profile?.email?.split('@')[0]}
-                    </button>
-                    {characters.length > 0 && <hr className="topic-reply__mask-divider" />}
+                    </Dropdown.Item>
+                    {characters.length > 0 && <Dropdown.Divider />}
                     {characters.map(char => (
-                      <button
-                        type="button"
+                      <Dropdown.Item
                         key={char.id}
-                        className={`topic-reply__mask-item ${selectedCharacterId === char.id ? 'is-active' : ''}`}
+                        active={selectedCharacterId === char.id}
                         onClick={() => {
                           setSelectedCharacterId(char.id);
                           if (user && setLastSelectedMask) setLastSelectedMask(char.id);
                         }}
                       >
                         {t?.('forum.post_as_character') || 'Character'}: {char.name}
-                      </button>
+                      </Dropdown.Item>
                     ))}
-                  </div>
-                </details>
+                  </Dropdown.Menu>
+                </Dropdown>
               )}
 
-              <button
-                type="button"
-                className={`topic-btn topic-btn--accent ${(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? '' : 'topic-reply__hotkeys'}`}
+              <Button
+                variant="outline-management"
+                className={`ms-auto d-none d-md-flex align-items-center gap-2 ${!(user && hasPermission(PERMISSIONS.USE_MASKS, { category })) ? 'mb-2' : ''}`}
                 onClick={() => replyEditorRef.current?.openHotkeysModal()}
-                title={lang === 'ru' ? 'Горячие клавиши (Ctrl+/)' : 'Hotkeys (Ctrl+/)'}
+                title={t('forum.hotkeys')}
               >
                 <Keyboard size={18} />
-                <span className="topic-reply__hotkeys-label">{lang === 'ru' ? 'Справка' : 'Help'}</span>
-              </button>
+                <span className="d-none d-md-inline small">{t('forum.help')}</span>
+              </Button>
             </div>
 
-            <div className="topic-reply__field reply-editor">
+            <Form.Group className="mb-3">
               <RichEditor
                 ref={replyEditorRef}
                 id="reply-editor"
@@ -186,30 +184,30 @@ export const TopicReplyComposer = React.forwardRef(({
                 hideHotkeysButton={true}
                 onSubmit={() => handleReply()}
               />
-            </div>
+            </Form.Group>
 
-            <div className="topic-reply__actions reply-actions">
+            <div className="mt-4 d-flex justify-content-end gap-2">
               {user && !hasDraft && (
-                <button
+                <Button
+                  variant="outline-secondary"
                   type="button"
-                  className="topic-btn topic-btn--secondary"
                   disabled={submitting || draftSaving || !replyContent?.trim()}
                   onClick={handleSaveDraft}
                 >
-                  <FilePen size={14} />
+                  <FilePen size={14} className="me-1" />
                   {draftSaving ? t?.('forum.draft_saving') || 'Saving...' : t?.('forum.draft_save') || 'Save Draft'}
-                </button>
+                </Button>
               )}
-              <button type="submit" className="topic-btn topic-btn--primary topic-reply__submit reply-submit" disabled={submitting}>
+              <Button variant="primary" type="submit" className="px-4" disabled={submitting}>
                 {submitting
                   ? t?.('forum.posting') || 'Posting...'
                   : t?.('forum.create_post') || 'Submit Reply'}
-              </button>
+              </Button>
             </div>
-          </form>
-        </div>
-      </div>
-    </section>
+          </Form>
+        </Card.Body>
+      </Card>
+    </div>
   );
 });
 

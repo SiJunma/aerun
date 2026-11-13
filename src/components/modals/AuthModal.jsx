@@ -53,7 +53,7 @@ const AuthModal = ({ show, onHide, initialMode = 'login' }) => {
       size="md"
       showHeader
       headerClassName="border-0"
-      title={mode === 'login' ? 'Войти' : mode === 'forgot_password' ? 'Восстановление пароля' : 'Регистрация'}
+      title={mode === 'login' ? t('auth.sign_in_title') : mode === 'forgot_password' ? t('auth.forgot_password_title') : t('auth.register_title')}
       bodyClassName="px-4 pb-4 pt-0"
       contentClassName="shadow-lg rounded-4 overflow-hidden bg-card"
     >

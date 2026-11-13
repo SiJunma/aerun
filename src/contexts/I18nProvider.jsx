@@ -1,6 +1,12 @@
 /* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { translations } from '../i18n/dictionary';
+import { translations } from '../i18n/dictionary.js';
+import {
+  SUPPORTED_LANGUAGE_CODES,
+  DEFAULT_LANGUAGE,
+  detectLanguageFromBrowser,
+  isSupportedLanguage,
+} from '../i18n/languages';
 import { useAuth } from './AuthProvider';
 
 const I18nContext = createContext();
@@ -17,16 +23,16 @@ export const I18nProvider = ({ children }) => {
   // Detect browser language or use saved preference
   const getInitialLang = () => {
     const saved = localStorage.getItem('language');
-    if (saved && (saved === 'ru' || saved === 'en')) return saved;
-    
+    if (saved && isSupportedLanguage(saved)) return saved;
+
     const browserLang = navigator.language || navigator.userLanguage;
-    return (browserLang && browserLang.toLowerCase().startsWith('ru')) ? 'ru' : 'en';
+    return detectLanguageFromBrowser(browserLang);
   };
 
   const [lang, setLangState] = useState(getInitialLang());
 
   useEffect(() => {
-    if (profile?.settings?.language) {
+    if (profile?.settings?.language && isSupportedLanguage(profile.settings.language)) {
       setLangState(profile.settings.language);
     }
   }, [profile]);
@@ -77,7 +83,17 @@ export const I18nProvider = ({ children }) => {
       return result;
     }
 
-    return fallbackText || result || path;
+    // Missing translation — log to help catch missing keys during development.
+    if (typeof result !== 'string') {
+      console.warn(
+        `[i18n] missing translation key "${path}" for lang "${lang}"` +
+        (lang !== 'en' ? ` (checked en fallback too)` : '')
+      );
+    }
+
+    // Never return a nested translation object as a React child — that would
+    // throw "Objects are not valid as a React child". Fall back to the path.
+    return fallbackText || path;
   };
 
   const value = {

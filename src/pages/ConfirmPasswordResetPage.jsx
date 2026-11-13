@@ -8,7 +8,7 @@ import { confirmPasswordReset } from '../api/account-credentials';
 
 const ConfirmPasswordResetPage = () => {
   const { token } = useParams();
-  const { lang } = useI18n();
+  const { t, lang } = useI18n();
   const { setPageTitle } = usePageTitle();
 
   const [password, setPassword] = useState('');
@@ -18,21 +18,21 @@ const ConfirmPasswordResetPage = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    setPageTitle(lang === 'ru' ? 'Сброс пароля' : 'Reset Password');
+    setPageTitle(t('forum.reset_password'));
   }, [setPageTitle, lang]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!password || !passwordConfirm) {
-      setError(lang === 'ru' ? 'Пожалуйста, заполните оба поля' : 'Please fill in both fields');
+      setError(t('forum.fill_both_fields'));
       return;
     }
     if (password !== passwordConfirm) {
-      setError(lang === 'ru' ? 'Пароли не совпадают' : 'Passwords do not match');
+      setError(t('forum.passwords_not_match'));
       return;
     }
     if (password.length < 8) {
-      setError(lang === 'ru' ? 'Пароль должен быть не менее 8 символов' : 'Password must be at least 8 characters');
+      setError(t('forum.password_min_length'));
       return;
     }
 
@@ -42,7 +42,7 @@ const ConfirmPasswordResetPage = () => {
       await confirmPasswordReset({ token, password, passwordConfirm });
       setSuccess(true);
     } catch (err) {
-      setError(err?.message || (lang === 'ru' ? 'Не удалось сбросить пароль. Ссылка устарела или недействительна.' : 'Failed to reset password. Link may be invalid or expired.'));
+      setError(err?.message || t('forum.reset_failed'));
     } finally {
       setSubmitting(false);
     }
@@ -64,15 +64,13 @@ const ConfirmPasswordResetPage = () => {
                 <CheckCircle2 size={54} className="mx-auto" />
               </div>
               <h4 className="fw-bold mb-2">
-                {lang === 'ru' ? 'Пароль успешно изменён!' : 'Password Reset Successful!'}
+                {t('forum.password_reset_success')}
               </h4>
               <p className="text-muted mb-4">
-                {lang === 'ru'
-                  ? 'Теперь вы можете войти с вашим новым паролем.'
-                  : 'You can now sign in with your new password.'}
+                {t('forum.sign_in_now')}
               </p>
               <Button as={Link} to="/login" variant="primary" className="w-100 d-flex align-items-center justify-content-center gap-2">
-                <span>{lang === 'ru' ? 'Перейти ко входу' : 'Sign In'}</span>
+                <span>{t('forum.sign_in')}</span>
                 <ArrowRight size={18} />
               </Button>
             </div>
@@ -83,12 +81,10 @@ const ConfirmPasswordResetPage = () => {
                   <Lock size={28} />
                 </div>
                 <h4 className="fw-bold mb-1">
-                  {lang === 'ru' ? 'Установите новый пароль' : 'Set New Password'}
+                  {t('forum.set_new_password')}
                 </h4>
                 <p className="text-muted small mb-0">
-                  {lang === 'ru'
-                    ? 'Придумайте надежный пароль длиной не менее 8 символов'
-                    : 'Choose a secure password of at least 8 characters'}
+                  {t('forum.password_at_least_8')}
                 </p>
               </div>
 
@@ -101,7 +97,7 @@ const ConfirmPasswordResetPage = () => {
               <Form onSubmit={handleSubmit}>
                 <Form.Group className="mb-3">
                   <Form.Label className="small fw-semibold">
-                    {lang === 'ru' ? 'Новый пароль' : 'New Password'}
+                    {t('forum.new_password')}
                   </Form.Label>
                   <Form.Control
                     type="password"
@@ -115,7 +111,7 @@ const ConfirmPasswordResetPage = () => {
 
                 <Form.Group className="mb-4">
                   <Form.Label className="small fw-semibold">
-                    {lang === 'ru' ? 'Подтверждение пароля' : 'Confirm Password'}
+                    {t('forum.confirm_password')}
                   </Form.Label>
                   <Form.Control
                     type="password"
@@ -136,17 +132,17 @@ const ConfirmPasswordResetPage = () => {
                   {submitting ? (
                     <>
                       <Spinner size="sm" animation="border" />
-                      <span>{lang === 'ru' ? 'Сохранение...' : 'Saving...'}</span>
+                      <span>{t('forum.saving')}</span>
                     </>
                   ) : (
-                    <span>{lang === 'ru' ? 'Сохранить пароль' : 'Save Password'}</span>
+                    <span>{t('forum.save_password')}</span>
                   )}
                 </Button>
               </Form>
 
               <div className="text-center mt-3">
                 <Link to="/login" className="text-decoration-none small text-muted">
-                  {lang === 'ru' ? '← Вернуться ко входу' : '← Back to Login'}
+                  {t('forum.back_to_login')}
                 </Link>
               </div>
             </>

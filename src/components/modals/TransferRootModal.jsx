@@ -41,7 +41,7 @@ const TransferRootModal = ({
   currentUserId = '',
   onReauthWithGoogle,
 }) => {
-  const { lang } = useI18n();
+  const { t } = useI18n();
   const [successorId, setSuccessorId] = useState('');
   const [password, setPassword] = useState('');
   const [phrase, setPhrase] = useState('');
@@ -107,12 +107,12 @@ const TransferRootModal = ({
   const footer = (
     <>
       <Button variant="link" className="text-decoration-none text-muted fw-bold me-2" onClick={onHide} disabled={busy}>
-        {lang === 'ru' ? 'Отмена' : 'Cancel'}
+        {t('transfer_root.cancel')}
       </Button>
       <Button variant="danger" className="px-4 fw-bold shadow-sm" onClick={handleSubmit} disabled={!canSubmit}>
         {busy
-          ? (lang === 'ru' ? 'Передача…' : 'Transferring…')
-          : (lang === 'ru' ? 'Передать роль' : 'Transfer role')}
+          ? t('transfer_root.confirm_loading')
+          : t('transfer_root.confirm_button')}
       </Button>
     </>
   );
@@ -125,7 +125,7 @@ const TransferRootModal = ({
       title={
         <span className="d-inline-flex align-items-center gap-2">
           <ShieldAlert size={20} className="text-danger" />
-          {lang === 'ru' ? 'Передача роли главного администратора' : 'Transfer chief admin role'}
+          {t('transfer_root.modal_title')}
         </span>
       }
       footer={footer}
@@ -134,39 +134,27 @@ const TransferRootModal = ({
         {/* Consequences in full, before the first input. */}
         <Alert variant="danger" className="small">
           <p className="fw-bold mb-2">
-            {lang === 'ru' ? 'Это действие необратимо.' : 'This action cannot be undone.'}
+            {t('transfer_root.irreversible')}
           </p>
           <ul className="mb-2 ps-3">
             <li>
-              {lang === 'ru'
-                ? `Роль перейдёт к выбранному участнику, а вы станете администратором${
-                    currentNickname ? ` (${currentNickname} → admin)` : ' (admin)'
-                  }.`
-                : `The role passes to the chosen member and you become an administrator${
-                    currentNickname ? ` (${currentNickname} → admin)` : ' (admin)'
-                  }.`}
+              {t('transfer_root.consequence_role', { currentNickname })}
             </li>
             <li>
-              {lang === 'ru'
-                ? 'Вернуть роль себе вы не сможете: назначить главного администратора может только главный.'
-                : 'You cannot take the role back: only the chief admin can appoint one.'}
+              {t('transfer_root.consequence_no_return')}
             </li>
             <li>
-              {lang === 'ru'
-                ? 'У нового главного будут все права, включая право передать роль дальше.'
-                : 'The new chief admin gets every power, including handing the role on.'}
+              {t('transfer_root.consequence_full_power')}
             </li>
           </ul>
           <p className="mb-0">
-            {lang === 'ru'
-              ? 'Передача будет записана в журнал аудита с указанием обоих участников.'
-              : 'The handover is recorded in the audit log naming both members.'}
+            {t('transfer_root.consequence_audit')}
           </p>
         </Alert>
 
         <Form.Group className="mb-3">
           <Form.Label className="fw-bold">
-            {lang === 'ru' ? 'Новый главный администратор' : 'New chief admin'}
+            {t('transfer_root.title')}
           </Form.Label>
           <Form.Select
             value={successorId}
@@ -174,7 +162,7 @@ const TransferRootModal = ({
             isInvalid={submitted && !successorId}
             disabled={busy}
           >
-            <option value="">{lang === 'ru' ? '— выберите участника —' : '— choose a member —'}</option>
+            <option value="">{t('transfer_root.select_placeholder')}</option>
             {(options).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.nickname}
@@ -183,14 +171,14 @@ const TransferRootModal = ({
           </Form.Select>
           {submitted && !successorId && (
             <div className="invalid-feedback d-block">
-              {lang === 'ru' ? 'Выберите участника.' : 'Choose a member.'}
+              {t('transfer_root.select_required')}
             </div>
           )}
         </Form.Group>
 
         <Form.Group className="mb-3">
           <Form.Label className="fw-bold">
-            {lang === 'ru' ? 'Ваш пароль (повторная аутентификация)' : 'Your password (re-authentication)'}
+            {t('transfer_root.password_label')}
           </Form.Label>
           <Form.Control
             type="password"
@@ -199,12 +187,10 @@ const TransferRootModal = ({
             isInvalid={submitted && !confirmed}
             disabled={busy}
             autoComplete="current-password"
-            placeholder={lang === 'ru' ? 'Ваш текущий пароль' : 'Your current password'}
+            placeholder={t('transfer_root.password_placeholder')}
           />
           <Form.Text className="text-muted">
-            {lang === 'ru'
-              ? 'Требуется, чтобы украденная сессия не позволяла передать форум.'
-              : 'Required so a stolen session cannot hand over the forum.'}
+            {t('transfer_root.password_help')}
           </Form.Text>
 
           {/* The alternative for an account that has no password to type. */}
@@ -212,9 +198,7 @@ const TransferRootModal = ({
             {reauthState === 'done' ? (
               <div className="d-flex align-items-center gap-2 text-success small">
                 <CheckCircle2 size={14} />
-                {lang === 'ru'
-                  ? 'Вход через Google подтверждён.'
-                  : 'Google sign-in confirmed.'}
+                {t('transfer_root.google_confirmed')}
               </div>
             ) : (
               <>
@@ -225,19 +209,15 @@ const TransferRootModal = ({
                   disabled={busy || reauthState === 'busy' || !onReauthWithGoogle}
                 >
                   {reauthState === 'busy'
-                    ? (lang === 'ru' ? 'Проверяем…' : 'Checking…')
-                    : (lang === 'ru' ? 'Войти через Google повторно' : 'Sign in with Google again')}
+                    ? t('transfer_root.google_checking')
+                    : t('transfer_root.google_button')}
                 </Button>
                 <Form.Text className="text-muted d-block mt-1">
-                  {lang === 'ru'
-                    ? 'Если пароль не помните или его не было — подтвердите вход через Google. Проверяет сервер.'
-                    : 'No password, or you cannot recall it? Confirm with Google instead. The server verifies this.'}
+                  {t('transfer_root.google_help')}
                 </Form.Text>
                 {reauthState === 'error' && (
                   <div className="text-danger small mt-1">
-                    {lang === 'ru'
-                      ? 'Не удалось подтвердить вход. Попробуйте ещё раз.'
-                      : 'Could not confirm the sign-in. Please try again.'}
+                    {t('transfer_root.google_error')}
                   </div>
                 )}
               </>
@@ -247,9 +227,7 @@ const TransferRootModal = ({
 
         <Form.Group className="mb-2">
           <Form.Label className="fw-bold">
-            {lang === 'ru'
-              ? `Введите ${TRANSFER_PHRASE}, чтобы подтвердить`
-              : `Type ${TRANSFER_PHRASE} to confirm`}
+            {t('transfer_root.phrase_label', { phrase: TRANSFER_PHRASE })}
           </Form.Label>
           <Form.Control
             value={phrase}

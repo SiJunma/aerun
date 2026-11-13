@@ -78,8 +78,8 @@ export const TopicHeader = ({
               />
             </span>
             <span className="topic-meta-separator">·</span>
-            <span className="topic-meta__item">
-              {lang === 'ru' ? 'Ответы' : 'Replies'}:{' '}
+            <span className="topic-meta__item text-nowrap">
+              {t('forum.replies')}:{' '}
               <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
             </span>
             <span className="topic-meta-separator">·</span>
@@ -103,13 +103,13 @@ export const TopicHeader = ({
                   {hasPermission(PERMISSIONS.PIN_TOPICS) && (
                     <button type="button" onClick={onPinToggle} className="topic-manage-menu__item">
                       <Pin size={14} />
-                      {topic.is_pinned ? (lang === 'ru' ? 'Открепить' : 'Unpin') : (lang === 'ru' ? 'Закрепить' : 'Pin')}
+                      {topic.is_pinned ? t('forum.unpin') : t('forum.pin')}
                     </button>
                   )}
                   {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
                     <button type="button" onClick={onLockToggle} className="topic-manage-menu__item">
                       <Lock size={14} />
-                      {topic.is_locked ? (lang === 'ru' ? 'Открыть' : 'Open') : (lang === 'ru' ? 'Закрыть' : 'Close')}
+                      {topic.is_locked ? t('forum.open') : t('forum.close')}
                     </button>
                   )}
                   {hasPermission(PERMISSIONS.MOVE_TOPICS) && (

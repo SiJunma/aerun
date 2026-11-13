@@ -243,15 +243,16 @@ export const AuthProvider = ({ children }) => {
               photoURL: fresh.avatar_url || prev.photoURL
             }
           : prev));
-        setProfile({
+        setProfile(prev => ({
           ...toOwnProfile(fresh),
+          settings: prev?.settings,
           // `last_selected_character_id` is a private field the `/api/aerun/users/{id}`
           // profile DTO deliberately does not return, so a server profile refresh
           // must not wipe the mask the author chose. It survives in the auth store
           // snapshot (kept in step with the DB by `setLastSelectedMask`) and is the
           // value the reply/topic "Post as…" pickers read back on reload.
           last_selected_character_id: pb.authStore.record?.last_selected_character_id ?? ''
-        });
+        }));
       } catch (err) {
         // Everything that reaches here is a real failure: fetchUserProfile already
         // answers null for a cancellation. The snapshot is on screen regardless, so

@@ -145,17 +145,17 @@ const TopicRow = ({
       {showCategoryInColumn && (
         <div
           className="topic-category"
-          data-label={lang === 'ru' ? 'Категория' : 'Category'}
+          data-label={t('topic_row.category')}
         >
           <Link to={`/category/${topic.category_id}`}>
             {categoryName}
           </Link>
         </div>
       )}
-      <div className="topic-replies" data-label={lang === 'ru' ? 'Ответов' : 'Replies'}>
+      <div className="topic-replies" data-label={t('topic_row.replies')}>
         <span className="topic-count">{Math.max(0, (topic.posts_count || 1) - 1)}</span>
       </div>
-      <div className="topic-last-post" data-label={lang === 'ru' ? 'Последнее' : 'Last Post'}>
+      <div className="topic-last-post" data-label={t('topic_row.last_post')}>
         <LastPostInfo
           topicId={topic.id}
           lastPostAt={topic.last_post_at}

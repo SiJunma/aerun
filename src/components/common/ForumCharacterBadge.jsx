@@ -25,15 +25,15 @@ const ForumCharacterBadge = ({
   hideTooltip = false,
   className = '' 
 }) => {
-  const { lang } = useI18n();
+  const { t } = useI18n();
   
   const isSm = size === 'sm';
   // A known name always wins over the generic label; the label is the fallback
   // for the sidebar, where the character name is already the headline above it.
   const named = typeof characterName === 'string' ? characterName.trim() : '';
   const label = named || (isSm 
-    ? (lang === 'ru' ? 'Перс.' : 'Char.')
-    : (lang === 'ru' ? 'Персонаж' : 'Character'));
+    ? t('character.badge_short')
+    : t('character.badge_long'));
     
   // If ownerName is not provided, we just show the badge without tooltip
   const showTooltip = !hideTooltip && !!ownerName;
@@ -56,7 +56,7 @@ const ForumCharacterBadge = ({
 
   const renderTooltip = (props) => (
     <Tooltip id="character-owner-tooltip" {...props}>
-      {lang === 'ru' ? `Игрок: ${ownerName}` : `Player: ${ownerName}`}
+      {t('character.player_tooltip', { ownerName })}
     </Tooltip>
   );
 

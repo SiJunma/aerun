@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { createPost, updatePost, deletePost } from '../../api/forum';
 import { voteOnPost, updateReputationComment } from '../../api/reputation';
 import { createInFlight, newIdempotencyKey } from '../../utils/inflight';
+import { useI18n } from '../../contexts/I18nProvider';
 import {
   saveUnsentReply,
   clearUnsentReply,
@@ -19,10 +20,10 @@ export const useTopicMutations = ({
   currentUser,
   _currentProfile,
   showToast,
-  lang,
   recordActivity,
   scheduleForumStateRefresh
 }) => {
+  const { t } = useI18n();
   const [submittingPost, setSubmittingPost] = useState(false);
   const [submittingRep, setSubmittingRep] = useState(false);
   const replyInFlightRef = useRef(createInFlight());
@@ -160,7 +161,7 @@ export const useTopicMutations = ({
     try {
       await voteOnPost(currentUser.uid, targetUid, postId, topicId, value, comment, undefined, undefined, voterNickname);
       recordActivity?.();
-      showToast?.(lang === 'ru' ? 'Голос за репутацию учтен' : 'Reputation vote recorded', 'success');
+      showToast?.(t('forum.reputation_vote_recorded'), 'success');
     } catch (err) {
       console.error('[voteOnPost error]', err);
       showToast?.(err.message || 'Failed to submit vote', 'danger');
@@ -168,19 +169,19 @@ export const useTopicMutations = ({
     } finally {
       setSubmittingRep(false);
     }
-  }, [currentUser?.uid, topicId, recordActivity, showToast, lang]);
+  }, [currentUser?.uid, topicId, recordActivity, showToast]);
 
   // Edit reputation comment
   const editRepComment = useCallback(async (voteId, newComment) => {
     try {
       await updateReputationComment(voteId, newComment);
-      showToast?.(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
+      showToast?.(t('forum.reputation_comment_updated'));
     } catch (err) {
       console.error('[updateReputationComment error]', err);
       showToast?.(err.message || 'Failed to update reputation comment', 'danger');
       throw err;
     }
-  }, [showToast, lang]);
+  }, [showToast]);
 
   return {
     submittingPost,

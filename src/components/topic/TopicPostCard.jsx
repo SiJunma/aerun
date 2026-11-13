@@ -42,7 +42,6 @@ export const TopicPostCard = ({
   editingChildren = null,
   onOpenDm,
   onOpenRepVote,
-  lang,
   t,
   showToast
 }) => {
@@ -84,7 +83,7 @@ export const TopicPostCard = ({
   const voteBadge = canVote ? (
     <div
       className="text-muted small d-flex align-items-center gap-1 rep-trigger"
-      title={lang === 'ru' ? 'Репутация сообщения (Нажмите чтобы оценить)' : 'Post reputation (Click to evaluate)'}
+      title={t('forum.post_reputation_tooltip')}
       onClick={() => onOpenRepVote?.(post, postNumber)}
     >
       <Award size={14} className="text-accent" />
@@ -94,7 +93,7 @@ export const TopicPostCard = ({
     /* Guest or missing permission: show value but block voting */
     <div
       className="text-muted small d-flex align-items-center gap-1 rep-badge-own"
-      title={lang === 'ru' ? 'Репутация сообщения (Нет права на оценку)' : 'Post reputation (Voting not allowed)'}
+      title={t('forum.post_reputation_no_vote')}
     >
       <Award size={14} className="text-muted" style={{ opacity: 0.65 }} />
       <strong>{postRepValue}</strong>
@@ -177,14 +176,14 @@ export const TopicPostCard = ({
               {/* 4. Posts Count */}
               {post.author?.user_id && (
                 <div className="text-muted mt-1 opacity-75" style={{ fontSize: '0.775rem' }}>
-                  {t?.('profile.posts_count') || lang === 'ru' ? 'Posts' : 'Posts'}: <strong>{postCount}</strong>
+                  {t('forum.posts_count_label')}: <strong>{postCount}</strong>
                 </div>
               )}
 
               {/* 5. Reputation */}
               {post.author?.user_id && (
                 <div className="text-muted" style={{ fontSize: '0.775rem' }}>
-                  {t?.('profile.reputation') || lang === 'ru' ? 'Reputation' : 'Reputation'}: <strong>{reputation}</strong>
+                  {t('forum.reputation_label')}: <strong>{reputation}</strong>
                 </div>
               )}
 
@@ -203,7 +202,7 @@ export const TopicPostCard = ({
                     </Link>
                     {canDm && onOpenDm && (
                       <Link to={`/messages/${post.author?.user_id}`} className="footer-link text-decoration-none px-0" onClick={() => onOpenDm(post.author?.user_id)}>
-                        {lang === 'ru' ? 'PM' : 'PM'}
+                        {t('forum.pm_label')}
                       </Link>
                     )}
                   </div>
@@ -246,12 +245,12 @@ export const TopicPostCard = ({
                 <div className="d-flex flex-column align-items-end gap-1">
                   {post.author?.user_id && (
                     <div className="text-muted author-res-stat">
-                      {lang === 'ru' ? 'Постов' : 'Posts'}: <strong className="ms-1">{postCount}</strong>
+                      {t('forum.posts_short')}: <strong className="ms-1">{postCount}</strong>
                     </div>
                   )}
                   {post.author?.user_id && (
                     <div className="text-muted author-res-stat">
-                      {lang === 'ru' ? 'Реп' : 'Rep'}: <strong className="ms-1">{reputation}</strong>
+                      {t('forum.rep_short')}: <strong className="ms-1">{reputation}</strong>
                     </div>
                   )}
                   <div className="author-res-info-lite text-end">
@@ -278,7 +277,7 @@ export const TopicPostCard = ({
                         e.preventDefault();
                         const url = `${window.location.origin}/topic/${topicId}?post=${post.id}`;
                         navigator.clipboard.writeText(url);
-                        showToast?.(lang === 'ru' ? 'Ссылка скопирована!' : 'Link copied!', 'success');
+                        showToast?.(t('forum.link_copied'), 'success');
                       }}
                     >
                       <Timestamp date={post.created_at} className="text-muted" />
@@ -286,7 +285,7 @@ export const TopicPostCard = ({
                   )}
                   {post.edited_at && !post._isOptimistic && (
                     <span className="d-block d-md-inline-block ms-md-2 opacity-50">
-                      ({lang === 'ru' ? 'ред.' : 'edited'} <Timestamp date={post.edited_at} />)
+                      ({t('forum.edited_label')} <Timestamp date={post.edited_at} />)
                     </span>
                   )}
                 </small>
@@ -298,7 +297,7 @@ export const TopicPostCard = ({
                     DRAFT
                   </span>
                   <span className="text-muted small fst-italic">
-                    {lang === 'ru' ? 'только вам' : 'only visible to you'}
+                    {t('forum.only_you')}
                   </span>
                 </>
               ) : postNumber !== undefined ? (
@@ -341,7 +340,7 @@ export const TopicPostCard = ({
                     {post.rolls && Object.keys(post.rolls).length > 0 && (
                       <div className="small d-flex align-items-center gap-1" style={{ color: 'var(--secondary-color)' }}>
                         <Dices size={14} />
-                        <span>{lang === 'ru' ? `Всего бросков: ${Object.keys(post.rolls).length}` : `Dice thrown: ${Object.keys(post.rolls).length}`}</span>
+                        <span>{t('forum.dice_total', { count: Object.keys(post.rolls).length })}</span>
                       </div>
                     )}
                   </div>
@@ -351,7 +350,7 @@ export const TopicPostCard = ({
                     <button
                     type="button"
                     className="rep-eye-btn"
-                    title={lang === 'ru' ? 'Посмотреть кто голосовал' : 'View who evaluated'}
+                    title={t('forum.view_voters')}
                     onClick={() => onShowVoters?.(post, postNumber)}
                   >
                     <svg
@@ -378,7 +377,7 @@ export const TopicPostCard = ({
                       /* Own post: always show disabled award badge regardless of vote state */
                       <div
                         className="text-muted small d-flex align-items-center gap-1 rep-badge-own"
-                        title={lang === 'ru' ? 'Репутация сообщения (Вы не можете голосовать за свой пост)' : 'Post reputation (You cannot vote for your own post)'}
+                        title={t('forum.post_reputation_own')}
                       >
                         <Award
                           size={14}
@@ -391,7 +390,7 @@ export const TopicPostCard = ({
                       /* Already voted (current user voted) */
                       <div
                         className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
-                        title={lang === 'ru' ? 'Вы уже оценили этот пост (Нажмите чтобы посмотреть ваш голос)' : 'You evaluated this post (Click to view your vote)'}
+                        title={t('forum.post_reputation_voted')}
                         onClick={() => onShowVoteInfo?.(userVote)}
                       >
                         <Award
@@ -407,7 +406,7 @@ export const TopicPostCard = ({
                       /* Has voted (another user voted) - but this shouldn't happen since myVotes is per-user */
                       <div
                         className="small d-flex align-items-center gap-1 rep-badge-voted rep-trigger"
-                        title={lang === 'ru' ? 'Вы уже оценили этот пост' : 'You evaluated this post'}
+                        title={t('forum.post_reputation_voted_readonly')}
                       >
                         <Award
                           size={14}
@@ -436,7 +435,7 @@ export const TopicPostCard = ({
                   </a>
                   {canDm && onOpenDm && (
                     <a className="author-res-footer-link" href={`/messages/${authorId}`} data-discover="true" onClick={() => onOpenDm(authorId)}>
-                      {lang === 'ru' ? 'PM' : 'PM'}
+                      {t('forum.pm_label')}
                     </a>
                   )}
                 </div>
@@ -449,7 +448,7 @@ export const TopicPostCard = ({
                       className="footer-link p-0 text-decoration-none text-danger opacity-75"
                       onClick={() => onDeletePost?.(post)}
                     >
-                      {lang === 'ru' ? 'Удалить' : 'Delete'}
+                      {t('forum.delete_action')}
                     </Button>
                   )}
                   {canEdit && (
@@ -459,7 +458,7 @@ export const TopicPostCard = ({
                       className="footer-link p-0 text-decoration-none"
                       onClick={() => onStartEdit?.(post, postNumber === 1)}
                     >
-                      {lang === 'ru' ? 'Редактировать' : 'Edit'}
+                      {t('forum.edit_action')}
                     </Button>
                   )}
 
@@ -471,7 +470,7 @@ export const TopicPostCard = ({
                       onClick={() => onPublishDraft?.(post.id)}
                     >
                       <Send size={12} className="me-1" />
-                      {lang === 'ru' ? 'Опубликовать' : 'Publish'}
+                      {t('forum.publish_action')}
                     </Button>
                   ) : canReply && onQuote && (
                     <Button
@@ -480,7 +479,7 @@ export const TopicPostCard = ({
                       className="footer-link p-0 text-decoration-none fw-semibold"
                       onClick={() => onQuote?.(post)}
                     >
-                      {lang === 'ru' ? 'Цитировать' : 'Quote'}
+                      {t('forum.quote_action')}
                     </Button>
                   )}
                 </div>

@@ -99,7 +99,7 @@ const SecurityTab = () => {
       const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
       if (authData?.record?.id !== user?.uid && authData?.record?.id !== user?.id) {
         pb.authStore.save(previousToken, previousRecord);
-        throw new Error(t('auth_google_other_account'));
+        throw new Error(t('auth.wrong_google_account'));
       }
     }, 'auth_google_linked');
 
