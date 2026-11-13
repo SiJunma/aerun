@@ -32,7 +32,6 @@ export const PostInlineEditor = ({
   onSave,
   onCancel,
   isSaving = false,
-  lang = 'ru',
   t,
 }) => {
   const editorRef = useRef(null);

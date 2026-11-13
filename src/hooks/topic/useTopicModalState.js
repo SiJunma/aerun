@@ -19,8 +19,7 @@ export const useTopicModalState = ({
   myVotes,
   setMyVotes,
   recordActivity,
-  lang,
-  _t,
+  t,
   showToast,
   posts,
   setPosts,
@@ -192,7 +191,7 @@ export const useTopicModalState = ({
     } finally {
       if (isMountedRef.current) setModalState((prev) => ({ ...prev, savingEdit: false }));
     }
-  }, [topicId, currentUser, lang, showToast, posts, pinnedFirstPost, currentPage, ITEMS_PER_PAGE, isTopicFirstPost, buildAuthorDTO, mutationEditPost, setPosts, setPinnedFirstPost, setTopic, topic, isMountedRef, modalState]);
+  }, [topicId, currentUser, showToast, posts, pinnedFirstPost, currentPage, ITEMS_PER_PAGE, isTopicFirstPost, buildAuthorDTO, mutationEditPost, setPosts, setPinnedFirstPost, setTopic, topic, isMountedRef, modalState]);
 
 
   const handleConfirmDeleteTopic = async () => {
@@ -366,7 +365,7 @@ export const useTopicModalState = ({
         }));
       }
     }
-  }, [topicId, currentUser, modalState, setModalState, showToast, lang, isMountedRef, topic, setPosts, setPinnedFirstPost, setAuthorStats, setMyVotes, profile, recordActivity]);
+  }, [topicId, currentUser, modalState, setModalState, showToast, isMountedRef, topic, setPosts, setPinnedFirstPost, setAuthorStats, setMyVotes, profile, recordActivity]);
 
   const handleShowVoters = useCallback((post, postNum) => {
     setModalState((prev) => ({ ...prev, selectedPostForVoters: { id: post.id, postNumber: postNum }, showPostVotersModal: true }));
@@ -399,7 +398,7 @@ export const useTopicModalState = ({
     } finally {
       if (isMountedRef.current) setModalState((prev) => ({ ...prev, savingRepComment: false }));
     }
-  }, [modalState, setModalState, showToast, lang, isMountedRef, setMyVotes]);
+  }, [modalState, setModalState, showToast, isMountedRef, setMyVotes]);
 
   return {
     modalState,

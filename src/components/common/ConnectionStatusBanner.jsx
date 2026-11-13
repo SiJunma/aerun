@@ -9,7 +9,7 @@ import { notifyConnectionRestored } from '../../api/connection';
  * ConnectionStatusBanner — Global sticky alert when network or backend connection is lost.
  */
 const ConnectionStatusBanner = () => {
-  const { lang, t } = useI18n();
+  const { t } = useI18n();
   const [isDisconnected, setIsDisconnected] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const disconnectTimerRef = useRef(null);

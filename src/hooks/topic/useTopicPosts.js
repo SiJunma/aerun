@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { fetchSecuredPosts } from '../../api/forum';
 import { toMillis, unreadFloor } from '../../utils/dates';
 import { getPendingOptimisticPosts, clearPendingOptimisticPost } from '../../utils/optimisticPostQueue';
+import { useI18n } from '../../contexts/I18nProvider';
 
 /**
  * useTopicPosts: Custom hook for managing topic posts, pagination fetching,
@@ -15,7 +16,6 @@ export const useTopicPosts = ({
   setSearchParams,
   navigate,
   showToast,
-  lang,
   currentUser,
   currentProfile,
   readMap,
@@ -28,6 +28,8 @@ export const useTopicPosts = ({
   const [authorStats, setAuthorStats] = useState({});
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [postsLoadError, setPostsLoadError] = useState(null);
+
+  const { t } = useI18n();
 
   const activeFetchIdRef = useRef(0);
   const activeFetchPromiseRef = useRef(null);
@@ -282,7 +284,6 @@ export const useTopicPosts = ({
     setSearchParams,
     navigate,
     showToast,
-    lang,
     currentUser?.uid,
     currentProfile?.created_at,
     readMap,

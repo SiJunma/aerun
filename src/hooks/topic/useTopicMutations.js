@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { createPost, updatePost, deletePost } from '../../api/forum';
 import { voteOnPost, updateReputationComment } from '../../api/reputation';
 import { createInFlight, newIdempotencyKey } from '../../utils/inflight';
+import { useI18n } from '../../contexts/I18nProvider';
 import {
   saveUnsentReply,
   clearUnsentReply,
@@ -19,10 +20,10 @@ export const useTopicMutations = ({
   currentUser,
   _currentProfile,
   showToast,
-  lang,
   recordActivity,
   scheduleForumStateRefresh
 }) => {
+  const { t } = useI18n();
   const [submittingPost, setSubmittingPost] = useState(false);
   const [submittingRep, setSubmittingRep] = useState(false);
   const replyInFlightRef = useRef(createInFlight());
@@ -168,7 +169,7 @@ export const useTopicMutations = ({
     } finally {
       setSubmittingRep(false);
     }
-  }, [currentUser?.uid, topicId, recordActivity, showToast, lang]);
+  }, [currentUser?.uid, topicId, recordActivity, showToast]);
 
   // Edit reputation comment
   const editRepComment = useCallback(async (voteId, newComment) => {
@@ -180,7 +181,7 @@ export const useTopicMutations = ({
       showToast?.(err.message || 'Failed to update reputation comment', 'danger');
       throw err;
     }
-  }, [showToast, lang]);
+  }, [showToast]);
 
   return {
     submittingPost,

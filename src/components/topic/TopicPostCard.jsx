@@ -42,7 +42,6 @@ export const TopicPostCard = ({
   editingChildren = null,
   onOpenDm,
   onOpenRepVote,
-  lang,
   t,
   showToast
 }) => {
