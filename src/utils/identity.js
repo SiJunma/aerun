@@ -1,5 +1,5 @@
 import { resolveAvatarUrl } from '../api/avatars';
-import { translations } from '../i18n/dictionary';
+import { translations } from '../i18n/dictionary.js';
 
 // identity.js — the single source for a MISSING identity's placeholder display.
 //

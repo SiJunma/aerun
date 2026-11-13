@@ -14,7 +14,7 @@ import { toMillis, unreadFloor } from '../utils/dates';
 import { usePageTitle } from '../contexts/TitleProvider';
 
 const MainPage = () => {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   // Categories AND groups come from ONE read, which AuthProvider already makes
   // (forum-index) and re-makes whenever the identity changes.
   //

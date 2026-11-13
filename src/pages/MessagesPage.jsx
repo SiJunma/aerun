@@ -22,7 +22,7 @@ const MessagesPage = () => {
   const [timeoutExpired, setTimeoutExpired] = React.useState(false);
 
   React.useEffect(() => {
-    setPageTitle(t('messages.title', 'Сообщения'));
+    setPageTitle(t('dm.tab_title', 'Сообщения'));
   }, [setPageTitle, t]);
 
   React.useEffect(() => {

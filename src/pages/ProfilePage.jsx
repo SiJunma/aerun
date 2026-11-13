@@ -3,6 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Table, Form, Image, Tabs, Tab, Badge, OverlayTrigger, Tooltip, Spinner, Dropdown } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
+import { SUPPORTED_LANGUAGES } from '../i18n/languages';
 import { useTheme } from '../contexts/ThemeProvider';
 import { User, Settings, LogOut, MessageSquare, TrendingUp, TrendingDown, Save, Lock, MessageCircle, Filter, MapPin, Cake, Briefcase, Heart, Share2, ClipboardList, Trash2, Bell, Volume2, Mail } from 'lucide-react';
 import { playNotificationSound } from '../utils/notificationSound';
@@ -554,7 +555,7 @@ const ProfilePage = () => {
       return url;
     } catch (err) {
       console.error('[characterAvatar]', err);
-      showToast(lang === 'ru' ? 'Не удалось загрузить аватар' : 'Failed to upload avatar', 'danger');
+      showToast(t('profile.avatar_upload_error'), 'danger');
       throw err;
     }
   };
@@ -598,7 +599,7 @@ const ProfilePage = () => {
           : 'profile.character_limit_reached';
         showToast(t(key, { limit }), 'danger');
       } else {
-        showToast(lang === 'ru' ? 'Не удалось сохранить персонажа' : 'Failed to save character', 'danger');
+        showToast(t('profile.character_save_error'), 'danger');
       }
       // If failed, we might want to re-open it, but usually a toast is enough
     }
@@ -621,7 +622,7 @@ const ProfilePage = () => {
     if (uid === profile?.uid && nextLang && nextLang !== lang) {
       setLang(nextLang);
     }
-    showToast(lang === 'ru' ? 'Вам удалось обновить профиль' : 'Profile updated successfully!');
+    showToast(t('profile.profile_updated'));
   };
 
   const handleSaveProfileTab = async () => {
@@ -643,7 +644,7 @@ const ProfilePage = () => {
       if (diff.nickname !== undefined && trimmedNickname !== viewedProfile?.nickname) {
         const isTaken = await checkNicknameExists(String(trimmedNickname).trim(), uid);
         if (isTaken) {
-          showToast(t('common.error_nickname_taken') || (lang === 'ru' ? 'Этот никнейм уже занят.' : 'This nickname is already taken.'), 'danger');
+          showToast(t('common.error_nickname_taken') || t('auth.error_nickname_taken'), 'danger');
           setSavingAccount(false);
           return;
         }
@@ -666,7 +667,7 @@ const ProfilePage = () => {
       if (Object.keys(settingsPatch).length > 0) updates.settings = settingsPatch;
 
       if (Object.keys(updates).length === 0) {
-        showToast(lang === 'ru' ? 'Нет изменений для сохранения' : 'Nothing to save');
+        showToast(t('profile.no_changes'));
         setSavingAccount(false);
         return;
       }
@@ -675,7 +676,7 @@ const ProfilePage = () => {
       finishAccountSave(savedProfile, null);
     } catch (err) {
       console.error(err);
-      showToast(lang === 'ru' ? 'Не удалось обновить профиль' : 'Failed to update profile', 'danger');
+      showToast(t('profile.profile_update_error'), 'danger');
     } finally {
       setSavingAccount(false);
     }
@@ -689,7 +690,7 @@ const ProfilePage = () => {
       const diff = diffTabFields(SETTINGS_TAB_KEYS);
       const settingsPatch = buildSettingsPatch(diff);
       if (Object.keys(settingsPatch).length === 0) {
-        showToast(lang === 'ru' ? 'Нет изменений для сохранения' : 'Nothing to save');
+        showToast(t('profile.no_changes'));
         setSavingAccount(false);
         return;
       }
@@ -697,7 +698,7 @@ const ProfilePage = () => {
       finishAccountSave(savedProfile, settingsPatch.language);
     } catch (err) {
       console.error(err);
-      showToast(lang === 'ru' ? 'Не удалось обновить настройки' : 'Failed to update settings', 'danger');
+      showToast(t('profile.settings_update_error'), 'danger');
     } finally {
       setSavingAccount(false);
     }
@@ -760,7 +761,7 @@ const ProfilePage = () => {
       const log = repLogs.find((l) => l.id === logId);
       await updateReputationComment(log, editLogComment);
       setEditingLogId(null);
-      showToast(lang === 'ru' ? 'Комментарий к репутации обновлен' : 'Reputation comment updated');
+      showToast(t('profile.rep_comment_updated'));
     } catch (err) {
       console.error(err);
       showToast(err.message, 'danger');
@@ -774,9 +775,7 @@ const ProfilePage = () => {
     setConfirmState({
       show: true,
       title: t('profile.delete_character'),
-      message: (lang === 'ru' 
-        ? `Вы уверены, что хотите удалить персонажа "${char?.name || '?'}"?` 
-        : `Are you sure you want to delete character "${char?.name || '?'}"?`) + ' ' + (lang === 'ru' ? 'Это действие нельзя отменить.' : 'This action is irreversible.'),
+      message: t('profile.delete_character_confirm', { name: char?.name || '?' }) + ' ' + t('profile.delete_character_irreversible'),
       onConfirm: async () => {
         try {
           await deleteCharacter(uid, id);
@@ -796,7 +795,7 @@ const ProfilePage = () => {
     return (
       <Container className="py-5">
         <ErrorCard
-          title={lang === 'ru' ? 'Не удалось загрузить профиль' : 'Failed to load profile'}
+          title={t('profile.load_error')}
           error={profileError}
           onRetry={() => {
             setProfileError(null);
@@ -891,7 +890,7 @@ const ProfilePage = () => {
                         style={{ borderRadius: '20px', padding: '0.3rem 1rem', fontSize: '0.85rem' }}
                       >
                         <MessageCircle size={14} />
-                        {lang === 'ru' ? 'Написать' : 'Message'}
+                        {t('profile.message_btn')}
                       </Button>
                     </div>
                   )}
@@ -992,7 +991,7 @@ const ProfilePage = () => {
                         {profile?.uid && (viewedProfile?.location || viewedProfile?.birthday || viewedProfile?.occupation || viewedProfile?.interests) && (
                           <div className={viewedProfile?.contacts ? "mb-4 pb-4 border-bottom" : "mb-0"}>
                             <h6 className="text-primary text-uppercase small fw-bold mb-3 d-flex align-items-center gap-2">
-                              <ClipboardList size={16} /> {lang === 'ru' ? 'Информация' : 'Information'}
+                              <ClipboardList size={16} /> {t('profile.information')}
                             </h6>
                             <Row className="g-4">
                               {viewedProfile?.location && (
@@ -1123,7 +1122,7 @@ const ProfilePage = () => {
                                     </p>
                                   ) : (
                                     <p className="text-muted small mb-0 opacity-50">
-                                      {lang === 'ru' ? 'Нет статуса' : 'No status'}
+                                      {t('profile.no_status')}
                                     </p>
                                   )}
                                 </div>
@@ -1263,7 +1262,7 @@ const ProfilePage = () => {
                         <thead>
                           <tr>
                             <th className="px-4">{t('profile.rep_date')}</th>
-                            <th className="text-center" title={lang === 'ru' ? 'Тип голоса' : 'Vote Type'}>
+                            <th className="text-center" title={t('profile.vote_type')}>
                               <div className="small fw-bold text-uppercase opacity-50">Type</div>
                             </th>
                             <th>{t('profile.rep_from')}</th>
@@ -1291,13 +1290,13 @@ const ProfilePage = () => {
                                     <Tooltip>
                                       {log.post_id || log.topic_id ? (
                                         <>
-                                          <div className="fw-bold">{lang === 'ru' ? 'Голос за сообщение' : 'Post vote'}</div>
+                                          <div className="fw-bold">{t('profile.post_vote')}</div>
                                           {isAllowed && log.topic_title && <div className="small opacity-75 mt-1">{log.topic_title}</div>}
                                           {isAllowed && log.post_number && <div className="small opacity-75">#{log.post_number}</div>}
                                           {!isAllowed && <div className="small opacity-75 mt-1 text-warning d-flex align-items-center gap-1 justify-content-center"><Lock size={10}/> {t('forum.private_topic')}</div>}
                                         </>
                                       ) : (
-                                        lang === 'ru' ? 'Голос за профиль' : 'Profile vote'
+                                        t('profile.profile_vote')
                                       )}
                                     </Tooltip>
                                   }
@@ -1318,7 +1317,7 @@ const ProfilePage = () => {
                                   </Link>
                                 ) : (
                                   <span className="fw-semibold text-muted">
-                                    {log.voter_nickname || (lang === 'ru' ? 'Аноним' : 'Anonymous')}
+                                    {log.voter_nickname || t('profile.anonymous')}
                                   </span>
                                 )}
                               </td>
@@ -1332,10 +1331,10 @@ const ProfilePage = () => {
                                           {isAllowed && log.topic_title && <div className="fw-bold mb-1">{log.topic_title}</div>}
                                           {isAllowed && log.post_number && <div className="small opacity-75 mb-1">#{log.post_number}</div>}
                                           {!isAllowed && <div className="fw-bold mb-1 text-warning d-flex align-items-center gap-1 justify-content-center"><Lock size={12}/> {t('forum.private_topic')}</div>}
-                                          {isAllowed && <div>{lang === 'ru' ? 'Перейти к сообщению' : 'Go to post'}</div>}
+                                          {isAllowed && <div>{t('profile.go_to_post')}</div>}
                                         </>
                                       ) : (
-                                        lang === 'ru' ? 'Голос за профиль' : 'Profile vote'
+                                        t('profile.profile_vote')
                                       )}
                                     </Tooltip>
                                   }
@@ -1365,7 +1364,7 @@ const ProfilePage = () => {
                                         rows={2}
                                         value={editLogComment}
                                         onChange={(e) => setEditLogComment(e.target.value)}
-                                        placeholder={lang === 'ru' ? 'Ваш комментарий...' : 'Your comment...'}
+                                        placeholder={t('profile.your_comment_placeholder')}
                                         size="sm"
                                         className="modal-section-themed"
                                       />
@@ -1374,7 +1373,7 @@ const ProfilePage = () => {
                                           {t('common.cancel')}
                                         </Button>
                                         <Button variant="primary" size="sm" onClick={() => handleUpdateLogComment(log.id)} disabled={savingLogComment}>
-                                          {savingLogComment ? t('common.loading') : (lang === 'ru' ? 'Сохранить' : 'Save')}
+                                          {savingLogComment ? t('common.loading') : t('common.save')}
                                         </Button>
                                       </div>
                                     </div>
@@ -1396,7 +1395,7 @@ const ProfilePage = () => {
                                               setEditLogComment(log.comment || '');
                                               setEditingLogId(log.id);
                                             }}
-                                            title={lang === 'ru' ? 'Изменить комментарий' : 'Edit comment'}
+                                            title={t('profile.edit_comment')}
                                           >
                                             <Settings size={14} />
                                           </Button>
@@ -1406,16 +1405,16 @@ const ProfilePage = () => {
                                               size="sm" 
                                               className="p-0 text-decoration-none text-danger opacity-75 ms-1"
                                               onClick={async () => {
-                                                if (window.confirm(lang === 'ru' ? 'Удалить комментарий?' : 'Delete comment?')) {
+                                                if (window.confirm(t('profile.delete_comment_confirm'))) {
                                                   try {
                                                     await updateReputationComment(log, '');
-                                                    showToast(lang === 'ru' ? 'Комментарий удален' : 'Comment deleted');
+                                                    showToast(t('profile.comment_deleted'));
                                                   } catch (err) {
                                                     showToast(err.message, 'danger');
                                                   }
                                                 }
                                               }}
-                                              title={lang === 'ru' ? 'Удалить комментарий' : 'Delete comment'}
+                                              title={t('profile.delete_comment')}
                                             >
                                               <Trash2 size={14} />
                                             </Button>
@@ -1461,7 +1460,7 @@ const ProfilePage = () => {
                                               ));
                                             }
 
-                                            showToast(lang === 'ru' ? 'Запись удалена' : 'Entry deleted');
+                                            showToast(t('profile.entry_deleted'));
                                           } catch (err) {
                                             console.error(err);
                                             showToast(err.message, 'danger');
@@ -1762,10 +1761,10 @@ const ProfilePage = () => {
 
                       <hr className="my-4" />
                       <h6 className="mb-1 text-primary uppercase small fw-bold d-flex align-items-center gap-2">
-                        <ClipboardList size={18} /> {lang === 'ru' ? 'Дополнительная информация' : 'Additional Information'}
+                        <ClipboardList size={18} /> {t('profile.additional_info')}
                       </h6>
                       <p className="small text-muted mb-3">
-                        {lang === 'ru' ? 'Эта информация будет видна в профиле только зарегистрированным пользователям.' : 'This information will be visible on your profile only to registered users.'}
+                        {t('profile.info_visibility_desc')}
                       </p>
                       <Row>
                         <Col md={6}>
@@ -1777,7 +1776,7 @@ const ProfilePage = () => {
                               type="text"
                               value={accountFormData.location}
                               onChange={(e) => setAccountFormData({ ...accountFormData, location: e.target.value })}
-                              placeholder={lang === 'ru' ? 'Город, Страна' : 'City, Country'}
+                              placeholder={t('profile.location_placeholder')}
                             />
                           </Form.Group>
                         </Col>
@@ -1890,21 +1889,18 @@ const ProfilePage = () => {
                                 variant="outline-management" 
                                 className="w-100 d-flex justify-content-between align-items-center custom-select-toggle"
                               >
-                                {accountFormData.language === 'ru' ? 'Русский' : 'English'}
+                                {t('common.language_' + accountFormData.language) || accountFormData.language}
                               </Dropdown.Toggle>
                               <Dropdown.Menu className="w-100 custom-select-menu shadow-sm">
-                                <Dropdown.Item 
-                                  active={accountFormData.language === 'en'}
-                                  onClick={() => setAccountFormData({ ...accountFormData, language: 'en' })}
-                                >
-                                  English
-                                </Dropdown.Item>
-                                <Dropdown.Item 
-                                  active={accountFormData.language === 'ru'}
-                                  onClick={() => setAccountFormData({ ...accountFormData, language: 'ru' })}
-                                >
-                                  Русский
-                                </Dropdown.Item>
+                                {SUPPORTED_LANGUAGES.map((lng) => (
+                                  <Dropdown.Item
+                                    key={lng.code}
+                                    active={accountFormData.language === lng.code}
+                                    onClick={() => setAccountFormData({ ...accountFormData, language: lng.code })}
+                                  >
+                                    {t(lng.labelKey)}
+                                  </Dropdown.Item>
+                                ))}
                               </Dropdown.Menu>
                             </Dropdown>
                           </Form.Group>
@@ -1945,7 +1941,7 @@ const ProfilePage = () => {
                                   <>
                                     <Dropdown.Divider />
                                     <Dropdown.Header className="small text-muted text-uppercase fw-bold opacity-75">
-                                      {lang === 'ru' ? 'Кастомные дизайны' : 'Custom Designs'}
+                                      {t('profile.custom_designs')}
                                     </Dropdown.Header>
                                     {designs.filter(d => d.isActive && d.showInList).map(d => (
                                       <Dropdown.Item
@@ -1993,9 +1989,7 @@ const ProfilePage = () => {
                         <Bell size={15} /> {t('profile.notifications_section')}
                       </h6>
                       <p className="small text-muted mb-3" style={{ maxWidth: '480px' }}>
-                        {lang === 'ru'
-                          ? 'Выберите, какие события будут отображаться на странице уведомлений.'
-                          : 'Choose which events appear on your Notifications page.'}
+                        {t('profile.notif_section_desc')}
                       </p>
                       <Form.Check
                         type="switch"
@@ -2035,17 +2029,15 @@ const ProfilePage = () => {
                       {/* ── Email Notifications (Brevo) ────────────────── */}
                       <hr className="my-4" />
                       <h6 className="mb-1 text-primary small fw-bold d-flex align-items-center gap-2">
-                        <Mail size={15} /> {lang === 'ru' ? 'Email-уведомления (когда вы не на форуме)' : 'Email Notifications (when offline)'}
+                        <Mail size={15} /> {t('profile.email_notif_title')}
                       </h6>
                       <p className="small text-muted mb-3" style={{ maxWidth: '520px' }}>
-                        {lang === 'ru'
-                          ? 'Уведомления на ваш email отправляются только если вы не проявляли активности последние 15 минут.'
-                          : 'Transactional emails are only sent if you have been offline for at least 15 minutes.'}
+                        {t('profile.email_notif_desc')}
                       </p>
                       <Form.Check
                         type="switch"
                         id="email-notif-dms-switch"
-                        label={lang === 'ru' ? 'Личные сообщения (ЛС)' : 'Direct Messages'}
+                        label={t('profile.email_notif_dms')}
                         className="mb-2"
                         checked={accountFormData.email_notif_dms}
                         onChange={(e) => setAccountFormData({ ...accountFormData, email_notif_dms: e.target.checked })}
@@ -2053,7 +2045,7 @@ const ProfilePage = () => {
                       <Form.Check
                         type="switch"
                         id="email-notif-replies-switch"
-                        label={lang === 'ru' ? 'Новые ответы в отслеживаемых темах' : 'New replies in subscribed topics'}
+                        label={t('profile.email_notif_topic_replies')}
                         className="mb-2"
                         checked={accountFormData.email_notif_topic_replies}
                         onChange={(e) => setAccountFormData({ ...accountFormData, email_notif_topic_replies: e.target.checked })}
@@ -2223,7 +2215,7 @@ const ProfilePage = () => {
       <ForumModal
         show={showRepModal}
         onHide={() => setShowRepModal(false)}
-        title={lang === 'ru' ? 'Репутация пользователя' : 'User Reputation'}
+        title={t('profile.rep_modal_title')}
         titleClassName="fw-bold text-accent"
         headerClassName="border-0"
         bodyClassName="pt-4"
@@ -2241,22 +2233,20 @@ const ProfilePage = () => {
               className="px-4 fw-bold shadow-sm"
             >
               {submittingRep ? <Spinner size="sm" animation="border" className="me-2" /> : null}
-              {lang === 'ru' ? 'Проголосовать' : 'Submit Vote'}
+              {t('profile.rep_vote_btn')}
             </Button>
           </>
         }
       >
           <div className="text-center mb-4">
             <h5 className="mb-2">
-              {lang === 'ru' ? 'Ваш голос для' : 'Your vote for'} <strong>{viewedProfile?.nickname}</strong>: 
+              {t('profile.rep_your_vote_for')} <strong>{viewedProfile?.nickname}</strong>: 
               <span className={`ms-2 fs-4 fw-bold ${repValue > 0 ? 'text-success' : 'text-danger'}`}>
                 {repValue > 0 ? `+${repValue}` : repValue}
               </span>
             </h5>
             <p className="text-muted small">
-              {lang === 'ru' 
-                ? 'Вы можете добавить комментарий к своему голосу (необязательно)' 
-                : 'You can add a comment to your vote (optional)'}
+              {t('profile.rep_add_comment')}
             </p>
           </div>
           <Form.Group>
@@ -2265,7 +2255,7 @@ const ProfilePage = () => {
               rows={3}
               value={repComment}
               onChange={(e) => setRepComment(e.target.value)}
-              placeholder={lang === 'ru' ? 'Напишите комментарий...' : 'Write a comment...'}
+              placeholder={t('profile.rep_comment_placeholder')}
               maxLength={200}
             />
             <div className="d-flex justify-content-between mt-1 small text-muted">

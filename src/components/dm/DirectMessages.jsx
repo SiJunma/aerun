@@ -51,7 +51,7 @@ import { toMillis as toEpochMs } from '../../utils/dates';
  *   targetProfile: object (optional, preloaded profile of target)
  */
 const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTargetProfile }) => {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { profile, settings, hasPermission, setActiveDmConvId } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -1307,7 +1307,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                                   className="dm-bubble-action"
                                   onClick={() => handleDeleteDm(msg)}
                                 >
-                                  {lang === 'ru' ? 'Удалить' : 'Delete'}
+                                  {t('common.delete')}
                                 </button>
                               </div>
                             )}
@@ -1346,8 +1346,8 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                   cursor: 'pointer',
                 }}
                 title={unreadBelowCount > 0
-                  ? (lang === 'ru' ? `Непрочитанных сообщений: ${unreadBelowCount}` : `${unreadBelowCount} unread messages`)
-                  : (lang === 'ru' ? 'Вниз' : 'Scroll to bottom')}
+                  ? t('dm.unread_below', { count: unreadBelowCount })
+                  : t('dm.scroll_to_bottom')}
               >
                 <ChevronDown size={22} />
                 {unreadBelowCount > 0 && (
@@ -1377,9 +1377,9 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 <Lock size={32} className="mb-3 text-muted opacity-50" />
                 <p className="text-muted mb-0 fw-medium">
                   {peerStatus === 'deleted'
-                    ? (lang === 'ru' ? 'Аккаунт пользователя удален. Отправка сообщений недоступна.' : 'User account deleted. Sending messages is disabled.')
+                    ? t('dm.account_deleted')
                     : peerStatus === 'banned'
-                      ? (lang === 'ru' ? 'Пользователь заблокирован. Отправка сообщений недоступна.' : 'User is banned. Sending messages is disabled.')
+                      ? t('dm.user_banned')
                       : t('dm.pending_cannot_start')}
                 </p>
               </div>
@@ -1421,7 +1421,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                 <div className={`${computedMaxChars && messageText.length >= computedMaxChars ? 'text-danger' : 'text-muted'} fw-semibold small`}>
                   {computedMaxChars > 0
                     ? `${messageText.length} / ${computedMaxChars}`
-                    : `${lang === 'ru' ? 'Символов: ' : 'Chars: '}${messageText.length}`
+                    : t('dm.chars_label', { count: messageText.length })
                   }
                 </div>
               </div>
@@ -1435,11 +1435,9 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
         show={!!deleteConfirmConvId}
         onHide={() => setDeleteConfirmConvId(null)}
         onConfirm={handleConfirmDelete}
-        title={lang === 'ru' ? 'Удалить переписку?' : 'Delete conversation?'}
-        message={lang === 'ru'
-          ? 'Вы уверены, что хотите безвозвратно удалить этот диалог у себя?'
-          : 'Are you sure you want to permanently delete this conversation for yourself?'}
-        confirmText={lang === 'ru' ? 'Удалить' : 'Delete'}
+        title={t('dm.delete_conversation')}
+        message={t('dm.delete_conversation_confirm')}
+        confirmText={t('common.delete')}
         cancelText={t('dm.cancel')}
         variant="danger"
       />
@@ -1460,7 +1458,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
 
         {inboxError ? (
           <ErrorCard
-            title={lang === 'ru' ? 'Не удалось загрузить диалоги' : 'Failed to load conversations'}
+            title={t('dm.load_conversations_error')}
             error={inboxError}
             onRetry={() => {
               setInboxError(null);
@@ -1590,7 +1588,7 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
                     className="text-muted p-2 mx-1 shadow-none dm-trash-btn"
                     style={{ opacity: 0.6 }}
                     onClick={(e) => promptDeleteConversation(conv.id, e)}
-                    title={lang === 'ru' ? 'Удалить у себя' : 'Remove for me'}
+                    title={t('dm.remove_for_me')}
                   >
                     <Trash2 size={16} />
                   </Button>
@@ -1607,18 +1605,14 @@ const DirectMessages = ({ mode = 'inbox', targetUid, targetProfile: initialTarge
       onHide={() => setDeleteConfirmConvId(null)}
       onConfirm={handleConfirmDelete}
       title={isDraftId(deleteConfirmConvId)
-        ? (lang === 'ru' ? 'Удалить черновик?' : 'Delete draft?')
-        : (lang === 'ru' ? 'Удалить переписку у себя?' : 'Remove this conversation for you?')}
+        ? t('dm.delete_draft')
+        : t('dm.remove_this_conversation')}
       message={isDraftId(deleteConfirmConvId)
-        ? (lang === 'ru'
-            ? 'Этот черновик ещё не отправлен. Удалить его? Сообщение не будет создано.'
-            : 'This draft has not been sent yet. Delete it? No message will be created.')
-        : (lang === 'ru'
-            ? 'Переписка исчезнет у вас, и вы больше её не прочтёте. У собеседника переписка сохранится, пока он сам её не удалит.'
-            : 'The conversation disappears for you and you will not read it again. Your contact keeps it until they remove it too.')}
+        ? t('dm.delete_draft_confirm')
+        : t('dm.delete_conversation_desc')}
       confirmText={isDraftId(deleteConfirmConvId)
-        ? (lang === 'ru' ? 'Удалить' : 'Delete')
-        : (lang === 'ru' ? 'Удалить у себя' : 'Remove for me')}
+        ? t('common.delete')
+        : t('dm.remove_for_me')}
       cancelText={t('dm.cancel')}
       variant="danger"
     />

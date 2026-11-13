@@ -6,6 +6,7 @@ import ForumModal from './ForumModal';
 import Timestamp from './Timestamp';
 import { fetchPostVoters } from '../../api/reputation';
 import { resolveAvatarUrl } from '../../api/avatars';
+import { useI18n } from '../../contexts/I18nProvider';
 
 /**
  * PostVotersModal

@@ -41,7 +41,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 import { useToast } from '../contexts/ToastProvider';
 
 const MembersPage = () => {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { profile, updateSettings, settings } = useAuth();
   const { setPageTitle } = usePageTitle();
   const { showToast } = useToast();

@@ -23,7 +23,7 @@ const TopicFormPage = () => {
   const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
-    setPageTitle(t('topic.create_topic', 'Создание темы'));
+    setPageTitle(t('forum.create_topic', 'Создание темы'));
   }, [setPageTitle, t, lang]);
 
   const [title, setTitle] = useState('');

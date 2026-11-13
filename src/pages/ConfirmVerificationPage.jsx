@@ -8,7 +8,7 @@ import { confirmEmailVerification } from '../api/account-credentials';
 
 const ConfirmVerificationPage = () => {
   const { token } = useParams();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { setPageTitle } = usePageTitle();
 
   const [loading, setLoading] = useState(Boolean(token));

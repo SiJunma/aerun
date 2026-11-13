@@ -8,7 +8,7 @@ import { confirmPasswordReset } from '../api/account-credentials';
 
 const ConfirmPasswordResetPage = () => {
   const { token } = useParams();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { setPageTitle } = usePageTitle();
 
   const [password, setPassword] = useState('');

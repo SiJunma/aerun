@@ -10,7 +10,7 @@ import { sanitizeHtml } from '../utils/text';
 
 const LoginPage = () => {
   const { user, profile, settings, hasPermission, PERMISSIONS } = useAuth();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { setPageTitle } = usePageTitle();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';

@@ -80,7 +80,7 @@ import ErrorCard from '../components/common/ErrorCard';
 
 const ITEMS_PER_PAGE_DEFAULT = 20;
 
-import { translations } from '../i18n/dictionary';
+import { translations } from '../i18n/dictionary.js';
 
 // The server refuses content that references [roll=<id>] throws it did not
 // receive. Translate the terse validation message into an actionable one.
