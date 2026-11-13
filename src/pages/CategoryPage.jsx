@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table, Button, Badge, Row, Col, Form } from 'react-bootstrap';
+import { Container, Card, Button, Badge, Row, Col, Form } from 'react-bootstrap';
 import { Trash2, Move, Settings, PinOff, Pin, Lock, PlusCircle, Search, MessageSquare, Clock, Filter, FolderInput, Unlock, CheckCircle } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -12,8 +12,8 @@ import {
 } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
 import ForumPagination from '../components/common/ForumPagination';
+import LastPostInfo from '../components/common/LastPostInfo';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
-import TopicRow from '../components/common/TopicRow';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
@@ -25,7 +25,7 @@ import { usePageTitle } from '../contexts/TitleProvider';
 const CategoryPage = () => {
   const { id } = useParams();
   const { t, lang } = useI18n();
-  const { user, hasPermission, PERMISSIONS, categories, settings, scheduleForumStateRefresh, applyForumState } = useAuth();
+  const { user, profile, readMap, hasPermission, PERMISSIONS, categories, settings, scheduleForumStateRefresh, applyForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -196,7 +196,7 @@ const CategoryPage = () => {
           {!category ? (
             <Skeleton width={250} height="1rem" className="mt-2" />
           ) : resolveField(category.description, lang) && (
-            <div className="text-muted mb-0" style={{ lineHeight: 1.2, fontSize: '0.875rem' }}>
+            <div className="text-muted mb-0">
               {resolveField(category.description, lang)}
             </div>
           )}
@@ -231,43 +231,36 @@ const CategoryPage = () => {
 
       <Card className={`mb-4 overflow-hidden forum-group-card ${!loading && currentTopics.length === 0 ? '' : 'border-0 bg-transparent shadow-none'}`}>
         {loading ? (
-          <div className="p-0">
-            <Table hover responsive className="mb-0 align-middle forum-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '50%' }}>{t('forum.topic')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.replies')}</th>
-                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...Array(5)].map((_, i) => (
-                  <tr key={i}>
-                    <td className="py-3 px-4">
-                      <div className="d-flex align-items-center gap-3">
-                        <Skeleton variant="avatar" width={40} height={40} className="rounded-circle" />
-                        <div className="flex-grow-1">
-                          <Skeleton width="60%" height="1.1rem" className="mb-2" />
-                          <Skeleton width="30%" height="0.8rem" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="text-center p-3">
-                      <Skeleton width={30} height="1rem" className="mx-auto" />
-                    </td>
-                    <td className="p-3">
-                      <div className="d-flex align-items-center gap-2">
-                        <Skeleton variant="avatar" width={32} height={32} className="rounded-circle" />
-                        <div className="flex-grow-1">
-                          <Skeleton width="80%" height="0.8rem" className="mb-1" />
-                          <Skeleton width="50%" height="0.7rem" />
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+          <div className="category-content">
+            <div className="category-head">
+              <span className="category-col-topic">{t('forum.topic')}</span>
+              <span className="category-col-replies">{t('forum.replies')}</span>
+              <span className="category-col-lastpost">{t('forum.last_post')}</span>
+            </div>
+            <div className="category-topics-body">
+              {[...Array(5)].map((_, i) => (
+                <article key={i} className="forum-item forum-skeleton">
+                  <div className="forum-info">
+                    <h3 className="forum-title">
+                      <Skeleton width="60%" height="1.1rem" className="mb-2" />
+                      <Skeleton width="30%" height="0.8rem" />
+                    </h3>
+                  </div>
+                  <div className="forum-topics" data-value={0}>
+                    <Skeleton width={30} height="1rem" className="mx-auto" />
+                  </div>
+                  <div className="forum-posts" data-value={0}>
+                    <Skeleton width={30} height="1rem" className="mx-auto" />
+                  </div>
+                  <div className="forum-last-post" data-label={t('forum.last_post')}>
+                    <div className="last-post-content">
+                      <Skeleton width="50%" height="0.9rem" className="mb-1" />
+                      <Skeleton width="80%" height="0.7rem" />
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
           </div>
         ) : loadError ? (
           <div className="p-3">
@@ -279,11 +272,11 @@ const CategoryPage = () => {
           </div>
         ) : currentTopics.length === 0 ? (
           <div className="p-5 text-center">
-            <div className="mb-3" style={{ fontSize: '3rem', opacity: 0.3 }}>💬</div>
+            <div className="mb-3">💬</div>
             <h5 className="text-muted mb-2">
               {t('forum.no_topics_yet')}
             </h5>
-            <p className="text-muted mb-4" style={{ fontSize: '0.875rem' }}>
+            <p className="text-muted mb-4">
               {t('forum.be_first')}
             </p>
             {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
@@ -294,38 +287,107 @@ const CategoryPage = () => {
           </div>
         ) : (
           <>
-            <Table hover responsive className="mb-0 align-middle forum-table">
-              <thead>
-                <tr>
+            <div className="category-content">
+              <div className="category-head">
+                <div className={`category-head-row${isManaging ? ' has-check' : ''}`}>
                   {isManaging && (
-                    <th style={{ width: '40px' }}>
+                    <span className="category-head-cell--check">
                       <Form.Check 
                         type="checkbox"
                         checked={selectedTopicIds.length === currentTopics.length && currentTopics.length > 0}
                         onChange={selectAll}
                       />
-                    </th>
+                    </span>
                   )}
-                  <th style={{ width: '50%' }}>{t('forum.topic')}</th>
-                  <th className="text-center" style={{ width: '100px', whiteSpace: 'nowrap' }}>{t('forum.replies')}</th>
-                  {/* <th className="text-center">{t('forum.views')}</th> */}
-                  <th style={{ minWidth: 180 }}>{t('forum.last_post')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentTopics.map(topic => (
-                  <TopicRow 
+                  <span className="category-col-cell">{t('forum.topic')}</span>
+                  <span className="category-col-cell category-col-cell--replies">{t('forum.replies')}</span>
+                  {/* <span className="category-col-cell text-center"">{t('forum.views')}</span> */}
+                  <span className="category-col-cell">{t('forum.last_post')}</span>
+                </div>
+              </div>
+              <div className="category-topics-body">
+                {currentTopics.map(topic => {
+                const stateClasses = [
+                  topic.is_pinned ? 'is-pinned' : '',
+                  topic.is_locked ? 'is-locked' : '',
+                  isManaging ? 'is-managing' : '',
+                ].filter(Boolean).join(' ');
+                return (
+                  <article
                     key={topic.id}
-                    topic={topic}
-                    user={user}
-                    lang={lang}
-                    isManaging={isManaging}
-                    isSelected={selectedTopicIds.includes(topic.id)}
-                    onSelect={toggleSelect}
-                  />
-                ))}
-              </tbody>
-            </Table>
+                    className={'forum-item ' + stateClasses}
+                    id={'topic-' + topic.id}
+                    data-topic-id={topic.id}
+                  >
+                    {isManaging && (
+                      <div className="topic-select">
+                        <input
+                          type="checkbox"
+                          className="topic-select-input"
+                          checked={selectedTopicIds.includes(topic.id)}
+                          onChange={() => toggleSelect(topic.id)}
+                        />
+                      </div>
+                    )}
+                    <div className="forum-info">
+                      <h3 className="forum-title">
+                        <Link
+                          to={'/topic/' + topic.id}
+                          className="cat-link"
+                          title={t('stats.to_first_post')}
+                        >
+                          {topic.title}
+                        </Link>
+                      </h3>
+                      {topic.description && (
+                        <div className="forum-description cat-desc">
+                          {topic.description}
+                        </div>
+                      )}
+                      <div className="forum-mobile-stats d-md-none">
+                        <span className="forum-mobile-stat">
+                          <MessageSquare size={12} />
+                          {' '}
+                          {Math.max(0, (topic.posts_count || 1) - 1)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="forum-topics" data-value={topic.topics_count || 1}>
+                      {topic.topics_count || 1}
+                    </div>
+                    <div className="forum-posts" data-value={topic.posts_count}>
+                      {topic.posts_count || 0}
+                    </div>
+                    <div className="forum-last-post" data-label={t('forum.last_post')}>
+                      <div className="last-post-content">
+                        <Link
+                          to={'/topic/' + topic.id}
+                          className="last-topic-link"
+                          title={t('stats.to_first_post')}
+                        >
+                          {topic.title}
+                        </Link>
+                        <LastPostInfo
+                          topicId={topic.id}
+                          lastPostAt={topic.last_post_at}
+                          author={topic.last_post_author_ref}
+                          hasUnread={
+                            !!user &&
+                            profile?.role !== 'pending' &&
+                            topic.last_post_author_ref?.user_id !== user?.uid
+                          }
+                          lastReadOffset={
+                            readMap[topic.id]?.offset ?? null
+                          }
+                          postsCount={topic.posts_count}
+                          lang={lang}
+                        />
+                      </div>
+                    </div>
+                  </article>
+                );})}
+              </div>
+            </div>
             {totalPages > 1 && (
               <div className="p-3 d-flex justify-content-center border-top">
                 <ForumPagination

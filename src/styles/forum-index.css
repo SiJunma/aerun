@@ -74,10 +74,30 @@
   border-bottom: 1px solid var(--category-border);
 }
 
-.category-col-topics,
-.category-col-posts {
+.category-col-topic {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.category-col-replies {
   text-align: center;
   white-space: nowrap;
+}
+
+.category-col-lastpost {
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Manage mode: narrow first column for the select-all checkbox */
+.category-head.has-check {
+  grid-template-columns: 36px minmax(260px, 1fr) 100px minmax(200px, 35%);
+}
+
+.category-head-cell--check {
+  width: 36px;
+  padding: 0;
+  text-align: center;
 }
 
 /* ── Forum Item (Row) ───────────────────────────────────────── */
