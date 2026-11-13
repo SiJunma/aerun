@@ -41,7 +41,7 @@ const TransferRootModal = ({
   currentUserId = '',
   onReauthWithGoogle,
 }) => {
-  const { lang, t } = useI18n();
+  const { t } = useI18n();
   const [successorId, setSuccessorId] = useState('');
   const [password, setPassword] = useState('');
   const [phrase, setPhrase] = useState('');

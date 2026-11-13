@@ -18,7 +18,7 @@ import { useI18n } from '../../contexts/I18nProvider';
  *  - lang          {string}   – 'ru' | 'en'
  *  - disabled      {boolean}  – if true, no overlay is shown (just renders children)
  */
-const ReputationHoverPreview = ({ postId, targetUid, children, lang = 'ru', disabled = false }) => {
+const ReputationHoverPreview = ({ postId, targetUid, children, disabled = false }) => {
   const { t } = useI18n();
   const { user } = useAuth();
   const [show, setShow] = useState(false);

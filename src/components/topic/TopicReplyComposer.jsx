@@ -29,7 +29,6 @@ export const TopicReplyComposer = React.forwardRef(({
   hasPermission,
   PERMISSIONS,
   computedMaxChars,
-  lang,
   t
 }, ref) => {
   const replyEditorRef = React.useRef(null);

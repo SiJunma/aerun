@@ -16,8 +16,7 @@ const PostVotersModal = ({
   show,
   onHide,
   postId,
-  postNumber,
-  lang = 'ru'
+  postNumber
 }) => {
   const { t } = useI18n();
   const [voters, setVoters] = useState([]);

@@ -307,7 +307,7 @@ const safeHtmlToReact = (htmlStr, index, isAdminAuthor) => {
 const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) => {
   const navigate = useNavigate();
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   if (typeof children !== 'string') return children;
 
   // 0. Preprocess text to wrap smile shortcodes into [smile] tags

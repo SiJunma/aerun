@@ -18,7 +18,7 @@ const RichEditor = forwardRef(({
   showHide = true, smilesDropDirection = "up", smilesFullWidth = true, onSubmit,
   hideHotkeysButton = false, hideFooter = false, autoResize = false
 }, ref) => {
-  const { lang, t } = useI18n();
+  const { t } = useI18n();
 
   const textareaRef = useRef(null);
   const containerRef = useRef(null);
