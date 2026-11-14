@@ -143,6 +143,7 @@
 
 .forum-title a:hover,
 .cat-link:hover {
+  color: var(--link-color);
   text-decoration: none;
 }
 
@@ -319,5 +320,3 @@
  * right, and "Today, 07:46 · [avatar] Arin" lives on ONE line when it
  * fits. The avatar + nickname stay one indivisible flex item; only an
  * over-long nickname wraps, inside its own box. */
-
-

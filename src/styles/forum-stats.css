@@ -163,7 +163,11 @@
 
 .stat-user-default {
   color: var(--stat-user-default-color);
-  font-weight: 500;
+  font-weight: 400;
+}
+
+.stat-newest-member .online-user-link {
+  font-weight: 600;
 }
 
 .stat-user-default:hover {
