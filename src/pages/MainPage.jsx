@@ -70,33 +70,33 @@ const MainPage = () => {
           />
         ) : (
           <div className="forum-skeleton-group">
-            <div className="category-header skeleton-category-header">
+            <div className="category-group-header skeleton-category-header">
               <Skeleton width="180px" height="1.4rem" />
             </div>
             <div className="category-content skeleton-category-content">
-              <div className="category-head">
-                <span className="category-col-forum">{t('forum.category')}</span>
-                <span className="category-col-topics">{t('forum.topics')}</span>
-                <span className="category-col-posts">{t('forum.posts')}</span>
-                <span className="category-col-lastpost">{t('forum.last_post')}</span>
+              <div className="category-group-subtitle">
+                <span className="category-col--forum">{t('forum.category')}</span>
+                <span className="category-col--topics">{t('forum.topics')}</span>
+                <span className="category-col--posts">{t('forum.posts')}</span>
+                <span className="category-col--lastpost">{t('forum.last_post')}</span>
               </div>
               {[...Array(4)].map((_, i) => (
                 <div key={i} className="forum-item skeleton-forum-item">
                   <div className="forum-info">
-                    <Skeleton width="50%" height="1.4rem" className="mb-2" />
+                    <Skeleton width="50%" height="1.4rem" className="forum-skeleton-gap" />
                     <Skeleton width="80%" height="0.9rem" />
                   </div>
                   <div className="forum-topics">
-                    <Skeleton width={30} height="1rem" className="mx-auto" />
+                    <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
                   </div>
                   <div className="forum-posts">
-                    <Skeleton width={30} height="1rem" className="mx-auto" />
+                    <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
                   </div>
-                  <div className="forum-last-post">
-                    <div className="d-flex align-items-center gap-2">
-                      <Skeleton variant="avatar" width={32} height={32} className="rounded-circle flex-shrink-0" />
-                      <div className="flex-grow-1">
-                        <Skeleton width="80%" height="0.9rem" className="mb-1" />
+                  <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
+                    <div className="forum-skeleton-last">
+                      <Skeleton variant="avatar" width={32} height={32} className="forum-skeleton-avatar" />
+                      <div className="forum-skeleton-last-lines">
+                        <Skeleton width="80%" height="0.9rem" className="forum-skeleton-gap" />
                         <Skeleton width="40%" height="0.7rem" />
                       </div>
                     </div>
@@ -170,7 +170,7 @@ const MainPage = () => {
               <div className="forum-posts" data-value={cat.posts_count || 0}>
                 {cat.posts_count || 0}
               </div>
-              <div className="forum-last-post" data-label={t('forum.last_post')}>
+              <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
                 {cat.last_post_topic_id ? (
                   <div className="last-post-content">
                     <Link
@@ -205,17 +205,17 @@ const MainPage = () => {
             className={`forum-category ${groupId ? ` category-${groupId}` : ' category-ungrouped'}`}
             data-category-id={groupId || 'ungrouped'}
           >
-            <header className="category-header">
-              <h2 className="category-title">
+            <header className="category-group-header">
+              <h2 className="category-group-title">
                 {groupTitle}
               </h2>
             </header>
             <div className="category-content">
-              <div className="category-head">
-                <span className="category-col-forum">{t('forum.category')}</span>
-                <span className="category-col-topics">{t('forum.topics')}</span>
-                <span className="category-col-posts">{t('forum.posts')}</span>
-                <span className="category-col-lastpost">{t('forum.last_post')}</span>
+              <div className="category-group-subtitle">
+                <span className="category-col--forum">{t('forum.category')}</span>
+                <span className="category-col--topics">{t('forum.topics')}</span>
+                <span className="category-col--posts">{t('forum.posts')}</span>
+                <span className="category-col--lastpost">{t('forum.last_post')}</span>
               </div>
               {renderCategoryRows(cats)}
             </div>
@@ -225,7 +225,7 @@ const MainPage = () => {
         if (visibleCats.length === 0) {
           return (
             <ForumEmptyState
-              className="mb-4"
+              className="forum-index-empty"
               icon={Folder}
               title={t('forum.no_categories')}
               description={t('forum.no_categories_desc')}

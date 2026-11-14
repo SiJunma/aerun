@@ -1,11 +1,18 @@
 /**
  * Aerun Forum Index Styles
- * 
+ *
  * Implements semantic structure from SPEC_forum-index-theme-dom.md:
- * #forum-index, #forum-main, .forum-category, .category-header,
- * .category-title, .category-content, .category-head, .forum-item,
- * .forum-info, .forum-title, .forum-description, .forum-topics,
- * .forum-posts, .forum-last-post, .is-unread, .is-new.
+ * #forum-index, #forum-main, .forum-category, .category-group-header,
+ * .category-group-title, .category-content, .category-group-subtitle,
+ * .forum-item, .forum-info, .forum-title, .forum-description,
+ * .forum-topics, .forum-posts, .forum-last-post, .is-unread, .is-new.
+ *
+ * SHARED ATOMS (used by forum-view.css topic lists too):
+ * .category-col--{forum,topic,topics,posts,replies,category,lastpost}
+ * are the column cells of both column strips (.category-group-subtitle
+ * on the main page, .category-subtitle on the category/list pages).
+ * The topic-row variant of .forum-item (.forum-item--topic) is also
+ * defined here so the category page rows keep the main-page look.
  */
 
 #forum-index,
@@ -24,28 +31,29 @@
 /* ── Category / Group ───────────────────────────────────────── */
 .forum-category {
   margin-bottom: 1.5rem;
-  border-radius: var(--category-header-radius);
+  border-radius: var(--category-group-header-radius);
 }
 
 .forum-category:last-child {
   margin-bottom: 0;
 }
 
-.category-header {
-  background-color: var(--category-header-bg);
-  color: var(--category-header-text);
-  padding: var(--category-header-padding);
-  border-radius: var(--category-header-radius);
+/* Group header band: coloured strip with the group title (main page). */
+.category-group-header {
+  background-color: var(--category-group-header-bg);
+  color: var(--category-group-header-text);
+  padding: var(--category-group-header-padding);
+  border-radius: var(--category-group-header-radius);
   border-bottom: 1px solid var(--category-border);
   display: flex;
   align-items: center;
 }
 
-.category-title {
+.category-group-title {
   margin: 0;
-  color: var(--category-header-text);
-  font-size: var(--category-header-font-size);
-  font-weight: var(--category-header-font-weight);
+  color: var(--category-group-header-text);
+  font-size: var(--category-group-header-font-size);
+  font-weight: var(--category-group-header-font-weight);
   letter-spacing: normal;
   text-transform: none;
 }
@@ -59,11 +67,14 @@
   overflow: hidden;
 }
 
-/* ── Category Head (Desktop Column Titles) ──────────────────── */
-.category-head {
+/* ── Category Group Subtitle (Desktop Column Titles, main page) ──
+   One block class carries both the layout grid and the small-caps
+   visual. The four columns are: forum / topics / posts / last post. */
+.category-group-subtitle {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) 100px 100px minmax(200px, 35%);
   align-items: center;
+  column-gap: 10px;
   padding: 0.4rem 1rem;
   background-color: var(--category-head-bg);
   color: var(--category-head-text);
@@ -74,30 +85,20 @@
   border-bottom: 1px solid var(--category-border);
 }
 
-.category-col-topic {
+/* ── Shared column cells (main subtitle + category subtitle) ── */
+.category-col--forum,
+.category-col--topic,
+.category-col--category,
+.category-col--lastpost {
   text-align: left;
   white-space: nowrap;
 }
 
-.category-col-replies {
+.category-col--topics,
+.category-col--posts,
+.category-col--replies {
   text-align: center;
   white-space: nowrap;
-}
-
-.category-col-lastpost {
-  text-align: left;
-  white-space: nowrap;
-}
-
-/* Manage mode: narrow first column for the select-all checkbox */
-.category-head.has-check {
-  grid-template-columns: 36px minmax(260px, 1fr) 100px minmax(200px, 35%);
-}
-
-.category-head-cell--check {
-  width: 36px;
-  padding: 0;
-  text-align: center;
 }
 
 /* ── Forum Item (Row) ───────────────────────────────────────── */
@@ -105,10 +106,101 @@
   display: grid;
   grid-template-columns: minmax(260px, 1fr) 100px 100px minmax(200px, 35%);
   align-items: center;
+  column-gap: 10px;
   padding: var(--forum-item-padding);
   border-bottom: 1px solid var(--forum-item-border);
   background-color: var(--forum-item-bg);
   transition: background-color 0.15s ease;
+}
+
+/* Topic variant (category page rows): no topics-count column, wider
+   gaps to match the wider group-header look of the category subtitle. */
+.forum-item--topic {
+  grid-template-columns: minmax(260px, 1fr) 100px minmax(200px, 35%);
+  column-gap: 30px;
+}
+
+/* Manage mode: fixed-width leading column for the row checkbox. The
+   checkbox itself never changes size, so the column is a constant 32px
+   with the ordinary 10px gap (the legacy Table stretched this column
+   with the row — do not copy). */
+.forum-item--topic.is-managing {
+  grid-template-columns: 32px minmax(260px, 1fr) 100px minmax(200px, 35%);
+  column-gap: 10px;
+}
+
+/* ── Medium viewport (<993px): narrower counters ───────────────
+   MUST stay AFTER every base grid rule above — same specificity, so
+   source order decides the cascade (this block used to sit before
+   `.forum-item--topic` and was silently overridden). */
+@media screen and (max-width: 993px) {
+
+  .forum-item,
+  .category-group-subtitle {
+    grid-template-columns: minmax(220px, 1fr) 80px 80px minmax(200px, 35%);
+  }
+
+  .forum-item--topic {
+    grid-template-columns: minmax(220px, 1fr) 80px minmax(200px, 35%);
+  }
+
+  .forum-item--topic.is-managing {
+    grid-template-columns: 32px minmax(220px, 1fr) 80px minmax(200px, 35%);
+    column-gap: 10px;
+  }
+}
+
+/* Topic-row variant typography: category rows match TopicRow sizes
+   (--topic-title-*, 1rem/700), not the 1.25rem section-row titles. */
+.forum-item--topic .forum-title {
+  font-size: var(--topic-title-size);
+  font-weight: var(--topic-title-font-weight);
+}
+
+/* Mini pagination inherits the bold title context — the reference
+   render keeps it regular weight. The 700 comes from `.forum-title a`
+   hitting the page links directly, so the links are retargeted. */
+.forum-item--topic .mini-pagination {
+  font-weight: 400;
+}
+
+.forum-item--topic .mini-page-link {
+  font-weight: 400;
+}
+
+/* A little more air between the title / description / creation-meta
+   lines inside the topic variant of the row. */
+.forum-item--topic .forum-info {
+  gap: 0.35rem;
+}
+
+/* Checkbox cells: fill the fixed track, no extra padding — the column
+   width IS the visual width. In manage mode the row checkbox sits on
+   the FIRST text line (the title), not vertically centred. */
+.forum-item--topic .topic-select,
+.category-subtitle-check {
+  width: 100%;
+  padding: 0;
+  justify-content: center;
+}
+
+.forum-item--topic.is-managing .topic-select {
+  align-self: start;
+  padding-top: 2px;
+}
+
+/* Creation meta under the title (date · author), like TopicRow rows. */
+.forum-item--topic .topic-author .author-meta {
+  color: var(--topic-author-color);
+  font-size: 0.875rem;
+}
+
+/* Without the avatar there is no visual separation between the date and
+   the author name — the reference render puts a mid dot between them.
+   Scoped to the category rows: the avatar-bearing contexts keep their
+   gap-only layout (see the author-meta journal decision). */
+.forum-item--topic .topic-author .author-meta__identity::before {
+  content: '·';
 }
 
 .forum-item:last-child {
@@ -122,6 +214,7 @@
 /* ── Forum Information ──────────────────────────────────────── */
 .forum-info {
   display: flex;
+  row-gap: 5px;
   flex-direction: column;
   padding-right: 1rem;
 }
@@ -131,6 +224,12 @@
   font-size: var(--forum-title-font-size);
   font-weight: var(--forum-title-font-weight);
   line-height: 1.25;
+  /* State icons (pin/lock) sit INLINE before the title, bullet-like —
+     they never drop to their own line above it. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .forum-title a,
@@ -152,6 +251,11 @@
   color: var(--forum-description-color);
   font-size: var(--forum-description-font-size);
   line-height: var(--forum-description-line-height);
+}
+
+/* Mobile-only stats (category page topic rows): hidden on desktop. */
+.forum-mobile-stats {
+  display: none;
 }
 
 /* ── Topic & Post Counts ────────────────────────────────────── */
@@ -193,6 +297,10 @@
   font-size: 0.875rem;
 }
 
+.forum-index-empty {
+  margin-bottom: 1.5rem;
+}
+
 /* ── Skeletons ──────────────────────────────────────────────── */
 .forum-skeleton-group {
   margin-bottom: 2rem;
@@ -206,18 +314,46 @@
   padding: 1.25rem 1rem;
 }
 
+/* Skeleton helpers replacing Bootstrap utilities (mx-auto, d-flex,
+   flex-grow-1, rounded-circle) inside skeleton rows. */
+.forum-skeleton-row {
+  padding: 1.25rem 1rem;
+}
+
+.forum-skeleton-gap {
+  margin-bottom: 0.5rem;
+}
+
+.forum-skeleton-stat {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.forum-skeleton-avatar {
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.forum-skeleton-last {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.forum-skeleton-last-lines {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* ── Mobile Responsive View (max-width: 768px) ──────────────── */
 @media (max-width: 768px) {
-  .category-head {
+
+  .category-group-subtitle {
     display: none;
   }
 
-  .category-header {
+  .category-group-header {
     padding: 0.85rem 1.25rem;
-  }
-
-  .category-title {
-    font-size: 0.85rem;
   }
 
   .forum-category {
@@ -246,6 +382,24 @@
     background-color: transparent;
   }
 
+  .forum-item--topic {
+    position: relative;
+  }
+
+  /* Manage mode on mobile: the row checkbox floats as a "chip" in the
+     top-right corner of the card — clearly visible, tinted background. */
+  .forum-item--topic.is-managing .topic-select {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: auto;
+    padding: 0.375rem;
+    /* Reset the desktop title-line alignment: the chip positions itself. */
+    padding-top: 0.375rem;
+    border-radius: 0.5rem;
+    background-color: var(--topic-check-chip-bg);
+  }
+
   .forum-info {
     padding-right: 0;
     padding-bottom: 0.25rem;
@@ -271,7 +425,7 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-top: 0.5rem;
+    margin-top: 0.2rem;
     font-size: 14px;
     font-weight: 600;
     color: var(--forum-mobile-stats-color);
@@ -283,27 +437,9 @@
     gap: 0.25rem;
   }
 
-  .forum-last-post {
-    /* margin-top: 0.75rem; */
-    padding: 1rem 1.25rem 1.25rem;
-    margin-left: -1.25rem;
-    margin-right: -1.25rem;
-    margin-bottom: -1.25rem;
-    background-color: transparent;
-    border-top: 1px solid var(--forum-last-post-mobile-border);
-    min-width: 0;
-  }
-
-  .forum-last-post::before {
-    content: attr(data-label);
-    display: block;
-    margin-bottom: 0.65rem;
-    font-size: 0.65rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--forum-description-color);
-    letter-spacing: 0.05em;
-  }
+  /* The mobile LAST POST strip chrome moved to the shared
+     .last-post-strip class (topic-row.css) — .forum-last-post carries
+     it in JSX on the main page and the category rows. */
 
   .last-topic-link {
     max-width: 100%;

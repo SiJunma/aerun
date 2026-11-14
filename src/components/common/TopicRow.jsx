@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Pin, Lock, MessageSquare } from 'lucide-react';
 import LastPostInfo from './LastPostInfo';
 import AuthorMeta from './AuthorMeta';
+import TopicMiniPagination from './TopicMiniPagination';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { toMillis, unreadFloor } from '../../utils/dates';
@@ -39,43 +40,6 @@ const TopicRow = ({
   const isUnreadByServer = serverUnread !== null ? serverUnread : true;
   const isUnreadByState = isUnreadByServer && !isLocallyRead;
   const hasUnread = !!user && profile?.role !== 'pending' && topic.last_post_author_ref?.user_id !== user?.uid && isUnreadByState;
-
-  const ITEMS_PER_PAGE = settings?.postsPerPage || 20;
-  const totalPages = Math.ceil((topic.posts_count || 1) / ITEMS_PER_PAGE);
-
-  const renderMiniPagination = () => {
-    if (totalPages <= 1) return null;
-
-    const pages = [];
-    if (totalPages <= 5) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else {
-      pages.push(1, 2, 3);
-      pages.push('...');
-      pages.push(totalPages);
-    }
-
-    return (
-      <span className="mini-pagination">
-        <span>[</span>
-        {pages.map((p, i) => (
-          <React.Fragment key={i}>
-            {p === '...' ? (
-              <span>...</span>
-            ) : (
-              <Link
-                to={`/topic/${topic.id}?page=${p}`}
-                className="mini-page-link"
-              >
-                {p}
-              </Link>
-            )}
-          </React.Fragment>
-        ))}
-        <span>]</span>
-      </span>
-    );
-  };
 
   const stateClasses = [
     topic.is_pinned ? 'is-pinned' : '',
@@ -116,7 +80,7 @@ const TopicRow = ({
               {topic.title}
             </Link>
           </h6>
-          {renderMiniPagination()}
+          <TopicMiniPagination topic={topic} />
         </div>
         {topic.description && (
           <p className="topic-description">{topic.description}</p>
@@ -130,16 +94,16 @@ const TopicRow = ({
               lang={lang}
             />
           </div>
-          {showCategory && categoryName && (
-            <div className={`topic-category ${showCategoryInColumn ? 'topic-category--inline' : ''}`}>
-              <Link to={`/category/${topic.category_id}`}>
-                {categoryName}
-              </Link>
-            </div>
-          )}
         </div>
         <div className="topic-mobile-stats">
           <span><MessageSquare size={12} /> {Math.max(0, (topic.posts_count || 1) - 1)}</span>
+          {/* Mobile-only category line: the dedicated .topic-category column
+              is hidden on mobile, so the name lives next to the post count. */}
+          {showCategory && categoryName && (
+            <Link to={`/category/${topic.category_id}`} className="topic-mobile-category">
+              {categoryName}
+            </Link>
+          )}
         </div>
       </div>
       {showCategoryInColumn && (
@@ -155,7 +119,7 @@ const TopicRow = ({
       <div className="topic-replies" data-label={t('topic_row.replies')}>
         <span className="topic-count">{Math.max(0, (topic.posts_count || 1) - 1)}</span>
       </div>
-      <div className="topic-last-post" data-label={t('topic_row.last_post')}>
+      <div className="topic-last-post last-post-strip" data-label={t('topic_row.last_post')}>
         <LastPostInfo
           topicId={topic.id}
           lastPostAt={topic.last_post_at}

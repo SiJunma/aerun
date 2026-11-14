@@ -36,12 +36,13 @@ body {
    --forum-status-maintenance-text: #ffffff;
 
    /* ── Category / Group tokens ──────────────────────────────── */
-   --category-header-bg: var(--nav-bg);
-   --category-header-text: #ffffff;
-   --category-header-radius: 12px 12px 0 0;
-   --category-header-padding: 0.75rem 1rem;
-   --category-header-font-size: 1rem;
-   --category-header-font-weight: 700;
+   /* Group header band on the main page (.category-group-header). */
+   --category-group-header-bg: var(--nav-bg);
+   --category-group-header-text: #ffffff;
+   --category-group-header-radius: 12px 12px 0 0;
+   --category-group-header-padding: 0.75rem 1rem;
+   --category-group-header-font-size: 1rem;
+   --category-group-header-font-weight: 700;
    --category-card-bg: var(--card-bg);
    --category-card-radius: 0 0 12px 12px;
    --category-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
@@ -124,26 +125,28 @@ body {
    --stat-online-indicator: #10b981;
 
    /* ── Forum View (CategoryPage: /category/:id) ─────────────── */
-   /* Header is a bare heading (target layout), not a card. */
-   --forum-view-header-bg: transparent;
-   --forum-view-header-border: transparent;
-   --forum-view-header-padding: 0;
-   --forum-view-header-margin-bottom: 1rem;
-   --forum-view-title-size: 2.5rem;
-   --forum-view-title-size-mobile: 2rem;
-   --forum-view-title-color: var(--text-color);
-   --forum-view-description-color: #475569;
+   /* Page header (.category-header): a bare heading (target layout),
+      not a card. Shared by the category page and the three topic
+      list pages (active topics / new replies / subscriptions). */
+   --category-header-bg: transparent;
+   --category-header-border: transparent;
+   --category-header-padding: 0;
+   --category-header-margin-bottom: 1rem;
+   --category-header-title-size: 2.5rem;
+   --category-header-title-size-mobile: 2rem;
+   --category-header-title-color: var(--text-color);
+   --category-header-description-color: #475569;
    --forum-view-card-bg: var(--card-bg);
    --forum-view-card-border: var(--border-color);
    --forum-view-card-radius: 12px;
    --forum-view-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-   --topic-list-head-bg: var(--nav-bg);
-   --topic-list-head-color: #ffffff;
-   --topic-list-head-font-size: .9rem;
-   --topic-list-head-font-weight: 700;
-   --topic-list-head-padding: .75rem 1rem;
-   --topic-list-head-transform: none;
-   --topic-list-head-letter-spacing: normal;
+   /* Columns strip (.category-subtitle) wears the GROUP HEADER look on
+      every topic list (category page + active/new/subscriptions): colors
+      alias the group header so a theme recoloring the band recolors both
+      together. Geometry (padding/font-size/uppercase) lives in the
+      .category-subtitle class, not in tokens. */
+   --category-subtitle-bg: var(--category-group-header-bg);
+   --category-subtitle-text: var(--category-group-header-text);
    --forum-view-empty-color: var(--secondary-color);
    /* Buttons: filled = btn-primary, ghost = btn-outline-primary/secondary.
      Ghost border/text comes from --secondary-color (not --border-color),
@@ -368,12 +371,23 @@ body {
    --forum-view-empty-icon-opacity: 0.3;
    --forum-view-empty-note-size: 0.875rem;
    --empty-state-margin: 1rem;
+
+   /* ── Management toolbar delete button ─────────────────────── */
+   --forum-view-btn-danger-bg: #dc3545;
+   --forum-view-btn-danger-text: #ffffff;
+   --forum-view-btn-danger-hover-bg: #c82333;
+
+   /* ── Topic select checkboxes (manage mode) ────────────────── */
+   --topic-check-border: var(--border-color);
+   --topic-check-bg: var(--card-bg);
+   --topic-check-checked-bg: var(--primary-color);
+   --topic-check-chip-bg: rgba(var(--primary-rgb), 0.14);
 }
 
 [data-theme='dark'] {
    --topic-post-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
    /* Equivalent of light #475569 (Slate 600) on dark: Slate 500 */
-   --forum-view-description-color: #b0b0b0;
+   --category-header-description-color: #b0b0b0;
    /* Exact target home colors (screenshot 2026-11-06, user-confirmed):
      .category-head background #0e1324, color #80848d;
      .last-topic-link (#94a3b8), .forum-description/.cat-desc and
@@ -407,8 +421,21 @@ body {
    --forum-view-btn-ghost-hover-text: #f1f5f9;
    --topic-item-hover-bg: rgba(var(--primary-rgb), 0.12);
    --topic-item-selected-bg: rgba(var(--primary-rgb), 0.18);
+   --topic-check-chip-bg: rgba(var(--primary-rgb), 0.26);
+   /* Checkboxes must stay visible on dark cards AND on the dark
+      subtitle strip: a light border + faint light fill (the light
+      theme keeps the base border-color/card-bg pair). Checked fill:
+      the dark theme's --primary-color is pale (#f1f5f9), so the white
+      tick would vanish — use a dark slate fill instead. */
+   --topic-check-border: rgba(255, 255, 255, 0.55);
+   --topic-check-bg: rgba(255, 255, 255, 0.08);
+   --topic-check-checked-bg: #334155;
    --pagination-hover-bg: rgba(255, 255, 255, 0.08);
    --mini-pagination-hover-color: var(--nav-bg);
+   /* Hover pair must stay readable in dark: light chip background for the
+      dark nav-bg text (the body default pairs primary bg with white text,
+      which light/neutral keep). */
+   --mini-pagination-hover-bg: #e2e8f0;
    --forum-view-btn-primary-text: #0f172a;
    --forum-view-btn-ghost-hover-text: #0f172a;
    --management-toolbar-bg: rgba(30, 41, 59, 0.9);
@@ -423,14 +450,18 @@ body {
    --management-toolbar-text: #1e293b;
    --management-toolbar-border: rgba(0, 0, 0, 0.15);
    --management-toolbar-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+   --stats-item-muted: #6c757d;
 }
 
 [data-theme='neutral'] {
+   --author-meta-color: #8c7a6b;
+   --forum-description-color: #8c7a6b;
+   --stats-item-muted: #8c7a6b;
    --last-post-name-color: #6c5b4b;
    --stat-user-default-color: #8c7152;
    --category-head-text: #857d71;
    --category-head-bg: #faf7f0;
-   --forum-view-description-color: #6b5a48;
+   --category-header-description-color: #6b5a48;
    --forum-header-border: rgba(0, 0, 0, 0.1);
    --category-card-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
    --stats-card-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
@@ -445,8 +476,8 @@ body {
    --forum-view-btn-primary-text: #fdf6e3;
    --forum-view-btn-ghost-border: #8c7a6b;
    --forum-view-btn-ghost-text: #8c7a6b;
-   --forum-view-btn-ghost-hover-bg: #8c7a6b;
-   --forum-view-btn-ghost-hover-text: #fdf6e3;
+   --forum-view-btn-ghost-hover-bg: #5c4b3a;
+   --forum-view-btn-ghost-hover-text: #fff;
    /* Was utilities.css !important (.btn-outline-light / .vr) — now tokens */
    --management-toolbar-bg: rgba(244, 241, 234, 0.98);
    --management-toolbar-text: #433422;

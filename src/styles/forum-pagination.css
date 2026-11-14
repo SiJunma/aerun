@@ -12,7 +12,7 @@
  * Modifiers carry only placement:
  *   .forum-pagination-view   — full-width centered row (list pages)
  *   .forum-pagination-topic  — compact row inside a header (Topic View)
- * No topic-*/forum-pagination-* component classes per page.
+ *  No topic- / forum-pagination- component classes per page.
  */
 
 .forum-pagination {
@@ -36,6 +36,7 @@
 .forum-pagination-view {
   justify-content: center;
   margin-bottom: 1rem;
+  margin-top: 1rem;
 }
 
 /* Topic View only changes alignment inside the header row. */
@@ -61,7 +62,9 @@
   transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
 }
 
-.forum-pagination .page-item:not(.active) .page-link { opacity: 0.7; }
+.forum-pagination .page-item:not(.active) .page-link {
+  opacity: 0.7;
+}
 
 .forum-pagination .page-item:not(.active):not(.disabled) .page-link:hover,
 .forum-pagination .page-item:not(.active):not(.disabled) .page-link:focus {
@@ -92,7 +95,9 @@
 .forum-pagination .page-item.prev:hover .page-link,
 .forum-pagination .page-item.next:hover .page-link,
 .forum-pagination .page-item.first:hover .page-link,
-.forum-pagination .page-item.last:hover .page-link { opacity: 1; }
+.forum-pagination .page-item.last:hover .page-link {
+  opacity: 1;
+}
 
 .forum-pagination .page-item.disabled .page-link {
   opacity: var(--pagination-disabled-opacity);
@@ -111,7 +116,9 @@
 }
 
 @media (max-width: 576px) {
-  .forum-pagination { gap: 0.1rem; }
+  .forum-pagination {
+    gap: 0.1rem;
+  }
 
   .forum-pagination .page-item .page-link {
     min-width: 2rem;

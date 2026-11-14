@@ -88,10 +88,10 @@ const ActiveTopicsPage = () => {
         />
       </nav>
 
-      <header id="forum-view-header" className="forum-view-header">
-        <div className="forum-view-heading">
-          <h1 className="forum-view-title">{t('stats.top_discussed')}</h1>
-          <p className="forum-view-description">
+      <header id="forum-view-header" className="category-header">
+        <div className="category-header-heading">
+          <h1 className="category-header-title">{t('stats.top_discussed')}</h1>
+          <p className="category-header-description">
             {t('stats.top_discussed_desc')}
           </p>
         </div>
@@ -113,11 +113,11 @@ const ActiveTopicsPage = () => {
         />
       ) : (
         <section id="forum-topic-list" className="forum-topic-list">
-          <div className="topic-list-head has-category">
-            <span className="topic-col-topic">{t('forum.topic')}</span>
-            <span className="topic-col-category">{t('forum.category')}</span>
-            <span className="topic-col-replies">{t('forum.replies')}</span>
-            <span className="topic-col-lastpost">{t('forum.last_post')}</span>
+          <div className="category-subtitle has-category">
+            <span className="category-col--topic">{t('forum.topic')}</span>
+            <span className="category-col--category">{t('forum.category')}</span>
+            <span className="category-col--replies">{t('forum.replies')}</span>
+            <span className="category-col--lastpost">{t('forum.last_post')}</span>
           </div>
           <div className="topic-list">
             {visibleTopics.map(topic => (

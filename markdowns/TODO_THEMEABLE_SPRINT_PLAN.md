@@ -29,14 +29,79 @@
    - Этап 1: Главная страница (`home` / `MainPage`), каркас `Layout`, `Navbar`, `ForumStats`, `LastPostInfo`.
    - Этап 2: Страница категории (`CategoryPage`) + общие атомы списков (`TopicRow`, `ForumPagination`, `ForumEmptyState`-вызовы, management toolbar) + 3 страницы-списка, которые их потребляют (`ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`). См. «Расхождения» — фактический DOM отличается от исходного Спринта 3/7 в нескольких именах.
 
+### Единая схема хедеров и сабтайтлов (Ноябрь 2026 — ревизия, supersede старых имён)
+> В этом разделе — фактическая схема после ревизии. Где ниже по журналу встречаются старые
+> имена (`.category-header` как полоса группы, `.category-head`, `.topic-list-head`,
+> `.forum-view-header` и т.п.) — они переименованы этим разделом; исторические записи
+> журнала не правятся, но правильные имена теперь только эти.
+
+Сущности «группа» и «список тем» внешне похожи, но это разные блоки. Один класс = разметка,
+различия = модификаторы (только состояния), визуальные варианты = отдельные именованные блоки
+(не модификаторы), размеры/паддинги/шрифты — литерально в классах, токены — только цветовые.
+
+| Сущность | Класс | Где | Что это |
+|---|---|---|---|
+| Хедер группы (главная) | `.category-group-header` + `.category-group-title` (h2) | forum-index.css | цветная полоса с названием группы |
+| Хедер колонок (главная) | `.category-group-subtitle` | forum-index.css | полоса forum/topics/posts/lastpost, small-caps |
+| Хедер страницы (категория + active/new/subs) | `.category-header`, элементы `-heading/-title/-description/-meta/-actions` | forum-view.css | название + описание + контролы (id остаётся `#forum-view-header`) |
+| Хедер колонок (категория + active/new/subs) | `.category-subtitle` | forum-view.css | полоса topic/[category]/replies/lastpost; **дизайн = хедер группы** |
+| Ячейки колонок (общие атомы) | `.category-col--{forum,topic,topics,posts,replies,category,lastpost}` | forum-index.css | выравнивание/nowrap; используются обоими сабтайтлами |
+| Мобильная полоса LAST POST | `.last-post-strip` (единый класс) | topic-row.css | ОДИН класс для `.forum-last-post` (главная + категория) и `.topic-last-post` (списки). Хром полосы (паддинги, компенсирующие margins, фон, бордер, метка, ховер-подсветка) правится только в topic-row.css — страница-файлы его не дублируют. В author-meta.css мета-блок главной скоуплен на `#forum-index` — не убирать скоуп, иначе форс-stretch ссылки снова перебьёт ховер-подсветку на категории/списках |
+| Строка категории | `.forum-item--topic` | forum-index.css | вариант `.forum-item`: 3 колонки, без counts-topics |
+| Состояние manage | `.has-check` (хедер), `.is-managing` (строка) | — | +фиксированная колонка чекбокса **40px** |
+
+Правила, выверенные со скриншотами деплоя (2026-11-14):
+- **Чекбокс-колонка** — константные **32px** + обычный 10px gap и в хедере (`.category-subtitle-check`),
+  и в строках (`.forum-item--topic.is-managing`, `.topic-item.is-managing`); `.topic-select` —
+  `padding: 0`, ширина колонки и есть визуальная ширина. Ломать «растягивается с колонкой»
+  легаси-Table не воспроизводим. Чекбокс — полностью кастомный нативный input
+  (`.topic-select-input`: рамка/фон из токенов `--topic-check-*`, белая галка на `--primary-color`).
+  На мобильных — «чип» в правом верхнем углу карточки: absolute top/right с подложкой
+  `--topic-check-chip-bg` (сильнее в dark).
+- **Иконки pinned/locked** — inline в flex-строке заголовка (`.forum-title` — flex+wrap),
+  по поведению как буллет: никогда не переносятся на строку выше тайтла.
+- **Last Post**: главная — тайтл темы + таймштамп/автор; категория и списки —
+  только таймштамп + автор (+ unread dot), тайтл уже в первой колонке
+  (`.last-topic-link` на категории не рендерится).
+- **Врапается всё, кроме цифр**: тайтл (длинные названия + мини-пагинация), колонка категории
+  (`.topic-category a` — `white-space: normal; overflow-wrap: anywhere`), last-post
+  (длинные ники/таймштампы). Только counters (`.forum-topics/.forum-posts/.topic-replies`) — nowrap.
+- **Название категории в строках списков — без дублей**: на десктопе оно живёт ТОЛЬКО в
+  колонке `.topic-category`; на мобильных (колонка скрыта) — в строке статов
+  `.topic-mobile-stats`: счётчик слева, категория справа (`.topic-mobile-category`).
+  Инлайн-вариант под тайтлом удалён как мёртвый код.
+- **Типографика строк категории = TopicRow**: `.forum-item--topic .forum-title` —
+  `--topic-title-*` (1rem/700), мини-пагинация регулярного веса, под тайтлом мета
+  создания `дата · автор` (`.topic-author`, AuthorMeta `showAvatar={false}`).
+- **Мобильные ≤768px**: `.category-subtitle` и `.category-group-subtitle` — `display:none`
+  (строки перестраиваются в колонку); хедеры страниц остаются.
+- **Средний диапазон ≤993px**: все сетки сужаются согласованно — счётчики 100px→80px,
+  первая колонка 260px→220px; чекбокс-колонка остаётся 32px. Варианты: `.forum-item`,
+  `.forum-item--topic(.is-managing)`, `.category-group-subtitle`, `.category-subtitle`
+  (`+.has-category`, `+.has-check`), `.topic-item` (те же модификаторы). Media-блоки
+  стоят ПОСЛЕ базовых правил (та же специфичность — решает порядок в файле).
+- **Мини-пагинация** строк — общий компонент `TopicMiniPagination` (TopicRow + строки категории).
+- **Токены**: `--category-group-header-*` (полоса группы), `--category-header-*`
+  (хедер страницы; description-color по темам), `--category-subtitle-bg/-text` —
+  алиасы цветов хедера группы (тема, перекрашивающая полосу, красит и сабтайтл),
+  `--forum-view-btn-danger-*` (Delete в toolbar). `--topic-list-head-*` удалены —
+  геометрия сабтайтла литерально в классе.
+- Обёртки без Bootstrap: `#forum-view` корень категории (`data-forum-id`),
+  `#forum-topic-list` > `.topic-list`, `#forum-pagination-bottom` + `.forum-view-pagination`
+  (border-top внутри карточки), `.forum-view-error`, `.forum-view-empty-actions`,
+  `.forum-view-footer/.forum-view-back`; toolbar — `.management-toolbar-count/-divider/-hint`,
+  кнопки `.forum-view-action-btn--secondary/--danger` + `.forum-view-action-label`
+  (иконка < 992px, иконка+текст ≥ 992px).
+
 ### Структура стилей (куда что класть)
+
 | Файл | Зона ответственности |
 |---|---|
 | `src/styles/theme-variables.css` | Все семантические токены (`--*`), значения по умолчанию на `body` + переопределения `body[data-theme='dark'/'light'/'neutral']`. Никаких правил layout здесь — только переменные. `body`, а не `:root`: см. «Фикс тёмной темы Категории» в статусе Этапа 2. |
 | `src/styles/layout.css` | Каркас: `#forum-wrapper`, `#forum`, `#forum-header`, `#forum-title`, `#forum-nav`, `#forum-user-links`, `#forum-status`, `#forum-announcement`, `#forum-about`, футер. |
-| `src/styles/forum-index.css` | Главная: `#forum-index`, `#forum-main`, `.forum-category`, `.category-header`, `.forum-item`, `.forum-last-post`, скелетоны главной. |
+| `src/styles/forum-index.css` | Главная: `#forum-index`, `#forum-main`, `.forum-category`, `.category-group-header/.category-group-title`, `.category-group-subtitle`, общие ячейки `.category-col--*` (главная + сабтайтлы списков), `.forum-item` (+`.forum-item--topic` для строк категории), `.forum-last-post`, скелетоны главной. |
 | `src/styles/forum-stats.css` | `ForumStats`: `#forum-statistics`, `.forum-stats-card`, `.stats-*`, `.online-*`. |
-| `src/styles/forum-view.css` | Страница категории + списки тем: `#forum-view`, `#forum-view-header`, `#forum-actions-top`, `#forum-pagination-*`, `#forum-topic-list`, `.topic-list-head`, `.forum-view-empty`, `.forum-view-back`, `.management-toolbar*`, `.forum-view-spinner`, `.topic-select-input`, классы скелетонов списка. |
+| `src/styles/forum-view.css` | Страница категории + списки тем: `#forum-view`, `#forum-view-header` + `.category-header(-title/-description/-actions)`, `#forum-actions-top`, `#forum-pagination-*`, `#forum-topic-list`, `.category-subtitle` (+`.has-check/.has-category`), `.forum-view-empty`, `.forum-view-back`, `.management-toolbar*`, `.forum-view-spinner`, `.topic-select-input`, классы скелетонов списка. |
 | `src/styles/topic-row.css` | `TopicRow` (общий атом списков): `.topic-item`, `.topic-main/head/title/description/meta`, `.topic-category`, `.topic-replies`, `.topic-last-post`, `.mini-pagination`, `.unread-dot`. |
 | `src/styles/author-meta.css` | `AuthorMeta` + `LastPostInfo`: `.author-meta`, `.author-meta__date`, `.author-meta__identity`, `.author-meta__avatar`, `.author-meta__name`, `.last-post-link-meta`, `.last-post-meta`, `.last-post-empty`. |
 | `src/styles/forum-pagination.css` | `ForumPagination` (общий атом): `.forum-pagination`, `.page-item/.page-link` состояния. Импортируется только из `main.jsx`; локальный `ForumPagination.css` удалён (был `@import`-редирект). |
@@ -99,7 +164,7 @@
 ### Расхождения с исходными спринтами (факт vs план)
 > Ветвления `isThemeable ? new : old` нет — семантический DOM всегда (решение Этапа 1). Имена ниже — фактические.
 
-- `CategoryPage`: корень `<main id="forum-view">`; header `#forum-view-header` (не `#forum-header`), title `.forum-view-title`, список `<section id="forum-topic-list">`, шапка `.topic-list-head` + `.topic-col-topic/.topic-col-category/.topic-col-replies/.topic-col-lastpost` (не `.topic-list-header/.topic-column`); пагинация `#forum-pagination-top/bottom` + `.forum-view-pagination`; `#forum-actions-bottom`/`#forum-breadcrumbs-bottom` нет — только `.forum-view-footer/.forum-view-back`.
+- `CategoryPage`: корень `<main id="forum-view">`; header `#forum-view-header` (не `#forum-header`), title `.category-header-title`, список `<section id="forum-topic-list">`, шапка `.category-subtitle` + `.category-col--topic/.category-col--category/.category-col--replies/.category-col--lastpost` (не `.topic-list-header/.topic-column`); пагинация `#forum-pagination-top/bottom` + `.forum-view-pagination`; `#forum-actions-bottom`/`#forum-breadcrumbs-bottom` нет — только `.forum-view-footer/.forum-view-back`.
 - `TopicRow`: pinned → `.is-pinned` (не `.is-sticky`); `data-category-id` на article; колонки views нет; mini-pagination — `.mini-pagination` внутри `.topic-head`.
 - Списки тем: отдельных `#*-page/#*-list` нет — общий `#forum-view/#forum-topic-list`, различие только `data-forum-id`.
 

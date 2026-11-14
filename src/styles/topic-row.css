@@ -34,15 +34,22 @@
   transition: background-color 0.15s ease;
 }
 
-.topic-item:last-child { border-bottom: none; }
-.topic-item:hover { background-color: var(--topic-item-hover-bg); }
-.topic-item.is-selected { background-color: var(--topic-item-selected-bg); }
+.topic-item:last-child {
+  border-bottom: none;
+}
+
+.topic-item:hover {
+  background-color: var(--topic-item-hover-bg);
+}
+
+.topic-item.is-selected {
+  background-color: var(--topic-item-selected-bg);
+}
 
 .topic-select {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding-right: 0.5rem;
 }
 
 .topic-main {
@@ -67,8 +74,13 @@
   opacity: 0.7;
 }
 
-.topic-pinned { color: var(--topic-pinned-color); }
-.topic-locked { color: var(--topic-locked-color); }
+.topic-pinned {
+  color: var(--topic-pinned-color);
+}
+
+.topic-locked {
+  color: var(--topic-locked-color);
+}
 
 .topic-title {
   margin: 0;
@@ -90,7 +102,9 @@
 }
 
 .topic-title a:hover,
-.topic-title a:focus { color: var(--topic-title-hover-color); }
+.topic-title a:focus {
+  color: var(--topic-title-hover-color);
+}
 
 /* Locked state is conveyed by the red lock icon
    (.topic-locked on .topic-icon) only; the title keeps the
@@ -143,27 +157,28 @@
   min-width: 0;
 }
 
-.topic-category--inline { }
-@media (max-width: 768px) {
-  .topic-category--inline {
-    display: flex;
-    margin-top: 0.35rem;
-  }
-}
+/* The inline category name under the title is gone entirely: on desktop
+   the dedicated .topic-category column owns the name, on mobile the name
+   sits in .topic-mobile-stats (see TopicRow). */
 
 .topic-category a {
   color: var(--topic-category-color);
   text-decoration: none;
   font-size: 0.875rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Category names wrap (long titles + long nicknames) — only the
+     numeric counter columns are locked to one line. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .topic-category a:hover,
-.topic-category a:focus { color: var(--topic-category-hover-color); }
+.topic-category a:focus {
+  color: var(--topic-category-hover-color);
+}
 
-.topic-mobile-stats { display: none; }
+.topic-mobile-stats {
+  display: none;
+}
 
 /* Mini pagination ([1 2 3 … 9]) */
 .topic-pagination,
@@ -193,7 +208,7 @@
 
 .mini-page-link:hover,
 .mini-page-link:focus {
-  background: var(--mini-pagination-hover-bg);
+  /* background: var(--mini-pagination-hover-bg); */
   color: var(--mini-pagination-hover-color);
 }
 
@@ -204,13 +219,50 @@
   font-weight: 400;
 }
 
-.topic-count { display: inline-block; }
+.topic-count {
+  display: inline-block;
+}
 
 .topic-last-post {
   display: flex;
   flex-direction: column;
   background-color: var(--topic-last-post-bg);
   min-width: 0;
+}
+
+/* ── Shared mobile LAST POST strip (.last-post-strip) ────────────
+   ONE class for every mobile strip: .forum-last-post (main page +
+   category rows) and .topic-last-post (TopicRow lists). Any visual
+   change to the strip happens HERE, once — never in page files.
+   Must sit AFTER the .topic-last-post base rule above. */
+@media (max-width: 768px) {
+  .last-post-strip {
+    padding: 1rem 1.25rem 1.25rem;
+    margin-left: -1.25rem;
+    margin-right: -1.25rem;
+    margin-bottom: -1.25rem;
+    background-color: var(--topic-last-post-mobile-bg);
+    border-top: 1px solid var(--topic-last-post-mobile-border);
+    min-width: 0;
+  }
+
+  .last-post-strip::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.65rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--topic-meta-color);
+    letter-spacing: 0.05em;
+  }
+
+  /* Hover highlight hugs the content — not a full-width bar. */
+  .last-post-strip .last-post-link-meta {
+    align-self: flex-start;
+    width: auto;
+    max-width: 100%;
+  }
 }
 
 /* Cross-page state (LastPostInfo unread marker) */
@@ -234,15 +286,39 @@
 }
 
 .topic-item.is-managing {
-  grid-template-columns: 36px minmax(260px, 1fr) 100px minmax(200px, 35%);
+  grid-template-columns: 32px minmax(260px, 1fr) 100px minmax(200px, 35%);
 }
 
 .topic-item.is-managing.has-category {
-  grid-template-columns: 36px minmax(260px, 1fr) 140px 100px minmax(200px, 35%);
+  grid-template-columns: 32px minmax(260px, 1fr) 140px 100px minmax(200px, 35%);
+}
+
+/* ── Medium viewport (<993px): narrower counters ───────────────
+   Same narrowing as the subtitle (.category-subtitle) and the
+   category-page rows — placed after every base grid rule so the
+   cascade wins. At ≤768px the card layout below ignores columns. */
+@media screen and (max-width: 993px) {
+
+  .topic-item {
+    grid-template-columns: minmax(220px, 1fr) 80px minmax(200px, 35%);
+  }
+
+  .topic-item.has-category {
+    grid-template-columns: minmax(220px, 1fr) 140px 80px minmax(200px, 35%);
+  }
+
+  .topic-item.is-managing {
+    grid-template-columns: 32px minmax(220px, 1fr) 80px minmax(200px, 35%);
+  }
+
+  .topic-item.is-managing.has-category {
+    grid-template-columns: 32px minmax(220px, 1fr) 140px 80px minmax(200px, 35%);
+  }
 }
 
 /* ── Mobile (max-width: 768px): card layout ─────────────────── */
 @media (max-width: 768px) {
+
   .topic-item,
   .topic-item.has-category,
   .topic-item.is-managing,
@@ -253,12 +329,30 @@
     padding: 1.25rem 1.25rem;
   }
 
-  .topic-item:hover { background-color: transparent; }
+  .topic-item:hover {
+    background-color: transparent;
+  }
 
-  .topic-main { padding-right: 0; padding-bottom: 0.25rem; }
-  .topic-title a { font-size: 1.1rem; }
-  .topic-description { font-size: 14px; line-height: 1.5; }
-  .topic-replies { display: none; }
+  .topic-main {
+    padding-right: 0;
+    padding-bottom: 0.25rem;
+    /* Air between the title / description / stats lines of the card. */
+    gap: 0.4rem;
+  }
+
+  .topic-title a {
+    font-size: 1.1rem;
+  }
+
+  .topic-description {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .topic-replies {
+    display: none;
+  }
+
   /* Mobile card layout: the author/date line duplicates the
      last-post meta below and has no other content, so the whole
      .topic-meta wrapper is removed from the flow (not just its
@@ -274,21 +368,32 @@
   .topic-mobile-stats {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 0.75rem;
-    margin-top: 0.3rem;
+    margin-top: 0.2rem;
     font-size: 14px;
     font-weight: 600;
     color: var(--topic-meta-color);
   }
 
-  .topic-last-post {
-    padding: 1rem 1.25rem 1.25rem;
-    margin-left: -1.25rem;
-    margin-right: -1.25rem;
-    margin-bottom: -1.25rem;
-    background-color: var(--topic-last-post-mobile-bg);
-    border-top: 1px solid var(--topic-last-post-mobile-border);
+  /* Category name shares the stats line (count left, category right). */
+  .topic-mobile-category {
+    color: var(--topic-category-color);
+    font-size: 0.875rem;
+    font-weight: 400;
+    text-decoration: none;
+    text-align: right;
+    overflow-wrap: anywhere;
   }
+
+  .topic-mobile-category:hover,
+  .topic-mobile-category:focus {
+    color: var(--topic-category-hover-color);
+  }
+
+  /* The mobile LAST POST strip chrome moved to the shared
+     .last-post-strip class (see above) — both .topic-last-post and
+     .forum-last-post carry it. */
 
   .topic-last-post::before {
     content: attr(data-label);
@@ -301,4 +406,3 @@
     letter-spacing: 0.05em;
   }
 }
-
