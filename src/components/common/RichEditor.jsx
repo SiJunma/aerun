@@ -5,7 +5,7 @@ import {
   Bold, Italic, Underline, Strikethrough, Link as LinkIcon, Image as ImageIcon,
   Quote, Undo, Redo, Palette, ALargeSmall, Columns, Dices, Clapperboard,
   Youtube, EyeOff, Minus, Smile, AlignLeft, AlignCenter, AlignRight,
-  AlignJustify, Keyboard, MoreHorizontal, Superscript, Subscript, HelpCircle, Code
+  AlignJustify, Keyboard, MoreHorizontal, Superscript, Subscript, HelpCircle, Code, CodeXml, Table as TableIcon
 } from 'lucide-react';
 import { useI18n } from '../../contexts/I18nProvider';
 import SmilesPicker from './SmilesPicker';
@@ -42,6 +42,8 @@ const RichEditor = forwardRef(({
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [showColumnsModal, setShowColumnsModal] = useState(false);
   const [columnsData, setColumnsData] = useState({ count: 2, stack: '768' });
+  const [showTableModal, setShowTableModal] = useState(false);
+  const [tableData, setTableData] = useState({ rows: 3, cols: 2, layout: 'auto', width: '100%', border: '', noBorders: false });
   const [showHotkeysModal, setShowHotkeysModal] = useState(false);
   const [showSmilesModal, setShowSmilesModal] = useState(false);
   const [showAbbrModal, setShowAbbrModal] = useState(false);
@@ -298,7 +300,7 @@ const RichEditor = forwardRef(({
       { id: 'links', priority: 4, width: 45 },
       { id: 'typography', priority: 5, width: 100 },
       { id: 'align', priority: 6, width: 145 },
-      { id: 'inserts', priority: 7, width: 160 },
+      { id: 'inserts', priority: 7, width: 205 },
       { id: 'media', priority: 8, width: 85 },
       { id: 'advanced', priority: 9, width: (showHide ? 45 : 0) + (showDice && !isEdit ? 45 : 0) + 75 }
     ];
@@ -366,10 +368,10 @@ const RichEditor = forwardRef(({
         case 'KeyI': e.preventDefault(); insertText('[i]', '[/i]'); break;
         case 'KeyU': e.preventDefault(); insertText('[u]', '[/u]'); break;
         case 'KeyS': e.preventDefault(); insertText('[s]', '[/s]'); break;
-        case 'KeyL': e.preventDefault(); insertText('[left]', '[/left]'); break;
-        case 'KeyR': e.preventDefault(); insertText('[right]', '[/right]'); break;
-        case 'KeyE': e.preventDefault(); insertText('[center]', '[/center]'); break;
-        case 'KeyJ': e.preventDefault(); insertText('[justify]', '[/justify]'); break;
+        case 'KeyL': e.preventDefault(); insertText('[align=left]', '[/align]'); break;
+        case 'KeyR': e.preventDefault(); insertText('[align=right]', '[/align]'); break;
+        case 'KeyE': e.preventDefault(); insertText('[align=center]', '[/align]'); break;
+        case 'KeyJ': e.preventDefault(); insertText('[align=justify]', '[/align]'); break;
         case 'KeyK': e.preventDefault(); openLinkModal(); break;
         case 'KeyG': e.preventDefault(); insertText('', '', 'spoiler'); break;
         case 'KeyH': e.preventDefault(); openHideModal(); break;
@@ -652,6 +654,26 @@ const RichEditor = forwardRef(({
     setShowColumnsModal(false);
   };
 
+  const openTableModal = () => {
+    setTableData({ rows: 3, cols: 2, layout: 'auto', width: '100%', border: '', noBorders: false });
+    setShowTableModal(true);
+  };
+
+  const handleTableSubmit = () => {
+    const { rows, cols, layout, width, border, noBorders } = tableData;
+    let before = `[table${layout ? ` layout=${layout}` : ''}${width ? ` width=${width}` : ''}${noBorders ? ' border=0' : border ? ` border=${border}` : ''}]\n`;
+    for (let r = 0; r < rows; r++) {
+      before += `[tr]`;
+      for (let c = 0; c < cols; c++) {
+        before += `[td][/td]`;
+      }
+      before += `[/tr]\n`;
+    }
+    before += `[/table]`;
+    insertText(before, '', 'table');
+    setShowTableModal(false);
+  };
+
   // The mention picker.
 //
 // THIS USED TO BE `pb.collection('users').getList(1, 5, { filter: nickname ~ … })`
@@ -863,22 +885,22 @@ const handleUserSearch = async (queryText) => {
       case 'align':
         return isOverflow ? (
           <>
-            <Dropdown.Item onClick={() => insertText('[left]', '[/left]')} className="d-flex align-items-center gap-2 py-2 px-3">
+            <Dropdown.Item onClick={() => insertText('[align=left]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
               <AlignLeft size={16} /> {t('editor.align_left')}
             </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[center]', '[/center]')} className="d-flex align-items-center gap-2 py-2 px-3">
+            <Dropdown.Item onClick={() => insertText('[align=center]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
               <AlignCenter size={16} /> {t('editor.align_center')}
             </Dropdown.Item>
-            <Dropdown.Item onClick={() => insertText('[right]', '[/right]')} className="d-flex align-items-center gap-2 py-2 px-3">
+            <Dropdown.Item onClick={() => insertText('[align=right]', '[/align]')} className="d-flex align-items-center gap-2 py-2 px-3">
               <AlignRight size={16} /> {t('editor.align_right')}
             </Dropdown.Item>
             <Dropdown.Divider />
           </>
         ) : (
           <div className="d-flex align-items-center gap-1">
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[left]', '[/left]')} title="Left"><AlignLeft size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[center]', '[/center]')} title="Center"><AlignCenter size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[right]', '[/right]')} title="Right"><AlignRight size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=left]', '[/align]')} title="Left"><AlignLeft size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=center]', '[/align]')} title="Center"><AlignCenter size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[align=right]', '[/align]')} title="Right"><AlignRight size={16} /></Button>
           </div>
         );
       case 'inserts':
@@ -893,8 +915,11 @@ const handleUserSearch = async (queryText) => {
             <Dropdown.Item onClick={openAbbrModal} className="d-flex align-items-center gap-2 py-2 px-3">
               {t('editor.abbreviation')}
             </Dropdown.Item>
+            <Dropdown.Item onClick={() => insertText('[code]', '[/code]', 'code')} className="d-flex align-items-center gap-2 py-2 px-3">
+              <Code size={16} /> {t('editor.code_block')}
+            </Dropdown.Item>
             <Dropdown.Item onClick={() => insertText('[html]', '[/html]')} className="d-flex align-items-center gap-2 py-2 px-3">
-              <Code size={16} /> HTML
+              <CodeXml size={16} /> HTML
             </Dropdown.Item>
           </>
         ) : (
@@ -902,7 +927,16 @@ const handleUserSearch = async (queryText) => {
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'quote')} title="Quote"><Quote size={16} /></Button>
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('', '', 'spoiler')} title="Spoiler"><Clapperboard size={15} /></Button>
             <Button variant="light" size="sm" className="p-1 px-2" onClick={openAbbrModal} title={t('editor.abbreviation')}><HelpCircle size={16} /></Button>
-            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[html]', '[/html]')} title="HTML"><Code size={16} /></Button>
+            <Button
+              variant="light"
+              size="sm"
+              className="p-1 px-2"
+              onClick={() => insertText('[code]', '[/code]', 'code')}
+              title={t('editor.code_block')}
+            >
+              <Code size={16} />
+            </Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={() => insertText('[html]', '[/html]')} title="HTML"><CodeXml size={16} /></Button>
           </div>
         );
       case 'media':
@@ -927,6 +961,9 @@ const handleUserSearch = async (queryText) => {
             <Dropdown.Item onClick={() => setShowColumnsModal(true)} className="d-flex align-items-center gap-2 py-2 px-3">
               <Columns size={16} /> {t('editor.columns')}
             </Dropdown.Item>
+            <Dropdown.Item onClick={openTableModal} className="d-flex align-items-center gap-2 py-2 px-3">
+              <TableIcon size={16} /> {t('editor.table')}
+            </Dropdown.Item>
             {showHide && (
               <Dropdown.Item onClick={openHideModal} className="d-flex align-items-center gap-2 py-2 px-3">
                 <EyeOff size={16} /> {t('editor.hide')}
@@ -944,6 +981,7 @@ const handleUserSearch = async (queryText) => {
         ) : (
           <div className="d-flex align-items-center gap-1">
             <Button variant="light" size="sm" className="p-1 px-2" onClick={() => setShowColumnsModal(true)} title={t('editor.columns')}><Columns size={16} /></Button>
+            <Button variant="light" size="sm" className="p-1 px-2" onClick={openTableModal} title={t('editor.table')}> <TableIcon size={16} /></Button>
             {showHide && (
               <Button variant="light" size="sm" className="p-1 px-2" onClick={openHideModal} title={t('editor.hide')}><EyeOff size={16} /></Button>
             )}
@@ -1378,6 +1416,111 @@ const handleUserSearch = async (queryText) => {
           </Form.Select>
           <Form.Text className="text-muted small mt-1 d-block">
             {t('editor.columns_hint')}
+          </Form.Text>
+        </Form.Group>
+      </ForumModal>
+
+      <ForumModal
+        show={showTableModal}
+        onHide={() => closeModalWithFocus(setShowTableModal)}
+        title={t('editor.table_modal_title')}
+        footer={
+          <>
+            <Button variant="outline-secondary" onClick={() => closeModalWithFocus(setShowTableModal)}>
+              {t('editor.link_cancel')}
+            </Button>
+            <Button variant="primary" onClick={handleTableSubmit}>
+              {t('editor.table_apply')}
+            </Button>
+          </>
+        }
+      >
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_rows_label')}</Form.Label>
+          <Form.Select
+            value={tableData.rows}
+            onChange={(e) => setTableData({ ...tableData, rows: parseInt(e.target.value) })}
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+            <option value={5}>5</option>
+            <option value={6}>6</option>
+            <option value={7}>7</option>
+            <option value={8}>8</option>
+            <option value={9}>9</option>
+            <option value={10}>10</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_cols_label')}</Form.Label>
+          <Form.Select
+            value={tableData.cols}
+            onChange={(e) => setTableData({ ...tableData, cols: parseInt(e.target.value) })}
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+            <option value={5}>5</option>
+            <option value={6}>6</option>
+            <option value={7}>7</option>
+            <option value={8}>8</option>
+            <option value={9}>9</option>
+            <option value={10}>10</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_layout_label')}</Form.Label>
+          <Form.Select
+            value={tableData.layout}
+            onChange={(e) => setTableData({ ...tableData, layout: e.target.value })}
+          >
+            <option value="auto">{t('editor.table_layout_auto')}</option>
+            <option value="fixed">{t('editor.table_layout_fixed')}</option>
+            <option value="revert">{t('editor.table_layout_revert')}</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_width_label')}</Form.Label>
+          <Form.Control
+            type="text"
+            value={tableData.width}
+            onChange={(e) => setTableData({ ...tableData, width: e.target.value })}
+            placeholder="100%"
+          />
+          <Form.Text className="text-muted small mt-1 d-block">
+            {t('editor.table_width_hint')}
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>{t('editor.table_border_label')}</Form.Label>
+          <Form.Control
+            type="text"
+            value={tableData.border}
+            onChange={(e) => setTableData({ ...tableData, border: e.target.value })}
+            placeholder="#cccccc"
+          />
+          <Form.Text className="text-muted small mt-1 d-block">
+            {t('editor.table_border_hint')}
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Check
+            type="checkbox"
+            id="table-no-borders"
+            label={t('editor.table_no_borders')}
+            checked={tableData.noBorders}
+            onChange={(e) => setTableData({ ...tableData, noBorders: e.target.checked })}
+          />
+          <Form.Text className="text-muted small mt-1 d-block">
+            {t('editor.table_no_borders_hint')}
           </Form.Text>
         </Form.Group>
       </ForumModal>
