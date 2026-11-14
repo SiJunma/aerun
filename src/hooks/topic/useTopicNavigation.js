@@ -5,7 +5,7 @@ import { useCallback } from 'react';
  * highlighting targets, and scrolling to the reply form.
  */
 export const useTopicNavigation = () => {
-  const scrollToPost = useCallback((postId, { behavior = 'smooth', block = 'center', highlight = true } = {}) => {
+  const scrollToPost = useCallback((postId, { behavior = 'smooth', block = 'start', highlight = true } = {}) => {
     if (!postId) return false;
     const el = document.getElementById(`post-${postId}`);
     if (el) {

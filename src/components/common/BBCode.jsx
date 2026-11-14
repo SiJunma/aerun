@@ -567,7 +567,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
                       const el = document.getElementById(`post-${postId}`);
                       if (el) {
                         // Post is on this page — just scroll, no navigation
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         el.classList.add('highlight-new-post');
                         setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
                       } else {
