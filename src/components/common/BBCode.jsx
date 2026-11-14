@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Dices, EyeOff, Reply } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Dices, EyeOff, Reply } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import { useToast } from '../../contexts/ToastProvider';
 import { ALL_SMILES_MAP } from '../../config/smiles';
 
 /**
@@ -304,10 +305,52 @@ const safeHtmlToReact = (htmlStr, index, isAdminAuthor) => {
   }
 };
 
+/**
+ * Одиночный блок кода [code][/code] со своим состоянием копирования.
+ * Каждый экземпляр имеет независимое состояние `copied`, поэтому нажатие
+ * на одну кнопку не затрагивает остальные блоки кода в том же посте.
+ */
+const CodeBlock = ({ rawText, t, showToast }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(rawText);
+      setCopied(true);
+      showToast(t('bbcode.code_copied', 'Код скопирован'), 'success');
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showToast(t('bbcode.code_copy_failed', 'Не удалось скопировать'), 'error');
+    }
+  };
+
+  return (
+    <div className="bbcode-code-wrapper">
+      <pre className="bbcode-code">
+        {rawText}
+      </pre>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="bbcode-copy-btn"
+        aria-label={t('bbcode.code_copy', 'Копировать код')}
+        title={copied ? t('bbcode.code_copied', 'Код скопирован') : t('bbcode.code_copy', 'Копировать код')}
+      >
+        {copied ? (
+          <span className="bbcode-copy-check">✓</span>
+        ) : (
+          <Copy size={13} strokeWidth={1.8} />
+        )}
+      </button>
+    </div>
+  );
+};
+
 const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) => {
   const navigate = useNavigate();
   const { user, profile, hasPermission, PERMISSIONS, settings } = useAuth() || {};
   const { t } = useI18n();
+  const { showToast } = useToast();
   if (typeof children !== 'string') return children;
 
   // 0. Preprocess text to wrap smile shortcodes into [smile] tags
@@ -351,7 +394,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
   // 2. Build a tree structure using a stack
   const root = { type: 'root', children: [] };
   const stack = [root];
-  const supportedTags = ['b', 'i', 'u', 's', 'strike', 'del', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hide_secured', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'left', 'center', 'right', 'justify'];
+  const supportedTags = ['b', 'i', 'u', 's', 'strike', 'del', 'quote', 'list', '*', 'url', 'img', 'color', 'size', 'columns', 'col', 'dice', 'roll', 'spoiler', 'video', 'youtube', 'media', 'hide', 'hide_secured', 'hr', 'smile', 'code', 'sup', 'sub', 'abbr', 'html', 'align', 'left', 'center', 'right', 'justify', 'table', 'tr', 'td'];
 
   tokens.forEach(token => {
     let parent = stack[stack.length - 1];
@@ -407,20 +450,31 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
   // them glued the following text to the chip (the "[dice=6]\nтекст" report):
   // with white-space:pre-wrap the break must survive, so a tag authored on
   // its own line keeps its own line.
-  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'video', 'youtube', 'media', 'hr', 'left', 'center', 'right', 'justify', 'code', 'html', 'hide', 'hide_secured'];
-  function preprocessNodes(nodes) {
+  const blockTags = ['quote', 'list', '*', 'columns', 'col', 'spoiler', 'video', 'youtube', 'media', 'hr', 'align', 'left', 'center', 'right', 'justify', 'code', 'html', 'hide', 'hide_secured', 'table', 'tr'];
+  // `insideCode` — когда мы внутри [code][/code], переносы строк и пустые
+  // строки являются значимым содержимым и НЕ должны вырезаться.
+  function preprocessNodes(nodes, insideCode = false) {
     const result = [...nodes];
     for (let i = 0; i < result.length; i++) {
       const node = result[i];
       if (typeof node !== 'string' && blockTags.includes(node.name)) {
-        // Absorption: remove ONE newline after the block tag
-        if (i < result.length - 1 && typeof result[i + 1] === 'string') {
-          result[i + 1] = result[i + 1].replace(/^\r?\n/, '');
+        // Absorption: remove ONE newline after the block tag — never inside [code]
+        // Never absorb the newline between two [code] blocks, otherwise text
+        // sitting between them gets swallowed.
+        if (!insideCode && i < result.length - 1 && typeof result[i + 1] === 'string') {
+          const nextIsCodeBlock =
+            i < result.length - 2 &&
+            typeof result[i + 2] !== 'string' &&
+            result[i + 2].name === 'code';
+          if (!nextIsCodeBlock) {
+            result[i + 1] = result[i + 1].replace(/^\r?\n/, '');
+          }
         }
       }
       // Recursively preprocess children of tags
       if (typeof node !== 'string' && node.children) {
-        if (blockTags.includes(node.name)) {
+        const isBlockOrTd = blockTags.includes(node.name) || node.name === 'td';
+        if (isBlockOrTd && !insideCode) {
           // Remove leading newlines only (preserving indent spaces)
           if (node.children.length > 0 && typeof node.children[0] === 'string') {
             node.children[0] = node.children[0].replace(/^[\r\n]+/, '');
@@ -431,14 +485,62 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
             node.children[lastIdx] = node.children[lastIdx].replace(/[\r\n]+$/, '');
           }
         }
-        node.children = preprocessNodes(node.children);
+        node.children = preprocessNodes(node.children, insideCode || node.name === 'code');
       }
     }
-    // Filter out truly empty strings to prevent "phantom" spans/lines
-    return result.filter(n => typeof n !== 'string' || n.length > 0);
+    // Never drop empty strings on the top level: text between two [code]
+    // blocks (including a bare newline) must survive to the renderer.
+    return result;
   }
 
   const processedTree = preprocessNodes(root.children);
+
+  // Extract text nodes that are direct children of <table> or <tr> (not inside <td>).
+  // HTML does not allow text as a direct child of <tr>, so MyBB moves such text
+  // before the table. We do the same here to avoid hydration errors and wrong placement.
+  let orphanTexts = [];
+  // Та же причина, что и в preprocessNodes: внутри [code] переносы и пустые
+  //строки — значимое содержимое, а не «осиротевший» текст таблицы.
+  function extractTableOrphanText(nodes, insideCode = false) {
+    for (const node of nodes) {
+      if (typeof node === 'string') continue;
+      if (node.name === 'table') {
+        const kept = [];
+        for (const child of node.children) {
+          if (typeof child === 'string') {
+            if (insideCode) {
+              kept.push(child);
+            } else if (child.trim().length > 0) {
+              orphanTexts.push(child);
+            }
+          } else if (child.name === 'tr') {
+            const keptTd = [];
+            for (const grandchild of child.children) {
+              if (typeof grandchild === 'string') {
+                if (insideCode) {
+                  keptTd.push(grandchild);
+                } else if (grandchild.trim().length > 0) {
+                  orphanTexts.push(grandchild);
+                }
+              } else if (grandchild.name === 'td') {
+                keptTd.push(grandchild);
+              } else {
+                keptTd.push(grandchild);
+              }
+            }
+            child.children = keptTd;
+            kept.push(child);
+          } else {
+            kept.push(child);
+          }
+        }
+        node.children = kept;
+      } else {
+        extractTableOrphanText(node.children, insideCode || node.name === 'code');
+      }
+    }
+  }
+  extractTableOrphanText(processedTree);
 
   // 4. Render the tree to React elements
   function getTextContent(node) {
@@ -450,6 +552,15 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
     if (typeof node === 'string') return node;
     const inner = (node.children || []).map(getRawContent).join('');
     const closing = node.name !== 'dice' && node.name !== 'roll' && node.name !== 'hr';
+    // Alignment tags are always serialized in the new [align=<value>] format
+    // (MyBB compatibility), regardless of the original syntax ([center] / [align=center]).
+    const alignNames = { left: 'left', center: 'center', right: 'right', justify: 'justify' };
+    if (node.name === 'align' || node.name in alignNames) {
+      const value = node.name === 'align' ? (node.rawParams || 'left') : alignNames[node.name];
+      const valid = ['left', 'center', 'right', 'justify'].includes(value) ? value : 'left';
+      const openTag = `[align=${valid}]`;
+      return `${openTag}${inner}${closing ? '[/align]' : ''}`;
+    }
     const openTag = node.rawTag || `[${node.name}]`;
     return `${openTag}${inner}${closing ? `[/${node.name}]` : ''}`;
   }
@@ -567,7 +678,7 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
                       const el = document.getElementById(`post-${postId}`);
                       if (el) {
                         // Post is on this page — just scroll, no navigation
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         el.classList.add('highlight-new-post');
                         setTimeout(() => el.classList.remove('highlight-new-post'), 2000);
                       } else {
@@ -672,6 +783,14 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
       case 'center': return <div key={index} className="text-center">{content}</div>;
       case 'right': return <div key={index} className="text-end">{content}</div>;
       case 'justify': return <div key={index} style={{ textAlign: 'justify' }}>{content}</div>;
+      case 'align': {
+        const value = (params.default || 'left').toLowerCase();
+        if (value === 'left') return <div key={index} className="text-start">{content}</div>;
+        if (value === 'center') return <div key={index} className="text-center">{content}</div>;
+        if (value === 'right') return <div key={index} className="text-end">{content}</div>;
+        if (value === 'justify') return <div key={index} style={{ textAlign: 'justify' }}>{content}</div>;
+        return <div key={index} className="text-start">{content}</div>;
+      }
       case 'dice': {
         const sides = params.default || '20';
         return (
@@ -907,10 +1026,19 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
         );
       }
       case 'code': {
+        // Render code block content as raw text: nothing inside [code][/code]
+        // is interpreted — neither nested BBCode tags, nor HTML markup.
+        // Plain text chunks pass through verbatim, and nested tag nodes are
+        // serialised back to their literal BBCode text (e.g. [b]…[/b]),
+        // so the block shows exactly what was typed between [code] and [/code].
+        // React escapes the resulting text when it hits the DOM, so any HTML
+        // inside is displayed literally and never rendered as markup.
+        const rawText = (node.children || []).map((child) =>
+          typeof child === 'string' ? child : getRawContent(child)
+        ).join('');
+
         return (
-          <pre key={index} className="bbcode-code p-3 my-2 rounded font-monospace shadow-sm">
-            {content}
-          </pre>
+          <CodeBlock key={index} rawText={rawText} t={t} showToast={showToast} />
         );
       }
       case 'html': {
@@ -925,12 +1053,76 @@ const BBCode = ({ children, rolls = {}, isDM = false, authorId, authorRole }) =>
           </div>
         );
       }
+      case 'table': {
+        const layout = params.layout ? String(params.layout).trim() : 'auto';
+        const width = params.width ? String(params.width).trim() : undefined;
+        const border = params.border ? String(params.border).trim() : undefined;
+        const cellspacing = params.cellspacing ? String(params.cellspacing).trim() : undefined;
+        const noBorders = border === '0' || border === 'none' || border === 'false';
+        const tableStyle = {
+          width: width ? width : '100%',
+          borderCollapse: 'collapse',
+        };
+        if (!noBorders && border) tableStyle.border = `1px solid ${border}`;
+        if (cellspacing !== undefined) tableStyle.borderSpacing = cellspacing;
+        // table-layout CSS property: fixed, auto, revert
+        const validLayouts = ['fixed', 'auto', 'revert'];
+        if (validLayouts.includes(layout)) {
+          tableStyle.tableLayout = layout;
+        }
+        // Убираем whitespace-строки (переносы между BBCode-тегами), которые
+        // не могут быть прямыми детьми <table>/<tbody> в HTML.
+        const tableContent = content.filter(
+          c => typeof c !== 'string' || c.trim().length > 0
+        );
+        const tableClass = noBorders ? 'bbcode-table bbcode-table-no-borders' : 'bbcode-table';
+        return (
+          <table key={index} className={tableClass} style={tableStyle}>
+            <tbody>{tableContent}</tbody>
+          </table>
+        );
+      }
+      case 'tr': {
+        // Убираем whitespace-строки между [td] — HTML не допускает текстовые
+        // узлы как прямых детей <tr>.
+        const trContent = content.filter(
+          c => typeof c !== 'string' || c.trim().length > 0
+        );
+        return <tr key={index} className="bbcode-tr">{trContent}</tr>;
+      }
+      case 'td': {
+        const bgcolor = params.bgcolor ? String(params.bgcolor).trim() : undefined;
+        const width = params.width ? String(params.width).trim() : undefined;
+        const height = params.height ? String(params.height).trim() : undefined;
+        const valign = params.valign ? String(params.valign).trim() : undefined;
+        const align = params.align ? String(params.align).trim() : undefined;
+        const colspan = params.colspan ? parseInt(String(params.colspan), 10) : undefined;
+        const rowspan = params.rowspan ? parseInt(String(params.rowspan), 10) : undefined;
+        const tdStyle = {};
+        if (bgcolor) tdStyle.backgroundColor = bgcolor;
+        if (width) tdStyle.width = width;
+        if (height) tdStyle.height = height;
+        if (valign) tdStyle.verticalAlign = valign;
+        if (align) tdStyle.textAlign = align;
+        return (
+          <td
+            key={index}
+            className="bbcode-td"
+            style={tdStyle}
+            colSpan={colspan}
+            rowSpan={rowspan}
+          >
+            {content}
+          </td>
+        );
+      }
       default: return <span key={index}>{content}</span>;
     }
   }
 
   return (
     <div className="bbcode-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', width: '100%' }}>
+      {orphanTexts.map((text, i) => renderNode(text, i))}
       {processedTree.map((node, i) => renderNode(node, i))}
     </div>
   );

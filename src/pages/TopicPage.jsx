@@ -18,7 +18,7 @@
  * - buildPostData passing character_id
  * - handleSaveDraft and handleUpdateDraft
  */
-import React, { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nProvider';
 
@@ -61,6 +61,7 @@ import { toggleSubscription } from '../api/subscriptions';
 import { subscribeToTopicNotifications, markNotificationRead } from '../api/notifications';
 import { refreshUnreadCounts } from '../api/dms';
 import { fetchCharacter } from '../api/character';
+import { playNotificationSound } from '../utils/notificationSound';
 import { canDeleteTopic, topicDeleteErrorText } from '../utils/topic-delete';
 import { queueOptimisticPost, clearPendingOptimisticPost, resolveOptimisticPost } from '../utils/optimisticPostQueue';
 import { processDiceRolls } from '../utils/dice';
@@ -152,6 +153,7 @@ export default function TopicPage() {
     isFetchingPostsRef,
     skipNextLoadForPageRef,
     loadedPageRef,
+    readCutoffRef,
     updateLocalTopicLastPost,
     updateLocalTopicPostsCount,
   } = useTopicPageCore({
@@ -299,6 +301,7 @@ export default function TopicPage() {
 
   const pendingCreatedPostIdRef = useRef(null);
   const lastJumpIntentRef = useRef(null);
+  const prevUnreadQuotesRef = useRef(null);
 
   const postParam = searchParams.get('post');
   const goLastParam = searchParams.get('goLast');
@@ -327,6 +330,7 @@ export default function TopicPage() {
     setAlreadyJumped,
     pendingCreatedPostIdRef,
     lastJumpIntentRef,
+    readCutoffRef,
     postParam,
     goLastParam,
     hash,
@@ -671,7 +675,7 @@ export default function TopicPage() {
         setTimeout(() => {
           const element = document.getElementById(`post-${savedDraftId}`);
           if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
             element.classList.add('highlight-new-post');
             setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
           }
@@ -814,14 +818,10 @@ export default function TopicPage() {
         return [...prev, optimisticPost];
       });
 
-      setTimeout(() => {
-        const element = document.getElementById(`post-${tempId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          element.classList.add('highlight-new-post');
-          setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
-        }
-      }, 50);
+      // The unified scroll controller (useTopicJumpScroll) focuses
+      // post-${tempId} once the optimistic row is appended
+      // (pendingCreatedPostIdRef is set before the append above). No direct
+      // scroll here — it used to double-jump with the controller's scroll.
     }
 
     try {
@@ -1042,24 +1042,17 @@ export default function TopicPage() {
       }, { preventScrollReset: true, state: { pendingPostId: tempId } });
     } else {
       // Same-page send: reset the jump latch so the unified scroll controller
-      // can position on post-${newPostId} once the server confirms it
-      // (onSuccess below sets pendingCreatedPostIdRef.current).
+      // (useTopicJumpScroll) positions the viewport ONCE on post-${newPostId}
+      // after the server confirms the post (onSuccess sets
+      // pendingCreatedPostIdRef.current). Do NOT scroll to the optimistic
+      // placeholder here — that produced a double jump: optimistic post →
+      // (perceived) reply form → confirmed post.
       setAlreadyJumped(false);
 
       setPosts((prev) => {
         if (prev.some((p) => p.id === tempId)) return prev;
         return [...prev, optimisticPost];
       });
-
-      // Highlight the freshly created post on its page (legacy parity).
-      setTimeout(() => {
-        const element = document.getElementById(`post-${tempId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          element.classList.add('highlight-new-post');
-          setTimeout(() => element.classList.remove('highlight-new-post'), 1000);
-        }
-      }, 50);
     }
 
     // 3. Clear editor input immediately for snappy UX
@@ -1368,10 +1361,19 @@ export default function TopicPage() {
   useEffect(() => {
     if (!user?.uid || !id || !topic?.id || topicNotFound || topicRestricted) return;
     const unsub = subscribeToTopicNotifications(user.uid, id, (activeQuotes) => {
-      setUnreadQuotes(activeQuotes || []);
+      const next = activeQuotes || [];
+      const prev = prevUnreadQuotesRef.current;
+      setUnreadQuotes(next);
+      prevUnreadQuotesRef.current = next;
+      // New quotes/mentions arrived while the reader is in the topic — refresh
+      // the global unread counters (navbar / title / favicon) so the badge
+      // updates without a page reload.
+      if (prev === null || prev.length !== next.length) {
+        scheduleForumStateRefresh?.();
+      }
     });
     return () => unsub();
-  }, [user?.uid, id, topic?.id, topicNotFound, topicRestricted]);
+  }, [user?.uid, id, topic?.id, topicNotFound, topicRestricted, scheduleForumStateRefresh]);
 
   // Guest page fallback wait guard — contract marker for check-golast-overlay.mjs
   useEffect(() => {
@@ -1482,64 +1484,13 @@ export default function TopicPage() {
     markTopicRead(id, lastMessageIndex, lastRealPost.id);
   }, [user?.uid, id, posts, currentPage, ITEMS_PER_PAGE, markTopicRead, profile?.role]);
 
-  // 15b. Pin the reply composer under the typing caret while live updates
-  // insert or remove posts above it.
-  //
-  // A post arriving from another reader is rendered BEFORE the composer, so
-  // the form (with the member half-written reply and its focus) is pushed
-  // out of the viewport mid-keystroke. While the member is actually typing,
-  // compensate the scroll so the form and the caret stay visually still.
-  //
-  // THE BASELINE IS THE COMPOSER DOCUMENT-RELATIVE OFFSET, never its
-  // viewport position: the document offset changes ONLY when content above
-  // the composer changes, so the member own scrolling between updates can
-  // never leak into the delta (a viewport baseline turned every live update
-  // into "scroll the member back to where the FORM was" - literally throwing
-  // a reader whose focus stayed in the textarea while they scrolled up to
-  // read, to the top of the page). The compensation itself is the VIEWPORT
-  // delta, so a browser scroll anchoring that already restored the position
-  // makes it a no-op rather than a double correction. Reading without focus
-  // is never disturbed: the scroll only moves when document.activeElement
-  // lives inside the composer and the composer is on screen. replyRef points
-  // at the composer root element (forwardRef).
-  const composerDocTopRef = useRef(null);
-  useLayoutEffect(() => {
-    // While the member's own reply is in flight the local posts_count bump and
-    // optimistic insert already move content; compensating the scroll here
-    // would fight the same movement and produce jitter. Skip until the server
-    // confirms and isSubmittingReplyRef flips back to false.
-    if (isSubmittingReplyRef.current) return;
-
-    const el = replyRef.current;
-    if (!el || !el.isConnected) {
-      composerDocTopRef.current = null;
-      return;
-    }
-    const rect = el.getBoundingClientRect();
-    const docTop = rect.top + window.scrollY;
-    const prev = composerDocTopRef.current;
-    if (prev === null) {
-      composerDocTopRef.current = docTop;
-      return;
-    }
-    const deltaDoc = docTop - prev;
-    composerDocTopRef.current = docTop;
-    if (deltaDoc === 0) return; // content above the form did not move
-
-    const active = document.activeElement;
-    const typing = !!active && (active === el || el.contains(active));
-    // The form is scrolled out of view: the member is reading, not pinned to
-    // the caret - leave the scroll alone.
-    const onScreen = rect.bottom > 0 && rect.top < window.innerHeight;
-    if (typing && onScreen) {
-      // Where the form top edge sat in the viewport BEFORE the content above
-      // it moved (the scroll position itself is unchanged by a DOM mutation),
-      // and scroll only the gap the browser has not already closed for us.
-      const viewportBefore = prev - window.scrollY;
-      window.scrollBy(0, rect.top - viewportBefore);
-    }
-    // replyRef is a stable ref object; including it only satisfies the linter.
-  }, [posts, replyRef]);
+  // 15b. NO composer scroll pinning. A foreign post arriving while the
+  // member is typing must never move the page: the browser's native scroll
+  // anchoring already keeps the composer (and the caret) visually stable
+  // when content is inserted above it. Any manual scrollBy here fought the
+  // anchoring and produced the "page jumps up and down" jitter. Reading
+  // without focus is never disturbed either — the scroll simply never moves
+  // for a post that is not ours.
 
   // 16. Load posts on page change or initial topic resolution
   const loadPostsRef = useRef(loadPosts);
@@ -1589,6 +1540,12 @@ export default function TopicPage() {
 
     const currentTopicKey = `${id}|${topic.last_post_id || ''}|${topic.posts_count || 0}`;
     if (prevTopicKeyRef.current === currentTopicKey) return;
+    // The key is "id|last_post_id|posts_count": parse the OLD posts_count
+    // back out of the stored key before overwriting it. A GROWING count
+    // means a foreign post arrived — a shrinking one is a deletion, and a
+    // flat count with a new last_post_id is the opener re-filed by the
+    // header merge. Only the growing case plays the chime (fix #2b).
+    const prevPostsCount = Number(String(prevTopicKeyRef.current).split('|')[2]) || 0;
     prevTopicKeyRef.current = currentTopicKey;
 
     // A page navigation is effect 16's job; if the page changed in this same
@@ -1624,12 +1581,28 @@ export default function TopicPage() {
       return;
     }
 
+    // A foreign post arrived (posts_count grew): play a notification sound
+    // but NEVER scroll the viewport — the reader stays exactly where they
+    // were. Browser scroll anchoring keeps the composer/caret stable when
+    // content is inserted above it.
+    const currentPostsCount = Number(topic?.posts_count || 0);
+    const isForeignPostArrived = currentPostsCount > prevPostsCount;
+    if (isForeignPostArrived) {
+      const isSoundEnabled = profile?.settings?.sound?.enabled !== false;
+      if (isSoundEnabled) {
+        playNotificationSound(profile?.settings?.sound?.volume ?? 40);
+      }
+      // Refresh the global unread counters (navbar / title / favicon) so the
+      // badge reflects the new activity while the reader remains in the topic.
+      scheduleForumStateRefresh?.();
+    }
+
     // Silent refetch: the rendered page stays on screen while the request is
     // in flight (stale-while-revalidate), and loadPosts merges the server
     // answer around the still-pending optimistic cards.
     loadPostsRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, topic, topicNotFound, topicRestricted, currentPage, searchParams]);
+  }, [id, topic, topicNotFound, topicRestricted, currentPage, searchParams, scheduleForumStateRefresh]);
 
   // Render Skeleton / ErrorCard
   if (isTopicLoading) return <Skeleton />;

@@ -180,7 +180,7 @@ export const useTopicModalState = ({
       setTimeout(() => {
         const el = document.getElementById(`post-${postId}`);
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
           el.classList.add('highlight-target-post');
           setTimeout(() => el.classList.remove('highlight-target-post'), 1000);
         }

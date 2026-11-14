@@ -24,6 +24,7 @@ export const useTopicJumpScroll = ({
   setAlreadyJumped,
   pendingCreatedPostIdRef,
   lastJumpIntentRef,
+  readCutoffRef,
   postParam,
   goLastParam,
   hash,
@@ -59,14 +60,36 @@ export const useTopicJumpScroll = ({
     } else if (hash && hash.startsWith('#post-')) {
       targetId = hash.substring(1);
     } else if (goLastParam === '1') {
-      const lastPost = posts[posts.length - 1];
-      if (lastPost) targetId = `post-${lastPost.id}`;
+      // The ?goLast=1 contract resolves THIS page server-side as the one
+      // holding the first unread post, and the response echoes the read
+      // cutoff it resolved against. Aim the scroll at that post — with
+      // several unread replies the whole page is new, and dropping the
+      // reader on the page tail skips everything they came here to read.
+      // No cutoff (guest, or the topic fully read so the server fell
+      // through to the last page) keeps the previous behaviour: the last
+      // post on the page.
+      const cutoff = readCutoffRef?.current;
+      let target = null;
+      if (cutoff && cutoff.topicId === topicId) {
+        // Find the FIRST unread post by created_at_ms (oldest → newest).
+        // posts.find() alone returns the first match in array order, which
+        // may not be chronological if the page renders newest-first.
+        const unreadPosts = posts
+          .filter((p) => !p._isOptimistic && p.id && p.created_at_ms > cutoff.value)
+          .sort((a, b) => a.created_at_ms - b.created_at_ms);
+        target = unreadPosts[0] || null;
+      }
+      if (!target) {
+        // No cutoff (guest / fully read): fall back to the last post on the page.
+        target = posts[posts.length - 1] || null;
+      }
+      if (target) targetId = `post-${target.id}`;
     }
 
     if (targetId) {
       const el = document.getElementById(targetId);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         el.classList.add('highlight-target-post');
         setTimeout(() => el.classList.remove('highlight-target-post'), 2500);
         setAlreadyJumped(true);
@@ -89,7 +112,7 @@ export const useTopicJumpScroll = ({
     }
     // If targetId resolved but the DOM element isn't mounted yet (cold start),
     // we deliberately do NOT set alreadyJumped, so the next posts render retries.
-  }, [topicId, postParam, hash, goLastParam, posts, currentPage, ITEMS_PER_PAGE, setAlreadyJumped, markTopicRead, alreadyJumpedRef, pendingCreatedPostIdRef]);
+  }, [topicId, postParam, hash, goLastParam, posts, currentPage, ITEMS_PER_PAGE, setAlreadyJumped, markTopicRead, alreadyJumpedRef, pendingCreatedPostIdRef, readCutoffRef]);
 
   const navigateToCreatedPost = useCallback((tempId, postId) => {
     const currentLocation = locationRef.current;
