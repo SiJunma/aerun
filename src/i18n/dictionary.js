@@ -437,6 +437,9 @@ export const translations = {
       spoiler_default: "Spoiler",
       size_placeholder: "size",
       color_placeholder: "color",
+      code_copy: "Copy code",
+      code_copied: "Code copied",
+      code_copy_failed: "Failed to copy",
     },
 
     editor: {
@@ -1852,6 +1855,9 @@ export const translations = {
       spoiler_default: "Спойлер",
       size_placeholder: "размер",
       color_placeholder: "цвет",
+      code_copy: "Копировать код",
+      code_copied: "Код скопирован",
+      code_copy_failed: "Не удалось скопировать",
     },
 
     editor: {
