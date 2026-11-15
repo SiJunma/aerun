@@ -13,6 +13,7 @@ import { createInFlight } from '../utils/inflight';
 import { useToast } from '../contexts/ToastProvider';
 
 import { usePageTitle } from '../contexts/TitleProvider';
+import { makeStorageKey } from '../utils/storageScope';
 
 const TopicFormPage = () => {
   const { categoryId } = useParams();
@@ -45,7 +46,7 @@ const TopicFormPage = () => {
   const [pinFirstPost, setPinFirstPost] = useState(false);
   const [guestNickname, setGuestNickname] = useState(() => {
     try {
-      return localStorage.getItem('aerun_guest_nickname') || '';
+      return localStorage.getItem(makeStorageKey('guest_nickname', 'guest')) || '';
     } catch {
       return '';
     }
@@ -54,7 +55,7 @@ const TopicFormPage = () => {
   // Persist the guest nickname so it is pre-filled on the next visit.
   useEffect(() => {
     try {
-      localStorage.setItem('aerun_guest_nickname', guestNickname);
+      localStorage.setItem(makeStorageKey('guest_nickname', 'guest'), guestNickname);
     } catch {
       // localStorage may be unavailable in private mode; degrade gracefully.
     }
@@ -83,7 +84,7 @@ const TopicFormPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.last_selected_character_id, categoryId, categories, hasPermission, PERMISSIONS.USE_MASKS, user, setLastSelectedMask, settings?.enableCharacters]);
 
-  const DRAFT_KEY = `topic_draft_${categoryId}`;
+  const DRAFT_KEY = makeStorageKey(`topic_draft_${categoryId}`, user?.uid || 'guest');
 
   useEffect(() => {
     // Find category from context — independent of user (guests need it too).

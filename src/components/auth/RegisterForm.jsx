@@ -5,6 +5,7 @@ import { useI18n } from '../../contexts/I18nProvider';
 import { describeAuthError } from '../../utils/auth-errors';
 import { checkNicknameExists } from '../../api/forum';
 import { getGlobalSettings } from '../../api/admin';
+import { makeStorageKey } from '../../utils/storageScope';
 
 const RegisterForm = ({ onSuccess }) => {
   const { loginWithGoogle, registerWithEmail, settings } = useAuth();
@@ -23,10 +24,10 @@ const RegisterForm = ({ onSuccess }) => {
   const [loadingGoogle, setLoadingGoogle] = useState(false);
 
   React.useEffect(() => {
-    const error = sessionStorage.getItem('auth_error');
+    const error = sessionStorage.getItem(makeStorageKey('auth_error', 'guest'));
     if (error === 'nickname_taken_at_registration') {
       setAuthError(t('auth.error_nickname_taken_at_registration'));
-      sessionStorage.removeItem('auth_error');
+      sessionStorage.removeItem(makeStorageKey('auth_error', 'guest'));
     }
   }, [t]);
 
@@ -47,37 +48,37 @@ const RegisterForm = ({ onSuccess }) => {
         setNicknameError(t('auth.error_nickname_taken'));
         return false;
       }
-      sessionStorage.setItem('pending_nickname', nickname.trim());
+      sessionStorage.setItem(makeStorageKey('pending_nickname', 'guest'), nickname.trim());
     } else {
-      sessionStorage.removeItem('pending_nickname');
+      sessionStorage.removeItem(makeStorageKey('pending_nickname', 'guest'));
     }
 
-    sessionStorage.setItem('is_registering', 'true');
+    sessionStorage.setItem(makeStorageKey('is_registering', 'guest'), 'true');
     // Snapshot the guest-side theme/language BEFORE the OAuth redirect, so a
     // brand-new Google account can be seeded once on return (same contract as
     // the email path above). Only read here — never written back elsewhere.
     try {
-      const guestTheme = localStorage.getItem('guest_theme') || '';
-      const guestLang = lang || localStorage.getItem('language') || '';
-      if (guestTheme) sessionStorage.setItem('pending_theme', guestTheme);
-      else sessionStorage.removeItem('pending_theme');
-      if (guestLang) sessionStorage.setItem('pending_language', guestLang);
-      else sessionStorage.removeItem('pending_language');
+      const guestTheme = localStorage.getItem(makeStorageKey('guest_theme', 'guest')) || '';
+      const guestLang = lang || localStorage.getItem(makeStorageKey('language', 'guest')) || '';
+      if (guestTheme) sessionStorage.setItem(makeStorageKey('pending_theme', 'guest'), guestTheme);
+      else sessionStorage.removeItem(makeStorageKey('pending_theme', 'guest'));
+      if (guestLang) sessionStorage.setItem(makeStorageKey('pending_language', 'guest'), guestLang);
+      else sessionStorage.removeItem(makeStorageKey('pending_language', 'guest'));
     } catch {
       // Storage may be unavailable (private mode) — seeding is best-effort,
       // the live fallbacks keep rendering either way.
     }
     if (lang) {
-      sessionStorage.setItem('language', lang);
-      localStorage.setItem('language', lang);
-      sessionStorage.setItem('preferred_language', lang);
-      localStorage.setItem('preferred_language', lang);
+      sessionStorage.setItem(makeStorageKey('language', 'guest'), lang);
+      localStorage.setItem(makeStorageKey('language', 'guest'), lang);
+      sessionStorage.setItem(makeStorageKey('preferred_language', 'guest'), lang);
+      localStorage.setItem(makeStorageKey('preferred_language', 'guest'), lang);
     }
     
     if (adminMessage.trim()) {
-      sessionStorage.setItem('pending_message', adminMessage.trim());
+      sessionStorage.setItem(makeStorageKey('pending_message', 'guest'), adminMessage.trim());
     } else {
-      sessionStorage.removeItem('pending_message');
+      sessionStorage.removeItem(makeStorageKey('pending_message', 'guest'));
     }
     return true;
   };
@@ -124,8 +125,8 @@ const RegisterForm = ({ onSuccess }) => {
       await registerWithEmail(email.trim(), password, nickname.trim(), adminMessage.trim(), {
         // Seed the fresh account with what the forum shows right now, so the
         // first profile save never rewrites theme/language from a default.
-        theme: localStorage.getItem('guest_theme') || '',
-        language: lang || localStorage.getItem('language') || ''
+        theme: localStorage.getItem(makeStorageKey('guest_theme', 'guest')) || '',
+        language: lang || localStorage.getItem(makeStorageKey('language', 'guest')) || ''
       });
       // Reset before closing: if the exit transition is ever interrupted and the
       // modal remounts, it must not reopen with a stuck spinner.

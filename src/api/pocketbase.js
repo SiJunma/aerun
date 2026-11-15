@@ -1,4 +1,5 @@
 import PocketBase from 'pocketbase';
+import { makeStorageKey } from '../utils/storageScope';
 
 export const pbUrl = import.meta.env.VITE_POCKETBASE_URL || 'http://127.0.0.1:8090';
 export const pb = new PocketBase(pbUrl);
@@ -60,7 +61,7 @@ const DEAD_SESSION_STATUSES = [401];
 
 function endDeadSession() {
   try {
-    sessionStorage.setItem('deleted_logout', 'true');
+    sessionStorage.setItem(makeStorageKey('deleted_logout', 'guest'), 'true');
   } catch {
     // A browser with storage disabled (private mode, blocked cookies) cannot
     // hold the flag. The session is still cleared, and the provider's own

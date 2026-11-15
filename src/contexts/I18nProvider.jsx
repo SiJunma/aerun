@@ -8,6 +8,7 @@ import {
   isSupportedLanguage,
 } from '../i18n/languages';
 import { useAuth } from './AuthProvider';
+import { makeStorageKey } from '../utils/storageScope';
 
 const I18nContext = createContext();
 
@@ -22,7 +23,7 @@ export const I18nProvider = ({ children }) => {
   
   // Detect browser language or use saved preference
   const getInitialLang = () => {
-    const saved = localStorage.getItem('language');
+    const saved = localStorage.getItem(makeStorageKey('language', profile?.uid || 'guest'));
     if (saved && isSupportedLanguage(saved)) return saved;
 
     const browserLang = navigator.language || navigator.userLanguage;
@@ -39,7 +40,7 @@ export const I18nProvider = ({ children }) => {
 
   const setLang = async (newLang) => {
     setLangState(newLang);
-    localStorage.setItem('language', newLang);
+    localStorage.setItem(makeStorageKey('language', profile?.uid || 'guest'), newLang);
     if (profile) {
       await updateSettings({ language: newLang });
     }

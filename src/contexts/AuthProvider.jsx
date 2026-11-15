@@ -25,6 +25,7 @@ import {
 } from '../api/rtdb-presence';
 import { subscribeToUnreadCounts, refreshUnreadCounts } from '../api/dms';
 import { subscribeToRealtimeSignals, canReceiveSignals } from '../api/realtime-signals';
+import { makeStorageKey, migrateLegacyGuestStorage } from '../utils/storageScope';
 import { fetchSecuredMainPageData, INHERIT_ROLES } from '../api/categories';
 import { subscribeToRoles, getGlobalSettings } from '../api/admin';
 import { CHIEF_ADMIN_ID, PERMISSIONS, DEFAULT_ROLES, normalizePermissions, isChiefAdmin } from '../constants/permissions';
@@ -183,12 +184,12 @@ export const AuthProvider = ({ children }) => {
   // Re-reading after the write makes both tabs converge on whichever value
   // ended up stored, instead of each keeping its own.
   const getOrCreateGuestId = useCallback(() => {
-    const stored = localStorage.getItem('guest_id');
+    const stored = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (stored) return stored;
 
     const candidate = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    localStorage.setItem('guest_id', candidate);
-    return localStorage.getItem('guest_id') || candidate;
+    localStorage.setItem(makeStorageKey('guest_id', 'guest'), candidate);
+    return localStorage.getItem(makeStorageKey('guest_id', 'guest')) || candidate;
   }, []);
 
   // The caller's OWN profile: the shared normalizer plus the mailbox fallback.
@@ -443,6 +444,17 @@ export const AuthProvider = ({ children }) => {
     migrateLegacyReadMap(user.uid);
   }, [restored, user?.uid, migrateLegacyReadMap]);
 
+  // Legacy guest-storage migration: once the session has settled, copy any
+  // values left under the old unscoped keys (guest_id, guest_theme, language,
+  // auth_error, pending_*, banned_logout, deleted_logout, …) onto the new
+  // scoped keys `aerun_<scope>_<prefix>_guest`, then delete the old keys.
+  // Runs for guests and members alike; safe to repeat — missing keys are
+  // skipped and already-scoped keys are left alone.
+  useEffect(() => {
+    if (!restored) return;
+    migrateLegacyGuestStorage();
+  }, [restored, migrateLegacyGuestStorage]);
+
   // Presence and DM subscriptions. A signed-in visitor beats as a member; an
   // anonymous one beats as a guest so the stats panel can count them.
   //
@@ -509,7 +521,7 @@ export const AuthProvider = ({ children }) => {
     // Only remove a guest presence THIS session actually started — a stale
     // guest_id in localStorage from an earlier visit is not a live guest row.
     if (!guestPresenceStartedRef.current) return;
-    const guestId = localStorage.getItem('guest_id');
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (!guestId) return;
     removeRtdbGuestPresence(guestId);
   }, [user?.uid, restored]);
@@ -611,8 +623,8 @@ export const AuthProvider = ({ children }) => {
 
   const loginWithGoogle = useCallback(async () => {
     const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
-    const isRegistering = sessionStorage.getItem('is_registering') === 'true';
-    const pendingNickname = sessionStorage.getItem('pending_nickname');
+    const isRegistering = sessionStorage.getItem(makeStorageKey('is_registering', 'guest')) === 'true';
+    const pendingNickname = sessionStorage.getItem(makeStorageKey('pending_nickname', 'guest'));
     if (isRegistering && pendingNickname && pendingNickname.trim()) {
       try {
         await sendApi('/api/aerun/me/nickname', {
@@ -634,8 +646,8 @@ export const AuthProvider = ({ children }) => {
         await pb.collection('users').authRefresh().catch(() => {});
         const stored = pb.authStore.record?.settings || {};
         const seed = {};
-        const pendingTheme = sessionStorage.getItem('pending_theme') || '';
-        const pendingLang = sessionStorage.getItem('pending_language') || '';
+        const pendingTheme = sessionStorage.getItem(makeStorageKey('pending_theme', 'guest')) || '';
+        const pendingLang = sessionStorage.getItem(makeStorageKey('pending_language', 'guest')) || '';
         if (pendingTheme && stored.theme === undefined) seed.theme = pendingTheme;
         if (pendingLang && stored.language === undefined) seed.language = pendingLang;
         if (Object.keys(seed).length > 0) {
@@ -650,15 +662,15 @@ export const AuthProvider = ({ children }) => {
           await pb.collection('users').authRefresh().catch(() => {});
         }
       } finally {
-        sessionStorage.removeItem('pending_theme');
-        sessionStorage.removeItem('pending_language');
+        sessionStorage.removeItem(makeStorageKey('pending_theme', 'guest'));
+        sessionStorage.removeItem(makeStorageKey('pending_language', 'guest'));
       }
     }
-    sessionStorage.removeItem('is_registering');
-    sessionStorage.removeItem('pending_nickname');
-    sessionStorage.removeItem('pending_message');
+    sessionStorage.removeItem(makeStorageKey('is_registering', 'guest'));
+    sessionStorage.removeItem(makeStorageKey('pending_nickname', 'guest'));
+    sessionStorage.removeItem(makeStorageKey('pending_message', 'guest'));
     // Clean up any previous guest presence when a new user logs in
-    const guestId = localStorage.getItem('guest_id');
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (guestId) {
       removeRtdbGuestPresence(guestId);
     }
@@ -682,7 +694,7 @@ export const AuthProvider = ({ children }) => {
     });
     const authData = await pb.collection('users').authWithPassword(email, password);
     // Clean up any previous guest presence when a new user registers
-    const guestId = localStorage.getItem('guest_id');
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (guestId) {
       removeRtdbGuestPresence(guestId);
     }
@@ -696,7 +708,7 @@ export const AuthProvider = ({ children }) => {
   const loginWithEmail = useCallback(async (email, password) => {
     const authData = await pb.collection('users').authWithPassword(email, password);
     // Clean up any previous guest presence when a new user logs in
-    const guestId = localStorage.getItem('guest_id');
+    const guestId = localStorage.getItem(makeStorageKey('guest_id', 'guest'));
     if (guestId) {
       removeRtdbGuestPresence(guestId);
     }
@@ -837,7 +849,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!user || !profile || loading) return;
     if (profile.status !== 'banned') return;
-    sessionStorage.setItem('banned_logout', 'true');
+    sessionStorage.setItem(makeStorageKey('banned_logout', profile?.uid || 'guest'), 'true');
     logout(true);
   }, [user, profile, loading, logout]);
 
@@ -864,7 +876,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!user || !profile || loading) return;
     if (profile.status !== 'deleted') return;
-    sessionStorage.setItem('deleted_logout', 'true');
+    sessionStorage.setItem(makeStorageKey('deleted_logout', profile?.uid || 'guest'), 'true');
     logout(true);
   }, [user, profile, loading, logout]);
 

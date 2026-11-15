@@ -45,6 +45,7 @@ import {
   useTopicDmAndNavigation,
   useTopicNavigation,
 } from '../hooks/topic';
+import { makeStorageKey } from '../utils/storageScope';
 
 import {
   updateTopic,
@@ -357,7 +358,7 @@ export default function TopicPage() {
   // next visit (legacy monolith parity).
   const [guestNickname, setGuestNickname] = useState(() => {
     try {
-      return localStorage.getItem('aerun_guest_nickname') || '';
+      return localStorage.getItem(makeStorageKey('guest_nickname', 'guest')) || '';
     } catch {
       return '';
     }
@@ -366,7 +367,7 @@ export default function TopicPage() {
   // Persist the guest nickname on every change so the next visit pre-fills it.
   useEffect(() => {
     try {
-      localStorage.setItem('aerun_guest_nickname', guestNickname);
+      localStorage.setItem(makeStorageKey('guest_nickname', 'guest'), guestNickname);
     } catch {
       // localStorage may be unavailable in private mode; degrade gracefully.
     }
@@ -412,7 +413,7 @@ export default function TopicPage() {
 
   // ── Reply draft autosave & unsent-reply rescue (legacy monolith parity) ──
   // Draft Auto-save scoped to user so unsent text does not leak across accounts.
-  const DRAFT_KEY = `aerun_reply_draft_${id}_${user?.uid || 'guest'}`;
+  const DRAFT_KEY = makeStorageKey(`reply_draft_${id}`, user?.uid || 'guest');
   // Which reason already produced a rescue for the text currently in the form.
   // Two triggers can fire for one paragraph — the submit that was refused, and
   // then the topic closing or vanishing under that same text — and each would

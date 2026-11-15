@@ -1,6 +1,7 @@
 import { sendApi } from './pocketbase';
 import { subscribeToRefetch } from './connection';
 import { PERMISSIONS } from '../constants/permissions';
+import { makeStorageKey } from '../utils/storageScope';
 
 // Category and category-group access.
 //
@@ -16,7 +17,7 @@ import { PERMISSIONS } from '../constants/permissions';
 
 // ── Category Groups ──────────────────────────────────────────────────────────
 
-const CAT_GROUPS_CACHE_KEY = 'aerun_cat_groups';
+const CAT_GROUPS_CACHE_KEY = makeStorageKey('cat_groups');
 const CAT_GROUPS_TTL_MS = 60 * 60 * 1000; // 1 час
 
 // The command contract stores ONE string per label, and for a long time the

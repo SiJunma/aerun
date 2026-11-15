@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth } from './AuthProvider';
+import { makeStorageKey } from '../utils/storageScope';
 
 const ThemeContext = createContext();
 
@@ -17,7 +18,7 @@ export const ThemeProvider = ({ children }) => {
   }, [settings]);
 
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('guest_theme') || getFallbackTheme();
+    return localStorage.getItem(makeStorageKey('guest_theme', profile?.uid || 'guest')) || getFallbackTheme();
   });
 
   // Sync the active theme with the signed-in member's preference during render
@@ -29,7 +30,7 @@ export const ThemeProvider = ({ children }) => {
   const [prevThemeSource, setPrevThemeSource] = useState(themeSource);
   if (themeSource !== prevThemeSource) {
     setPrevThemeSource(themeSource);
-    setTheme(themeSource || localStorage.getItem('guest_theme') || getFallbackTheme());
+    setTheme(themeSource || localStorage.getItem(makeStorageKey('guest_theme', profile?.uid || 'guest')) || getFallbackTheme());
   }
 
   // Persist the member's own theme choice to the guest store so it survives a
@@ -37,9 +38,9 @@ export const ThemeProvider = ({ children }) => {
   // cascading render.
   useEffect(() => {
     if (themeSource) {
-      localStorage.setItem('guest_theme', themeSource);
+      localStorage.setItem(makeStorageKey('guest_theme', profile?.uid || 'guest'), themeSource);
     }
-  }, [themeSource]);
+  }, [themeSource, profile?.uid]);
 
   // A guest without an explicit theme choice must open with the forum's default
   // design, not with the hardcoded dark fallback. `settings.defaultDesignId`
@@ -51,7 +52,7 @@ export const ThemeProvider = ({ children }) => {
   const currentFallbackTheme = getFallbackTheme();
   if (
     !themeSource &&
-    !localStorage.getItem('guest_theme') &&
+    !localStorage.getItem(makeStorageKey('guest_theme', profile?.uid || 'guest')) &&
     currentFallbackTheme !== prevFallbackTheme
   ) {
     setPrevFallbackTheme(currentFallbackTheme);
@@ -74,8 +75,8 @@ export const ThemeProvider = ({ children }) => {
 
   const changeGuestTheme = useCallback((newTheme) => {
     setTheme(newTheme);
-    localStorage.setItem('guest_theme', newTheme);
-  }, []);
+    localStorage.setItem(makeStorageKey('guest_theme', profile?.uid || 'guest'), newTheme);
+  }, [profile?.uid]);
 
   const value = {
     theme,
