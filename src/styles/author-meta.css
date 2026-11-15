@@ -122,24 +122,13 @@
 
 .last-post-link-meta {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--last-post-link-gap, 0.25rem);
   width: fit-content;
   max-width: 100%;
   border-radius: var(--last-post-link-radius, 6px);
   padding: var(--last-post-link-padding, 4px 6px);
   margin: var(--last-post-link-margin, -4px -6px);
-  /* Legacy home: LastPostInfo was a Bootstrap `text-muted` link, so the
-     meta (date + author) rendered muted. Target screenshot (2026-11-06)
-     shows date and username in secondary/muted tone too — NOT in
-     --text-color. This rule dropped the muted intent and inherited the
-     near-white title colour instead (screenshot 1: date + "Arin" white).
-     NOTE the order: the topic-row fallback (--topic-meta-color) must
-     NOT shadow --last-post-meta-color on pages that use topic rows
-     with .topic-meta — author-meta.css is loaded after topic-row.css,
-     so --last-post-meta-color wins here, and topic rows are unaffected
-     because they nest the link inside their own .topic-meta scope,
-     where the token is re-scoped by topic-row.css (specificity). */
   color: var(--last-post-meta-color, var(--topic-meta-color, var(--secondary-color)));
   text-decoration: none;
   transition: background-color 0.2s ease, color 0.2s ease;
@@ -155,6 +144,7 @@
    only so TopicRow/.topic-meta and post headers keep --author-name-color. */
 .last-post-link-meta .author-meta__name {
   /* Exact name color, not meta fallback: on dark, #94a3b8 */
+  transition: all .2s ease;
   color: var(--last-post-name-color, var(--author-name-color, var(--last-post-meta-color, var(--secondary-color))));
 }
 
@@ -163,6 +153,13 @@
   background-color: rgba(var(--primary-rgb), 0.08);
   color: var(--primary-color);
   text-decoration: none;
+}
+
+[data-theme='light'] .last-post-link-meta:hover,
+[data-theme='light'] .last-post-link-meta:hover .author-meta__date>span,
+[data-theme='light'] .last-post-link-meta:focus {
+  background-color: #edeef0;
+  color: #1e293b;
 }
 
 [data-theme='dark'] .last-post-link-meta:hover,
@@ -225,6 +222,7 @@
 /* The chrome block was removed — see the note above. */
 
 @media (max-width: 768px) {
+
   /* Every selector below is SCOPED to #forum-index: this block crafts
    * the homepage one-line meta (date · avatar · name) inside the
    * .last-post-content structure that exists only on the main page.
