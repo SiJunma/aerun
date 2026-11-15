@@ -597,7 +597,7 @@ const runRefreshWith = async ({ record, fetchImpl }) => {
     async uid => { calls.fetch += 1; return fetchImpl(uid); },
     rec => ({ ...rec, nickname: rec.nickname }),
     () => { calls.setUser += 1; },
-    p => { calls.setProfile.push(p); },
+    p => { calls.setProfile.push(typeof p === 'function' ? p(null) : p); },
     { warn: () => { calls.warn += 1; } }
   );
   return { refreshOwnProfile, calls, refreshRef };

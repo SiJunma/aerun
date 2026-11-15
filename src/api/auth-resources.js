@@ -4,7 +4,7 @@
 // `settings` server-side, where the collection read could not. Re-adding the
 // import is how that regression comes back, so its absence is asserted by
 // scripts/check-forum-read-contract.mjs.
-import { sendApi } from './pocketbase';
+import { sendApi, pbUrl } from './pocketbase';
 // normalizeTopic is imported, not re-implemented: the topic lists here must
 // render the same rows as the category page, and a second copy of this mapping
 // is exactly how the two drifted apart in the first place.
@@ -94,7 +94,52 @@ export const normalizeUserProfile = (rec) => {
 // read". Collapsing them into one would put a network round trip in front of a
 // button that must feel instant, or keep the count wrong on the second device.
 
-const getReadMapKey = (uid) => `aerun_readmap_${uid}`;
+export const getStorageScope = () => {
+  try {
+    const raw = pbUrl || (typeof window !== 'undefined' ? window.location.origin : 'default');
+    const url = new URL(raw, typeof window !== 'undefined' ? window.location.href : 'http://127.0.0.1:8090');
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+    return `${url.hostname}_${port}`.replace(/[^a-zA-Z0-9_]/g, '_');
+  } catch {
+    return 'default';
+  }
+};
+
+export const getReadMapKey = (uid) => `aerun_readmap_${getStorageScope()}_${uid}`;
+
+// The legacy key (pre-scoping) used before migration 3.1. Kept as a constant so
+// the migration can target it precisely.
+const LEGACY_READ_MAP_KEY_PREFIX = 'aerun_readmap_';
+
+// migrateLegacyReadMap moves any data left under the old unscoped key
+// `aerun_readmap_${uid}` onto the new scoped key `aerun_readmap_${scope}_${uid}`,
+// then deletes the old key. It runs once per (uid, scope) on first read after
+// the upgrade. Phantom offsets that exceed the real topic post count are not
+// removed here (the server doesn't know posts_count at migration time); they are
+// neutralized client-side by the loadedPage guard + offset clamp in Effect 15
+// and by the backward-guard isTopicEnd exemption in AuthProvider.markTopicRead.
+export const migrateLegacyReadMap = (uid) => {
+  if (!uid || typeof localStorage === 'undefined') return;
+  try {
+    const legacyKey = `${LEGACY_READ_MAP_KEY_PREFIX}${uid}`;
+    const raw = localStorage.getItem(legacyKey);
+    if (!raw) return;
+    const legacyMap = JSON.parse(raw);
+    if (!legacyMap || typeof legacyMap !== 'object' || Object.keys(legacyMap).length === 0) {
+      // Nothing to migrate; clean up the stale key anyway.
+      localStorage.removeItem(legacyKey);
+      return;
+    }
+    const newKey = getReadMapKey(uid);
+    const existingRaw = localStorage.getItem(newKey);
+    const existingMap = existingRaw ? JSON.parse(existingRaw) : {};
+    const merged = { ...existingMap, ...legacyMap };
+    localStorage.setItem(newKey, JSON.stringify(merged));
+    localStorage.removeItem(legacyKey);
+  } catch (err) {
+    console.warn('[migrateLegacyReadMap] failed', err);
+  }
+};
 
 export const recordTopicVisit = async (uid, topicId, offset = null, lastVisiblePostId = null) => {
   if (!uid || !topicId) return false;
@@ -138,7 +183,20 @@ export const subscribeToReadMap = (uid, callback) => {
   }
   try {
     const key = getReadMapKey(uid);
-    const raw = localStorage.getItem(key);
+    let raw = localStorage.getItem(key);
+    if (!raw) {
+      // Legacy un-scoped key fallback for smooth transition across deploys
+      const legacyKey = `aerun_readmap_${uid}`;
+      const legacyRaw = localStorage.getItem(legacyKey);
+      if (legacyRaw) {
+        raw = legacyRaw;
+        try {
+          localStorage.setItem(key, legacyRaw);
+        } catch {
+          // ignore quota issues
+        }
+      }
+    }
     const map = raw ? JSON.parse(raw) : {};
     callback(map);
   } catch {

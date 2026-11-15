@@ -93,8 +93,13 @@ func markTopicReadHandler(e *core.RequestEvent) error {
 		if post.GetString("topic_id") != topicID {
 			return forbiddenError("post does not belong to this topic")
 		}
+		postCreated := post.GetDateTime("created")
+		topicLastPostCreated := topic.GetDateTime("last_post_created")
+		if !topicLastPostCreated.IsZero() && postCreated.After(topicLastPostCreated) {
+			return validationError("post creation time cannot exceed topic last post time")
+		}
 		lastReadPostID = post.Id
-		lastReadCreated = post.GetDateTime("created").String()
+		lastReadCreated = postCreated.String()
 		lastReadTiebreakID = post.Id
 	} else {
 		// No post id supplied: fall back to "now" so legacy clients still
@@ -187,8 +192,13 @@ func upsertTopicReadState(app core.App, userID, topicID, lastReadPostID, lastRea
 func applyTopicReadStateUpdate(app core.App, existing *core.Record, lastReadPostID, lastReadCreated, lastReadTiebreakID string) error {
 	existingCreated := existing.GetDateTime("last_read_created")
 	newCreated, parseErr := types.ParseDateTime(lastReadCreated)
-	if parseErr == nil && !existingCreated.IsZero() && newCreated.Before(existingCreated) {
-		return nil // backward write: ignore
+	if parseErr == nil && !existingCreated.IsZero() {
+		if newCreated.Before(existingCreated) {
+			return nil // backward write: ignore
+		}
+		if newCreated.Equal(existingCreated) && existing.GetString("last_read_post_tiebreak_id") != "" && lastReadTiebreakID != "" && lastReadTiebreakID < existing.GetString("last_read_post_tiebreak_id") {
+			return nil // backward tiebreak write: ignore
+		}
 	}
 	existing.Set("last_read_post_id", lastReadPostID)
 	existing.Set("last_read_created", lastReadCreated)
@@ -776,9 +786,9 @@ func unreadTopicsPredicate(e *core.RequestEvent) (string, dbx.Params, error) {
 		t.category_id IN (` + strings.Join(placeholders, ", ") + `)
 		AND COALESCE(t.last_post_author_id, '') != {:user}
 		AND (
-			t.last_post_created > COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created)
+			datetime(t.last_post_created) > datetime(COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created))
 			OR (
-				t.last_post_created = COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created)
+				datetime(t.last_post_created) = datetime(COALESCE(r.last_read_created, r.last_read_at, {:registered}, t.last_post_created))
 				AND COALESCE(r.last_read_post_id, '') <> ''
 				AND t.last_post_id > r.last_read_post_id
 			)
