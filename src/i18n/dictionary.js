@@ -1680,7 +1680,7 @@ export const translations = {
       pm_label: "ЛС",
       link_copied: "Ссылка скопирована!",
       edited_label: "ред.",
-      only_you: "только вам",
+      only_you: "виден только вам",
       dice_total: "Всего бросков: {count}",
       view_voters: "Посмотреть кто голосовал",
       delete_action: "Удалить",

@@ -247,10 +247,9 @@ body {
    --topic-title-line-height: 1.2;
    --topic-description-size: 0.875rem;
    --topic-description-line-height: 1.2;
-   --topic-meta-size: 1rem;
+   --topic-meta-size: 0.9rem;
    --topic-meta-line-height: 1.2;
    --topic-meta-gap: 0.5rem;
-   --topic-meta-color: var(--secondary-color);
    --topic-header-layout-gap: 1rem;
    --topic-actions-gap: 0.5rem;
 
@@ -390,6 +389,8 @@ body {
    --topic-check-bg: var(--card-bg);
    --topic-check-checked-bg: var(--primary-color);
    --topic-check-chip-bg: rgba(var(--primary-rgb), 0.14);
+
+   --footer-post-header-bg: #f8f9fa;
 }
 
 [data-theme='dark'] {
@@ -450,6 +451,7 @@ body {
    --forum-view-btn-ghost-hover-text: #0f172a;
    --management-toolbar-bg: rgba(30, 41, 59, 0.9);
    --management-toolbar-text: #ffffff;
+   --footer-post-header-bg: #1c2636;
    --management-toolbar-border: rgba(255, 255, 255, 0.1);
    --management-toolbar-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
 }
@@ -463,6 +465,7 @@ body {
    --management-toolbar-border: rgba(0, 0, 0, 0.15);
    --management-toolbar-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
    --stats-item-muted: #6c757d;
+   --topic-meta-color: #475569;
 }
 
 [data-theme='neutral'] {
@@ -484,6 +487,7 @@ body {
    --forum-view-card-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
    --topic-pinned-color: #78350f;
    --topic-locked-color: #b91c1c;
+   --footer-post-header-bg: #f8f4ec;
    --mini-pagination-hover-color: #fffcf5;
    --forum-view-btn-primary-bg: #8c7a6b;
    --forum-view-btn-primary-border: #8c7a6b;

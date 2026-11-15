@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Pin, Edit, Award, Send, FilePen, Dices } from 'lucide-react';
+import { Pin, Edit, Award, Send, FilePen, Dices, Mail, Heart, User, MessageCircle, Quote, Trash2 } from 'lucide-react';
 import ForumAuthorAvatar from '../common/ForumAuthorAvatar';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
@@ -157,27 +157,39 @@ export const TopicPostCard = ({
               />
             </div>
 
-            {/* 4. Posts Count — labels differ per breakpoint: desktop full
-                label, mobile short label; the pair is swapped by CSS. */}
+            {/* 4. Stats — desktop: text labels in <dl>; mobile: icons + numbers */}
             {post.author?.user_id && (
-              <div className="post-author__meta-row">
-                <dt className="post-author__meta-label">
-                  <span className="post-author__meta-label--full">{t('forum.posts_count_label')}</span>
-                  <span className="post-author__meta-label--short">{t('forum.posts_short')}</span>
-                </dt>
-                <dd>{postCount}</dd>
-              </div>
-            )}
+              <>
+                <dl className="post-author__meta">
+                  <div className="post-author__meta-row">
+                    <dt className="post-author__meta-label">
+                      <span className="post-author__meta-label--full">{t('forum.posts_count_label')}:</span>
+                      <span className="post-author__meta-label--short">{t('forum.posts_short')}:</span>
+                    </dt>
+                    <dd>{postCount}</dd>
+                  </div>
 
-            {/* 5. Reputation */}
-            {post.author?.user_id && (
-              <div className="post-author__meta-row">
-                <dt className="post-author__meta-label">
-                  <span className="post-author__meta-label--full">{t('forum.reputation_label')}</span>
-                  <span className="post-author__meta-label--short">{t('forum.rep_short')}</span>
-                </dt>
-                <dd>{reputation}</dd>
-              </div>
+                  <div className="post-author__meta-row">
+                    <dt className="post-author__meta-label">
+                      <span className="post-author__meta-label--full">{t('forum.reputation_label')}:</span>
+                      <span className="post-author__meta-label--short">{t('forum.rep_short')}:</span>
+                    </dt>
+                    <dd>{reputation}</dd>
+                  </div>
+                </dl>
+
+                {/* Mobile: icon-only stats */}
+                <div className="post-author__stats-mobile">
+                  <div className="post-author__stat">
+                    <Mail size={20} />
+                    <span>{postCount}</span>
+                  </div>
+                  <div className="post-author__stat">
+                    <Heart size={20} />
+                    <span>{reputation}</span>
+                  </div>
+                </div>
+              </>
             )}
 
             {/* 6. Role/Mask */}
@@ -378,17 +390,19 @@ export const TopicPostCard = ({
               {/* Mobile-only links (Profile/PM): the sidebar contact is hidden
                   on mobile, so the footer carries them instead. */}
               <div className="post-footer__links">
-                <a className="footer-link" href={`/profile/${authorId}`} data-discover="true">
-                  {t?.('profile.view_profile') || 'Profile'}
+                <a className="footer-link footer-link--icon" href={`/profile/${authorId}`} data-discover="true">
+                  <User size={16} />
+                  <span className="footer-link__label">{t?.('profile.view_profile') || 'Profile'}</span>
                 </a>
                 {canDm && onOpenDm && (
                   <a
-                    className="footer-link"
+                    className="footer-link footer-link--icon"
                     href={`/messages/${authorId}`}
                     data-discover="true"
                     onClick={() => onOpenDm(authorId)}
                   >
-                    {t('forum.pm_label')}
+                    <MessageCircle size={16} />
+                    <span className="footer-link__label">{t('forum.pm_label')}</span>
                   </a>
                 )}
               </div>
@@ -397,38 +411,41 @@ export const TopicPostCard = ({
                 {canDelete && onDeletePost && (
                   <button
                     type="button"
-                    className="footer-link footer-link--delete"
+                    className="footer-link footer-link--delete footer-link--icon"
                     onClick={() => onDeletePost?.(post)}
                   >
-                    {t('forum.delete_action')}
+                    <Trash2 size={16} />
+                    <span className="footer-link__label">{t('forum.delete_action')}</span>
                   </button>
                 )}
                 {canEdit && (
                   <button
                     type="button"
-                    className="footer-link"
+                    className="footer-link footer-link--edit footer-link--icon"
                     onClick={() => onStartEdit?.(post, postNumber === 1)}
                   >
-                    {t('forum.edit_action')}
+                    <Edit size={16} />
+                    <span className="footer-link__label">{t('forum.edit_action')}</span>
                   </button>
                 )}
 
                 {isDraft ? (
                   <button
                     type="button"
-                    className="footer-link footer-link--publication"
+                    className="footer-link footer-link--publication footer-link--icon"
                     onClick={() => onPublishDraft?.(post.id)}
                   >
                     <Send size={12} />
-                    {t('forum.publish_action')}
+                    <span className="footer-link__label">{t('forum.publish_action')}</span>
                   </button>
                 ) : canReply && onQuote && (
                   <button
                     type="button"
-                    className="footer-link footer-link--publication"
+                    className="footer-link footer-link--quote footer-link--icon"
                     onClick={() => onQuote?.(post)}
                   >
-                    {t('forum.quote_action')}
+                    <Quote size={16} />
+                    <span className="footer-link__label">{t('forum.quote_action')}</span>
                   </button>
                 )}
               </div>

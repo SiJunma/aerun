@@ -2182,7 +2182,7 @@ a.badge.bg-danger:hover {
   background: rgba(67, 52, 34, 0.02);
 }
 
-.footer-link {
+/* .footer-link {
   font-size: 0.875rem;
   color: var(--secondary-color);
   text-decoration: none;
@@ -2194,7 +2194,7 @@ a.badge.bg-danger:hover {
 .footer-link:hover {
   opacity: 1;
   text-decoration: underline;
-}
+} */
 
 .rep-btn {
   width: 18px;
