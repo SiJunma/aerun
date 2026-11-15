@@ -302,7 +302,7 @@
 .forum-view-back:focus {
   color: var(--forum-view-btn-ghost-hover-text);
   background-color: var(--forum-view-btn-ghost-hover-bg);
-  border-color: var(--forum-view-back-border);
+  border-color: var(--forum-view-btn-ghost-hover-bg);
 }
 
 .forum-view-footer {

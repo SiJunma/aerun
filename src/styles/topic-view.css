@@ -219,6 +219,10 @@
   border-top: 1px solid var(--topic-post-footer-border);
 }
 
+#topic-pagination-bottom {
+  width: 100%;
+}
+
 /* Pagination wrappers on Topic View are the page-level #ids only.
    The look itself lives in forum-pagination.css (.forum-pagination).
    Bottom pagination is centered by .forum-pagination-view on other pages. */
@@ -627,14 +631,16 @@
   display: inline-flex;
   align-items: center;
   gap: var(--topic-meta-gap);
-  padding: var(--topic-actions-subscription-padding-y) var(--topic-actions-subscription-padding-x);
-  border-radius: var(--topic-actions-subscription-radius);
+  padding: 0.5rem 1rem;
+  border-radius: .75rem !important;
   border: 1px solid var(--primary-color);
   background-color: transparent;
   color: var(--primary-color);
   font-size: var(--topic-post-footer-link-size);
   line-height: 1.2;
   cursor: pointer;
+  transition: all .2s ease;
+  font-weight: 500;
 }
 
 .topic-actions-subscription:disabled {
@@ -644,13 +650,13 @@
 
 .topic-actions-subscription:hover:not(:disabled),
 .topic-actions-subscription:focus {
-  background-color: var(--primary-color);
-  color: var(--topic-reply-header-text);
+  background-color: var(--forum-view-btn-ghost-hover-bg);
+  color: var(--forum-view-btn-ghost-hover-text);
 }
 
 #topic-actions-bottom .topic-actions-subscription.is-subscribed {
   background-color: var(--primary-color);
-  color: var(--topic-reply-header-text);
+  color: var(--forum-view-btn-ghost-hover-text);
 }
 
 .topic-skeleton {
@@ -719,12 +725,14 @@
   font-size: 0.95rem;
   font-weight: 600;
   text-decoration: none;
+  margin-top: 1rem;
 }
 
 .topic-back-link:hover,
 .topic-back-link:focus {
-  color: var(--text-color);
-  border-color: var(--text-color);
+  color: var(--forum-view-btn-ghost-hover-text);
+  background-color: var(--forum-view-btn-ghost-hover-bg);
+  border-color: var(--forum-view-btn-ghost-hover-bg);
   text-decoration: none;
 }
 
