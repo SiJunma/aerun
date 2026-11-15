@@ -237,8 +237,9 @@
   background-color: var(--topic-post-card-bg);
   border: 1px solid var(--topic-post-card-border);
   border-radius: var(--topic-post-card-radius);
-  box-shadow: var(--topic-post-card-shadow);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   overflow: hidden;
+  scroll-margin-top: 80px;
 }
 
 .topic-post.pinned-first-post-card {
@@ -251,7 +252,7 @@
 }
 
 .post-author {
-  background-color: var(--topic-post-sidebar-bg);
+  background-color: rgba(var(--primary-rgb), 0.01);
   border-bottom: 1px solid var(--topic-post-sidebar-border);
   padding: var(--topic-post-sidebar-padding);
   text-align: center;
@@ -365,11 +366,12 @@
 }
 
 .post-author__meta-row dt {
-  color: var(--topic-post-sidebar-meta-color, var(--secondary-color));
+  color: var(--topic-post-muted-color);
 }
 
 .post-author__meta-row dd {
-  color: var(--text-color);
+  color: var(--topic-post-strong-color);
+  font-weight: 600;
 }
 
 .post-author__meta-row dt,
@@ -409,6 +411,20 @@
   align-items: center;
   padding: var(--topic-post-header-padding-y) var(--topic-post-header-padding-x);
   border-bottom: 1px solid var(--topic-post-header-border);
+  background-color: rgba(0, 0, 0, 0.02);
+  min-height: 30px;
+}
+
+[data-theme='dark'] .post-header {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='neutral'] .post-header {
+  background-color: rgba(67, 52, 34, 0.04);
+}
+
+[data-theme='neutral'] .post-header {
+  border-bottom-color: rgba(67, 52, 34, 0.1);
 }
 
 .post-meta {
@@ -416,8 +432,12 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--topic-header-layout-gap);
-  color: var(--topic-post-date-color);
+  color: var(--topic-post-muted-color);
   font-size: var(--topic-post-date-size);
+}
+
+.post-meta strong {
+  color: var(--topic-post-strong-color);
 }
 
 .post-permalink {
@@ -435,9 +455,10 @@
 }
 
 .post-number {
-  color: var(--topic-post-number-color);
+  color: var(--topic-post-muted-color);
   font-size: var(--topic-post-number-size);
-  font-weight: var(--topic-post-number-weight);
+  font-weight: 400;
+  opacity: 0.5;
   overflow-wrap: anywhere;
 }
 
@@ -445,29 +466,34 @@
 .post-edited-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0 0.5rem;
-  border-radius: 50rem;
-  color: var(--topic-post-draft-badge-text);
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-}
-
-.post-draft-badge {
-  background-color: var(--topic-post-draft-badge-bg);
-  border: 1px solid var(--topic-post-draft-badge-border);
+  color: var(--topic-post-muted-color);
+  font-size: 0.875rem;
+  letter-spacing: 0;
+  opacity: 0.5;
 }
 
 .post-edited-badge {
-  background-color: var(--topic-post-edited-badge-bg);
-  border: 1px solid var(--topic-post-edited-badge-border);
+  background-color: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.post-draft-badge {
+  background-color: transparent;
+  border: 0;
+  padding: 0;
+  font-weight: 600;
+  opacity: 1;
 }
 
 .post-signature {
-  margin-top: var(--topic-post-signature-padding-top);
+  margin-top: 1.5rem;
   padding-top: var(--topic-post-signature-padding-top);
-  border-top: 1px solid var(--topic-post-signature-border);
-  color: var(--topic-post-signature-color);
+  border-top: 1px dashed var(--topic-post-signature-border);
+  color: var(--topic-post-muted-color);
   font-size: var(--topic-post-signature-size);
+  opacity: 0.75;
+  font-style: italic;
   font-style: italic;
   opacity: 0.75;
 }
@@ -538,6 +564,19 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0;
+  font-size: 0.875rem;
+  color: var(--secondary-color);
+  opacity: 0.8;
+  text-decoration: none;
+  background: none;
+  border: 0;
+}
+
+.footer-link:hover,
+.footer-link:focus {
+  opacity: 1;
+  text-decoration: underline;
+}
   border: 0;
   background: transparent;
   color: var(--secondary-color);
@@ -906,6 +945,17 @@
     width: 200px;
     min-width: 200px;
     flex: 0 0 200px;
+    border-radius: 1rem 1rem 0 0;
+  }
+
+  .post-header {
+    padding-left: var(--topic-post-header-padding-x-md, 1.5rem);
+    padding-right: var(--topic-post-header-padding-x-md, 1.5rem);
+  }
+
+  .post-footer {
+    padding-left: var(--topic-post-footer-padding-x-md, 1.5rem);
+    padding-right: var(--topic-post-footer-padding-x-md, 1.5rem);
   }
 
   .post-footer__spacer {
@@ -925,9 +975,18 @@
 
 @media (max-width: 768px) {
   .post-footer {
+    height: auto;
     min-height: 0;
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
+  }
+
+  .post-author__avatar {
+    width: 60px;
+  }
+
+  .post-author .author-avatar__wrap {
+    max-width: 60px;
   }
 }
 
@@ -936,10 +995,22 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.25rem 1rem;
-  background-color: var(--topic-post-draft-badge-bg);
-  color: var(--topic-post-draft-badge-text);
+  background-color: rgba(var(--primary-rgb), 0.08);
+  color: var(--primary-color);
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.12);
+  border-radius: 1rem 1rem 0 0;
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+[data-theme='dark'] .pinned-first-post-strip {
+  background-color: rgba(var(--primary-rgb), 0.12);
+}
+
+[data-theme='neutral'] .pinned-first-post-strip {
+  background-color: rgba(100, 80, 50, 0.08);
+  color: rgb(112, 92, 72);
+  border-bottom-color: rgba(100, 80, 50, 0.12);
 }
 
 .pinned-first-post-strip__label {
@@ -1052,9 +1123,26 @@
   cursor: pointer;
 }
 
-.post-rep__trigger:hover,
-.post-rep__voted:hover {
-  color: var(--text-color);
+.post-rep__trigger:hover {
+  background-color: rgba(var(--primary-rgb), 0.1);
+}
+
+[data-theme='dark'] .post-rep__trigger:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme='neutral'] .post-rep__trigger:hover {
+  background-color: rgba(140, 113, 82, 0.1);
+}
+
+.post-rep__voted,
+.post-rep__voted strong {
+  color: #198754;
+}
+
+.post-rep__own {
+  opacity: 0.75;
+  cursor: default;
 }
 
 .post-meta-row {
@@ -1078,4 +1166,134 @@
   .topic-reply__hotkeys-label {
     display: inline;
   }
+
+/* ============================================================
+   TopicPostCard — parity layer
+   Значения: markdowns/Assets/FACTS_topic-post-card.md (deploy)
+   ============================================================ */
+
+/* --- Модификаторы карточки --- */
+.topic-post.is-draft {
+  border: 3px dashed var(--topic-post-card-border);
+  background-color: var(--topic-post-card-bg);
+}
+
+.topic-post.is-pinned-first {
+  opacity: 0.95;
+  border-left: 3px solid var(--primary-color);
+}
+
+/* --- Шапка поста (draft) --- */
+.post-header.is-draft {
+  background-color: var(--footer-bg);
+  border-bottom: 1px dashed var(--topic-post-header-border);
+}
+
+/* --- Сайдбар: метки лейблов (Posts/Reputation ↔ Posts/Rep) --- */
+.post-author__meta-label {
+  margin: 0;
+}
+
+.post-author__meta-label--full {
+  display: inline;
+}
+
+.post-author__meta-label--short {
+  display: none;
+}
+
+/* --- Сайдбар: скелетон статуса --- */
+.post-author__status-skeleton {
+  width: 80px;
+  height: 0.875rem;
+  border-radius: 999px;
+}
+
+/* --- Сайдбар: аватар-картинка (className форума) --- */
+.post-author__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- Реп-строка: левый слот дайсов --- */
+.post-dice-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* --- Реп-строка: заметка драфта "only visible to you" --- */
+.post-draft-note {
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--secondary-color);
+  opacity: 0.5;
+}
+
+/* --- Desktop: скрыть мобильные ссылки футера --- */
+@media (min-width: 768px) {
+  .post-footer__links {
+    display: none;
+  }
+}
+
+/* --- Mobile: горизонтальная строка автора --- */
+@media (max-width: 767.98px) {
+  .post-author__content {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      'avatar name meta'
+      'avatar status meta'
+      'avatar role meta';
+    align-items: center;
+    justify-items: center;
+    column-gap: 0.75rem;
+    row-gap: 0.125rem;
+    width: 100%;
+    height: auto;
+  }
+
+  .post-author__avatar {
+    grid-area: avatar;
+    margin-bottom: 0;
+  }
+
+  .post-author__name {
+    grid-area: name;
+    margin-bottom: 0;
+    text-align: center;
+  }
+
+  .post-author__status {
+    grid-area: status;
+    margin-bottom: 0;
+  }
+
+  .post-author__meta {
+    grid-area: meta;
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .post-author__role {
+    grid-area: role;
+    margin-bottom: 0;
+  }
+
+  .post-author__contact {
+    display: none;
+  }
+
+  .post-author__meta-label--full {
+    display: none;
+  }
+
+  .post-author__meta-label--short {
+    display: inline;
+  }
+}
+
 }

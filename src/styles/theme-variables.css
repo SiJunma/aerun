@@ -315,6 +315,14 @@ body {
    --topic-post-skeleton-footer-margin-top: 3rem;
    --topic-post-skeleton-footer-padding-top: 1rem;
    --topic-post-skeleton-footer-border: var(--border-color);
+   --topic-post-skeleton-footer-border: var(--border-color);
+
+   /* ── TopicPostCard parity tokens (muted/strong pairs) ──────
+      Deploy values (FACTS_topic-post-card.md): light #475569/#1e293b,
+      dark #cbd5e1/#f1f5f9, neutral #5c4b3a/#382d1d. */
+   --topic-post-muted-color: #475569;
+   --topic-post-strong-color: #1e293b;
+
 
    --topic-reply-margin-top: 3rem;
    --topic-reply-card-bg: var(--card-bg);
@@ -386,6 +394,8 @@ body {
 
 [data-theme='dark'] {
    --topic-post-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+   --topic-post-muted-color: #cbd5e1;
+   --topic-post-strong-color: #f1f5f9;
    /* Equivalent of light #475569 (Slate 600) on dark: Slate 500 */
    --category-header-description-color: #b0b0b0;
    /* Exact target home colors (screenshot 2026-11-06, user-confirmed):
@@ -446,6 +456,8 @@ body {
 
 [data-theme='light'] {
    --category-head-bg: #f9f9f9;
+   --topic-post-muted-color: #475569;
+   --topic-post-strong-color: #1e293b;
    --management-toolbar-bg: rgba(255, 255, 255, 0.95);
    --management-toolbar-text: #1e293b;
    --management-toolbar-border: rgba(0, 0, 0, 0.15);
@@ -455,6 +467,8 @@ body {
 
 [data-theme='neutral'] {
    --author-meta-color: #8c7a6b;
+   --topic-post-muted-color: #5c4b3a;
+   --topic-post-strong-color: #382d1d;
    --forum-description-color: #8c7a6b;
    --stats-item-muted: #8c7a6b;
    --last-post-name-color: #6c5b4b;
