@@ -10,7 +10,8 @@ import {
   subscribeToReadMap,
   recordTopicVisit as apiRecordTopicVisit,
   normalizeUserProfile,
-  fetchUserProfile
+  fetchUserProfile,
+  migrateLegacyReadMap
 } from '../api/auth-resources';
 import {
   initRtdbPresence,
@@ -431,6 +432,16 @@ export const AuthProvider = ({ children }) => {
     });
     return unsubscribe;
   }, [user?.uid, restored]);
+
+  // Legacy localStorage migration: once the session is settled and we have a uid,
+  // move any data from the old unscoped key `aerun_readmap_${uid}` onto the new
+  // scoped key `aerun_readmap_${scope}_${uid}`, then delete the old key. Runs
+  // once per (uid, scope); phantom offsets are neutralized later by Effect 15's
+  // loadedPage guard + offset clamp and by markTopicRead's isTopicEnd exemption.
+  useEffect(() => {
+    if (!restored || !user?.uid) return;
+    migrateLegacyReadMap(user.uid);
+  }, [restored, user?.uid, migrateLegacyReadMap]);
 
   // Presence and DM subscriptions. A signed-in visitor beats as a member; an
   // anonymous one beats as a guest so the stats panel can count them.
@@ -1261,33 +1272,23 @@ export const AuthProvider = ({ children }) => {
 
   const updateLocalTopicPostsCount = useCallback((_topicId, _delta) => {}, []);
 
-  const markTopicRead = useCallback(async (topicId, offset = null, lastVisiblePostId = null) => {
+  const markTopicRead = useCallback(async (topicId, offset = null, lastVisiblePostId = null, isTopicEnd = false) => {
     if (!user?.uid || !topicId) return;
     const now = Date.now();
     // Only move the read cursor forward, never backward. Going back to an
     // earlier page must not overwrite the read position set by a later page —
     // otherwise goLast resolves against the older cursor and drops the user
     // onto a page they already read instead of the last page.
-    // The guard must block BOTH the local state update AND the server write:
-    // apiRecordTopicVisit pins topic_read_states to last_visible_post_id, so a
-    // backward page navigation would move the server cursor back, make the
-    // topic look unread again, and relight the navbar badge (1).
+    //
+    // However, if the visit is at the topic's end (isTopicEnd), an existingOffset
+    // that exceeds offset is either poisoned/inflated from a previous page race
+    // or reflects deleted posts that shrank the topic. In that case the cursor
+    // must advance rather than deadlock.
+    // Furthermore, the server already enforces monotonic forward-only cursor
+    // advancement based on post creation timestamp (applyTopicReadStateUpdate).
     const existing = readMapRef.current[topicId];
     const existingOffset = existing?.offset ?? null;
-    // Strictly-less, not equal. An EQUAL offset with a DIFFERENT last post is
-    // exactly "one new reply landed inside the same last page since the
-    // previous visit" — the cursor must move forward onto that reply.
-    // Blocking on equality deadlocked the mark-read: a goLast visit's
-    // jump-scroll caller recorded an offset one HIGHER than Effect 15 computes
-    // next time (posts.length vs length - 1 — the caller is fixed now, but
-    // readMap entries persisted by older builds still carry the inflated
-    // value), so the next visit's offset came back EQUAL and the guard
-    // silently swallowed the mark-read: the topic never left the unread list,
-    // and the network log showed no /read at all. Equal-offset same-post
-    // visits are still skipped — by the cursor guard below, which knows the
-    // pinned id — and a genuine backward navigation computes a STRICTLY
-    // SMALLER offset, which stays blocked.
-    if (offset !== null && existingOffset !== null && offset < existingOffset) {
+    if (offset !== null && existingOffset !== null && offset < existingOffset && !isTopicEnd) {
       // We are not moving the server cursor here, so there is nothing to
       // refresh on the client — the server state is already correct. Do not
       // touch refreshUnreadCounts/refreshUnreadTopics, or we risk overwriting a

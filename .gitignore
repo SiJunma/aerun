@@ -18,7 +18,7 @@ dist/
 
 # Testing
 coverage/
-markdowns/Assets
+markdowns/Assets/
 
 # Production
 build/
@@ -56,8 +56,6 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
-*.swp
-*.o*
 
 # Firebase
 .firebase/

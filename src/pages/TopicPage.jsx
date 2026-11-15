@@ -317,6 +317,7 @@ export default function TopicPage() {
     navigateToCreatedPost,
   } = useTopicJumpScroll({
     topicId: id,
+    topic,
     _searchParams: searchParams,
     setSearchParams,
     _navigate: navigate,
@@ -829,7 +830,7 @@ export default function TopicPage() {
       const newPostId = pubResult?.postId || pubResult?.id;
       if (newPostId) {
         resolveOptimisticPost(id, tempId, newPostId);
-        markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId);
+        markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId, true);
       }
       navigateToCreatedPost(tempId, newPostId);
 
@@ -1085,7 +1086,7 @@ export default function TopicPage() {
               return prev.map((p) => (p.id === tempIdRef ? { ...p, ...post, id: newPostId, _isOptimistic: false } : p));
             });
             navigateToCreatedPost(tempIdRef, newPostId);
-            markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId);
+            markTopicRead?.(id, (currentPage - 1) * ITEMS_PER_PAGE + posts.length, newPostId, true);
             // Same-page sends never touch `location.state`, so remember the
             // real post ID here — the unified scroll controller will focus
             // `post-${newPostId}` once the optimistic placeholder swaps to
@@ -1470,9 +1471,12 @@ export default function TopicPage() {
 
   useEffect(() => {
     if (!user?.uid || !id || posts.length === 0) return;
+    if (loadedPageRef.current !== currentPage) return;
     if (profile?.role === 'spectator') return;
     if (isSubmittingReplyRef.current) return;
-    const lastMessageIndex = (currentPage - 1) * ITEMS_PER_PAGE + (posts.length - 1);
+    const rawOffset = (currentPage - 1) * ITEMS_PER_PAGE + (posts.length - 1);
+    const maxPossibleOffset = Math.max(0, (topic?.posts_count || 1) - 1);
+    const lastMessageIndex = Math.min(rawOffset, maxPossibleOffset);
     if (lastMarkedOffsetRef.current === lastMessageIndex) return;
     lastMarkedOffsetRef.current = lastMessageIndex;
     // Optimistic (not-yet-confirmed) posts are skipped: their temp ids would
@@ -1481,8 +1485,11 @@ export default function TopicPage() {
     // server's "now" stamp and swallow replies that landed meanwhile.
     const lastRealPost = [...posts].reverse().find((p) => !p._isOptimistic && p.id);
     if (!lastRealPost) return;
-    markTopicRead(id, lastMessageIndex, lastRealPost.id);
-  }, [user?.uid, id, posts, currentPage, ITEMS_PER_PAGE, markTopicRead, profile?.role]);
+    const isTopicEnd = Boolean(
+      topic?.last_post_id && (lastRealPost.id === topic.last_post_id || (currentPage >= totalPages && posts.length > 0))
+    );
+    markTopicRead(id, lastMessageIndex, lastRealPost.id, isTopicEnd);
+  }, [user?.uid, id, posts, currentPage, ITEMS_PER_PAGE, markTopicRead, profile?.role, loadedPageRef, topic?.posts_count, topic?.last_post_id, totalPages]);
 
   // 15b. NO composer scroll pinning. A foreign post arriving while the
   // member is typing must never move the page: the browser's native scroll
