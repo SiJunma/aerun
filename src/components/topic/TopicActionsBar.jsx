@@ -1,5 +1,4 @@
 import React from 'react';
-import { Button } from 'react-bootstrap';
 import { Bell, BellOff } from 'lucide-react';
 import ForumPagination from '../common/ForumPagination';
 
@@ -20,41 +19,45 @@ export const TopicActionsBar = ({
   if (position === 'top') {
     if (totalPages <= 1) return null;
     return (
-      <div className="pagination-top">
-        <ForumPagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          onPageChange={onPageChange}
-        />
-      </div>
+      <ForumPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={onPageChange}
+        className="forum-pagination-topic"
+      />
     );
   }
 
   // Bottom position
   return (
-    <div className="mt-4 mb-4 px-2 px-md-0">
+    <div className="topic-actions-row">
       {showSubscription && onToggleSubscription && (
-        <div className="d-flex justify-content-end mb-3">
-          <Button
-            variant={isSubscribed ? 'primary' : 'outline-primary'}
-            size="sm"
-            className="d-flex align-items-center gap-2 rounded-pill px-3 shadow-sm"
+        <div
+          id="topic-actions-bottom"
+          className="topic-actions"
+        >
+          <button
+            type="button"
+            className={`topic-actions-subscription ${isSubscribed ? 'is-subscribed' : ''}`}
             onClick={onToggleSubscription}
             disabled={togglingSub}
           >
             {isSubscribed ? <BellOff size={14} /> : <Bell size={14} />}
             {isSubscribed ? t?.('notifications.unfollow') || 'Unfollow' : t?.('notifications.follow') || 'Follow'}
-          </Button>
+          </button>
         </div>
       )}
-      <div className="d-flex justify-content-center pagination-bottom">
+      <nav
+        id="topic-pagination-bottom"
+        className="topic-pagination topic-pagination-bottom"
+      >
         <ForumPagination
           currentPage={currentPage}
           totalPages={totalPages}
           onPageChange={(page) => onPageChange(page, true)}
           centered
         />
-      </div>
+      </nav>
     </div>
   );
 };

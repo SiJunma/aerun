@@ -1,0 +1,504 @@
+/**
+ * Aerun Theme Variables & Design Tokens
+ *
+ * Provides semantic CSS variables for Layout, Forum Index, and Statistics.
+ * Overridable cleanly by themes without specificity wars or !important.
+ *
+ * Defaults live on `body`, NOT `:root`: ThemeProvider sets `data-theme`
+ * on <body>, and a semantic alias like --forum-view-title-color:
+ * var(--text-color) must resolve var() against the *themed* base
+ * token on body[data-theme='dark']. On :root (<html>), var() would be
+ * resolved against the unthemed light defaults from index.css :root,
+ * baking light colours into every alias (black title / white card in
+ * dark theme — screenshot regression 2026-11-06). Custom properties
+ * inherit from body to all descendants, so consumers are unaffected.
+ */
+
+body {
+   /* ── Layout tokens ────────────────────────────────────────── */
+   --forum-max-width: 1320px;
+   --forum-main-content-padding-top: 2rem;
+   --forum-main-content-padding-bottom: 2rem;
+   --forum-header-bg: var(--nav-bg);
+   --forum-header-text: #ffffff;
+   --forum-header-border: rgba(255, 255, 255, 0.1);
+   --forum-name-color: var(--forum-header-text);
+   --nav-admin-color: #ffc107;
+   --nav-link-color: rgba(255, 255, 255, 0.55);
+   --nav-link-hover-color: #ffffff;
+   --nav-link-active-color: #ffffff;
+   --forum-footer-bg: var(--footer-bg);
+   --forum-footer-text: var(--secondary-color);
+   --forum-footer-border: var(--footer-border);
+   --forum-announcement-bg: var(--card-bg);
+   --forum-announcement-border: var(--border-color);
+   --forum-status-maintenance-bg: #dc3545;
+   --forum-status-maintenance-text: #ffffff;
+
+   /* ── Category / Group tokens ──────────────────────────────── */
+   /* Group header band on the main page (.category-group-header). */
+   --category-group-header-bg: var(--nav-bg);
+   --category-group-header-text: #ffffff;
+   --category-group-header-radius: 12px 12px 0 0;
+   --category-group-header-padding: 0.75rem 1rem;
+   --category-group-header-font-size: 1rem;
+   --category-group-header-font-weight: 700;
+   --category-card-bg: var(--card-bg);
+   --category-card-radius: 0 0 12px 12px;
+   --category-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+   --category-border: var(--border-color);
+   /* Legacy home: thead th was --secondary-color with Slate 400 on dark.
+     The band is lighter than the card, and its label reads as muted
+     Slate — not white. --category-head-text stays --secondary-color
+     on light/neutral; dark below recolors it to Slate 500. */
+   --category-head-bg: var(--secondary-color);
+   --category-head-text: var(--secondary-color);
+   --category-head-letter-spacing: 0.05em;
+
+   /* ── Forum Item tokens ────────────────────────────────────── */
+   --forum-item-bg: transparent;
+   --forum-item-hover-bg: rgba(var(--primary-rgb), 0.03);
+   --forum-item-border: var(--border-color);
+   --forum-item-padding: 1rem 1rem;
+   --forum-title-color: var(--text-color);
+   --forum-title-hover-color: var(--link-color);
+   --forum-title-font-size: 1.25rem;
+   --forum-title-font-weight: 700;
+   --forum-description-color: var(--secondary-color);
+   --forum-description-font-size: 0.875rem;
+   --forum-description-line-height: 1.35;
+   --forum-stat-color: var(--text-color);
+   --forum-unread-dot: #f59e0b;
+   --forum-mobile-stats-color: var(--secondary-color);
+
+   /* ── Last Post tokens ─────────────────────────────────────── */
+   --last-post-hover-bg: rgba(var(--primary-rgb), 0.08);
+   --last-post-meta-color: var(--secondary-color);
+   /* Legacy home (HEAD MainPage): the last-post topic was a Bootstrap
+     `text-decoration-none` link — no explicit `color`, so the global
+     `a { color: var(--link-color) }` won and the title rendered in the
+     link colour. The migration renamed this to --last-post-title-color
+     and set it to --link-color, but forum-index.css lost the explicit
+     `a {}` rule, so the title silently fell back to... the higher-
+     specificity `.last-topic-link a`? No: it inherited the parent's
+     --text-color (footer colour). Screenshot 2 (target) shows the title
+     one shade dimmer than the category name, exactly like a legacy link.
+     Restored as an explicit token: do not "simplify" this to
+     --text-color) — it must stay the link colour. */
+   --last-post-title-color: var(--link-color);
+   --last-post-title-line-height: 1.35;
+   --last-post-title-margin-bottom: 0.25rem;
+   --last-post-mobile-bg: rgba(var(--primary-rgb), 0.02);
+   --last-post-mobile-border: rgba(var(--primary-rgb), 0.03);
+   /* Inside-group mobile separator for .forum-last-post (<=768px).
+     The row separator above (--forum-item-border = opaque
+     --border-color) marks where one forum section ends and the
+     next begins; this one sits INSIDE a section, between its
+     meta (title/description/stats) and its last-post strip, so
+     it must read paler or the two borders look identical
+     (screenshot: heavy line under "General Discussion" vs the
+     barely-there line under "LAST POST" in the target). Derived
+     from --border-color via color-mix so dark/light/neutral
+     inherit their own border hue at 40% alpha with no per-theme
+     RGB override to keep in sync. */
+   --forum-last-post-mobile-border: color-mix(in srgb, var(--border-color) 40%, transparent);
+
+   /* ── Statistics tokens ────────────────────────────────────── */
+   --stats-card-bg: var(--card-bg);
+   --stats-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+   --stats-card-radius: 12px;
+   --stats-header-bg: var(--nav-bg);
+   --stats-header-text: #ffffff;
+   --stats-header-border: rgba(var(--primary-rgb), 0.1);
+   --stats-header-icon-color: var(--stats-header-text);
+   --stats-footer-link-color: var(--secondary-color);
+   --stats-footer-link-hover-color: var(--text-color);
+   --stat-user-default-color: var(--text-color);
+   --stat-user-default-hover-color: var(--text-color);
+   --stats-border: var(--border-color);
+   --stats-item-muted: var(--secondary-color);
+   --stats-item-text: var(--text-color);
+   --stats-panel-bg: var(--block-bg);
+   --stats-panel-border: rgba(var(--primary-rgb), 0.05);
+   --stats-footer-bg: rgba(var(--primary-rgb), 0.02);
+   --stats-footer-border: rgba(var(--primary-rgb), 0.05);
+   --stat-online-indicator: #10b981;
+
+   /* ── Forum View (CategoryPage: /category/:id) ─────────────── */
+   /* Page header (.category-header): a bare heading (target layout),
+      not a card. Shared by the category page and the three topic
+      list pages (active topics / new replies / subscriptions). */
+   --category-header-bg: transparent;
+   --category-header-border: transparent;
+   --category-header-padding: 0;
+   --category-header-margin-bottom: 1rem;
+   --category-header-title-size: 2.5rem;
+   --category-header-title-size-mobile: 2rem;
+   --category-header-title-color: var(--text-color);
+   --category-header-description-color: #475569;
+   --forum-view-card-bg: var(--card-bg);
+   --forum-view-card-border: var(--border-color);
+   --forum-view-card-radius: 12px;
+   --forum-view-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+   /* Columns strip (.category-subtitle) wears the GROUP HEADER look on
+      every topic list (category page + active/new/subscriptions): colors
+      alias the group header so a theme recoloring the band recolors both
+      together. Geometry (padding/font-size/uppercase) lives in the
+      .category-subtitle class, not in tokens. */
+   --category-subtitle-bg: var(--category-group-header-bg);
+   --category-subtitle-text: var(--category-group-header-text);
+   --forum-view-empty-color: var(--secondary-color);
+   /* Buttons: filled = btn-primary, ghost = btn-outline-primary/secondary.
+     Ghost border/text comes from --secondary-color (not --border-color),
+     matching index.css .btn-outline-secondary / .btn-outline-primary. */
+   --forum-view-btn-primary-bg: var(--primary-color);
+   --forum-view-btn-primary-border: var(--primary-color);
+   --forum-view-btn-primary-text: var(--bg-color);
+   --forum-view-btn-primary-hover-opacity: 1;
+   --forum-view-btn-ghost-bg: transparent;
+   --forum-view-btn-ghost-border: var(--secondary-color);
+   --forum-view-btn-ghost-text: var(--secondary-color);
+   --forum-view-btn-ghost-hover-bg: var(--secondary-color);
+   --forum-view-btn-ghost-hover-text: #ffffff;
+   --forum-view-back-color: var(--secondary-color);
+   --forum-view-back-hover-color: var(--text-color);
+   --forum-view-back-border: var(--secondary-color);
+   --forum-view-back-radius: 0.375rem;
+   --forum-view-back-padding: 0.5rem 1rem;
+   --forum-view-back-hover-bg: transparent;
+
+   /* ── Topic Row (shared: category / active / new-replies / top) */
+   --topic-item-bg: transparent;
+   --topic-item-hover-bg: rgba(var(--primary-rgb), 0.05);
+   --topic-item-selected-bg: rgba(var(--primary-rgb), 0.08);
+   --topic-item-border: var(--border-color);
+   --topic-item-padding: 1rem 1rem;
+   --topic-title-color: var(--text-color);
+   --topic-title-hover-color: var(--primary-color);
+   --topic-title-size: 1rem;
+   --topic-title-font-weight: 700;
+   --topic-description-color: var(--secondary-color);
+   --topic-description-font-size: 0.875rem;
+   --topic-meta-color: var(--secondary-color);
+   --topic-count-color: var(--text-color);
+   --topic-category-color: var(--secondary-color);
+   --topic-category-hover-color: var(--primary-color);
+   --topic-last-post-bg: transparent;
+   --topic-last-post-mobile-bg: rgba(var(--primary-rgb), 0.02);
+   --topic-last-post-mobile-border: rgba(var(--primary-rgb), 0.05);
+   --topic-pinned-color: #ffc107;
+   --topic-locked-color: #ef4444;
+   --mini-pagination-bg: rgba(var(--primary-rgb), 0.1);
+   --mini-pagination-hover-bg: var(--primary-color);
+   --mini-pagination-color: var(--primary-color);
+   --mini-pagination-hover-color: #ffffff;
+   --unread-dot-color: var(--forum-unread-dot);
+   --author-meta-color: var(--secondary-color);
+   --author-meta-font-size: 0.875rem;
+   --author-meta-line-height: 1.35;
+   --author-meta-gap: 0.5rem;
+   --author-meta-avatar-shadow: 0 1px 3px rgba(0, 0, 0, .1);
+   --author-meta-avatar-size: 20px;
+   --author-name-color: var(--text-color);
+   --author-name-font-weight: 600;
+   --topic-author-color: var(--secondary-color);
+   --topic-avatar-shadow: var(--author-meta-avatar-shadow);
+
+   /* Shared AuthorMeta / LastPostInfo (author-meta.css) */
+   --last-post-empty-color: var(--secondary-color);
+   --last-post-empty-font-size: 0.875rem;
+   --last-post-link-gap: 0.25rem;
+   --last-post-link-radius: 6px;
+   --last-post-link-padding: 4px 6px;
+   --last-post-link-margin: -4px -6px;
+
+   /* ── Forum Pagination (shared; absent on the index) ───────── */
+   --pagination-color: var(--text-color);
+   --pagination-hover-color: var(--primary-color);
+   --pagination-hover-bg: rgba(255, 255, 255, 0.06);
+   --pagination-active-color: var(--primary-color);
+   --pagination-active-border: rgba(var(--primary-rgb), 0.3);
+   --pagination-disabled-opacity: 0.2;
+
+   /* ── Forum Breadcrumbs (shared; one component everywhere) ───── */
+   --breadcrumb-gap: 0.25rem;
+   --breadcrumb-color: var(--link-color);
+   --breadcrumb-active-color: var(--text-color);
+   --breadcrumb-font-size: 1rem;
+
+   /* ── Management Toolbar (CategoryPage manage mode) ─────────── */
+   --management-toolbar-bg: rgba(30, 41, 59, 0.9);
+   --management-toolbar-text: #ffffff;
+   --management-toolbar-border: rgba(255, 255, 255, 0.1);
+   --management-toolbar-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+   --management-toolbar-hint-opacity: 0.85;
+
+   /* ── Topic View (TopicPage: /topic/:id) ─────────────────────
+     Declared here (not inherited from index.css :root): values below
+     are aliases of the base theme tokens on body. */
+   --topic-page-margin: 0;
+   --topic-header-margin-bottom: 1.5rem;
+   --topic-header-margin-top: 0.5rem;
+   --topic-title-row-gap: 0.5rem;
+   --topic-title-row-margin-bottom: 0.25rem;
+   --topic-head-meta-margin-top: 0.75rem;
+   --topic-header-title-size: 2rem;
+   --topic-title-weight: 600;
+   --topic-title-line-height: 1.2;
+   --topic-description-size: 0.875rem;
+   --topic-description-line-height: 1.2;
+   --topic-meta-size: 0.9rem;
+   --topic-meta-line-height: 1.2;
+   --topic-meta-gap: 0.5rem;
+   --topic-header-layout-gap: 1rem;
+   --topic-actions-gap: 0.5rem;
+
+   --topic-posts-margin-bottom: 1.5rem;
+   --topic-post-margin-bottom: 1.5rem;
+   --topic-post-card-bg: var(--card-bg);
+   --topic-post-card-border: var(--border-color);
+   --topic-post-card-radius: 1rem;
+   --topic-post-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+   --topic-post-sidebar-bg: transparent;
+   --topic-post-sidebar-border: var(--border-color);
+   --topic-post-sidebar-padding: 1rem;
+   --topic-post-sidebar-name-size: 1rem;
+   --topic-post-sidebar-name-weight: 700;
+   --topic-post-sidebar-name-line-height: 1.2;
+   --topic-post-sidebar-meta-size: 0.875rem;
+   --topic-post-sidebar-meta-line-height: 1.2;
+   --topic-post-sidebar-role-size: 0.875rem;
+   --topic-post-sidebar-role-size-mobile: 0.875rem;
+   --topic-post-sidebar-status-max-width: 100%;
+   --topic-post-sidebar-status-size: 0.875rem;
+   --topic-post-avatar-size: 150px;
+   --topic-post-avatar-radius: 0.5rem;
+   --topic-post-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+   --topic-post-header-padding-y: 0.5rem;
+   --topic-post-header-padding-x: 1.25rem;
+   --topic-post-header-border: var(--border-color);
+   --topic-post-body-padding-y: 1rem;
+   --topic-post-body-padding-x: 1.25rem;
+   --topic-post-footer-padding-y: 0.625rem;
+   --topic-post-footer-padding-x: 1.25rem;
+   --topic-post-footer-height: 40px;
+   --topic-post-footer-border: var(--border-color);
+   --topic-post-footer-gap: 1rem;
+   --topic-post-footer-text-size: 0.95rem;
+   --topic-post-footer-link-size: 0.875rem;
+   --topic-post-number-size: 0.875rem;
+   --topic-post-number-weight: 600;
+   --topic-post-number-color: var(--secondary-color);
+   --topic-post-date-size: 0.875rem;
+   --topic-post-date-color: var(--secondary-color);
+   --topic-post-signature-size: 0.875rem;
+   --topic-post-signature-color: var(--secondary-color);
+   --topic-post-signature-padding-top: 1rem;
+   --topic-post-signature-border: var(--border-color);
+   --topic-post-draft-badge-bg: var(--secondary-color);
+   --topic-post-draft-badge-border: var(--secondary-color);
+   --topic-post-draft-badge-text: #ffffff;
+   --topic-post-edited-badge-bg: var(--secondary-color);
+   --topic-post-edited-badge-border: var(--secondary-color);
+   --topic-post-edited-badge-text: #ffffff;
+   --topic-post-dice-size: 0.875rem;
+   --topic-post-dice-color: var(--secondary-color);
+   --topic-post-rep-size: 0.875rem;
+   --topic-post-action-size: 0.875rem;
+   --topic-post-action-weight: 600;
+   --topic-post-footer-mobile-gap: 1rem;
+   --topic-post-skeleton-author-min-height: 200px;
+   --topic-post-skeleton-padding: 1rem;
+   --topic-post-skeleton-row-gap: 1rem;
+   --topic-post-skeleton-line-gap: 0.5rem;
+   --topic-post-skeleton-footer-margin-top: 3rem;
+   --topic-post-skeleton-footer-padding-top: 1rem;
+   --topic-post-skeleton-footer-border: var(--border-color);
+   --topic-post-skeleton-footer-border: var(--border-color);
+
+   /* ── TopicPostCard parity tokens (muted/strong pairs) ──────
+      Deploy values (FACTS_topic-post-card.md): light #475569/#1e293b,
+      dark #cbd5e1/#f1f5f9, neutral #5c4b3a/#382d1d. */
+   --topic-post-muted-color: #475569;
+   --topic-post-strong-color: #1e293b;
+
+
+   --topic-reply-margin-top: 3rem;
+   --topic-reply-card-bg: var(--card-bg);
+   --topic-reply-card-border: var(--border-color);
+   --topic-reply-card-radius: 0.375rem;
+   --topic-reply-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+   --topic-reply-header-bg: var(--nav-bg);
+   --topic-reply-header-text: #ffffff;
+   --topic-reply-header-padding-y: 0.75rem;
+   --topic-reply-header-padding-x: 1rem;
+   --topic-reply-header-title-size: 1.25rem;
+   --topic-reply-header-title-weight: 500;
+   --topic-reply-header-title-line-height: 1.2;
+   --topic-reply-body-padding-y: 1rem;
+   --topic-reply-body-padding-x: 1rem;
+   --topic-reply-field-margin-bottom: 1rem;
+   --topic-reply-label-size: 0.875rem;
+   --topic-reply-label-weight: 600;
+   --topic-reply-mask-row-gap: 0.5rem;
+   --topic-reply-mask-row-margin-bottom: 0.5rem;
+   --topic-reply-mask-toggle-min-width: 250px;
+   --topic-reply-mask-toggle-max-width: 250px;
+   --topic-reply-mask-text-max-width: 200px;
+   --topic-reply-actions-margin-top: 1.5rem;
+   --topic-reply-actions-gap: 0.5rem;
+   --topic-reply-submit-padding-x: 1.5rem;
+   --topic-reply-submit-padding-y: 0.375rem;
+   --topic-reply-notice-padding: 1.5rem;
+   --topic-reply-notice-icon-size: 2rem;
+   --topic-reply-notice-icon-max-width: 400px;
+   --topic-reply-notice-gap: 1rem;
+
+   --topic-actions-row-padding-x: 0.5rem;
+   --topic-actions-row-padding-x-md: 0;
+   --topic-actions-row-margin-top: 1.5rem;
+   --topic-actions-row-margin-bottom: 1.5rem;
+   --topic-actions-row-gap: 1rem;
+   --topic-actions-subscription-margin-bottom: 1rem;
+   --topic-actions-subscription-padding-x: 1rem;
+   --topic-actions-subscription-padding-y: 0.25rem;
+   --topic-actions-subscription-radius: 50rem;
+   --topic-actions-pagination-margin-top: 1rem;
+
+   --topic-post-editor-margin-bottom: 0.75rem;
+   --topic-post-editor-label-size: 0.875rem;
+   --topic-post-editor-label-weight: 600;
+   --topic-post-editor-mask-row-margin-bottom: 0.5rem;
+   --topic-post-editor-mask-text-max-width: 200px;
+   --topic-post-editor-actions-gap: 0.5rem;
+
+   /* ── Shared loading / empty states (Forum View list pages) ─── */
+   --loading-spinner-color: var(--primary-color);
+   --forum-view-empty-icon-size: 3rem;
+   --forum-view-empty-icon-opacity: 0.3;
+   --forum-view-empty-note-size: 0.875rem;
+   --empty-state-margin: 1rem;
+
+   /* ── Management toolbar delete button ─────────────────────── */
+   --forum-view-btn-danger-bg: #dc3545;
+   --forum-view-btn-danger-text: #ffffff;
+   --forum-view-btn-danger-hover-bg: #c82333;
+
+   /* ── Topic select checkboxes (manage mode) ────────────────── */
+   --topic-check-border: var(--border-color);
+   --topic-check-bg: var(--card-bg);
+   --topic-check-checked-bg: var(--primary-color);
+   --topic-check-chip-bg: rgba(var(--primary-rgb), 0.14);
+
+   --footer-post-header-bg: #f8f9fa;
+}
+
+[data-theme='dark'] {
+   --topic-post-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+   --topic-post-muted-color: #cbd5e1;
+   --topic-post-strong-color: #f1f5f9;
+   /* Equivalent of light #475569 (Slate 600) on dark: Slate 500 */
+   --category-header-description-color: #b0b0b0;
+   /* Exact target home colors (screenshot 2026-11-06, user-confirmed):
+     .category-head background #0e1324, color #80848d;
+     .last-topic-link (#94a3b8), .forum-description/.cat-desc and
+     .author-meta__date > span (#b0b0b0, legacy .text-muted tone),
+     .last-post-link-meta .author-meta__name (#94a3b8),
+     --stats-item-muted (#b0b0b0), .topic-pinned (#ffc107).
+     These are not Slate/Bootstrap aliases: do not "simplify" them
+     to nearby Slates. */
+   --category-head-bg: #0e1324;
+   --category-head-text: #80848d;
+   --last-post-meta-color: #94a3b8;
+   --last-post-title-color: #94a3b8;
+   --author-name-color: #94a3b8;
+   --last-post-name-color: #94a3b8;
+   --author-date-color: #b0b0b0;
+   --forum-description-color: #b0b0b0;
+   --stats-item-muted: #b0b0b0;
+   --topic-pinned-color: #ffc107;
+   --forum-title-color: #f8fafc;
+   --forum-stat-color: #f8fafc;
+   --forum-header-border: rgba(255, 255, 255, 0.05);
+   --category-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+   --last-post-hover-bg: rgba(var(--primary-rgb), 0.15);
+   --stats-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+   --stats-panel-bg: rgba(15, 23, 42, 0.3);
+   --stats-panel-border: rgba(255, 255, 255, 0.06);
+   --forum-view-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+   --forum-view-btn-ghost-text: #f1f5f9;
+   --forum-view-btn-ghost-border: #f1f5f9;
+   --forum-view-btn-ghost-hover-bg: #f1f5f9;
+   --forum-view-btn-ghost-hover-text: #f1f5f9;
+   --topic-item-hover-bg: rgba(var(--primary-rgb), 0.12);
+   --topic-item-selected-bg: rgba(var(--primary-rgb), 0.18);
+   --topic-check-chip-bg: rgba(var(--primary-rgb), 0.26);
+   /* Checkboxes must stay visible on dark cards AND on the dark
+      subtitle strip: a light border + faint light fill (the light
+      theme keeps the base border-color/card-bg pair). Checked fill:
+      the dark theme's --primary-color is pale (#f1f5f9), so the white
+      tick would vanish — use a dark slate fill instead. */
+   --topic-check-border: rgba(255, 255, 255, 0.55);
+   --topic-check-bg: rgba(255, 255, 255, 0.08);
+   --topic-check-checked-bg: #334155;
+   --pagination-hover-bg: rgba(255, 255, 255, 0.08);
+   --mini-pagination-hover-color: var(--nav-bg);
+   /* Hover pair must stay readable in dark: light chip background for the
+      dark nav-bg text (the body default pairs primary bg with white text,
+      which light/neutral keep). */
+   --mini-pagination-hover-bg: #e2e8f0;
+   --forum-view-btn-primary-text: #0f172a;
+   --forum-view-btn-ghost-hover-text: #0f172a;
+   --management-toolbar-bg: rgba(30, 41, 59, 0.9);
+   --management-toolbar-text: #ffffff;
+   --footer-post-header-bg: #1c2636;
+   --management-toolbar-border: rgba(255, 255, 255, 0.1);
+   --management-toolbar-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme='light'] {
+   --category-head-bg: #f9f9f9;
+   --topic-post-muted-color: #475569;
+   --topic-post-strong-color: #1e293b;
+   --management-toolbar-bg: rgba(255, 255, 255, 0.95);
+   --management-toolbar-text: #1e293b;
+   --management-toolbar-border: rgba(0, 0, 0, 0.15);
+   --management-toolbar-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+   --stats-item-muted: #6c757d;
+   --topic-meta-color: #475569;
+}
+
+[data-theme='neutral'] {
+   --author-meta-color: #8c7a6b;
+   --topic-post-muted-color: #5c4b3a;
+   --topic-post-strong-color: #382d1d;
+   --forum-description-color: #8c7a6b;
+   --stats-item-muted: #8c7a6b;
+   --last-post-name-color: #6c5b4b;
+   --stat-user-default-color: #8c7152;
+   --category-head-text: #857d71;
+   --category-head-bg: #faf7f0;
+   --category-header-description-color: #6b5a48;
+   --forum-header-border: rgba(0, 0, 0, 0.1);
+   --category-card-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
+   --stats-card-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
+   --stats-panel-bg: rgba(67, 52, 34, 0.03);
+   --stats-panel-border: rgba(128, 128, 128, 0.15);
+   --forum-view-card-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
+   --topic-pinned-color: #78350f;
+   --topic-locked-color: #b91c1c;
+   --footer-post-header-bg: #f8f4ec;
+   --mini-pagination-hover-color: #fffcf5;
+   --forum-view-btn-primary-bg: #8c7a6b;
+   --forum-view-btn-primary-border: #8c7a6b;
+   --forum-view-btn-primary-text: #fdf6e3;
+   --forum-view-btn-ghost-border: #8c7a6b;
+   --forum-view-btn-ghost-text: #8c7a6b;
+   --forum-view-btn-ghost-hover-bg: #5c4b3a;
+   --forum-view-btn-ghost-hover-text: #fff;
+   /* Was utilities.css !important (.btn-outline-light / .vr) — now tokens */
+   --management-toolbar-bg: rgba(244, 241, 234, 0.98);
+   --management-toolbar-text: #433422;
+   --management-toolbar-border: #dcd7c9;
+   --management-toolbar-shadow: 0 10px 30px rgba(67, 52, 34, 0.15);
+}

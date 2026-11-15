@@ -111,16 +111,18 @@ const Navigation = () => {
 
   return (
     <Navbar
+      as="header"
+      id="forum-header"
       bg="dark"
       variant="dark"
       expand="lg"
       sticky="top"
       expanded={expanded}
       onToggle={(val) => setExpanded(val)}
-      className="mb-0 shadow-sm border-bottom border-secondary border-opacity-25"
+      className="forum-header mb-0 shadow-sm border-bottom border-secondary border-opacity-25"
     >
       <Container className="d-flex align-items-center">
-        <div className="d-flex align-items-center">
+        <div id="forum-title" className="forum-title d-flex align-items-center">
           <div className="position-relative d-lg-none">
             <Navbar.Toggle
               aria-controls="basic-navbar-nav"
@@ -128,28 +130,18 @@ const Navigation = () => {
               onClick={() => setExpanded(!expanded)}
             />
             {unreadTopicsCount > 0 && (
-              <span
-                className="position-absolute rounded-circle bg-warning shadow-sm"
-                style={{
-                  width: '10px',
-                  height: '10px',
-                  top: '5px',
-                  right: '11px',
-                  border: '2px solid var(--nav-bg)',
-                  pointerEvents: 'none'
-                }}
-              />
+              <span className="nav-mobile-unread-dot" />
             )}
           </div>
-          <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="d-flex align-items-center gap-2">
+          <Navbar.Brand as={Link} to="/" onClick={() => setExpanded(false)} className="forum-brand d-flex align-items-center gap-2">
             {(activeDesign?.logoUrl || settings?.logoUrl) && (
               <img
                 src={activeDesign?.logoUrl || settings.logoUrl}
                 alt="Logo"
-                style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
+                className="forum-logo"
               />
             )}
-            <span>
+            <span className="forum-name">
               {activeDesign?.forumTitle ? activeDesign.forumTitle : (
                 (typeof settings?.forumName === 'object' && settings.forumName !== null)
                   ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
@@ -160,7 +152,7 @@ const Navigation = () => {
         </div>
 
         {/* Persistent actions (Right side on mobile & desktop) */}
-        <div className="d-flex align-items-center gap-2 gap-md-3 order-lg-3 ms-auto">
+        <div id="forum-user-links" className="forum-user-links d-flex align-items-center gap-2 gap-md-3 order-lg-3 ms-auto">
           {settings?.maintenanceMode && (
             <Badge bg="warning" text="dark" className="d-none d-sm-flex align-items-center gap-1 shadow-sm px-2 py-1" style={{ fontSize: '0.75rem', letterSpacing: '0.5px' }}>
               <div className="bg-dark rounded-circle me-1" style={{ width: '6px', height: '6px', animation: 'pulse 1.5s infinite' }}></div>
@@ -322,22 +314,21 @@ const Navigation = () => {
         </div>
 
         <Navbar.Collapse id="basic-navbar-nav" className="order-lg-2">
-          <Nav className="me-auto mt-2 mt-lg-0">
-            <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)}>
+          <Nav id="forum-nav" className="forum-nav me-auto mt-2 mt-lg-0">
+            <Nav.Link as={Link} to="/new-replies" onClick={() => setExpanded(false)} className="nav-active-topics">
               {t('nav.active_topics')}
               {unreadTopicsCount > 0 && ` (${unreadTopicsCount})`}
             </Nav.Link>
             {user && (
-              <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)}>
+              <Nav.Link as={Link} to="/subscriptions" onClick={() => setExpanded(false)} className="nav-subscriptions">
                 {t('nav.subscriptions', 'Подписки')}
               </Nav.Link>
             )}
-            <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)}>
-
+            <Nav.Link as={Link} to="/members" onClick={() => setExpanded(false)} className="nav-members">
               {t('nav.members')}
             </Nav.Link>
             {isAdmin && (
-              <Nav.Link as={Link} to="/admin" onClick={() => setExpanded(false)} className="text-warning fw-semibold">
+              <Nav.Link as={Link} to="/admin" onClick={() => setExpanded(false)} className="nav-admin">
                 {t('nav.admin')}
               </Nav.Link>
             )}

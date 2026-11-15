@@ -1,5 +1,4 @@
 import React from 'react';
-import { Dropdown } from 'react-bootstrap';
 import { Pin, Lock, Settings, Trash2, ArrowRightLeft } from 'lucide-react';
 import ForumBreadcrumbs from '../common/ForumBreadcrumbs';
 import ForumPagination from '../common/ForumPagination';
@@ -35,33 +34,39 @@ export const TopicHeader = ({
 
   return (
     <>
-      <div className="mt-4">
+      <nav
+        id="topic-breadcrumbs-top"
+        aria-label="breadcrumb"
+      >
         <ForumBreadcrumbs
           items={[
             ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
             { label: topic?.title || '...', active: true }
           ]}
         />
-      </div>
+      </nav>
 
-      <div className="mb-4 topic-header-area">
-        <div className="mb-2">
-          <div className="d-flex align-items-center gap-2 mb-1">
+      <header
+        id="topic-header"
+        className="topic-header"
+      >
+        <div className="topic-head">
+          <div className="topic-title-row">
             {topic.is_pinned && <Pin size={20} className="topic-indicator topic-pinned" fill="currentColor" />}
             {topic.is_locked && <Lock size={20} className="topic-indicator topic-locked" />}
-            <h1 className="h2 mb-0">{topic.title}</h1>
+            <h1 className="topic-title">{topic.title}</h1>
           </div>
           {topic.description && (
-            <p className="text-muted mb-0 opacity-75 topic-description" style={{ fontSize: '0.875rem' }}>
+            <p className="topic-description">
               {topic.description}
             </p>
           )}
         </div>
 
-        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end align-items-center gap-3">
+        <div className="topic-header-layout">
           {/* Metadata Group */}
-          <div className="d-flex align-items-center gap-2 flex-wrap flex-md-nowrap text-muted opacity-75 topic-meta-bar" style={{ fontSize: '0.875rem' }}>
-            <span className="text-nowrap">
+          <div className="topic-meta">
+            <span className="topic-meta__item">
               {t('forum.author')}:{' '}
               <ForumAuthorName
                 author={topic.author}
@@ -69,86 +74,81 @@ export const TopicHeader = ({
                 characterId={topic.author_character_id}
                 isCharacter={!!topic.is_character}
                 fallbackName={topic.author_name || topic.guest_nickname}
-                className="fw-semibold text-primary"
+                className="topic-author-name"
               />
             </span>
-            <span>·</span>
-            <span className="text-nowrap">
+            <span className="topic-meta-separator">·</span>
+            <span className="topic-meta__item text-nowrap">
               {t('forum.replies')}:{' '}
               <strong>{Math.max(0, (topic.posts_count || 1) - 1)}</strong>
             </span>
-            <span>·</span>
+            <span className="topic-meta-separator">·</span>
             <Timestamp date={topic.created_at} />
           </div>
 
           {/* Actions Group (Right Side) */}
-          <div className="d-flex flex-column flex-md-row align-items-center gap-2 gap-md-3">
+          <div id="topic-actions-top" className="topic-actions">
             {(hasPermission(PERMISSIONS.PIN_TOPICS) ||
               hasPermission(PERMISSIONS.CLOSE_TOPICS) ||
               hasPermission(PERMISSIONS.MOVE_TOPICS) ||
               canDeleteTopic) && (
-              <Dropdown>
-                <Dropdown.Toggle
-                  variant="link"
-                  size="sm"
-                  id="admin-topic-controls"
-                  className="topic-manage-link d-flex align-items-center gap-1 text-decoration-none"
-                >
+              <details className="topic-manage">
+                <summary className="topic-manage-link">
                   <Settings size={14} />
                   <span>{t('forum.manage_topic')}</span>
-                </Dropdown.Toggle>
+                  <span className="topic-manage-caret" aria-hidden="true" />
+                </summary>
 
-                <Dropdown.Menu className="shadow-sm border-0">
+                <div className="topic-manage-menu">
                   {hasPermission(PERMISSIONS.PIN_TOPICS) && (
-                    <Dropdown.Item onClick={onPinToggle} className="d-flex align-items-center gap-2">
+                    <button type="button" onClick={onPinToggle} className="topic-manage-menu__item">
                       <Pin size={14} />
                       {topic.is_pinned ? t('forum.unpin') : t('forum.pin')}
-                    </Dropdown.Item>
+                    </button>
                   )}
                   {hasPermission(PERMISSIONS.CLOSE_TOPICS) && (
-                    <Dropdown.Item onClick={onLockToggle} className="d-flex align-items-center gap-2">
+                    <button type="button" onClick={onLockToggle} className="topic-manage-menu__item">
                       <Lock size={14} />
                       {topic.is_locked ? t('forum.open') : t('forum.close')}
-                    </Dropdown.Item>
+                    </button>
                   )}
                   {hasPermission(PERMISSIONS.MOVE_TOPICS) && (
-                    <Dropdown.Item onClick={onOpenMoveModal} className="d-flex align-items-center gap-2">
+                    <button type="button" onClick={onOpenMoveModal} className="topic-manage-menu__item">
                       <ArrowRightLeft size={14} />
                       {t('forum.move_topic')}
-                    </Dropdown.Item>
+                    </button>
                   )}
                   {hasPermission(PERMISSIONS.EDIT_OTHERS_POSTS) && (
-                    <Dropdown.Item onClick={onOpenMovePostsModal} className="d-flex align-items-center gap-2">
+                    <button type="button" onClick={onOpenMovePostsModal} className="topic-manage-menu__item">
                       <ArrowRightLeft size={14} />
                       {t('forum.move_posts')}
-                    </Dropdown.Item>
+                    </button>
                   )}
                   {canDeleteTopic && (
                     <>
-                      <Dropdown.Divider />
-                      <Dropdown.Item onClick={onOpenDeleteModal} className="text-danger d-flex align-items-center gap-2">
+                      <hr className="topic-manage-menu__divider" />
+                      <button type="button" onClick={onOpenDeleteModal} className="topic-manage-menu__item topic-manage-menu__item--danger">
                         <Trash2 size={14} />
                         {t('forum.delete_topic')}
-                      </Dropdown.Item>
+                      </button>
                     </>
                   )}
-                </Dropdown.Menu>
-              </Dropdown>
+                </div>
+              </details>
             )}
 
             {/* Top pagination — lives inside the header's action group (legacy parity) */}
             {totalPages > 1 && (
-              <div className="pagination-top">
-                <ForumPagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={onPageChange}
-                />
-              </div>
+              <ForumPagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={onPageChange}
+                className="forum-pagination-topic"
+              />
             )}
           </div>
         </div>
-      </div>
+      </header>
     </>
   );
 };

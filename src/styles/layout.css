@@ -1,0 +1,186 @@
+/**
+ * Aerun Forum Layout Styles
+ *
+ * Implements semantic structure from SPEC_forum-index-theme-dom.md:
+ * #forum-wrapper, #forum, #forum-header, #forum-title, #forum-nav,
+ * #forum-user-links, #forum-status, #forum-announcement, #forum-about.
+ *
+ * Consumes only the semantic aliases from theme-variables.css (e.g.
+ * --forum-name-color). Never reference a base token (var(--text-color),
+ * var(--card-bg), ...) directly here: aliases must be resolved on
+ * body[data-theme] so they follow the active theme (see the header
+ * note in theme-variables.css).
+ */
+
+#forum-wrapper,
+.forum-wrapper {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#forum,
+.forum {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.forum-main-content {
+  padding-top: var(--forum-main-content-padding-top);
+  padding-bottom: var(--forum-main-content-padding-bottom);
+}
+
+/* ── Header & Navbar ────────────────────────────────────────── */
+#forum-header,
+.forum-header {
+  position: sticky;
+  top: 0;
+  z-index: 1020;
+  background-color: var(--forum-header-bg);
+  border-bottom: 1px solid var(--forum-header-border);
+}
+
+#forum-title,
+.forum-title {
+  display: flex;
+  align-items: center;
+}
+
+.forum-logo {
+  height: 32px;
+  width: auto;
+  object-fit: contain;
+}
+
+.forum-name {
+  color: var(--forum-name-color);
+  font-weight: 600;
+}
+
+.forum-brand {
+  text-decoration: none;
+  color: var(--forum-name-color);
+}
+
+.forum-brand:hover,
+.forum-brand:focus {
+  text-decoration: none;
+  color: var(--forum-name-color);
+}
+
+/* ── Navigation Links ───────────────────────────────────────── */
+#forum-nav,
+.forum-nav {
+  display: flex;
+  align-items: center;
+}
+
+#forum-nav a,
+.forum-nav a {
+  color: var(--nav-link-color);
+  text-decoration: none;
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  background: transparent;
+  border: 0;
+  border-radius: 0.375rem;
+}
+
+#forum-nav a:hover,
+#forum-nav a:focus,
+.forum-nav a:hover,
+.forum-nav a:focus {
+  color: var(--nav-link-hover-color);
+}
+
+#forum-nav a.nav-admin,
+.forum-nav a.nav-admin {
+  color: var(--nav-admin-color);
+  font-weight: 600;
+}
+
+#forum-nav a.nav-admin:hover,
+#forum-nav a.nav-admin:focus,
+.forum-nav a.nav-admin:hover,
+.forum-nav a.nav-admin:focus {
+  color: var(--nav-admin-color);
+}
+
+.nav-mobile-unread-dot {
+  position: absolute;
+  top: 5px;
+  right: 11px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #f59e0b;
+  border: 2px solid var(--nav-bg);
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* ── User Action Links ──────────────────────────────────────── */
+#forum-user-links,
+.forum-user-links {
+  display: flex;
+  align-items: center;
+}
+
+.forum-maintenance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  background-color: #ffc107;
+  color: #000000;
+  font-weight: 600;
+}
+
+.maintenance-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #000000;
+  animation: pulse 1.5s infinite;
+}
+
+/* ── Banners & Status ───────────────────────────────────────── */
+#forum-status,
+.forum-status-banner {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.maintenance-status-banner {
+  position: sticky;
+  top: 56px;
+  z-index: 900;
+  background-color: var(--forum-status-maintenance-bg);
+  color: var(--forum-status-maintenance-text);
+  border: none;
+}
+
+#forum-announcement,
+.forum-announcement {
+  margin-bottom: 0;
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+#forum-about,
+.forum-about {
+  background-color: var(--forum-footer-bg);
+  border-top: 1px solid var(--forum-footer-border);
+  color: var(--forum-footer-text);
+  padding: 0.75rem 1rem;
+  text-align: center;
+  margin-top: auto;
+}

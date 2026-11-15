@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Container, Card, Table } from 'react-bootstrap';
 import { BellOff } from 'lucide-react';
 import { useI18n } from '../contexts/I18nProvider';
 import { useAuth } from '../contexts/AuthProvider';
@@ -106,44 +105,46 @@ const SubscriptionsPage = () => {
   };
 
   return (
-    <Container className="py-4">
-      <ForumBreadcrumbs 
-        items={[{ label: t('nav.subscriptions', 'Подписки'), active: true }]} 
-      />
+    <main id="forum-view" className="forum-view" data-forum-id="subscriptions">
+      <nav id="forum-breadcrumbs-top" aria-label="breadcrumb">
+        <ForumBreadcrumbs
+          items={[{ label: t('nav.subscriptions', 'Подписки'), active: true }]}
+        />
+      </nav>
 
-      <div className="mb-4">
-        <h2>{t('nav.subscriptions', 'Подписки')}</h2>
-        <p className="text-muted small mb-0">
-          {t('stats.subscribed_topics_desc', 'Темы, на обновления которых вы подписаны')}
-        </p>
-      </div>
+      <header id="forum-view-header" className="category-header">
+        <div className="category-header-heading">
+          <h1 className="category-header-title">{t('nav.subscriptions', 'Подписки')}</h1>
+          <p className="category-header-description">
+            {t('stats.subscribed_topics_desc', 'Темы, на обновления которых вы подписаны')}
+          </p>
+        </div>
+      </header>
 
       {displayLoading ? (
-        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-          <div className="p-5 text-center text-muted">
-            <div className="spinner-border spinner-border-sm me-2" role="status" />
+        <section id="forum-topic-list" className="forum-topic-list">
+          <div className="forum-view-empty forum-view-loading">
+            <span className="forum-view-spinner" role="status" />
             {t('common.loading', 'Загрузка...')}
           </div>
-        </Card>
+        </section>
       ) : filteredTopics.length === 0 ? (
         <ForumEmptyState
-          className="mb-4"
+          className="forum-view-empty-state"
           icon={BellOff}
           title={t('stats.no_subscriptions', 'Подписок пока нет')}
           description={t('stats.no_subscriptions_desc', 'Подпишитесь на тему, чтобы следить за обновлениями.')}
         />
       ) : (
-        <Card className="border-0 mb-4 overflow-hidden forum-group-card bg-transparent shadow-none">
-          <Table hover responsive className="mb-0 align-middle forum-table">
-            <thead>
-              <tr>
-                <th style={{ width: '40%' }}>{t('forum.topic', 'Тема')}</th>
-                <th className="d-none d-md-table-cell" style={{ width: '15%' }}>{t('forum.category', 'Категория')}</th>
-                <th className="text-center">{t('forum.replies', 'Ответов')}</th>
-                <th>{t('forum.last_post', 'Последнее')}</th>
-              </tr>
-            </thead>
-            <tbody>
+        <>
+          <section id="forum-topic-list" className="forum-topic-list">
+            <div className="category-subtitle has-category">
+              <span className="category-col--topic">{t('forum.topic', 'Тема')}</span>
+              <span className="category-col--category">{t('forum.category', 'Категория')}</span>
+              <span className="category-col--replies">{t('forum.replies', 'Ответов')}</span>
+              <span className="category-col--lastpost">{t('forum.last_post', 'Последнее')}</span>
+            </div>
+            <div className="topic-list">
               {currentTopics.map(topic => (
                 <TopicRow
                   key={topic.id}
@@ -155,27 +156,26 @@ const SubscriptionsPage = () => {
                   categoryName={getCategoryName(topic.category_id)}
                 />
               ))}
-            </tbody>
-          </Table>
+            </div>
+          </section>
 
           {totalPages > 1 && (
-            <div className="p-3 border-top d-flex justify-content-center">
-              <ForumPagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={handlePageChange}
-              />
-            </div>
+            <ForumPagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={handlePageChange}
+              className="forum-pagination-view"
+            />
           )}
-        </Card>
+        </>
       )}
 
-      <div className="mt-4">
-        <Link to="/" className="btn btn-outline-secondary">
+      <div className="forum-view-footer">
+        <Link to="/" className="forum-view-back">
           {t('common.back_to_main', 'На главную')}
         </Link>
       </div>
-    </Container>
+    </main>
   );
 };
 

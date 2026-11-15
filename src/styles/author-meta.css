@@ -1,0 +1,289 @@
+/**
+ * Aerun Author Meta — shared module.
+ * Used by AuthorMeta + LastPostInfo on the forum index and shared topic lists.
+ *
+ * DOM:
+ *   <div class="author-meta">
+ *     <span class="author-meta__date">…</span>
+ *     <span class="author-meta__identity">
+ *       [avatar] <span class="author-meta__name">…</span>
+ *     </span>
+ *   </div>
+ *
+ * The meta itself is a wrapping flex row: the date and the identity block
+ * may move to separate lines when space is tight. The identity block is an
+ * indivisible unit, so the avatar always stays on the line where the
+ * nickname starts; only the nickname text inside it is allowed to wrap.
+ * No decorative separator is rendered between date and identity.
+ *
+ * Loaded LAST among the component styles in main.jsx, so on equal
+ * specificity these rules win over the legacy index.css / forum-index.css
+ * duplicates of .last-post-link-meta and the mobile .forum-last-post
+ * panel.
+ */
+
+.author-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: var(--author-meta-gap, 0.5rem);
+  row-gap: var(--author-meta-gap, 0.25rem);
+  min-width: 0;
+  color: var(--author-meta-color);
+  font-size: var(--author-meta-font-size, 0.875rem);
+  line-height: var(--author-meta-line-height, 1.35);
+}
+
+.author-meta__date {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.author-meta__date>span {
+  white-space: nowrap;
+  /* Exact date color: on dark, legacy .text-muted #b0b0b0 */
+  color: var(--author-date-color, var(--author-meta-color));
+}
+
+.author-meta__identity {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--author-meta-gap, 0.5rem);
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: 100%;
+}
+
+.author-avatar__wrap {
+  position: relative;
+  display: inline-block;
+  width: var(--author-avatar-size, 32px);
+  height: var(--author-avatar-size, 32px);
+  flex: 0 0 var(--author-avatar-size, 32px);
+}
+
+.author-meta__identity .author-avatar__wrap,
+.author-meta__avatar {
+  flex: 0 0 var(--author-meta-avatar-size, 20px);
+  align-self: flex-start;
+  flex-shrink: 0;
+  width: var(--author-meta-avatar-size, 20px);
+  height: var(--author-meta-avatar-size, 20px);
+}
+
+.author-meta__avatar {
+  filter: drop-shadow(var(--author-meta-avatar-shadow));
+}
+
+.author-avatar__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.author-avatar__dot {
+  position: absolute;
+}
+
+.author-avatar__dot--sm {
+  width: var(--author-avatar-dot-sm-size, 8px);
+  height: var(--author-avatar-dot-sm-size, 8px);
+  bottom: var(--author-avatar-dot-sm-offset, -2px);
+  right: var(--author-avatar-dot-sm-offset, -2px);
+}
+
+.author-avatar__dot--md {
+  width: var(--author-avatar-dot-md-size, 10px);
+  height: var(--author-avatar-dot-md-size, 10px);
+  bottom: var(--author-avatar-dot-md-offset, -3px);
+  right: var(--author-avatar-dot-md-offset, -3px);
+}
+
+.author-avatar__dot--lg {
+  width: var(--author-avatar-dot-lg-size, 12px);
+  height: var(--author-avatar-dot-lg-size, 12px);
+  bottom: var(--author-avatar-dot-lg-offset, -4px);
+  right: var(--author-avatar-dot-lg-offset, -4px);
+}
+
+.author-meta__name {
+  min-width: 0;
+  color: var(--author-name-color, var(--text-color));
+  font-weight: var(--author-name-font-weight, 600);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.author-meta__name {
+  color: var(--author-date-color, var(--author-meta-color));
+}
+
+.last-post-link-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--last-post-link-gap, 0.25rem);
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--last-post-link-radius, 6px);
+  padding: var(--last-post-link-padding, 4px 6px);
+  margin: var(--last-post-link-margin, -4px -6px);
+  color: var(--last-post-meta-color, var(--topic-meta-color, var(--secondary-color)));
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Legacy link inner inherit: in the Bootstrap era the meta lived inside
+   `a.last-post-link-meta` and text-muted coloured the whole block, so
+   avatar/nickname/date all shared the muted tone. The migration moved
+   .author-meta out of .text-muted but .author-meta__name hardcodes
+   --author-name-color (default --text-color) — brighter than the meta.
+   Target screenshot: username matches the date tone ("Today, 07:46 ·
+   Arin" all muted), avatar uncoloured. Scope the override to the link
+   only so TopicRow/.topic-meta and post headers keep --author-name-color. */
+.last-post-link-meta .author-meta__name {
+  /* Exact name color, not meta fallback: on dark, #94a3b8 */
+  transition: all .2s ease;
+  color: var(--last-post-name-color, var(--author-name-color, var(--last-post-meta-color, var(--secondary-color))));
+}
+
+.last-post-link-meta:hover,
+.last-post-link-meta:focus {
+  background-color: rgba(var(--primary-rgb), 0.08);
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+[data-theme='light'] .last-post-link-meta:hover,
+[data-theme='light'] .last-post-link-meta:hover .author-meta__date>span,
+[data-theme='light'] .last-post-link-meta:focus {
+  background-color: #edeef0;
+  color: #1e293b;
+}
+
+[data-theme='dark'] .last-post-link-meta:hover,
+[data-theme='dark'] .last-post-link-meta:focus {
+  background-color: rgba(var(--primary-rgb), 0.15);
+  color: #ffffff;
+}
+
+/* Dark hover must paint the whole meta white, not only the link:
+   date (author-meta__date > span) and nickname (author-meta__name)
+   otherwise keep their muted #b0b0b0 / #94a3b8 tones on hover. */
+[data-theme='dark'] .last-post-link-meta:hover .author-meta__date>span,
+[data-theme='dark'] .last-post-link-meta:hover .author-meta__name,
+[data-theme='dark'] .last-post-link-meta:focus .author-meta__date>span,
+[data-theme='dark'] .last-post-link-meta:focus .author-meta__name {
+  color: #ffffff;
+}
+
+.last-post-meta {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.last-post-empty {
+  color: var(--last-post-empty-color, var(--secondary-color));
+  font-size: var(--last-post-empty-font-size, 0.875rem);
+}
+
+/* Forum-index mobile (≤768px): the ".forum-last-post" block on the
+ * homepage is a full-width strip under the description (target
+ * screenshot 2), not an inset panel to the right. Its meta — "Today,
+ * 07:46 · [avatar] Arin" — lives on ONE line when it fits; the author
+ * is not dropped to a second line under the date. The avatar + nickname
+ * stay one indivisible flex item; only an over-long nickname wraps,
+ * inside its own box, keeping the avatar on the line where the nickname
+ * starts. First the panel chrome, then the meta layout.
+ *
+ * specificity: the museum of index.css mobile rules (`.forum-table
+ * td:last-child`, `td:last-child:before`, `.last-topic-link`,
+ * `.forum-mobile-stats`, `.forum-table .cat-link`) carries !important and
+ * CANNOT match the semantic DOM here (`.forum-last-post` is a <div>, not a
+ * <td> inside `.forum-table`), so they never render on the index. The
+ * one rule that DOES reach the index DOM was the bare
+ * `.last-post-link-meta` in index.css (line 2873), which set
+ * `padding: 4px 6px !important; margin: -4px -6px !important`. That rule
+ * now reads its geometry from tokens (--last-post-link-padding /
+ * --last-post-link-margin, declared in theme-variables.css), so the
+ * forum-index mobile entry overrides the tokens here without any
+ * !important of its own — the bleed has to go: it shoves the avatar past
+ * the card's right border, and the extra padding lifts the meta off the
+ * strip's baseline. Desktop is unaffected (≤768px only).
+ *
+ * STRIP CHROME REMOVED (2026-11-14): this block (earlier scoped to
+ * #forum-index) set background-color and its own border and, loading
+ * later than forum-index.css / topic-row.css, silently overrode the
+ * shared strip on every page. The mobile LAST POST strip is now the ONE
+ * shared class .last-post-strip (topic-row.css); the homepage element
+ * carries it in JSX. */
+/* The chrome block was removed — see the note above. */
+
+@media (max-width: 768px) {
+
+  /* Every selector below is SCOPED to #forum-index: this block crafts
+   * the homepage one-line meta (date · avatar · name) inside the
+   * .last-post-content structure that exists only on the main page.
+   * Unscoped it also hit the category rows and the TopicRow strips,
+   * where `.last-post-link-meta` must hug the content
+   * (.last-post-strip rule in topic-row.css). */
+  #forum-index .forum-last-post .author-meta {
+    flex-wrap: nowrap;
+    align-items: center;
+    min-width: 0;
+  }
+
+  #forum-index .forum-last-post .author-meta__date {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  #forum-index .forum-last-post .author-meta__date>span:last-child {
+    margin-left: 0.125rem;
+  }
+
+  #forum-index .forum-last-post .author-meta__date::after {
+    content: "\00B7";
+    margin-left: 0.25rem;
+    color: var(--forum-description-color);
+  }
+
+  #forum-index .forum-last-post .author-meta__identity {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  #forum-index .forum-last-post .author-meta__name {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* NO local geometry overrides here: --last-post-link-padding/margin
+   * are zeroed by the shared .last-post-strip block (topic-row.css) —
+   * the link hugs the strip identically on every page. */
+
+  /* The parent .forum-last-post is a flex column; without this the
+   * link is only as wide as its content and sits left-aligned with a
+   * shorter border-top. Target an explicit full-width strip. */
+  #forum-index .forum-last-post .last-post-content {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #forum-index .forum-last-post .last-topic-link {
+    align-self: flex-start;
+    max-width: 100%;
+  }
+
+  /* NO local stretch/width override for .last-post-link-meta here: the
+   * shared .last-post-strip .last-post-link-meta rule (topic-row.css)
+   * owns its geometry everywhere — the hover highlight hugs the content
+   * on the main page too. */
+}

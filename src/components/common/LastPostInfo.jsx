@@ -24,7 +24,7 @@ const LastPostInfo = ({
   return (
     <Link
       to={targetUrl}
-      className={`text-decoration-none d-flex align-items-center gap-1 text-muted last-post-link-meta ${className}`}
+      className={`last-post-link-meta ${className}`}
       title={hasUnread
         ? t('last_post.to_first_unread')
         : t('last_post.to_last')
@@ -39,7 +39,7 @@ const LastPostInfo = ({
       <AuthorMeta
         date={lastPostAt}
         author={author}
-        className="w-100"
+        className="last-post-meta"
       />
     </Link>
   );

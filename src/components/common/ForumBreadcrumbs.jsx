@@ -7,11 +7,11 @@ import { useI18n } from '../../contexts/I18nProvider';
  * Reusable Breadcrumbs component for Aerun Forum.
  * @param {Array} items - Array of breadcrumb items: { label, to, active }
  */
-const ForumBreadcrumbs = ({ items = [] }) => {
+const ForumBreadcrumbs = ({ items = [], className = '' }) => {
   const { t } = useI18n();
 
   return (
-    <Breadcrumb className="mb-4">
+    <Breadcrumb className={`forum-breadcrumbs ${className}`.trim()}>
       <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/' }}>
         {t('nav.home')}
       </Breadcrumb.Item>

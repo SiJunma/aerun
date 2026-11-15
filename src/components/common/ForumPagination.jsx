@@ -1,7 +1,6 @@
 import React from 'react';
 import { Pagination } from 'react-bootstrap';
 import { ChevronsLeft, ChevronsRight } from 'lucide-react';
-import './ForumPagination.css';
 
 /**
  * Shared forum-styled pagination component.
@@ -32,7 +31,7 @@ const ForumPagination = ({ currentPage, totalPages, onPageChange, className = ''
   // Only show next/last arrows if current range doesn't include last
 
   return (
-    <Pagination className={`forum-pagination mb-0 ${centered ? 'forum-pagination-centered' : ''} ${className}`}>
+    <Pagination className={`forum-pagination ${centered ? 'forum-pagination-centered' : ''} ${className}`}>
       <Pagination.First
         className="first"
         onClick={() => onPageChange(1)}

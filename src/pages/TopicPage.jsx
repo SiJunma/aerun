@@ -20,7 +20,6 @@
  */
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { Container, Card, Row, Col } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 
 import {
@@ -1657,8 +1656,18 @@ export default function TopicPage() {
   const MAX_CHARS = settings?.maxCharsPerPost ?? 15000;
   const computedMaxChars = MAX_CHARS > 0 ? MAX_CHARS : undefined;
 
+  const topicStateClasses = [
+    topic.is_pinned ? 'is-pinned' : null,
+    topic.is_locked ? 'is-locked' : null,
+    topic.is_closed ? 'is-closed' : null,
+  ].filter(Boolean).join(' ');
+
   return (
-    <Container className={`topic-page-container ${isJumping ? 'topic-jump-loading' : ''}`}>
+    <main
+      id="topic-page"
+      data-topic-id={id}
+      className={`topic-page-container topic topic-${id} ${topicStateClasses} ${isJumping ? 'topic-jump-loading' : ''}`}
+    >
       <TopicHeader
         topic={topic}
         category={topic.category || categories.find((c) => c.id === topic.category_id)}
@@ -1677,7 +1686,10 @@ export default function TopicPage() {
         onOpenDeleteModal={() => setModalState((prev) => ({ ...prev, showDeleteTopicModal: true }))}
       />
 
-      <div className="topic-posts-list">
+      <section
+        id="topic-posts"
+        className="topic-posts-list topic-posts"
+      >
         {postsLoadError && posts.length === 0 ? (
           <ErrorCard
             title={t('topic_page.failed_load_posts')}
@@ -1688,30 +1700,30 @@ export default function TopicPage() {
         {!postsLoadError && posts.length === 0 && isPageLoading
           ? /* Inline skeleton while page posts are loading (legacy parity). */
             [...Array(3)].map((_, i) => (
-              <Card key={`skel-${i}`} className="mb-4 post-card shadow-sm border-0 overflow-hidden skeleton-fade-in">
-                <Row className="g-0">
-                  <Col md={3} lg={2} className="author-sidebar p-3 d-none d-md-block text-center border-end" style={{ minHeight: '200px' }}>
-                    <Skeleton variant="avatar" width={80} height={80} className="mb-3 mx-auto rounded-circle" />
-                    <Skeleton width="70%" height="1.2rem" className="mb-2 mx-auto" />
-                    <Skeleton width="50%" height="0.8rem" className="mb-2 mx-auto" />
-                  </Col>
-                  <Col md={9} lg={10} className="p-4">
-                    <div className="d-flex justify-content-between mb-4">
+              <article key={`skel-${i}`} className="topic-skeleton">
+                <div className="topic-skeleton__grid">
+                  <div className="topic-skeleton__author">
+                    <Skeleton variant="avatar" width={80} height={80} className="topic-skeleton__avatar" />
+                    <Skeleton width="70%" height="1.2rem" />
+                    <Skeleton width="50%" height="0.8rem" />
+                  </div>
+                  <div className="topic-skeleton__body">
+                    <div className="topic-skeleton__row">
                       <Skeleton width="25%" height="1rem" />
                       <Skeleton width="40px" height="1rem" />
                     </div>
-                    <div>
-                      <Skeleton width="100%" height="1rem" className="mb-2" />
-                      <Skeleton width="100%" height="1rem" className="mb-2" />
-                      <Skeleton width="85%" height="1rem" className="mb-2" />
-                      <Skeleton width="40%" height="1rem" className="mb-2" />
+                    <div className="topic-skeleton__lines">
+                      <Skeleton width="100%" height="1rem" />
+                      <Skeleton width="100%" height="1rem" />
+                      <Skeleton width="85%" height="1rem" />
+                      <Skeleton width="40%" height="1rem" />
                     </div>
-                    <div className="mt-5 pt-3 border-top">
+                    <div className="topic-skeleton__footer">
                       <Skeleton width="150px" height="1.5rem" />
                     </div>
-                  </Col>
-                </Row>
-              </Card>
+                  </div>
+                </div>
+              </article>
             ))
           : null}
         {/* Unpin must take effect live: the flag is the TOPIC's (refreshed by
@@ -1921,7 +1933,7 @@ export default function TopicPage() {
             onOpenRepVote={handleOpenRepVote}
           />
         )}
-      </div>
+      </section>
 
       {/* Bottom Actions & Pagination (legacy parity): the follow/unfollow button
           is for authenticated members only — pending, banned and spectator roles
@@ -1966,21 +1978,22 @@ export default function TopicPage() {
       />
 
       {/* Bottom breadcrumbs & back-to-category (legacy parity) */}
-      <div className="mt-5 mb-5">        <ForumBreadcrumbs
+      <nav id="topic-breadcrumbs-bottom" aria-label="breadcrumb">
+        <ForumBreadcrumbs
           items={[
             ...(category ? [{ label: categoryTitle, to: `/category/${category.id}` }] : []),
             { label: topic?.title || '...', active: true },
           ]}
         />
 
-        <div className="d-flex justify-content-between">
+        <div className="topic-footer">
           {category && (
-            <Link to={`/category/${category.id}`} className="btn btn-outline-secondary">
+            <Link to={`/category/${category.id}`} className="topic-back-link">
               &larr; {t('forum.back_to_category')}
             </Link>
           )}
         </div>
-      </div>
+      </nav>
 
       <TopicModalsContainer
         deletingPost={modalState.deletingPost}
@@ -2022,6 +2035,6 @@ export default function TopicPage() {
         lang={lang}
         t={t}
       />
-    </Container>
+    </main>
   );
 }
