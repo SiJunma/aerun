@@ -10,6 +10,7 @@ import {
   moveTopics
 } from '../api/forum';
 import ForumAuthorName from '../components/common/ForumAuthorName';
+import ForumEmptyState from '../components/common/ForumEmptyState';
 import ForumPagination from '../components/common/ForumPagination';
 import LastPostInfo from '../components/common/LastPostInfo';
 import AuthorMeta from '../components/common/AuthorMeta';

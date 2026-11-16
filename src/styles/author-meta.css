@@ -242,10 +242,6 @@
     min-width: 0;
   }
 
-  #forum-index .forum-last-post .author-meta__date>span:last-child {
-    margin-left: 0.125rem;
-  }
-
   #forum-index .forum-last-post .author-meta__date::after {
     content: "\00B7";
     margin-left: 0.25rem;

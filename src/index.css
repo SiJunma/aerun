@@ -1707,24 +1707,9 @@ strike:hover,
  * opaque than before: at 0.4 the card nearly vanished into the light
  * background photo and took its muted copy with it. */
 .empty-state-card {
-  background: rgba(255, 255, 255, 0.55) !important;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.35) !important;
-  border-radius: 20px !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme='dark'] .empty-state-card {
-  background: rgba(15, 23, 42, 0.55) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-}
-
-[data-theme='neutral'] .empty-state-card {
-  background: rgba(224, 219, 202, 0.7) !important;
-  border-color: rgba(67, 52, 34, 0.12) !important;
-  box-shadow: 0 6px 24px rgba(56, 45, 29, 0.12);
+  text-align: center;
+  border: none;
+  ;
 }
 
 .empty-state-icon {

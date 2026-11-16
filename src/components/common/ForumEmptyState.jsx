@@ -16,7 +16,7 @@ import { Card } from 'react-bootstrap';
  * @param {string} className
  */
 const ForumEmptyState = ({ icon: Icon, title, description, action, className = '' }) => (
-  <Card className={`text-center border-1 empty-state-card shadow-sm ${className}`.trim()}>
+  <Card className={`empty-state-card ${className}`.trim()}>
     <Card.Body>
       {Icon && (
         <div className="mb-4 empty-state-icon">

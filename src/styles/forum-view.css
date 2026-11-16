@@ -328,7 +328,7 @@
 .forum-view-empty-actions {
   display: flex;
   justify-content: center;
-  padding-bottom: 2rem;
+  padding-bottom: 1.5rem;
 }
 
 /* ── Management Toolbar (CategoryPage manage mode) ────────────
@@ -457,10 +457,6 @@
 
 .forum-view-empty-note {
   font-size: var(--forum-view-empty-note-size);
-}
-
-.forum-view-empty-state {
-  margin-bottom: var(--empty-state-margin);
 }
 
 /* Native checkbox in topic select columns (replaces react-bootstrap
