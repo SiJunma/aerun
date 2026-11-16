@@ -53,7 +53,10 @@ const TopicFormPage = () => {
   });
 
   // Persist the guest nickname so it is pre-filled on the next visit.
+  // Only write once the guest has actually entered a nickname — do not create
+  // the key on mere page load / topic visit.
   useEffect(() => {
+    if (!guestNickname) return;
     try {
       localStorage.setItem(makeStorageKey('guest_nickname', 'guest'), guestNickname);
     } catch {

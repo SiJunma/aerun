@@ -365,6 +365,7 @@ export default function TopicPage() {
 
   // Persist the guest nickname on every change so the next visit pre-fills it.
   useEffect(() => {
+    if (!guestNickname) return;
     try {
       localStorage.setItem(makeStorageKey('guest_nickname', 'guest'), guestNickname);
     } catch {
