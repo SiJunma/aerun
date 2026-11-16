@@ -84,7 +84,7 @@ const ForumStats = () => {
           <div className="stats-grid">
             <div className="stats-row-compact">
               <div className="stats-item stat-topics">
-                <MessageSquare size={14} className="stats-item-icon" />
+                <FileText size={14} className="stats-item-icon" />
                 <div className="stats-item-text-group">
                   <span className="stat-count">{totalTopics.toLocaleString()}</span>
                   <span className="stat-label">{t('stats.topics')}</span>
@@ -92,7 +92,7 @@ const ForumStats = () => {
               </div>
               
               <div className="stats-item stat-posts">
-                <FileText size={14} className="stats-item-icon" />
+                <MessageSquare size={14} className="stats-item-icon" />
                 <div className="stats-item-text-group">
                   <span className="stat-count">{totalPosts.toLocaleString()}</span>
                   <span className="stat-label">{t('stats.posts')}</span>

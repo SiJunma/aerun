@@ -157,10 +157,10 @@ const MainPage = () => {
                 {/* Mobile Stats Line */}
                 <div className="forum-mobile-stats d-md-none">
                   <span className="forum-mobile-stat">
-                    <MessageSquare size={12} /> {cat.topics_count || 0}
+                    <FileText size={12} /> {cat.topics_count || 0}
                   </span>
                   <span className="forum-mobile-stat">
-                    <FileText size={12} /> {cat.posts_count || 0}
+                    <MessageSquare size={12} /> {cat.posts_count || 0}
                   </span>
                 </div>
               </div>
