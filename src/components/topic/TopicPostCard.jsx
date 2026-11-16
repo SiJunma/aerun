@@ -390,10 +390,10 @@ export const TopicPostCard = ({
               {/* Mobile-only links (Profile/PM): the sidebar contact is hidden
                   on mobile, so the footer carries them instead. */}
               <div className="post-footer__links">
-                <a className="footer-link footer-link--icon" href={`/profile/${authorId}`} data-discover="true">
+                <Link className="footer-link footer-link--icon" to={`/profile/${authorId}`} data-discover="true">
                   <User size={16} />
                   <span className="footer-link__label">{t?.('profile.view_profile') || 'Profile'}</span>
-                </a>
+                </Link>
                 {canDm && onOpenDm && (
                   <a
                     className="footer-link footer-link--icon"
