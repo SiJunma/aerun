@@ -40,6 +40,8 @@ const normalizePost = (p) => {
     content: p.content || '',
     created_at: p.created,
     updated_at: p.updated,
+    edited_at: p.edited_at || p.edited || null,
+    editor_id: p.editor_id || null,
     created_at_ms: p.created ? new Date(p.created).getTime() : 0,
   };
 };

@@ -135,6 +135,7 @@ export const useTopicModalState = ({
           ...p,
           ...updated,
           content: updated?.content,
+          edited_at: new Date().toISOString(),
           ...identityFields,
           author: nextAuthor(p.author),
         };
@@ -145,6 +146,7 @@ export const useTopicModalState = ({
           ...prev,
           ...updated,
           content: updated?.content,
+          edited_at: new Date().toISOString(),
           ...identityFields,
           author: nextAuthor(prev.author),
         } : prev));

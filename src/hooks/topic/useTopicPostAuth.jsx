@@ -44,7 +44,7 @@ export const useTopicPostAuth = ({
     return result.trim();
   }, []);
 
-  const getLiveOwnerName = useCallback((post) => {
+  const getLiveAuthorDisplayName = useCallback((post) => {
     if (!post) return '';
     if (post.author?.user_id === currentUser?.uid) {
       if (post.is_character) {
@@ -56,6 +56,20 @@ export const useTopicPostAuth = ({
     if (post.is_character) return post.author?.display_name;
     return authorStats[post.author?.user_id]?.nickname || post.author?.display_name;
   }, [currentUser, profile, characters, authorStats]);
+
+  /** Возвращает ник реального владельца аккаунта (а не имя маски) для тултипа бейджа персонажа. */
+  const getLivePlayerOwnerName = useCallback((post) => {
+    if (!post) return '';
+    // 1. Прямое поле от бэкенда при маскировании (сервер уже пишет owner_name в AuthorRef DTO)
+    if (post.author?.owner_name) return post.author.owner_name;
+    if (post.owner_name) return post.owner_name;
+    // 2. Автор — учётная запись без маски: nickname / display_name аккаунта
+    if (post.author?.user_id && post.author?.display_name && !post.author?.is_character) {
+      return post.author.display_name;
+    }
+    // 3. Fallback на плоские legacy-поля
+    return post.author_name || post.author?.nickname || '';
+  }, []);
 
   const getLiveAuthorStatus = useCallback((post) => {
     if (!post) return '';
@@ -113,7 +127,7 @@ export const useTopicPostAuth = ({
     if (post.is_character) {
       return (
         <div className={`${extraClass} post-author__role-wrapper`}>
-          <ForumCharacterBadge ownerName={getLiveOwnerName(post)} />
+          <ForumCharacterBadge ownerName={getLivePlayerOwnerName(post)} />
         </div>
       );
     }
@@ -135,7 +149,7 @@ export const useTopicPostAuth = ({
         className={extraClass}
       />
     );
-  }, [currentUser, profile, authorStats, getLiveOwnerName]);
+  }, [currentUser, profile, authorStats, getLivePlayerOwnerName]);
 
   const canDeletePost = useCallback((post) => {
     if (!currentUser || !post) return false;
@@ -157,7 +171,7 @@ export const useTopicPostAuth = ({
 
   const handleQuote = useCallback((post) => {
     const selectedText = window.getSelection().toString().trim();
-    const author = getLiveOwnerName(post) || post.author?.display_name || 'User';
+    const author = getLiveAuthorDisplayName(post) || post.author?.display_name || 'User';
     let content = selectedText || post.content;
 
     if (post.rolls) {
@@ -181,7 +195,7 @@ export const useTopicPostAuth = ({
     });
     window.getSelection().removeAllRanges();
     scrollToReply(replyRef);
-  }, [getLiveOwnerName, setReplyContent, replyRef, scrollToReply, topicId, stripQuotes]);
+  }, [getLiveAuthorDisplayName, setReplyContent, replyRef, scrollToReply, topicId, stripQuotes]);
 
   const handleQuoteAuthor = useCallback((authorName) => {
     if (!authorName) return;
@@ -193,7 +207,8 @@ export const useTopicPostAuth = ({
   }, [setReplyContent, replyRef, scrollToReply]);
 
   return {
-    getLiveOwnerName,
+    getLiveAuthorDisplayName,
+    getLivePlayerOwnerName,
     getLiveAuthorStatus,
     getLiveAuthorSignature,
     isAuthorOnline,

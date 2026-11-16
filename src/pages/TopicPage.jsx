@@ -572,7 +572,7 @@ export default function TopicPage() {
 
   // 8. Post author helpers & quoting
   const {
-    getLiveOwnerName,
+    getLiveAuthorDisplayName,
     getLiveAuthorStatus,
     getLiveAuthorSignature,
     isAuthorOnline,
@@ -1750,7 +1750,7 @@ export default function TopicPage() {
             onDeletePost={(p) => setModalState((prev) => ({ ...prev, deletingPost: p }))}
             onShowVoters={handleShowVoters}
             onShowVoteInfo={handleShowVoteInfo}
-            onQuoteAuthor={() => handleQuoteAuthor(getLiveOwnerName(pinnedFirstPost))}
+            onQuoteAuthor={() => handleQuoteAuthor(getLiveAuthorDisplayName(pinnedFirstPost))}
             myVotes={myVotes}
             isEditing={modalState.editingPostId === pinnedFirstPost.id}
             editingChildren={
@@ -1821,7 +1821,7 @@ export default function TopicPage() {
               onDeletePost={(p) => setModalState((prev) => ({ ...prev, deletingPost: p }))}
               onShowVoters={handleShowVoters}
               onShowVoteInfo={handleShowVoteInfo}
-              onQuoteAuthor={() => handleQuoteAuthor(getLiveOwnerName(post))}
+              onQuoteAuthor={() => handleQuoteAuthor(getLiveAuthorDisplayName(post))}
               myVotes={myVotes}
               isEditing={isThisEditing}
               editingChildren={

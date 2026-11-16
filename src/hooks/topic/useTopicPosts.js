@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { fetchSecuredPosts } from '../../api/forum';
-import { toMillis, unreadFloor } from '../../utils/dates';
+import { toMillis } from '../../utils/dates';
 import { getPendingOptimisticPosts, clearPendingOptimisticPost } from '../../utils/optimisticPostQueue';
 import { useI18n } from '../../contexts/I18nProvider';
 
@@ -65,8 +65,18 @@ export const useTopicPosts = ({
         pageToFetch = 'last';
         const lastVisitRaw = initialVisitMap?.[topicId] ?? readMap?.[topicId];
         const lastVisitVal = lastVisitRaw?.timestamp || lastVisitRaw;
-        const floored = unreadFloor(lastVisitVal, currentProfile?.created_at);
-        lastVisitMs = floored || null;
+        if (!lastVisitVal) {
+          // Нет записи о визите → всё считается непрочитанным.
+          // Чистый page=last без last_visit заставляет бэкенд вычислить
+          // countBefore = totalCount - 1, что гарантированно даёт
+          // последнюю страницу и последний пост темы.
+          lastVisitMs = null;
+        } else {
+          // Есть запись о визите → тема прочитана, просим последнюю страницу явно,
+          // чтобы старый last_visit не сместил выбор на страницу с первым
+          // «непрочитанным» (которое уже давно прочитано).
+          lastVisitMs = Date.now();
+        }
       }
     }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/SiJunma/aerun/backend/internal/forum"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/SiJunma/aerun/backend/internal/auth"
 )
@@ -417,6 +418,12 @@ func publishDraftHandler(e *core.RequestEvent) error {
 		// changed its author identity on publication is exactly the bug that made
 		// "publish my draft" drop the mask. setLastPostProjection below copies
 		// the mask from the post row, so no local copy is needed here.
+		// Published post must stamped with the publication moment, not the draft's
+		// original creation time. `created` is an AutodateField(onCreate: true), so
+		// a plain Set is overwritten on save — SetRaw is the only way to make it
+		// survive.
+		now := types.NowDateTime()
+		post.SetRaw("created", now)
 		if err := txApp.Save(post); err != nil {
 			return 0, nil, internalError("failed to publish draft", err)
 		}

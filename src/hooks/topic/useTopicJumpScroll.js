@@ -90,7 +90,23 @@ export const useTopicJumpScroll = ({
     if (targetId) {
       const el = document.getElementById(targetId);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Точный скролл с фиксированным отступом от навбара.
+        // scrollIntoView({ block: 'start' }) нестабилен при асинхронной
+        // загрузке картинок/шрифтов — центрирует родительский блок или
+        // пересчитывает позицию некорректно. Явный window.scrollTo с
+        // getBoundingClientRect даёт стабильный результат.
+        const NAVBAR_OFFSET = 85; // высота шапки + запас
+        const runScroll = () => {
+          const rect = el.getBoundingClientRect();
+          const absoluteTop = rect.top + window.pageYOffset - NAVBAR_OFFSET;
+          window.scrollTo({
+            top: Math.max(0, absoluteTop),
+            behavior: 'smooth',
+          });
+        };
+        // requestAnimationFrame гарантирует, что DOM уже отрендерен
+        // (картинки, цитаты, шрифты — занимают своё место) перед замером.
+        requestAnimationFrame(runScroll);
         el.classList.add('highlight-target-post');
         setTimeout(() => el.classList.remove('highlight-target-post'), 2500);
         setAlreadyJumped(true);
