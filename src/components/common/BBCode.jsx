@@ -234,6 +234,30 @@ const safeHtmlToReact = (htmlStr, index, isAdminAuthor) => {
 
   const admin = isAdminAuthor === true;
 
+  // [html] — сырой HTML. Переносы строк между тегами не имеют визуального
+  // смысла (браузер их схлопывает), но при рендере в React они становятся
+  // текстовыми узлами, которые могут быть прямыми детьми <tr>, <table>,
+  // <ul> и т.д. — это ломает hydration. Удаляем все whitespace-only
+  // текстовые узлы из дерева (кроме <pre>, <textarea>, <script>, <style>,
+  // где переносы значимы).
+  const stripWhitespaceTextNodes = (node) => {
+    if (node.nodeType === 1) {
+      const tagName = node.tagName.toLowerCase();
+      const preserveWhitespace = ['pre', 'textarea', 'script', 'style'].includes(tagName);
+      if (!preserveWhitespace) {
+        for (let i = node.childNodes.length - 1; i >= 0; i--) {
+          const child = node.childNodes[i];
+          if (child.nodeType === 3 && /^\s*$/.test(child.textContent)) {
+            node.removeChild(child);
+          } else {
+            stripWhitespaceTextNodes(child);
+          }
+        }
+      }
+    }
+    return node;
+  };
+
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlStr, 'text/html');
@@ -270,8 +294,8 @@ const safeHtmlToReact = (htmlStr, index, isAdminAuthor) => {
           const attrName = attr.name.toLowerCase();
           const attrValue = attr.value;
 
-          if (attrName.startsWith('on')) continue; // inline event handlers
-          if (!ALLOWED_ATTRS.has(attrName)) continue; // not on the allowlist — dropped
+          if (attrName.startsWith('on')) continue;
+          if (!ALLOWED_ATTRS.has(attrName)) continue;
 
           if (URL_ATTRS.has(attrName) && !isSafeUrl(attrValue)) continue;
 
@@ -296,7 +320,9 @@ const safeHtmlToReact = (htmlStr, index, isAdminAuthor) => {
       return null;
     };
 
-    const bodyChildren = Array.from(doc.body.childNodes);
+    const bodyChildren = Array.from(doc.body.childNodes).map(node =>
+      stripWhitespaceTextNodes(node)
+    );
     const elements = bodyChildren.map((child, i) => domNodeToReact(child, `${index}-${i}`)).filter(Boolean);
     return <React.Fragment key={index}>{elements}</React.Fragment>;
   } catch (err) {

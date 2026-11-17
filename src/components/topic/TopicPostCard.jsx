@@ -244,7 +244,7 @@ export const TopicPostCard = ({
                 )}
                 {post.edited_at && !post._isOptimistic && (
                   <span className="post-edited-badge">
-                    ({t('forum.edited_label')} <Timestamp date={post.edited_at} />)
+                    {`(${t('forum.edited_label')} `}<Timestamp date={post.edited_at} />)
                   </span>
                 )}
               </small>
