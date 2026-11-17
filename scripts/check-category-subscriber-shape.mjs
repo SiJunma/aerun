@@ -45,6 +45,12 @@ const sandbox = {
     throw new Error(`unexpected url in test: ${url}`);
   },
   subscribeToRefetch: () => () => {},
+  // makeStorageKey is imported by categories.js and used at module top level
+  // (CAT_GROUPS_CACHE_KEY), but the import lines are stripped above, so it
+  // needs a stub like the other imports. Mirrors src/utils/storageScope.js
+  // with a fixed scope — the exact value does not matter here, only that the
+  // key is stable within one run (it is just a localStorage key).
+  makeStorageKey: (prefix, uid = null) => `aerun_test_${prefix}${uid == null ? '' : `_${String(uid)}`}`,
   localStorage: {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => store.set(k, String(v)),

@@ -1125,7 +1125,7 @@ strike:hover,
 }
 
 .bbcode-quote {
-  border-left: 4px solid var(--primary-color);
+  border-left: 4px solid var(--quote-border-color, var(--primary-color));
   padding: 0.2rem 0.75rem;
   margin-top: 1rem;
   margin-bottom: 0;
@@ -1238,7 +1238,6 @@ strike:hover,
 
 [data-theme='neutral'] .bbcode-quote {
   background: #ede9df;
-  border-left-color: #666;
 }
 
 [data-theme='dark'] .bbcode-quote {
@@ -3748,6 +3747,20 @@ a.rep-preview-name:hover {
   max-height: 260px !important;
   overflow-y: auto !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Overflow menu items are <a class="dropdown-item">. Outside post bodies
+   Bootstrap already leaves them un-underlined, but the inline post editor
+   lives inside .post-content, where .post-content a underlines every link
+   — including these menu items. The ancestor-scoped selector (0,3,0) beats
+   .post-content a:hover (0,2,1) without !important; same leak the modal
+   variant already guards against below. */
+.editor-overflow-dropdown-menu .dropdown-item {
+  text-decoration: none;
+}
+
+.post-content .editor-overflow-dropdown-menu .dropdown-item {
+  text-decoration: none;
 }
 
 .editor-overflow-modal-items {

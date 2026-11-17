@@ -390,6 +390,14 @@ body {
    --topic-check-checked-bg: var(--primary-color);
    --topic-check-chip-bg: rgba(var(--primary-rgb), 0.14);
 
+   /* ── BBCode quote tokens ──────────────────────────────────── */
+   /* Left border of [quote] (.bbcode-quote). Was var(--primary-color),
+      which is near-white (#f1f5f9) in dark — the line read as white on the
+      dark quote background. Base = light value (#1e293b); dark uses the
+      muted dark border tone (#334155, same as .post-content blockquote);
+      neutral keeps its previous explicit override (#666). */
+   --quote-border-color: #1e293b;
+
    --footer-post-header-bg: #f8f9fa;
 }
 
@@ -454,6 +462,7 @@ body {
    --footer-post-header-bg: #1c2636;
    --management-toolbar-border: rgba(255, 255, 255, 0.1);
    --management-toolbar-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+   --quote-border-color: #334155;
 }
 
 [data-theme='light'] {
@@ -487,6 +496,7 @@ body {
    --forum-view-card-shadow: 0 2px 12px rgba(56, 45, 29, 0.12);
    --topic-pinned-color: #78350f;
    --topic-locked-color: #b91c1c;
+   --quote-border-color: #666;
    --footer-post-header-bg: #f8f4ec;
    --mini-pagination-hover-color: #fffcf5;
    --forum-view-btn-primary-bg: #8c7a6b;
