@@ -12,7 +12,7 @@
 |---|---|---|
 | `src/config/adminNavigation.js` | **NEW** | The declarative navigation tree: groups, sections, the permission each section needs, and the pure helpers that filter it. No React, so the check script can execute it in plain Node. |
 | `src/components/admin/AdminSidebar.jsx` | **NEW** | The sidebar: collapsible groups, the responsive drawer, the themeable DOM contract. |
-| `src/components/admin/AdminSidebar.css` | **NEW** | Every rule hangs on the semantic class, never on a Bootstrap class. Colours come from the forum's own theme variables, so all three built-in themes are covered without a rule per theme. |
+| `src/components/admin/AdminSidebar.css` | **MODIFY** | Added `.admin-card` / `.admin-card__header` / `.admin-card__body` / `.admin-card__footer` / `.admin-card__title-row` / `.admin-card__title` component system; `.admin-dashboard-body` desktop padding-top changed `0` → `1.5rem`; sticky sidebar compensated with negative `margin-top`/`margin-bottom` so it doesn't jump while scrolling. Every rule hangs on the semantic class, never on a Bootstrap class. Colours come from the forum's own theme variables. |
 | `src/i18n/dictionary.js` | **MODIFY** | Added `admin.nav.*` (group titles, drawer title, toggle label) in EN and RU. Section labels keep the existing `admin.tabs.*` keys. |
 | `src/pages/AdminPage.jsx` | **MODIFY** | The tab strip is gone; the page renders the sidebar and the content in a two-column grid. The content panels are untouched. |
 | `scripts/check-admin-nav-config.mjs` | **NEW** | Executes the real navigation tree and checks the permission, i18n and DOM contracts. |
@@ -96,9 +96,13 @@ const activeTab = visibleTabPaths.includes(requestedTab)
 
 A bookmarked `?tab=audit` therefore opens the audit log for a viewer who may read it, and opens a section they may read for one who may not — never a blank page.
 
-### 3.3 The content panels are untouched
+### 3.3 The layout shell (`src/components/layout/Layout.jsx`)
 
-`renderSettings`, `renderUsers`, `renderRoles`, `renderCategories`, `renderAuditLog` and `DesignsTab` are unchanged, so no closure over the page state broke. Each is still gated by its own `hasPermission` check as well as by the open section — the navigation filter decides what is *offered*, the panel gate decides what is *rendered*, and the two are now derived from the same tree.
+`Layout.jsx` now splits rendering by route. On admin routes (`/admin*`) it renders `<main className="admin-main-fullwidth"><div className="admin-viewport-wrapper">{children}</div></main>` without the Bootstrap `Container`, giving the admin panels full width. On all other routes it keeps `<main className="forum-main-content"><Container>{children}</Container></main>`. The page footer is rendered only on non-admin routes.
+
+### 3.4 The content panels are untouched
+
+`renderSettings`, `renderUsers`, `renderRoles`, `renderCategories`, `renderAuditLog` and `DesignsTab` are unchanged in behaviour, so no closure over the page state broke. Each is still gated by its own `hasPermission` check as well as by the open section — the navigation filter decides what is *offered*, the panel gate decides what is *rendered*, and the two are now derived from the same tree. `DesignsTab.jsx` and `AdminPage.jsx` panels now wrap their content in `.admin-card` / `.admin-card__body` instead of Bootstrap `Card`/`Card.Body`.
 
 ---
 
@@ -112,9 +116,13 @@ A theme is written against `#admin-sidebar [data-tab="users"]` or `.admin-nav-li
 
 The forum themes itself through `--text-color`, `--card-bg`, `--border-color`, `--content-link-color` and `--block-bg` (see `src/index.css`). The sidebar uses the same variables, so light, dark and neutral all work without a single theme-specific rule. The original draft hard-coded `rgba(255, 255, 255, 0.07)` hovers and a `--bs-body-bg` fallback, which would have been invisible in the light theme.
 
-### 4.3 The responsive placement
+### 4.3 Admin card component system
 
-- Wide screens: the navigation is a sticky column that scrolls with the page, capped to the viewport height.
+The `.admin-card` / `.admin-card__header` / `.admin-card__body` / `.admin-card__footer` / `.admin-card__title-row` / `.admin-card__title` component system replaces Bootstrap `Card`/`Card.Body`/`Card.Header`/`Card.Footer` across `AdminPage.jsx` and `DesignsTab.jsx`, giving the admin panels a consistent themable look without Bootstrap utility classes.
+
+### 4.4 The responsive placement
+
+- Wide screens: the navigation is a sticky column that scrolls with the page, capped to the viewport height. Its top/bottom is compensated against `.forum-main-content` padding via negative `margin-top`/`margin-bottom` so the sticky sidebar doesn't jump while scrolling. The `.admin-dashboard-body` desktop padding-top is `1.5rem`.
 - Narrow screens: Bootstrap's own off-canvas drawer behaviour does the work (slide-in, dimming, scroll lock); the stylesheet only sets the drawer width.
 
 ---
@@ -154,14 +162,14 @@ The draft plan was written before the code was re-read. Where the two disagreed,
 
 ## 7. Verification
 
-Run on 2026-10-21, branch `feature/admin-reorg`:
+Run on 2026-11-17, branch `feature/admin-reorg`:
 
 | Check | Result |
 |---|---|
-| `npm test` (the whole chain) | passed — including the new `test:admin-nav-config` |
+| `npm test` (the whole chain) | passed — including `test:admin-nav-config` |
 | `npm run test:admin-nav-config` | `admin navigation OK - 3 groups, 6 sections, permissions, i18n and the themeable contract verified` |
-| `npm run lint:js` | 0 errors; the 2 warnings are the pre-existing ones in `ProfilePage.jsx` (unchanged by this sprint) |
-| `npm run build` | built in ~30 s; the "chunk larger than 500 kB" warning is pre-existing |
+| `npm run lint:js` | 0 errors |
+| `npm run build` | built successfully; the "chunk larger than 500 kB" warning is pre-existing |
 
 **Still to be done by hand**: open `/admin` as an admin and as a viewer with a narrow right, and check the drawer on a phone-sized viewport. The automated checks cannot see the layout.
 
@@ -192,14 +200,16 @@ Run on 2026-10-21, branch `feature/admin-reorg`:
 1. **Zero inline styles**:
    - `src/components/admin/AdminSidebar.jsx` and `src/pages/AdminPage.jsx` layout code contain no `style={...}`.
 2. **Bootstrap utilities eradicated in new markup**:
-   - In `AdminSidebar.jsx`: eliminated `d-none d-lg-flex`, `d-lg-none`, `fw-bold fs-5`, `p-0`. Responsive display is driven entirely by media queries in `AdminSidebar.css`. Typography and padding are delegated to `.admin-offcanvas__title` and `.admin-offcanvas__body`.
-   - In `AdminPage.jsx`: eliminated `d-lg-none`, `me-2`, `text-muted small ms-auto fw-medium`, and `p-3 p-md-4` from the layout markup. Replaced with semantic `.admin-mobile-toggle-icon`, `.admin-mobile-toggle-current`, and layout padding in `AdminSidebar.css`.
+   - `AdminPage.jsx` panels (`renderUsers`, `renderRoles`, `renderCategories`) and `DesignsTab.jsx` now wrap content in `.admin-card` / `.admin-card__header` / `.admin-card__body` / `.admin-card__footer` instead of Bootstrap `Card`/`Card.Body`/`Card.Header`/`Card.Footer`.
+   - Bootstrap utilities (`d-none d-lg-flex`, `d-lg-none`, `fw-bold fs-5`, `p-0`, `d-lg-none`, `me-2`, `text-muted small ms-auto fw-medium`, `p-3 p-md-4`) eliminated from layout markup.
+3. **Admin card component system**: `.admin-card` / `.admin-card__header` / `.admin-card__body` / `.admin-card__footer` / `.admin-card__title-row` / `.admin-card__title` added to `AdminSidebar.css`, driven entirely by theme variables (`var(--card-bg)`, `var(--border-color)`).
 3. **No new react-bootstrap imports**:
    - Only existing `Offcanvas`, `OverlayTrigger`, and `Tooltip` are used.
 4. **Colours strictly via theme variables**:
    - In `AdminSidebar.css`, all colors reference `var(--card-bg)`, `var(--border-color)`, `var(--text-color)`, `var(--secondary-color)`, `var(--content-link-color)`, `var(--block-bg)`, `var(--primary-color)`. Zero hardcoded hex colors.
 5. **Stable Themeable DOM Hooks preserved**:
-   - Root layout: `#admin-page`, `.admin-dashboard-layout`, `.admin-dashboard-content`, `.admin-dashboard-body`, `.admin-mobile-toggle-bar`.
+   - Admin cards: `.admin-card`, `.admin-card--spacing`, `.admin-card__header`, `.admin-card__body`, `.admin-card__footer`, `.admin-card__title-row`, `.admin-card__title`.
+   - Layout shell: `#admin-page`, `.admin-dashboard-layout`, `.admin-dashboard-content`, `.admin-dashboard-body`, `.admin-mobile-toggle-bar`, `.admin-main-fullwidth`, `.admin-viewport-wrapper`.
    - Desktop sidebar: `#admin-sidebar`, `.admin-sidebar`, `.admin-sidebar--collapsed`, `.admin-sidebar--expanded`, `.admin-sidebar__header`, `.admin-sidebar__title`, `.admin-sidebar__toggle-btn`, `.admin-sidebar__nav`, `.admin-sidebar__group`, `.admin-sidebar__group-header`, `.admin-sidebar__group-chevron`, `.admin-sidebar__group-chevron--collapsed`, `.admin-sidebar__group-items`.
    - Nav items: `.admin-nav-item`, `.admin-nav-item--active`, `.admin-nav-item__icon`, `.admin-nav-item__label`, `[data-group]`, `[data-tab]`, `.is-active`, `.is-collapsed`.
    - Mobile offcanvas: `.admin-offcanvas`, `.admin-offcanvas__header`, `.admin-offcanvas__title`, `.admin-offcanvas__body`.

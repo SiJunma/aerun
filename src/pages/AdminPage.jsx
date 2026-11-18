@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Row, Col, Card, Form, Button, Table, Badge, Dropdown, Spinner } from 'react-bootstrap';
+import { Row, Col, Form, Button, Table, Badge, Dropdown, Spinner } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -1759,9 +1759,9 @@ const AdminPage = () => {
   };
 
   const renderSettings = () => (
-    <>
-      <Card className="shadow-sm border-0 mb-4">
-        <Card.Body className="p-4">
+    <div className="admin-settings-tab">
+      <div className="admin-card admin-card--spacing">
+        <div className="admin-card__body">
         <Form>
           <h5 className="mb-4 text-primary">{t('admin.settings.general')}</h5>
           <Row>
@@ -2239,13 +2239,13 @@ const AdminPage = () => {
             {saving ? t('admin.settings.saving') : t('admin.settings.save_btn')}
           </Button>
         </Form>
-      </Card.Body>
-    </Card>
+        </div>
+      </div>
 
     <EmailTemplatesSettings
       forumName={settings.forumName?.[currentLang] || settings.forumName?.en || 'Aerun'}
     />
-  </>
+  </div>
 );
 
 
@@ -2260,23 +2260,24 @@ const AdminPage = () => {
     const filteredUsers = users;
 
     return (
-      <Card className="shadow-sm border-0">
-        <Card.Header className="bg-transparent py-3 border-bottom">
-          <InputGroup style={{ maxWidth: '400px' }}>
-            <InputGroup.Text className="border-end-0 text-muted">
-              <Search size={18} />
-            </InputGroup.Text>
-            <Form.Control
-              type="text"
-              placeholder={t('common.search_placeholder')}
-              value={userSearch}
-              onChange={(e) => setUserSearch(e.target.value)}
-              className="border-start-0 ps-0"
-            />
-          </InputGroup>
-        </Card.Header>
-        {selectedUserIds.size > 0 && (
-          <Card.Body className="py-3 border-bottom">
+      <div className="admin-users-tab">
+        <div className="admin-card">
+          <div className="admin-card__header">
+            <InputGroup style={{ maxWidth: '400px' }}>
+              <InputGroup.Text className="border-end-0 text-muted">
+                <Search size={18} />
+              </InputGroup.Text>
+              <Form.Control
+                type="text"
+                placeholder={t('common.search_placeholder')}
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="border-start-0 ps-0"
+              />
+            </InputGroup>
+          </div>
+          {selectedUserIds.size > 0 && (
+            <div className="admin-card__header">
             <div className="d-flex flex-wrap align-items-center gap-2">
               <span className="fw-bold text-muted small">
                 {t('admin.users.bulk_selected', { count: selectedUserIds.size })}
@@ -2321,8 +2322,9 @@ const AdminPage = () => {
                 {t('admin.users.bulk_clear')}
               </Button>
             </div>
-          </Card.Body>
+          </div>
         )}
+        <div className="admin-card__body">
         <Table hover responsive className="mb-0 overflow-hidden">
           <thead>
             <tr>
@@ -2518,25 +2520,28 @@ const AdminPage = () => {
             ))}
           </tbody>
         </Table>
+        </div>
         {/* Server-side pagination: the footer mirrors the response envelope —
             one request renders one page, and `totalItems` is the count of the
             NARROWED set (the search filter applies before the page is cut).
             ForumPagination hides itself when there is a single page. */}
-        <Card.Body className="d-flex flex-wrap align-items-center justify-content-between gap-2 border-top py-2">
+        <div className="admin-card__footer">
           <span className="text-muted small">{t('admin.users.total', { count: usersTotalItems })}</span>
           <ForumPagination
             currentPage={usersPage}
             totalPages={usersTotalPages}
             onPageChange={setUsersPage}
           />
-        </Card.Body>
-      </Card>
+        </div>
+        </div>
+      </div>
     );
   };
 
   const renderRoles = () => (
-    <Card className="shadow-sm border-0">
-      <Card.Body className="p-4">
+    <div className="admin-roles-tab">
+      <div className="admin-card">
+        <div className="admin-card__body">
         <div className="d-flex justify-content-between mb-4">
           <h5 className="mb-0">{t('admin.roles.title')}</h5>
           {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
@@ -2629,8 +2634,9 @@ const AdminPage = () => {
             })()}
           </tbody>
         </Table>
-      </Card.Body>
-    </Card>
+        </div>
+      </div>
+    </div>
   );
 
   const renderCategories = () => {
@@ -2662,9 +2668,9 @@ const AdminPage = () => {
     const showGroupScaffold = groups.length > 0 && categories.length === 0;
 
     return (
-      <>
-        <Card className="shadow-sm border-0 mb-4">
-          <Card.Body className="p-4">
+      <div className="admin-categories-tab">
+        <div className="admin-card admin-card--spacing">
+          <div className="admin-card__body">
             <div className="d-flex justify-content-between mb-4">
               <h5 className="mb-0">{t('admin.categories.groups_title')}</h5>
               {hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && (
@@ -2716,11 +2722,11 @@ const AdminPage = () => {
                 </tbody>
               </Table>
             )}
-          </Card.Body>
-        </Card>
+          </div>
+        </div>
 
-        <Card className="shadow-sm border-0">
-          <Card.Body className="p-4">
+        <div className="admin-card">
+          <div className="admin-card__body">
             <div className="d-flex justify-content-between mb-4">
               <h5 className="mb-0">{t('admin.categories.title')}</h5>
             </div>
@@ -2883,9 +2889,9 @@ const AdminPage = () => {
                 </tbody>
               </Table>
             )}
-          </Card.Body>
-        </Card>
-      </>
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -2944,9 +2950,10 @@ const AdminPage = () => {
     const allActions = [...new Set(auditLogs.map(l => l.action_type))].sort();
 
     return (
-      <Card className="shadow-sm border-0">
-        <Card.Body className="p-4">
-          <h5 className="mb-3">{t('admin.audit.title')}</h5>
+      <div className="admin-audit-tab">
+        <div className="admin-card">
+          <div className="admin-card__body">
+            <h5 className="mb-3">{t('admin.audit.title')}</h5>
 
           {/* Toolbar */}
           <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
@@ -3072,8 +3079,9 @@ const AdminPage = () => {
               </Button>
             </div>
           )}
-        </Card.Body>
-      </Card>
+          </div>
+        </div>
+      </div>
     );
   };
 

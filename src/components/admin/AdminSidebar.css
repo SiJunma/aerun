@@ -47,7 +47,7 @@
 
 @media (min-width: 993px) {
   .admin-dashboard-body {
-    padding-top: 0;
+    padding-top: 1.5rem;
   }
 }
 
@@ -331,4 +331,55 @@
 
 .admin-offcanvas__body {
   padding: 0;
+}
+
+/* ── Admin Cards & Panels ─────────────────────────────────────────────────── */
+
+.admin-card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.admin-card--spacing,
+.admin-card-spacing {
+  margin-bottom: 1.5rem;
+}
+
+.admin-card__header,
+.admin-card-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background-color: transparent;
+}
+
+.admin-card__body,
+.admin-card-body {
+  padding: 1.5rem;
+}
+
+.admin-card__footer,
+.admin-card-footer {
+  padding: 0.75rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.admin-card__title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.admin-card__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-color);
 }
