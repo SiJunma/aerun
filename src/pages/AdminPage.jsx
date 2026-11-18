@@ -25,6 +25,11 @@ import {
   Layers, FolderTree, ShieldAlert, Menu
 } from 'lucide-react';
 import AdminSidebar from '../components/admin/AdminSidebar';
+import {
+  ADMIN_NAV_GROUPS,
+  filterNavByPermissions,
+  collectVisibleTabPaths,
+} from '../config/adminNavigation';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -55,7 +60,18 @@ const AdminPage = () => {
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'settings';
+  const visibleNavGroups = useMemo(
+    () => filterNavByPermissions(ADMIN_NAV_GROUPS, hasPermission),
+    [hasPermission]
+  );
+  const visibleTabPaths = useMemo(
+    () => collectVisibleTabPaths(visibleNavGroups),
+    [visibleNavGroups]
+  );
+  const requestedTab = searchParams.get('tab');
+  const activeTab = visibleTabPaths.includes(requestedTab)
+    ? requestedTab
+    : (visibleTabPaths[0] ?? 'settings');
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -3062,9 +3078,10 @@ const AdminPage = () => {
   };
 
   return (
-    <div className="admin-dashboard-layout">
+    <div id="admin-page" className="admin-dashboard-layout">
       {/* Sidebar with Desktop Sticky and Mobile Offcanvas */}
       <AdminSidebar
+        groups={visibleNavGroups}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         collapsed={sidebarCollapsed}
@@ -3076,22 +3093,22 @@ const AdminPage = () => {
       {/* Main Content Area */}
       <div className="admin-dashboard-content">
         {/* Mobile top toggle bar (visible only on < lg screens) */}
-        <div className="admin-mobile-toggle-bar d-lg-none">
+        <div className="admin-mobile-toggle-bar">
           <Button
             variant="outline-secondary"
             size="sm"
             onClick={() => setMobileSidebarOpen(true)}
-            aria-label="Open admin navigation"
+            aria-label={t('admin.nav.toggleMenu') || 'Open admin navigation'}
           >
-            <Menu size={18} className="me-2" />
+            <Menu size={18} className="admin-mobile-toggle-icon" />
             <span>{t('admin.dashboard')}</span>
           </Button>
-          <span className="text-muted small ms-auto fw-medium">
+          <span className="admin-mobile-toggle-current">
             {t(`admin.tabs.${activeTab}`)}
           </span>
         </div>
 
-        <div className="admin-dashboard-body p-3 p-md-4">
+        <div className="admin-dashboard-body">
           <ForumBreadcrumbs
             items={[
               { label: t('nav.admin'), active: false, link: '/admin' },

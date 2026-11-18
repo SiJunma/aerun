@@ -1,4 +1,4 @@
-﻿// Regression test: the admin navigation must hide what the viewer may not open.
+// Regression test: the admin navigation must hide what the viewer may not open.
 //
 // The admin panel used to render a horizontal tab strip, and every tab was
 // guarded by its own inline `hasPermission(...)` call. That arrangement fails
@@ -199,9 +199,44 @@ for (const [snippet, what] of [
   ['data-group={group.id}', 'a group must be marked with its data-group'],
   ['is-active', 'the open section must be marked with the is-active state class'],
   ['is-collapsed', 'a folded group must be marked with the is-collapsed state class'],
+  ['admin-sidebar--collapsed', 'collapsed sidebar state class must be present'],
+  ['admin-sidebar--expanded', 'expanded sidebar state class must be present'],
+  ['admin-sidebar__header', 'sidebar header class must be present'],
+  ['admin-sidebar__title', 'sidebar title class must be present'],
+  ['admin-sidebar__toggle-btn', 'sidebar toggle button class must be present'],
+  ['admin-sidebar__nav', 'sidebar nav class must be present'],
+  ['admin-sidebar__group', 'sidebar group class must be present'],
+  ['admin-sidebar__group-header', 'sidebar group header class must be present'],
+  ['admin-sidebar__group-chevron', 'sidebar group chevron class must be present'],
+  ['admin-sidebar__group-items', 'sidebar group items class must be present'],
+  ['admin-nav-item', 'nav item class must be present'],
+  ['admin-nav-item--active', 'nav item active modifier must be present'],
+  ['admin-nav-item__icon', 'nav item icon container class must be present'],
+  ['admin-nav-item__label', 'nav item label class must be present'],
+  ['admin-offcanvas', 'mobile offcanvas class must be present'],
 ]) {
   if (!sidebarSource.includes(snippet)) {
     fail(`${what} (expected "${snippet}" in AdminSidebar.jsx)`);
+  }
+}
+
+// Layout hooks on the page
+for (const [snippet, what] of [
+  ['id="admin-page"', 'the page layout must carry id="admin-page"'],
+  ['admin-dashboard-layout', 'admin-dashboard-layout container class must be present'],
+  ['admin-dashboard-content', 'admin-dashboard-content column class must be present'],
+  ['admin-dashboard-body', 'admin-dashboard-body container class must be present'],
+  ['admin-mobile-toggle-bar', 'admin-mobile-toggle-bar class must be present'],
+]) {
+  if (!adminPageSource.includes(snippet)) {
+    fail(`${what} (expected "${snippet}" in AdminPage.jsx)`);
+  }
+}
+
+// Prohibit forbidden bootstrap utilities in AdminSidebar.jsx
+for (const utility of ['d-none', 'd-lg-flex', 'd-lg-none', 'fw-bold', 'fs-5', 'p-0']) {
+  if (sidebarSource.includes(utility)) {
+    fail(`AdminSidebar.jsx must not use bootstrap utility "${utility}" — replace with component CSS`);
   }
 }
 

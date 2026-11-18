@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Offcanvas } from 'react-bootstrap';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Offcanvas, OverlayTrigger, Tooltip } from 'react-bootstrap';
 import {
   Users,
   User,
@@ -13,38 +13,27 @@ import {
   ChevronDown,
   Menu,
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
+import {
+  ADMIN_NAV_GROUPS,
+  filterNavByPermissions,
+  findGroupForTab,
+} from '../../config/adminNavigation';
 import './AdminSidebar.css';
 
 /**
- * Admin navigation — the sidebar of the admin panel.
+ * Admin navigation — the collapsible responsive sidebar of the admin panel.
  *
- * WHAT THIS COMPONENT OWNS
- *
- *   1. The collapsible groups of sections it is handed. The groups arrive
- *      already filtered by the viewer's permissions (see
- *      `src/config/adminNavigation.js`), so a section the viewer may not open
- *      is never rendered, and a group that ends up empty is never rendered
- *      either.
- *   2. The open/closed state of those groups.
- *   3. The mobile drawer.
- *
- * WHY THE NAVIGATION IS RENDERED ONCE
- *
- * A desktop sidebar and a mobile drawer are usually two copies of the same
- * markup, which means two sets of `data-tab` hooks for a theme to trip over
- * and two focusable copies of every link. Here the whole navigation is ONE
- * Bootstrap `Offcanvas` with the `responsive` prop: from `lg` up Bootstrap
- * renders it as a static, always-visible block, and below that as a drawer
- * that slides in from the edge. Exactly one copy of the markup exists at any
- * moment, and the drawer brings the focus handling, the Escape key, the
- * backdrop and the scroll lock with it.
- *
- * The DOM contract for themes (ids, classes, state classes and data
- * attributes) follows `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md`:
- * `#admin-sidebar`, `.admin-sidebar`, `.admin-sidebar-group`,
- * `.admin-sidebar-group-header`, `.admin-nav-link`, `.is-active`,
- * `.is-collapsed`, `data-group`, `data-tab`.
+ * DOM contract for custom themes follows markdowns/TODO_THEMEABLE_SPRINT_PLAN.md:
+ * - `#admin-sidebar`
+ * - `.admin-sidebar`, `.admin-sidebar--collapsed`, `.admin-sidebar--expanded`
+ * - `.admin-sidebar__header`, `.admin-sidebar__title`, `.admin-sidebar__toggle-btn`
+ * - `.admin-sidebar__nav`, `.admin-sidebar__group`, `.admin-sidebar__group-header`
+ * - `.admin-sidebar__group-chevron`, `.admin-sidebar__group-items`
+ * - `.admin-nav-item`, `.admin-nav-item--active`, `.admin-nav-item__icon`, `.admin-nav-item__label`
+ * - `.admin-offcanvas`, `.admin-offcanvas__header`, `.admin-offcanvas__title`, `.admin-offcanvas__body`
+ * - `data-group`, `data-tab`, `.is-active`, `.is-collapsed`
  */
 
 /** Icon components the navigation config may name. */
@@ -63,28 +52,40 @@ const ICON_MAP = {
 };
 
 /** Renders the icon named by the navigation config, if it is a known one. */
-const NavIcon = ({ name, size = 17, className = '' }) => {
+const NavIcon = ({ name, size = 18, className = '' }) => {
   const Icon = ICON_MAP[name];
   if (!Icon) return null;
   return <Icon size={size} className={className} aria-hidden="true" />;
 };
 
-const AdminSidebar = ({ groups, activeTab, onSelect }) => {
+const AdminSidebar = ({
+  groups,
+  activeTab,
+  onSelectTab,
+  onSelect,
+  collapsed = false,
+  onToggleCollapse,
+  mobileOpen = false,
+  onCloseMobile,
+}) => {
+  const { hasPermission } = useAuth();
   const { t } = useI18n();
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  // Groups the viewer has folded away, keyed by group id.
+
+  // Navigation tree filtered by the viewer's permissions
+  const navGroups = useMemo(() => {
+    if (groups && groups.length > 0) return groups;
+    return filterNavByPermissions(ADMIN_NAV_GROUPS, hasPermission);
+  }, [groups, hasPermission]);
+
+  // Groups the viewer has folded away, keyed by group id
   const [collapsedGroups, setCollapsedGroups] = useState({});
 
   const activeGroupId = useMemo(
-    () => groups.find((group) => group.children.some((item) => item.path === activeTab))?.id || null,
-    [groups, activeTab]
+    () => findGroupForTab(navGroups, activeTab),
+    [navGroups, activeTab]
   );
 
-  // The group holding the open section must be expanded, or the section the
-  // viewer is looking at has no visible entry in the navigation. This is
-  // adjusted while rendering (the same "adjust state when a value changes"
-  // pattern the theme provider uses) rather than in an effect, so the
-  // navigation is never painted with the wrong group folded.
+  // The group holding the open section must be expanded automatically
   const [prevActiveGroupId, setPrevActiveGroupId] = useState(activeGroupId);
   if (activeGroupId !== prevActiveGroupId) {
     setPrevActiveGroupId(activeGroupId);
@@ -99,110 +100,138 @@ const AdminSidebar = ({ groups, activeTab, onSelect }) => {
     setCollapsedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
   }, []);
 
-  const openDrawer = useCallback(() => setIsDrawerOpen(true), []);
-  const closeDrawer = useCallback(() => setIsDrawerOpen(false), []);
-
-  const handleSelect = useCallback(
-    (path) => {
-      onSelect(path);
-      // On a phone the navigation covers the page, so it must get out of the
-      // way once the viewer has chosen where to go.
-      setIsDrawerOpen(false);
+  const handleItemClick = useCallback(
+    (tabId) => {
+      if (onSelectTab) onSelectTab(tabId);
+      if (onSelect) onSelect(tabId);
+      if (onCloseMobile) onCloseMobile();
     },
-    [onSelect]
+    [onSelectTab, onSelect, onCloseMobile]
   );
 
-  // Widening the window past the breakpoint turns the drawer back into an
-  // inline column. The `show` flag has to be dropped along with it, or the
-  // drawer would reappear the moment the window narrows again.
-  useEffect(() => {
-    const wide = window.matchMedia('(min-width: 992px)');
-    const onChange = (event) => {
-      if (event.matches) setIsDrawerOpen(false);
-    };
-    wide.addEventListener('change', onChange);
-    return () => wide.removeEventListener('change', onChange);
-  }, []);
+  const renderNavList = (isCollapsedMode = false) => (
+    <nav className="admin-sidebar__nav" aria-label={t('admin.nav.menuLabel')}>
+      {navGroups.map((group) => {
+        const isCollapsed = !isCollapsedMode && !!collapsedGroups[group.id];
+        const groupTitle = t(group.title);
 
-
-
-  const renderGroups = () =>
-    groups.map((group) => {
-      const isCollapsed = !!collapsedGroups[group.id];
-      return (
-        <div
-          key={group.id}
-          className={`admin-sidebar-group ${isCollapsed ? 'is-collapsed' : 'is-open'}`}
-          data-group={group.id}
-        >
-          <button
-            type="button"
-            className="admin-sidebar-group-header"
-            aria-expanded={!isCollapsed}
-            aria-controls={`admin-group-${group.id}`}
-            onClick={() => toggleGroup(group.id)}
+        return (
+          <div
+            key={group.id}
+            className={`admin-sidebar__group ${isCollapsed ? 'is-collapsed' : 'is-open'}`}
+            data-group={group.id}
           >
-            <span className="admin-sidebar-group-title">
-              <NavIcon name={group.icon} size={15} className="admin-sidebar-group-icon" />
-              <span>{t(group.title)}</span>
-            </span>
-            <ChevronDown size={15} className="admin-sidebar-group-chevron" />
-          </button>
+            {!isCollapsedMode && (
+              <button
+                type="button"
+                className="admin-sidebar__group-header"
+                onClick={() => toggleGroup(group.id)}
+                aria-expanded={!isCollapsed}
+                aria-controls={`admin-group-${group.id}`}
+              >
+                <span className="admin-sidebar__group-title">
+                  <NavIcon name={group.icon} size={15} className="admin-sidebar__group-icon" />
+                  <span>{groupTitle}</span>
+                </span>
+                <ChevronDown
+                  size={14}
+                  className={`admin-sidebar__group-chevron ${
+                    isCollapsed ? 'admin-sidebar__group-chevron--collapsed' : ''
+                  }`}
+                />
+              </button>
+            )}
 
-          <ul id={`admin-group-${group.id}`} className="admin-sidebar-list">
-            {group.children.map((item) => {
-              const isActive = item.path === activeTab;
-              return (
-                <li key={item.id} className="admin-nav-item">
-                  <button
-                    type="button"
-                    className={`admin-nav-link ${isActive ? 'is-active' : ''}`}
-                    data-tab={item.path}
-                    aria-current={isActive ? 'page' : undefined}
-                    onClick={() => handleSelect(item.path)}
-                  >
-                    <NavIcon name={item.icon} className="admin-nav-link-icon" />
-                    <span className="admin-nav-link-text">{t(item.title)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      );
-    });
+            {(!isCollapsed || isCollapsedMode) && (
+              <div id={`admin-group-${group.id}`} className="admin-sidebar__group-items">
+                {group.children.map((item) => {
+                  const isActive = activeTab === item.path || activeTab === item.id;
+                  const itemTitle = t(item.title);
+
+                  const buttonNode = (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`admin-nav-item ${
+                        isActive ? 'admin-nav-item--active is-active' : ''
+                      }`}
+                      data-tab={item.path}
+                      onClick={() => handleItemClick(item.path)}
+                      aria-current={isActive ? 'page' : undefined}
+                    >
+                      <span className="admin-nav-item__icon">
+                        <NavIcon name={item.icon} size={18} />
+                      </span>
+                      {!isCollapsedMode && (
+                        <span className="admin-nav-item__label">{itemTitle}</span>
+                      )}
+                    </button>
+                  );
+
+                  if (isCollapsedMode) {
+                    return (
+                      <OverlayTrigger
+                        key={item.id}
+                        placement="right"
+                        overlay={<Tooltip id={`tooltip-${item.id}`}>{itemTitle}</Tooltip>}
+                      >
+                        {buttonNode}
+                      </OverlayTrigger>
+                    );
+                  }
+
+                  return buttonNode;
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </nav>
+  );
 
   return (
     <>
-      <Button
-        variant="outline-secondary"
-        size="sm"
-        className="admin-nav-toggle d-lg-none"
-        aria-expanded={isDrawerOpen}
-        aria-controls="admin-sidebar"
-        onClick={openDrawer}
+      {/* Desktop Sidebar */}
+      <aside
+        id="admin-sidebar"
+        className={`admin-sidebar ${
+          collapsed ? 'admin-sidebar--collapsed' : 'admin-sidebar--expanded'
+        }`}
       >
-        <Menu size={16} className="admin-nav-toggle-icon" />
-        <span>{t('admin.nav.toggleMenu')}</span>
-      </Button>
+        <div className="admin-sidebar__header">
+          <button
+            type="button"
+            className="admin-sidebar__toggle-btn"
+            onClick={onToggleCollapse}
+            title={collapsed ? t('common.expand') || 'Expand' : t('common.collapse') || 'Collapse'}
+            aria-label={collapsed ? t('common.expand') || 'Expand' : t('common.collapse') || 'Collapse'}
+          >
+            <Menu size={20} />
+          </button>
+          {!collapsed && (
+            <h2 className="admin-sidebar__title">{t('admin.dashboard')}</h2>
+          )}
+        </div>
 
+        {renderNavList(collapsed)}
+      </aside>
+
+      {/* Mobile Drawer (Offcanvas) */}
       <Offcanvas
-        responsive="lg"
+        show={mobileOpen}
+        onHide={onCloseMobile}
+        className="admin-offcanvas"
         placement="start"
-        show={isDrawerOpen}
-        onHide={closeDrawer}
-        className="admin-sidebar"
-        aria-labelledby="admin-sidebar-title"
+        aria-labelledby="admin-offcanvas-title"
       >
-        <Offcanvas.Header closeButton className="admin-sidebar-header">
-          <Offcanvas.Title id="admin-sidebar-title" className="admin-sidebar-title">
-            {t('admin.nav.menuLabel')}
+        <Offcanvas.Header closeButton className="admin-offcanvas__header">
+          <Offcanvas.Title id="admin-offcanvas-title" className="admin-offcanvas__title">
+            {t('admin.dashboard')}
           </Offcanvas.Title>
         </Offcanvas.Header>
-        <Offcanvas.Body className="admin-sidebar-body">
-          <nav id="admin-sidebar" className="admin-nav" aria-label={t('admin.nav.menuLabel')}>
-            {renderGroups()}
-          </nav>
+        <Offcanvas.Body className="admin-offcanvas__body">
+          {renderNavList(false)}
         </Offcanvas.Body>
       </Offcanvas>
     </>

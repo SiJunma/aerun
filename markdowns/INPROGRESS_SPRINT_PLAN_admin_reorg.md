@@ -1,4 +1,4 @@
-﻿# Sprint Plan: Admin View Reorganization & Themeable Preparation
+# Sprint Plan: Admin View Reorganization & Themeable Preparation
 
 **Status**: IN PROGRESS — implemented on branch `feature/admin-reorg`, verified, not yet merged to `main`.
 
@@ -171,3 +171,47 @@ Run on 2026-10-21, branch `feature/admin-reorg`:
 
 - The branch is `feature/admin-reorg`; `main` is untouched.
 - The owner merges it, and the VPS migration happens afterwards, as planned: this is a feature, not a bug fix, so it rides with the next release rather than going out as a hotfix.
+
+---
+
+## 9. Checkpoints & Theming Preparation Finalization (Brief: 2026-11-17)
+
+**Goal**: Prepare and lock the admin panel layout and sidebar contract so Sprint 12 of `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md` has a stable, clean, zero-inline-style, zero-bootstrap-utility DOM to theme without rework.
+
+### Checkpoint Progress Tracker
+
+| Checkpoint | Scope | Status | Verification |
+|---|---|---|---|
+| **CP-1**: DOM Contract & Component Cleanliness | Remove inline styles, replace Bootstrap utilities with component CSS, ensure semantic BEM hooks and theme variables. | **DONE** | Zero `style={}`, zero utilities (`d-none`, `d-lg-*`, `fw-bold`, `fs-5`, `p-0`), zero raw hex colors. |
+| **CP-2**: Verification Suite & Automated Contract Guard | Strengthen `scripts/check-admin-nav-config.mjs` with BEM & utility assertions; run lint, build, test. | **DONE** | `npm run test:admin-nav-config` OK, `npm run lint:js` 0 errors, `npm run build` OK, `npm test` 100% green. |
+| **CP-3**: Documentation Synchronization | Update Sprint 12 mini-specification in `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md` with the real DOM structure. | **DONE** | Target DOM in Sprint 12 updated to match `admin-dashboard-layout` & `AdminSidebar`. |
+
+### Detailed Checkpoint Breakdown
+
+#### Checkpoint 1: Clean DOM & AdminSidebar Reorg
+1. **Zero inline styles**:
+   - `src/components/admin/AdminSidebar.jsx` and `src/pages/AdminPage.jsx` layout code contain no `style={...}`.
+2. **Bootstrap utilities eradicated in new markup**:
+   - In `AdminSidebar.jsx`: eliminated `d-none d-lg-flex`, `d-lg-none`, `fw-bold fs-5`, `p-0`. Responsive display is driven entirely by media queries in `AdminSidebar.css`. Typography and padding are delegated to `.admin-offcanvas__title` and `.admin-offcanvas__body`.
+   - In `AdminPage.jsx`: eliminated `d-lg-none`, `me-2`, `text-muted small ms-auto fw-medium`, and `p-3 p-md-4` from the layout markup. Replaced with semantic `.admin-mobile-toggle-icon`, `.admin-mobile-toggle-current`, and layout padding in `AdminSidebar.css`.
+3. **No new react-bootstrap imports**:
+   - Only existing `Offcanvas`, `OverlayTrigger`, and `Tooltip` are used.
+4. **Colours strictly via theme variables**:
+   - In `AdminSidebar.css`, all colors reference `var(--card-bg)`, `var(--border-color)`, `var(--text-color)`, `var(--secondary-color)`, `var(--content-link-color)`, `var(--block-bg)`, `var(--primary-color)`. Zero hardcoded hex colors.
+5. **Stable Themeable DOM Hooks preserved**:
+   - Root layout: `#admin-page`, `.admin-dashboard-layout`, `.admin-dashboard-content`, `.admin-dashboard-body`, `.admin-mobile-toggle-bar`.
+   - Desktop sidebar: `#admin-sidebar`, `.admin-sidebar`, `.admin-sidebar--collapsed`, `.admin-sidebar--expanded`, `.admin-sidebar__header`, `.admin-sidebar__title`, `.admin-sidebar__toggle-btn`, `.admin-sidebar__nav`, `.admin-sidebar__group`, `.admin-sidebar__group-header`, `.admin-sidebar__group-chevron`, `.admin-sidebar__group-chevron--collapsed`, `.admin-sidebar__group-items`.
+   - Nav items: `.admin-nav-item`, `.admin-nav-item--active`, `.admin-nav-item__icon`, `.admin-nav-item__label`, `[data-group]`, `[data-tab]`, `.is-active`, `.is-collapsed`.
+   - Mobile offcanvas: `.admin-offcanvas`, `.admin-offcanvas__header`, `.admin-offcanvas__title`, `.admin-offcanvas__body`.
+
+#### Checkpoint 2: Validation & CI Guard
+- `scripts/check-admin-nav-config.mjs` asserts:
+  - Permission validity in `PERMISSIONS`.
+  - Dynamic group & item filtering via `src/config/adminNavigation.js`.
+  - Section correspondence between navigation tree and `AdminPage.jsx`.
+  - Presence of dictionary keys in EN and RU.
+  - Strict BEM class contract on `AdminSidebar.jsx` and `AdminPage.jsx`.
+  - Negative assertion: prohibition of Bootstrap utility classes in `AdminSidebar.jsx`.
+
+#### Checkpoint 3: Documentation Alignment
+- `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md`: Sprint 12 mini-spec replaced outdated `<nav class="admin-tabs">` with the actual `admin-dashboard-layout` and `AdminSidebar` DOM architecture. Fully environment-neutral.

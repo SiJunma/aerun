@@ -932,60 +932,105 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 Админка менее приоритетна для кастомизации пользовательскими темами, но должна быть адресуемой через CSS (администратор может захотеть стилизовать её под свой форум).
 
-```
-<div id="admin-page" class="admin-page">
-  <nav id="admin-breadcrumbs">...</nav>
-  <header id="admin-header">
-    <h1 class="page-title">...</h1>
-  </header>
-  <nav class="admin-tabs">
-    <button class="admin-tab [is-active]" data-tab="users">...</button>
-    <button class="admin-tab [is-active]" data-tab="categories">...</button>
-    <button class="admin-tab [is-active]" data-tab="roles">...</button>
-    <button class="admin-tab [is-active]" data-tab="designs">...</button>
-    <button class="admin-tab [is-active]" data-tab="settings">...</button>
-    <button class="admin-tab [is-active]" data-tab="audit">...</button>
-  </nav>
-  <div id="admin-content" class="admin-tab-content">
-    <!-- Active tab content -->
-    
-    <!-- Users tab -->
-    <div class="admin-users-tab">
-      <div class="admin-users-filters">...</div>
-      <div class="admin-users-list">
-        <div class="admin-user-item" data-user-id="{uid}">...</div>
-      </div>
+Навигация панели построена на полноэкранном дашборде с двухколоночным лейаутом (`admin-dashboard-layout`), адаптивным сайдбаром (`AdminSidebar`: десктопный collapsible-сайдбар + мобильный Offcanvas drawer) и семантическими BEM-классами.
+
+```html
+<div id="admin-page" class="admin-dashboard-layout">
+  <!-- Десктопный сайдбар (>=992px) -->
+  <aside id="admin-sidebar" class="admin-sidebar [admin-sidebar--collapsed | admin-sidebar--expanded]">
+    <div class="admin-sidebar__header">
+      <button class="admin-sidebar__toggle-btn" aria-label="Toggle sidebar">...</button>
+      <h2 class="admin-sidebar__title">...</h2>
     </div>
-    
-    <!-- Categories tab -->
-    <div class="admin-categories-tab">
-      <div class="admin-category-groups">
-        <div class="admin-category-group" data-group-id="{id}">...</div>
-      </div>
-      <div class="admin-categories-list">
-        <div class="admin-category-item" data-category-id="{id}">...</div>
-      </div>
-    </div>
-    
-    <!-- Designs tab -->
-    <div class="admin-designs-tab">
-      <div class="admin-designs-settings">...</div>
-      <div class="admin-designs-list">
-        <div class="design-card" data-design-id="{id}">
-          <div class="design-card-name">...</div>
-          <div class="design-card-status">...</div>
-          <div class="design-card-actions">...</div>
+    <nav class="admin-sidebar__nav" aria-label="...">
+      <div class="admin-sidebar__group [is-collapsed | is-open]" data-group="{groupId}">
+        <button class="admin-sidebar__group-header" aria-expanded="[true|false]">
+          <span class="admin-sidebar__group-title">
+            <svg class="admin-sidebar__group-icon">...</svg>
+            <span>...</span>
+          </span>
+          <svg class="admin-sidebar__group-chevron [admin-sidebar__group-chevron--collapsed]">...</svg>
+        </button>
+        <div class="admin-sidebar__group-items">
+          <button class="admin-nav-item [admin-nav-item--active is-active]" data-tab="{tabPath}">
+            <span class="admin-nav-item__icon"><svg>...</svg></span>
+            <span class="admin-nav-item__label">...</span>
+          </button>
         </div>
       </div>
+    </nav>
+  </aside>
+
+  <!-- Мобильный Offcanvas drawer (<992px) -->
+  <div class="offcanvas offcanvas-start admin-offcanvas">
+    <div class="offcanvas-header admin-offcanvas__header">
+      <div class="offcanvas-title admin-offcanvas__title">...</div>
+      <button class="btn-close">...</button>
     </div>
-    
-    <!-- Settings tab -->
-    <div class="admin-settings-tab">...</div>
-    
-    <!-- Audit tab -->
-    <div class="admin-audit-tab">
-      <div class="audit-log-list">
-        <div class="audit-log-item">...</div>
+    <div class="offcanvas-body admin-offcanvas__body">
+      <nav class="admin-sidebar__nav">
+        <!-- Та же структура групп и элементов .admin-sidebar__group -->
+      </nav>
+    </div>
+  </div>
+
+  <!-- Основная область контента -->
+  <div class="admin-dashboard-content">
+    <!-- Мобильная плашка переключения меню (<992px) -->
+    <div class="admin-mobile-toggle-bar">
+      <button class="btn btn-outline-secondary btn-sm" aria-label="...">
+        <svg class="admin-mobile-toggle-icon">...</svg>
+        <span>...</span>
+      </button>
+      <span class="admin-mobile-toggle-current">...</span>
+    </div>
+
+    <div class="admin-dashboard-body">
+      <nav id="admin-breadcrumbs" class="forum-breadcrumbs">...</nav>
+
+      <!-- Active tab content -->
+
+      <!-- Settings tab -->
+      <div class="admin-settings-tab">...</div>
+
+      <!-- Designs tab -->
+      <div class="admin-designs-tab">
+        <div class="admin-designs-settings">...</div>
+        <div class="admin-designs-list">
+          <div class="design-card" data-design-id="{id}">
+            <div class="design-card-name">...</div>
+            <div class="design-card-status">...</div>
+            <div class="design-card-actions">...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Users tab -->
+      <div class="admin-users-tab">
+        <div class="admin-users-filters">...</div>
+        <div class="admin-users-list">
+          <div class="admin-user-item" data-user-id="{uid}">...</div>
+        </div>
+      </div>
+
+      <!-- Roles tab -->
+      <div class="admin-roles-tab">...</div>
+
+      <!-- Categories tab -->
+      <div class="admin-categories-tab">
+        <div class="admin-category-groups">
+          <div class="admin-category-group" data-group-id="{id}">...</div>
+        </div>
+        <div class="admin-categories-list">
+          <div class="admin-category-item" data-category-id="{id}">...</div>
+        </div>
+      </div>
+
+      <!-- Audit tab -->
+      <div class="admin-audit-tab">
+        <div class="audit-log-list">
+          <div class="audit-log-item">...</div>
+        </div>
       </div>
     </div>
   </div>
