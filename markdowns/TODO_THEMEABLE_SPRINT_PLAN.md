@@ -137,7 +137,7 @@
 #### Хвост внутри уже переведённых мест (добить до снятия Bootstrap)
 - `ForumPagination.jsx` — `Pagination` из react-bootstrap (6 тегов), утилит 0.
 - `ForumBreadcrumbs.jsx` — `Breadcrumb` из react-bootstrap (3 тега).
-- `Layout.jsx` — `Container` (2 тега) + 5 утилит (`small`, `fw-medium`, `py-2`, `text-center`, `mb-0`).
+- `Layout.jsx` — `Container` (2 тега) + 5 утилит. Full-width для `/admin` (CP-1.1) готов; остаток (футер и неадминские страницы) — Спринт B.
 - `ForumRoleBadge` / `ForumCharacterBadge` / `ForumAuthorAvatar` — `Badge` / `Image` (1–4 тега).
 - `ForumTabs.jsx` — 3 утилиты, `LastPostInfo.jsx` — 3 (`text-muted`, `small`, `me-1`), `ForumStats.jsx` — 2 (`mt-5`, `mb-4`), `TopicHeader.jsx` — 1 (`text-nowrap`), `NewRepliesPage.jsx` — 1.
 - `ForumEmptyState.jsx` — ещё на Bootstrap `Card` (Этап 7). `ForumModal.jsx` — обёртка над react-bootstrap `Modal` (9 тегов).
@@ -212,6 +212,21 @@
 | `components/common/Skeleton.jsx` | 1 | 0 | — | хвост (динамика через пропс) |
 | `components/layout/ForumBackground.jsx` | 3 | 0 | — | динамика (opacity), не переводить в статику |
 
+#### Пересчёт админки 2026-11-18 (реорг влит, HEAD `68bb9bc`)
+
+Метод пересчёта (повторить той же логикой): `style={` — буквальный подсчёт вхождений; Bootstrap — токены классов из `className` по префиксам утилит Bootstrap 5 (`d-*`, `flex-*`, `gap-*`, `m-*/p-*`, `text-*`, `bg-*`, `border*`, `rounded*`, `fw-*`, `fs-*`, `btn*`, `form-*`, `table*`, `card*`, `modal*`, `nav*`, `row`/`col`, `container*` и т.п.) плюс JSX-теги, импортированные из `react-bootstrap` в том же файле. Прямое сравнение с числами 2026-11-17 некорректно (там был ручной список токенов); инлайн-счётчики совпали (52/0/4) — реорг инлайн-стили не трогал, только обёртку.
+
+| Файл | Inline `style={` | Bootstrap (утилиты + RB-теги) | Таблицы | Статус |
+|---|---|---|---|---|
+| `pages/AdminPage.jsx` | 52 | 701 (591 + 110) | 5 (`<Table hover responsive>`, 81 тег) | реорг влит; внутренности не начаты |
+| `components/admin/DesignsTab.jsx` | 0 | 67 (49 + 18) | — | реорг влит; сетка на Bootstrap `Row`/`Col`/`Card` |
+| `components/admin/EmailTemplatesSettings.jsx` | 4 | 109 (93 + 16) | — | реорг влит; не начато |
+| `components/admin/AdminSidebar.jsx` | 0 | 3 (только `Offcanvas`/`OverlayTrigger`/`Tooltip`, утилит 0) | — | обёртка готова |
+| `components/layout/Layout.jsx` | 0 | 7 (2 `Container` + 5 утилит футера) | — | full-width для `/admin` готов (CP-1.1); остаток — хвост Этапа 1 (Спринт B) |
+| `components/modals/TransferRootModal.jsx` | 0 | 43 (38 + 5) | — | не начато (модалка админки) |
+
+Готово после реорга: сайдбар и навигация (`AdminSidebar`, конфиг навигации, тест `test:admin-nav-config`), полноширинный лейаут (`Layout.jsx`, CP-1.1), система `.admin-card` на переменных темы (0 hex в `AdminSidebar.css`). Не начато: все 5 таблиц и внутренности табов — см. Спринт H.
+
 #### Два бага из аудита — ИСПРАВЛЕНО в `2e574979`
 
 - **Баг A — список дополнительных BBCode подчёркивался при редактировании.** Причина: пункты overflow-меню RichEditor — это `<a class="dropdown-item">`, а `.post-content a` их подчёркивает, когда редактор стоит внутри поста. Исправлено скоупленными правилами `.editor-overflow-dropdown-menu .dropdown-item` и `.post-content .editor-overflow-dropdown-menu .dropdown-item` в `src/index.css` (без `!important`). Глобальное правило `.post-content a` не тронуто.
@@ -219,7 +234,7 @@
 
 #### Правило 1. Уход от жёстких HTML-таблиц к гибким гридам
 Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) больше не используются для раскладки страниц. Паттерн замены — тот же, что уже применён на главной/категории/топике: CSS grid с колонками (`forum-index.css`, `forum-view.css`, `topic-row.css`), на ≤768px — перестройка в карточки, а не горизонтальный скролл таблицы. Инвентарь таблиц (всего 131 тег в 5 файлах):
-- `AdminPage.jsx` — 5 таблиц (81 тег): пользователи, роли, группы категорий, категории (с инлайн-редактированием строк), аудит-лог. Все — в гриды/карточки, по одной таблице за заход; `table-active` у редактируемой строки → state-класс `.is-editing`.
+- `AdminPage.jsx` — 5 таблиц (81 тег): пользователи, роли, группы категорий, категории (с инлайн-редактированием строк), аудит-лог. Все — в гриды/карточки, по одной таблице за заход; `table-active` у редактируемой строки → state-класс `.is-editing`. Таблицы — `<Table hover responsive>` (это горизонтальный скролл на мобильных, а не адаптив); лежат внутри `.admin-card` (обёртка уже готова, мигрировать таблицу, а не карточку). Пересчитано 2026-11-18 — без изменений.
 - `MembersPage.jsx` — 1 таблица (20 тегов): список участников. В грид; `data-label` для мобильной вёрстки сохранить как есть (он уже есть и работает как подписи ячеек в карточном виде); `.members-table-*` (`index.css:507–566`) переезжает в новый модуль стилей.
 - `ProfilePage.jsx` — 1 таблица (16 тегов): история репутации. В грид/список.
 - `RichEditor.jsx:1546–1553` — таблица хоткеев в модалке (4 тега). В `<dl>`/грид, не в `<table>`.
@@ -261,11 +276,11 @@ Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) �
 5. **Спринт E** — DirectMessages + MessagesPage.
 6. **Спринт F** — Auth + служебные страницы (Login/Register/Pending/Banned + формы).
 7. **Спринт G** — BBCode + RichEditor (отдельный воркстрим, контент пользователя — не 1:1-конверсия).
-8. **Спринт H** — AdminPage + DesignsTab + EmailTemplatesSettings. ПОСЛЕДНИМ: сначала свериться с веткой реорганизации `feature/admin-reorg`.
+8. **Спринт H** — AdminPage + DesignsTab + EmailTemplatesSettings. ПОСЛЕДНИМ: реорг влит в `feature/theming` (HEAD `68bb9bc`); начинать с инвентаря в подразделе «Пересчёт админки 2026-11-18».
 9. **Спринт I** — ProfilePage + SecurityTab. ПОСЛЕДНИМ: по `SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`.
 10. **Спринт J** — снятие Bootstrap (`bootstrap.min.css` из `main.jsx`, `react-bootstrap` из зависимостей) + финальная проверка.
 
-Цифры остатка выше — на 2026-11-17, HEAD `1598c0c`; инлайн-счётчики перепроверены 2026-11-17 на HEAD `2e574979` — без изменений.
+Цифры остатка выше — на 2026-11-17, HEAD `1598c0c`; инлайн-счётчики перепроверены 2026-11-17 на HEAD `2e574979` — без изменений. Админка пересчитана отдельно 2026-11-18 (HEAD `68bb9bc`) — см. подраздел «Пересчёт админки 2026-11-18».
 
 ### Расхождения с исходными спринтами (факт vs план)
 > Ветвления `isThemeable ? new : old` нет — семантический DOM всегда (решение Этапа 1). Имена ниже — фактические.
@@ -276,9 +291,9 @@ Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) �
 
 ### Как продолжать в следующей сессии
 
-1. Источник правды — ветка `feature/theming` на GitHub, HEAD=`2e574979` (2026-11-17). Работай из настоящего клона ветки (`git pull` перед началом); локальные копии и zip-снимки без git-контроля — не источник правды, не верить им.
+1. Источник правды — ветка `feature/theming` на GitHub, HEAD=`68bb9bc` (2026-11-18, реорг админки влит). Работай из настоящего клона ветки (`git pull` перед началом); локальные копии и zip-снимки без git-контроля — не источник правды, не верить им.
 2. Node (машина Алины, Git Bash): `export PATH="$PATH:/c/nvm4w/nodejs:/c/Users/Alina/AppData/Local/nvm"` → `node v24.14.0`, `npm 11.9.0`. PowerShell-строка с `%NVM_HOME%` в Git Bash не работает.
-3. Статус тестов на HEAD `2e574979`: `npm run build` — OK; `npm test` — 80 OK, падает на `test:account-status-axis` (предсуществующее: `AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`). Проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен).
+3. Статус тестов на HEAD `68bb9bc`: `npm run build` — OK; `npm test` — exit 0, 88 OK, lint 0 ошибок, 15 предсуществующих предупреждений. (На HEAD `2e574979` было 80 OK и падал `test:account-status-axis` — починен в `b8f36780` вместе с CSS-дубликатами.)
 4. Перед чисткой `index.css` — `grep` по `src --include='*.jsx'`: `.forum-table*` и `.empty-state-*` пересекаются с немигрированными страницами.
 5. Новые токены — только `theme-variables.css`, новые правила — только `src/styles/*.css`; `grep -n '!important' src/styles/*.css` должен давать только комментарии.
 
@@ -407,7 +422,7 @@ Bootstrap-класс — это не магия, а готовое CSS-прав�
 ---
 ## Спринты: порядок и шаги
 
-> Цифры в скобках — остаток на 2026-11-17 (инлайн `style={` / Bootstrap-утилиты + react-bootstrap-теги, по аудиту; инлайн перепроверены на HEAD `2e574979`). Утилиты для страниц авторизации — приближённые, перепроверь `grep` перед работой.
+> Цифры в скобках — остаток на 2026-11-17 (инлайн `style={` / Bootstrap-утилиты + react-bootstrap-теги, по аудиту; инлайн перепроверены на HEAD `2e574979`). Админка пересчитана 2026-11-18 (HEAD `68bb9bc`) — цифры в Спринте H свежие, метод в подразделе «Пересчёт админки 2026-11-18». Утилиты для страниц авторизации — приближённые, перепроверь `grep` перед работой.
 > Соответствие старой нумерации: Этап 1 (главная+каркас) — готов, кроме хвоста (спринт B). Этап 2 (категория+списки) — готов. Этап 3 (топик) — готов, кроме хвоста (спринт A). Этап 4 Members — спринт C. Этап 5 Profile — спринт I (последним). Этап 6 списки — готовы. Этап 7 (уведомления/сообщения/auth/админка + снятие Bootstrap) — спринты D, E, F, H, J.
 
 ### Спринт A — Хвост Этапа 3: редактор топика
@@ -487,12 +502,29 @@ SPEC: `markdowns/SPEC_forum-and-members-theme-dom.md`, разделы 17–37 + 
 
 ### Спринт H — AdminPage (ПОСЛЕДНИМ)
 
-Файлы: `src/pages/AdminPage.jsx` (52 / 875, 5 таблиц), `src/components/admin/DesignsTab.jsx` (0 / 102), `src/components/admin/EmailTemplatesSettings.jsx` (4 / 114).
-SPEC: `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении.
+Файлы: `src/pages/AdminPage.jsx` (52 / 701, 5 таблиц, 81 тег), `src/components/admin/DesignsTab.jsx` (0 / 67), `src/components/admin/EmailTemplatesSettings.jsx` (4 / 109), `src/components/modals/TransferRootModal.jsx` (0 / 43, модалка передачи рута, вызывается из админки).
+SPEC: `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении (целевой DOM — Спринт 12). Свежие цифры и метод пересчёта — подраздел «Пересчёт админки 2026-11-18».
 
-Сначала: свериться с веткой реорганизации **`feature/admin-reorg`** (HEAD `69e7231d`) — что там уже переделано. Мигрировать в координации с реоргом, а не поверх старой формы. Если реорг ещё не влит в `feature/theming` — не начинать этот спринт, а дождаться решения Алины.
+Реорг ВЛИТ в `feature/theming` (HEAD `68bb9bc`, мерж `68bb9bc`). Ветка `feature/admin-reorg` больше не направление работы — сверяться не с чем, работать только здесь.
 
-Шаги: 5 таблиц (users, roles, category groups, categories с инлайн-редактированием, audit log) → гриды (шаг 6 плейбука); редактируемая строка → `.is-editing`; табы админки — по одному; DesignsTab — карточки дизайнов; EmailTemplates — формы шаблонов.
+Что уже готово (не трогать, не переделывать):
+- Обёртка: двухколоночный лейаут `#admin-page.admin-dashboard-layout`, `AdminSidebar` (десктопный collapsible-сайдбар + мобильный Offcanvas), конфиг навигации (`src/config/adminNavigation.js`, `src/navigation/adminNavigationConfig.js`), тест `test:admin-nav-config`.
+- Полноширинный лейаут: `Layout.jsx` — для `/admin` рендерит `.admin-main-fullwidth` + `.admin-viewport-wrapper`, футер скрыт (CP-1.1, проверено).
+- Карточки: общая система `.admin-card` (`__header`/`__body`/`__footer`/`__title`, модификатор `--spacing`) в `src/components/admin/AdminSidebar.css` — на переменных темы (`var(--card-bg)` и т.д.), hex нет. Поверхности уже лежат внутри `.admin-card` — мигрировать содержимое, а не карточку. Вторую карточную систему не изобретать.
+- `AdminSidebar.jsx`: 0 инлайн-стилей, 0 Bootstrap-утилит. Остались только 3 RB-тега (`Offcanvas`, `OverlayTrigger`, `Tooltip`) — их замена на свои компоненты входит в этот спринт, в конце, а не в начале.
+
+Что осталось (этот спринт, по одному табу за раз):
+- 5 таблиц `<Table hover responsive>` → гриды/карточки (шаг 6 плейбука): users, roles, category groups, categories (с инлайн-редактированием строк), audit log. `responsive` у `<Table>` — это горизонтальный скролл на мобильных, а не адаптив: цель — перестройка в карточки на ≤768px, без скролла таблицы. `table-active` у редактируемой строки → state-класс `.is-editing`.
+- Табы по одному: users (массовое выделение чекбоксами — поведение сохранить), roles (редактор ролей), categories (группы + категории, инлайн-редактирование), audit log, settings, designs, email templates.
+- `DesignsTab`: сетка дизайнов сейчас на Bootstrap `Row`/`Col`/`Card` (`Row className="g-4"`, `Col md={6} lg={4}`, `Card shadow-sm h-100`) → свой грид + `.admin-card`. Целевой DOM в приложении исправлен: `.design-card` там больше нет.
+- `EmailTemplatesSettings`: формы шаблонов (`Card`/`Alert`/`Form` из react-bootstrap) → свои классы.
+- Модалки админки (`TransferRootModal` и диалоги удаления/передачи из `AdminPage`) — в конце спринта, вместе с заменой `Offcanvas`/`Tooltip` в сайдбаре.
+
+Ловушки (не сломать):
+- Проверки authority в `AdminPage.jsx` (`canChangeRoleOf`, перепроверка цели при сохранении, `assignableRoles`) — это зеркало серверной матрицы из `admin_users.go`; при переписывании разметки редактора ролей логику не трогать, только классы. Тест `test:admin-role-authority` должен оставаться зелёным после каждого таба.
+- `fetchAdminUsers` — вызовы чтения персонала оставить как есть (тест `test:forum-read-contract`).
+- Табы переключаются через конфиг навигации (`adminNavigation.js`); не возвращать табы в `AdminPage` (старый `Nav` удалён реоргом).
+- После каждого таба: `npm run build` + `npm test` + визуальная проверка таба (десктоп + ≤768px).
 
 ### Спринт I — ProfilePage (ПОСЛЕДНИМ)
 
@@ -532,7 +564,7 @@ SPEC: `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md` + мини-спец
     ↓
 Спринт G (BBCode / RichEditor — можно параллельно с C–F, не пересекается)
     ↓
-Спринт H (Admin — после реорга feature/admin-reorg)
+Спринт H (Admin — реорг влит в feature/theming)
     ↓
 Спринт I (Profile)
     ↓
@@ -934,6 +966,8 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 Навигация панели построена на полноэкранном дашборде с двухколоночным лейаутом (`admin-dashboard-layout`), адаптивным сайдбаром (`AdminSidebar`: десктопный collapsible-сайдбар + мобильный Offcanvas drawer) и семантическими BEM-классами.
 
+Статус 2026-11-18 (реорг влит, HEAD `68bb9bc`): обёртка готова — сайдбар, навигация, full-width (`Layout.jsx`, CP-1.1), система `.admin-card`. Содержимое табов — ещё таблицы `<Table hover responsive>` (5 штук, 81 тег); целевые классы ниже (`.admin-user-item`, `.admin-category-item` и т.д.) пока НЕ существуют в коде — их создаёт этот спринт, не искать их в текущей разметке.
+
 ```html
 <div id="admin-page" class="admin-dashboard-layout">
   <!-- Десктопный сайдбар (>=992px) -->
@@ -978,7 +1012,7 @@ ProfilePage — вторая по сложности страница (1802 ст
   <div class="admin-dashboard-content">
     <!-- Мобильная плашка переключения меню (<992px) -->
     <div class="admin-mobile-toggle-bar">
-      <button class="btn btn-outline-secondary btn-sm" aria-label="...">
+      <button class="admin-mobile-toggle-btn" aria-label="...">
         <svg class="admin-mobile-toggle-icon">...</svg>
         <span>...</span>
       </button>
@@ -997,10 +1031,13 @@ ProfilePage — вторая по сложности страница (1802 ст
       <div class="admin-designs-tab">
         <div class="admin-designs-settings">...</div>
         <div class="admin-designs-list">
-          <div class="design-card" data-design-id="{id}">
-            <div class="design-card-name">...</div>
-            <div class="design-card-status">...</div>
-            <div class="design-card-actions">...</div>
+          <div class="admin-card" data-design-id="{id}">
+            <div class="admin-card__header">
+              <div class="admin-card__title">...</div>
+              <div class="admin-card__status">...</div>
+            </div>
+            <div class="admin-card__body">...</div>
+            <div class="admin-card__footer">...</div>
           </div>
         </div>
       </div>
