@@ -1,6 +1,6 @@
 # Sprint Plan: Admin View Reorganization & Themeable Preparation
 
-**Status**: DONE — implemented on branch `feature/admin-reorg`, verified, not yet merged to `main`.
+**Status**: DONE — implemented on branch `feature/admin-reorg`, verified, merged into `feature/theming` (`68bb9bc`, 2026-11-17). `feature/admin-reorg` is kept as a backup until `feature/theming` reaches `main`; `main` itself is untouched.
 
 **Goal**: Replace the horizontal tab navigation in `AdminPage.jsx` with a responsive vertical sidebar: grouped, collapsible sections, filtered by the viewer's permissions, an off-canvas drawer on narrow screens, and a stable DOM contract for custom themes (`TODO_THEMEABLE_SPRINT_PLAN.md`).
 
@@ -49,9 +49,9 @@
 
 ## 2. The sidebar (`src/components/admin/AdminSidebar.jsx`)
 
-### 2.1 One copy of the navigation
+### 2.1 One definition, two render sites
 
-A desktop sidebar and a mobile drawer are usually two copies of the same markup, which means two sets of `data-tab` hooks for a theme to trip over and two focusable copies of every link. Here the navigation is ONE Bootstrap `Offcanvas` with the `responsive` prop: from `lg` up Bootstrap renders it in the flow as a static block, and below that as a drawer that slides in from the edge. Exactly one copy of the markup exists at any moment, and the drawer brings the focus handling, the Escape key, the backdrop and the scroll lock with it.
+The navigation markup is defined once, in `renderNavList()` inside `AdminSidebar.jsx`, but it renders in two places: a desktop `<aside id="admin-sidebar">` and a mobile `<Offcanvas className="admin-offcanvas">` drawer. The aside is hidden below the `lg` breakpoint by CSS; the drawer opens on demand and brings the focus handling, the Escape key, the backdrop and the scroll lock with it. A theme must not assume a single `data-tab` hook in the DOM: the same section appears in the aside and in the drawer (the drawer only when open).
 
 ### 2.2 Behaviour
 
@@ -62,7 +62,7 @@ A desktop sidebar and a mobile drawer are usually two copies of the same markup,
 
 ### 2.3 The themeable DOM contract
 
-`#admin-sidebar`, `.admin-nav`, `.admin-sidebar-group`, `.admin-sidebar-group-header`, `.admin-sidebar-list`, `.admin-nav-item`, `.admin-nav-link`, the state classes `.is-open` / `.is-collapsed` / `.is-active`, and the data attributes `data-group` / `data-tab`. `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md` (Sprint 12) was updated to this structure.
+`#admin-sidebar`, `.admin-sidebar__nav`, `.admin-sidebar__group`, `.admin-sidebar__group-header`, `.admin-sidebar__group-chevron`, `.admin-sidebar__group-items`, `.admin-nav-item` (+ `.admin-nav-item--active`, `.admin-nav-item__icon`, `.admin-nav-item__label`), the state classes `.is-open` / `.is-collapsed` / `.is-active`, and the data attributes `data-group` / `data-tab`. The full hook list is in §9 (Checkpoint 1.5) and in `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md` (Sprint 12).
 
 ---
 
@@ -70,7 +70,7 @@ A desktop sidebar and a mobile drawer are usually two copies of the same markup,
 
 ### 3.1 Structure
 
-The tab strip is replaced by a two-column grid: the sidebar in `col-lg-3`, the content in `col-lg-9` (`#admin-content`). The nested `<Container>` is gone — the global `<Layout>` already provides one, and two nested containers gave the admin panel a narrower measure than every other page for no reason.
+The tab strip is replaced by a two-column layout: `<aside id="admin-sidebar">` + `.admin-dashboard-content` inside `#admin-page.admin-dashboard-layout` (no Bootstrap grid columns — the columns are the sidebar and the content area, sized by `AdminSidebar.css`). The nested `<Container>` is gone — and so is the global one: on `/admin` `Layout.jsx` renders no `<Container>` at all (full-width, see §3.3), so there is no container left to nest.
 
 The page now reads the filtered tree once and passes it down:
 
@@ -99,6 +99,8 @@ A bookmarked `?tab=audit` therefore opens the audit log for a viewer who may rea
 ### 3.3 The layout shell (`src/components/layout/Layout.jsx`)
 
 `Layout.jsx` now splits rendering by route. On admin routes (`/admin*`) it renders `<main className="admin-main-fullwidth"><div className="admin-viewport-wrapper">{children}</div></main>` without the Bootstrap `Container`, giving the admin panels full width. On all other routes it keeps `<main className="forum-main-content"><Container>{children}</Container></main>`. The page footer is rendered only on non-admin routes.
+
+Note: this `Layout.jsx` change was lost once in the merge into `feature/theming` and re-applied 2026-11-17 (commit `eafacd5` on `feature/admin-reorg`, verified before the merge). The checkpoint marks in `SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` (§7–§8) predate the re-application — see that document for the corrected record.
 
 ### 3.4 The content panels are untouched
 
@@ -171,14 +173,17 @@ Run on 2026-11-17, branch `feature/admin-reorg`:
 | `npm run lint:js` | 0 errors |
 | `npm run build` | built successfully; the "chunk larger than 500 kB" warning is pre-existing |
 
-**Still to be done by hand**: open `/admin` as an admin and as a viewer with a narrow right, and check the drawer on a phone-sized viewport. The automated checks cannot see the layout.
+Manual check 2026-11-17: `/admin` opened as an admin — the page was still inside the 960px container (the `Layout.jsx` change had been lost in the merge); fixed and re-verified the same day (see §3.3).
+
+**Still to be done by hand**: open `/admin` as a viewer with a narrow right, and check the drawer on a phone-sized viewport. The automated checks cannot see the layout.
 
 ---
 
 ## 8. Before this reaches `main`
 
-- The branch is `feature/admin-reorg`; `main` is untouched.
-- The owner merges it, and the VPS migration happens afterwards, as planned: this is a feature, not a bug fix, so it rides with the next release rather than going out as a hotfix.
+- Merged into `feature/theming` (`68bb9bc`, 2026-11-17); `feature/admin-reorg` is kept as a backup until `feature/theming` reaches `main`. `main` is untouched.
+- The owner merges `feature/theming` into `main`, and the VPS migration happens afterwards, as planned: this is a feature, not a bug fix, so it rides with the next release rather than going out as a hotfix.
+- Stages 2–4 of the reorganization continue in `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` (§7–§9); the theming of the tab innards is Sprint H in `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md`.
 
 ---
 
@@ -190,18 +195,19 @@ Run on 2026-11-17, branch `feature/admin-reorg`:
 
 | Checkpoint | Scope | Status | Verification |
 |---|---|---|---|
-| **CP-1**: DOM Contract & Component Cleanliness | Remove inline styles, replace Bootstrap utilities with component CSS, ensure semantic BEM hooks and theme variables. | **DONE** | Zero `style={}`, zero utilities (`d-none`, `d-lg-*`, `fw-bold`, `fs-5`, `p-0`), zero raw hex colors. |
+| **CP-1**: DOM Contract & Component Cleanliness | Remove inline styles, replace Bootstrap utilities with component CSS, ensure semantic BEM hooks and theme variables — in the sidebar and the layout shell. | **DONE** | Zero `style={}`, zero utilities (`d-none`, `d-lg-*`, `fw-bold`, `fs-5`, `p-0`), zero raw hex colors — in the sidebar and the layout shell. The tab panels still carry their inline styles and Bootstrap (Sprint H scope). |
 | **CP-2**: Verification Suite & Automated Contract Guard | Strengthen `scripts/check-admin-nav-config.mjs` with BEM & utility assertions; run lint, build, test. | **DONE** | `npm run test:admin-nav-config` OK, `npm run lint:js` 0 errors, `npm run build` OK, `npm test` 100% green. |
 | **CP-3**: Documentation Synchronization | Update Sprint 12 mini-specification in `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md` with the real DOM structure. | **DONE** | Target DOM in Sprint 12 updated to match `admin-dashboard-layout` & `AdminSidebar`. |
 
 ### Detailed Checkpoint Breakdown
 
 #### Checkpoint 1: Clean DOM & AdminSidebar Reorg
-1. **Zero inline styles**:
-   - `src/components/admin/AdminSidebar.jsx` and `src/pages/AdminPage.jsx` layout code contain no `style={...}`.
+1. **Zero inline styles — in the sidebar and the layout shell**:
+   - `src/components/admin/AdminSidebar.jsx` and the `#admin-page` shell in `src/pages/AdminPage.jsx` contain no `style={...}`.
+   - Scope note: the tab panels inside `AdminPage.jsx` still carry 52 `style={...}` (recounted 2026-11-18) — that is Sprint H scope in `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md`, not this checkpoint.
 2. **Bootstrap utilities eradicated in new markup**:
    - `AdminPage.jsx` panels (`renderUsers`, `renderRoles`, `renderCategories`) and `DesignsTab.jsx` now wrap content in `.admin-card` / `.admin-card__header` / `.admin-card__body` / `.admin-card__footer` instead of Bootstrap `Card`/`Card.Body`/`Card.Header`/`Card.Footer`.
-   - Bootstrap utilities (`d-none d-lg-flex`, `d-lg-none`, `fw-bold fs-5`, `p-0`, `d-lg-none`, `me-2`, `text-muted small ms-auto fw-medium`, `p-3 p-md-4`) eliminated from layout markup.
+   - Bootstrap utilities (`d-none d-lg-flex`, `d-lg-none`, `fw-bold fs-5`, `p-0`, `d-lg-none`, `me-2`, `text-muted small ms-auto fw-medium`, `p-3 p-md-4`) eliminated from layout markup. (Layout markup only — the panels' innards still use Bootstrap utilities; Sprint H.)
 3. **Admin card component system**: `.admin-card` / `.admin-card__header` / `.admin-card__body` / `.admin-card__footer` / `.admin-card__title-row` / `.admin-card__title` added to `AdminSidebar.css`, driven entirely by theme variables (`var(--card-bg)`, `var(--border-color)`).
 3. **No new react-bootstrap imports**:
    - Only existing `Offcanvas`, `OverlayTrigger`, and `Tooltip` are used.

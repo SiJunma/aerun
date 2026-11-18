@@ -3,9 +3,10 @@
 > **Статус документа**: Согласовано к реализации  
 > **Целевой модуль**: `src/pages/ProfilePage.jsx` (~2,228 строк) → Модульная архитектура с разделением на режимы "Предпросмотр" и "Широкоформатный Дашборд Редактирования"  
 > **Связанные спецификации**:  
-> - [`SPEC_ADMIN_PAGE_ARCHITECTURE_AND_REFACTOR.md`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/markdowns/SPEC_ADMIN_PAGE_ARCHITECTURE_AND_REFACTOR.md) (Единый паттерн полноширинного layout)  
-> - [`SPEC_TOPIC_ARCHITECTURE_AND_RACE_CONDITIONS.md`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/markdowns/SPEC_TOPIC_ARCHITECTURE_AND_RACE_CONDITIONS.md) (Кастомные хуки и устранение race conditions)  
-> - [`TODO_SPRINT_PLAN_admin_reorg.md`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/markdowns/TODO_SPRINT_PLAN_admin_reorg.md) (Темизация и дизайн-система сайдбаров)
+> - [`SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md`](SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md) (Единый паттерн полноширинного layout — механизм `.admin-main-fullwidth` / `.admin-viewport-wrapper` переиспользуется здесь, см. §2)  
+> - `SPEC_TOPIC_ARCHITECTURE_AND_RACE_CONDITIONS.md` — документ отсутствует в репозитории; ссылка оставлена как текст до появления файла (кастомные хуки и устранение race conditions)  
+> - [`Archive/ARCHIVED_SPRINT_PLAN_admin_reorg.md`](Archive/ARCHIVED_SPRINT_PLAN_admin_reorg.md) (Темизация и дизайн-система сайдбаров; живой план архивирован после вливания реорга в `feature/theming`)  
+> **Темизация:** новый DOM темизируется по Спринту I в [`TODO_THEMEABLE_SPRINT_PLAN.md`](TODO_THEMEABLE_SPRINT_PLAN.md); мини-спецификация Спринта 6 в плане описывает старый DOM и переписывается после реорга.
 
 ---
 
@@ -104,9 +105,9 @@ const Layout = ({ children }) => {
         <Navigation />
         <EmailVerificationBanner />
 
-        <main className={isFullWidthRoute ? "app-main-fullwidth" : "py-2"}>
+        <main className={isFullWidthRoute ? "admin-main-fullwidth" : "forum-main-content"}>
           {isFullWidthRoute ? (
-            <div className="app-viewport-wrapper">
+            <div className="admin-viewport-wrapper">
               {children}
             </div>
           ) : (
@@ -127,22 +128,10 @@ const Layout = ({ children }) => {
 ### CSS-основа для полноширинного дашборда (`src/index.css`):
 
 ```css
-/* Полноширинный контейнер для админки и дашборда профиля */
-.app-main-fullwidth {
-  width: 100%;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-}
-
-.app-viewport-wrapper {
-  width: 100%;
-  min-height: calc(100vh - 56px); /* Высота за вычетом навбара */
-  display: flex;
-  flex-direction: column;
-}
+/* Полноширинная оболочка — общая с админкой, новых правил не заводится:
+   `.admin-main-fullwidth` и `.admin-viewport-wrapper` уже есть в `src/index.css`
+   (см. SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md, §2). Классы `.app-main-fullwidth` /
+   `.app-viewport-wrapper` не существуют — не создавать вторую систему. */
 
 /* Двухколоночный дашборд профиля */
 .profile-dashboard-layout {
@@ -155,8 +144,8 @@ const Layout = ({ children }) => {
 .profile-dashboard-sidebar {
   width: 280px;
   flex-shrink: 0;
-  background: var(--card-bg, #1e222b);
-  border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  background: var(--card-bg);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -171,7 +160,7 @@ const Layout = ({ children }) => {
   min-width: 0;
   padding: 1.5rem 2rem;
   overflow-y: auto;
-  background: var(--bg-color, #13161c);
+  background: var(--bg-color);
 }
 
 @media (max-width: 991.98px) {
@@ -188,6 +177,8 @@ const Layout = ({ children }) => {
   }
 }
 ```
+
+Примечание: в CSS выше убраны тёмные fallback'ы (`#1e222b`, `rgba(255,255,255,0.08)`, `#13161c`) — при отсутствии переменной светлая тема получила бы тёмные значения. Переменные темы всегда определены, fallback не нужен. Брейкпоинт `991.98px` — стандартная пара к `min-width: 992px` (Bootstrap `lg`, как у админки), не ошибка.
 
 ---
 
@@ -359,6 +350,18 @@ export default ProfilePage;
 4. **"Модерация репутации"** (`icon: TrendingUp`, `id: reputation`) — Удаление нарушающих правила комментариев или накруток.
 5. **"Роль и Санкции"** (`icon: ShieldAlert`, `id: moderation`) — Назначение роли (`CHANGE_ROLES`), блокировка аккаунта (`BAN_USERS`).
 
+#### Соответствие старых табов новым режимам
+Текущая страница (`ProfilePage.jsx`, табы `overview` / `reputation` / `characters` / `posts` / `settings` / `security`, `SecurityTab.jsx`) разбирается так:
+
+| Старый таб | Куда переезжает |
+|---|---|
+| `overview` (карточка, статус, счётчики) | Предпросмотр: `ProfileUserCard` + `ProfileAboutTab` |
+| `reputation` (история + голосование) | Предпросмотр: `ProfileReputationTab`; модерация — дашборд, таб `reputation` |
+| `characters` (маски) | Предпросмотр: `ProfileCharactersTab` (только чтение); правка — дашборд, таб `characters` (`ProfileCharactersManager`) |
+| `posts` (публикации пользователя) | Предпросмотр: `ProfilePostsTab` |
+| `settings` (ник, аватар, подпись, тема, язык, уведомления) | Дашборд: `account` (`ProfileAccountCard`), `preferences` (`ProfilePreferencesCard`), `notifications` (`ProfileNotificationsCard`) |
+| `security` (пароль, сессии; `SecurityTab.jsx`) | Дашборд: `security` (`ProfileSecurityCard`, только owner) |
+
 ---
 
 ### 5.3. Атомарное сохранение и изоляция данных (`useProfileForm.js`)
@@ -448,31 +451,33 @@ sequenceDiagram
 ## 7. Пошаговый план внедрения (Sprint Roadmap)
 
 ### Фаза 1: Извлечение Custom Hooks (Изоляция бизнес-логики)
-- [ ] **Шаг 1.1**: Создать [`src/components/profile/hooks/useProfileData.js`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/hooks/useProfileData.js) (подписка на пользователя, определение прав `canEdit*`, расчет `isLimitedProfile`, `isPendingProfile`).
-- [ ] **Шаг 1.2**: Создать [`src/components/profile/hooks/useProfileForm.js`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/hooks/useProfileForm.js) (сидирование формы, предотвращение затирания несохраненных данных, расчет таб-ориентированных diff, валидация никнейма).
-- [ ] **Шаг 1.3**: Создать [`src/components/profile/hooks/useProfileCharacters.js`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/hooks/useProfileCharacters.js) (подписка на персонажей, квоты, изоляция слотов `newAvatarSlot()`, добавление/правка/удаление).
-- [ ] **Шаг 1.4**: Создать [`src/components/profile/hooks/useProfileReputation.js`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/hooks/useProfileReputation.js) и [`useProfilePosts.js`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/hooks/useProfilePosts.js) (пагинация, seek deep link `?log=`, фильтрация постов).
+- [ ] **Шаг 1.1**: Создать [`src/components/profile/hooks/useProfileData.js`](../src/components/profile/hooks/useProfileData.js) (подписка на пользователя, определение прав `canEdit*`, расчет `isLimitedProfile`, `isPendingProfile`).
+- [ ] **Шаг 1.2**: Создать [`src/components/profile/hooks/useProfileForm.js`](../src/components/profile/hooks/useProfileForm.js) (сидирование формы, предотвращение затирания несохраненных данных, расчет таб-ориентированных diff, валидация никнейма).
+- [ ] **Шаг 1.3**: Создать [`src/components/profile/hooks/useProfileCharacters.js`](../src/components/profile/hooks/useProfileCharacters.js) (подписка на персонажей, квоты, изоляция слотов `newAvatarSlot()`, добавление/правка/удаление).
+- [ ] **Шаг 1.4**: Создать [`src/components/profile/hooks/useProfileReputation.js`](../src/components/profile/hooks/useProfileReputation.js) и [`useProfilePosts.js`](../src/components/profile/hooks/useProfilePosts.js) (пагинация, seek deep link `?log=`, фильтрация постов).
 
 ### Фаза 2: Модули режима "Предпросмотр" (Preview View)
-- [ ] **Шаг 2.1**: Создать [`ProfileUserCard.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/preview/ProfileUserCard.jsx) — левая визитка с аватаром, ролью, счетчиками и кнопкой перехода в ЛС.
-- [ ] **Шаг 2.2**: Вынести вкладки предпросмотра в отдельные презентационные компоненты: [`ProfileAboutTab.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/preview/tabs/ProfileAboutTab.jsx), [`ProfileCharactersTab.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/preview/tabs/ProfileCharactersTab.jsx), [`ProfileReputationTab.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/preview/tabs/ProfileReputationTab.jsx), [`ProfilePostsTab.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/preview/tabs/ProfilePostsTab.jsx).
-- [ ] **Шаг 2.3**: Собрать [`ProfilePreviewLayout.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/preview/ProfilePreviewLayout.jsx) со стандартным контейнером и кнопкой входа в режим редактирования для модераторов.
+- [ ] **Шаг 2.1**: Создать [`ProfileUserCard.jsx`](../src/components/profile/preview/ProfileUserCard.jsx) — левая визитка с аватаром, ролью, счетчиками и кнопкой перехода в ЛС.
+- [ ] **Шаг 2.2**: Вынести вкладки предпросмотра в отдельные презентационные компоненты: [`ProfileAboutTab.jsx`](../src/components/profile/preview/tabs/ProfileAboutTab.jsx), [`ProfileCharactersTab.jsx`](../src/components/profile/preview/tabs/ProfileCharactersTab.jsx), [`ProfileReputationTab.jsx`](../src/components/profile/preview/tabs/ProfileReputationTab.jsx), [`ProfilePostsTab.jsx`](../src/components/profile/preview/tabs/ProfilePostsTab.jsx).
+- [ ] **Шаг 2.3**: Собрать [`ProfilePreviewLayout.jsx`](../src/components/profile/preview/ProfilePreviewLayout.jsx) со стандартным контейнером и кнопкой входа в режим редактирования для модераторов.
 
 ### Фаза 3: Интеграция в Layout и Полноширинный Дашборд
-- [ ] **Шаг 3.1**: Обновить [`src/components/layout/Layout.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/layout/Layout.jsx) для поддержки класса `.app-main-fullwidth` на маршрутах профиля в режиме дашборда.
-- [ ] **Шаг 3.2**: Создать компонент сайдбара [`ProfileEditSidebar.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/dashboard/ProfileEditSidebar.jsx) с поддержкой сворачивания и разделением структуры вкладок для Owner vs Staff.
+- [ ] **Шаг 3.1**: Обновить [`src/components/layout/Layout.jsx`](../src/components/layout/Layout.jsx) для полноширинного режима на маршрутах профиля в режиме дашборда — общий механизм с админкой: классы `.admin-main-fullwidth` / `.admin-viewport-wrapper`, условие `isAdminRoute || isProfileEditDashboard`; новых классов не заводить.
+- [ ] **Шаг 3.2**: Создать компонент сайдбара [`ProfileEditSidebar.jsx`](../src/components/profile/dashboard/ProfileEditSidebar.jsx) с поддержкой сворачивания и разделением структуры вкладок для Owner vs Staff.
 - [ ] **Шаг 3.3**: Реализовать атомарные карточки настроек:
-  - [`ProfileAccountCard.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/dashboard/tabs/ProfileAccountCard.jsx)
-  - [`ProfileCharactersManager.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/dashboard/tabs/ProfileCharactersManager.jsx)
-  - [`ProfilePreferencesCard.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/dashboard/tabs/ProfilePreferencesCard.jsx)
-  - [`ProfileNotificationsCard.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/dashboard/tabs/ProfileNotificationsCard.jsx)
-  - [`ProfileModerationCard.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/dashboard/tabs/ProfileModerationCard.jsx) (Роли, бан, статус).
-- [ ] **Шаг 3.4**: Реализовать вкладку "Предпросмотр" внутри дашборда ([`ProfilePreviewTabContent.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/components/profile/dashboard/tabs/ProfilePreviewTabContent.jsx)), чтобы пользователь мог оценивать вид профиля не выходя из панели.
+  - [`ProfileAccountCard.jsx`](../src/components/profile/dashboard/tabs/ProfileAccountCard.jsx)
+  - [`ProfileCharactersManager.jsx`](../src/components/profile/dashboard/tabs/ProfileCharactersManager.jsx)
+  - [`ProfilePreferencesCard.jsx`](../src/components/profile/dashboard/tabs/ProfilePreferencesCard.jsx)
+  - [`ProfileNotificationsCard.jsx`](../src/components/profile/dashboard/tabs/ProfileNotificationsCard.jsx)
+  - [`ProfileSecurityCard.jsx`](../src/components/profile/dashboard/tabs/ProfileSecurityCard.jsx) (Пароли и активные сессии, только owner).
+  - [`ProfileModerationCard.jsx`](../src/components/profile/dashboard/tabs/ProfileModerationCard.jsx) (Роли, бан, статус).
+- [ ] **Шаг 3.5**: Реализовать шапку дашборда ([`ProfileDashboardHeader.jsx`](../src/components/profile/dashboard/ProfileDashboardHeader.jsx) — хлебные крошки, переключатель режимов) и панель действий предпросмотра ([`ProfileHeaderActions.jsx`](../src/components/profile/preview/ProfileHeaderActions.jsx) — «Модерировать», «ЛС», «Голос»).
+- [ ] **Шаг 3.4**: Реализовать вкладку "Предпросмотр" внутри дашборда ([`ProfilePreviewTabContent.jsx`](../src/components/profile/dashboard/tabs/ProfilePreviewTabContent.jsx)), чтобы пользователь мог оценивать вид профиля не выходя из панели.
 
 ### Фаза 4: Диспетчеризация, тестирование и полировка
-- [ ] **Шаг 4.1**: Переписать корень [`src/pages/ProfilePage.jsx`](file:///c:/Users/Alina/source/repos/SiJunma/aerun/src/pages/ProfilePage.jsx) на компактный диспетчер режимов (~120 строк).
+- [ ] **Шаг 4.1**: Переписать корень [`src/pages/ProfilePage.jsx`](../src/pages/ProfilePage.jsx) на компактный диспетчер режимов (~120 строк).
 - [ ] **Шаг 4.2**: Проверить адаптивность на экранах телефонов (плавный переход сайдбара в мобильное меню).
-- [ ] **Шаг 4.3**: Проверить соответствие правилам проекта (`AGENTS.md`) и запустить CI verification (`origin/ci-report`).
+- [ ] **Шаг 4.3**: Проверить соответствие правилам проекта (`AGENTS.md`): `npm run build` + `npm test` (exit 0, без новых падений). (Ссылка на `origin/ci-report` из черновика не проверена — отдельного CI-отчёта в репозитории нет, проверка выполняется локальными командами.)
 
 ---
 

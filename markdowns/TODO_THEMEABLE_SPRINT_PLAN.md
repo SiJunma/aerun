@@ -277,7 +277,7 @@ Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) �
 6. **Спринт F** — Auth + служебные страницы (Login/Register/Pending/Banned + формы).
 7. **Спринт G** — BBCode + RichEditor (отдельный воркстрим, контент пользователя — не 1:1-конверсия).
 8. **Спринт H** — AdminPage + DesignsTab + EmailTemplatesSettings. ПОСЛЕДНИМ: реорг влит в `feature/theming` (HEAD `68bb9bc`); начинать с инвентаря в подразделе «Пересчёт админки 2026-11-18».
-9. **Спринт I** — ProfilePage + SecurityTab. ПОСЛЕДНИМ: по `SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`.
+9. **Спринт I** — ProfilePage + SecurityTab. ПОСЛЕДНИМ: сначала реорг по `SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`, темизация — по финальному DOM.
 10. **Спринт J** — снятие Bootstrap (`bootstrap.min.css` из `main.jsx`, `react-bootstrap` из зависимостей) + финальная проверка.
 
 Цифры остатка выше — на 2026-11-17, HEAD `1598c0c`; инлайн-счётчики перепроверены 2026-11-17 на HEAD `2e574979` — без изменений. Админка пересчитана отдельно 2026-11-18 (HEAD `68bb9bc`) — см. подраздел «Пересчёт админки 2026-11-18».
@@ -505,7 +505,7 @@ SPEC: `markdowns/SPEC_forum-and-members-theme-dom.md`, разделы 17–37 + 
 Файлы: `src/pages/AdminPage.jsx` (52 / 701, 5 таблиц, 81 тег), `src/components/admin/DesignsTab.jsx` (0 / 67), `src/components/admin/EmailTemplatesSettings.jsx` (4 / 109), `src/components/modals/TransferRootModal.jsx` (0 / 43, модалка передачи рута, вызывается из админки).
 SPEC: `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении (целевой DOM — Спринт 12). Свежие цифры и метод пересчёта — подраздел «Пересчёт админки 2026-11-18».
 
-Реорг ВЛИТ в `feature/theming` (HEAD `68bb9bc`, мерж `68bb9bc`). Ветка `feature/admin-reorg` больше не направление работы — сверяться не с чем, работать только здесь.
+Реорг ВЛИТ в `feature/theming` (HEAD `68bb9bc`, мерж `68bb9bc`). Ветка `feature/admin-reorg` больше не направление работы — сверяться не с чем, работать только здесь. Отчёт о том, что построено, — `markdowns/DONE_ADMIN_PAGE_REORGANIZATION.md`; структура и Этапы 2–4 — `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md`.
 
 Что уже готово (не трогать, не переделывать):
 - Обёртка: двухколоночный лейаут `#admin-page.admin-dashboard-layout`, `AdminSidebar` (десктопный collapsible-сайдбар + мобильный Offcanvas), конфиг навигации (`src/config/adminNavigation.js`, `src/navigation/adminNavigationConfig.js`), тест `test:admin-nav-config`.
@@ -514,7 +514,7 @@ SPEC: `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` + мини-специ
 - `AdminSidebar.jsx`: 0 инлайн-стилей, 0 Bootstrap-утилит. Остались только 3 RB-тега (`Offcanvas`, `OverlayTrigger`, `Tooltip`) — их замена на свои компоненты входит в этот спринт, в конце, а не в начале.
 
 Что осталось (этот спринт, по одному табу за раз):
-- 5 таблиц `<Table hover responsive>` → гриды/карточки (шаг 6 плейбука): users, roles, category groups, categories (с инлайн-редактированием строк), audit log. `responsive` у `<Table>` — это горизонтальный скролл на мобильных, а не адаптив: цель — перестройка в карточки на ≤768px, без скролла таблицы. `table-active` у редактируемой строки → state-класс `.is-editing`.
+- 5 таблиц `<Table hover responsive>` → гриды/карточки (шаг 6 плейбука): users, roles, category groups, categories (с инлайн-редактированием строк), audit log. `responsive` у `<Table>` — это горизонтальный скролл на мобильных, а не адаптив: цель — перестройка в карточки на ≤768px, без скролла таблицы. `table-active` у редактируемой строки → state-класс `.is-editing`. Audit log — только разметка таблицы; поведение (пагинация, обновление, детали) — отдельный документ `markdowns/SPEC_REFACTOR_AUDIT_LOGS.md`, до темизации таба.
 - Табы по одному: users (массовое выделение чекбоксами — поведение сохранить), roles (редактор ролей), categories (группы + категории, инлайн-редактирование), audit log, settings, designs, email templates.
 - `DesignsTab`: сетка дизайнов сейчас на Bootstrap `Row`/`Col`/`Card` (`Row className="g-4"`, `Col md={6} lg={4}`, `Card shadow-sm h-100`) → свой грид + `.admin-card`. Целевой DOM в приложении исправлен: `.design-card` там больше нет.
 - `EmailTemplatesSettings`: формы шаблонов (`Card`/`Alert`/`Form` из react-bootstrap) → свои классы.
@@ -528,10 +528,14 @@ SPEC: `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` + мини-специ
 
 ### Спринт I — ProfilePage (ПОСЛЕДНИМ)
 
-Файлы: `src/pages/ProfilePage.jsx` (35 / 763, 1 таблица), `src/components/profile/SecurityTab.jsx` (3 / 171).
-SPEC: `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении.
+Файлы: `src/pages/ProfilePage.jsx` (35 / 763, 1 таблица), `src/components/profile/SecurityTab.jsx` (3 / 171) — цифры по СТАРОМУ DOM.
+SPEC: `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md` — governing document for the new DOM. Мини-спецификация в приложении (Спринт 6) описывает старый DOM и переписывается после реорга.
 
-Шаги — по табам, один за раз: overview / reputation / characters / posts / settings / security. Reputation history → grid. Формы настроек: поведение сида по серверным значениям не трогать. Аватар — загрузка отдельным эндпоинтом (не смешивать с профилем).
+Сначала — реорг профиля по SPEC (Preview + Edit Dashboard, диспетчер ~120 строк, табы по §5.2, атомарное сохранение по §5.3), потом — темизация по финальному DOM. Не темизировать старый DOM: табы overview / reputation / characters / posts / settings / security после реорга не существуют в прежнем виде (соответствие старых табов новым — §5.2 SPEC).
+
+Полноширинный дашборд профиля — на общем механизме с админкой: классы `.admin-main-fullwidth` / `.admin-viewport-wrapper`, условие `isAdminRoute || isProfileEditDashboard` в `Layout.jsx`; новых full-width классов не заводить.
+
+Темизация (по финальному DOM): предпросмотр — карточка + табы about / characters / reputation / posts; дашборд — сайдбар + атомарные карточки (account, characters, preferences, notifications, security, moderation). Reputation history → grid. Формы настроек: поведение сида по серверным значениям не трогать. Аватар — загрузка отдельным эндпоинтом (не смешивать с профилем).
 
 ### Спринт J — Снятие Bootstrap
 
@@ -683,6 +687,8 @@ SPEC: `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md` + мини-спец
 # Спринт 6 — Profile (ProfilePage)
 
 ## Мини-спецификация (нет отдельного markdown-файла)
+
+> СТАТУС 2026-11-18: описывает СТАРЫЙ DOM (один экран, табы overview / reputation / characters / posts / settings). По `SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md` страница перестраивается в два режима (Preview + Edit Dashboard) — после реорга этот раздел переписать под новый DOM; темизация (Спринт I) идёт по новому DOM, а не по этому. Цифра «1802 строки» тоже устарела (сейчас ~2228).
 
 ProfilePage — вторая по сложности страница (1802 строки). Содержит множество табов: обзор, репутация, персонажи, посты, настройки, безопасность.
 
