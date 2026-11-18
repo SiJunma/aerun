@@ -20,7 +20,7 @@ const TopicRow = ({
   showCategoryInColumn = false
 }) => {
   const { t } = useI18n();
-  const { readMap, profile, settings } = useAuth();
+  const { readMap, profile } = useAuth();
   const lastVisitRaw = readMap[topic.id];
   const lastReadOffset = lastVisitRaw?.offset ?? null;
   // Handle both Firestore Timestamp (from server) and plain number (optimistic local update)

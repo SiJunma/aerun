@@ -94,7 +94,14 @@ for (const r of roleStateReads) {
 const authProvider = readFileSync('src/contexts/AuthProvider.jsx', 'utf8');
 const FLAG = 'banned_logout';
 
-const writeIdx = authProvider.search(new RegExp(`setItem\\(\\s*['"\`]${FLAG}['"\`]`));
+// The flag is storage-scoped (src/utils/storageScope.js): the writer and the
+// readers all use makeStorageKey('banned_logout', 'guest') — guest-scoped,
+// because GlobalModals reads it after the logout, when no uid is available.
+// The gates below match that scoped form; the pre-scoping literal
+// `setItem('banned_logout', ...)` no longer exists anywhere.
+const writeIdx = authProvider.search(
+  new RegExp(`setItem\\(makeStorageKey\\('${FLAG}', 'guest'\\), 'true'\\)`)
+);
 if (writeIdx !== -1) {
   // The flag must go up BEFORE the eviction. Writing it after logout() still
   // surfaces the modal on the next mount, but the order is the contract the
@@ -114,7 +121,7 @@ const walkForReaders = (dir) => {
     if (entry.isDirectory()) {
       walkForReaders(path);
     } else if (/\.(jsx?|tsx?)$/.test(entry.name)) {
-      if (new RegExp(`getItem\\(\\s*['"\`]${FLAG}['"\`]`).test(readFileSync(path, 'utf8'))) {
+      if (new RegExp(`getItem\\(makeStorageKey\\('${FLAG}', 'guest'\\)\\)`).test(readFileSync(path, 'utf8'))) {
         flagReaders.push(path);
       }
     }

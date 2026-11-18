@@ -314,7 +314,6 @@ body {
    --topic-post-skeleton-footer-margin-top: 3rem;
    --topic-post-skeleton-footer-padding-top: 1rem;
    --topic-post-skeleton-footer-border: var(--border-color);
-   --topic-post-skeleton-footer-border: var(--border-color);
 
    /* ── TopicPostCard parity tokens (muted/strong pairs) ──────
       Deploy values (FACTS_topic-post-card.md): light #475569/#1e293b,
@@ -437,7 +436,6 @@ body {
    --forum-view-btn-ghost-text: #f1f5f9;
    --forum-view-btn-ghost-border: #f1f5f9;
    --forum-view-btn-ghost-hover-bg: #f1f5f9;
-   --forum-view-btn-ghost-hover-text: #f1f5f9;
    --topic-item-hover-bg: rgba(var(--primary-rgb), 0.12);
    --topic-item-selected-bg: rgba(var(--primary-rgb), 0.18);
    --topic-check-chip-bg: rgba(var(--primary-rgb), 0.26);
