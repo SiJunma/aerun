@@ -1,11 +1,31 @@
-# Themeable DOM Refactoring — мастер-план и журнал реализации
+# Themeable DOM Refactoring — рабочий план миграции
 
 > **Актуальный стек**: Go 1.27 + PocketBase (SQLite) + React 19 (обновлено: Ноябрь 2026).
-> **Спецификации DOM**: `markdowns/SPEC_forum-index-theme-dom.md`, `markdowns/SPEC_forum-and-members-theme-dom.md`, `markdowns/SPEC_forum-topic-view-theme-dom.md`.
-> **Как читать этот файл**: верхняя секция `📌 Журнал реализации` — источник правды о текущем состоянии. Разделы «Спринт N» ниже — исходный план/spec; где они расходятся с журналом, прав журнал (см. «Расхождения с исходными спринтами»).
+> **Ветка**: `feature/theming`. Источник правды — ветка на GitHub, а не локальные копии.
+> **Спецификации DOM**: `markdowns/SPEC_forum-index-theme-dom.md`, `markdowns/SPEC_forum-and-members-theme-dom.md`, `markdowns/SPEC_forum-topic-view-theme-dom.md`, `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md`, `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`.
 
 ---
 
+## Как пользоваться этим планом (прочти первым)
+
+Этот документ — инструкция для агента-исполнителя (например, Nemotron в Cline). Он устроен так:
+
+1. **Плейбук** — как мигрировать ОДИН компонент, шаг за шагом, чтобы вид не изменился. Прочти его целиком, прежде чем трогать код.
+2. **Спринты A–J** — порядок работы. Бери спринты строго по порядку, внутри спринта — компоненты по одному, сверху вниз.
+3. **Статус и карта повторяющихся элементов** — что уже чисто, что осталось, где элементы повторяются и чем отличаются.
+4. **Справочные мини-спецификации** — целевые DOM для страниц, у которых нет отдельного SPEC-файла.
+5. **Журнал ключевых решений** — почему принято так, а не иначе. Подробный журнал правок 2026-11-05…09 вынесен в `markdowns/Archive/THEME_JOURNAL_2026-11-06.md` — в рабочем плане ему не место, но он сохранён.
+
+Правила, которые нельзя нарушать (подробнее — в «Правилах для агентов» в конце):
+
+- **Один компонент за раз.** Закончил компонент — `npm run build` + `npm test`, отчёт, только потом следующий.
+- **Вид не меняется.** Миграция — это переезд стилей, а не редизайн. Любое визуальное отличие от состояния до изменений — баг, а не «улучшение».
+- **Никаких `isThemeable`-веток.** Семантический DOM — всегда, для всех тем.
+- **Bootstrap и инлайн-стили — в именные классы, 1:1.** Значение берётся из оригинала, а не «похожее».
+- **Новые токены — только цвета.** Паддинги, размеры, радиусы — литералами в классе.
+- **Не трогай бизнес-логику.** Только DOM-атрибуты, классы, теги и CSS.
+
+---
 ## 📌 Журнал реализации и ключевые решения
 
 ### Архитектурное решение (Ноябрь 2026)
@@ -109,11 +129,11 @@
 | `src/index.css` | Глобальные темы/база + ещё не мигрированные страницы. Новые семантические правила сюда не добавлять. |
 | `src/main.jsx` | Порядок импортов: `theme-variables.css` → модульные `src/styles/*.css`. Bootstrap CSS остаётся подключённым до конца миграции. |
 
-### Аудит 2026-11-17: остаток миграции (сверено с `feature/theming`, HEAD `1598c0c`)
+### Аудит 2026-11-17: остаток миграции (сверено с `feature/theming`, HEAD `2e574979`)
 
 Метод: `grep` по коду. Источник правды — ветка на GitHub, а не zip-снимок: `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md` побайтово совпадает с веткой (blob SHA `d1129764…`), выборочно сверены `MainPage.jsx`, `CategoryPage.jsx`, `TopicPage.jsx`, `theme-variables.css`, `forum-index.css`, `topic-view.css` и др. — совпадают после нормализации CRLF→LF. Цифры ниже — по этому состоянию. Локальный снимок от 2026-11-16 в `~/workspace/aerun/` (два zip: backend + frontend) — только кэш; перед работой с кодом сверять файл с веткой по blob SHA, а не верить снимку.
 
-Базовая проверка сборки на этом состоянии (локально, `npm install` + `npm run build`): build — OK за 8.5с. Полный `npm test` на zip-снимке падает не из-за кода, а из-за раскладки: скрипт `check-topic-delete-cleanup.mjs` ждёт `backend/` рядом с `package.json`, а в снимке backend лежит отдельно (`~/workspace/aerun/backend`). В ветке `backend/` — на месте (корень репозитория = содержимое `frontend/` + `backend/`), на настоящем клоне тест должен идти полностью.
+Базовая проверка на этом состоянии — на точной копии ветки `~/workspace/aerun-repo/` (собирается и обновляется скриптом `~/workspace/aerun-remote/sync-aerun-repo.py`, diff-only pull с ветки; повторный запуск при неизменном HEAD — секунды). `npm ci` + `npm run build` — OK. `npm test`: проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен); сейчас 80 OK, дальше падает `test:account-status-axis` — предсуществующее, не связано с темизацией (`AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`).
 
 #### Что уже чисто (0 инлайн-стилей, 0 Bootstrap-утилит, 0 react-bootstrap)
 `MainPage`, `CategoryPage`, `TopicPage`, `TopicPostCard`, `TopicHeader`, `TopicActionsBar`, `TopicRow`, `TopicMiniPagination`, `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`, `AuthorMeta`, `ForumStats`, `LastPostInfo`, `App.jsx`, `main.jsx` (+ не-UI: `api/`, `hooks/`, `contexts/` кроме `ToastProvider`, `utils/`, `config/`, `i18n/`). Это Этапы 1–2 и ядро Этапа 3.
@@ -196,9 +216,10 @@
 | `components/common/Skeleton.jsx` | 1 | 0 | — | хвост (динамика через пропс) |
 | `components/layout/ForumBackground.jsx` | 3 | 0 | — | динамика (opacity), не переводить в статику |
 
-#### Два бага из аудита (отдельные задачи, не часть Этапов 4–7)
-- **Баг А — список дополнительных BBCode подчёркивается при редактировании.** Список «Дополнительные коды» (`editor.additional_formatting_title`) — overflow-меню `RichEditor`: десктоп `RichEditor.jsx:1030–1050` (`Dropdown.Menu.editor-overflow-dropdown-menu`, пункты — `renderGroup(groupId, true)`), мобильный — `ForumModal` с `.editor-overflow-modal-items` (`RichEditor.jsx:1579–1596`). Все 56 пунктов — react-bootstrap `<Dropdown.Item>`, который по умолчанию рендерится как `<a class="dropdown-item">`, `as="button"` нет нигде. Причина — точная: `src/index.css:212–215` `.bbcode-content a, .post-content a { text-decoration: underline; }` (специфичность 0,1,1) бьёт Bootstrap `.dropdown-item` (0,1,0), а собственные правила `.dropdown-item` в `index.css:1389–1391, 2104–2110` задают только цвет, без сброса подчёркивания. Почему только при редактировании: `PostInlineEditor` как `editingChildren` (`TopicPage.jsx:1759, 1830, 1905`) рендерится внутри `.post-content` в `TopicPostCard.jsx:265–267`, поэтому пункты меню оказываются внутри `.post-content`. Композер ответа (`TopicReplyComposer.jsx:173`) и форма новой темы (`TopicFormPage.jsx:383`) рендерят `RichEditor` вне `.post-content` — там бага нет. Та же утечка бьёт выбор маски в `PostInlineEditor.jsx:106–126`. Мобильный вариант уже защищён: `index.css:3779` `.editor-overflow-modal-items .dropdown-item { text-decoration: none !important; }`, а у десктопного `.editor-overflow-dropdown-menu` (`index.css:3747–3751`) такого переопределения нет. Фикс (scoped, рядом с 3747): `.editor-overflow-dropdown-menu .dropdown-item { text-decoration: none; }` (или пункты `as="button"`). Правило `.post-content a` не ослаблять — оно намеренно подчёркивает настоящие ссылки в тексте постов.
-- **Баг Б — линия цитаты в тёмной теме слишком светлая.** Две разные цитаты, баг только в одной. `[quote]` → `<blockquote class="bbcode-quote">` (`BBCode.jsx:666`), стиль `index.css:1127–1136`: `border-left: 4px solid var(--primary-color)`. В тёмной теме `--primary-color: #f1f5f9` (почти белый, `index.css:57`), а фон цитаты `#1a2333` — линия почти белая. Dark-оверрайд `index.css:1244–1246` меняет только фон, `border-left-color` не задаёт. Прецедент — neutral-оверрайд `1239–1242` задаёт `border-left-color: #666` явно. Вторая цитата — raw HTML `<blockquote>` (`.post-content blockquote`, `index.css:1069–1083`) — не баг: там `border-color: var(--border-color)` (`#334155` в тёмной). Токена цитаты нет вообще: `grep quote` по `theme-variables.css` — 0 совпадений. Фикс: новый токен `--quote-border-color` (light `#1e293b` / dark `#334155` / neutral `#666`) и использовать его в базовом правиле `.bbcode-quote`. Попутно: заголовок цитаты в тёмной тоже почти белый — инлайн `style={{ color: 'var(--primary-color)' }}` в `BBCode.jsx:668` — и его `border-bottom` от Bootstrap без темизации. Примечание: SPEC (`SPEC_forum-topic-view-theme-dom.md:673–698`, §23 Quotes) описывает классы `.post-quote` / `.quote-author` / `.quote-content` / `.quote-link`, а код использует `.bbcode-quote` — расхождение spec и кода, зафиксировать при следующем касании цитат.
+#### Два бага из аудита — ИСПРАВЛЕНО в `2e574979`
+
+- **Баг A — список дополнительных BBCode подчёркивался при редактировании.** Причина: пункты overflow-меню RichEditor — это `<a class="dropdown-item">`, а `.post-content a` их подчёркивает, когда редактор стоит внутри поста. Исправлено скоупленными правилами `.editor-overflow-dropdown-menu .dropdown-item` и `.post-content .editor-overflow-dropdown-menu .dropdown-item` в `src/index.css` (без `!important`). Глобальное правило `.post-content a` не тронуто.
+- **Баг B — линия цитаты в тёмной теме слишком светлая.** Причина: `.bbcode-quote` брал `var(--primary-color)`, а в тёмной теме это почти белый `#f1f5f9`. Исправлен новым цветовым токеном `--quote-border-color` (светлая `#1e293b` / тёмная `#334155` / нейтральная `#666`) в `src/styles/theme-variables.css`; нейтральный оверрайд `border-left-color` удалён как лишний.
 
 #### Правило 1. Уход от жёстких HTML-таблиц к гибким гридам
 Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) больше не используются для раскладки страниц. Паттерн замены — тот же, что уже применён на главной/категории/топике: CSS grid с колонками (`forum-index.css`, `forum-view.css`, `topic-row.css`), на ≤768px — перестройка в карточки, а не горизонтальный скролл таблицы. Инвентарь таблиц (всего 131 тег в 5 файлах):
@@ -233,65 +254,22 @@ Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) �
 | BBCode / RichEditor | `BBCode.jsx`, `RichEditor.jsx` | Посты, композер ответа, редактор поста, форма новой темы | Отдельный воркстрим, не «перевести в классы 1:1»: часть инлайн-стилей — данные пользователя (`[color]`, `[size]`, параметры `[table]`/`[td]`, свотчи палитры, динамическая ширина), часть Bootstrap-утилит (92 в `BBCode.jsx`) — в рендере пользовательского контента, снятие `bootstrap.min.css` сломает посты, пока они не заменены. |
 
 #### Порядок следующих шагов (обновлено 2026-11-17)
-1. Два бага выше (изолированные, маленькие): А — scoped-правило для `.editor-overflow-dropdown-menu`; Б — токен `--quote-border-color` + правка `BBCode.jsx:668`.
-2. Хвост Этапа 3: `TopicReplyComposer` (5 inline / 89 BS), `PostInlineEditor` (1 / 40), `TopicModalsContainer` (1 / 61); затем сведение строк топиков к одному `TopicRow` (см. карту) и перевод `CategoryPage` с `<nav id="forum-pagination-bottom">` на `.forum-pagination-view`.
-3. Хвост Этапа 1: `Navbar.jsx` (11 inline / 94 BS) + `Layout.jsx` (7 BS) + мёртвый импорт в `ScrollButtons.jsx`.
-4. Этап 4: `MembersPage` (11 inline / 149 BS / 1 таблица → грид).
-5. Этап 5: `ProfilePage` (35 / 763 / 1 таблица) + `SecurityTab` (3 / 171).
-6. Этап 7: остальное (админка, уведомления, сообщения, auth, модалки) + `BBCode`/`RichEditor` отдельным воркстримом + снятие `bootstrap.min.css` и `react-bootstrap` — только после всего.
 
-### Статус выполнения
-- [x] **Этап 1: Главная страница (Home) и каркас Layout** (Выполнено):
-  - [x] `src/styles/theme-variables.css` — централизованные CSS-токены для Layout, Forum Categories, Forum Items, Last Post, Statistics.
-  - [x] `src/styles/layout.css` — стили для `#forum-wrapper`, `#forum`, `#forum-header`, `#forum-title`, `#forum-nav`, `#forum-user-links`, `#forum-status`, `#forum-announcement`, `#forum-about`. Устранены инлайн-стили.
-  - [x] `src/styles/forum-index.css` — стили для главной страницы (`#forum-index`, `#forum-main`, `.forum-category`, `.category-header`, `.category-title`, `.category-content`, `.category-head`, `.forum-item`, `.forum-info`, `.forum-title`, `.forum-description`, `.forum-topics`, `.forum-posts`, `.forum-last-post`, скелетоны). CSS Grid на десктопе, Flex/Cards на мобильных устройствах, без использования `!important`.
-  - [x] `src/styles/forum-stats.css` — стили для `#forum-statistics`, `.forum-stats-card`, `.stats-header`, `.stats-grid`, `.stats-item`, `.stat-topics`, `.stat-posts`, `.stat-members`, `.stat-newest-member`, `.online-users-panel`, `.online-indicator-blob`, `.online-user-link`, `.stats-footer`.
-  - [x] `src/components/layout/Layout.jsx` — добавлены семантические контейнеры `#forum-wrapper`, `#forum`, `#forum-status`, `#forum-announcement`, `#forum-about`, удалены неиспользуемые компоненты.
-  - [x] `src/components/layout/Navbar.jsx` — добавлены `#forum-header`, `#forum-title`, `#forum-nav`, `#forum-user-links`, семантические классы навигации и действий, устранены инлайн-стили.
-  - [x] `src/pages/MainPage.jsx` — полностью переведён на семантическую разметку по `SPEC_forum-index-theme-dom.md`. Удалены Bootstrap `Table` и `Card`.
-  - [x] `src/components/layout/ForumStats.jsx` — переведён на семантический HTML без Bootstrap `Card`, инлайн-стили перенесены в `forum-stats.css`.
-  - [x] `src/components/common/AuthorMeta.jsx` — убран инлайн font-size в пользу `.author-meta`.
-  - [x] Проверка: `npm test` (все 35 проверок и linter) и `npm run build` пройдены без ошибок.
-  - [x] **Фикс визуальных регрессий Этапа 1 (отчёт по багам главной страницы):**
-    - Языки категорий/групп: снято с баг-листа — подтверждено как устаревшая БД без `name_i18n`/`description_i18n`, из-за чего `labelPair()` в `category_labels.go` дублирует legacy-строку в оба языка и `resolveField` корректно показывает RU при `lang=en`. Код менять не требуется.
-    - Navbar — название форума (чёрное на чёрном): добавлен семантический токен `--forum-name-color: var(--forum-header-text)` и правило `.forum-name { color: var(--forum-name-color) }` в `layout.css`. Bootstrap `navbar-dark` больше не единственный поставщик цвета бренда.
-    - Statistics — заголовок "Forum Statistics" и иконка: `--stats-header-bg` возвращён к тёмному (`var(--nav-bg)`), `--stats-header-text` — к светлому (`#ffffff` на тёмном). `stats-header-icon` переведён с прямого `--badge-bg` на `--stats-header-icon-color`, чтобы акцентный синий не закрашивал текст.
-    - Statistics — ссылки "Latest registered" и "Most Active Topics": `.stat-user-default` и `.stats-footer-link` переведены с `--badge-bg` на `--stat-user-default-color` / `--stats-footer-link-color` (`var(--secondary-color)`) + hover-токены `--stat-user-default-hover-color` / `--stats-footer-link-hover-color` (`var(--text-color)`). Вновь зарегистрировавшийся пользователь и ссылка на активные топики больше не синие.
-    - Удалены legacy-дубликаты с `!important` из `src/index.css` (2900+): `.forum-stats-card`, `.stats-header`, `.forum-header-text`, `.stats-grid`, `.ms-auto-md`, `.stats-item`, `.online-users-panel`, `.online-indicator-blob`, `.online-user-link`, `.stats-footer` + их theme-оверрайды. Цвета ролей `.online-author-admin` / `.online-author-mod` перенесены в `forum-stats.css` без `!important` (с сохранением `[data-theme='neutral']` перекраса админа).
-    - JSX: из `ForumStats.jsx` убран `forum-header-text` класс со span'а заголовка — цвет задаётся только через `.stats-title` и токены.
-    - Navbar — дублирующий класс и подчёркивание бренда: в `Navbar.jsx` из `Nav.Link` убраны `nav-link` и Bootstrap `text-warning fw-semibold` — остался только семантический класс (`.nav-active-topics`, `.nav-subscriptions`, `.nav-members`, `.nav-admin`). Стилизация ссылок `#forum-nav a` / `.forum-nav a` переехала в `layout.css` через токены `--nav-link-color / --nav-link-hover-color / --nav-admin-color`. `.forum-brand { text-decoration:none }` + `:hover/:focus { text-decoration:none }` — название форума при наведении больше не подчёркивается (глобальное `a:hover`/`a` в `index.css` давало синий линк с подчёркиванием).
-- [x] **Этап 2: Forum View + списки тем (Выполнено, незакоммичено)**: `CategoryPage.jsx` на `<main id="forum-view" data-forum-id>` (`#forum-view-header`, `#forum-actions-top`, `#forum-pagination-top/bottom`, `<section id="forum-topic-list">`, `.topic-list-head`, `.forum-view-empty`, `.forum-view-footer`); удалены `Container/Card/Table/Button`, инлайн `style={{...}}`, Bootstrap-утилиты (`mb-*/vr/d-none/small/fw-bold/user-select-none`); кнопки — `.forum-view-action-btn--primary/--secondary` с `:disabled`, чекбоксы — `<input class="topic-select-input">` вместо `Form.Check` (импорт `react-bootstrap` убран). `TopicRow.jsx` — `<article id="topic-{id}" class="topic-item [is-pinned/is-locked/is-unread/...]" data-topic-id data-category-id>`, нативный checkbox. `ActiveTopicsPage`/`NewRepliesPage`/`SubscriptionsPage` — тот же `#forum-view` каркас (`data-forum-id="active-topics"/"new-replies"/"subscriptions"`), `.forum-view-spinner` вместо `spinner-border`, `ForumEmptyState className="forum-view-empty-state"` вместо `mb-4`. `ForumPagination` — `.forum-pagination` без `mb-0`, CSS в `src/styles/forum-pagination.css` (локальный `ForumPagination.css` удалён — был `@import`-редирект, давал дубль в Vite dev). Новые модули `src/styles/forum-view.css` + `src/styles/topic-row.css`; токены в `theme-variables.css` (Forum View / Topic Row / Pagination / `--management-toolbar-*` для `dark/light/neutral` / loading+empty). `utilities.css`: `.management-toolbar*` переехал в `forum-view.css`, сняты `!important` с `.btn-outline-light/.vr`, `.topic-pinned/.topic-locked` через токены. `index.css`: дубликаты списков удалены; блок `.forum-table*` (~3990–4244) оставлен — пересекается с `MainPage`/`DraftsPage`, удалять отдельным аудитом. Проверка 2026-11-05 (Node v24.14.0): `npm test`+`lint:js` и `npm run build` пройдены; остатков `style={{...}}`/Bootstrap-утилит в файлах Этапа 2 нет. `ForumEmptyState.jsx` ещё на Bootstrap `Card` — Этап 7.
-  - [x] **Фикс визуальных регрессий Этапа 2 (сверка со скриншотами 2026-11-05)**: header — больше не карточка: `#forum-view-header` стал flex-строкой (заголовок `.forum-view-heading` слева, `#forum-actions-top` справа, `padding:0`, `border:transparent`, title `--forum-view-title-size: 2.5rem`); `CategoryPage` — actions перенесены внутрь header (как в целевом макете и как было в исходном `d-flex justify-content-between`), остальные списки — `.forum-view-heading` без actions. Шапка списка `.topic-list-head` — тёмная (`var(--nav-bg)`/белый, `1rem/700`, без uppercase), карточка списка без radius/shadow; строки `.topic-item` — `padding: 1.25rem`, как в целевом виде. Проверка после фикса: `npm test`+`lint:js` и `npm run build` пройдены повторно.
-  - [x] **Паддинги каркаса (2026-11-05)**: `.forum-main-content` получил верхний паддинг `2rem` (32px) через токен `--forum-main-content-padding-top` (нижний — `--forum-main-content-padding-bottom: 0.5rem`, как старый `py-2`); у `#forum-index` убран верхний/нижний Bootstrap-паддинг (`pt-5 pb-4` → `padding:0` в `forum-index.css`), чтобы они не накладывались друг на друга. `Layout.jsx`: `py-2` убран с `<main>`. Проверка: `npm test`+`lint:js` и `npm run build` пройдены.
-  - [x] **Низ страницы категории (2026-11-05)**: карточка списка вернула radius/shadow (`--forum-view-card-radius/--forum-view-card-shadow`); `.forum-view-back` — кнопка с рамкой (`--forum-view-back-border/radius/padding/hover-bg`); закрытые темы — заголовок красным (`--topic-locked-title-color: var(--topic-locked-color)`, `.topic-locked-title` в `TopicRow.jsx`, иконка замка красная без `opacity`). Проверка: `npm test`+`lint:js` и `npm run build` пройдены.
-  - [x] **Цвета кнопок по оригиналу (2026-11-05)**: кнопки Forum View переведены на оригинал `btn-primary` / `btn-outline-primary` / `btn-outline-secondary` из `index.css` через токены `--forum-view-btn-primary-*` и `--forum-view-btn-ghost-*` (заливка `--primary-color`/`--bg-color`, призрак `--secondary-color` с hover-заливкой). `--forum-view-back-border` теперь `var(--secondary-color)` (как бордер `btn-outline-secondary`), а не `var(--border-color)` — бледный бордер формы для кнопок не подходит. `dark`: текст на primary/ghost-hover `#0f172a`; `neutral`: `#8c7a6b`/`#fdf6e3` (как `[data-theme='neutral'] .btn-primary/.btn-outline-primary`). `.forum-view-back` hover — заливка `--secondary-color`. Проверка: `npm test`+`lint:js` и `npm run build` пройдены.
-  - [x] **Пустая пагинация не рендерится (2026-11-05)**: `<nav id="forum-pagination-top/bottom">` оборачивает `ForumPagination` только при `totalPages > 1` — раньше обёртка рендерилась всегда, а пустой `ForumPagination` возвращал `null`, оставляя пустой `<nav>` с `margin-top: 1rem` (виден в DevTools как `936×0`). Исправлено в `CategoryPage` (top+bottom) и `ActiveTopicsPage` (`!loading && totalPages > 1`); `NewRepliesPage`/`SubscriptionsPage` уже имели guard. Проверка: `npm test`+`lint:js` и `npm run build` пройдены.
-  - [x] **Темизация row списка категорий / перенос заголовка последнего топика (2026-11-05)**: в живом DOM `MainPage` уже на семантических `.forum-item/.cat-link/.cat-desc/.forum-mobile-stats/.forum-topics/.forum-posts/.last-topic-link/.last-post-link-meta` и `forum-index.css` (Этап 1, незакоммичен) — Bootstrap-тэги из сырого `<tr><td>`-снимка в коде отсутствуют. `.last-topic-link` больше не обрезается (`white-space: nowrap`/`overflow: hidden`/`text-overflow: ellipsis` → `normal/visible/clip` + `overflow-wrap: anywhere`, `line-height`/`margin-bottom` через `--last-post-title-*`, `color: var(--last-post-title-color)`); лишний mobile-дубль `white-space: normal` убран. `.cat-desc` `line-height` — через `--forum-description-line-height`. Мёртвый `.forum-table*`-блок в `index.css` не тронут (нужен аудит по MainPage/Drafts). Проверка: `npm test`+`lint:js` и `npm run build` пройдены.
-  - [x] **AuthorMeta / LastPostInfo: переносимость и неделимость «аватар + ник»**: декоративный `·` и все Bootstrap-утилиты (`d-flex/gap-*/text-muted/fw-semibold/shadow-sm/w-100/me-1/text-decoration-none`) убраны из `AuthorMeta.jsx`/`LastPostInfo.jsx`. DOM: `.author-meta > .author-meta__date + .author-meta__identity { [avatar + .author-meta__name] }` — блок identity не переносится как целое (`flex: 1 1 auto`, `max-width: 100%`), поэтому аватар всегда на строке, с которой начинается ник; ломаться может только сам ник (`white-space: normal`, `overflow-wrap: anywhere`, `min-width: 0` у имени и контейнера). Сама `.author-meta` — `flex-wrap: wrap`, дата и identity при нехватке места могут разнестись по строкам. Все правила перенесены из `topic-row.css`/`forum-index.css` в новый общий `src/styles/author-meta.css`; цвета/отступы/тени — через токены `--author-meta-*`, `--author-name-*`, `--last-post-link-*`, `--last-post-empty-*`. Проверка: в песочнице `npm` отсутствует (`npm: command not found`), `npm test`/`lint:js`/`build` здесь не запускались — нужна проверка на машине с Node.
-  - [x] **Мобильная главная: целевой вид last-post полосы (сверка со скриншотами 2026-11-06)**: в живом DOM `.forum-last-post` больше не врезная тонированная панель справа, а полоса во всю ширину под описанием. В `src/styles/author-meta.css` (модуль загружается последним в `main.jsx`, поэтому выигрывает каскад у дубликатов в `forum-index.css` при равной специфичности) добавлен мобильный блок `≤768px`: фон панели — `transparent`, верхняя граница — обычный разделитель строк `var(--forum-item-border)` вместо тонированных `--last-post-mobile-bg/--last-post-mobile-border`; `.author-meta` — `flex-wrap: nowrap` + `align-items: center`, поэтому «Today, 07:46 · [avatar] Arin» именно в одну строку, а не автор отдельной строкой под датой; разделитель даты и автора — типографическая точка `\00B7` через `::after` на `.author-meta__date`; `.author-meta__identity { flex: 1 1 auto; min-width: 0 }` + `.author-meta__name { flex: 1 1 auto; min-width: 0 }` — аватар+ник неделимы, длинный ник переносится внутри себя; `.last-post-link-meta` растянут на всю строку (`width: 100%`, bleed `-4px/-6px` убраны), иначе `fit-content` + отрицательный margin выносили аватар за границу карточки. Дополнительно: `src/main.jsx` — `author-meta.css` перенесён после `forum-pagination.css` (последний компонентный импорт, как отмечено в шапке модуля); `ForumAuthorAvatar.jsx` — `void roundedCircle` чинит `lint:js` (проп сохранён для обратной совместимости, круг — теперь `.author-avatar__img`). Проверка: `npm test` (skipped своё тестовое окружение) — полный прогон дошёл до `lint:js` с одним предсуществующим падением `roundedCircle` (исправлено выше); brace-depth обоих CSS — 0.
-  - [x] **Запрет `!important` в нативных стилях (2026-11-06) + доработка полосы**: `!important` убраны из нативных модулей без всяких исключений для медиа-запросов — медиа-брейкпоинт не оправдывает `!important`, он работает только через обычный каскад (специфичность + порядок). Конкретно: в `src/index.css:2873` legacy-дубль `.last-post-link-meta` переведён на токены `var(--last-post-link-padding)` / `var(--last-post-link-margin)` (объявлены в `theme-variables.css`: padding `4px 6px`, margin `-4px -6px`); `.last-post-link-meta` в `author-meta.css` тоже читает `var(--last-post-link-margin, -4px -6px)` вместо хардкода `-4px -6px`. Мобильная точка пересечения на индексе (`≤768px`) переопределяет ТОКЕНЫ (`--last-post-link-padding: 0; --last-post-link-margin: 0`) вместо `width:100%!important` — поэтому кросс-файловая война снимается без `!important`, без `@layer`-костылей и без троттлинга десктопного bleed на `TopicRow`/`CategoryPage` (он там intentional). Дополнительно чинён второй живой виновник «полоса не во всю ширину»: базовое `.forum-item` в `forum-index.css` задаёт `align-items:center` для десктопной grid-строки, и в мобильной колонке это съедало ширину полосы и её `border-top` (на скриншоте бордер останавливается посреди карточки) — в мобильном блоке добавлен `align-items: stretch`, а `last-post-content`/`last-post-link-meta` растянуты (`align-self: stretch; width: 100%`), дабы ссылка шла от начала строки и дата стояла первой. Desktop не тронут: всё — только внутри `@media (max-width: 768px)`.
-  - [x] **Диагностика «не видны изменения в рендере» (2026-11-06)**: сравнились скриншот 1 (отрендеренный вид) и живой DOM. Три независимые причины, почему целевой вид не «проявлялся»: (1) **устаревший `dist/`** — в `dist/assets/` лежала сборка от 11:17 (`index-*.css` 11:17), а dev-сервер отдавал свежие CSS (`author-meta.css` 11:41 / curl `:5173` — 200 и актуальное содержимое) — HMR/CSS не кэшируются, но сборка в `dist/` — нет; (2) **музей `!important` в `src/index.css` (~4063–4244)** — `.forum-table td:last-child`, `td:last-child:before`, `.last-topic-link`, `.forum-table .cat-link` с `!important` **не могли сматчиться на семантическом DOM главной** (`.forum-last-post` — `<div>`, а не `<td>` внутри `.forum-table` в новом `MainPage.jsx` на `<article id="forum-item-*">`), поэтому их `!important` не били по целевой странице; (3) **единственное живое пересечение** — голое `.last-post-link-meta` в `index.css:2873-2874` (`padding: 4px 6px !important; margin: -4px -6px !important`) — достигает индекса и разрывает bleed (-4/-6): без него аватар+тень уходят за правую границу карточки, а отступы приподнимают мету над строкой. Исправление: в `src/styles/author-meta.css` две точки пересечения (`.forum-last-post .last-post-link-meta` — `width/margin/padding: 100%/0`) переведены в `@layer author-meta` + `!important` — в каскаде !important резолвится ДО учёта слоёв, поэтому одного слоя мало; оба условия обязательны. Проверка: curl `:5173/src/styles/author-meta.css` отдаёт `width:100%!important` на `.forum-last-post .last-post-link-meta` (200); `git status` подтверждает, что правки в `src/index.css` касаются только этого одного правила и от него не зависли. Для прод-рендера нужен `npm run build` (новая сборка `dist/`).
-- [ ] **Этап 3: Topic View (`TopicPage`)**
-  - [x] **Аудит legacy-дубликатов `index.css` (2026-11-06, по запросу «удалить/закомментировать»)**: grep `src --include='*.jsx'` доказал: ни одна страница не рендерит `.forum-table*` / `.forum-table-sub` / `.topic-row-hover` / `.topic-title-link` / `.forum-td-stat` (MainPage, CategoryPage, ActiveTopics, NewReplies и Subscriptions — все на семантическом DOM). Поэтому: (1) весь блок `~3995–4244` (uniform columns, `thead th`, `td`, `.forum-table-sub thead th`, mobile `@media` с `.forum-table`, `.cat-link`, `.cat-desc`, `.forum-mobile-stats`, `td:last-child(:before)`, `.last-topic-link`, `.author-sidebar` mobile, `.author-res-*`, `.post-content`) закомментирован с шапкой «LEGACY … turned OFF» и перечислением новых владельцев (`forum-index.css`, `topic-row.css`, `author-meta.css`, `utilities.css`); внутренние `/* */`-маркеры заменены на `--`, чтобы не рвать внешний комментарий. Живым оставлено: `.hide-on-extra-small-mobile` (TopicPostCard), `.bbcode-media-wrapper`, `.hotkeys-table`, `.dm-*`, `.members-table-*`, `.profile-sidebar-wrapper` — они нужны немигрированным страницам (TopicPage, DM, Members, Profile, Admin) и остаются Bootstrap-переопределениями до Этапа 7. (2) Голый `.last-post-link-meta` + три `!important`-hoverа в `index.css:2873` закомментированы — единственный владелец теперь `author-meta.css` (у него те же правила без `!important`). (3) `.forum-group-card`/`.forum-group-header` закомментированы на одной строке-шапке: `.forum-group-header` не используется нигде, `.forum-group-card` — только скелетон в DraftsPage (Bootstrap Card, не group chrome). (4) В `theme-variables.css` убраны 4 дубля `--last-post-link-margin` из прошлой сессии. Проверка: `grep -c '!important' src/index.css` = 747 (остаток — только Bootstrap-переопределения + закомментированные блоки), живых селекторов `.forum-table*`/`.forum-group-*`/`.last-post-link-meta` в `index.css` нет, brace-depth = 0. Нативных модулей (`src/styles/*.css`) это не коснулось: там `!important` только в комментариях. Для прода нужен `npm run build`.
-  - [x] **Бледный внутренний разделитель на мобильной главной (2026-11-06)**: проблема — граница раздела между `.forum-item` и верхняя граница `.forum-last-post` внутри секции имели один и тот же цвет `--forum-item-border` (opaque `--border-color`), поэтому на скриншоте 1 обе линии выглядели одинаково (не видно, где заканчивается одна секция и начинается следующая — вторая линия дублировала первую). Целевой вид (скриншот 2): внешний разделитель остаётся плотным (`--forum-item-border`), внутренний — заметно бледнее. Решение без локальных цветов в CSS: добавлен семантический токен `--forum-last-post-mobile-border: color-mix(in srgb, var(--border-color) 40%, transparent)` в `theme-variables.css` (40% alpha от opaque border-color) — он наследуется всеми темами автоматически через их `--border-color`, без per-theme RGB-переопределений в `[data-theme=...]`. Оба мобильных правила `.forum-last-post` (`forum-index.css` и `author-meta.css`) переведены с `var(--forum-item-border)` на `var(--forum-last-post-mobile-border)`; desktop не затронут (токен используется только внутри `@media (max-width: 768px)`).
-  - [x] **Закрытые темы: заголовок больше не краснеет (2026-11-06)**: убрана ветка `.topic-locked-title` (TopicRow.jsx рендерил отдельный класс заголовка для `is_locked`, а `.topic-locked-title a` красил его в `--topic-locked-title-color` = `--topic-locked-color`). Теперь заголовок всегда `.topic-title` и обычный цвет темы; закрытость темы передаётся только красной иконкой замка (`.topic-locked` на `.topic-icon`, без opacity). Токен `--topic-locked-title-color` и правила `.topic-locked-title` удалены.
-  - [x] **Мобильный TopicRow: скрыт родитель `.topic-meta`, а не только `.topic-author` (2026-11-06)**: в `@media (max-width: 768px)` прятался только `.topic-meta .topic-author`, но родитель `.topic-meta` оставался в потоке (flex column с `margin-top: 0.25rem`, `gap: 0.25rem`) — пустой контейнер продолжал занимать место. Теперь в мобильном блоке скрыт сам `.topic-meta` (`display: none`); на десктопе он не тронут.
-  - [x] **Меньше `.forum-view-title` на мобиле (2026-11-06)**: десктопный размер заголовка страницы (CategoryPage / ActiveTopics / NewReplies / Subscriptions) был `--forum-view-title-size: 2.5rem` (40px) и не уменьшался на ≤768px. Добавлен токен `--forum-view-title-size-mobile: 2rem` (32px) и правило `.forum-view-title { font-size: var(--forum-view-title-size-mobile, 2rem) }` в мобильном блоке `forum-view.css`; десктоп не тронут.
-  - [x] **Цвет `.forum-view-description` (2026-11-06)**: светлая тема — `#475569` (Slate 600, как у `--link-color`); эквиваленты в остальных: dark — `#64748b` (Slate 500), neutral — `#6b5a48` (тёплый коричнево-серый, между `--link-color: #8c7152` и `--secondary-color: #5c4b3a`). Используется через токен `--forum-view-description-color` (без локальных цветов в CSS и без `!important`).
-  - [x] **Фикс тёмной темы Категории: алиасы резолвились в светлые значения (2026-11-06, скриншоты)**: «General Discussion» чёрным на тёмном фоне планеты, «New Topic» почти невидима, список — белая карточка с светлым текстом (заголовки/даты 64/190 — `--text-color` в светлой теме тёмный). Причина: семантические алиасы (`--forum-view-title-color: var(--text-color)`, `--topic-title-color`, `--forum-view-card-bg: var(--card-bg)`, `--forum-view-btn-primary-bg/-text`, `--topic-count-color` и ~60 таких) жили в `:root` (`<html>`), а тема ставится на `<body data-theme>` (`ThemeProvider.jsx:64`); `var()` на `:root` резолвится против базовых токенов самого `:root` (светлые из `index.css :root`), и алиас запекался в светлый цвет навсегда, не видя `body[data-theme='dark']`. Поэтому тёмная тема и выглядела «сломанной». Исправление: блок дефолтов в `theme-variables.css` переехал с `:root` на `body` (переопределения и так были `[data-theme=...]` на body) — теперь алиас на body резолвится против темовых базовых токенов на том же body; кастомные свойства наследуются потомками, потребители не тронуты. Нелинейные токены (пиксели/шрифты/тени) равнозначно переехали. Проверено по `dist/assets/index-*.css`: `body{...--forum-view-title-color: var(--text-color)...}` + `[data-theme=dark]{--text-color: #f8fafc; --card-bg: #1e293b}`. `npm test` (все тесты + `lint:js`) и `npm run build` пройдены. Побочно это починило те же алиасы на главной, статистике и шапке (`--forum-name-color`, `--category-*-bg`, `--stats-*-bg`).
-  - [x] **Цвета Главной (Last Post колонка) не совпадали с целевым (2026-11-06, скриншоты)**: в текущей версии дата/ник в Last Post были ярче (почти белые), чем в целевой, где они приглушены. Причина: в legacy `LastPostInfo` — Bootstrap `text-muted`-линк (muted дата+автор), а в миграции `.last-post-link-meta` и `.author-meta__name` ушли в `--topic-meta-color`/`--author-name-color` (=`--text-color`), а `.last-topic-link` потерял явный цвет ссылки. Починено: `.last-post-link-meta` — `--last-post-meta-color: var(--secondary-color)` (dark — `#94a3b8` Slate 400, как у `--link-color`), `.last-post-link-meta .author-meta__name` тонирует ник тоже в `--last-post-meta-color` (дата/ник одним приглушённым тоном, аватар не красится), `.last-topic-link` — явный `--last-post-title-color: var(--link-color)` как в legacy (на один тон темнее заголовка категории). TopicRow и посты не тронуты: токен берётся из локального scope `.topic-meta`, который в `topic-row.css` переопределяет цвет. Tokens-комментарий в `theme-variables.css` документирует legacy-семантику. Проверка: `npm test` + `npm run build`; в `dist` подтверждено`.last-post-link-meta .author-meta__name{color:…--last-post-meta-color…}` и `.last-topic-link{color:var(--last-post-title-color)}`.
-  - [x] **Цвета Главной (уточнение по скриншотам 2026-11-06 — приглушение было не Slate 400, а Slate 500)**: после предыдущего фикса muted-текст остался Slate 400 (`#94a3b8` из `--secondary-color`/`--link-color`), а на целевой картинке все вторичные тексты — Slate 500 (`#64748b`, `.text-muted`-тон), при этом заголовочная полоса — Slate 700 (`#334155`), а заголовок последнего топика — Slate 300 (`#cbd5e1`). В `theme-variables.css` для `body[data-theme='dark']` явно заданы: `--category-head-bg: #334155`, `--category-head-text: #64748b`, `--last-post-meta-color: #64748b`, `--last-post-title-color: #cbd5e1`, `--author-name-color: #64748b`; дефолт `--category-head-bg` переведён с `var(--block-bg)` на `var(--secondary-color)` (у legacy был secondary). Теперь в `dist/assets/index-*.css` видно `[data-theme=dark]{…--category-head-bg: #334155;--category-head-text: #64748b;--last-post-meta-color: #64748b;--last-post-title-color: #cbd5e1;--author-name-color: #64748b…}` и `.category-head{background:var(--category-head-bg);color:var(--category-head-text)}`, `.last-topic-link{color:var(--last-post-title-color)}`. Дефолтные light/neutral значения не менялись. Проверка: `npm test` (все тесты + `lint:js`) и `npm run build` пройдены.
-  - [x] **Главная (финальная сверка 2026-11-06)**: заголовок последнего топика в целевой картинке — тот же near-white, что название категории (`#f8fafc`), а не Slate 300. В том же dark-блоке уточнено: `--last-post-title-color: #f8fafc`, `--forum-title-color: #f8fafc`, `--forum-stat-color: #f8fafc`. В `dist` подтверждено `[data-theme=dark]{…--last-post-title-color: #f8fafc;--forum-title-color: #f8fafc;--forum-stat-color: #f8fafc…}` и `.last-topic-link{color:var(--last-post-title-color)}`. Дефолтные light/neutral значения не менялись. `npm test` + `npm run build` пройдены.
-  - [x] **Главная (точные цвета от пользователя 2026-11-06)**: `.category-head` — фон `#0e1324`, color `#80848d`; `.last-topic-link` — `#94a3b8`; `.forum-description`, `.cat-desc` и `.author-meta__date > span` — `#b0b0b0` (legacy `.text-muted`); `.last-post-link-meta .author-meta__name` — `#94a3b8`; `--stats-item-muted` — `#b0b0b0`; `.topic-pinned` в dark — `#ffc107`; hover на `.last-post-link-meta` в dark — белый текст внутри. Реализовано через токены, а не hardcoded hex в правилах: в dark-блоке заданы `--category-head-bg: #0e1324`, `--category-head-text: #80848d`, `--last-post-title-color: #94a3b8`, `--last-post-meta-color: #94a3b8`, `--author-name-color: #94a3b8`, `--last-post-name-color: #94a3b8`, `--author-date-color: #b0b0b0`, `--forum-description-color: #b0b0b0`, `--stats-item-muted: #b0b0b0`, `--topic-pinned-color: #ffc107`; правило `.author-meta__date > span` теперь красит дату через `--author-date-color`, `.last-post-link-meta .author-meta__name` — через `--last-post-name-color`; dark-hover в `author-meta.css` красит весь `link + date + nick` в `#ffffff` (внутренний rule `[data-theme='dark'] .last-post-link-meta:hover .author-meta__date > span, .author-meta__name` — иначе дата/ник оставались бы muted на ховере). В `dist/index-D73JR6za.css` подтверждено `[data-theme=dark]{…--category-head-bg: #0e1324;--category-head-text: #80848d;--last-post-title-color: #94a3b8;--last-post-name-color: #94a3b8;--author-date-color: #b0b0b0;--forum-description-color: #b0b0b0;--stats-item-muted: #b0b0b0;--topic-pinned-color: #ffc107…}`, `.topic-pinned{color:var(--topic-pinned-color)}`, `[data-theme=dark] .last-post-link-meta:hover{color:#fff}`, `[data-theme=dark] .last-post-link-meta:hover .author-meta__date>span,[data-theme=dark] .last-post-link-meta:hover .author-meta__name{color:#fff}`, `.category-head{background:var(--category-head-bg);color:var(--category-head-text)}`, `.last-topic-link{color:var(--last-post-title-color)}`, `.author-meta__date>span{color:var(--author-date-color,…)}`, `.last-post-link-meta .author-meta__name{color:var(--last-post-name-color,…)}`. `npm test` (все тесты + `lint:js`) и `npm run build` пройдены.
-  - [x] **Главная (2026-11-09)**: в светлой теме `.category-head` — фон `#f9f9f9`, `letter-spacing: .05em`. Реализовано по токен-архитектуре: в `[data-theme='light']` задан `--category-head-bg: #f9f9f9`; добавлен токен `--category-head-letter-spacing: 0.05em` в `body`, `.category-head` в `forum-index.css` теперь использует `letter-spacing: var(--category-head-letter-spacing)` вместо hardcoded `0.1em` (как `--topic-list-head-letter-spacing` в forum-view). Dark (`#0e1324`) и neutral не тронуты, кроме общего letter-spacing.
-    - **Почему на скриншоте (2026-11-09) фон был сине-серым и не `#f9f9f9`:** на втором скриншоте `body data-theme="light"`, лента — цвет дефолта `body` (`--category-head-bg: var(--secondary-color)`), а не light-значение. Значит, в живом окружении блок `[data-theme='light']` из `theme-variables.css` не применялся. Кандидаты, требующие проверки в живом окружении: (1) dev-сервер не подхватил перезапись файла / кэш CSS; (2) смотреть нужно именно `npm run build` в `dist/assets/*.css` — там блок `[data-theme=light]{--category-head-bg:#f9f9f9…}` присутствует (проверено; других `--category-head-bg`-блоков для light в бандле нет, конфликтующих переопределений в `index.css` нет). Горячий фикс: hard-refresh (Ctrl+Shift+R).
-    - **Попутный найденный баг:** в HEAD-блок `[data-theme='dark']` был разорван лишней `}` (открыт на 366, закрыт на 368; остальные dark-токены 369–411, включая `--category-head-bg:#0e1324`, лежали вне блока как orphan-declarations и отбрасывались браузером; stray-`}` на 412 уводил баланс в минус). Убрана `}` на 368 — dark-блок теперь единый (366–411). Побочка: dark-токены из этого куска (last-post/stats/toolbar и др.) до фикса не действовали (проверено сборкой HEAD-состояния: бандл `index-CcL1SNl3.css` содержал `--category-head-bg` только в `body` и global-скоупе; `[data-theme=light]{--category-head-bg…}` в нём не было — это ожидаемо, т.к. light-токена в HEAD ещё не было).
-- [x] **Этап 3: Topic View (`TopicPage`) — выполнен `b2fcb9d` + визуальный фикс 2026-11-09 (проверен пользователем скриншотами 1→3)** (текущий vs целевой). Миграция HEAD перевела разметку из Bootstrap на `topic-view.css`, но новых визуальных акцентов не было — только семантика. Первый фикс 2026-11-09: (1) шапка meta+actions в одну строку; (2) большой аватар 150px; (3) `<dl>` для Posts/Reputation; (4) футер справа и Delete не красным. Пользовательская проверка 1 показала: meta колонкой, пагинация не на строке, аватар не rectangular, Delete красным. Второй заход 2026-11-09: (а) `topic-row.css` — `.topic-header-layout .topic-meta` теперь `flex-direction: row` (scope страницы топика, не списков строк), мобильное `display:none` ограничено `:not(.topic-header-layout .topic-meta)`; (б) `.topic-header-layout .topic-pagination` + `.forum-pagination` форсировали `flex-direction: row`; (в) `.post-author .author-avatar__wrap` — `width:100%; max-width:150px; aspect-ratio:1; height:auto` (квадратный контейнер, без `min-height`); (г) `.footer-link--delete` → `--secondary-color` (приглушённый, как Edit/Quote); (д) заголовок возвращён к `--topic-title-weight: 500` на основании целевого снимка. Проверка пользователя 2 (скриншот 3) показала шапку/сайдбар/пагинацию уже в строке, остатками были типографика и воздух: заголовок в целевом 32px medium (не 28px 500), meta 16px (не 14px), карточка `0.75rem` радиуса с `sidebar-padding: 1rem / header 0.5rem 1.25rem / body 1rem 1.25rem / footer 0.625rem 1.25rem 40px`, аватар `0.5rem`, сайдбар `name 1rem / meta 0.875rem / role 0.875rem`, pin у заголовка жёлтый. **Третий заход 2026-11-09:** возвращены `--topic-title-size: 2rem; --topic-title-weight: 600; --topic-title-line-height: 1.2`, `--topic-meta-size: 1rem`, карточка `--topic-post-card-radius: 0.75rem` + новые паддинги через токены, аватар `--topic-post-avatar-radius: 0.5rem`, сайдбар `--topic-post-sidebar-name-size: 1rem / --*-meta-size: 0.875rem / --*-role-size: 0.875rem`, в `topic-view.css` добавлены `.topic-indicator { flex: 0 0 auto }`, `.topic-pinned { color: var(--topic-pinned-color) }`, `.topic-locked { color: var(--topic-locked-color) }` (pin/lock у заголовка страницы топика, не только в списках). Проверка: `npm test` + `npm run build` — EXIT 0. **Четвёртый заход 2026-11-09 (скриншот 3 → целевой):** пользователь подтвердил реальный рендер без кэша: (а) `.topic-header-layout { margin-top: 0.75rem }` через `--topic-head-meta-margin-top` — мета оторвалась от заголовка; (б) `.topic-meta { opacity: 1 }` и `.topic-header-layout .topic-meta strong/.topic-author-name { color: var(--text-color); font-weight: 700 }` — `Arin` и `67` вновь жирные тёмные; (в) `.post-author__meta-row { flex-direction: row; align-items: baseline; justify-content: center }` — `Posts: 1299` и `Reputation: 224` снова в одну строку с приглушённым лейблом и жирным тёмным числом; (г) подпись и разделители сайдбара/футера — `border-top: 1px solid` вместо dashed; (д) `--topic-post-card-radius: 1rem` (было 0.75) под мягкость целевого; (е) `--topic-pinned-color` в базовом скоупе и `utilities.css` fallback — `#ffc107` (желтый pin, не коричневый). Проверка: `npm test` OK, build OK. **Пятый заход 2026-11-09 (правило пользователя):** breadcrumb и pagination — повторяемые элементы по форуму, им не нужны разные классы на каждой странице — один уникальный класс + модификатор только для расположения. Вынесен `src/styles/forum-breadcrumbs.css` (владелец `.forum-breadcrumbs` + `.forum-breadcrumbs__wrapper` + `.forum-breadcrumbs--topic` — модификатор только связи на странице топика), подключён в `main.jsx` до `forum-pagination.css`. В `ForumBreadcrumbs.jsx` убран `mb-4`, класс компонента — только `forum-breadcrumbs`. В `TopicHeader.jsx`/`TopicPage.jsx` обёртка топика — `.forum-breadcrumbs__wrapper` (было `.forum-breadcrumbs`). Pagination: `src/styles/forum-pagination.css` — единственный владелец вида (`.forum-pagination` + две модификаторы расположения: `.forum-pagination-view` — full-width centered row для списков (CategoryPage, ActiveTopicsPage, NewRepliesPage, SubscriptionsPage — убраны лишние `<nav id="forum-pagination-*">` обёртки, осталась только `ForumPagination className="forum-pagination-view"`), `.forum-pagination-topic` — компактная строка внутри header (TopicHeader/TopicActionsBar top — убрана `<nav id="topic-pagination-top">`). В `forum-view.css`/`topic-view.css` оставлены только placement-маркеры `#forum-pagination-*`/`#topic-pagination-bottom`. Токены `--topic-breadcrumbs-*` и `--topic-pagination-top-*` удалены, добавлены `--breadcrumb-*` в `theme-variables.css` (шарик: `--breadcrumb-margin-top: 1.5rem; --breadcrumb-margin-bottom: 1rem` — та же визуальная высота, что в CategoryPage).
-  - [x] **Этап 3 (продолжение): TopicPostCard — семантический DOM + parity-слой (2026-11-14, commit `18aaf5f`)**: мигрирована последняя bootstrap-часть карточки поста. `TopicPostCard.jsx` (443 стр.): `article.topic-post` с модификаторами `is-draft`/`is-pinned-first`, единый DOM без дубликатов desktop/mobile (`aside.post-author` + `.post-body`), ноль react-bootstrap, ноль инлайн-стилей, мобильная строка автора — через CSS grid (`@media (max-width: 767.98px)`), лейблы Posts/Reputation ↔ Posts/Rep — через CSS-переключение двух span. `topic-view.css` (1298 стр.): parity-слой в конце файла по значениям из deploy-бандла (`markdowns/Assets/FACTS_topic-post-card.md`): модификаторы `.topic-post.is-draft` (3px dashed) / `.is-pinned-first` (opacity .95 + border-left 3px), `.post-header.is-draft` (bg `--footer-bg`), недостающие классы (`post-dice-slot`, `post-draft-note`, `post-author__meta-label--full/--short`, `post-author__status-skeleton`, `post-author__avatar-img`), `.post-header` (min-height 30px, bg rgba(0,0,0,.02) + dark rgba(0,0,0,.08) + neutral rgba(67,52,34,.04)), `.post-footer` (34px, dashed border, padding-x 1.5rem на md), `.pinned-first-post-strip` (rgba primary по темам), реп-состояния (`post-rep__trigger` hover per-theme, `__voted` #198754, `__own` opacity .75), `.post-number` (opacity .5), `.post-draft-badge`/`.post-edited-badge` (без пилл), `.footer-link`, `.post-signature` (dashed, italic), `.post-author` (rgba primary .01), mobile: аватар 60px, футер auto, футер-ссылки скрыты на desktop, contact скрыт на mobile. `theme-variables.css` (499 стр.): новые токены `--topic-post-muted-color`/`--topic-post-strong-color` — body-дефолт `#475569`/`#1e293b`, dark `#cbd5e1`/`#f1f5f9`, light `#475569`/`#1e293b`, neutral `#5c4b3a`/`#382d1d` (по FACTS с деплоя); связаны с dt/dd сайдбара, `.post-meta`, `.post-number`. Проверка: `npm run build` ✓ (5.28s), eslint чист. Осталось: визуальная сверка 3 темы + десктоп/мобайл + состояния (draft, pinned, voted, own-post); затем `TopicReplyComposer` / `PostInlineEditor` / `TopicModalsContainer` (контракты `.topic-reply*` / `.topic-post-editor*` уже готовы в CSS).
-- [ ] **Этап 4: Members View (`MembersPage`)**
-- [ ] **Этап 5: Profile (`ProfilePage`)**
-- [x] **Этап 6 (часть): Списки тем (`ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`) — выполнены в рамках Этапа 2** (см. выше); отдельные id `#active-topics-page` и т.п. не заводились — все списки переиспользуют `#forum-view/#forum-topic-list` с разными `data-forum-id`.
-- [ ] **Этап 7: Уведомления, Сообщения, Авторизация, Админка** + удаление Bootstrap (`bootstrap.min.css` из `main.jsx`, `react-bootstrap` из зависимостей) — только после Этапов 3–6.
+Новый порядок — спринты A–J ниже в этом документе (старая нумерация Этапов 1–7
+отображена в разделе спринтов). Коротко:
+
+1. **Спринт A** — хвост Этапа 3 (ReplyComposer / PostInlineEditor / TopicModalsContainer) + сведение строк категории к одному `TopicRow` + пагинация категории.
+2. **Спринт B** — хвост Этапа 1: общие атомы (Pagination, Breadcrumbs, Layout, бейджи/аватар, Tabs, EmptyState, Modal, Navbar, ScrollButtons).
+3. **Спринт C** — MembersPage.
+4. **Спринт D** — NotificationsPage + DraftsPage + TopicFormPage (по одной).
+5. **Спринт E** — DirectMessages + MessagesPage.
+6. **Спринт F** — Auth + служебные страницы (Login/Register/Pending/Banned + формы).
+7. **Спринт G** — BBCode + RichEditor (отдельный воркстрим, контент пользователя — не 1:1-конверсия).
+8. **Спринт H** — AdminPage + DesignsTab + EmailTemplatesSettings. ПОСЛЕДНИМ: сначала свериться с веткой реорганизации `feature/admin-reorg`.
+9. **Спринт I** — ProfilePage + SecurityTab. ПОСЛЕДНИМ: по `SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md`.
+10. **Спринт J** — снятие Bootstrap (`bootstrap.min.css` из `main.jsx`, `react-bootstrap` из зависимостей) + финальная проверка.
+
+Цифры остатка выше — на 2026-11-17, HEAD `1598c0c`; инлайн-счётчики перепроверены 2026-11-17 на HEAD `2e574979` — без изменений.
 
 ### Расхождения с исходными спринтами (факт vs план)
 > Ветвления `isThemeable ? new : old` нет — семантический DOM всегда (решение Этапа 1). Имена ниже — фактические.
@@ -301,154 +279,280 @@ Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) �
 - Списки тем: отдельных `#*-page/#*-list` нет — общий `#forum-view/#forum-topic-list`, различие только `data-forum-id`.
 
 ### Как продолжать в следующей сессии
-1. `git status` + `git --no-pager diff --stat HEAD` — HEAD=`1598c0c` (feature/theming, 2026-11-17). Источник правды — ветка на GitHub, а не zip-снимок; перед работой сверять файл с веткой по blob SHA.
-2. Node (Git Bash): `export PATH="$PATH:/c/nvm4w/nodejs:/c/Users/Alina/AppData/Local/nvm"` → `node v24.14.0`, `npm 11.9.0`. PowerShell-строка с `%NVM_HOME%` в Git Bash не работает.
-3. Этап 3 (TopicPage) закрыт частично: шапка + `TopicPostCard` готовы (`b2fcb9d`, `18aaf5f`), остаток — `TopicReplyComposer` / `PostInlineEditor` / `TopicModalsContainer` + сведение строк топиков к одному `TopicRow` (см. аудит 2026-11-17). Следующий шаг — хвост Этапа 3, затем Этап 4 (`MembersPage`, 345 строк): только DOM/CSS, ноль бизнес-логики; читать файл целиком; после каждого блока `npm test` + `npm run build`.
+
+1. Источник правды — ветка `feature/theming` на GitHub, HEAD=`2e574979` (2026-11-17). Локальная копия — `~/workspace/aerun-repo/`, синхронизируется скриптом `~/workspace/aerun-remote/sync-aerun-repo.py` (diff-only pull; повторный запуск при неизменном HEAD — секунды). Zip-снимок в `~/workspace/aerun/` устарел, не использовать.
+2. Node (машина Алины, Git Bash): `export PATH="$PATH:/c/nvm4w/nodejs:/c/Users/Alina/AppData/Local/nvm"` → `node v24.14.0`, `npm 11.9.0`. PowerShell-строка с `%NVM_HOME%` в Git Bash не работает.
+3. Статус тестов на HEAD `2e574979`: `npm run build` — OK; `npm test` — 80 OK, падает на `test:account-status-axis` (предсуществующее: `AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`). Проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен).
 4. Перед чисткой `index.css` — `grep` по `src --include='*.jsx'`: `.forum-table*` и `.empty-state-*` пересекаются с немигрированными страницами.
 5. Новые токены — только `theme-variables.css`, новые правила — только `src/styles/*.css`; `grep -n '!important' src/styles/*.css` должен давать только комментарии.
 
 ---
 
-Aerun Forum — это React + Firebase SPA-форум с системой кастомных дизайнов. Администраторы создают дизайны (CSS + JS), которые инжектятся на страницу через `DesignProvider`.
+## Исполнительный плейбук: как мигрировать ОДИН компонент
 
-**Проблема:** текущий DOM построен целиком на Bootstrap-компонентах (`Card`, `Table`, `Row`, `Col`, `Badge`) без семантических классов и стабильных `id`. Кастомный CSS не может надёжно стилизовать форум, т.к. нет публичного DOM API.
+> Этот раздел — главный. Если спринт и плейбук расходятся, прав плейбук.
 
-**Цель:** перестроить DOM всех страниц форума так, чтобы при активном кастомном дизайне рендерилась стабильная семантическая разметка с `id`, `class` и `data-*` атрибутами, описанная в спецификациях `markdowns/`. Это позволит CSS-темам полностью переоформлять форум без знания внутренней React-реализации.
+### Шаг 0. Возьми ровно один компонент
 
-**Стратегия безопасности:** существующие 3 встроенные темы (`dark`, `light`, `neutral`) **не изменяются**. Новая семантическая разметка активируется **только** при работе с кастомным дизайном. Тестируем через уже существующий механизм `?preview_design=`.
+- Один компонент = один JSX-файл (+ его CSS-модуль, если он есть) или один логический блок внутри большого файла (например, один таб админки).
+- Не бери два компонента за раз, не «заодно» правишь соседние файлы. Контекст теряется именно так.
+- Прочти спринт целиком, потом SPEC этой страницы (если есть), потом сам файл.
 
----
+### Шаг 1. Зафиксируй, как выглядит «до»
 
-# 2. Архитектурные решения
+- Открой страницу в трёх темах (`dark` / `light` / `neutral`) и на трёх ширинах (десктоп, ≤993px, ≤768px), если есть живой стенд. Нет стенда — читай CSS как спецификацию: итоговые computed-стили элемента = истина.
+- Выпиши для компонента: что видно, какие состояния есть (hover, focus, disabled, active, unread, empty, loading, error), какие элементы прячутся на мобиле.
+- Если сомневаешься, как выглядит элемент, — не гадай: напиши в отчёте, что не удалось сверить. Угаданный стиль — это переделка глазами Алины.
 
-## 2.1. Themeable — это НЕ встроенная тема
+### Шаг 2. Составь инвентарь: что именно переезжает
 
-`Themeable` **не** добавляется в `BUILTIN_THEMES = ['dark', 'light', 'neutral']`. Он не появляется как вариант выбора рядом с dark/light/neutral.
+В файле компонента выполни `grep` и выпиши в отчёт (короткой таблицей, не прозой):
 
-**Themeable** — это каркас (engine), который активируется автоматически, когда пользователь выбирает кастомный дизайн. В будущем возможны разные каркасы (например, «classic», «modern», «minimal»), поэтому механизм должен быть спроектирован как выбираемый framework, а не жёстко привязанный к одному варианту.
+- `style={{...}}` — каждый инлайн-стиль с его значениями;
+- Bootstrap-утилиты в `className` — каждый класс;
+- `react-bootstrap` — каждый импортированный компонент и каждый его JSX-тег;
+- `<table>` / `<Table>` — каждая таблица;
+- `id` и `className`, которые уже есть и используются в JS или CSS (их нельзя молча удалять).
 
-## 2.2. Механизм активации
+### Шаг 3. Переведи Bootstrap-правила в значения
 
-```
-Пользователь выбирает кастомный дизайн (в профиле или через админку)
-→ DesignProvider находит design в Firestore
-→ DesignProvider инжектит CSS/JS
-→ ThemeProvider устанавливает на <body>:
-     data-theme-engine="themeable"
-     data-theme="dark"  (или другая базовая тема — base fallback)
-→ Компоненты через хук useThemeable() узнают, что нужно рендерить семантическую разметку
-```
+Bootstrap-класс — это не магия, а готовое CSS-правило. Бери значение из `bootstrap.min.css` / `src/index.css` и переноси литерально. Опорная таблица (самое частое):
 
-Когда custom design не активен (стандартная тема dark/light/neutral):
-- `data-theme-engine` **отсутствует** на `<body>`
-- Компоненты рендерят текущий JSX без изменений
-- Никакого влияния на существующий UI
+| Было | Становится (значение — в класс, литерально) |
+|---|---|
+| `m-0..5`, `mt-*/mb-*/ms-*/me-*/mx-*/my-*` | `margin[-*]`: `0 / 0.25rem / 0.5rem / 1rem / 1.5rem / 3rem` |
+| `p-0..5`, `pt-*/pb-*/ps-*/pe-*/px-*/py-*` | `padding[-*]`: та же шкала |
+| `d-none / d-block / d-flex / d-grid / d-inline-flex` | `display: none / block / flex / grid / inline-flex` |
+| `flex-row / flex-column`, `flex-wrap`, `flex-grow-1 / flex-shrink-0` | `flex-direction / flex-wrap / flex` — теми же значениями |
+| `justify-content-start/center/end/between/around` | `justify-content: flex-start / center / flex-end / space-between / space-around` |
+| `align-items-start/center/end/baseline/stretch` | `align-items` — теми же значениями |
+| `gap-0..5` | `gap`: шкала отступов |
+| `text-start / text-center / text-end` | `text-align: left / center / right` |
+| `text-muted` | `color: var(--secondary-color)` (в этом проекте muted — secondary, см. журнал) |
+| `text-decoration-none` | `text-decoration: none` |
+| `fw-light / fw-normal / fw-medium / fw-semibold / fw-bold` | `font-weight: 300 / 400 / 500 / 600 / 700` |
+| `fs-6..1` | `font-size`: `1rem / 1.25rem / 1.5rem / 1.75rem / 2rem / 2.5rem` |
+| `small` | `font-size: 0.875rem` |
+| `rounded / rounded-1/2/3 / rounded-circle / rounded-pill` | `border-radius: 0.375rem / 0.25rem / 0.5rem / 1rem / 50% / 50rem` |
+| `border / border-top/...` | `border[-*]: 1px solid var(--border-color)` — цвет сверяй с оригиналом, не гадай |
+| `shadow-sm / shadow` | `box-shadow`: значение из Bootstrap (`0 .125rem .25rem rgba(0,0,0,.075)` / `0 .5rem 1rem rgba(0,0,0,.15)`) |
+| `w-100 / h-100` | `width / height: 100%` |
+| `text-truncate` | `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` |
+| `visually-hidden` | полный набор правил visually-hidden, а не `display: none` |
+| `btn / btn-primary / btn-outline-primary / btn-outline-secondary / btn-danger / btn-sm / btn-lg` | именной класс кнопки: цвета — из `index.css` (`.btn-primary` и др.) через токены; размеры — литерально (`padding`, `font-size`, `border-radius`) |
+| `Card / Card.Body / Card.Header` | `section`/`div` с тем же `border / border-radius / background / padding` |
+| `Form.Control / Form.Select / Form.Check` | нативный `input`/`select`/кастомный чекбокс по образцу `.topic-select-input` |
+| `Modal` | `ForumModal` (обёртка; сам `ForumModal` мигрируется в спринте B) |
+| `Badge` | именной класс бейджа с цветом по роли/состоянию через токены |
+| `Table` | см. шаг 6 — таблицы не переводятся 1:1 |
 
-## 2.3. Что меняется в компонентах
+Если класса нет в таблице — открой `bootstrap.min.css`, найди его правило и скопируй значения. Не подбирай «на глаз».
 
-При `isThemeable === true` компоненты добавляют:
-1. **Семантические `id`** на структурные контейнеры (`#forum-wrapper`, `#forum-main`, `#topic-page`, etc.)
-2. **Семантические `class`** на все значимые элементы (`.forum-item`, `.topic-item`, `.post-author`, etc.)
-3. **`data-*` атрибуты** на сущности (`data-topic-id`, `data-post-id`, `data-user-id`, etc.)
-4. **State-классы** (`.is-pinned`, `.is-locked`, `.is-online`, `.is-new`, `.is-unread`, etc.)
+### Шаг 4. Вынеси в именной класс
 
-Bootstrap-классы **сохраняются** для внутреннего layout. Семантические классы добавляются **рядом**, не вместо.
+- Один элемент — один именной класс в духе готовых модулей (`forum-view.css`, `topic-row.css`, `author-meta.css`): `.members-search-input`, `.notification-item`, `.dm-message-content`. Не `.item1`, не `.custom-1`.
+- Все значения — литерально из шага 3. Не округляй, не «улучшай».
+- Специфичность — плоская: один-два класса, `(0,1,0)`–`(0,2,0)`. Без `!important` в нативных модулях — никогда, даже в медиа-запросах (каскад решается порядком правил, см. журнал).
+- Состояния — модификаторами: `.is-active`, `.is-unread`, `.is-read`, `.is-managing`, `.is-editing`. Состояние — это класс, а не новый элемент.
+- JSX-структуру не меняй без нужды. Теги меняются только если этого требует концепт: `<table>` → grid-разметка (шаг 6), `Card` → `section`/`article`, `Button` → `<button class="...">`. Поведение (обработчики, state, API) не трогается вообще.
+- Класс, который уже используется в JS (`document.querySelector`, `getElementById`) или в другом CSS, — не удаляй и не переименовывай молча. Добавь новый рядом, старый убери только когда убедился, что его никто не ищет.
+- Новый CSS — в модуль своей страницы (`src/styles/*.css`), а не в `src/index.css`. В `index.css` новые семантические правила не добавляются.
 
-Пример:
-```jsx
-// До (сейчас):
-<tr className="topic-row-hover">
+### Шаг 5. Цвета — через токены, и сверь все три темы
 
-// После (при isThemeable):
-<article id="topic-42" className="topic-item topic-42 is-pinned topic-row-hover"
-         data-topic-id="42">
-```
+- Каждый цвет в новом классе — через токен (`var(--...)`). Hex напрямую в правиле — нельзя (кроме случаев, где hex — само значение токена).
+- Новый токен — только цвет. Паддинги, размеры, радиусы, тени, шрифты — литералами в классе, не токенами. Существующие геометрические токены заморожены: новые не создавать.
+- Токены живут на `body`, не на `:root` (алиасы на `:root` запекаются в светлые значения — см. журнал, «Фикс тёмной темы Категории»). Дефолт — в `body { ... }` в `theme-variables.css`, переопределения — в `body[data-theme='dark'/'light'/'neutral']`.
+- Сверь каждый цвет в трёх темах: значение в `light` — дефолт, в `dark` и `neutral` — переопределение. Оригинал — в `index.css` (`:root` и `[data-theme]`-блоки) и в Bootstrap-правилах. Если в одной теме цвет «поплыл» — ищи, какой токен не переопределён, а не добавляй локальный hex.
+- Проверь состояния: `hover`, `focus`, `disabled`, `active` — у каждого цвета есть своё значение в оригинале, и оно тоже переезжает в токен/класс.
 
-## 2.4. Файловая структура
+### Шаг 6. Таблицы — в гриды, а не 1:1
 
-Новые файлы:
-```
-src/
-  hooks/
-    useThemeable.js          ← хук для проверки isThemeable
-  styles/
-    themeable.css             ← базовые стили для [data-theme-engine="themeable"]
-    utilities.css             ← существующий файл
-markdowns/
-  THEMEABLE_SPRINT_PLAN.md    ← этот документ
-  theme-api-reference.md      ← итоговая справка Theme API (создаётся в спринте 14)
-```
+- `<table>`/`<Table>` для раскладки — не переводится класс-в-класс. Она заменяется grid-разметкой по образцу `forum-index.css` / `forum-view.css` / `topic-row.css`:
+  - колонки таблицы → `grid-template-columns` с теми же ширинами (фиксированные колонки — фиксированными значениями, как чекбокс-колонка 32px);
+  - `thead` → полоса заголовков колонок в духе `.category-subtitle` (тот же дизайн — цветная полоса, small-caps);
+  - состояние редактирования строки (`table-active` и подобные) → state-класс, например `.is-editing`;
+  - на ≤768px таблица не скроллится горизонтально — она перестраивается в карточки (каждая строка — карточка, подписи полей — через `data-label` или отдельные лейблы).
+- Исключение — единственное: `[table]` в BBCode — это контент пользователя, а не раскладка. Там `<table>` остаётся, а инлайн-стили ячеек переводятся на CSS-переменные (см. спринт G).
 
----
+### Шаг 7. Адаптив — три ширины, без «потом»
 
-# 3. Текущая структура проекта
+- Проверяй каждую мигрированную страницу на трёх ширинах: десктоп (>993px), планшет (≤993px), мобильный (≤768px).
+- Что прячется на мобиле — `display: none` в мобильном блоке того же файла (пример: `.category-subtitle` на ≤768px). Что перестраивается — grid → одна колонка; что становится чипом — как чекбокс manage-режима в правом верхнем углу карточки.
+- Длинные строки (ники, названия тем, даты) — `overflow-wrap: anywhere` + `min-width: 0` у flex-детей, иначе текст выдавит карточку. Цифры и счётчики — `white-space: nowrap`.
+- Media-блоки — ПОСЛЕ базовых правил в том же файле (та же специфичность — решает порядок).
+- Сетки на ≤993px сужаются согласованно (образец: счётчики 100px→80px, первая колонка 260px→220px, чекбокс-колонка остаётся 32px).
 
-## 3.1. Система тем
+### Шаг 8. Проверка компонента — что значит «готово»
 
-| Файл | Назначение |
-|------|-----------|
-| `src/contexts/ThemeProvider.jsx` | Устанавливает `data-theme` на `<body>`, управляет dark/light/neutral |
-| `src/contexts/DesignProvider.jsx` | Загружает кастомные дизайны из Firestore, инжектит CSS/JS через `<style>` и `<script>` |
-| `src/components/admin/DesignsTab.jsx` | UI админки для создания/редактирования дизайнов |
-| `src/index.css` | 4062 строки — все стили, CSS-переменные для 3 тем |
-| `src/styles/utilities.css` | Утилитарные стили |
+После каждого компонента, до перехода к следующему:
 
-## 3.2. Все страницы форума
+1. `npm run build` — обязательно, exit 0.
+2. `npm test` — цепочка до конца. Если падает проверка, которой не было в списке известных падений (см. «Как продолжать»), — это твоё, чини. Падение в уже известном месте — не твоё, зафиксируй в отчёте.
+3. `grep` по изменённым файлам: не осталось `style={{`, Bootstrap-утилит из шага 3 и `react-bootstrap`-импорта (если спринт требует их убрать).
+4. `git diff --stat` — только файлы этого компонента (+ его CSS-модуль, + токены, если добавлял). Соседние файлы в diff — признак, что ты взял лишнего.
+5. Отчёт (коротко): что сделано, по каким правилам сверялся, что не проверено глазами. Визуальная сверка глазами — за Алиной после аудита, не за тобой.
 
-| Маршрут | Файл | Размер | Сложность DOM-рефакторинга |
-|---------|------|--------|---------------------------|
-| `/` | `pages/MainPage.jsx` | 231 стр. | Средняя |
-| `/category/:id` | `pages/CategoryPage.jsx` | 392 стр. | Средняя |
-| `/topic/:id` | `pages/TopicPage.jsx` | **3681 стр.** | **Высокая** ⚠️ |
-| `/members` | `pages/MembersPage.jsx` | 345 стр. | Средняя |
-| `/profile/:uid` | `pages/ProfilePage.jsx` | **1802 стр.** | **Высокая** |
-| `/admin` | `pages/AdminPage.jsx` | **2032 стр.** | Средняя |
-| `/active-topics` | `pages/ActiveTopicsPage.jsx` | 106 стр. | Низкая |
-| `/new-replies` | `pages/NewRepliesPage.jsx` | 206 стр. | Низкая |
-| `/subscriptions` | `pages/SubscriptionsPage.jsx` | 144 стр. | Низкая |
-| `/notifications` | `pages/NotificationsPage.jsx` | 687 стр. | Средняя |
-| `/category/:id/new-topic` | `pages/TopicFormPage.jsx` | 326 стр. | Низкая |
-| `/messages`, `/messages/:uid` | `pages/MessagesPage.jsx` | 77 стр. | Низкая |
-| `/login` | `pages/LoginPage.jsx` | 67 стр. | Минимальная |
-| `/register` | `pages/RegisterPage.jsx` | 60 стр. | Минимальная |
-| `/pending` | `pages/PendingPage.jsx` | 57 стр. | Минимальная |
-| `/banned` | `pages/BannedPage.jsx` | 45 стр. | Минимальная |
+Компонент НЕ готов, если: build красный; остался инлайн/Bootstrap там, где спринт требует убрать; цвет в одной из тем «поплыл»; на мобиле что-то вылезает за карточку; diff задел соседний компонент.
 
-## 3.3. Общие компоненты (layout и common)
+### Шаг 9. Ловушки — прочитай до начала работы
 
-| Файл | Назначение | Изменения нужны |
-|------|-----------|----------------|
-| `components/layout/Layout.jsx` | Общий каркас: Navbar + main + footer | **Да** — `#forum-wrapper`, `#forum`, `#forum-about` |
-| `components/layout/Navbar.jsx` | Навигация | **Да** — `#forum-nav`, `#forum-title`, `#forum-user-links` |
-| `components/layout/ForumStats.jsx` | Статистика внизу главной | **Да** — `#forum-statistics`, `.stat-*` |
-| `components/layout/ForumBackground.jsx` | Фоновое изображение | Нет |
-| `components/common/ForumBreadcrumbs.jsx` | Хлебные крошки | **Да** — `id`, `.breadcrumb-item`, `.breadcrumb-link` |
-| `components/common/ForumPagination.jsx` | Пагинация | **Да** — `id`, `.pagination-item`, `.pagination-current` |
-| `components/common/TopicRow.jsx` | Строка темы в списке | **Да** — `.topic-item`, `.topic-title`, `.is-*` |
-| `components/common/LastPostInfo.jsx` | Блок последнего сообщения | **Да** — `.last-post-*` |
-| `components/common/AuthorMeta.jsx` | Мета автора | **Да** — `.topic-author`, `.topic-author-name` |
-| `components/common/ForumAuthorAvatar.jsx` | Аватар автора | **Да** — `.author-avatar` |
-| `components/common/ForumAuthorName.jsx` | Имя автора | **Да** — `.author-name` |
-| `components/common/ForumRoleBadge.jsx` | Бейдж роли | **Да** — `.author-rank` |
-| `components/common/BBCode.jsx` | Рендер BB-кода | Нет (внутри `.post-content`) |
-| `components/common/RichEditor.jsx` | Редактор сообщений | Нет (внутри `.reply-editor`) |
-| `components/common/Timestamp.jsx` | Компонент даты/времени | Минимально — `.post-date` |
-| `components/dm/DirectMessages.jsx` | Личные сообщения | **Да** — `.dm-*` классы |
-| `components/auth/LoginForm.jsx` | Форма входа | Да — `.login-form` |
-| `components/auth/RegisterForm.jsx` | Форма регистрации | Да — `.register-form` |
-| `components/profile/SecurityTab.jsx` | Таб безопасности профиля | Да — `.profile-security` |
+- **`.post-content a` подчёркивает всё.** Правило `.post-content a { text-decoration: underline }` бьёт и по ссылкам в тексте поста, и по любым `<a>` внутри редактора (см. баг с overflow-меню BBCode, починен в `2e574979`). Элементы внутри `.post-content`, которые не ссылки, — только скоупленными селекторами, без ослабления глобального правила.
+- **React-bootstrap рендерит `<a>`.** `Dropdown.Item`, `Nav.Link`, `Pagination.Item` по умолчанию — это `<a>`. Проверяй, во что рендерится компонент, прежде чем стилизовать его как кнопку.
+- **Глобальные `a` в `index.css`.** `a { text-decoration: none }` и `a:hover` действуют на всё. Новый класс ссылки должен явно задавать своё `text-decoration` и `color`, иначе его перебьёт глобальное правило.
+- **Порядок импортов в `main.jsx`.** Модуль, импортированный позже, выигрывает при равной специфичности. Новый CSS — в конец списка компонентных импортов, если он должен перебивать дубликаты.
+- **Токены на `body`.** См. шаг 5: `:root` запекает светлые значения.
+- **Мёртвые импорты.** `ScrollButtons.jsx` импортировал `Button` из react-bootstrap и не использовал. После миграции проверяй `grep react-bootstrap` — пустой импорт тоже считается остатком.
+- **Legacy-блок `.forum-table*` в `index.css`.** Закомментирован, но частично жив для немигрированных страниц. Не удаляй и не раскомментируй без отдельного аудита.
+- **Чекбокс-колонка — 32px + 10px gap.** Константа, см. журнал. Не «резиновая».
+- **Мини-пагинация — общий компонент.** `TopicMiniPagination` один на всех; не изобретай вторую.
+- **Маски и аватары.** `ForumAuthorAvatar` / маски рендерятся в нескольких местах; меняешь класс — проверь все места.
 
 ---
+## Спринты: порядок и шаги
 
+> Цифры в скобках — остаток на 2026-11-17 (инлайн `style={` / Bootstrap-утилиты + react-bootstrap-теги, по аудиту; инлайн перепроверены на HEAD `2e574979`). Утилиты для страниц авторизации — приближённые, перепроверь `grep` перед работой.
+> Соответствие старой нумерации: Этап 1 (главная+каркас) — готов, кроме хвоста (спринт B). Этап 2 (категория+списки) — готов. Этап 3 (топик) — готов, кроме хвоста (спринт A). Этап 4 Members — спринт C. Этап 5 Profile — спринт I (последним). Этап 6 списки — готовы. Этап 7 (уведомления/сообщения/auth/админка + снятие Bootstrap) — спринты D, E, F, H, J.
+
+### Спринт A — Хвост Этапа 3: редактор топика
+
+Файлы: `src/components/topic/TopicReplyComposer.jsx` (5 / 89), `src/components/topic/PostInlineEditor.jsx` (1 / 40), `src/components/topic/TopicModalsContainer.jsx` (1 / 61). Плюс сведение строк категории и пагинации (ниже).
+SPEC: `markdowns/SPEC_forum-topic-view-theme-dom.md`. Контракты `.topic-reply*` / `.topic-post-editor*` уже готовы в CSS.
+
+Шаги — строго по одному:
+1. **TopicReplyComposer** — редактор ответа под постом: инлайн и утилиты в именные классы; тулбар и кнопки — по шагу 3 плейбука. Сам `RichEditor` внутри не трогать (спринт G).
+2. **PostInlineEditor** — редактор внутри `.post-content`. Ловушка: overflow-меню и mask-picker внутри поста (см. шаг 9 плейбука — баг уже починен, не сломай его своими правилами).
+3. **TopicModalsContainer** — модалки топика на `ForumModal` (сам `ForumModal` мигрируется в спринте B — здесь только замена вызовов).
+4. **Сведение строк категории к одному `TopicRow`.** `CategoryPage.jsx:344` рендерит строки топиков инлайн как `.forum-item--topic`, а `TopicRow.jsx` (`.topic-item`) — эталон (см. карту повторяющихся элементов). Переведи `CategoryPage` на `TopicRow`, скелетон `:250` — тоже. Комментарий `:387` «same as the TopicRow reference render» после сведения удалить вместе с дублем.
+5. **Пагинация категории.** `<nav id="forum-pagination-bottom" class="forum-view-pagination">` → `ForumPagination className="forum-pagination-view"` (модификатор уже есть, см. карту).
+
+Критерий готовности: в трёх файлах — 0 `style={{`, 0 `react-bootstrap`; строки категории — один компонент; `npm run build` + `npm test` без новых падений.
+
+### Спринт B — Хвост Этапа 1: общие атомы
+
+Порядок внутри спринта — сверху вниз, не перемешивать:
+1. **ForumPagination.jsx** — react-bootstrap `Pagination` (6 тегов) → нативные `button`/`a` с `.forum-pagination` (CSS уже есть в `forum-pagination.css`). Модификаторы `.forum-pagination-view` / `.forum-pagination-topic` не трогать — это только расположение.
+2. **ForumBreadcrumbs.jsx** — react-bootstrap `Breadcrumb` (3 тега) → `nav` + `ol`/`li` с `.forum-breadcrumbs` (CSS уже есть). Модификатор `--topic` — только расположение.
+3. **Layout.jsx** — `Container` (2 тега) + 5 утилит (`small`, `fw-medium`, `py-2`, `text-center`, `mb-0`) → семантические `div`.
+4. **ForumRoleBadge / ForumCharacterBadge / ForumAuthorAvatar** — `Badge` / `Image` (1–4 тега) → `span`/`img` с классами; цвета ролей — через токены.
+5. **ForumTabs.jsx** — 3 утилиты → класс.
+6. **ForumEmptyState.jsx** — Bootstrap `Card` → `section` с классом. Используется на 8 страницах — проверь все места вызова.
+7. **ForumModal.jsx** — обёртка над react-bootstrap `Modal` (9 тегов) → нативный `<dialog>` или `div`-модалка с тем же видом (оверлей, центрирование, закрытие по Esc и клику вне). Проверь все вызовы (мобильное меню RichEditor, TopicModalsContainer).
+8. **Navbar.jsx** (11 / 94) — самый большой атом, делать последним в спринте: status badge, индикатор, аватар 32px, плейсхолдеры `width: 16`, `cursor: pointer`; цвета ссылок — через токены `--nav-*`.
+9. **ScrollButtons.jsx** — убрать мёртвый импорт `Button` из react-bootstrap (логики — 0 строк).
+
+Критерий готовности: `grep -r "react-bootstrap" src/components/common src/components/layout` — 0; в `Navbar.jsx` — 0 `style={{`.
+
+### Спринт C — MembersPage
+
+Файл: `src/pages/MembersPage.jsx` (11 / 149, 1 таблица).
+SPEC: `markdowns/SPEC_forum-and-members-theme-dom.md`, разделы 17–37 + мини-спецификация в приложении.
+
+Шаги:
+1. Фильтры (поиск / сортировка / направление) — `form` с именными классами (`.members-search-input`, `.members-sort-select`, ...).
+2. Таблица участников → grid (`.member-item` как `article`, `data-user-id` / `data-group-id`, `.is-online` / `.is-offline`). Образец — шаг 6 плейбука.
+3. Пагинация сверху/снизу — `ForumPagination`; breadcrumbs — `ForumBreadcrumbs`.
+4. Мобильная версия — карточки, а не скролл.
+
+Ловушки: `.members-table-*` в `index.css:507–566` живёт для этой страницы — переносить в модуль, а не удалять молча; `data-label` для мобильных подписей.
+
+### Спринт D — NotificationsPage + DraftsPage + TopicFormPage (по одной)
+
+1. **NotificationsPage.jsx** (13 / 218): табы `user`/`admin`; `.notification-item` + `.is-read` / `.is-unread` + `.notification-{type}`; mark-all-read / delete-all; пагинация. Мини-спецификация в приложении.
+2. **DraftsPage.jsx** (3 / 91): карточки черновиков (Bootstrap `Card` → `section`; legacy `.forum-group-card` — проверить, прежде чем трогать). Поведение не трогать: Guest-автор никогда, маска сохраняется при публикации.
+3. **TopicFormPage.jsx** (0 / 86): форма создания темы; `RichEditor` внутри — не трогать сам редактор (спринт G); submit/cancel.
+
+### Спринт E — DirectMessages + MessagesPage
+
+Файлы: `src/components/dm/DirectMessages.jsx` (33 / 169), `src/pages/MessagesPage.jsx` (0 / 10).
+Мини-спецификация в приложении.
+
+Шаги: `.dm-container`, режимы inbox/chat; список диалогов (`.is-active` / `.is-unread`, unread-badge); сообщения sent/received; ввод + отправка; мобильный переход sidebar↔chat.
+
+### Спринт F — Auth + служебные страницы
+
+Файлы: `src/pages/LoginPage.jsx` (1 / ~21), `src/pages/RegisterPage.jsx` (1 / ~17), `src/pages/PendingPage.jsx` (2 / ~16), `src/pages/BannedPage.jsx` (2 / ~13), `src/components/auth/LoginForm.jsx` (2 / ~51), `src/components/auth/RegisterForm.jsx` (2 / ~61).
+Мини-спецификации в приложении.
+
+Шаги: `.auth-card` / `.auth-form` / `.auth-field` / `.auth-submit` / `.auth-link`; white wall (`whitelistMode` + `maintenance-message`); `.system-page` / `.system-card` / `.system-title` / `.system-message` / `.system-actions`.
+
+### Спринт G — BBCode + RichEditor (отдельный воркстрим)
+
+Файлы: `src/components/common/BBCode.jsx` (28 / 92, 4 raw `<table>`), `src/components/common/RichEditor.jsx` (20 / 510, 1 таблица hotkeys).
+
+Правило спринта: это рендер пользовательского контента, а не раскладка. Здесь нет 1:1-конверсии — менять только то, что не меняет вид постов.
+
+Шаги:
+1. `[table]` в BBCode: `<table>` остаётся (контент!), инлайн `tableStyle`/`tdStyle` — на CSS-переменные/санитизацию.
+2. `[quote]` уже на токене `--quote-border-color`; инлайн-стиль цвета заголовка цитаты (`BBCode.jsx:694`, `style={{ color: 'var(--primary-color)' }}`) — в токен.
+3. Таблица хоткеев в RichEditor → `<dl>`/grid (шаг 6 плейбука).
+4. Overflow-меню (56 пунктов) — `<a>` против `as="button"`: решить, не сломав `.post-content a` (см. шаг 9). То же — для mask-picker.
+5. Тулбар, кнопки форматирования, состояния disabled/active — по плейбуку.
+
+### Спринт H — AdminPage (ПОСЛЕДНИМ)
+
+Файлы: `src/pages/AdminPage.jsx` (52 / 875, 5 таблиц), `src/components/admin/DesignsTab.jsx` (0 / 102), `src/components/admin/EmailTemplatesSettings.jsx` (4 / 114).
+SPEC: `markdowns/SPEC_REFACTOR_ADMIN_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении.
+
+Сначала: свериться с веткой реорганизации **`feature/admin-reorg`** (HEAD `69e7231d`) — что там уже переделано. Мигрировать в координации с реоргом, а не поверх старой формы. Если реорг ещё не влит в `feature/theming` — не начинать этот спринт, а дождаться решения Алины.
+
+Шаги: 5 таблиц (users, roles, category groups, categories с инлайн-редактированием, audit log) → гриды (шаг 6 плейбука); редактируемая строка → `.is-editing`; табы админки — по одному; DesignsTab — карточки дизайнов; EmailTemplates — формы шаблонов.
+
+### Спринт I — ProfilePage (ПОСЛЕДНИМ)
+
+Файлы: `src/pages/ProfilePage.jsx` (35 / 763, 1 таблица), `src/components/profile/SecurityTab.jsx` (3 / 171).
+SPEC: `markdowns/SPEC_REFACTOR_PROFILE_PAGE_ARCHITECTURE.md` + мини-спецификация в приложении.
+
+Шаги — по табам, один за раз: overview / reputation / characters / posts / settings / security. Reputation history → grid. Формы настроек: поведение сида по серверным значениям не трогать. Аватар — загрузка отдельным эндпоинтом (не смешивать с профилем).
+
+### Спринт J — Снятие Bootstrap
+
+Только когда `grep` даёт 0 по всем трём проверкам:
+
+- `grep -r "react-bootstrap" src/` — 0;
+- `grep -r "style={{" src/` — 0;
+- Bootstrap-утилиты из шага 3 плейбука в `className` — 0.
+
+Шаги:
+1. Убрать `bootstrap.min.css` из `src/main.jsx`.
+2. Убрать `bootstrap` и `react-bootstrap` из `package.json` (`package-lock.json` — пересобрать через `npm install` на машине Алины, не руками).
+3. Прогон: `npm test` + `npm run build`; финальный чек-лист (раздел ниже).
+
+---
+## Зависимости между спринтами
+
+```
+Спринт A (хвост топика)
+    ↓
+Спринт B (общие атомы)
+    ↓
+Спринт C (Members)
+    ↓
+Спринт D (Notifications / Drafts / TopicForm)
+    ↓
+Спринт E (DM)
+    ↓
+Спринт F (Auth + служебные)
+    ↓
+Спринт G (BBCode / RichEditor — можно параллельно с C–F, не пересекается)
+    ↓
+Спринт H (Admin — после реорга feature/admin-reorg)
+    ↓
+Спринт I (Profile)
+    ↓
+Спринт J (снятие Bootstrap)
+```
+
+---
 # 4. Спецификации по страницам — что уже есть
 
 Существуют 3 подробные спецификации в `markdowns/`:
 
 | Спецификация | Покрывает |
 |-------------|----------|
-| `forum-index-theme-dom-spec.md` | **Forum Index** — главная страница (`/`). Категории, форумы, статистика |
-| `forum-and-members-theme-dom-spec.md` | **Forum View** — страница категории (`/category/:id`) + **Members View** — участники (`/members`) |
-| `forum-topic-view-theme-dom-spec.md` | **Topic View** — просмотр темы (`/topic/:id`) |
+| `SPEC_forum-index-theme-dom.md` | **Forum Index** — главная страница (`/`). Категории, форумы, статистика |
+| `SPEC_forum-and-members-theme-dom.md` | **Forum View** — страница категории (`/category/:id`) + **Members View** — участники (`/members`) |
+| `SPEC_forum-topic-view-theme-dom.md` | **Topic View** — просмотр темы (`/topic/:id`) |
 
 Эти спецификации являются **основным источником истины** для DOM-контракта. Агент ОБЯЗАН прочитать соответствующую спецификацию перед началом работы над компонентом.
 
@@ -456,9 +560,9 @@ markdowns/
 
 # 5. Спецификации по страницам — что нужно создать
 
-Для страниц, **не** покрытых существующими спецификациями, агент должен следовать общим принципам из раздела 1 файла `forum-index-theme-dom-spec.md` и нижеприведённым мини-спецификациям в этом документе.
+Для страниц, **не** покрытых существующими спецификациями, агент должен следовать общим принципам из раздела 1 файла `SPEC_forum-index-theme-dom.md` и нижеприведённым мини-спецификациям в этом документе.
 
-Страницы, для которых нужны DOM-спецификации (мини-спецификации приведены ниже в спринтах):
+Страницы, для которых нужны DOM-спецификации (мини-спецификации приведены в приложении «Справочные мини-спецификации»):
 
 1. **Profile** (`/profile/:uid`) — профиль пользователя
 2. **Active Topics** (`/active-topics`) — активные темы
@@ -477,555 +581,11 @@ markdowns/
 
 ---
 
-# Спринт 0 — Инфраструктура
-
-## Цель
-Создать базовую инфраструктуру: хук `useThemeable`, атрибут `data-theme-engine`, пустой CSS-файл. После этого спринта ни один компонент ещё не изменён, но механизм переключения работает.
-
-## Файлы
-
-### [НОВЫЙ] `src/hooks/useThemeable.js`
-
-```js
-// Хук, который компоненты используют для определения режима themeable
-// Возвращает { isThemeable: boolean, engineName: string | null }
-//
-// isThemeable = true когда DesignProvider имеет activeDesign !== null
-// engineName = "themeable" (в будущем возможны другие каркасы)
-//
-// Использование в компоненте:
-//   const { isThemeable } = useThemeable();
-//   return (
-//     <div id={isThemeable ? "forum-main" : undefined}
-//          className={`existing-class ${isThemeable ? 'forum-main' : ''}`}>
-//   );
-```
-
-Реализация:
-- Импортирует `useDesign` из `DesignProvider`
-- Возвращает `{ isThemeable: !!activeDesign, engineName: activeDesign ? 'themeable' : null }`
-
-### [ИЗМЕНИТЬ] `src/contexts/ThemeProvider.jsx`
-
-Добавить логику:
-- Когда `DesignProvider.activeDesign !== null` → установить `document.body.setAttribute('data-theme-engine', 'themeable')`
-- Когда `activeDesign === null` → `document.body.removeAttribute('data-theme-engine')`
-- Координация: `ThemeProvider` должен получать информацию об `activeDesign`. Варианты:
-  - (a) Импортировать `useDesign` в `ThemeProvider`
-  - (b) Вынести эту логику в `DesignProvider` (он уже знает про `activeDesign`)
-  - **Рекомендация: вариант (b)** — добавить `data-theme-engine` прямо в `DesignProvider.jsx`, рядом с существующей логикой инжекта CSS/JS
-
-### [ИЗМЕНИТЬ] `src/contexts/DesignProvider.jsx`
-
-В `useEffect` где инжектится CSS/JS, добавить:
-```js
-if (activeDesign) {
-  document.body.setAttribute('data-theme-engine', 'themeable');
-  // ... existing CSS/JS injection ...
-} else {
-  document.body.removeAttribute('data-theme-engine');
-  // ... existing cleanup ...
-}
-```
-
-### [НОВЫЙ] `src/styles/themeable.css`
-
-Пустой файл-заготовка. Все стили за selector `[data-theme-engine="themeable"]`. Будет наполнен в спринте 13.
-
-```css
-/* Themeable Engine — базовые стили для кастомных дизайнов */
-/* Все правила ниже действуют ТОЛЬКО при data-theme-engine="themeable" */
-
-[data-theme-engine="themeable"] {
-  /* CSS-переменные для кастомных тем будут добавлены позже */
-}
-```
-
-### [ИЗМЕНИТЬ] `src/main.jsx`
-
-Добавить `import './styles/themeable.css';` после импорта `index.css`.
-
-## Критерий готовности
-- При активном custom design на `<body>` появляется `data-theme-engine="themeable"`
-- При стандартной теме (dark/light/neutral) атрибута нет
-- `useThemeable()` возвращает `{ isThemeable: true }` при custom design
-- Визуально ничего не изменилось — ни для стандартных тем, ни для custom designs
-
 ---
 
-# Спринт 1 — Layout, Navbar, общий каркас
+## Справочные мини-спецификации (целевые DOM)
 
-## Цель
-Привести `Layout.jsx`, `Navbar.jsx`, `ForumStats.jsx`, `ForumBreadcrumbs.jsx`, `ForumPagination.jsx` к стабильной DOM-структуре. Эти компоненты общие для ВСЕХ страниц.
-
-## Целевая структура (при `isThemeable`)
-
-```
-<div id="forum-wrapper">
-  <div id="forum">
-    <ForumBackground />
-    <header id="forum-header">
-      <div id="forum-title">              ← логотип + название форума
-        <a class="forum-logo">...</a>
-        <span class="forum-name">...</span>
-      </div>
-      <nav id="forum-nav">                ← навигационные ссылки
-        <a class="nav-link nav-home">...</a>
-        <a class="nav-link nav-members">...</a>
-        <a class="nav-link nav-active-topics">...</a>
-        ...
-      </nav>
-      <div id="forum-user-links">         ← ссылки пользователя
-        <a class="user-profile">...</a>
-        <a class="user-notifications">...</a>
-        <a class="user-messages">...</a>
-        <a class="user-settings">...</a>
-        <a class="user-logout">...</a>
-      </div>
-    </header>
-    <div id="forum-announcement">...</div>  ← welcomeMessage, только на главной
-    <div id="forum-status">...</div>        ← maintenance banner, verification banner
-    <main>                                  ← каждая страница добавит свой id через children
-      {children}
-    </main>
-    <footer id="forum-about">              ← copyright, ссылки
-      ...
-    </footer>
-  </div>
-</div>
-```
-
-## Файлы
-
-### [ИЗМЕНИТЬ] `src/components/layout/Layout.jsx`
-
-**Текущий DOM:**
-```
-<>
-  <ForumBackground />
-  <div className="app-wrapper">
-    <ConnectionStatusBanner />
-    <Navigation />
-    ...maintenance banner...
-    ...email verification banner...
-    ...welcome message...
-    <main className="py-2"><Container>{children}</Container></main>
-  </div>
-  <footer className="footer-custom py-2">...</footer>
-  <ScrollButtons />
-</>
-```
-
-**Что изменить при `isThemeable`:**
-- Обернуть всё в `<div id="forum-wrapper">` → `<div id="forum">`
-- `<Navigation />` обернуть в `<header id="forum-header">`
-- Banners → `<div id="forum-status">`
-- Welcome message → `<div id="forum-announcement">`
-- Footer → `<footer id="forum-about">`
-- **Bootstrap-классы и `<Container>` сохраняются** для layout, добавляются семантические id/class
-
-**Что НЕ менять при `!isThemeable`:**
-- Весь текущий JSX остаётся без изменений
-
-### [ИЗМЕНИТЬ] `src/components/layout/Navbar.jsx`
-
-- На корневой `<Navbar>` (Bootstrap) добавить: при isThemeable id не ставить на Navbar (Bootstrap уже контролирует его), но внутренние блоки снабдить id
-- Блок с логотипом/названием форума → `id="forum-title"`, `.forum-logo`, `.forum-name`
-- Навигационные ссылки → каждая получает семантический класс: `.nav-home`, `.nav-members`, `.nav-active`, `.nav-search`, `.nav-new-replies`, `.nav-subscriptions`, `.nav-admin`
-- Блок пользовательских ссылок (профиль, уведомления, тема, выход) → `id="forum-user-links"`, внутренние элементы: `.user-profile`, `.user-notifications`, `.user-messages`, `.user-theme-picker`, `.user-logout`
-
-### [ИЗМЕНИТЬ] `src/components/layout/ForumStats.jsx`
-
-- Обернуть в `<section id="forum-statistics">`
-- Каждый показатель → семантический класс:
-  - `.stat-topics` — всего тем
-  - `.stat-posts` — всего сообщений
-  - `.stat-members` — всего участников
-  - `.stat-newest-member` — последний зарегистрированный
-  - `.stat-online` — онлайн
-  - `.stat-visitors` — посетители
-
-### [ИЗМЕНИТЬ] `src/components/common/ForumBreadcrumbs.jsx`
-
-- Добавить props: `position` (`"top"` | `"bottom"`) и `pagePrefix` (строка, напр. `"forum"`, `"topic"`, `"members"`)
-- При `isThemeable` рендерить `id="{pagePrefix}-breadcrumbs-{position}"` на `<nav>`
-- Внутренние элементы: `.breadcrumb-item`, `.breadcrumb-link`
-
-### [ИЗМЕНИТЬ] `src/components/common/ForumPagination.jsx`
-
-- Добавить prop `paginationId` (строка, напр. `"forum-pagination-top"`)
-- При `isThemeable` рендерить `id={paginationId}` на контейнере
-- Внутренние элементы: `.pagination-item`, `.pagination-link`, `.pagination-current`, `.pagination-prev`, `.pagination-next`
-
-## Критерий готовности
-- При `isThemeable`: в DOM видны `#forum-wrapper`, `#forum`, `#forum-header`, `#forum-title`, `#forum-nav`, `#forum-user-links`, `#forum-about`
-- При `!isThemeable`: DOM идентичен текущему
-- Визуально ничего не поломано ни для одной темы
-
----
-
-# Спринт 2 — Forum Index (MainPage)
-
-## Спецификация
-**Основной источник:** `markdowns/forum-index-theme-dom-spec.md`
-
-## Файлы
-
-### [ИЗМЕНИТЬ] `src/pages/MainPage.jsx`
-
-**Текущий DOM (упрощённо):**
-```
-<div className="pt-5 pb-4">
-  {groups.map(group => (
-    <Card className="forum-group-card bg-transparent">
-      <div className="forum-group-header"><h4>{group.title}</h4></div>
-      <Table hover responsive className="forum-table forum-table-sub">
-        <thead><tr>...</tr></thead>
-        <tbody>
-          {categories.map(cat => (
-            <tr>
-              <td>link + description</td>
-              <td>topics count</td>
-              <td>posts count</td>
-              <td>last post info</td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </Card>
-  ))}
-  <ForumStats />
-</div>
-```
-
-**Целевой DOM при `isThemeable`:**
-```
-<div id="forum-index" class="forum-index">
-  <nav id="forum-breadcrumbs-top">...</nav>
-  
-  <main id="forum-main">
-    <!-- Каждый group → section.forum-category -->
-    <section id="forum-category-{groupId}" 
-             class="forum-category category-{groupId}"
-             data-category-id="{groupId}">
-      <header class="category-header">
-        <h2 class="category-title">{group.title}</h2>
-      </header>
-      <div class="category-content">
-        <!-- Каждая категория в группе → article.forum-item -->
-        <article id="forum-item-{catId}" 
-                 class="forum-item forum-item-{catId} [is-new] [is-unread]"
-                 data-forum-id="{catId}">
-          <div class="forum-icon">...</div>
-          <div class="forum-info">
-            <h3 class="forum-title"><a href="/category/{catId}">...</a></h3>
-            <div class="forum-description">...</div>
-          </div>
-          <div class="forum-topics" data-value="{N}">{N}</div>
-          <div class="forum-posts" data-value="{N}">{N}</div>
-          <div class="forum-last-post">
-            <div class="last-post-avatar">...</div>
-            <a class="last-post-link" href="...">...</a>
-            <time class="last-post-date">...</time>
-            <a class="last-post-author" href="...">...</a>
-          </div>
-        </article>
-      </div>
-    </section>
-  </main>
-  
-  <section id="forum-statistics">...</section>
-  <nav id="forum-breadcrumbs-bottom">...</nav>
-</div>
-```
-
-**Маппинг терминов:**
-- В коде `group` → в спецификации `category` (группа категорий)
-- В коде `category` → в спецификации `forum-item` (подфорум внутри категории)
-
-### [ИЗМЕНИТЬ] `src/components/common/LastPostInfo.jsx`
-
-- Добавить prop `contextClass` (`"forum-last-post"` или `"topic-last-post"`)
-- При `isThemeable` обернуть в `<div class="{contextClass}">`
-- Внутри: `.last-post-avatar`, `.last-post-link`, `.last-post-date`, `.last-post-author`
-
-## Критерий готовности
-- Чек-лист из раздела 48 `forum-and-members-theme-dom-spec.md` → Forum View → все пункты проходят
-- Главная страница визуально и функционально работает при обеих режимах
-
----
-
-# Спринт 3 — Forum View (CategoryPage + TopicRow)
-
-## Спецификация
-**Основной источник:** `markdowns/forum-and-members-theme-dom-spec.md`, разделы 2-16
-
-## Файлы
-
-### [ИЗМЕНИТЬ] `src/pages/CategoryPage.jsx`
-
-**Целевой DOM при `isThemeable`:**
-```
-<div id="forum-view" class="forum-view forum-{categoryId}" data-forum-id="{categoryId}">
-  <nav id="forum-breadcrumbs-top">...</nav>
-  <header id="forum-header">
-    <h1 class="forum-title">{category.title}</h1>
-    <div class="forum-description">{category.description}</div>
-  </header>
-  <div id="forum-actions-top">
-    <!-- кнопки управления: новая тема, manage -->
-  </div>
-  <nav id="forum-pagination-top" class="forum-pagination is-top">...</nav>
-  <div id="forum-topic-list">
-    <div class="topic-list-header">
-      <div class="topic-column">...</div>
-      <div class="topic-replies">...</div>
-      <div class="topic-views">...</div>
-      <div class="topic-last-post">...</div>
-    </div>
-    <div class="topic-list">
-      <!-- pinned topics -->
-      <!-- regular topics -->
-    </div>
-  </div>
-  <nav id="forum-pagination-bottom" class="forum-pagination is-bottom">...</nav>
-  <div id="forum-actions-bottom">...</div>
-  <nav id="forum-breadcrumbs-bottom">...</nav>
-</div>
-```
-
-### [ИЗМЕНИТЬ] `src/components/common/TopicRow.jsx`
-
-**Критически важный компонент** — используется на 4 страницах: CategoryPage, ActiveTopicsPage, NewRepliesPage, SubscriptionsPage.
-
-**Текущий DOM:** `<tr className="topic-row-hover">` с `<td>` внутри
-
-**Целевой DOM при `isThemeable`:**
-```
-<article id="topic-{topicId}" 
-         class="topic-item topic-{topicId} [is-sticky] [is-locked] [is-new] [is-unread]"
-         data-topic-id="{topicId}">
-  <div class="topic-icon">...</div>
-  <div class="topic-main">
-    <a class="topic-title" href="/topic/{id}">{title}</a>
-    <div class="topic-author">
-      <a class="topic-author-link" href="/profile/{authorId}">
-        <span class="topic-author-name">{authorName}</span>
-      </a>
-    </div>
-    <nav class="topic-pagination"><!-- mini-pagination --></nav>
-  </div>
-  <div class="topic-replies" data-value="{N}">{N}</div>
-  <div class="topic-views" data-value="{N}">{N}</div>
-  <div class="topic-last-post">
-    <a class="last-post-avatar" href="/profile/{id}"><img ...></a>
-    <a class="last-post-link" href="/topic/{id}">...</a>
-    <time class="last-post-date" datetime="...">...</time>
-    <a class="last-post-author" href="/profile/{id}">...</a>
-  </div>
-</article>
-```
-
-**ВАЖНО**: При `isThemeable` компонент должен рендерить `<article>` вместо `<tr>`. Это значит, что страницы, использующие TopicRow, должны при `isThemeable` рендерить контейнер как `<div class="topic-list">` вместо `<Table>`. Сам TopicRow должен определять через prop или хук, какой элемент рендерить.
-
-**State-классы на `.topic-item`:**
-- `topic.is_pinned` → `.is-sticky`
-- `topic.is_locked` → `.is-locked`
-- `hasUnread` → `.is-unread` / `.is-new`
-
-### [ИЗМЕНИТЬ] `src/components/common/AuthorMeta.jsx`
-- При `isThemeable` добавить `.topic-author`, `.topic-author-name`, `.topic-author-link`
-
-## Критерий готовности
-- Чек-лист из раздела 48 `forum-and-members-theme-dom-spec.md` → Forum View → все пункты проходят
-- Все 4 страницы, использующие TopicRow, работают корректно
-
----
-
-# Спринт 4 — Topic View (TopicPage) — ✅ ВЫПОЛНЕНО
-
-## Спецификация
-**Основной источник:** `markdowns/SPEC_forum-topic-view-theme-dom.md`
-
-## Статус реализации (Ноябрь 2026, исправлено после повторной верификации)
-
-> ⚠️ **Первая верификация (2026-11-08):** предыдущий агент добавил семантику
-> **условно** через `isThemeable ? ... : undefined` и junk-классы `themeable-*`, что противоречит
-> решению Этапа 1 («Семантический DOM первого класса»: разметка всегда, без веток `isThemeable`).
->
-> ⚠️ **Повторная проверка архитектурного пункта 1 (2026-11-08):** в топик-компонентах оставались
-> Bootstrap-утилиты (`mt-4`, `d-flex`, `shadow-sm`, `text-muted`, `px-4`, `bg-dark`) и инлайн
-> `style={{ ... }}`, а также react-bootstrap-компоненты (`Container`, `Row`, `Col`, `Card`,
-> `Dropdown`). Это прямо противоречит пункту 1. Исправлено по образцу Этапов 1–2: страница и её
-> topic-компоненты полностью переведены на семантические теги и классы, стили — в
-> `src/styles/topic-view.css`, размер/цвет/зазор — через токены в `theme-variables.css`.
-> Импорты react-bootstrap удалены из TopicPage и topic-компонентов. Глобальный Bootstrap CSS
-> оставлен только как переходный Compass — он удаляется только после Этапов 3–7, когда в
-> `src/` не останется ни одного react-bootstrap-импорта.
-
-TopicPage.jsx остаётся модульным контроллером (hooks/`src/components/topic/*`); бизнес-логика,
-state, API и обработчики событий не менялись. Семантические DOM-атрибуты добавлены **безусловно**.
-
-### Создано
-
-- `src/hooks/useThemeable.js` — хук `{ isThemeable, engineName }`, читает `activeDesign` из `DesignProvider`. Оставлен как детект custom design; **не** используется для условного рендера разметки.
-- `src/contexts/DesignProvider.jsx` (`data-theme-engine`): при активном custom design `document.body.setAttribute('data-theme-engine', 'themeable')`, иначе `removeAttribute`.
-- `src/styles/topic-view.css` — компонентные стили Topic View: `#topic-page`, `#topic-header`, `#topic-posts`, `.topic-post`, `.post-author`, `.post-body`, `.post-content`, `.post-footer`, reply/editor/action/skeleton; все свойства — через `--topic-*` токены. Подключён в `src/main.jsx` рядом с `forum-view.css`/`topic-row.css`.
-- `src/styles/theme-variables.css` — блок «Topic View»: page/breadcrumbs/header/post/author/reply/actions/skeleton токены (`--topic-*`); dark-переопределение карточки.
-
-### Изменено (только DOM-атрибуты/классы/теги + native-элементы вместо react-bootstrap; бизнес-логика не затронута)
-
-| Файл | Что добавлено (безусловно, без Bootstrap-классов и без `style={{ ... }}`) |
-|------|--------------|
-| `src/pages/TopicPage.jsx` | Удалены `Container/Card/Row/Col` из react-bootstrap; корень — `<main id="topic-page" data-topic-id>`; state-классы `is-pinned`/`is-locked`/`is-closed`; `<section id="topic-posts" class="topic-posts">`; skeleton — `<article class="topic-skeleton">` (был `Card/Row/Col` с Bootstrap-утилитами и `style={{ minHeight: '200px' }}`); `<nav id="topic-breadcrumbs-bottom">` + `.topic-back-link` |
-| `src/components/topic/TopicHeader.jsx` | Удалены `Dropdown` и все Bootstrap-классы/инлайн-стили; `<nav id="topic-breadcrumbs-top">`, `<header id="topic-header">`, `.topic-head/.topic-title-row/.topic-title/.topic-description/.topic-header-layout/.topic-meta/.topic-actions`, нативный `details/summary.topic-manage` + `.topic-manage-menu` вместо Dropdown, `<nav id="topic-pagination-top" class="topic-pagination">` |
-| `src/components/topic/TopicPostCard.jsx` | Удалены `Card/Button` и все Bootstrap-классы/инлайн-стили; `id="post-{id}"`, `data-post-id`, `data-user-id`, state-классы `is-first`/`is-topic-starter`/`is-edited`/`is-deleted`, `.topic-post` + `.post-{id}`, `<aside class="post-author">` (`is-online`/`is-offline`, `data-user-id`/`data-group-id`), `.post-header/.post-meta/.post-permalink/.post-number`, `.post-body/.post-content/.post-content__text`, `.post-signature`, `.post-dice/.post-rep`, `<footer class="post-footer">` с нативными `button.footer-link`, pinned-strip без Bootstrap |
-| `src/components/topic/TopicActionsBar.jsx` | Удалены `Button` и Bootstrap-классы; `<nav id="topic-pagination-top/bottom" class="topic-pagination">`, `#topic-actions-bottom` + нативный `button.topic-actions-subscription` |
-| `src/components/topic/TopicReplyComposer.jsx` | Удалены `Card/Form/Button/Dropdown` и все Bootstrap-классы/инлайн-стили; `<section id="topic-reply" class="topic-reply">`, `.topic-reply__card/__header/__title/__body`, `.reply-form`, нативные `input.topic-reply__input`, `details.topic-reply__mask` + меню, `button.topic-btn`, `.reply-header/.reply-editor/.reply-actions/.reply-submit`, notice-стейты через `.topic-reply-notice` |
-| `src/components/topic/PostInlineEditor.jsx` | Удалены `Form/Button/Dropdown` и Bootstrap-классы/инлайн-стили; `.topic-post-editor*`, нативный checkbox `.topic-select-input`, `details.topic-reply__mask`, кнопки `.topic-btn` |
-| `src/styles/topic-view.css` + `theme-variables.css` + `src/main.jsx` | Новые CSS-токены и компонентный файл (см. «Создано»); JSX хранит только данные/state |
-
-**Проверка после исправления:** `npx eslint` по затронутым файлам — чисто; `npm run build` — OK; `npm test` (35 гейтов + `lint:js`) — OK. В `TopicPage.jsx` и `src/components/topic/*.jsx` (кроме `TopicModalsContainer`, который вне этого спринта) нет `react-bootstrap`-импортов, `style={{ ... }}` и Bootstrap-утилитных классов. Глобальный `bootstrap.min.css` **не** удалялся (Compass: финальный шаг после Этапов 3–7).
-
-## ⚠️ Предупреждение
-
-**TopicPage.jsx — 3681 строка, 172KB.** Самый большой и сложный файл проекта. Содержит огромное количество бизнес-логики: посты, черновики, реакции, цитирование, редактирование, модерация, real-time подписки, пагинация, голоса, уведомления.
-
-**Правила для агента:**
-1. **ТОЛЬКО DOM-изменения.** Ноль изменений в бизнес-логике, state management, API-вызовах, useEffect, обработчиках событий.
-2. Перед началом — полностью прочитать файл и понять его структуру.
-3. Каждый пост в JSX найти и обернуть семантическими элементами.
-4. Тестировать после каждого блока изменений.
-
-## Целевой DOM при `isThemeable`
-
-### Корневой контейнер темы
-```
-<main id="topic-page" 
-      class="topic topic-{topicId} [is-pinned] [is-locked] [is-closed]"
-      data-topic-id="{topicId}">
-```
-
-### Заголовок темы
-```
-<header id="topic-header">
-  <h1 class="topic-title">{topic.title}</h1>
-  <div class="topic-description">{topic.description}</div>
-  <div class="topic-meta">
-    <!-- автор, дата создания, количество сообщений, статус -->
-  </div>
-</header>
-```
-
-### Breadcrumbs и пагинация
-```
-<nav id="topic-breadcrumbs-top">...</nav>
-<div id="topic-actions-top">
-  <button class="topic-action-reply">...</button>
-  <button class="topic-action-subscribe">...</button>
-  ...
-</div>
-<nav id="topic-pagination-top">...</nav>
-```
-
-### Список постов
-```
-<section id="topic-posts">
-  <article id="post-{postId}" 
-           class="topic-post post-{postId} [is-first] [is-topic-starter] [is-edited] [is-deleted]"
-           data-post-id="{postId}" data-user-id="{authorId}">
-    
-    <header class="post-header">
-      <a class="post-number">#{N}</a>
-      <time class="post-date" datetime="...">{date}</time>
-      <a class="post-permalink" href="#post-{id}">⟶</a>
-      <div class="post-actions">
-        <button class="post-action-quote">...</button>
-        <button class="post-action-edit">...</button>
-        <button class="post-action-delete">...</button>
-        <button class="post-action-report">...</button>
-      </div>
-    </header>
-    
-    <div class="post-container">
-      <div class="post-author [is-online] [is-offline]" 
-           data-user-id="{id}" data-group-id="{roleId}">
-        <div class="author-status"><!-- online dot --></div>
-        <a class="author-name" href="/profile/{uid}">{name}</a>
-        <div class="author-rank">{role badge}</div>
-        <div class="author-avatar"><img src="..." alt="..."></div>
-        <div class="author-custom-fields">
-          <div class="author-field">
-            <span class="author-field-name">...</span>
-            <span class="author-field-value">...</span>
-          </div>
-        </div>
-        <div class="author-post-count">{N}</div>
-        <div class="author-reputation">{N}</div>
-      </div>
-      
-      <div class="post-body">
-        <div class="post-content">
-          <!-- user HTML content (BBCode rendered) -->
-          <!-- blockquote.post-quote внутри контента -->
-        </div>
-        <div class="post-attachments">
-          <div class="post-attachment">...</div>
-        </div>
-        <div class="post-signature">...</div>
-      </div>
-    </div>
-    
-    <footer class="post-footer">
-      <div class="post-reactions">
-        <button class="post-reaction [is-active]">...</button>
-      </div>
-      <div class="post-links">
-        <a class="post-link-reply">...</a>
-        <a class="post-link-quote">...</a>
-      </div>
-    </footer>
-  </article>
-</section>
-```
-
-### Нижняя часть
-```
-<nav id="topic-pagination-bottom">...</nav>
-<div id="topic-actions-bottom">...</div>
-<section id="topic-reply">
-  <div class="reply-header">...</div>
-  <form class="reply-form">
-    <div class="reply-editor"><!-- RichEditor --></div>
-    <div class="reply-actions">
-      <button class="reply-submit">...</button>
-    </div>
-  </form>
-</section>
-<nav id="topic-breadcrumbs-bottom">...</nav>
-```
-
-## State-классы
-
-**На `#topic-page`:**
-- `topic.is_pinned` → `.is-pinned`
-- `topic.is_locked` → `.is-locked`
-
-**На `.topic-post`:**
-- Первый пост → `.is-first`
-- Автор совпадает с автором темы → `.is-topic-starter`
-- `post.edited_at` → `.is-edited`
-
-**На `.post-author`:**
-- `isUserOnline(uid)` → `.is-online` / `.is-offline`
-
-## Критерий готовности
-- Чек-лист из раздела 38 `forum-topic-view-theme-dom-spec.md`
-- Все посты рендерятся, цитаты работают, реакции работают, пагинация работает
-- Форма ответа работает
-- Якоря `#post-{id}` работают для навигации
-
----
+Целевые DOM из исходных спринтов 5–12. Рамка `isThemeable` в них — устаревшая: семантический DOM теперь всегда, веток нет. Имена классов — фактические, сверены с журналом; где мини-спецификация расходится с кодом, прав код и карта повторяющихся элементов в аудите.
 
 # Спринт 5 — Members View (MembersPage)
 
@@ -1167,73 +727,6 @@ ProfilePage — вторая по сложности страница (1802 ст
 .profile-tabs
 .profile-tab
 .profile-tab-content
-```
-
----
-
-# Спринт 7 — Списки тем: Active Topics, New Replies, Subscriptions
-
-## Мини-спецификация
-
-Эти 3 страницы имеют одинаковую структуру — список тем с TopicRow. После спринта 3 TopicRow уже поддерживает семантическую разметку. Здесь нужно добавить обёртки страниц.
-
-### ActiveTopicsPage
-
-```
-<div id="active-topics-page" class="active-topics-page topic-list-page">
-  <nav id="active-topics-breadcrumbs-top">...</nav>
-  <header id="active-topics-header">
-    <h1 class="page-title">{t('stats.top_discussed')}</h1>
-    <div class="page-description">{t('stats.top_discussed_desc')}</div>
-  </header>
-  <div id="active-topics-list" class="topic-list-container">
-    <div class="topic-list-header">...</div>
-    <div class="topic-list">
-      <!-- TopicRow components (already themed from Sprint 3) -->
-    </div>
-  </div>
-  <nav id="active-topics-breadcrumbs-bottom">...</nav>
-</div>
-```
-
-### NewRepliesPage
-
-```
-<div id="new-replies-page" class="new-replies-page topic-list-page">
-  <nav id="new-replies-breadcrumbs-top">...</nav>
-  <header id="new-replies-header">
-    <h1 class="page-title">...</h1>
-    <div class="page-actions">
-      <button class="mark-all-read-btn">...</button>
-    </div>
-  </header>
-  <nav class="page-tabs">
-    <button class="page-tab [is-active]" data-tab="all">...</button>
-    <button class="page-tab [is-active]" data-tab="new">...</button>
-  </nav>
-  <nav id="new-replies-pagination-top">...</nav>
-  <div id="new-replies-list" class="topic-list-container">
-    <div class="topic-list">...</div>
-  </div>
-  <nav id="new-replies-pagination-bottom">...</nav>
-</div>
-```
-
-### SubscriptionsPage
-
-```
-<div id="subscriptions-page" class="subscriptions-page topic-list-page">
-  <nav id="subscriptions-breadcrumbs-top">...</nav>
-  <header id="subscriptions-header">
-    <h1 class="page-title">...</h1>
-    <div class="page-description">...</div>
-  </header>
-  <nav id="subscriptions-pagination-top">...</nav>
-  <div id="subscriptions-list" class="topic-list-container">
-    <div class="topic-list">...</div>
-  </div>
-  <nav id="subscriptions-pagination-bottom">...</nav>
-</div>
 ```
 
 ---
@@ -1505,62 +998,9 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 ---
 
-# Спринт 13 — Themeable CSS базовый файл
-
-## Цель
-Создать `src/styles/themeable.css` — полноценный файл базовых стилей, которые действуют только при `[data-theme-engine="themeable"]`.
-
-## Содержимое
-
-1. **CSS-переменные** — расширенный набор переменных для кастомных тем:
-   - Все существующие переменные из `:root` / `[data-theme]` (наследуются)
-   - Дополнительные переменные для новых элементов:
-     - `--forum-header-bg`, `--forum-header-text`
-     - `--category-header-bg`, `--category-header-text`
-     - `--topic-item-bg`, `--topic-item-hover-bg`
-     - `--post-author-bg`, `--post-body-bg`
-     - `--post-header-bg`, `--post-footer-bg`
-     - и т.д.
-
-2. **Базовые стили** для каждого семантического контейнера:
-   - Layout: `#forum-wrapper`, `#forum`, `#forum-header`, `#forum-about`
-   - Forum Index: `#forum-main`, `.forum-category`, `.forum-item`
-   - Forum View: `#forum-view`, `.topic-item`
-   - Topic View: `#topic-page`, `.topic-post`, `.post-author`, `.post-body`
-   - Members: `#members-page`, `.member-item`
-   - и т.д.
-
-3. **Reset Bootstrap конфликтов** — где Bootstrap-классы мешают семантическому layout, переопределить их за `[data-theme-engine="themeable"]`
-
-4. **Responsive breakpoints** — мобильные стили для семантических контейнеров
-
-## Принцип
-Этот файл — **минимальный**, работающий скелет. Он не должен навязывать конкретный дизайн. Он обеспечивает, что при активном themeable-каркасе форум выглядит «адекватно по умолчанию», а кастомный CSS поверх него может полностью переоформить любой элемент.
-
 ---
 
-# Спринт 14 — Theme API Reference документация
-
-## Цель
-Создать `markdowns/theme-api-reference.md` — полный справочник Theme DOM API для дизайнеров.
-
-## Содержимое
-
-1. **Введение** — что такое Theme API, как работает, как подключать CSS/JS
-2. **Полный список селекторов** по страницам:
-   - Structural IDs
-   - Semantic classes
-   - State classes
-   - Data attributes
-   - Entity-specific IDs/classes
-3. **CSS-переменные** — полный список с описанием и значениями по умолчанию
-4. **Примеры** — 3-5 примеров кастомных CSS-тем (смена цветовой палитры, смена layout, скрытие элементов, etc.)
-5. **Гайд для дизайнеров** — пошаговая инструкция «как создать свой дизайн»
-6. **Чек-лист** — полный чек-лист проверки DOM-контракта
-
----
-
-# Спринт 15 — Интеграционное тестирование
+## Финальный чек-лист (бывший спринт 15)
 
 ## Чек-лист
 
@@ -1608,87 +1048,30 @@ ProfilePage — вторая по сложности страница (1802 ст
 
 ---
 
-# Зависимости между спринтами
-
-```
-Спринт 0 (Инфраструктура)
-    ↓
-Спринт 1 (Layout, Navbar, каркас)
-    ↓
-    ├── Спринт 2 (Forum Index)
-    ├── Спринт 3 (Forum View + TopicRow) ─→ Спринт 4 (Topic View)
-    ├── Спринт 5 (Members View)
-    └── Спринт 6 (Profile)
-            ↓
-    Спринт 7 (Active/New/Subs) ← зависит от спринта 3 (TopicRow)
-    Спринт 8 (Notifications)
-    Спринт 9 (Topic Form)
-    Спринт 10 (Messages)
-    Спринт 11 (Auth + служебные)
-    Спринт 12 (Admin)
-            ↓
-    Спринт 13 (CSS)
-    Спринт 14 (Docs)
-            ↓
-    Спринт 15 (Тестирование)
-```
-
-**Параллельно** можно выполнять:
-- Спринты 2, 3, 5, 6 — после спринта 1
-- Спринты 7-12 — после спринта 3 (TopicRow готов)
-- Спринты 13, 14 — после завершения всех DOM-спринтов
-
 ---
 
-# Общие правила для агентов
+## Правила для агентов
 
-## Что ДЕЛАТЬ
+> Этот раздел заменяет старые «Общие правила» (isThemeable-ветки, «сохранять Bootstrap-классы», «не запускать build») — те правила устарели и противоречат журналу.
 
-1. **Читать спецификацию** перед началом работы. Для страниц с подробной спецификацией в `markdowns/` — читать соответствующий файл целиком. Для остальных — следовать мини-спецификации из этого документа.
+### Что ДЕЛАТЬ
 
-2. **Использовать хук `useThemeable()`** для определения, нужна ли семантическая разметка. Пример:
-   ```jsx
-   const { isThemeable } = useThemeable();
-   
-   return (
-     <div 
-       id={isThemeable ? "forum-view" : undefined}
-       className={`existing-class ${isThemeable ? 'forum-view' : ''}`}
-     >
-   ```
+1. **Читать плейбук, спринт и SPEC** перед началом работы над компонентом.
+2. **Один компонент за раз.** После него — `npm run build` + `npm test` + короткий отчёт.
+3. **Семантический DOM всегда.** `id` на структурных контейнерах, `data-*` на сущностях (`data-topic-id`, `data-post-id`, `data-user-id`, `data-group-id`, `data-category-id`, `data-forum-id`), state — классами `.is-*` по реальным данным из модели.
+4. **Значения — литерально из оригинала** (Bootstrap / `index.css`). Не округлять, не «улучшать».
+5. **Цвета — через токены; новые токены — только цвета.** Геометрия — литералами в классе.
+6. **Проверять три темы и три ширины** (десктоп / ≤993px / ≤768px).
+7. **Если не можешь сверить вид — напиши в отчёте**, что не сверено. Не гадай.
 
-3. **Сохранять Bootstrap-классы** — они отвечают за внутренний layout и не должны удаляться. Семантические классы добавляются РЯДОМ:
-   ```jsx
-   // Правильно:
-   className="row forum-item forum-item-25"
-   
-   // Неправильно:
-   className="forum-item forum-item-25"  // удалён row — layout сломан
-   ```
-
-4. **Добавлять `data-*` атрибуты** на все сущности:
-   - `data-category-id`, `data-forum-id`, `data-topic-id`, `data-post-id`, `data-user-id`, `data-group-id`
-
-5. **Добавлять state-классы** на основании реальных данных из модели. Не изобретать несуществующие состояния.
-
-6. **Проверять обратную совместимость** — если существующий JS ищет элементы по классу, не удалять этот класс. Можно добавить новый рядом.
-
-7. **Тестировать при обоих режимах** — убедиться, что при `!isThemeable` UI идентичен текущему.
-
-## Что НЕ делать
+### Что НЕ делать
 
 1. **НЕ менять бизнес-логику** — ноль изменений в state management, API-вызовах, useEffect, обработчиках событий, маршрутизации.
-
-2. **НЕ удалять существующие CSS-классы** без проверки, что они не используются в JS или CSS.
-
-3. **НЕ использовать Bootstrap-классы как Theme API** — тема не должна стилизоваться через `.row`, `.col`, `.card`, `.btn`. Эти классы для внутреннего layout.
-
-4. **НЕ копировать старую MyBB/Rusff разметку** — не использовать `.tcl`, `.tc2`, `.isticky`, `.pa-author`, `.item1` и подобные. Подробный список запрещённых классов в каждой спецификации.
-
-5. **НЕ использовать порядковые классы** — `.item1`, `.item2`, `.item3` для сущностей с собственным ID.
-
-6. **НЕ привязывать тему к тексту** — подписи колонок, лейблы фильтров, названия групп могут быть на разных языках. Тема стилизует по классу, не по тексту.
-
-7. **НЕ рендерить пустые контейнеры** — если элемент не имеет данных (нет описания, нет вложений, нет подписи), не создавать пустой `<div class="forum-description"></div>`. Если данных нет — элемент не рендерится.
-
-8. **НЕ запускать `npm run build`, `firebase deploy`** и подобные команды. Только модификация кода.
+2. **НЕ использовать `!important`** в нативных модулях (`src/styles/*.css`) — никогда, даже в медиа-запросах.
+3. **НЕ переписывать файл целиком и НЕ брать два компонента за раз.**
+4. **НЕ удалять классы/`id`, которые ищет JS или CSS**, без проверки.
+5. **НЕ добавлять новые правила в `src/index.css`** и новые токены геометрии.
+6. **НЕ запускать `firebase deploy`** и подобные команды. `npm run build` и `npm test` — можно и нужно.
+7. **НЕ придумывать новые состояния/классы** без данных из модели.
+8. **НЕ привязывать тему к тексту** — подписи и лейблы бывают на разных языках; тема стилизует по классу, не по тексту.
+9. **НЕ рендерить пустые контейнеры** — нет данных, нет элемента.
