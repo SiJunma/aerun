@@ -139,7 +139,7 @@
 ### A — Серверный флаг `unread` в подписках (главное)
 **Статус:** выполнено.
 **Файл:** `backend/internal/platform/pocketbase/subscriptions.go`.
-**Что сделано:** в `listUserSubscriptionsHandler`, после загрузки видимых тем и до сборки `items`, один раз резолвится множество непрочитанных тем через `unreadTopicIDs(e)` (та же логика, что `listTopicsHandler` в `forum_topics.go`). Флаг ставится на саму тему: `topic["unread"] = unreadSet[topicID]`. При ошибке `unreadTopicIDs` флаг остаётся отсутствующим, ответ не падает.
+**Что сделано:** в `listUserSubscriptionsHandler`, после загрузки видимых тем и до сборки `items`, один раз резолвится множество непрочитанных тем через `unreadTopicIDs(e)` (та же логика, что `listTopicsHandler` в `forum_topics.go`). Флаг ставится на саму тему: `topic["unread"] = unreadSet[topicID]`, но **только если** `unreadTopicIDs` отработал без ошибки — при ошибке флаг остаётся отсутствующим (`unreadResolved` флагует успех), и страница продолжает жить по локальной readMap. Ответ не падает.
 **Проверка:** `go vet` чист, `go build ./...` чист. Фронтенд (`normalizeTopic` через spread, `TopicRow` предпочитает серверный флаг) не требовал изменений.
 
 ### B — Сортировка подписок по активности темы на сервере + `toMillis` в датах

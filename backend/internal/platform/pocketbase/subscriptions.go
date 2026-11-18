@@ -245,8 +245,10 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 	// Серверное мнение о непрочитанном резолвится ОДИН раз на всю страницу —
 	// ровно как в listTopicsHandler (forum_topics.go). При ошибке флаг остаётся
 	// отсутствующим, и страница продолжает жить по локальной readMap.
+	var unreadResolved bool
 	unreadSet := make(map[string]bool)
 	if ids, err := unreadTopicIDs(e); err == nil {
+		unreadResolved = true
 		for _, id := range ids {
 			unreadSet[id] = true
 		}
@@ -270,7 +272,9 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 		// Absent, not null, when the topic is gone or out of reach — the client
 		// drops the row either way and must not render a stub.
 		if topic, ok := topics[topicID]; ok {
-			topic["unread"] = unreadSet[topicID]
+			if unreadResolved {
+				topic["unread"] = unreadSet[topicID]
+			}
 			item["topic"] = topic
 		}
 		items[i] = item
