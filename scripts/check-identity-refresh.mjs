@@ -288,13 +288,18 @@ check(
 // independent JavaScript: a get-then-set there is a race, so a simultaneous
 // logout in two tabs minted two ids and counted one person as two guests.
 // The re-read after the write is what makes both tabs converge on one value.
+// The key is storage-scoped (src/utils/storageScope.js): the code writes and
+// re-reads makeStorageKey('guest_id', 'guest'), not the literal 'guest_id'.
+// The gate below matches the scoped form; the pre-scoping literal form no
+// longer exists in AuthProvider, which is why the old regex failed on correct
+// code.
 check(
-  /localStorage\.setItem\('guest_id', candidate\);[\s\S]{0,120}return localStorage\.getItem\('guest_id'\)/.test(authProvider),
+  /localStorage\.setItem\(makeStorageKey\('guest_id', 'guest'\), candidate\);[\s\S]{0,120}return localStorage\.getItem\(makeStorageKey\('guest_id', 'guest'\)\)/.test(authProvider),
   'getOrCreateGuestId must re-read guest_id after writing it — a plain get-then-set races ' +
     'between tabs and one browser ends up counted as several guests'
 );
 check(
-  !/removeRtdbGuestPresence\(guestId\);\s*\n\s*localStorage\.removeItem\('guest_id'\)/.test(authProvider),
+  !/removeRtdbGuestPresence\(guestId\);\s*\n\s*localStorage\.removeItem\((?:'guest_id'|makeStorageKey\('guest_id', 'guest'\))\)/.test(authProvider),
   'signing in must NOT delete the stored guest_id: the id is per-browser, and every open tab ' +
     'mints a fresh one on its next logout, which is how two tabs became two guests'
 );

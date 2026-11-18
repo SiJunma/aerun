@@ -39,10 +39,6 @@
   margin-bottom: var(--topic-title-row-margin-bottom);
 }
 
-.topic-header-layout {
-  margin-top: var(--topic-head-meta-margin-top, 0.75rem);
-}
-
 .topic-header-layout .topic-meta strong {
   color: var(--text-color);
   opacity: 1;
@@ -95,6 +91,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--topic-header-layout-gap);
+  margin-top: var(--topic-head-meta-margin-top, 0.75rem);
 }
 
 .topic-actions {
@@ -446,9 +443,6 @@
 
 [data-theme='neutral'] .post-header {
   background-color: rgba(67, 52, 34, 0.04);
-}
-
-[data-theme='neutral'] .post-header {
   border-bottom-color: rgba(67, 52, 34, 0.1);
 }
 
@@ -500,7 +494,6 @@
 }
 
 .post-draft-badge {
-  background-color: transparent;
   border: 0;
   padding: 0.15rem 0.35rem;
   font-weight: 700;
@@ -522,7 +515,6 @@
   font-size: var(--topic-post-signature-size);
   opacity: 0.75;
   font-style: italic;
-  opacity: 0.75;
 }
 
 .post-dice {
@@ -558,15 +550,12 @@
 }
 
 .post-footer__links {
-  flex: 0 0 auto;
-}
-
-.post-footer__links {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--topic-post-footer-mobile-gap);
   font-size: var(--topic-post-footer-link-size);
+  flex: 0 0 auto;
 }
 
 .post-footer__actions {
@@ -1219,10 +1208,6 @@
   color: var(--topic-reply-header-text);
 }
 
-.post-author__meta-label {
-  font-weight: 400;
-}
-
 @media (min-width: 768px) {
   .topic-reply__hotkeys-label {
     display: inline;
@@ -1254,6 +1239,7 @@
 /* --- Сайдбар: метки лейблов (Posts/Reputation ↔ Posts/Rep) --- */
 .post-author__meta-label {
   margin: 0;
+  font-weight: 400;
 }
 
 .post-author__meta-label--full {

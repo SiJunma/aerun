@@ -41,6 +41,8 @@
   /* Accent badge (unread counter etc.) */
   --badge-bg: #0284c7;
   --badge-text: #ffffff;
+  --badge-bg-rgb: 75, 85, 99;
+  /* Default gray 600 */
 }
 
 [data-theme='dark'] {
@@ -416,10 +418,6 @@ label.fw-bold {
 }
 
 
-.text-primary {
-  color: var(--primary-color) !important;
-}
-
 [data-theme='neutral'] .form-select {
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23433422' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
 }
@@ -475,12 +473,6 @@ label.fw-bold {
 
 [data-theme='dark'] .form-switch .form-check-input:checked {
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgba(0,0,0,0.5)'/%3e%3c/svg%3e") !important;
-}
-
-[data-theme='neutral'] .form-check-input:checked {
-  background-color: #8c7152 !important;
-  /* Slightly darker than primary for better contrast on Sepia */
-  border-color: #8c7152 !important;
 }
 
 [data-theme='dark'] .form-control:focus,
@@ -1043,6 +1035,7 @@ label.fw-bold {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
   /* overflow: hidden; Removed to allow internal dropdowns to render outside */
   scroll-margin-top: 80px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 
@@ -1125,7 +1118,7 @@ strike:hover,
 }
 
 .bbcode-quote {
-  border-left: 4px solid var(--primary-color);
+  border-left: 4px solid var(--quote-border-color, var(--primary-color));
   padding: 0.2rem 0.75rem;
   margin-top: 1rem;
   margin-bottom: 0;
@@ -1238,7 +1231,6 @@ strike:hover,
 
 [data-theme='neutral'] .bbcode-quote {
   background: #ede9df;
-  border-left-color: #666;
 }
 
 [data-theme='dark'] .bbcode-quote {
@@ -1371,23 +1363,8 @@ strike:hover,
   color: var(--primary-color) !important;
 }
 
-.editor-toolbar .vr {
-  background-color: var(--border-color);
-}
-
 .editor-dropdown-toggle.no-caret::after {
   display: none !important;
-}
-
-/* Global Dropdown Hover/Background fixes for themes */
-.dropdown-menu {
-  background-color: var(--card-bg) !important;
-  border-color: var(--border-color) !important;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2) !important;
-}
-
-.dropdown-item {
-  color: var(--text-color) !important;
 }
 
 .dropdown-item:hover,
@@ -1750,14 +1727,6 @@ strike:hover,
   /* Reduced padding for a sleeker look */
 }
 
-.premium-modal .modal-title,
-.confirm-modal .modal-title {
-  font-size: 1.1rem;
-  /* Slightly smaller text */
-  font-weight: 600;
-  color: var(--text-color);
-}
-
 .premium-modal .modal-body {
   background: transparent !important;
   padding: 1.25rem !important;
@@ -1788,10 +1757,8 @@ strike:hover,
   background-color: var(--input-bg) !important;
   color: var(--text-color) !important;
   border: 1px solid var(--border-color) !important;
-}
-
-[data-theme='dark'] .modal-section-themed {
-  background-color: var(--input-bg) !important;
+  border-left: 3px solid var(--primary-color);
+  /* Add a tiny accent line to differentiate from inputs */
 }
 
 .modal-inner-card {
@@ -1899,6 +1866,9 @@ strike:hover,
 .premium-modal .modal-title,
 .confirm-modal .modal-title {
   color: var(--text-color);
+  font-size: 1.1rem;
+  /* Slightly smaller text */
+  font-weight: 600;
 }
 
 .premium-modal .btn-primary,
@@ -1964,15 +1934,19 @@ strike:hover,
   display: inline-block;
   padding: 0.2rem 0.75rem;
   font-size: 0.75rem;
-  font-weight: 600;
   border-radius: 6px;
   background: transparent;
-  color: var(--primary-color);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   -webkit-user-select: none;
   user-select: none;
   white-space: nowrap;
   line-height: 1.2;
+  /* "Calm Down" — ghost/subtle style for all themes (was a separate block) */
+  background-color: rgba(var(--badge-bg-rgb, 148, 163, 184), 0.08) !important;
+  color: var(--badge-bg) !important;
+  border: 1px solid rgba(var(--badge-bg-rgb, 148, 163, 184), 0.2) !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
 }
 
 /* The chief admin's badge is the SAME chip as every other role badge — same
@@ -2654,9 +2628,6 @@ a.rep-preview-name:hover {
 }
 
 /* New Post Highlighting */
-.post-card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
 
 .highlight-new-post {
   animation: highlight-fade 1s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2755,21 +2726,28 @@ a.rep-preview-name:hover {
 .role-badge.bg-danger {
   --badge-bg: var(--role-admin);
   --badge-text: #fff;
+  --badge-bg-rgb: 190, 18, 60;
+  /* Rose 700 */
 }
 
 .role-badge.bg-info {
   --badge-bg: var(--role-mod);
   --badge-text: #fff;
+  --badge-bg-rgb: 14, 116, 144;
+  /* Cyan 700 */
 }
 
 .role-badge.bg-primary {
   --badge-bg: var(--role-player);
   --badge-text: #fff;
+  --badge-bg-rgb: 29, 78, 216;
+  /* Blue 700 */
 }
 
 .role-badge.bg-secondary {
   --badge-bg: var(--role-spectator);
   --badge-text: #fff;
+  --badge-bg-rgb: 75, 85, 99;
 }
 
 /* Base Character Badge Override */
@@ -2800,40 +2778,6 @@ a.rep-preview-name:hover {
   /* Amber 700 */
   --badge-bg-rgb: 180, 83, 9 !important;
   border-color: rgba(180, 83, 9, 0.4) !important;
-}
-
-/* "Calm Down" - Use Ghost/Subtle style for all themes */
-.role-badge {
-  background-color: rgba(var(--badge-bg-rgb, 148, 163, 184), 0.08) !important;
-  color: var(--badge-bg) !important;
-  border: 1px solid rgba(var(--badge-bg-rgb, 148, 163, 184), 0.2) !important;
-  font-weight: 500 !important;
-  box-shadow: none !important;
-}
-
-/* Theme-specific RGB mappings for the ghost style */
-:root {
-  --badge-bg-rgb: 75, 85, 99;
-  /* Default gray 600 */
-}
-
-.role-badge.bg-danger {
-  --badge-bg-rgb: 190, 18, 60;
-}
-
-/* Rose 700 */
-.role-badge.bg-info {
-  --badge-bg-rgb: 14, 116, 144;
-}
-
-/* Cyan 700 */
-.role-badge.bg-primary {
-  --badge-bg-rgb: 29, 78, 216;
-}
-
-/* Blue 700 */
-.role-badge.bg-secondary {
-  --badge-bg-rgb: 75, 85, 99;
 }
 
 /* Gray 600 */
@@ -3019,16 +2963,11 @@ a.rep-preview-name:hover {
 .author-sidebar .text-muted,
 .post-header-strip .text-muted {
   opacity: 1 !important;
-}
-
-/* Light theme colors (Default) */
-.topic-description,
-.topic-meta-bar,
-.author-sidebar .text-muted,
-.post-header-strip .text-muted {
   color: #475569 !important;
   /* Slate 600 */
 }
+
+/* Light theme colors (Default) */
 
 .topic-meta-bar strong,
 .author-sidebar .text-muted strong {
@@ -3239,12 +3178,6 @@ a.rep-preview-name:hover {
 }
 
 /* Modal Content Grouping */
-.modal-section-themed {
-  background-color: rgba(var(--primary-rgb), 0.03);
-  border: 1px solid rgba(var(--primary-rgb), 0.08);
-  border-left: 3px solid var(--primary-color);
-  /* Add a tiny accent line to differentiate from inputs */
-}
 
 [data-theme='dark'] .modal-section-themed {
   background-color: rgba(255, 255, 255, 0.02) !important;
@@ -3748,6 +3681,20 @@ a.rep-preview-name:hover {
   max-height: 260px !important;
   overflow-y: auto !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Overflow menu items are <a class="dropdown-item">. Outside post bodies
+   Bootstrap already leaves them un-underlined, but the inline post editor
+   lives inside .post-content, where .post-content a underlines every link
+   — including these menu items. The ancestor-scoped selector (0,3,0) beats
+   .post-content a:hover (0,2,1) without !important; same leak the modal
+   variant already guards against below. */
+.editor-overflow-dropdown-menu .dropdown-item {
+  text-decoration: none;
+}
+
+.post-content .editor-overflow-dropdown-menu .dropdown-item {
+  text-decoration: none;
 }
 
 .editor-overflow-modal-items {
@@ -4526,6 +4473,7 @@ kbd {
   align-self: center;
   border-left: 1px solid var(--border-color);
   opacity: 0.2;
+  background-color: var(--border-color);
 }
 
 /* DM unread badge on the navbar — Bootstrap hides .badge:empty, ours must stay visible */

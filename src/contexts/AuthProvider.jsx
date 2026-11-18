@@ -836,6 +836,9 @@ export const AuthProvider = ({ children }) => {
   // The flag is written BEFORE the eviction and is NOT cleared on mount —
   // `GlobalModals` removes it only on hide, so it survives the redirect and the
   // page transitions in between until the member acknowledges the modal.
+  // Guest-scoped, not uid-scoped: `GlobalModals` reads the flag after the
+  // logout, when no uid is available — a uid-scoped write would never be
+  // read, and the member would be evicted silently again.
   //
   // `logout(true)` skips presence cleanup deliberately: a banned account has
   // already lost every permission, so setRtdbOffline would be a
@@ -849,7 +852,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!user || !profile || loading) return;
     if (profile.status !== 'banned') return;
-    sessionStorage.setItem(makeStorageKey('banned_logout', profile?.uid || 'guest'), 'true');
+    sessionStorage.setItem(makeStorageKey('banned_logout', 'guest'), 'true');
     logout(true);
   }, [user, profile, loading, logout]);
 
@@ -868,7 +871,8 @@ export const AuthProvider = ({ children }) => {
   //
   // The flag is written BEFORE the eviction and is NOT cleared on mount (the
   // modal removes it on hide), so the explanation survives the redirect and
-  // the page transitions in between.
+  // the page transitions in between. Guest-scoped, not uid-scoped — same reason
+  // as the ban flag above, and the same key `pocketbase.js` writes on a dead session.
   //
   // `logout(true)` skips the presence cleanup: the account has lost every
   // permission, so the offline write would be a permission-denied request
@@ -876,7 +880,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (!user || !profile || loading) return;
     if (profile.status !== 'deleted') return;
-    sessionStorage.setItem(makeStorageKey('deleted_logout', profile?.uid || 'guest'), 'true');
+    sessionStorage.setItem(makeStorageKey('deleted_logout', 'guest'), 'true');
     logout(true);
   }, [user, profile, loading, logout]);
 
