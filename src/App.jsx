@@ -151,7 +151,7 @@ const App = () => {
         {/* Admin-only Routes */}
         <Route path="/admin" element={<ProtectedRoute requireAdmin><Layout><AdminPage /></Layout></ProtectedRoute>} />
 
-        {/* Debug: скелетоны (только админ). Не в навигации, не индексируется. */}
+        {/* Debug: скелетоны (только root-админ). Не в навигации, не индексируется. */}
         <Route
           path="/_debug/skeletons"
           element={

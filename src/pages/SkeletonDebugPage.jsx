@@ -63,7 +63,7 @@ const inlineSkeletonLines = (count, width = '100%') =>
 
 export const SkeletonDebugPage = () => {
   const { profile } = useAuth();
-  const isRoot = profile?.role === 'root' || profile?.role === 'admin';
+  const isRoot = profile?.role === 'root';
 
   const [postsCount, setPostsCount] = useState(3);
   const [rowsCount, setRowsCount] = useState(5);

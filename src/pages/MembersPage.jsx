@@ -421,11 +421,203 @@ const MembersPage = () => {
           </thead>
           <tbody className="border-0">
             {membersLoading && users.length === 0 ? (
-              <tr>
-                <td colSpan="6" className="py-5 border-0">
-                  <Skeleton width="100%" height="14rem" className="mb-2" />
-                </td>
-              </tr>
+              <>
+                <tr key="ms-1" className="align-middle members-table-row">
+                  <td className="ps-4 py-3 border-0" data-label={t('forum.member')}>
+                    <div className="d-flex align-items-center gap-3">
+                      <div
+                        className="rounded-circle"
+                        style={{ width: '40px', height: '40px', background: 'var(--border-color)' }}
+                      />
+                      <div className="text-truncate">
+                        <div className="fw-bold text-truncate member-nickname">
+                          <Skeleton width="60%" height="1rem" />
+                        </div>
+                        <Skeleton width="40%" height="0.8rem" className="text-muted d-block text-truncate" />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="border-0" data-label={t('forum.role')}>
+                    <Skeleton width="80px" height="1.2rem" />
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.joined')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="60%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.last_seen')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="50%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="text-center fw-semibold text-primary border-0" data-label={t('forum.posts')}>
+                    <Skeleton width="40px" height="1rem" />
+                  </td>
+                  {settings?.enableReputation && (
+                    <td className="text-center pe-4 border-0" data-label={t('forum.rep')}>
+                      <Skeleton width="40px" height="1rem" />
+                    </td>
+                  )}
+                </tr>
+                <tr key="ms-2" className="align-middle members-table-row">
+                  <td className="ps-4 py-3 border-0" data-label={t('forum.member')}>
+                    <div className="d-flex align-items-center gap-3">
+                      <div
+                        className="rounded-circle"
+                        style={{ width: '40px', height: '40px', background: 'var(--border-color)' }}
+                      />
+                      <div className="text-truncate">
+                        <div className="fw-bold text-truncate member-nickname">
+                          <Skeleton width="60%" height="1rem" />
+                        </div>
+                        <Skeleton width="40%" height="0.8rem" className="text-muted d-block text-truncate" />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="border-0" data-label={t('forum.role')}>
+                    <Skeleton width="80px" height="1.2rem" />
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.joined')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="60%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.last_seen')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="50%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="text-center fw-semibold text-primary border-0" data-label={t('forum.posts')}>
+                    <Skeleton width="40px" height="1rem" />
+                  </td>
+                  {settings?.enableReputation && (
+                    <td className="text-center pe-4 border-0" data-label={t('forum.rep')}>
+                      <Skeleton width="40px" height="1rem" />
+                    </td>
+                  )}
+                </tr>
+                <tr key="ms-3" className="align-middle members-table-row">
+                  <td className="ps-4 py-3 border-0" data-label={t('forum.member')}>
+                    <div className="d-flex align-items-center gap-3">
+                      <div
+                        className="rounded-circle"
+                        style={{ width: '40px', height: '40px', background: 'var(--border-color)' }}
+                      />
+                      <div className="text-truncate">
+                        <div className="fw-bold text-truncate member-nickname">
+                          <Skeleton width="60%" height="1rem" />
+                        </div>
+                        <Skeleton width="40%" height="0.8rem" className="text-muted d-block text-truncate" />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="border-0" data-label={t('forum.role')}>
+                    <Skeleton width="80px" height="1.2rem" />
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.joined')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="60%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.last_seen')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="50%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="text-center fw-semibold text-primary border-0" data-label={t('forum.posts')}>
+                    <Skeleton width="40px" height="1rem" />
+                  </td>
+                  {settings?.enableReputation && (
+                    <td className="text-center pe-4 border-0" data-label={t('forum.rep')}>
+                      <Skeleton width="40px" height="1rem" />
+                    </td>
+                  )}
+                </tr>
+                <tr key="ms-4" className="align-middle members-table-row">
+                  <td className="ps-4 py-3 border-0" data-label={t('forum.member')}>
+                    <div className="d-flex align-items-center gap-3">
+                      <div
+                        className="rounded-circle"
+                        style={{ width: '40px', height: '40px', background: 'var(--border-color)' }}
+                      />
+                      <div className="text-truncate">
+                        <div className="fw-bold text-truncate member-nickname">
+                          <Skeleton width="60%" height="1rem" />
+                        </div>
+                        <Skeleton width="40%" height="0.8rem" className="text-muted d-block text-truncate" />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="border-0" data-label={t('forum.role')}>
+                    <Skeleton width="80px" height="1.2rem" />
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.joined')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="60%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.last_seen')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="50%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="text-center fw-semibold text-primary border-0" data-label={t('forum.posts')}>
+                    <Skeleton width="40px" height="1rem" />
+                  </td>
+                  {settings?.enableReputation && (
+                    <td className="text-center pe-4 border-0" data-label={t('forum.rep')}>
+                      <Skeleton width="40px" height="1rem" />
+                    </td>
+                  )}
+                </tr>
+                <tr key="ms-5" className="align-middle members-table-row">
+                  <td className="ps-4 py-3 border-0" data-label={t('forum.member')}>
+                    <div className="d-flex align-items-center gap-3">
+                      <div
+                        className="rounded-circle"
+                        style={{ width: '40px', height: '40px', background: 'var(--border-color)' }}
+                      />
+                      <div className="text-truncate">
+                        <div className="fw-bold text-truncate member-nickname">
+                          <Skeleton width="60%" height="1rem" />
+                        </div>
+                        <Skeleton width="40%" height="0.8rem" className="text-muted d-block text-truncate" />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="border-0" data-label={t('forum.role')}>
+                    <Skeleton width="80px" height="1.2rem" />
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.joined')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="60%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="small text-muted border-0" data-label={t('forum.last_seen')}>
+                    <div className="d-flex align-items-center gap-1">
+                      <Skeleton width={14} height={14} className="flex-shrink-0" />
+                      <Skeleton width="50%" height="1rem" />
+                    </div>
+                  </td>
+                  <td className="text-center fw-semibold text-primary border-0" data-label={t('forum.posts')}>
+                    <Skeleton width="40px" height="1rem" />
+                  </td>
+                  {settings?.enableReputation && (
+                    <td className="text-center pe-4 border-0" data-label={t('forum.rep')}>
+                      <Skeleton width="40px" height="1rem" />
+                    </td>
+                  )}
+                </tr>
+              </>
             ) : tableUsers.length > 0 ? (
               tableUsers.map(u => (
                 <tr key={u.id} className="align-middle members-table-row">

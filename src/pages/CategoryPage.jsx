@@ -19,6 +19,7 @@ import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
 import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
+import TopicRow from '../components/common/TopicRow';
 import ErrorCard from '../components/common/ErrorCard';
 import { resolveField } from '../utils/text';
 import { toMillis, unreadFloor } from '../utils/dates';
@@ -240,30 +241,11 @@ const CategoryPage = () => {
       <section id="forum-topic-list" className="forum-topic-list">
         {loading ? (
           <>
-            <div className="category-subtitle">
-              <span className="category-col--topic">{t('forum.topic')}</span>
-              <span className="category-col--replies">{t('forum.replies')}</span>
-              <span className="category-col--lastpost">{t('forum.last_post')}</span>
-            </div>
-            <div className="topic-list">
-              {[...Array(5)].map((_, i) => (
-                <article key={i} className="forum-item forum-item--topic forum-skeleton-row">
-                  <div className="forum-info">
-                    <h3 className="forum-title">
-                      <Skeleton width="60%" height="1.1rem" className="forum-skeleton-gap" />
-                      <Skeleton width="30%" height="0.8rem" />
-                    </h3>
-                  </div>
-                  <div className="forum-posts" data-value={0}>
-                    <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
-                  </div>
-                  <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
-                    <Skeleton width="50%" height="0.9rem" className="forum-skeleton-gap" />
-                    <Skeleton width="80%" height="0.7rem" />
-                  </div>
-                </article>
-              ))}
-            </div>
+            <TopicRow key="s-1" skeleton showCategoryInColumn />
+            <TopicRow key="s-2" skeleton showCategoryInColumn />
+            <TopicRow key="s-3" skeleton showCategoryInColumn />
+            <TopicRow key="s-4" skeleton showCategoryInColumn />
+            <TopicRow key="s-5" skeleton showCategoryInColumn />
           </>
         ) : loadError ? (
           <div className="forum-view-error">

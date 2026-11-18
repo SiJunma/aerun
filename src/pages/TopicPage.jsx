@@ -1723,7 +1723,7 @@ export default function TopicPage() {
             the stats poll and by the PATCH merge in handleSaveEdit), so the
             card is gated on it — pinnedFirstPost alone is a load-time
             snapshot that kept a unpinned post rendered until reload. */}
-        {currentPage > 1 && pinnedFirstPost && topic?.first_post_pinned !== false && (
+        {currentPage > 1 && pinnedFirstPost && topic?.first_post_pinned !== false && !isPageLoading && (
           <TopicPostCard
             post={pinnedFirstPost}
             postNumber={1}
@@ -1788,7 +1788,8 @@ export default function TopicPage() {
           />
         )}
 
-        {posts.map((post, index) => {
+        {!isPageLoading &&
+          posts.map((post, index) => {
           const postNum = (currentPage - 1) * ITEMS_PER_PAGE + index + 1;
           const isPostFirst = postNum === 1;
           const isThisEditing = modalState.editingPostId === post.id;

@@ -45,6 +45,120 @@ const MainPage = () => {
   // valid server result, so use its explicit loading state rather than length.
   const catsLoading = forumStateLoading;
 
+  // Живая скелетон-ветка строки раздела: та же оболочка .forum-item,
+  // контент — полосками. Нет id/якорей, нет живых ссылок. Видима и из
+  // ветки загрузки, и из основного рендера (через renderCategoryGroup).
+  const renderCategoryRows = (cats, skeleton = false) => cats.map(cat => {
+    if (skeleton) {
+      return (
+        <article
+          key={cat.id}
+          className={`forum-item forum-item-${cat.id} skeleton-forum-item`}
+        >
+          <div className="forum-info">
+            <Skeleton width="50%" height="1.4rem" className="forum-skeleton-gap" />
+            <Skeleton width="80%" height="0.9rem" />
+          </div>
+          <div className="forum-topics" data-value={0}>
+            <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
+          </div>
+          <div className="forum-posts" data-value={0}>
+            <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
+          </div>
+          <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
+            <div className="forum-skeleton-last">
+              <Skeleton variant="avatar" width={32} height={32} className="forum-skeleton-avatar" />
+              <div className="forum-skeleton-last-lines">
+                <Skeleton width="80%" height="0.9rem" className="forum-skeleton-gap" />
+                <Skeleton width="40%" height="0.7rem" />
+              </div>
+            </div>
+          </div>
+        </article>
+      );
+    }
+
+    const lastVisitRaw = readMap[cat.last_post_topic_id];
+    const lastReadOffset = lastVisitRaw?.offset ?? null;
+    const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
+    const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
+    const lastPostMs = toMillis(cat.last_post_at);
+    // The server owns read state, but local session visits
+    // (effectiveLastVisitMs >= lastPostMs) take immediate precedence
+    // over a stale server-side snapshot. A category is unread only if
+    // the server considers it unread AND this device has not visited
+    // it since the last post.
+    const serverUnread = typeof cat.unread === 'boolean' ? cat.unread : null;
+    const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
+    const isUnreadByServer = serverUnread !== null ? serverUnread : true;
+    const hasUnread = !!user &&
+      profile?.role !== 'pending' &&
+      cat.last_post_author_ref?.user_id !== user?.uid &&
+      isUnreadByServer &&
+      !isLocallyRead;
+
+    return (
+      <article
+        key={cat.id}
+        id={`forum-item-${cat.id}`}
+        className={`forum-item forum-item-${cat.id}${hasUnread ? ' is-unread is-new' : ''}`}
+        data-forum-id={cat.id}
+      >
+        <div className="forum-info">
+          <h3 className="forum-title">
+            <Link to={`/category/${cat.id}`} className="cat-link">
+              {resolveField(cat.title, lang)}
+            </Link>
+          </h3>
+          {cat.description && (
+            <div className="forum-description cat-desc">
+              {resolveField(cat.description, lang)}
+            </div>
+          )}
+          {/* Mobile Stats Line */}
+          <div className="forum-mobile-stats d-md-none">
+            <span className="forum-mobile-stat">
+              <FileText size={12} /> {cat.topics_count || 0}
+            </span>
+            <span className="forum-mobile-stat">
+              <MessageSquare size={12} /> {cat.posts_count || 0}
+            </span>
+          </div>
+        </div>
+        <div className="forum-topics" data-value={cat.topics_count || 0}>
+          {cat.topics_count || 0}
+        </div>
+        <div className="forum-posts" data-value={cat.posts_count || 0}>
+          {cat.posts_count || 0}
+        </div>
+        <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
+          {cat.last_post_topic_id ? (
+            <div className="last-post-content">
+              <Link
+                to={`/topic/${cat.last_post_topic_id}`}
+                className="last-topic-link"
+                title={t('stats.to_first_post')}
+              >
+                {cat.last_post_topic_title || '—'}
+              </Link>
+              <LastPostInfo
+                topicId={cat.last_post_topic_id}
+                lastPostAt={cat.last_post_at}
+                author={cat.last_post_author_ref}
+                hasUnread={hasUnread}
+                lastReadOffset={lastReadOffset}
+                postsCount={cat.last_post_topic_posts_count || null}
+                lang={lang}
+              />
+            </div>
+          ) : (
+            <span className="forum-no-posts">{t('forum.no_posts')}</span>
+          )}
+        </div>
+      </article>
+    );
+  });
+
   useEffect(() => {
     if (catsLoading || profileLoading) {
       const timer = setTimeout(() => {
@@ -53,6 +167,8 @@ const MainPage = () => {
       return () => clearTimeout(timer);
     }
   }, [catsLoading, profileLoading]);
+
+  const skeletonCats = [{ id: 'skel-1' }, { id: 'skel-2' }, { id: 'skel-3' }, { id: 'skel-4' }];
 
   return (
     <div id="forum-index" className="forum-index">
@@ -80,29 +196,7 @@ const MainPage = () => {
                 <span className="category-col--posts">{t('forum.posts')}</span>
                 <span className="category-col--lastpost">{t('forum.last_post')}</span>
               </div>
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="forum-item skeleton-forum-item">
-                  <div className="forum-info">
-                    <Skeleton width="50%" height="1.4rem" className="forum-skeleton-gap" />
-                    <Skeleton width="80%" height="0.9rem" />
-                  </div>
-                  <div className="forum-topics">
-                    <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
-                  </div>
-                  <div className="forum-posts">
-                    <Skeleton width={30} height="1rem" className="forum-skeleton-stat" />
-                  </div>
-                  <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
-                    <div className="forum-skeleton-last">
-                      <Skeleton variant="avatar" width={32} height={32} className="forum-skeleton-avatar" />
-                      <div className="forum-skeleton-last-lines">
-                        <Skeleton width="80%" height="0.9rem" className="forum-skeleton-gap" />
-                        <Skeleton width="40%" height="0.7rem" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              {renderCategoryRows(skeletonCats, true)}
             </div>
           </div>
         )
@@ -116,87 +210,6 @@ const MainPage = () => {
         // visible — otherwise a stale/empty groups cache blanks the whole page.
         const ungroupedCats = visibleCats.filter(c => !c.group_id || !safeGroups.some(g => g.id === c.group_id));
 
-        const renderCategoryRows = (cats) => cats.map(cat => {
-          const lastVisitRaw = readMap[cat.last_post_topic_id];
-          const lastReadOffset = lastVisitRaw?.offset ?? null;
-          const lastVisitValue = lastVisitRaw?.timestamp || lastVisitRaw;
-          const effectiveLastVisitMs = unreadFloor(lastVisitValue, profile?.created_at);
-          const lastPostMs = toMillis(cat.last_post_at);
-          // The server owns read state, but local session visits
-          // (effectiveLastVisitMs >= lastPostMs) take immediate precedence
-          // over a stale server-side snapshot. A category is unread only if
-          // the server considers it unread AND this device has not visited
-          // it since the last post.
-          const serverUnread = typeof cat.unread === 'boolean' ? cat.unread : null;
-          const isLocallyRead = effectiveLastVisitMs >= lastPostMs;
-          const isUnreadByServer = serverUnread !== null ? serverUnread : true;
-          const hasUnread = !!user &&
-            profile?.role !== 'pending' &&
-            cat.last_post_author_ref?.user_id !== user?.uid &&
-            isUnreadByServer &&
-            !isLocallyRead;
-
-          return (
-            <article
-              key={cat.id}
-              id={`forum-item-${cat.id}`}
-              className={`forum-item forum-item-${cat.id}${hasUnread ? ' is-unread is-new' : ''}`}
-              data-forum-id={cat.id}
-            >
-              <div className="forum-info">
-                <h3 className="forum-title">
-                  <Link to={`/category/${cat.id}`} className="cat-link">
-                    {resolveField(cat.title, lang)}
-                  </Link>
-                </h3>
-                {cat.description && (
-                  <div className="forum-description cat-desc">
-                    {resolveField(cat.description, lang)}
-                  </div>
-                )}
-                {/* Mobile Stats Line */}
-                <div className="forum-mobile-stats d-md-none">
-                  <span className="forum-mobile-stat">
-                    <FileText size={12} /> {cat.topics_count || 0}
-                  </span>
-                  <span className="forum-mobile-stat">
-                    <MessageSquare size={12} /> {cat.posts_count || 0}
-                  </span>
-                </div>
-              </div>
-              <div className="forum-topics" data-value={cat.topics_count || 0}>
-                {cat.topics_count || 0}
-              </div>
-              <div className="forum-posts" data-value={cat.posts_count || 0}>
-                {cat.posts_count || 0}
-              </div>
-              <div className="forum-last-post last-post-strip" data-label={t('forum.last_post')}>
-                {cat.last_post_topic_id ? (
-                  <div className="last-post-content">
-                    <Link
-                      to={`/topic/${cat.last_post_topic_id}`}
-                      className="last-topic-link"
-                      title={t('stats.to_first_post')}
-                    >
-                      {cat.last_post_topic_title || '—'}
-                    </Link>
-                    <LastPostInfo
-                      topicId={cat.last_post_topic_id}
-                      lastPostAt={cat.last_post_at}
-                      author={cat.last_post_author_ref}
-                      hasUnread={hasUnread}
-                      lastReadOffset={lastReadOffset}
-                      postsCount={cat.last_post_topic_posts_count || null}
-                      lang={lang}
-                    />
-                  </div>
-                ) : (
-                  <span className="forum-no-posts">{t('forum.no_posts')}</span>
-                )}
-              </div>
-            </article>
-          );
-        });
 
         const renderCategoryGroup = (cats, key, groupTitle, groupId) => (
           <section
