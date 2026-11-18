@@ -110,7 +110,7 @@
 
 .author-meta__name {
   min-width: 0;
-  color: var(--author-date-color, var(--author-meta-color));
+  color: var(--author-name-color, var(--text-color));
   font-weight: var(--author-name-font-weight, 600);
   white-space: normal;
   overflow-wrap: anywhere;

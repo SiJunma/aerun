@@ -172,7 +172,7 @@ const SubscriptionsPage = () => {
 
       <div className="forum-view-footer">
         <Link to="/" className="forum-view-back">
-          {t('common.back_to_main', 'На главную')}
+          &larr; {t('common.back_to_main', 'На главную')}
         </Link>
       </div>
     </main>

@@ -163,8 +163,8 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
         </Button>
       </div>
 
-      <Card className="shadow-sm border-0 mb-4 bg-light">
-        <Card.Body>
+      <div className="admin-card admin-card--spacing">
+        <div className="admin-card__body">
           <Form.Check 
             type="switch"
             id="allow-custom-design"
@@ -197,8 +197,8 @@ const DesignsTab = ({ designs, settings, updateSettings }) => {
               )}
             </Form.Select>
           </Form.Group>
-        </Card.Body>
-      </Card>
+        </div>
+      </div>
 
       <Row className="g-4">
         {designs.map(design => (

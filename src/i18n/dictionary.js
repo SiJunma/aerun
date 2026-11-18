@@ -12,6 +12,8 @@ export const translations = {
       app_name: "Aerun Forum",
       logout: "Logout",
       check_status: "Check Status",
+      collapse: "Collapse",
+      expand: "Expand",
       wip: "Project is under development.",
       back_to_main: "Back to Main",
       save: "Save",
@@ -1000,6 +1002,13 @@ export const translations = {
     admin: {
       title: "Admin Panel",
       dashboard: "Admin Dashboard",
+      nav: {
+        userManagement: "User & Access",
+        forumContent: "Forum Content",
+        systemConfig: "System",
+        toggleMenu: "Admin menu",
+        menuLabel: "Admin sections"
+      },
       tabs: {
         settings: "Settings",
         designs: "Designs",
@@ -1418,6 +1427,9 @@ export const translations = {
           content: "Content",
           created: "Created",
           guest_display_name: "Guest Name",
+          slug: "Slug",
+          allowed_roles: "Allowed Roles",
+          keys: "Keys",
           topic_title: "Topic Title",
         },
       },
@@ -1430,6 +1442,8 @@ export const translations = {
       app_name: "Aerun Forum",
       logout: "Выйти",
       check_status: "Проверить статус",
+      collapse: "Свернуть",
+      expand: "Развернуть",
       wip: "Проект находится в стадии разработки.",
       back_to_main: "На главную",
       save: "Сохранить",
@@ -2418,6 +2432,13 @@ export const translations = {
     admin: {
       title: "Панель управления",
       dashboard: "Панель управления",
+      nav: {
+        userManagement: "Пользователи и доступ",
+        forumContent: "Контент форума",
+        systemConfig: "Система",
+        toggleMenu: "Меню админки",
+        menuLabel: "Разделы админки"
+      },
       tabs: {
         settings: "Настройки",
         designs: "Дизайны",
@@ -2833,6 +2854,9 @@ export const translations = {
           author_id: "ID автора",
           author_kind: "Тип автора",
           by_author: "Автор",
+          slug: "Слаг",
+          allowed_roles: "Разрешенные роли",
+          keys: "Ключи",
           content: "Содержимое",
           created: "Создано",
           guest_display_name: "Имя гостя",

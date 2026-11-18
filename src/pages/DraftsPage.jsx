@@ -327,7 +327,7 @@ return (
 
       <div className="mt-4">
         <Link to="/" className="btn btn-outline-secondary">
-          {t('common.back_to_main', 'На главную')}
+          &larr; {t('common.back_to_main', 'На главную')}
         </Link>
       </div>
 

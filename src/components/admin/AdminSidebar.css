@@ -1,0 +1,385 @@
+/* ==========================================================================
+   Admin View Dashboard Layout & Sidebar Navigation
+
+   All styles bind to the semantic classes of the themeable DOM contract:
+   - Layout: #admin-page, .admin-dashboard-layout, .admin-dashboard-content,
+     .admin-dashboard-body, .admin-mobile-toggle-bar
+   - Sidebar: #admin-sidebar, .admin-sidebar, .admin-sidebar--collapsed,
+     .admin-sidebar--expanded, .admin-sidebar__header, .admin-sidebar__title,
+     .admin-sidebar__toggle-btn, .admin-sidebar__nav, .admin-sidebar__group,
+     .admin-sidebar__group-header, .admin-sidebar__group-chevron,
+     .admin-sidebar__group-items
+   - Navigation Items: .admin-nav-item, .admin-nav-item--active,
+     .admin-nav-item__icon, .admin-nav-item__label, [data-group], [data-tab]
+   - Drawer: .admin-offcanvas, .admin-offcanvas__header,
+     .admin-offcanvas__title, .admin-offcanvas__body
+
+   Colours come exclusively from theme variables (var(--card-bg),
+   var(--border-color), var(--text-color), var(--secondary-color),
+   var(--content-link-color), var(--block-bg)).
+   ========================================================================== */
+
+/* ── Two-column fluid admin layout ────────────────────────────────────────── */
+
+.admin-dashboard-layout {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  min-height: calc(100vh - 56px);
+  flex: 1 1 auto;
+}
+
+.admin-dashboard-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+}
+
+.admin-dashboard-body {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  padding: 1rem;
+}
+
+@media (min-width: 993px) {
+  .admin-dashboard-body {
+    padding-top: 1.5rem;
+  }
+}
+
+/* ── Mobile top toggle bar (< 992px) ─────────────────────────────────────── */
+
+.admin-mobile-toggle-bar {
+  position: sticky;
+  top: 56px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  background-color: var(--card-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+@media (min-width: 992px) {
+  .admin-mobile-toggle-bar {
+    display: none;
+  }
+}
+
+.admin-mobile-toggle-icon {
+  margin-right: 0.4rem;
+}
+
+.admin-mobile-toggle-current {
+  color: var(--secondary-color);
+  font-size: 0.875rem;
+  margin-left: auto;
+  font-weight: 500;
+}
+
+/* ── Desktop sticky sidebar (>= 992px) ───────────────────────────────────── */
+
+.admin-sidebar {
+  display: none;
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  max-height: calc(100vh - 56px);
+  flex-direction: column;
+  background-color: var(--card-bg);
+  border-right: 1px solid var(--border-color);
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow-x: hidden;
+  user-select: none;
+  z-index: 100;
+}
+
+@media (min-width: 992px) {
+  .admin-sidebar {
+    display: flex;
+    /* Compensate .forum-main-content top/bottom padding so the sticky
+       sidebar doesn't jump/shake while scrolling on desktop. */
+    margin-top: calc(var(--forum-main-content-padding-top) * -1);
+    margin-bottom: calc(var(--forum-main-content-padding-bottom) * -1);
+  }
+}
+
+.admin-sidebar--expanded {
+  width: 260px;
+  min-width: 260px;
+}
+
+.admin-sidebar--collapsed {
+  width: 68px;
+  min-width: 68px;
+}
+
+/* ── Sidebar header ───────────────────────────────────────────────────────── */
+
+.admin-sidebar__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  height: 60px;
+  flex-shrink: 0;
+}
+
+.admin-sidebar--collapsed .admin-sidebar__header {
+  justify-content: center;
+  padding: 1rem 0;
+}
+
+.admin-sidebar__toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-color);
+  padding: 0.4rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.admin-sidebar__toggle-btn:hover {
+  background-color: var(--block-bg);
+  color: var(--primary-color);
+}
+
+.admin-sidebar__title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+/* ── Sidebar navigation list ─────────────────────────────────────────────── */
+
+.admin-sidebar__nav {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.75rem 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  scrollbar-width: thin;
+}
+
+.admin-sidebar--collapsed .admin-sidebar__nav {
+  padding: 0.75rem 0.375rem;
+  align-items: center;
+}
+
+/* ── Navigation groups ────────────────────────────────────────────────────── */
+
+.admin-sidebar__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-sidebar__group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--secondary-color);
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  border-radius: 0.375rem;
+  font-family: inherit;
+  width: 100%;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.admin-sidebar__group-header:hover {
+  color: var(--text-color);
+  background-color: var(--block-bg);
+}
+
+.admin-sidebar__group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.admin-sidebar__group-icon {
+  flex-shrink: 0;
+}
+
+.admin-sidebar__group-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.admin-sidebar__group.is-collapsed .admin-sidebar__group-chevron,
+.admin-sidebar__group-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.admin-sidebar__group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-sidebar__group.is-collapsed .admin-sidebar__group-items {
+  display: none;
+}
+
+/* ── Navigation items (sections) ─────────────────────────────────────────── */
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1.5px solid transparent;
+  color: var(--secondary-color);
+  font-size: 0.925rem;
+  font-weight: 500;
+  font-family: inherit;
+  text-decoration: none;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  width: 100%;
+  text-align: left;
+}
+
+.admin-sidebar--collapsed .admin-nav-item {
+  padding: 0.5rem;
+  justify-content: center;
+  gap: 0;
+  width: 44px;
+  height: 44px;
+}
+
+.admin-nav-item:hover {
+  color: var(--text-color);
+  background-color: var(--block-bg);
+}
+
+.admin-nav-item--active,
+.admin-nav-item.is-active {
+  color: var(--content-link-color);
+  background-color: var(--block-bg);
+  border-color: var(--content-link-color);
+  font-weight: 600;
+}
+
+.admin-nav-item__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-nav-item__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Mobile offcanvas drawer ─────────────────────────────────────────────── */
+
+.admin-offcanvas {
+  --bs-offcanvas-bg: var(--card-bg);
+  --bs-offcanvas-color: var(--text-color);
+  --bs-offcanvas-border-color: var(--border-color);
+  --bs-offcanvas-width: 17rem;
+  background-color: var(--card-bg);
+  color: var(--text-color);
+  border-right: 1px solid var(--border-color);
+}
+
+@media (min-width: 992px) {
+  .admin-offcanvas {
+    display: none !important;
+  }
+}
+
+.admin-offcanvas__header {
+  border-bottom: 1px solid var(--border-color);
+  padding: 1rem;
+}
+
+.admin-offcanvas__title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-color);
+}
+
+.admin-offcanvas__body {
+  padding: 0;
+}
+
+/* ── Admin Cards & Panels ─────────────────────────────────────────────────── */
+
+.admin-card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.admin-card--spacing,
+.admin-card-spacing {
+  margin-bottom: 1.5rem;
+}
+
+.admin-card__header,
+.admin-card-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background-color: transparent;
+}
+
+.admin-card__body,
+.admin-card-body {
+  padding: 1.5rem;
+}
+
+.admin-card__footer,
+.admin-card-footer {
+  padding: 0.75rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.admin-card__title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.admin-card__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-color);
+}

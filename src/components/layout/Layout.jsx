@@ -16,6 +16,7 @@ const Layout = ({ children }) => {
   const { lang, t } = useI18n();
   const { activeDesign } = useDesign();
   const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   const sanitizedBanner = useMemo(() => {
     let rawHtml = '';
@@ -56,25 +57,35 @@ const Layout = ({ children }) => {
             <div id="forum-announcement" className="forum-announcement" dangerouslySetInnerHTML={{ __html: sanitizedBanner }} />
           )}
 
-          <main className="forum-main-content">
-            <Container>
-              {children}
-            </Container>
-          </main>
+          {isAdminRoute ? (
+            <main className="admin-main-fullwidth">
+              <div className="admin-viewport-wrapper">
+                {children}
+              </div>
+            </main>
+          ) : (
+            <main className="forum-main-content">
+              <Container>
+                {children}
+              </Container>
+            </main>
+          )}
         </div>
-        <footer id="forum-about" className="forum-about footer-custom py-2 text-center">
-          <Container>
-            <p className="mb-0 small">
-              &copy; {new Date().getFullYear()} {
-                activeDesign?.forumTitle ? activeDesign.forumTitle : (
-                  (typeof settings?.forumName === 'object' && settings.forumName !== null)
-                    ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
-                    : (settings?.forumName || 'Aerun Forum')
-                )
-              }
-            </p>
-          </Container>
-        </footer>
+        {!isAdminRoute && (
+          <footer id="forum-about" className="forum-about footer-custom py-2 text-center">
+            <Container>
+              <p className="mb-0 small">
+                &copy; {new Date().getFullYear()} {
+                  activeDesign?.forumTitle ? activeDesign.forumTitle : (
+                    (typeof settings?.forumName === 'object' && settings.forumName !== null)
+                      ? (settings.forumName[lang] || settings.forumName.en || 'Aerun Forum')
+                      : (settings?.forumName || 'Aerun Forum')
+                  )
+                }
+              </p>
+            </Container>
+          </footer>
+        )}
         <ScrollButtons />
       </div>
     </div>
