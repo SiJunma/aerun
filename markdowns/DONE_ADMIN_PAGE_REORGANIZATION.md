@@ -1,6 +1,6 @@
 # Sprint Plan: Admin View Reorganization & Themeable Preparation
 
-**Status**: IN PROGRESS — implemented on branch `feature/admin-reorg`, verified, not yet merged to `main`.
+**Status**: DONE — implemented on branch `feature/admin-reorg`, verified, not yet merged to `main`.
 
 **Goal**: Replace the horizontal tab navigation in `AdminPage.jsx` with a responsive vertical sidebar: grouped, collapsible sections, filtered by the viewer's permissions, an off-canvas drawer on narrow screens, and a stable DOM contract for custom themes (`TODO_THEMEABLE_SPRINT_PLAN.md`).
 
