@@ -331,6 +331,12 @@ func TestEveryDeleteIsAuditedWithItsText(t *testing.T) {
 		if byAuthor, _ := details["by_author"].(bool); !byAuthor {
 			t.Error("by_author must record that the author deleted their own post")
 		}
+		if catID, _ := details["category_id"].(string); catID == "" {
+			t.Error("category_id must be populated in post_delete audit details")
+		}
+		if catTitle, _ := details["category_title"].(string); catTitle == "" {
+			t.Error("category_title must be populated in post_delete audit details")
+		}
 		return
 	}
 	t.Errorf("the deleted post's TEXT must be stored in the audit log; entries: %v", logs)

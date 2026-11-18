@@ -10,10 +10,11 @@ import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, 
 import { toMembersRow, withLegacyDates } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { identityAvatar } from '../utils/identity';
-import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
+import { getAuditLogs } from '../api/audit';
 import { subscribeToDesigns } from '../api/designs';
 import { MAX_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_LABELS, getRoleVisuals, isChiefAdmin, normalizePermissions, PERMISSION_GROUPS, CHIEF_ADMIN_ID, ADMIN_ROLE_ID, DEFAULT_ROLES, rankOfRole } from '../constants/permissions';
 import TransferRootModal from '../components/modals/TransferRootModal';
+import AuditDetailsModal from '../components/modals/AuditDetailsModal';
 import { transferRoot } from '../api/admin';
 import Timestamp from '../components/common/Timestamp';
 import { InputGroup } from 'react-bootstrap';
@@ -22,7 +23,7 @@ import {
   UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2,
   Search, Award, Pin, Lock, Settings, MessageSquareOff,
   Bell, BellOff, ArrowRightLeft, Send, FilePen, User, Palette, Copy, Eye, EyeOff,
-  Layers, FolderTree, ShieldAlert, Menu
+  Layers, FolderTree, ShieldAlert, Menu, RefreshCw
 } from 'lucide-react';
 import AdminSidebar from '../components/admin/AdminSidebar';
 import {
@@ -53,6 +54,85 @@ const KNOWN_PERMISSIONS = new Set(Object.values(PERMISSIONS));
 // request carries at most 100 ids, so a bigger selection must be trimmed
 // before the confirmation button unlocks.
 const adminBulkMaxIds = 100;
+
+// Fixed Audit Action Registry (§3.3 of SPEC_REFACTOR_AUDIT_LOGS.md)
+// Grouped, canonical, no duplicates and no lower-case fallback.
+const AUDIT_ACTION_REGISTRY = [
+  {
+    groupKey: 'filter_group_identity',
+    actions: [
+      'password_change',
+      'email_change',
+      'provider_unlink',
+      'nickname_change',
+      'profile_edit',
+    ],
+  },
+  {
+    groupKey: 'filter_group_content',
+    actions: [
+      'post_edit',
+      'post_delete',
+      'topic_delete',
+      'topic_title_edit',
+      'topic_description_edit',
+      'topic_lock',
+      'topic_pin',
+      'topic_move',
+      'posts_move',
+      'dm_message_delete',
+      'reputation_edited',
+      'reputation_deleted',
+    ],
+  },
+  {
+    groupKey: 'filter_group_structure',
+    actions: [
+      'role_created',
+      'role_updated',
+      'role_deleted',
+      'category_created',
+      'category_updated',
+      'category_deleted',
+      'category_group_created',
+      'category_group_updated',
+      'category_group_deleted',
+      'design_created',
+      'design_updated',
+      'design_deleted',
+      'settings_updated',
+      'email_template_updated',
+      'email_template_test_sent',
+    ],
+  },
+  {
+    groupKey: 'filter_group_users',
+    actions: [
+      'admin_user_update',
+      'admin_user_delete',
+      'admin_users_bulk_update',
+      'admin_users_bulk_delete',
+      'root_transfer',
+    ],
+  },
+  {
+    groupKey: 'filter_group_masks',
+    actions: [
+      'character_created',
+      'character_updated',
+      'character_deleted',
+      'character_avatar_changed',
+    ],
+  },
+  {
+    groupKey: 'filter_group_legacy',
+    actions: [
+      'user banned',
+      'user unbanned',
+      'user registered',
+    ],
+  },
+];
 
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
@@ -257,7 +337,13 @@ const AdminPage = () => {
     if (!actionType) return '';
     const key = `admin.audit.actions.${actionType}`;
     const label = t(key);
-    return !label || label === key ? actionType.replace(/_/g, ' ') : label;
+    if (!label || label === key) {
+      console.warn(`[auditActionLabel] missing dictionary key: ${key}`);
+      return actionType
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+    return label;
   };
 
   const groupFormValid = groupTitleFilled;
@@ -343,25 +429,44 @@ const AdminPage = () => {
   // Audit Log State
   const [auditLogs, setAuditLogs] = useState([]);
   const [selectedAuditLog, setSelectedAuditLog] = useState(null);
-  const [lastAuditDoc, setLastAuditDoc] = useState(null);
   const [loadingAudit, setLoadingAudit] = useState(false);
-  const [hasMoreAudit, setHasMoreAudit] = useState(true);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditTotalPages, setAuditTotalPages] = useState(1);
   const [auditSearch, setAuditSearch] = useState('');
+  const [debouncedAuditSearch, setDebouncedAuditSearch] = useState('');
   const [auditActionFilter, setAuditActionFilter] = useState('all');
   const [auditSortDesc, setAuditSortDesc] = useState(true);
   const [auditPage, setAuditPage] = useState(1);
-  const AUDIT_PAGE_SIZE = 25;
+  const [auditReloadSignal, setAuditReloadSignal] = useState(0);
+  const AUDIT_PAGE_SIZE = 50;
 
-  // id → nickname for the ids the audit trail itself names. Most entries
-  // record the target's nickname beside its id (target_id/target_nickname,
-  // and the bulk `targets` rows), and the staff list the panel used to scan
-  // for them is one server page now — so the trail itself is the lookup,
-  // not the (partial) table.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedAuditSearch(auditSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [auditSearch]);
+
+  // id → nickname for the ids the audit trail names or users table holds.
   const auditNicknameIndex = useMemo(() => {
     const index = {};
+    (users || []).forEach(u => {
+      if (u?.id && u?.nickname) index[u.id] = u.nickname;
+    });
     (auditLogs || []).forEach(log => {
+      if (log.performer_id && log.performerNickname) {
+        index[log.performer_id] = log.performerNickname;
+      }
       const d = log.details || {};
-      if (d.target_id && d.target_nickname) index[d.target_id] = d.target_nickname;
+      if (d.author_id && (d.author_nickname || log.targetNickname)) {
+        index[d.author_id] = d.author_nickname || log.targetNickname;
+      }
+      if (d.owner_id && (d.owner_nickname || log.targetNickname)) {
+        index[d.owner_id] = d.owner_nickname || log.targetNickname;
+      }
+      if (d.target_id && (d.target_nickname || log.targetNickname)) {
+        index[d.target_id] = d.target_nickname || log.targetNickname;
+      }
       if (Array.isArray(d.targets)) {
         d.targets.forEach(tg => {
           if (tg?.id && tg?.nickname) index[tg.id] = tg.nickname;
@@ -369,7 +474,7 @@ const AdminPage = () => {
       }
     });
     return index;
-  }, [auditLogs]);
+  }, [auditLogs, users]);
 
   // Tab permissions check
   const canAccessTab = useCallback((tab) => {
@@ -955,33 +1060,64 @@ const AdminPage = () => {
     }
   }, [hasPermission]);
 
-  useEffect(() => {
-    if (activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) {
-      setLoadingAudit(true);
-      const unsub = subscribeToAuditLogs(200, (data, lastDoc) => {
-        setAuditLogs(data);
-        setLastAuditDoc(lastDoc);
-        setHasMoreAudit(data.length >= 200);
-        setLoadingAudit(false);
-      });
-      return () => unsub();
-    }
-  }, [activeTab, hasPermission]);
-
-  const handleLoadMoreAudit = async () => {
-    if (!lastAuditDoc || !hasMoreAudit) return;
+  const loadAuditLogs = useCallback(async (targetPage = 1) => {
+    if (!hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) return;
     setLoadingAudit(true);
     try {
-      const { logs, lastDoc: newLastDoc } = await getMoreAuditLogs(lastAuditDoc, 200);
-      setAuditLogs(prev => [...prev, ...logs]);
-      setLastAuditDoc(newLastDoc);
-      if (logs.length < 200) setHasMoreAudit(false);
+      const res = await getAuditLogs({
+        page: targetPage,
+        limit: AUDIT_PAGE_SIZE,
+        action_type: auditActionFilter,
+        q: debouncedAuditSearch,
+      });
+      setAuditLogs(res.items);
+      setAuditTotal(res.total);
+      setAuditTotalPages(res.totalPages);
+      setAuditPage(res.page);
     } catch (err) {
-      console.error('Failed to load more audit logs', err);
+      console.error('[AdminPage] Failed to fetch audit logs:', err);
     } finally {
       setLoadingAudit(false);
     }
-  };
+  }, [hasPermission, auditActionFilter, debouncedAuditSearch]);
+
+  const handleAuditPageChange = useCallback((newPage) => {
+    loadAuditLogs(newPage);
+  }, [loadAuditLogs]);
+
+  const triggerAuditReload = useCallback(() => {
+    setAuditReloadSignal((p) => p + 1);
+  }, []);
+
+  // Primary load & refresh when tab, filters or search change
+  useEffect(() => {
+    if (activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) {
+      loadAuditLogs(1);
+    }
+  }, [activeTab, hasPermission, auditActionFilter, debouncedAuditSearch, auditReloadSignal, loadAuditLogs]);
+
+  // Refetch on tab visibility change (§5.2 trigger b)
+  useEffect(() => {
+    if (activeTab !== 'audit' || !hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadAuditLogs(1);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [activeTab, hasPermission, loadAuditLogs]);
+
+  // Quiet fallback polling: 60s, only while tab is active and visible (§5.2)
+  useEffect(() => {
+    if (activeTab !== 'audit' || !hasPermission(PERMISSIONS.VIEW_AUDIT_LOG)) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadAuditLogs(auditPage);
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [activeTab, hasPermission, auditPage, loadAuditLogs]);
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();
@@ -2900,185 +3036,191 @@ const AdminPage = () => {
     const resolveId = (v) => {
       const usr = users?.find(u => u.id === v);
       if (usr) return usr.nickname || (isRootAdmin ? usr.email : '***');
-      // The trail names most targets twice (id and nickname); the staff
-      // page is not the whole table any more, so the trail resolves what
-      // the current page cannot.
       if (auditNicknameIndex[v]) return auditNicknameIndex[v];
       const cat = categories?.find(c => c.id === v);
-      if (cat) return typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title;
+      if (cat) return typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : (cat.title || cat.name);
       return v.length < 20 ? v : null; // short = readable role id, long = opaque hash
     };
 
-    const searchLower = auditSearch.toLowerCase();
-
-    const filtered = auditLogs
-      .filter(log => {
-        if (auditActionFilter !== 'all' && log.action_type !== auditActionFilter) return false;
-        if (!searchLower) return true;
-        // The server carries the performer's nickname on every audit row now;
-        // the staff page is only a fallback for rows it happens to hold.
-        const performerName = (log.performerNickname
-          || users?.find(u => u.id === log.performer_id)?.nickname
-          || '').toLowerCase();
-        const actionLabel = auditActionLabel(log.action_type).toLowerCase();
-        const detailValues = Object.values(log.details || {}).map(v => {
-          if (typeof v === 'string') return (resolveId(v) || v).toLowerCase();
-          return '';
-        }).join(' ');
-        return performerName.includes(searchLower)
-          || actionLabel.includes(searchLower)
-          || detailValues.includes(searchLower)
-          || log.id.toLowerCase().includes(searchLower);
-      })
-      .slice()
-      .sort((a, b) => {
-        // Numbers, not `a.created_at?.toMillis()`: the payload carries an ISO
-        // string (src/api/audit.js normalizes it), so the Firestore accessor
-        // threw "is not a function" and crashed the entire admin tab. The
-        // `?? 0` keeps an entry with no date sortable instead of NaN-poisoning
-        // the comparator.
-        const ta = a.created_at_ms ?? 0;
-        const tb = b.created_at_ms ?? 0;
-        return auditSortDesc ? tb - ta : ta - tb;
-      });
-
-    const totalPages = Math.max(1, Math.ceil(filtered.length / AUDIT_PAGE_SIZE));
-    const correctedPage = Math.min(auditPage, totalPages);
-    const pageItems = filtered.slice((correctedPage - 1) * AUDIT_PAGE_SIZE, correctedPage * AUDIT_PAGE_SIZE);
-
-    // All action types for the filter dropdown
-    const allActions = [...new Set(auditLogs.map(l => l.action_type))].sort();
+    const pageItems = auditSortDesc ? auditLogs : [...auditLogs].reverse();
 
     return (
       <div className="admin-audit-tab">
         <div className="admin-card">
           <div className="admin-card__body">
-            <h5 className="mb-3">{t('admin.audit.title')}</h5>
-
-          {/* Toolbar */}
-          <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
-            <div style={{ flex: '1 1 200px', minWidth: '200px' }}>
-              <InputGroup size="sm">
-                <InputGroup.Text><Search size={14} /></InputGroup.Text>
-                <Form.Control
-                  placeholder={t('common.search_placeholder')}
-                  value={auditSearch}
-                  onChange={e => { setAuditSearch(e.target.value); setAuditPage(1); }}
-                />
-              </InputGroup>
-            </div>
-            <Form.Select size="sm" style={{ width: 'auto' }} value={auditActionFilter} onChange={e => { setAuditActionFilter(e.target.value); setAuditPage(1); }}>
-              <option value="all">{t('common.all_actions')}</option>
-              {allActions.map(a => (
-                <option key={a} value={a}>{auditActionLabel(a)}</option>
-              ))}
-            </Form.Select>
-            <Button variant="outline-secondary" size="sm" onClick={() => { setAuditSortDesc(p => !p); setAuditPage(1); }} title={auditSortDesc ? 'Oldest first' : 'Newest first'}>
-              {t('admin.audit.table_date')} {auditSortDesc ? '↓' : '↑'}
-            </Button>
-          </div>
-
-          <div className="table-responsive">
-            <Table hover responsive>
-              <thead>
-                <tr>
-                  <th style={{ minWidth: '150px' }}>{t('admin.audit.table_date')}</th>
-                  <th>{t('admin.audit.table_performer')}</th>
-                  <th>{t('admin.audit.table_action')}</th>
-                  <th>{t('admin.audit.table_details')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageItems.map(log => {
-                  const performerName = log.performerNickname
-                    || users.find(u => u.id === log.performer_id)?.nickname
-                    || 'Unknown User';
-
-                  return (
-                    <tr key={log.id} className="align-middle">
-                      <td className="text-muted small text-nowrap">
-                        {log.created_at ? <Timestamp date={log.created_at} /> : '...'}
-                      </td>
-                      <td>
-                        <div className="fw-bold">{performerName}</div>
-                      </td>
-                      <td>
-                        <span className="audit-badge">{auditActionLabel(log.action_type)}</span>
-                      </td>
-                      <td className="small text-muted" style={{ wordBreak: 'break-word', minWidth: '200px' }}>
-                        {log.details && Object.keys(log.details).length > 0 ? (
-                          <div className="d-flex flex-column align-items-start gap-1">
-                            {Object.entries(log.details)
-                              .map(([k, v]) => {
-                                const transK = t(`admin.audit.fields.${k}`);
-                                const labelK = transK === `admin.audit.fields.${k}` ? k : transK;
-
-                                let displayValue = typeof v === 'object' ? JSON.stringify(v) : String(v);
-                                let hideRow = false;
-
-                                if (typeof v === 'string' && k.toLowerCase().includes('id')) {
-                                  const resolved = resolveId(v);
-                                  if (resolved !== null) {
-                                    displayValue = resolved;
-                                  } else {
-                                    hideRow = true; // opaque hash
-                                  }
-                                }
-
-                                if (hideRow) return null;
-
-                                if (k === 'changes' && typeof v === 'object') {
-                                  const changedKeys = Object.keys(v).map(ck => t(`admin.audit.fields.${ck}`) || ck);
-                                  return (
-                                    <div key={k}>
-                                      <strong>{labelK}:</strong> {changedKeys.join(', ')}
-                                    </div>
-                                  );
-                                }
-
-                                return (
-                                  <div key={k}>
-                                    <strong>{labelK}:</strong> {displayValue}
-                                  </div>
-                                );
-                              })}
-                            <Button variant="link" size="sm" className="p-0 text-decoration-none text-muted" onClick={() => setSelectedAuditLog(log)}>
-                              {t('admin.audit.view_details')}
-                            </Button>
-                          </div>
-                        ) : <span className="opacity-50">—</span>}
-                      </td>
-                    </tr>
-                  )
-                })}
-                {pageItems.length === 0 && !loadingAudit && (
-                  <tr>
-                    <td colSpan="4" className="text-center p-4 text-muted">{t('admin.audit.empty')}</td>
-                  </tr>
-                )}
-              </tbody>
-            </Table>
-          </div>
-
-          <div className="d-flex flex-wrap justify-content-between align-items-center mt-3 gap-2">
-            <div className="small text-muted">
-              {t('admin.audit.entries_count', { count: filtered.length })}
-              {auditSearch || auditActionFilter !== 'all' ? ` (${t('admin.audit.filtered_label')})` : ''}
-            </div>
-            <ForumPagination
-              currentPage={correctedPage}
-              totalPages={totalPages}
-              onPageChange={p => setAuditPage(p)}
-            />
-          </div>
-
-          {hasMoreAudit && (
-            <div className="text-center mt-2">
-              <Button variant="link" size="sm" onClick={handleLoadMoreAudit} disabled={loadingAudit}>
-                {loadingAudit ? t('common.loading') : t('admin.audit.load_more')}
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <h5 className="mb-0">{t('admin.audit.title')}</h5>
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                className="d-flex align-items-center gap-1"
+                onClick={triggerAuditReload}
+                disabled={loadingAudit}
+                title={t('admin.audit.refresh') || 'Refresh'}
+              >
+                <RefreshCw size={14} className={loadingAudit ? 'spin' : ''} />
+                <span>{t('admin.audit.refresh') || 'Refresh'}</span>
               </Button>
             </div>
-          )}
+
+            {/* Toolbar */}
+            <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
+              <div style={{ flex: '1 1 200px', minWidth: '200px' }}>
+                <InputGroup size="sm">
+                  <InputGroup.Text><Search size={14} /></InputGroup.Text>
+                  <Form.Control
+                    placeholder={t('common.search_placeholder')}
+                    value={auditSearch}
+                    onChange={e => {
+                      setAuditSearch(e.target.value);
+                      setAuditPage(1);
+                    }}
+                  />
+                </InputGroup>
+              </div>
+              <Form.Select
+                size="sm"
+                style={{ width: 'auto' }}
+                value={auditActionFilter}
+                onChange={e => {
+                  setAuditActionFilter(e.target.value);
+                  setAuditPage(1);
+                }}
+              >
+                <option value="all">{t('common.all_actions')}</option>
+                {AUDIT_ACTION_REGISTRY.map(group => (
+                  <optgroup key={group.groupKey} label={t(`admin.audit.${group.groupKey}`)}>
+                    {group.actions.map(action => (
+                      <option key={action} value={action}>
+                        {auditActionLabel(action)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Form.Select>
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={() => setAuditSortDesc(p => !p)}
+                title={auditSortDesc ? 'Oldest first' : 'Newest first'}
+              >
+                {t('admin.audit.table_date')} {auditSortDesc ? '↓' : '↑'}
+              </Button>
+            </div>
+
+            {debouncedAuditSearch && auditTotal >= 2000 && (
+              <div className="alert alert-info py-2 px-3 mb-3 small">
+                {t('admin.audit.search_clarify_hint', { count: 2000 })}
+              </div>
+            )}
+
+            <div className="table-responsive">
+              <Table hover responsive>
+                <thead>
+                  <tr>
+                    <th style={{ minWidth: '150px' }}>{t('admin.audit.table_date')}</th>
+                    <th>{t('admin.audit.table_performer')}</th>
+                    <th>{t('admin.audit.table_action')}</th>
+                    <th>{t('admin.audit.table_details')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageItems.map(log => {
+                    const performerName = log.performerNickname
+                      || users.find(u => u.id === log.performer_id)?.nickname
+                      || 'Unknown User';
+
+                    return (
+                      <tr key={log.id} className="align-middle">
+                        <td className="text-muted small text-nowrap">
+                          {log.created_at ? <Timestamp date={log.created_at} /> : '...'}
+                        </td>
+                        <td>
+                          <div className="fw-bold">{performerName}</div>
+                        </td>
+                        <td>
+                          <span className="audit-badge">{auditActionLabel(log.action_type)}</span>
+                        </td>
+                        <td className="small text-muted" style={{ wordBreak: 'break-word', minWidth: '200px' }}>
+                          {log.details && Object.keys(log.details).length > 0 ? (
+                            <div className="d-flex flex-column align-items-start gap-1">
+                              {Object.entries(log.details)
+                                .map(([k, v]) => {
+                                  if (v === null || v === undefined || v === '') return null;
+                                  const transK = t(`admin.audit.fields.${k}`);
+                                  const labelK = transK === `admin.audit.fields.${k}` ? k : transK;
+
+                                  let displayValue = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                                  let hideRow = false;
+
+                                  if (typeof v === 'string' && (k.toLowerCase().includes('id') || k.toLowerCase().includes('user'))) {
+                                    const resolved = resolveId(v);
+                                    if (resolved !== null) {
+                                      displayValue = resolved;
+                                    } else {
+                                      hideRow = true; // opaque hash without resolved name
+                                    }
+                                  }
+
+                                  if (hideRow) return null;
+
+                                  if (k === 'changes' && typeof v === 'object') {
+                                    const changedKeys = Object.keys(v).map(ck => t(`admin.audit.fields.${ck}`) || ck);
+                                    return (
+                                      <div key={k}>
+                                        <strong>{labelK}:</strong> {changedKeys.join(', ')}
+                                      </div>
+                                    );
+                                  }
+
+                                  return (
+                                    <div key={k}>
+                                      <strong>{labelK}:</strong> {displayValue}
+                                    </div>
+                                  );
+                                })}
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="p-0 text-decoration-none text-muted"
+                                onClick={() => setSelectedAuditLog(log)}
+                              >
+                                {t('admin.audit.view_details')}
+                              </Button>
+                            </div>
+                          ) : <span className="opacity-50">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {pageItems.length === 0 && !loadingAudit && (
+                    <tr>
+                      <td colSpan="4" className="text-center p-4 text-muted">{t('admin.audit.empty')}</td>
+                    </tr>
+                  )}
+                  {loadingAudit && (
+                    <tr>
+                      <td colSpan="4" className="text-center p-4 text-muted">
+                        <Spinner animation="border" size="sm" className="me-2" />
+                        {t('common.loading')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </Table>
+            </div>
+
+            <div className="d-flex flex-wrap justify-content-between align-items-center mt-3 gap-2">
+              <div className="small text-muted">
+                {t('admin.audit.entries_count', { count: auditTotal })}
+                {auditSearch || auditActionFilter !== 'all' ? ` (${t('admin.audit.filtered_label')})` : ''}
+              </div>
+              <ForumPagination
+                currentPage={auditPage}
+                totalPages={auditTotalPages}
+                onPageChange={handleAuditPageChange}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -3788,99 +3930,17 @@ const AdminPage = () => {
         )}
       </ConfirmModal>
 
-      {/* Audit Log Details Modal */}
-      <ForumModal
+      {/* Audit Log Details Modal (§3 of SPEC_REFACTOR_AUDIT_LOGS.md) */}
+      <AuditDetailsModal
         show={!!selectedAuditLog}
         onHide={() => setSelectedAuditLog(null)}
-        title={t('admin.audit.table_details')}
-        bodyClassName="small"
-      >
-          {selectedAuditLog && (
-            <div className="d-flex flex-column gap-3" style={{ wordBreak: 'break-word' }}>
-              <div>
-                <strong>{t('admin.audit.table_action')}:</strong> <span className="audit-badge ms-1">{auditActionLabel(selectedAuditLog.action_type)}</span>
-              </div>
-              <div>
-                <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? <Timestamp date={selectedAuditLog.created_at} /> : '...'}
-              </div>
-
-              <div className="p-3 rounded border border-secondary border-opacity-25" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-color)' }}>
-                <div className="mb-1 fw-bold" style={{ color: 'var(--text-color)', textTransform: 'uppercase', fontSize: '0.7rem' }}>
-                  {t('admin.audit.table_performer')}
-                </div>
-                <div>
-                  {(() => {
-                    // Server-carried nickname first (every audit row now has
-                    // one), then the staff page for rows it happens to hold.
-                    const p = users.find(u => u.id === selectedAuditLog.performer_id);
-                    return selectedAuditLog.performerNickname
-                      || (p ? `${p.nickname || (isRootAdmin ? p.email : '***')}` : '')
-                      || 'Unknown User';
-                  })()}
-                </div>
-                <div style={{ color: 'var(--secondary-color)', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-                  ID: {selectedAuditLog.performer_id}
-                </div>
-              </div>
-
-              <div className="p-3 rounded border border-secondary border-opacity-25" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-color)' }}>
-                <div className="mb-2 fw-bold" style={{ color: 'var(--text-color)', textTransform: 'uppercase', fontSize: '0.7rem' }}>
-                  Raw Details
-                </div>
-                {Object.entries(selectedAuditLog.details || {}).map(([k, v]) => {
-                  const transK = t(`admin.audit.fields.${k}`);
-                  const label = transK === `admin.audit.fields.${k}` ? k : transK;
-
-                  let resolvedName = null;
-                  if (v && typeof v === 'string' && v.length > 20) {
-                    const tgt = users.find(u => u.id === v);
-                    if (tgt) resolvedName = tgt.nickname || (isRootAdmin ? tgt.email : '***');
-                    // Not on the current staff page: the trail itself named
-                    // most targets twice (id and nickname).
-                    if (!resolvedName && auditNicknameIndex[v]) {
-                      resolvedName = auditNicknameIndex[v];
-                    }
-                  }
-
-                  return (
-                    <div key={k} className="mb-2 last-child-mb-0">
-                      <div className="fw-bold" style={{ color: 'var(--text-color)' }}>{label} {k !== label && <span style={{ color: 'var(--secondary-color)' }} className="fw-normal">({k})</span>}:</div>
-                      <div className="ms-2">
-                        {k === 'changes' && typeof v === 'object' ? (
-                          <div className="d-flex flex-column gap-1 mt-1">
-                            {Object.entries(v).map(([ck, cv]) => {
-                              const cLabel = t(`admin.audit.fields.${ck}`) || ck;
-                              const renderValue = (val) => typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val);
-                              return (
-                                <div key={ck} className="p-2 rounded border border-secondary border-opacity-10" style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-color)' }}>
-                                  <div className="fw-bold small" style={{ color: 'var(--text-color)' }}>{cLabel}:</div>
-                                  <div className="d-flex align-items-center gap-2 small flex-wrap">
-                                    <span className="text-danger text-decoration-line-through opacity-75">{renderValue(cv.from)}</span>
-                                    <ArrowRightLeft size={10} className="text-muted" />
-                                    <span className="text-success fw-bold">{renderValue(cv.to)}</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <>
-                            {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
-                            {resolvedName && <span style={{ color: 'var(--secondary-color)' }} className="ms-2">({resolvedName})</span>}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div style={{ color: 'var(--secondary-color)', fontSize: '0.65rem', fontFamily: 'monospace', textAlign: 'right' }}>
-                Log ID: {selectedAuditLog.id}
-              </div>
-            </div>
-          )}
-      </ForumModal>
+        log={selectedAuditLog}
+        users={users}
+        categories={categories}
+        currentLang={currentLang}
+        isRootAdmin={isRootAdmin}
+        auditActionLabel={auditActionLabel}
+      />
 
       {/* Group Modal */}
       <ForumModal

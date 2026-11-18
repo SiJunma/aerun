@@ -177,3 +177,58 @@
 - Фильтр по диапазону дат (пока нет; поиск и фильтр по действию покрывают основные сценарии).
 - Realtime-стрим (мёртв — см. §1.1).
 - Темизация вкладки (Спринт H в плане темизации).
+
+---
+
+## 8. Журнал реализации (Checkpoints & Findings)
+
+### План контрольных точек (Checkpoints)
+- [x] **CP-1: Backend fixes & Audit Generation**
+  - Маски: логировать `character_updated` и `character_avatar_changed` только для чужих масок (`performer != owner`); в `character_updated` добавлен diff `changes` (from → to), в `character_avatar_changed` флаг `avatar_updated: true`.
+  - Удаление постов (`post_delete`): добавлены `category_id` и `category_title` в details (через `topic.category_id`).
+  - Массовая чистка постов при удалении пользователя (`purgeSinglePostForUserDeletion`): проброшен действующий админ как `performer_id`, удаляемый пользователь оставлен в `author_id`.
+  - Проверка тестов бэкенда (`go test ./...`).
+- [x] **CP-2: Backend Audit API**
+  - Переход от курсора (`cursor`/`next_cursor`) к серверной offset-пагинации: параметры `page` (1-based, def 1), `limit` (def 50), ответ: `items`, `total`, `page`, `total_pages`.
+  - Нормализация legacy `action_type` при чтении и фильтрации: «topic deleted» → `topic_delete`, «topic locked» → `topic_lock`, «user deleted» → `admin_user_delete`, «user profile edited by admin» → `admin_user_update`, «user role updated» → `admin_user_update`.
+  - Серверный Unicode-aware поиск `q` (scan limit 2000, совпадение по `performer_nickname`, никам целей, контенту `post_delete`/`post_edit`, названиям тем/масок/категорий, id записи). Пакетный резолв ников целей.
+  - Написаны автотесты `TestAuditListAPI_PaginationAndFilters` и `TestAuditListAPI_SearchAndLegacyNormalization` в `audit_api_test.go`, все 13 тестов аудита пройдены.
+- [x] **CP-3: Frontend API & i18n Dictionary**
+  - `src/api/audit.js`: удалены `subscribeToAuditLogs` (polling) и `getMoreAuditLogs`; добавлен `getAuditLogs({ page, limit, action_type, performer_id, q })` с нормализацией строк.
+  - `src/i18n/dictionary.js`: добавлены ключи для legacy-типов («user banned», «user unbanned», «user registered», «topic deleted», «user deleted» и т.д.), ключи деталей `admin.audit.details.*` и групп фильтра `admin.audit.filter_group_*` (EN + RU).
+  - Пройдены `scripts/check-audit-action-labels.mjs` и весь набор `npm test`.
+- [ ] **CP-4: Frontend Audit Tab**
+  - Перевод вкладки аудита в `AdminPage.jsx` на серверную пагинацию (страница 50 записей, `total` из сервера, переключение через `ForumPagination`).
+  - Устранение 15-секундного поллинга; обновление по: (a) административному действию, (b) `visibilitychange`, (c) ручной кнопке обновления; запасной тихий поллинг 60с только при активной и видимой вкладке.
+  - Удаление кнопки «Загрузить ещё».
+  - Фильтр действий по фиксированному структурированному реестру (§3.3) вместо выборки из загруженных данных; группировка, запрет дублей и нижнего регистра.
+  - Подключение серверного поиска `q` с дебаунсом.
+- [ ] **CP-5: Structured Details Modal & Rows UI**
+  - Рефакторинг `AuditDetailsModal`: единая шапка (перформер с ником и id, действие, дата через `Timestamp`), скрытие пустых полей, структурированные шаблоны по группам (§3).
+  - Улучшение отображения деталей в колонке таблицы (без голых opaque-хешей, резолв связанных сущностей).
+- [ ] **CP-6: Финальная верификация, сборка и отчёт**
+  - Запуск `npm test`, `npm run build`, `go test ./...`.
+  - Проверка всех сценариев раздела §6.
+  - Итоговая фиксация всех попутных находок и состояния в данном журнале.
+
+### Попутные находки (Incidental Findings)
+1. В `backend/internal/platform/pocketbase/` отсутствовал изолированный тест-файл генерации аудита — создан `audit_generation_test.go` с проверками правил масок (§4) и атрибуции перформера при purge постов.
+2. В `user_soft_delete_test.go` вызов `purgeUserContent` был без параметра перформера — обновлен на передачу `fixAdminID`.
+3. В `audit.go` поиск по `action_type` поддержан для канонических и legacy-типов симметрично (`auditActionFilterValues`): при запросе `action_type=topic_delete` находятся и записи эпохи PocketBase, и исторические записи `topic deleted`. В `auditLogPayload` теперь также возвращается `target_nickname`, резолвимый на сервере пакетным чтением.
+
+### Прогресс по чекпоинтам
+- **2026-11-18 CP-1 завершён:**
+  - `characters.go`: самообслуживание масок больше не засоряет аудит (`e.Auth.Id != owner_id`), для модераторских правок пишутся `changes` (from → to) и `avatar_updated: true`.
+  - `forum_posts.go`: в `post_delete` добавлены `category_id` и `category_title`.
+  - `admin_user_delete_votes.go`, `admin_user_delete_purge.go`, `admin_users.go`: `purgeSinglePostForUserDeletion` атрибутирует удаление админу (`adminPerformerID`), а не жертве удаления.
+  - Тесты: `TestAuditGeneration_CharacterRules`, `TestAuditGeneration_PurgeUserPostDeletePerformer`, `TestEveryDeleteIsAuditedWithItsText` успешно пройдены.
+- **2026-11-18 CP-2 завершён:**
+  - `audit.go`: переписан `adminListAuditLogsHandler` на offset-пагинацию (`page`, `limit`), возвращает `{ items, total, page, total_pages }`. Keyset-курсор (`cursor`, `next_cursor`) удален.
+  - Добавлена нормализация legacy-действий (`topic deleted` → `topic_delete`, `user deleted` → `admin_user_delete` и др.).
+  - Реализован серверный Unicode-поиск `q` поверх выборки до 2000 записей (Go-matching с поддержкой кириллицы по перформеру, цели, контенту постов, заголовкам тем/категорий/масок/ролей, log ID).
+  - Тесты: написан `audit_api_test.go` (`TestAuditListAPI_PaginationAndFilters`, `TestAuditListAPI_SearchAndLegacyNormalization`), все тесты аудита (13 шт) пройдены (exit 0).
+- **2026-11-18 CP-3 завершён:**
+  - `src/api/audit.js`: заменен устаревший polling (`subscribeToAuditLogs`) и курсорный `getMoreAuditLogs` на параметризованный `getAuditLogs({ page, limit, action_type, performer_id, q })`.
+  - `src/i18n/dictionary.js`: добавлены все недостающие legacy-действия в EN и RU словари, а также ключи `admin.audit.details.*` и `admin.audit.filter_group_*`.
+  - Тесты `check-audit-action-labels.mjs` и `npm test` подтверждают полноту словаря и целостность кода.
+

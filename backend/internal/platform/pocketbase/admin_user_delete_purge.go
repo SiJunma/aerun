@@ -20,7 +20,7 @@ import (
 // command performs. Finally the profile-level votes — votes the member cast
 // (voter_id) and votes on the member's profile (target_id with no post) —
 // are deleted and their value paid back.
-func purgeUserContent(txApp core.App, userID string) error {
+func purgeUserContent(txApp core.App, userID string, adminPerformerID string) error {
 	topics, err := txApp.FindAllRecords(
 		topicsCollectionName,
 		dbx.HashExp{"author_id": userID},
@@ -51,7 +51,7 @@ func purgeUserContent(txApp core.App, userID string) error {
 		return internalError("failed to list posts for user deletion", err)
 	}
 	for _, post := range posts {
-		if err := purgeSinglePostForUserDeletion(txApp, post); err != nil {
+		if err := purgeSinglePostForUserDeletion(txApp, post, adminPerformerID); err != nil {
 			return err
 		}
 	}

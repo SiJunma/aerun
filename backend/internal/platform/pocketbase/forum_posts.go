@@ -983,10 +983,20 @@ func deletePostHandler(e *core.RequestEvent) error {
 		// DESIGN, so an audit entry keyed on it alone would record "nobody wrote
 		// this" — the kind and the display name are what make a moderation act
 		// on guest content attributable after the row is gone.
+		categoryID := topic.GetString("category_id")
+		var categoryTitle string
+		if categoryID != "" {
+			if cat, err := txApp.FindRecordById(categoriesCollectionName, categoryID); err == nil && cat != nil {
+				categoryTitle = cat.GetString("name")
+			}
+		}
+
 		if err := recordAuditLog(txApp, "post_delete", e.Auth.Id, map[string]any{
 			"post_id":            post.Id,
 			"topic_id":           topic.Id,
 			"topic_title":        topic.GetString("title"),
+			"category_id":        categoryID,
+			"category_title":     categoryTitle,
 			"author_id":          authorID,
 			"author_kind":        post.GetString(authorKindField),
 			"guest_display_name": post.GetString(guestDisplayNameField),
