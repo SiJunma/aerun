@@ -337,6 +337,8 @@ export default function TopicPage() {
     goLastParam,
     hash,
     hasExplicitPage,
+    isPageLoading,
+    loadedPageRef,
   });
 
   const { scrollToReply } = useTopicNavigation();
@@ -1608,13 +1610,27 @@ export default function TopicPage() {
 
     // Silent refetch: the rendered page stays on screen while the request is
     // in flight (stale-while-revalidate), and loadPosts merges the server
-    // answer around the still-pending optimistic cards.
-    loadPostsRef.current();
+    // answer around the still-pending optimistic cards. `silent: true` keeps
+    // the skeleton from flashing over the page the reader is already on.
+    loadPostsRef.current(undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, topic, topicNotFound, topicRestricted, currentPage, searchParams, scheduleForumStateRefresh]);
 
   // Render Skeleton / ErrorCard
-  if (isTopicLoading) return <Skeleton />;
+  if (isTopicLoading) return (
+    <main id="topic-page" data-topic-id={id} className="topic-page-container topic">
+      <div style={{ padding: '1rem' }}>
+        <Skeleton width="70%" height="2rem" />
+        <Skeleton width="50%" height="1rem" />
+        <Skeleton width="30%" height="1rem" />
+        <section id="topic-posts" className="topic-posts-list topic-posts">
+          {[...Array(3)].map((_, i) => (
+            <TopicPostCard key={`page-skel-${i}`} skeleton />
+          ))}
+        </section>
+      </div>
+    </main>
+  );
   if (topicNotFound || accessError || !topic) {
     // RES-02: parametrize the card. The branch used to render a bare
     // `<ErrorCard />` — no title, no diagnosis, no retry — so a 404, a 403
@@ -1698,33 +1714,9 @@ export default function TopicPage() {
             onRetry={() => loadPosts(currentPage)}
           />
         ) : null}
-        {!postsLoadError && posts.length === 0 && isPageLoading
-          ? /* Inline skeleton while page posts are loading (legacy parity). */
-            [...Array(3)].map((_, i) => (
-              <article key={`skel-${i}`} className="topic-skeleton">
-                <div className="topic-skeleton__grid">
-                  <div className="topic-skeleton__author">
-                    <Skeleton variant="avatar" width={80} height={80} className="topic-skeleton__avatar" />
-                    <Skeleton width="70%" height="1.2rem" />
-                    <Skeleton width="50%" height="0.8rem" />
-                  </div>
-                  <div className="topic-skeleton__body">
-                    <div className="topic-skeleton__row">
-                      <Skeleton width="25%" height="1rem" />
-                      <Skeleton width="40px" height="1rem" />
-                    </div>
-                    <div className="topic-skeleton__lines">
-                      <Skeleton width="100%" height="1rem" />
-                      <Skeleton width="100%" height="1rem" />
-                      <Skeleton width="85%" height="1rem" />
-                      <Skeleton width="40%" height="1rem" />
-                    </div>
-                    <div className="topic-skeleton__footer">
-                      <Skeleton width="150px" height="1.5rem" />
-                    </div>
-                  </div>
-                </div>
-              </article>
+        {!postsLoadError && isPageLoading
+          ? [...Array(3)].map((_, i) => (
+              <TopicPostCard key={`skel-${i}`} skeleton />
             ))
           : null}
         {/* Unpin must take effect live: the flag is the TOPIC's (refreshed by

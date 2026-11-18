@@ -421,14 +421,6 @@
 /* ── Skeletons, loading spinner, empty state ──────────────────
    Replaces Bootstrap spacing utilities (mb-1/mb-2/mt-2/me-2) and the
    empty-state inline styles on the Forum View list pages. */
-.topic-skeleton-title {
-  margin-bottom: 0.5rem;
-}
-
-.topic-skeleton-last {
-  margin-bottom: 0.25rem;
-}
-
 .forum-view-skeleton-desc {
   margin-top: 0.5rem;
 }

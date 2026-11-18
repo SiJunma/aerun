@@ -47,7 +47,7 @@ export const useTopicPosts = ({
     };
   }, []);
 
-  const loadPosts = useCallback(async (overridePage) => {
+  const loadPosts = useCallback(async (overridePage, silent = false) => {
     setPostsLoadError(null);
     const hasPageParam = searchParams.has('page');
     const isGoLast = searchParams.get('goLast') === '1';
@@ -97,6 +97,11 @@ export const useTopicPosts = ({
 
     const currentFetchId = ++activeFetchIdRef.current;
     isFetchingPostsRef.current = pageToFetch;
+    // Каждая новая загрузка страницы — Loading-состояние: скелетон вместо
+    // постов старой страницы, пока не пришёл ответ (F-01, F-04).
+    // Тихая перезагрузка (приход чужого поста на той же странице) не мигает
+    // скелетоном: страница остаётся на экране (stale-while-revalidate).
+    if (!silent && isMountedRef.current) setIsPageLoading(true);
 
     const performFetch = async () => {
       try {

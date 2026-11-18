@@ -7,6 +7,7 @@ import TopicMiniPagination from './TopicMiniPagination';
 import { useAuth } from '../../contexts/AuthProvider';
 import { useI18n } from '../../contexts/I18nProvider';
 import { toMillis, unreadFloor } from '../../utils/dates';
+import Skeleton from './Skeleton';
 
 const TopicRow = ({ 
   topic, 
@@ -17,10 +18,55 @@ const TopicRow = ({
   onSelect = () => {},
   showCategory = false,
   categoryName = '',
-  showCategoryInColumn = false
+  showCategoryInColumn = false,
+  skeleton = false,
 }) => {
   const { t } = useI18n();
   const { readMap, profile } = useAuth();
+  if (skeleton) {
+    // Скелетон-ветка живого компонента: та же оболочка (.topic-item →
+    // .topic-main → .topic-head/.topic-meta/.topic-mobile-stats/.topic-replies/
+    // .topic-last-post), контент — полосками. Хуки читают только контекст (без
+    // API-запросов), id и живых ссылок/кнопок нет.
+    return (
+      <article className={`topic-item ${showCategoryInColumn ? 'has-category' : ''}`}>
+        <div className="topic-main">
+          <div className="topic-head">
+            <h6 className="topic-title">
+              <Skeleton width="55%" height="1rem" />
+            </h6>
+            <TopicMiniPagination skeleton />
+          </div>
+          <div className="topic-meta">
+            <div className="topic-author">
+              <Skeleton width="40%" height="1rem" className="forum-skeleton-gap" />
+              <Skeleton width="20%" height="1rem" />
+            </div>
+          </div>
+          <div className="topic-mobile-stats">
+            <span><Skeleton width={12} height={12} /> <Skeleton width="30%" height="1rem" /></span>
+          </div>
+        </div>
+        {showCategoryInColumn && (
+          <div className="topic-category" data-label={t('topic_row.category')}>
+            <Skeleton width="60%" height="1rem" />
+          </div>
+        )}
+        <div className="topic-replies" data-label={t('topic_row.replies')}>
+          <span className="topic-count"><Skeleton width={30} height="1rem" className="forum-skeleton-stat" /></span>
+        </div>
+        <div className="topic-last-post last-post-strip" data-label={t('topic_row.last_post')}>
+          <div className="forum-skeleton-last">
+            <Skeleton variant="avatar" width={32} height={32} className="forum-skeleton-avatar" />
+            <div className="forum-skeleton-last-lines">
+              <Skeleton width="70%" height="0.9rem" className="forum-skeleton-gap" />
+              <Skeleton width="40%" height="0.7rem" />
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+  }
   const lastVisitRaw = readMap[topic.id];
   const lastReadOffset = lastVisitRaw?.offset ?? null;
   // Handle both Firestore Timestamp (from server) and plain number (optimistic local update)

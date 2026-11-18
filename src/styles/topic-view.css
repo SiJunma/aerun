@@ -425,6 +425,7 @@
   padding-left: 1.5rem;
   padding-top: .5rem;
   padding-bottom: .5rem;
+  margin-bottom: 1rem;
 }
 
 .post-header {
@@ -647,54 +648,6 @@
 #topic-actions-bottom .topic-actions-subscription.is-subscribed {
   background-color: var(--primary-color);
   color: var(--forum-view-btn-ghost-hover-text);
-}
-
-.topic-skeleton {
-  margin-bottom: var(--topic-post-margin-bottom);
-  background-color: var(--topic-post-card-bg);
-  border: 1px solid var(--topic-post-card-border);
-  border-radius: var(--topic-post-card-radius);
-  box-shadow: var(--topic-post-card-shadow);
-  overflow: hidden;
-}
-
-.topic-skeleton__grid {
-  display: flex;
-  flex-direction: column;
-}
-
-.topic-skeleton__author {
-  min-height: var(--topic-post-skeleton-author-min-height);
-  padding: var(--topic-post-skeleton-padding);
-  text-align: center;
-  border-bottom: 1px solid var(--topic-post-skeleton-footer-border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--topic-post-skeleton-line-gap);
-}
-
-.topic-skeleton__body {
-  padding: var(--topic-post-skeleton-padding);
-}
-
-.topic-skeleton__row {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--topic-post-skeleton-row-gap);
-  margin-bottom: var(--topic-post-skeleton-row-gap);
-}
-
-.topic-skeleton__lines {
-  display: flex;
-  flex-direction: column;
-  gap: var(--topic-post-skeleton-line-gap);
-}
-
-.topic-skeleton__footer {
-  margin-top: var(--topic-post-skeleton-footer-margin-top);
-  padding-top: var(--topic-post-skeleton-footer-padding-top);
-  border-top: 1px solid var(--topic-post-skeleton-footer-border);
 }
 
 .topic-footer {
@@ -941,8 +894,7 @@
 
 @media (min-width: 768px) {
 
-  .topic-post-inner,
-  .topic-skeleton__grid {
+  .topic-post-inner {
     flex-direction: row;
     flex-wrap: nowrap;
   }
@@ -976,10 +928,6 @@
     padding-right: var(--topic-actions-row-padding-x-md);
   }
 
-  .topic-skeleton__author {
-    border-bottom: 0;
-    border-right: 1px solid var(--topic-post-skeleton-footer-border);
-  }
 }
 
 @media screen and (max-width: 993px) {
@@ -1197,10 +1145,6 @@
   padding-right: 1.5rem;
   padding-left: 1.5rem;
   margin-bottom: 0.5rem;
-}
-
-.topic-skeleton__avatar {
-  margin-bottom: 0.75rem;
 }
 
 .author-role {

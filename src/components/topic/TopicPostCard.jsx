@@ -5,6 +5,7 @@ import ForumAuthorAvatar from '../common/ForumAuthorAvatar';
 import ForumAuthorName from '../common/ForumAuthorName';
 import Timestamp from '../common/Timestamp';
 import BBCode from '../common/BBCode';
+import Skeleton from '../common/Skeleton';
 
 /**
  * TopicPostCard: semantic DOM per SPEC_forum-topic-view-theme-dom.md.
@@ -48,8 +49,71 @@ export const TopicPostCard = ({
   onOpenDm,
   onOpenRepVote,
   t,
-  showToast
+  showToast,
+  skeleton = false,
+  skeletonLines = 5,
 }) => {
+  if (skeleton) {
+    // Скелетон-ветка живого компонента: та же оболочка и классы (.topic-post →
+    // .topic-post-inner → .post-author 200px + .post-body), контент — полосками.
+    // Нет id/якорей, нет data-хуков, нет живых ссылок/кнопок. Предзаполненный
+    // текст скрыт через visibility: hidden, чтобы сохранить высоту строк.
+    const lineWidths = ['100%', '100%', '85%', '60%', '40%', '100%', '70%', '45%'];
+    const contentLines = Array.from({ length: Math.max(1, skeletonLines) }, (_, i) => {
+      const width = lineWidths[i % lineWidths.length];
+      return <Skeleton key={i} width={width} height="1.25rem" />;
+    });
+    return (
+      <article className="topic-post">
+        <div className="topic-post-inner">
+          <aside className="post-author">
+            <div className="post-author__content">
+              <div className="post-author__name">
+                <Skeleton width="100%" height="1rem" />
+              </div>
+              <div className="post-author__status">
+                <Skeleton width="60%" height="0.875rem" />
+              </div>
+              <div className="post-author__avatar">
+                <Skeleton width={150} height={150} variant="avatar" />
+              </div>
+              <dl className="post-author__meta">
+                <div className="post-author__meta-row">
+                  <Skeleton width="45%" height="1rem" />
+                  <Skeleton width="22%" height="1rem" />
+                </div>
+                <div className="post-author__meta-row">
+                  <Skeleton width="45%" height="1rem" />
+                  <Skeleton width="22%" height="1rem" />
+                </div>
+              </dl>
+              <div className="post-author__role">
+                <Skeleton width="30%" height="1rem" />
+              </div>
+            </div>
+          </aside>
+          <div className="post-body">
+            <header className="post-header">
+              <Skeleton width="35%" height="30px" />
+            </header>
+            <div className="post-content">
+              <span style={{ visibility: 'hidden' }}>{' '.repeat(180)}</span>
+              {contentLines}
+            </div>
+            <footer className="post-footer">
+              <div className="post-footer__links">
+                <Skeleton width="25%" height="1.5rem" />
+              </div>
+              <div className="post-footer__spacer" />
+              <div className="post-footer__actions">
+                <Skeleton width="22%" height="1.5rem" />
+              </div>
+            </footer>
+          </div>
+        </div>
+      </article>
+    );
+  }
   if (!post) return null;
 
   const authorId = post.author?.user_id || post.author?.user_id;
@@ -390,10 +454,12 @@ export const TopicPostCard = ({
               {/* Mobile-only links (Profile/PM): the sidebar contact is hidden
                   on mobile, so the footer carries them instead. */}
               <div className="post-footer__links">
-                <Link className="footer-link footer-link--icon" to={`/profile/${authorId}`} data-discover="true">
-                  <User size={16} />
-                  <span className="footer-link__label">{t?.('profile.view_profile') || 'Profile'}</span>
-                </Link>
+                {authorId && (
+                  <Link className="footer-link footer-link--icon" to={`/profile/${authorId}`} data-discover="true">
+                    <User size={16} />
+                    <span className="footer-link__label">{t?.('profile.view_profile') || 'Profile'}</span>
+                  </Link>
+                )}
                 {canDm && onOpenDm && (
                   <a
                     className="footer-link footer-link--icon"

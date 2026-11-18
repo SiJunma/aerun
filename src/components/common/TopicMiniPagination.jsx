@@ -7,9 +7,23 @@ import React from 'react';
  */
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthProvider';
+import Skeleton from './Skeleton';
 
-const TopicMiniPagination = ({ topic }) => {
+const TopicMiniPagination = ({ topic, skeleton = false }) => {
   const { settings } = useAuth();
+  if (skeleton) {
+    return (
+      <span className="mini-pagination">
+        <span>[</span>
+        <Skeleton width="22%" height="1rem" className="forum-skeleton-stat" />
+        <Skeleton width="14%" height="1rem" className="forum-skeleton-stat" />
+        <Skeleton width="22%" height="1rem" className="forum-skeleton-stat" />
+        <span>...</span>
+        <Skeleton width="14%" height="1rem" className="forum-skeleton-stat" />
+        <span>]</span>
+      </span>
+    );
+  }
   const itemsPerPage = settings?.postsPerPage || 20;
   const totalPages = Math.ceil((topic.posts_count || 1) / itemsPerPage);
   if (totalPages <= 1) return null;
