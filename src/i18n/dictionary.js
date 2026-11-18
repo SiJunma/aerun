@@ -1392,7 +1392,6 @@ export const translations = {
         view_details: "View details...",
         entries_count: "Entries: {count}",
         filtered_label: "filtered)",
-        load_more: "Load more entries...",
         fields: {
           targetId: "Target",
           group_id: "Group ID",
@@ -2858,7 +2857,6 @@ export const translations = {
         view_details: "Подробнее...",
         entries_count: "Записей: {count}",
         filtered_label: "фильтр)",
-        load_more: "Загрузить еще...",
         fields: {
           targetId: "Цель",
           categoryId: "Категория",

@@ -435,7 +435,6 @@ const AdminPage = () => {
   const [auditSearch, setAuditSearch] = useState('');
   const [debouncedAuditSearch, setDebouncedAuditSearch] = useState('');
   const [auditActionFilter, setAuditActionFilter] = useState('all');
-  const [auditSortDesc, setAuditSortDesc] = useState(true);
   const [auditPage, setAuditPage] = useState(1);
   const [auditReloadSignal, setAuditReloadSignal] = useState(0);
   const AUDIT_PAGE_SIZE = 50;
@@ -3042,7 +3041,7 @@ const AdminPage = () => {
       return v.length < 20 ? v : null; // short = readable role id, long = opaque hash
     };
 
-    const pageItems = auditSortDesc ? auditLogs : [...auditLogs].reverse();
+    const pageItems = auditLogs;
 
     return (
       <div className="admin-audit-tab">
@@ -3098,14 +3097,6 @@ const AdminPage = () => {
                   </optgroup>
                 ))}
               </Form.Select>
-              <Button
-                variant="outline-secondary"
-                size="sm"
-                onClick={() => setAuditSortDesc(p => !p)}
-                title={auditSortDesc ? 'Oldest first' : 'Newest first'}
-              >
-                {t('admin.audit.table_date')} {auditSortDesc ? '↓' : '↑'}
-              </Button>
             </div>
 
             {debouncedAuditSearch && auditTotal >= 2000 && (
@@ -3151,18 +3142,14 @@ const AdminPage = () => {
                                   const labelK = transK === `admin.audit.fields.${k}` ? k : transK;
 
                                   let displayValue = typeof v === 'object' ? JSON.stringify(v) : String(v);
-                                  let hideRow = false;
 
                                   if (typeof v === 'string' && (k.toLowerCase().includes('id') || k.toLowerCase().includes('user'))) {
                                     const resolved = resolveId(v);
                                     if (resolved !== null) {
                                       displayValue = resolved;
-                                    } else {
-                                      hideRow = true; // opaque hash without resolved name
                                     }
+                                    // иначе оставляем raw `v`: строка показывается всегда — ник, если резолвится, иначе сам id
                                   }
-
-                                  if (hideRow) return null;
 
                                   if (k === 'changes' && typeof v === 'object') {
                                     const changedKeys = Object.keys(v).map(ck => t(`admin.audit.fields.${ck}`) || ck);
