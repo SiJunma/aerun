@@ -131,9 +131,9 @@
 
 ### Аудит 2026-11-17: остаток миграции (сверено с `feature/theming`, HEAD `2e574979`)
 
-Метод: `grep` по коду. Источник правды — ветка на GitHub, а не zip-снимок: `markdowns/TODO_THEMEABLE_SPRINT_PLAN.md` побайтово совпадает с веткой (blob SHA `d1129764…`), выборочно сверены `MainPage.jsx`, `CategoryPage.jsx`, `TopicPage.jsx`, `theme-variables.css`, `forum-index.css`, `topic-view.css` и др. — совпадают после нормализации CRLF→LF. Цифры ниже — по этому состоянию. Локальный снимок от 2026-11-16 в `~/workspace/aerun/` (два zip: backend + frontend) — только кэш; перед работой с кодом сверять файл с веткой по blob SHA, а не верить снимку.
+Метод: `grep` по коду ветки. Источник правды — ветка на GitHub, а не локальные копии и снимки без git-контроля: перед работой сверяй файл с веткой, а не верь копии на диске. Цифры ниже — по этому состоянию.
 
-Базовая проверка на этом состоянии — на точной копии ветки `~/workspace/aerun-repo/` (собирается и обновляется скриптом `~/workspace/aerun-remote/sync-aerun-repo.py`, diff-only pull с ветки; повторный запуск при неизменном HEAD — секунды). `npm ci` + `npm run build` — OK. `npm test`: проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен); сейчас 80 OK, дальше падает `test:account-status-axis` — предсуществующее, не связано с темизацией (`AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`).
+Базовая проверка на этом состоянии — на настоящем клоне ветки: `npm install` + `npm run build` — OK. `npm test`: проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен); сейчас 80 OK, дальше падает `test:account-status-axis` — предсуществующее, не связано с темизацией (`AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`).
 
 #### Что уже чисто (0 инлайн-стилей, 0 Bootstrap-утилит, 0 react-bootstrap)
 `MainPage`, `CategoryPage`, `TopicPage`, `TopicPostCard`, `TopicHeader`, `TopicActionsBar`, `TopicRow`, `TopicMiniPagination`, `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`, `AuthorMeta`, `ForumStats`, `LastPostInfo`, `App.jsx`, `main.jsx` (+ не-UI: `api/`, `hooks/`, `contexts/` кроме `ToastProvider`, `utils/`, `config/`, `i18n/`). Это Этапы 1–2 и ядро Этапа 3.
@@ -280,7 +280,7 @@ Layout-таблицы (`<Table>` из react-bootstrap и голые `<table>`) �
 
 ### Как продолжать в следующей сессии
 
-1. Источник правды — ветка `feature/theming` на GitHub, HEAD=`2e574979` (2026-11-17). Локальная копия — `~/workspace/aerun-repo/`, синхронизируется скриптом `~/workspace/aerun-remote/sync-aerun-repo.py` (diff-only pull; повторный запуск при неизменном HEAD — секунды). Zip-снимок в `~/workspace/aerun/` устарел, не использовать.
+1. Источник правды — ветка `feature/theming` на GitHub, HEAD=`2e574979` (2026-11-17). Работай из настоящего клона ветки (`git pull` перед началом); локальные копии и zip-снимки без git-контроля — не источник правды, не верить им.
 2. Node (машина Алины, Git Bash): `export PATH="$PATH:/c/nvm4w/nodejs:/c/Users/Alina/AppData/Local/nvm"` → `node v24.14.0`, `npm 11.9.0`. PowerShell-строка с `%NVM_HOME%` в Git Bash не работает.
 3. Статус тестов на HEAD `2e574979`: `npm run build` — OK; `npm test` — 80 OK, падает на `test:account-status-axis` (предсуществующее: `AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`). Проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен).
 4. Перед чисткой `index.css` — `grep` по `src --include='*.jsx'`: `.forum-table*` и `.empty-state-*` пересекаются с немигрированными страницами.
