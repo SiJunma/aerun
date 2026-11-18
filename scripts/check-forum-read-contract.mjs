@@ -24,6 +24,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PERMISSIONS } from '../src/constants/permissions.js';
+import { toMillis } from '../src/utils/dates.js';
 
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
 
@@ -493,7 +494,7 @@ assert.match(
 // below starts at `const`.
 const normalizeTopicSource = forum.match(/const normalizeTopic = [\s\S]*?\n};/);
 assert.ok(normalizeTopicSource, 'normalizeTopic must be extractable for the behavioural check');
-const normalizeTopic = new Function(`${normalizeTopicSource[0]}; return normalizeTopic;`)();
+const normalizeTopic = new Function(`const toMillis = (${String(toMillis)});${normalizeTopicSource[0]}; return normalizeTopic;`)();
 
 const rawTopic = {
   id: 'topic1',

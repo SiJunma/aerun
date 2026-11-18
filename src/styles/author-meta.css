@@ -116,10 +116,6 @@
   overflow-wrap: anywhere;
 }
 
-.author-meta__name {
-  color: var(--author-date-color, var(--author-meta-color));
-}
-
 .last-post-link-meta {
   display: flex;
   align-items: flex-start;

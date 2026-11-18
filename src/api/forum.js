@@ -1,6 +1,7 @@
 import { sendApi } from './pocketbase';
 import { sharedPoll } from './shared-poll';
 import { subscribeToRealtimeSignals, canReceiveSignals } from './realtime-signals';
+import { toMillis } from '../utils/dates';
 
 // normalizeTopic maps a server topic row onto the field names the renderers
 // read. EXPORTED because three different topic lists exist (the category page,
@@ -22,8 +23,8 @@ export const normalizeTopic = (t) => {
     is_locked: !!(t.locked || t.is_locked),
     created_at: createdDate,
     last_post_at: lastPostDate,
-    created_at_ms: createdDate ? new Date(createdDate).getTime() : 0,
-    last_post_at_ms: lastPostDate ? new Date(lastPostDate).getTime() : 0,
+    created_at_ms: createdDate ? toMillis(createdDate) : 0,
+    last_post_at_ms: lastPostDate ? toMillis(lastPostDate) : 0,
   };
 };
 

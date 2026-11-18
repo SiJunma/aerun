@@ -178,9 +178,6 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 	cursor := strings.TrimSpace(e.Request.URL.Query().Get("cursor"))
 	page := parseIntParam(e.Request.URL.Query().Get("page"), 1)
 
-	query := e.App.RecordQuery(topicSubscriptionsCollectionName).
-		AndWhere(dbx.HashExp{"user_id": e.Auth.Id})
-
 	// Counted BEFORE the cursor narrows the window, and only when the caller
 	// asked for a numbered page.
 	//
@@ -198,56 +195,82 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 		total = int(count)
 	}
 
+	var parts []string
+	sql := `
+		SELECT s.id AS id, s.topic_id AS topic_id, s.created AS created,
+		       t.last_post_created AS last_post_created
+		FROM ` + topicSubscriptionsCollectionName + ` s
+		INNER JOIN ` + topicsCollectionName + ` t ON t.id = s.topic_id
+		WHERE s.user_id = {:user}
+	`
+	params := dbx.Params{"user": e.Auth.Id}
+
 	if cursor != "" {
-		parts := strings.Split(cursor, "|")
+		parts = strings.Split(cursor, "|")
 		if len(parts) == 2 {
-			created := parts[0]
-			id := parts[1]
-			query = query.AndWhere(dbx.NewExp(
-				"(created < {:created}) OR (created = {:created} AND id < {:id})",
-				dbx.Params{
-					"created": created,
-					"id":      id,
-				},
-			))
-		}
-	} else {
-		// Offset only on the numbered path: layering an offset on top of a
-		// cursor skips rows the cursor did not name.
-		if page > 1 {
-			query = query.Offset(int64((page - 1) * limit))
+			sql += ` AND (t.last_post_created < {:created} OR (t.last_post_created = {:created} AND t.id < {:id}))`
+			params["created"] = parts[0]
+			params["id"] = parts[1]
 		}
 	}
 
-	query = query.OrderBy("created DESC", "id DESC").
-		Limit(int64(limit + 1))
+	fetch := int64(limit + 1)
+	var offset int64
+	if cursor == "" && page > 1 {
+		offset = int64((page - 1) * limit)
+	}
+	sql += ` ORDER BY t.last_post_created DESC, t.id DESC LIMIT {:fetch} OFFSET {:offset}`
+	params["fetch"] = fetch
+	params["offset"] = offset
 
-	var records []*core.Record
-	if err := query.All(&records); err != nil {
+	type subscribedTopicRow struct {
+		ID              string `db:"id"`
+		TopicID         string `db:"topic_id"`
+		Created         string `db:"created"`
+		LastPostCreated string `db:"last_post_created"`
+	}
+
+	var rows []subscribedTopicRow
+	if err := e.App.DB().NewQuery(sql).Bind(params).All(&rows); err != nil {
 		return internalError("failed to query subscriptions", err)
 	}
 
 	var nextCursor string
-	if len(records) > limit {
-		lastRec := records[limit-1]
-		records = records[:limit]
-		nextCursor = fmt.Sprintf("%s|%s", lastRec.GetDateTime("created").String(), lastRec.Id)
+	if len(rows) > limit {
+		lastRow := rows[limit-1]
+		rows = rows[:limit]
+		nextCursor = fmt.Sprintf("%s|%s", lastRow.LastPostCreated, lastRow.TopicID)
+	}
+
+	// Серверное мнение о непрочитанном резолвится ОДИН раз на всю страницу —
+	// ровно как в listTopicsHandler (forum_topics.go). При ошибке флаг остаётся
+	// отсутствующим, и страница продолжает жить по локальной readMap.
+	unreadSet := make(map[string]bool)
+	if ids, err := unreadTopicIDs(e); err == nil {
+		for _, id := range ids {
+			unreadSet[id] = true
+		}
 	}
 
 	acc := AccessFrom(e)
-	topics := loadVisibleTopics(e.App, acc, subscriptionTopicIDs(records))
+	topicIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		topicIDs = append(topicIDs, row.TopicID)
+	}
+	topics := loadVisibleTopics(e.App, acc, topicIDs)
 
-	items := make([]map[string]any, len(records))
-	for i, r := range records {
-		topicID := r.GetString("topic_id")
+	items := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		topicID := row.TopicID
 		item := map[string]any{
-			"id":       r.Id,
+			"id":       row.ID,
 			"topic_id": topicID,
-			"created":  r.GetDateTime("created").String(),
+			"created":  row.Created,
 		}
 		// Absent, not null, when the topic is gone or out of reach — the client
 		// drops the row either way and must not render a stub.
 		if topic, ok := topics[topicID]; ok {
+			topic["unread"] = unreadSet[topicID]
 			item["topic"] = topic
 		}
 		items[i] = item
@@ -257,6 +280,7 @@ func listUserSubscriptionsHandler(e *core.RequestEvent) error {
 		"items":       items,
 		"total":       total,
 		"page":        page,
+		"per_page":    limit,
 		"next_cursor": nextCursor,
 		"request_id":  requestIDFrom(e),
 	})
