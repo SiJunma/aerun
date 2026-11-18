@@ -155,7 +155,7 @@ const App = () => {
         <Route
           path="/_debug/skeletons"
           element={
-            <ProtectedRoute requireAdmin>
+            <ProtectedRoute requireRootAdmin>
               <Layout>
                 <SkeletonDebugPage />
               </Layout>

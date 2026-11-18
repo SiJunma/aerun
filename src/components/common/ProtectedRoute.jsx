@@ -6,13 +6,14 @@ import { useAuth } from '../../contexts/AuthProvider';
  * ProtectedRoute — Role-Based Access Control wrapper.
  *
  * Props:
- *  requireActive  {boolean} – if true, pending/banned users are bounced (default: true)
- *  requireAdmin   {boolean} – if true, only role_id='admin' may enter (default: false)
- *  requirePosting {boolean} – if true, spectators are bounced (cannot post/create, default: false)
- *  requireDm      {boolean} – if true, requires USE_DIRECT_MESSAGES permission (default: false)
+ *  requireActive   {boolean} – if true, pending/banned users are bounced (default: true)
+ *  requireAdmin    {boolean} – if true, only role_id='admin' may enter (default: false)
+ *  requireRootAdmin{boolean} – if true, only root/chief-admin may enter (default: false)
+ *  requirePosting  {boolean} – if true, spectators are bounced (cannot post/create, default: false)
+ *  requireDm       {boolean} – if true, requires USE_DIRECT_MESSAGES permission (default: false)
  */
-const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requirePosting = false, requireDm = false, allowGuest = false }) => {
-  const { user: firebaseUser, profile, settings, loading, hasPermission, PERMISSIONS } = useAuth();
+const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, requireRootAdmin = false, requirePosting = false, requireDm = false, allowGuest = false }) => {
+  const { user: firebaseUser, profile, settings, loading, hasPermission, PERMISSIONS, isRootAdmin } = useAuth();
   const location = useLocation();
 
   if (loading || !settings) {
@@ -82,6 +83,11 @@ const ProtectedRoute = ({ children, requireActive = true, requireAdmin = false, 
 
   // Admin-only route: kick non-admins back home
   if (requireAdmin && !hasPermission(PERMISSIONS.ADMIN_ACCESS)) {
+    return <Navigate to="/" replace />;
+  }
+
+  // Root-admin-only route: kick everyone except root/chief-admin back home
+  if (requireRootAdmin && !isRootAdmin) {
     return <Navigate to="/" replace />;
   }
 

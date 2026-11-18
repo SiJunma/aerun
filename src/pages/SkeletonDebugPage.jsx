@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthProvider';
 import TopicPostCard from '../components/topic/TopicPostCard';
 import TopicRow from '../components/common/TopicRow';
-import Skeleton from '../components/common/Skeleton';
+import CategoryHeaderSkeleton from '../components/common/CategoryHeaderSkeleton';
+import ProfileSkeleton from '../components/profile/ProfileSkeleton';
 
 /**
  * /_debug/skeletons — дебаг-страница скелетонов (только root-админ / dev).
@@ -53,13 +54,6 @@ const section = (title, source, children) => (
     <div style={{ padding: '1rem' }}>{children}</div>
   </section>
 );
-
-const inlineSkeletonLines = (count, width = '100%') =>
-  Array.from({ length: count }, (_, i) => (
-    <div key={i} style={{ marginBottom: '0.5rem' }}>
-      <Skeleton width={width} height="1rem" />
-    </div>
-  ));
 
 export const SkeletonDebugPage = () => {
   const { profile } = useAuth();
@@ -192,7 +186,6 @@ export const SkeletonDebugPage = () => {
             {linesCount}
           </span>
         </div>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           <label
             style={{
@@ -211,7 +204,8 @@ export const SkeletonDebugPage = () => {
                 padding: '0.15rem 0.6rem',
                 fontSize: '0.8rem',
                 border: '1px solid var(--border-color)',
-                background: viewTheme === t.value ? 'var(--primary-color)' : 'transparent',
+                background:
+                  viewTheme === t.value ? 'var(--primary-color)' : 'transparent',
                 color: viewTheme === t.value ? '#fff' : 'inherit',
                 borderRadius: '0.25rem',
                 cursor: 'pointer',
@@ -239,7 +233,8 @@ export const SkeletonDebugPage = () => {
                 padding: '0.15rem 0.6rem',
                 fontSize: '0.8rem',
                 border: '1px solid var(--border-color)',
-                background: viewport.width === v.width ? 'var(--primary-color)' : 'transparent',
+                background:
+                  viewport.width === v.width ? 'var(--primary-color)' : 'transparent',
                 color: viewport.width === v.width ? '#fff' : 'inherit',
                 borderRadius: '0.25rem',
                 cursor: 'pointer',
@@ -282,101 +277,29 @@ export const SkeletonDebugPage = () => {
 
         {section(
           'Шапка категории — скелетон',
-          'CategoryPage.jsx (pages) — инлайн',
-          <div style={previewStyle}>{inlineSkeletonLines(3)}</div>
+          'CategoryHeaderSkeleton.jsx (components/common)',
+          <CategoryHeaderSkeleton />
         )}
 
         {section(
           'Шапка профиля — скелетон',
-          'ProfilePage.jsx (pages) — инлайн',
-          (
-            <div
-              style={{
-                display: 'flex',
-                gap: '1rem',
-                alignItems: 'flex-start',
-              }}
-            >
-              <div
-                style={{
-                  width: '72px',
-                  height: '72px',
-                  borderRadius: '50%',
-                  background: 'var(--border-color)',
-                }}
-              />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {inlineSkeletonLines(1, '60%')}
-                {inlineSkeletonLines(2, '40%')}
-              </div>
-            </div>
-          )
+          'ProfileSkeleton.jsx (components/profile)',
+          <ProfileSkeleton section="header" />
         )}
 
         {section(
           'Участники — строка скелетона',
-          'MembersPage.jsx (pages) — инлайн',
+          'TopicRow.jsx (components/common)',
           (
             <div style={previewStyle}>
               {Array.from({ length: rowsCount }, (_, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    padding: '0.5rem 0',
-                    borderBottom: '1px solid var(--border-color)',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '50%',
-                      background: 'var(--border-color)',
-                    }}
-                  />
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.3rem',
-                      flex: 1,
-                    }}
-                  >
-                    {inlineSkeletonLines(1, '30%')}
-                    {inlineSkeletonLines(1, '20%')}
-                  </div>
-                  <div
-                    style={{
-                      width: '70px',
-                      textAlign: 'right',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.3rem',
-                    }}
-                  >
-                    {inlineSkeletonLines(1, '100%')}
-                    {inlineSkeletonLines(1, '60%')}
-                  </div>
+                <div key={i} style={{ marginBottom: '0.75rem' }}>
+                  <TopicRow skeleton showCategoryInColumn />
                 </div>
               ))}
             </div>
           )
         )}
-
-        <p
-          style={{
-            marginTop: '1.5rem',
-            fontSize: '0.85rem',
-            opacity: 0.7,
-          }}
-        >
-          Примечание: строки категории, профиля и участников показаны инлайн-полосками.
-          По мере перевода этих компонентов на живые скелетон-ветки (см. план §F-05)
-          замените их на скелетон-ветку живого компонента, как TopicPostCard/TopicRow.
-        </p>
       </div>
     </div>
   );

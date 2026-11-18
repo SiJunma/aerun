@@ -509,7 +509,7 @@
 }
 
 .post-signature {
-  margin-top: 1.5rem;
+  margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--topic-post-signature-border);
   color: var(--topic-post-muted-color);
@@ -1137,7 +1137,6 @@
 }
 
 .post-meta-row {
-  margin-top: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;

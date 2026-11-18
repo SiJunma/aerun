@@ -20,6 +20,7 @@ import MoveTopicsModal from '../components/modals/MoveTopicsModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import Skeleton from '../components/common/Skeleton';
 import TopicRow from '../components/common/TopicRow';
+import CategoryHeaderSkeleton from '../components/common/CategoryHeaderSkeleton';
 import ErrorCard from '../components/common/ErrorCard';
 import { resolveField } from '../utils/text';
 import { toMillis, unreadFloor } from '../utils/dates';
@@ -197,45 +198,49 @@ const CategoryPage = () => {
       </nav>
 
       <header id="forum-view-header" className="category-header">
-        <div className="category-header-heading">
-          <h1 className="category-header-title">{categoryTitle}</h1>
-          {!category ? (
-            <Skeleton width={250} height="1rem" className="category-header-skeleton" />
-          ) : resolveField(category.description, lang) && (
-            <div className="category-header-description">
-              {resolveField(category.description, lang)}
+        {!category ? (
+          <CategoryHeaderSkeleton />
+        ) : (
+          <>
+            <div className="category-header-heading">
+              <h1 className="category-header-title">{resolveField(category.title, lang)}</h1>
+              {resolveField(category.description, lang) && (
+                <div className="category-header-description">
+                  {resolveField(category.description, lang)}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="category-header-actions">
-          {loading ? (
-            <Skeleton width={120} height="2.5rem" />
-          ) : (
-            <>
-              {isStaff && (
-                <button
-                  type="button"
-                  className="forum-view-action-btn forum-view-action-btn--secondary"
-                  onClick={() => {
-                    setIsManaging(!isManaging);
-                    setSelectedTopicIds([]);
-                  }}
-                >
-                  <Settings size={18} />
-                  {t(isManaging ? 'forum.done' : 'forum.manage')}
-                </button>
+            <div className="category-header-actions">
+              {loading ? (
+                <Skeleton width={120} height="2.5rem" />
+              ) : (
+                <>
+                  {isStaff && (
+                    <button
+                      type="button"
+                      className="forum-view-action-btn forum-view-action-btn--secondary"
+                      onClick={() => {
+                        setIsManaging(!isManaging);
+                        setSelectedTopicIds([]);
+                      }}
+                    >
+                      <Settings size={18} />
+                      {t(isManaging ? 'forum.done' : 'forum.manage')}
+                    </button>
+                  )}
+                  {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
+                    <Link
+                      to={`/category/${id}/new-topic`}
+                      className="forum-view-action-btn forum-view-action-btn--primary"
+                    >
+                      {t('forum.create_topic')}
+                    </Link>
+                  )}
+                </>
               )}
-              {hasPermission(PERMISSIONS.CREATE_TOPIC, { category }) && (
-                <Link
-                  to={`/category/${id}/new-topic`}
-                  className="forum-view-action-btn forum-view-action-btn--primary"
-                >
-                  {t('forum.create_topic')}
-                </Link>
-              )}
-            </>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </header>
 
       <section id="forum-topic-list" className="forum-topic-list">

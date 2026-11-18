@@ -30,6 +30,7 @@ import ForumPagination from '../components/common/ForumPagination';
 import ForumEmptyState from '../components/common/ForumEmptyState';
 import Skeleton from '../components/common/Skeleton';
 import SecurityTab from '../components/profile/SecurityTab';
+import ProfileSkeleton from '../components/profile/ProfileSkeleton';
 
 
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -821,20 +822,22 @@ const ProfilePage = () => {
       </Row>
 
       <Row className={!hasTabs ? "justify-content-center" : ""}>
-        <Col lg={hasTabs ? 3 : 4} className="mb-4">
-          <Card className="shadow-sm border-0 bg-card">
-            <Card.Header className="py-3">
-              <h5 className="mb-0">{t('profile.info')}</h5>
-            </Card.Header>
-            <Card.Body className="p-3">
-              {/* ── Responsive profile layout: column on <=380px & >=992px, row on 381px..991px ── */}
-              <div className="profile-sidebar-wrapper d-flex flex-row align-items-start gap-3 d-lg-block text-lg-center">
+        {!viewedProfile ? (
+          <Col lg={hasTabs ? 3 : 4} className="mb-4">
+            <ProfileSkeleton section="header" />
+          </Col>
+        ) : (
+          <Col lg={hasTabs ? 3 : 4} className="mb-4">
+            <Card className="shadow-sm border-0 bg-card">
+              <Card.Header className="py-3">
+                <h5 className="mb-0">{t('profile.info')}</h5>
+              </Card.Header>
+              <Card.Body className="p-3">
+                {/* ── Responsive profile layout: column on <=380px & >=992px, row on 381px..991px ── */}
+                <div className="profile-sidebar-wrapper d-flex flex-row align-items-start gap-3 d-lg-block text-lg-center">
 
-                {/* Avatar */}
-                <div className="flex-shrink-0 text-center profile-sidebar-avatar">
-                  {!viewedProfile ? (
-                    <Skeleton variant="avatar" width={72} height={72} className="rounded-circle d-block mx-auto shadow-sm" style={{ border: '3px solid var(--border-color)' }} />
-                  ) : (
+                  {/* Avatar */}
+                  <div className="flex-shrink-0 text-center profile-sidebar-avatar">
                     <Image
                       src={resolveAvatarUrl(viewedProfile?.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedProfile?.nickname || 'User')}&background=random`}
                       roundedCircle
@@ -846,32 +849,26 @@ const ProfilePage = () => {
                         e.target.src = 'https://ui-avatars.com/api/?name=User&background=666&color=fff';
                       }}
                     />
-                  )}
-                </div>
-
-                {/* Info block */}
-                <div className="flex-grow-1 min-w-0 w-100 profile-sidebar-info">
-                  {/* Name & status (deleted account shows a deletion notice instead)} */}
-                  <div className="mb-2 mb-lg-3 text-lg-center">
-                    {!viewedProfile ? (
-                      <>
-                        <Skeleton width="140px" height="1.5rem" className="d-block mb-1 mx-lg-auto" />
-                        <Skeleton width="100px" height="0.85rem" className="d-block mx-lg-auto" />
-                      </>
-                    ) : isDeletedProfile ? (
-                      <div className="d-flex flex-column align-items-center justify-content-center text-center">
-                        <span className="badge bg-danger text-white mb-2">{t('profile.account_deleted')}</span>
-                        <h5 className="mb-1 text-truncate">{viewedProfile?.nickname || 'No Nickname'}</h5>
-                      </div>
-                    ) : (
-                      <>
-                        <h5 className="mb-1 text-truncate">{viewedProfile?.nickname || 'No Nickname'}</h5>
-                        <p className="text-muted small mb-0" style={{ wordBreak: 'break-word' }}>
-                          {viewedProfile?.status_line || ''}
-                        </p>
-                      </>
-                    )}
                   </div>
+
+                  {/* Info block */}
+                  <div className="flex-grow-1 min-w-0 w-100 profile-sidebar-info">
+                    {/* Name & status */}
+                    <div className="mb-2 mb-lg-3 text-lg-center">
+                      {isDeletedProfile ? (
+                        <div className="d-flex flex-column align-items-center justify-content-center text-center">
+                          <span className="badge bg-danger text-white mb-2">{t('profile.account_deleted')}</span>
+                          <h5 className="mb-1 text-truncate">{viewedProfile?.nickname || 'No Nickname'}</h5>
+                        </div>
+                      ) : (
+                        <>
+                          <h5 className="mb-1 text-truncate">{viewedProfile?.nickname || 'No Nickname'}</h5>
+                          <p className="text-muted small mb-0" style={{ wordBreak: 'break-word' }}>
+                            {viewedProfile?.status_line || ''}
+                          </p>
+                        </>
+                      )}
+                    </div>
 
                   {/* Send Message button.
                       A PENDING viewer does not get it: they may answer inside a
@@ -901,14 +898,14 @@ const ProfilePage = () => {
                       <div className="profile-stat-item text-start">
                         <span className="text-muted d-block small mb-0" style={{ fontSize: '0.72rem' }}>{t('profile.posts_count')}</span>
                         <div className="fw-bold">
-                          {!viewedProfile ? <Skeleton width="30px" height="1.2rem" /> : (viewedProfile?.post_count || 0)}
+                          {viewedProfile?.post_count || 0}
                         </div>
                       </div>
                       <div className="profile-stat-item text-start text-lg-end">
                         <span className="text-muted d-block small mb-0" style={{ fontSize: '0.72rem' }}>{t('profile.reputation')}</span>
                         <div className="profile-rep-row d-flex align-items-center justify-content-start justify-content-lg-end gap-1">
                           <div className="fw-bold text-accent">
-                            {!viewedProfile ? <Skeleton width="30px" height="1.2rem" /> : (viewedProfile?.reputation || 0)}
+                            {viewedProfile?.reputation || 0}
                           </div>
                           {/* The reputation vote is available for a PENDING
                               target: the server accepts it (it refuses only
@@ -943,17 +940,13 @@ const ProfilePage = () => {
                     <span className="text-muted d-block mb-1 fw-bold text-uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.1em' }}>
                       {t('profile.account_role')}
                     </span>
-                    {!viewedProfile ? (
-                      <Skeleton width="80px" height="1.4rem" className="mx-lg-auto" />
-                    ) : (
-                      <ForumRoleBadge
-                        roleId={viewedProfile?.role}
-                        status={viewedProfile?.status}
-                        userEmail={viewedProfile?.email}
-                        isDeleted={viewedProfile === null}
-                        className="px-3 py-1 font-uppercase"
-                      />
-                    )}
+                    <ForumRoleBadge
+                      roleId={viewedProfile?.role}
+                      status={viewedProfile?.status}
+                      userEmail={viewedProfile?.email}
+                      isDeleted={viewedProfile === null}
+                      className="px-3 py-1 font-uppercase"
+                    />
                   </div>
                 </div>
               </div>
@@ -961,6 +954,7 @@ const ProfilePage = () => {
             </Card.Body>
           </Card>
         </Col>
+        )}
 
         {hasTabs && (
           <Col lg={9}>
