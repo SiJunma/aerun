@@ -131,10 +131,6 @@
 
 ### Аудит 2026-11-17: остаток миграции (сверено с `feature/theming`, HEAD `2e574979`)
 
-Метод: `grep` по коду ветки. Источник правды — ветка на GitHub, а не локальные копии и снимки без git-контроля: перед работой сверяй файл с веткой, а не верь копии на диске. Цифры ниже — по этому состоянию.
-
-Базовая проверка на этом состоянии — на настоящем клоне ветки: `npm install` + `npm run build` — OK. `npm test`: проверки `category-subscriber` и `identity-refresh` починены в `2e574979` (обе падали из-за устаревших regex/стабов после введения storage-scoping, код приложения был верен); сейчас 80 OK, дальше падает `test:account-status-axis` — предсуществующее, не связано с темизацией (`AuthProvider.jsx` не пишет `sessionStorage['banned_logout']`).
-
 #### Что уже чисто (0 инлайн-стилей, 0 Bootstrap-утилит, 0 react-bootstrap)
 `MainPage`, `CategoryPage`, `TopicPage`, `TopicPostCard`, `TopicHeader`, `TopicActionsBar`, `TopicRow`, `TopicMiniPagination`, `ActiveTopicsPage`, `NewRepliesPage`, `SubscriptionsPage`, `AuthorMeta`, `ForumStats`, `LastPostInfo`, `App.jsx`, `main.jsx` (+ не-UI: `api/`, `hooks/`, `contexts/` кроме `ToastProvider`, `utils/`, `config/`, `i18n/`). Это Этапы 1–2 и ядро Этапа 3.
 
