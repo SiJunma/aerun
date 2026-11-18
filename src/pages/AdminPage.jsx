@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Row, Col, Card, Form, Button, Table, Badge, Dropdown, Spinner } from 'react-bootstrap';
 import { useI18n } from '../contexts/I18nProvider';
 import { useSearchParams } from 'react-router-dom';
 import {
   getGlobalSettings, updateGlobalSettings, uploadIdentityPlaceholder, approveUser, rejectUser, deleteUser, banUser, unbanUser,
-  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles
+  updateUserRole, addRole, updateRole, deleteRole, fetchAdminRoles, fetchAdminUsers, bulkUpdateUsers, bulkDeleteUsers, fetchUsersContentCounts
 } from '../api/admin';
 import { subscribeToAllCategories, addCategory, updateCategory, deleteCategory, subscribeToCategoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, fetchAdminCategories, fetchSecuredCategoryGroups } from '../api/categories';
-import { subscribeToAllUsers } from '../api/auth-resources';
+import { toMembersRow, withLegacyDates } from '../api/auth-resources';
 import { resolveAvatarUrl } from '../api/avatars';
 import { identityAvatar } from '../utils/identity';
 import { subscribeToAuditLogs, getMoreAuditLogs } from '../api/audit';
@@ -22,8 +22,9 @@ import {
   UserCheck, UserMinus, UserX, PlusCircle, Edit2, Trash2,
   Search, Award, Pin, Lock, Settings, MessageSquareOff,
   Bell, BellOff, ArrowRightLeft, Send, FilePen, User, Palette, Copy, Eye, EyeOff,
-  Layers, FolderTree, ShieldAlert
+  Layers, FolderTree, ShieldAlert, Menu
 } from 'lucide-react';
+import AdminSidebar from '../components/admin/AdminSidebar';
 import { useAuth } from '../contexts/AuthProvider';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ForumBreadcrumbs from '../components/common/ForumBreadcrumbs';
@@ -31,8 +32,6 @@ import ForumPagination from '../components/common/ForumPagination';
 import { useToast } from '../contexts/ToastProvider';
 import { pb } from '../api/pocketbase';
 import DesignsTab from '../components/admin/DesignsTab';
-import AdminSidebar from '../components/admin/AdminSidebar';
-import { ADMIN_NAV_GROUPS, filterNavByPermissions, collectVisibleTabPaths } from '../config/adminNavigation';
 import EmailTemplatesSettings from '../components/admin/EmailTemplatesSettings';
 import AvatarUploader from '../components/common/AvatarUploader';
 import { usePageTitle } from '../contexts/TitleProvider';
@@ -45,49 +44,78 @@ import { usePageTitle } from '../contexts/TitleProvider';
 // would otherwise make the form unsaveable.
 const KNOWN_PERMISSIONS = new Set(Object.values(PERMISSIONS));
 
+// adminBulkMaxIds mirrors the server cap (adminBulkMaxIDs = 100): one bulk
+// request carries at most 100 ids, so a bigger selection must be trimmed
+// before the confirmation button unlocks.
+const adminBulkMaxIds = 100;
+
 const AdminPage = () => {
   const { t, lang: currentLang } = useI18n();
-  const { user, profile, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
+  const { user, profile, meRole, hasPermission, roles, isRootAdmin, refreshForumState } = useAuth();
   const { showToast } = useToast();
   const { setPageTitle } = usePageTitle();
   const [searchParams, setSearchParams] = useSearchParams();
-  // The sections this viewer may open. The navigation and the panels below
-  // read the SAME list, so a section can never be shown in the sidebar and
-  // be missing from the page, or the other way round.
-  const visibleNavGroups = useMemo(
-    () => filterNavByPermissions(ADMIN_NAV_GROUPS, hasPermission),
-    [hasPermission]
-  );
-  const visibleTabPaths = useMemo(
-    () => collectVisibleTabPaths(visibleNavGroups),
-    [visibleNavGroups]
-  );
-  // The section the viewer is actually looking at. A `?tab=` left in the URL
-  // by a bookmark or by a section the viewer has since lost access to must not
-  // open an empty page, so an unreachable tab falls back to the first one the
-  // viewer may open.
-  const requestedTab = searchParams.get('tab');
-  const activeTab = visibleTabPaths.includes(requestedTab)
-    ? requestedTab
-    : (visibleTabPaths[0] ?? null);
+  const activeTab = searchParams.get('tab') || 'settings';
   const setActiveTab = useCallback((k) => setSearchParams({ tab: k }, { replace: true }), [setSearchParams]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
+  // The staff table reads ONE server page per render: `usersPage` is what the
+  // pagination footer drives, `usersSearch` is the COMMITTED (debounced)
+  // search string the server narrows by, and the totals come from the
+  // response envelope. `usersLoading` covers a tab entry, a page switch and
+  // the refetch after a mutation.
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersSearch, setUsersSearch] = useState('');
+  const [usersTotalItems, setUsersTotalItems] = useState(0);
+  const [usersTotalPages, setUsersTotalPages] = useState(1);
+  const [usersLoading, setUsersLoading] = useState(false);
+  // Bumped after every successful mutation so the loader effect re-reads the
+  // page from the server instead of trusting the optimistic patch to keep
+  // counts and ordering honest.
+  const [usersRefreshNonce, setUsersRefreshNonce] = useState(0);
+  const reloadUsers = useCallback(() => setUsersRefreshNonce(n => n + 1), []);
+  // Bulk (multi-user) actions. Selection is keyed by user id and persists across
+  // pages of the staff list — an account picked on page one stays selected when
+  // the admin turns to page two and back.
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set());
+  const [bulkAction, setBulkAction] = useState(null);
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
+  // ids the viewer removed from the selection while the confirmation modal was open
+  const [bulkModalExcluded, setBulkModalExcluded] = useState(new Set());
+  // Snapshot of every picked account, keyed by id: {nickname, avatar_url,
+  // role, status}. The `users` state holds only the CURRENT server page,
+  // but the selection persists across pages, so the confirmation modal reads
+  // the snapshot for every picked account — including rows on pages that are
+  // not rendered right now.
+  const [bulkSelectionSnap, setBulkSelectionSnap] = useState({});
+  const [bulkRoleId, setBulkRoleId] = useState('');
+  const [bulkRoleNotifyChange, setBulkRoleNotifyChange] = useState(true);
+  const [bulkDeletePosts, setBulkDeletePosts] = useState(false);
   // The role EDITOR's rows, from GET /admin/roles.
   //
   // `roles` from useAuth is the PUBLIC badge registry — role_id, name, rank,
   // color — because that route is ungated so a signed-out visitor can still render
   // badges. The editor additionally needs permissions, is_system, base_role_id,
   // max_characters_limit and the record id, and those are deliberately not
-  // published to everyone. Loaded here, only when this account may manage roles.
+  // published to everyone. Loaded only when the roles tab is open AND this
+  // account may manage roles.
   const [adminRoles, setAdminRoles] = useState([]);
   // Root handover. Only the account that IS the chief admin sees the button,
   // and the candidates exclude yourself — the server refuses you as your own
   // successor, so offering the choice would be a dialog that cannot succeed.
   const [showTransferRoot, setShowTransferRoot] = useState(false);
   const [transferring, setTransferring] = useState(false);
+  // Candidates for the handover dialog. The staff table itself holds one
+  // server page now, so the dialog loads its own list when it opens — the
+  // successor may sit on any page, and this is a rare root-only action that
+  // can afford the bounded walk the old table paid on every mount.
+  const [transferCandidates, setTransferCandidates] = useState([]);
+  const [transferLoading, setTransferLoading] = useState(false);
   // Whether THIS account holds the chief-admin role, as the SERVER says.
   //
   // It used to be `isChiefAdmin(user?.email, user?.role_id)`, and both halves
@@ -97,13 +125,16 @@ const AdminPage = () => {
   // that answer stays true forever, and the ex-root kept the "Transfer role"
   // button on the NEW root's row — the exact symptom the owner reported.
   //
-  // The role is read from the STAFF LIST first: that list is the very data the
-  // panel renders, it is fetched from the server, and it is what the button
-  // hangs on. `profile.role_id` is the fallback for the moment before the list
-  // arrives — and it is only ever a fallback, because the auth-store snapshot
-  // it starts from is a localStorage copy of the row as it was at SIGN-IN, so
-  // right after a handover it still says "root" until the profile is re-read.
-  const myRoleId = users.find((u) => u.id === user?.uid)?.role_id || profile?.role_id || 'player';
+  // The role of THIS account, as the SERVER says — read from the same /me
+  // projection that feeds `hasPermission` (one 30s poll carries both the
+  // permission set and the role, so the rank gates below and the permission
+  // gates can never disagree about who is asking). The fallbacks cover the
+  // window before the first /me answer lands: `profile` is the server row
+  // AuthProvider re-reads at boot (a rename on another device converges
+  // through it), then the staff page itself, then the auth-store snapshot —
+  // which is only ever a last resort, because it is a localStorage copy of
+  // the row as it was at SIGN-IN.
+  const myRoleId = meRole || users.find((u) => u.id === user?.uid)?.role || profile?.role || 'player';
   const isSelfRoot = myRoleId === CHIEF_ADMIN_ID;
   const [userSearch, setUserSearch] = useState('');
   const [designs, setDesigns] = useState([]);
@@ -257,7 +288,7 @@ const AdminPage = () => {
 
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userForm, setUserForm] = useState({ role_id: '', notifyRoleChange: true });
+  const [userForm, setUserForm] = useState({ role: '', notifyRoleChange: true });
 
   // Confirm Modal State
   const [confirmState, setConfirmState] = useState({
@@ -274,6 +305,15 @@ const AdminPage = () => {
   // not the stale value from when the dialog was opened. Without this, a
   // checked checkbox is ignored and deletePosts is always false (bug O12).
   const deleteUserPostsRef = useRef(false);
+  // Preview of what the "delete all their content" option destroys: how many
+  // topics and posts the purge would remove. The SINGLE delete dialog counts
+  // the one account it names; the bulk dialog sums the WHOLE selection —
+  // including rows picked on other pages. Counts are asked lazily, only
+  // while the option is checked.
+  const [deleteContentCount, setDeleteContentCount] = useState(null);
+  const [deleteContentCountLoading, setDeleteContentCountLoading] = useState(false);
+  const [bulkContentCount, setBulkContentCount] = useState(null);
+  const [bulkContentCountLoading, setBulkContentCountLoading] = useState(false);
 
   // A delete the SERVER would refuse, caught before the request is made.
   //
@@ -295,6 +335,25 @@ const AdminPage = () => {
   const [auditSortDesc, setAuditSortDesc] = useState(true);
   const [auditPage, setAuditPage] = useState(1);
   const AUDIT_PAGE_SIZE = 25;
+
+  // id → nickname for the ids the audit trail itself names. Most entries
+  // record the target's nickname beside its id (target_id/target_nickname,
+  // and the bulk `targets` rows), and the staff list the panel used to scan
+  // for them is one server page now — so the trail itself is the lookup,
+  // not the (partial) table.
+  const auditNicknameIndex = useMemo(() => {
+    const index = {};
+    (auditLogs || []).forEach(log => {
+      const d = log.details || {};
+      if (d.target_id && d.target_nickname) index[d.target_id] = d.target_nickname;
+      if (Array.isArray(d.targets)) {
+        d.targets.forEach(tg => {
+          if (tg?.id && tg?.nickname) index[tg.id] = tg.nickname;
+        });
+      }
+    });
+    return index;
+  }, [auditLogs]);
 
   // Tab permissions check
   const canAccessTab = useCallback((tab) => {
@@ -368,6 +427,288 @@ const AdminPage = () => {
     if (r.id === ADMIN_ROLE_ID && !isRootActor) return false;
     return true;
   });
+
+  // ── Bulk actions ────────────────────────────────────────────────────────
+  //
+  // A row's checkbox renders only when the actor may perform at least one bulk
+  // operation on that user (§3.2): ban/unban (PermBanUsers), delete
+  // (PermDeleteUsers) or role change (canChangeRoleOf). An account can never
+  // be selected for an action on itself — the server repeats this rule.
+
+  const canBulkEditUser = (u) => {
+    if (u.id === user.uid) return false;
+    return (
+      hasPermission(PERMISSIONS.BAN_USERS) ||
+      hasPermission(PERMISSIONS.DELETE_USERS) ||
+      canChangeRoleOf(u.role)
+    );
+  };
+
+  const bulkEditable = users.filter(canBulkEditUser);
+  const bulkAll = bulkEditable.length > 0 && bulkEditable.every(u => selectedUserIds.has(u.id));
+  const bulkAny = bulkEditable.some(u => selectedUserIds.has(u.id));
+
+  // Ids that will actually be acted on: the persistent selection minus anything
+  // the viewer dropped while the confirmation modal was open. The selection
+  // persists across pages (§8.2), so this list can name rows that are NOT in
+  // the current `users` page — the modal title, the chips and the ban/unban
+  // button therefore read each picked account through bulkSelectionSnap and
+  // only fall back to the current page.
+  const effectiveBulkIds = [...selectedUserIds].filter(id => !bulkModalExcluded.has(id));
+  const bulkAnyBanned = effectiveBulkIds.some(id => (
+    (bulkSelectionSnap[id] ?? users.find(x => x.id === id))?.status === 'banned'
+  ));
+
+  // Default role for the bulk role-change modal: the role of the first selected
+  // user when it is one the viewer may assign, otherwise the first assignable role.
+  const defaultBulkRoleId = (() => {
+    // The first picked account may live on another page (selection persists
+    // across pages), so read it through the selection snapshot first.
+    const firstId = effectiveBulkIds[0];
+    const first = bulkSelectionSnap[firstId] ?? users.find(x => x.id === firstId);
+    if (first && assignableRoles.some((r) => r.id === first.role)) return first.role;
+    return assignableRoles[0]?.id || '';
+  })();
+
+  const toggleBulkUser = (id) => {
+    const isRemoving = selectedUserIds.has(id);
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      if (isRemoving) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    // Keep the snapshot in step with the selection: a row picked on ANY page
+    // must stay visible (and reviewable) in the confirmation modal even after
+    // the admin flips to another page of the staff list.
+    setBulkSelectionSnap(prev => {
+      const next = { ...prev };
+      if (isRemoving) {
+        delete next[id];
+      } else {
+        const u = users.find(x => x.id === id);
+        if (u) {
+          next[id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role: u.role, status: u.status };
+        }
+      }
+      return next;
+    });
+  };
+
+  const toggleBulkAll = () => {
+    if (bulkAll) {
+      setSelectedUserIds(new Set());
+      setBulkSelectionSnap({});
+      return;
+    }
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      bulkEditable.forEach(u => next.add(u.id));
+      return next;
+    });
+    setBulkSelectionSnap(prev => {
+      const next = { ...prev };
+      bulkEditable.forEach(u => {
+        next[u.id] = { id: u.id, nickname: u.nickname, avatar_url: u.avatar_url, role: u.role, status: u.status };
+      });
+      return next;
+    });
+  };
+
+  const bulkModalTitle = () => {
+    // The count must cover the WHOLE selection, including rows picked on other
+    // pages — the request will act on every one of them.
+    const count = effectiveBulkIds.length;
+    if (bulkAction === 'role') return t('admin.users.bulk_modal_title_role', { count });
+    if (bulkAction === 'ban') return t('admin.users.bulk_modal_title_ban', { count });
+    if (bulkAction === 'unban') return t('admin.users.bulk_modal_title_unban', { count });
+    return t('admin.users.bulk_modal_title_delete', { count });
+  };
+
+  const handleOpenBulkModal = (action) => {
+    if (effectiveBulkIds.length === 0) return;
+    setBulkAction(action);
+    setBulkModalExcluded(new Set());
+    setBulkRoleId(defaultBulkRoleId);
+    setBulkRoleNotifyChange(true);
+    setBulkDeletePosts(false);
+    setBulkModalOpen(true);
+  };
+
+  const handleCloseBulkModal = () => {
+    setBulkModalOpen(false);
+    setBulkAction(null);
+    setBulkModalExcluded(new Set());
+    setBulkRoleNotifyChange(true);
+    setBulkContentCount(null);
+  };
+
+  const handleRemoveFromBulkSelection = (id) => {
+    setBulkModalExcluded(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    // Drop it from the persistent selection so the row checkbox unchecks too.
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setBulkSelectionSnap(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  // Executes the chosen bulk action over the currently selected ids (minus any
+  // the viewer dropped in the confirmation modal). Optimistic update with
+  // per-target rollback on partial failure, mirroring the single-user handlers.
+  const handleBulkConfirm = async () => {
+    const ids = effectiveBulkIds;
+    if (ids.length === 0) {
+      setBulkModalOpen(false);
+      return;
+    }
+    const before = users;
+    setBulkPending(true);
+    try {
+      let optimistic;
+      if (bulkAction === 'role') {
+        optimistic = users.map(u => (selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)
+          ? { ...u, role: bulkRoleId }
+          : u));
+      } else if (bulkAction === 'ban' || bulkAction === 'unban') {
+        optimistic = users.map(u => (selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)
+          ? { ...u, status: bulkAction === 'ban' ? 'banned' : 'active' }
+          : u));
+      } else {
+        optimistic = users.filter(u => !(selectedUserIds.has(u.id) && !bulkModalExcluded.has(u.id)));
+      }
+      setUsers(optimistic);
+
+      let res;
+      if (bulkAction === 'delete') {
+        res = await bulkDeleteUsers(ids, { delete_posts: bulkDeletePosts });
+      } else if (bulkAction === 'role') {
+        res = await bulkUpdateUsers(ids, { role: bulkRoleId, notify_role_change: bulkRoleNotifyChange });
+      } else {
+        res = await bulkUpdateUsers(ids, { status: bulkAction === 'ban' ? 'banned' : 'active' });
+      }
+
+      await refreshForumState?.(true);
+
+      const failed = (res?.items || []).filter(i => !i.ok);
+      if (failed.length > 0) {
+        const rejected = new Set(failed.map(i => i.id));
+        setUsers(prev => {
+          // Failed targets go back to their pre-action state, and rows that
+          // the optimistic delete removed re-enter the table at the position
+          // they had in `before` — not appended at the bottom of the list.
+          const next = prev.map(u => {
+            if (!rejected.has(u.id)) return u;
+            const old = before.find(o => o.id === u.id);
+            return old || u;
+          });
+          const present = new Set(next.map(u => u.id));
+          const restored = [];
+          before.forEach((u, idx) => {
+            if (rejected.has(u.id) && !present.has(u.id)) restored.push({ u, idx });
+          });
+          if (restored.length === 0) return next;
+          const out = [...next];
+          restored.forEach(({ u, idx }) => {
+            out.splice(Math.min(idx, out.length), 0, u);
+          });
+          return out;
+        });
+        showToast(t('admin.users.toast_bulk_partial', {
+          succeeded: res.succeeded,
+          failed: res.failed,
+        }), 'warning');
+      } else {
+        showToast(t('admin.users.toast_bulk_done', { count: res.processed }), 'success');
+      }
+      // The staff table renders one server page now, so the optimistic patch
+      // above can only ever be a preview: the refetch brings back the server's
+      // page and the honest totals (rows acted on may sit on other pages —
+      // the selection persists across them).
+      reloadUsers();
+      // The request went through (fully or partially): the selection has done
+      // its job. Only a FAILED REQUEST — the catch below — keeps it, so the
+      // admin can retry without re-picking the rows.
+      setSelectedUserIds(new Set());
+      setBulkSelectionSnap({});
+    } catch (err) {
+      setUsers(before);
+      console.error('[bulk users err]', err);
+      showToast(err?.message || t('admin.users.error_bulk'), 'danger');
+    } finally {
+      setBulkPending(false);
+      setBulkModalOpen(false);
+      setBulkAction(null);
+      setBulkModalExcluded(new Set());
+      setBulkRoleId('');
+      setBulkRoleNotifyChange(true);
+      setBulkDeletePosts(false);
+    }
+  };
+
+  // Preview of what the "delete all their content" option destroys: how many
+  // topics and posts the purge would remove. The SINGLE delete dialog counts
+  // the one account it names; the bulk dialog sums the WHOLE selection —
+  // including rows picked on other pages, because effectiveBulkIds covers
+  // them. Counts are asked lazily, only while the option is checked.
+  const deleteCountUid = confirmState.kind === 'delete-user' && confirmState.show ? confirmState.uid : '';
+  useEffect(() => {
+    if (!deleteCountUid || !deleteUserPosts) {
+      setDeleteContentCount(null);
+      return;
+    }
+    let alive = true;
+    setDeleteContentCountLoading(true);
+    fetchUsersContentCounts([deleteCountUid])
+      .then(res => {
+        if (alive) setDeleteContentCount(res?.items?.[0] || null);
+      })
+      .catch(err => {
+        console.error('[delete content count err]', err);
+        if (alive) setDeleteContentCount(null);
+      })
+      .finally(() => {
+        if (alive) setDeleteContentCountLoading(false);
+      });
+    return () => { alive = false; };
+  }, [deleteCountUid, deleteUserPosts]);
+
+  const bulkCountKey = bulkAction === 'delete' ? effectiveBulkIds.join(',') : '';
+  useEffect(() => {
+    const ids = bulkCountKey ? bulkCountKey.split(',') : [];
+    if (bulkAction !== 'delete' || !bulkDeletePosts || ids.length === 0) {
+      setBulkContentCount(null);
+      return;
+    }
+    let alive = true;
+    setBulkContentCountLoading(true);
+    fetchUsersContentCounts(ids)
+      .then(res => {
+        if (!alive) return;
+        const items = res?.items || [];
+        setBulkContentCount({
+          topics: items.reduce((acc, i) => acc + (i.topics || 0), 0),
+          posts: items.reduce((acc, i) => acc + (i.posts || 0), 0),
+        });
+      })
+      .catch(err => {
+        console.error('[bulk content count err]', err);
+        if (alive) setBulkContentCount(null);
+      })
+      .finally(() => {
+        if (alive) setBulkContentCountLoading(false);
+      });
+    return () => { alive = false; };
+  }, [bulkAction, bulkDeletePosts, bulkCountKey]);
 
   useEffect(() => {
     if (!canAccessTab(activeTab)) {
@@ -457,35 +798,122 @@ const AdminPage = () => {
         setSettings(migrated);
       }
     });
-    const unsubCats = subscribeToAllCategories(setCategories);
-    const unsubGroups = subscribeToCategoryGroups(setGroups);
-    // `{ staff: true }` because this screen needs the staff DTO — `status` and
-    // `verified` are served by `GET /api/aerun/admin/users` and by nothing else,
-    // and this is the one caller allowed to ask for it. Without the flag the
-    // public member read would be used here too, and the moderation columns
-    // would render empty.
-    const unsubUsers = subscribeToAllUsers(setUsers, { staff: true });
-    const unsubDesigns = subscribeToDesigns(setDesigns);
-
     return () => {
       unsubSettings();
-      unsubCats();
-      unsubGroups();
-      unsubUsers();
-      unsubDesigns();
     };
   }, []);
 
-  // The editor's role rows, loaded only when this account may manage roles.
+  // ── Per-tab loading ──────────────────────────────────────────────────────
   //
-  // Refetched whenever the permission flips rather than once on mount: the public
-  // registry is enough to render badges, so a moderator who gains or loses
-  // `manage_roles` would otherwise see an editor whose rows never arrived, or one
-  // still showing rows the server now refuses.
+  // Every list below used to subscribe ON MOUNT, whether or not its tab was
+  // open: opening /admin fired the categories read, the FULL staff walk (one
+  // request per /admin/users page) and the designs read at once, even for an
+  // admin who only came to look at Settings. The reads now follow the tab: a
+  // subscription is created when its tab becomes active and dropped — its
+  // connection-restored refetch listener with it — when the admin leaves, so
+  // returning to the tab re-reads from the server rather than showing rows
+  // that were current when the page mounted. None of these poll; each is a
+  // one-shot read per subscription (see src/api/connection.js), so a tab
+  // switch costs exactly the reads that tab needs.
+  useEffect(() => {
+    if (activeTab !== 'categories') return;
+    const unsubCats = subscribeToAllCategories(setCategories);
+    const unsubGroups = subscribeToCategoryGroups(setGroups);
+    return () => {
+      unsubCats();
+      unsubGroups();
+    };
+  }, [activeTab]);
+
+  // The search field holds the LIVE input; the COMMITTED value only changes
+  // 400 ms after the last keystroke, so typing "anna" costs one server read,
+  // not four, and every commit returns the table to page 1.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setUsersSearch(userSearch);
+      setUsersPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [userSearch]);
+
+  // The loader's error path needs `t` and `showToast`, but NEITHER may enter
+  // the dependency array: I18nProvider hands out a fresh `t` on every render
+  // (it is a plain function, not a useCallback), so a dep on it would re-run
+  // this effect — and therefore refetch the page — on every unrelated state
+  // change, the loading toggle included. The ref keeps the latest pair
+  // reachable without becoming part of the effect's contract.
+  const latestRenderRef = useRef({});
+  latestRenderRef.current = { t, showToast };
+
+  // The staff table reads one page per request from `GET /admin/users`.
+  // `perPage` is capped at 30 server-side, so the whole list can no longer
+  // arrive in a client-side walk: every page switch, committed search and
+  // post-action refresh is an explicit read. The caller's own role needs no
+  // read here at all — it rides on the /me projection that feeds
+  // `hasPermission` (see myRoleId above) — so the roles tab, which renders no
+  // rows, issues nothing.
+  useEffect(() => {
+    if (activeTab !== 'users') return;
+    let alive = true;
+    setUsersLoading(true);
+    fetchAdminUsers({ page: usersPage, search: usersSearch })
+      .then(res => {
+        if (!alive) return;
+        // Both sources spell the role `role` — the `users` column and the staff
+        // DTO agree — but the raw staff row still needs the normalisation:
+        // toMembersRow is the one mapper both routes go through, and skipping
+        // it is how every badge once resolved to the Player fallback.
+        const items = (res?.items || []).map(u => withLegacyDates(toMembersRow(u)));
+        const tp = Math.max(1, res?.totalPages ?? 1);
+        setUsers(items);
+        setUsersTotalItems(res?.totalItems ?? 0);
+        setUsersTotalPages(tp);
+        // A page that emptied out under us — rows deleted on the last
+        // page, a search that narrowed — steps back to the last real one
+        // instead of showing an empty table forever.
+        if (items.length === 0 && usersPage > tp) setUsersPage(tp);
+      })
+      .catch(err => {
+        console.error('[admin users page err]', err);
+        if (alive) {
+          setUsers([]);
+          setUsersTotalItems(0);
+          setUsersTotalPages(1);
+          latestRenderRef.current.showToast(
+            latestRenderRef.current.t('admin.users.error_load'),
+            'danger'
+          );
+        }
+      })
+      .finally(() => { if (alive) setUsersLoading(false); });
+    return () => { alive = false; };
+  }, [activeTab, usersPage, usersSearch, usersRefreshNonce]);
+
+  // Designs render on the designs tab, and the Settings tab reads the same
+  // list for the default-design dropdown.
+  useEffect(() => {
+    if (activeTab !== 'designs' && activeTab !== 'settings') return;
+    const unsubDesigns = subscribeToDesigns(setDesigns);
+    return () => unsubDesigns();
+  }, [activeTab]);
+
+  // The editor's role rows, loaded only when the roles tab is open AND this
+  // account may manage roles.
+  //
+  // Both gates, not just the permission one: the editor renders only on the
+  // roles tab, so the read follows it — an admin sitting on Settings no longer
+  // pays for rows nothing was showing. The permission gate stays because the
+  // public registry is enough to render badges: a moderator who gains or loses
+  // `manage_roles` would otherwise see an editor whose rows never arrived, or
+  // one still showing rows the server now refuses. Losing the permission clears
+  // the rows; regaining it (on the roles tab) re-reads them.
   const canManageRoles = hasPermission(PERMISSIONS.MANAGE_ROLES);
   useEffect(() => {
     if (!canManageRoles) {
       setAdminRoles([]);
+      return;
+    }
+    if (activeTab !== 'roles') {
       return;
     }
     let active = true;
@@ -497,7 +925,7 @@ const AdminPage = () => {
         if (active) console.warn('[AdminPage] admin roles failed to load:', err);
       });
     return () => { active = false; };
-  }, [canManageRoles]);
+  }, [activeTab, canManageRoles]);
 
   // After a create/update/delete the editor list is re-read from the admin route.
   // refreshRoles() only refreshes the PUBLIC registry, which no longer carries the
@@ -743,12 +1171,7 @@ const AdminPage = () => {
     // version of the same rule.
     if (!catForm.group_id) {
       revealFirstInvalid([catGroupRef]);
-      showToast(
-        currentLang === 'ru'
-          ? 'Категория должна принадлежать группе. Сначала создайте группу.'
-          : 'The category must belong to a group. Create a group first.',
-        'danger'
-      );
+      showToast(t('admin.categories.group_required'), 'danger');
       return;
     }
 
@@ -787,9 +1210,7 @@ const AdminPage = () => {
         kind: 'category',
         name: resolveTitle(cat?.title),
         items: [],
-        summary: currentLang === 'ru'
-          ? `В этой категории ${topics} тем. Перенесите их в другую категорию или удалите — и только потом удаляйте категорию.`
-          : `This category holds ${topics} topics. Move them to another category or delete them first, then delete the category.`
+        summary: t('admin.categories.category_blocked_topics_summary', { topics })
       });
       return;
     }
@@ -811,9 +1232,7 @@ const AdminPage = () => {
               kind: 'category',
               name: resolveTitle(cat?.title),
               items: [],
-              summary: currentLang === 'ru'
-                ? 'В этой категории появились темы. Перенесите или удалите их, затем удалите категорию.'
-                : 'Topics appeared in this category. Move or delete them, then delete the category.'
+              summary: t('admin.categories.category_blocked_topics_appeared_summary')
             });
             return;
           }
@@ -894,9 +1313,7 @@ const AdminPage = () => {
         items: blocking.map(c => ({
           id: c.id,
           label: resolveTitle(c.title),
-          meta: currentLang === 'ru'
-            ? `${c.topics_count || 0} тем · ${c.posts_count || 0} сообщ.`
-            : `${c.topics_count || 0} topics · ${c.posts_count || 0} posts`
+          meta: t('admin.categories.stats', { topics: c.topics_count || 0, posts: c.posts_count || 0 })
         }))
       });
       return;
@@ -943,6 +1360,10 @@ const AdminPage = () => {
           // (member count, newest member, today's visitors) has to be re-read;
           // this board's local `users` patch does not touch that snapshot.
           await refreshForumState?.(true);
+          // Server truth replaces the optimistic patch: the page may have
+          // shifted (a rejected account is deleted), and the footer counts
+          // come from the next read.
+          reloadUsers();
           showToast(t('admin.users.toast_rejected'), 'success');
         } catch (err) {
           console.error(err);
@@ -960,6 +1381,7 @@ const AdminPage = () => {
       // Approving flips pending -> active, which is what lets the account start
       // showing up in the online list and today's visitors on the public index.
       await refreshForumState?.(true);
+      reloadUsers();
       showToast(t('admin.users.toast_approved'), 'success');
     } catch (err) {
       setUsers(before);
@@ -984,6 +1406,7 @@ const AdminPage = () => {
           // A ban changes who the public stats may list (a banned account leaves
           // today's visitors / online), so re-read the shared snapshot.
           await refreshForumState?.(true);
+          reloadUsers();
           showToast(t('admin.users.toast_banned'), 'success');
         } catch (err) {
           setUsers(before);
@@ -1002,6 +1425,7 @@ const AdminPage = () => {
       // Mirror of the ban path: the account rejoins the population the public
       // stats may list, so the snapshot has to be refreshed.
       await refreshForumState?.(true);
+      reloadUsers();
       showToast(t('admin.users.toast_unbanned'), 'success');
     } catch (err) {
       // Without the revert the row would stay banned in the table after a
@@ -1028,11 +1452,7 @@ const AdminPage = () => {
       const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
       if (authData?.record?.id !== user?.uid) {
         pb.authStore.save(previousToken, previousRecord);
-        throw new Error(
-          currentLang === 'ru'
-            ? 'Этот Google-аккаунт не тот, под которым вы вошли. Проверка отменена.'
-            : 'That Google account is not the one you are signed in as. Confirmation cancelled.'
-        );
+        throw new Error(t('auth.wrong_google_account'));
       }
       return authData;
     } catch (err) {
@@ -1045,23 +1465,48 @@ const AdminPage = () => {
     }
   };
 
+  // The handover dialog needs a candidate list that spans the WHOLE table,
+  // but the staff table itself holds one server page. When the dialog opens,
+  // its own loader walks the pages once — a rare, root-only action that can
+  // afford the bounded walk the old table used to pay on every mount. The
+  // walk is bounded by the server's own totalPages, so it cannot loop.
+  const handleOpenTransferRoot = async () => {
+    setShowTransferRoot(true);
+    setTransferLoading(true);
+    try {
+      const rows = [];
+      let page = 1;
+      for (;;) {
+        const res = await fetchAdminUsers({ page });
+        // Same normalisation as the table: one mapper for both readers, so
+        // the modal cannot receive a row shape the dialog did not expect.
+        const items = (res?.items || []).map(u => withLegacyDates(toMembersRow(u)));
+        rows.push(...items);
+        const totalPages = res?.totalPages ?? 1;
+        if (page >= totalPages || items.length === 0) break;
+        page += 1;
+      }
+      setTransferCandidates(rows);
+    } catch (err) {
+      console.error('[transfer candidates err]', err);
+      setTransferCandidates([]);
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
   const handleTransferRoot = async ({ successorId, password, confirmPhrase }) => {
     setTransferring(true);
     try {
       const res = await transferRoot({ successorId, password, confirmPhrase });
-      showToast(
-        currentLang === 'ru'
-          ? `Роль передана. Новый главный администратор: ${res?.new_root_nickname || ''}`
-          : `Role transferred. New chief admin: ${res?.new_root_nickname || ''}`,
-        'success'
-      );
+      showToast(t('admin.users.transfer_role_success', { new_root_nickname: res?.new_root_nickname || '' }), 'success');
       setShowTransferRoot(false);
       // The caller is now an admin and this page's role assignment is stale —
       // reload so the badge and the button both change.
       window.location.reload();
     } catch (err) {
       showToast(
-        err?.message || (currentLang === 'ru' ? 'Не удалось передать роль' : 'Failed to transfer the role'),
+        err?.message || t('admin.users.transfer_role_failed'),
         'danger'
       );
     } finally {
@@ -1085,6 +1530,7 @@ const AdminPage = () => {
       kind: 'delete-user',
       title: t('admin.users.confirm_delete_title'),
       message: t('admin.users.confirm_delete_message_named', { nickname }),
+      uid,
       onConfirm: async () => {
         try {
           setUsers(prev => prev.filter(u => u.id !== uid));
@@ -1097,6 +1543,7 @@ const AdminPage = () => {
           // dead account until a full refresh re-ran the identity effect.
           // Refresh it here like every other mutation on this page does.
           await refreshForumState?.(true);
+          reloadUsers();
           showToast(t('admin.users.toast_deleted'), 'success');
         } catch (err) {
           console.error(err);
@@ -1112,12 +1559,12 @@ const AdminPage = () => {
     // the refusal in ONE place: the server enforces the same matrix, and a
     // panel that opens a dialog the server will reject is a lie about what is
     // possible.
-    if (!canChangeRoleOf(target?.role_id)) {
+    if (!canChangeRoleOf(target?.role)) {
       showToast(t('admin.users.error_role_forbidden'), 'danger');
       return;
     }
     setEditingUser(target);
-    setUserForm({ role_id: target.role_id || 'player', notifyRoleChange: true });
+    setUserForm({ role: target.role || 'player', notifyRoleChange: true });
     setShowUserModal(true);
   };
 
@@ -1127,7 +1574,7 @@ const AdminPage = () => {
     // account (or of the viewer) can change while the dialog is open, and a
     // request the server will refuse is better never sent than sent and
     // reported as a failure.
-    if (!canChangeRoleOf(editingUser.role_id)) {
+    if (!canChangeRoleOf(editingUser.role)) {
       showToast(t('admin.users.error_role_forbidden'), 'danger');
       setShowUserModal(false);
       return;
@@ -1135,14 +1582,15 @@ const AdminPage = () => {
     // The role being written must also be one this viewer may assign —
     // `root` is transferred, never assigned, and only the chief admin may
     // appoint another administrator.
-    if (!assignableRoles.some((r) => r.id === userForm.role_id)) {
+    if (!assignableRoles.some((r) => r.id === userForm.role)) {
       showToast(t('admin.users.error_role_forbidden'), 'danger');
       return;
     }
     setSaving(true);
     try {
-      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role_id: userForm.role_id } : u));
-      await updateUserRole(editingUser.id, userForm.role_id, user.uid, userForm.notifyRoleChange !== false);
+      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role: userForm.role } : u));
+      await updateUserRole(editingUser.id, userForm.role, user.uid, userForm.notifyRoleChange !== false);
+      reloadUsers();
       showToast(t('admin.users.toast_role_updated'), 'success');
       setShowUserModal(false);
     } catch (err) {
@@ -1787,13 +2235,13 @@ const AdminPage = () => {
 
 
   const renderUsers = () => {
-    // Nickname only. The staff endpoint does not serve email addresses, so an
-    // email search term matches nothing — the previous `u.email` branch here
-    // was already dead against the PocketBase data source, and keeping it
-    // would suggest a capability that does not exist.
-    const filteredUsers = users.filter(u =>
-      u.nickname?.toLowerCase().includes(userSearch.toLowerCase())
-    );
+    // The search runs on the SERVER (`?search=` narrows by nickname before
+    // the page is cut), so `users` already holds exactly the rows this page
+    // renders — a client-side substring pass here would hide rows the server
+    // counted and desync the pagination footer. (An email term matches
+    // nothing server-side for the same reason it matched nothing here: the
+    // staff endpoint does not serve email addresses.)
+    const filteredUsers = users;
 
     return (
       <Card className="shadow-sm border-0">
@@ -1804,16 +2252,81 @@ const AdminPage = () => {
             </InputGroup.Text>
             <Form.Control
               type="text"
-              placeholder={currentLang === 'ru' ? 'Поиск...' : 'Search...'}
+              placeholder={t('common.search_placeholder')}
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
               className="border-start-0 ps-0"
             />
           </InputGroup>
         </Card.Header>
+        {selectedUserIds.size > 0 && (
+          <Card.Body className="py-3 border-bottom">
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <span className="fw-bold text-muted small">
+                {t('admin.users.bulk_selected', { count: selectedUserIds.size })}
+              </span>
+
+              {hasPermission(PERMISSIONS.CHANGE_ROLES) && assignableRoles.length > 0 && (
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  disabled={bulkPending}
+                  onClick={() => handleOpenBulkModal('role')}
+                >
+                  {t('admin.users.bulk_change_role')}
+                </Button>
+              )}
+              {hasPermission(PERMISSIONS.BAN_USERS) && (
+                <Button
+                  variant={bulkAnyBanned ? 'success' : 'danger'}
+                  size="sm"
+                  disabled={bulkPending}
+                  onClick={() => handleOpenBulkModal(bulkAnyBanned ? 'unban' : 'ban')}
+                >
+                  {t(bulkAnyBanned ? 'admin.users.bulk_unban' : 'admin.users.bulk_ban')}
+                </Button>
+              )}
+              {hasPermission(PERMISSIONS.DELETE_USERS) && (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={bulkPending}
+                  onClick={() => handleOpenBulkModal('delete')}
+                >
+                  {t('admin.users.bulk_delete')}
+                </Button>
+              )}
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                disabled={bulkPending}
+                onClick={() => setSelectedUserIds(new Set())}
+              >
+                {t('admin.users.bulk_clear')}
+              </Button>
+            </div>
+          </Card.Body>
+        )}
         <Table hover responsive className="mb-0 overflow-hidden">
           <thead>
             <tr>
+              <th style={{ width: '36px' }}>
+                {bulkEditable.length > 0 && (
+                  <input
+                    type="checkbox"
+                    className="form-check-input mt-1"
+                    ref={(el) => {
+                      // React does not map an `indeterminate` prop onto the DOM
+                      // property (it is not a reflected attribute), so the
+                      // mixed "some selected" state must be set by hand.
+                      if (el) el.indeterminate = bulkAny && !bulkAll;
+                    }}
+                    checked={bulkAll}
+                    onChange={toggleBulkAll}
+                    aria-label={t('admin.users.table_select')}
+                  />
+                )}
+              </th>
               <th>{t('admin.users.table_user')}</th>
               <th>{t('admin.users.table_role')}</th>
               <th>{t('admin.users.table_status')}</th>
@@ -1821,8 +2334,32 @@ const AdminPage = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.map(u => (
+            {filteredUsers.length === 0 && usersLoading ? (
+              <tr>
+                <td colSpan={5} className="text-center text-muted py-4">
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  {t('common.loading')}
+                </td>
+              </tr>
+            ) : filteredUsers.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="text-center text-muted py-4">
+                  {t('admin.users.empty')}
+                </td>
+              </tr>
+            ) : filteredUsers.map(u => (
               <tr key={u.id} className="align-middle">
+                <td style={{ width: '36px' }} className="select-cell">
+                  {canBulkEditUser(u) && (
+                    <input
+                      type="checkbox"
+                      className="form-check-input mt-1"
+                      checked={selectedUserIds.has(u.id)}
+                      onChange={() => toggleBulkUser(u.id)}
+                      aria-label={t('admin.users.table_select')}
+                    />
+                  )}
+                </td>
                 <td>
                   <div className="d-flex align-items-center">
                     {/* identityAvatar instead of a bare resolveAvatarUrl: the old
@@ -1839,7 +2376,7 @@ const AdminPage = () => {
                 </td>
                 <td>
                   <div className="d-flex align-items-center gap-1">
-                    {isChiefAdmin(u.email, u.role_id) ? (
+                    {isChiefAdmin(u.email, u.role) ? (
                       (() => {
                         const visuals = getRoleVisuals('admin', roles);
                         return (
@@ -1861,14 +2398,14 @@ const AdminPage = () => {
                           </Badge>
                         );
                       })()
-                    ) : canChangeRoleOf(u.role_id) ? (
+                    ) : canChangeRoleOf(u.role) ? (
                       <Button
                         variant="link"
                         className="p-0 text-decoration-none d-inline-flex align-items-center gap-2 group border-0 shadow-none"
                         onClick={() => handleOpenUserModal(u)}
                       >
                         {(() => {
-                          const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                          const visuals = getRoleVisuals(u.role || 'player', roles);
                           return (
                             <>
                               <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
@@ -1885,7 +2422,7 @@ const AdminPage = () => {
                          panel does not offer it. The badge is still shown: the
                          role is information, the pencil is a promise. */
                       (() => {
-                        const visuals = getRoleVisuals(u.role_id || 'player', roles);
+                        const visuals = getRoleVisuals(u.role || 'player', roles);
                         return (
                           <Badge bg={visuals.color} className={`role-badge px-2 ${visuals.isLight ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.8rem' }}>
                             {visuals.name}
@@ -1905,7 +2442,7 @@ const AdminPage = () => {
                   {u.status === 'banned' && <Badge bg="danger">{t('admin.users.status_banned')}</Badge>}
                 </td>
                 <td className="text-end">
-                  {!isChiefAdmin(u.email, u.role_id) && u.id !== user.uid && (
+                  {!isChiefAdmin(u.email, u.role) && u.id !== user.uid && (
                     <div className="d-flex flex-wrap gap-2 justify-content-end align-items-center">
                       {u.status === 'pending' && (
                         <>
@@ -1941,7 +2478,7 @@ const AdminPage = () => {
                       )}
                     </div>
                   )}
-                  {isChiefAdmin(u.email, u.role_id) && (
+                  {isChiefAdmin(u.email, u.role) && (
                     /* The protected badge sits where the actions would be. For
                        the CURRENT chief admin it also offers the handover — it is
                        the one account that can act on it at all. */
@@ -1952,10 +2489,10 @@ const AdminPage = () => {
                           variant="outline-danger"
                           size="sm"
                           className="text-nowrap"
-                          onClick={() => setShowTransferRoot(true)}
+                          onClick={handleOpenTransferRoot}
                         >
                           <ShieldAlert size={14} className="me-1" />
-                          {currentLang === 'ru' ? 'Передать роль' : 'Transfer role'}
+                          {t('admin.users.transfer_role_btn')}
                         </Button>
                       )}
                     </div>
@@ -1965,6 +2502,18 @@ const AdminPage = () => {
             ))}
           </tbody>
         </Table>
+        {/* Server-side pagination: the footer mirrors the response envelope —
+            one request renders one page, and `totalItems` is the count of the
+            NARROWED set (the search filter applies before the page is cut).
+            ForumPagination hides itself when there is a single page. */}
+        <Card.Body className="d-flex flex-wrap align-items-center justify-content-between gap-2 border-top py-2">
+          <span className="text-muted small">{t('admin.users.total', { count: usersTotalItems })}</span>
+          <ForumPagination
+            currentPage={usersPage}
+            totalPages={usersTotalPages}
+            onPageChange={setUsersPage}
+          />
+        </Card.Body>
       </Card>
     );
   };
@@ -2329,6 +2878,10 @@ const AdminPage = () => {
     const resolveId = (v) => {
       const usr = users?.find(u => u.id === v);
       if (usr) return usr.nickname || (isRootAdmin ? usr.email : '***');
+      // The trail names most targets twice (id and nickname); the staff
+      // page is not the whole table any more, so the trail resolves what
+      // the current page cannot.
+      if (auditNicknameIndex[v]) return auditNicknameIndex[v];
       const cat = categories?.find(c => c.id === v);
       if (cat) return typeof cat.title === 'object' ? (cat.title[currentLang] || cat.title.en) : cat.title;
       return v.length < 20 ? v : null; // short = readable role id, long = opaque hash
@@ -2340,8 +2893,11 @@ const AdminPage = () => {
       .filter(log => {
         if (auditActionFilter !== 'all' && log.action_type !== auditActionFilter) return false;
         if (!searchLower) return true;
-        const performer = users?.find(u => u.id === log.performer_id);
-        const performerName = (performer?.nickname || (isRootAdmin ? performer?.email : '***') || '').toLowerCase();
+        // The server carries the performer's nickname on every audit row now;
+        // the staff page is only a fallback for rows it happens to hold.
+        const performerName = (log.performerNickname
+          || users?.find(u => u.id === log.performer_id)?.nickname
+          || '').toLowerCase();
         const actionLabel = auditActionLabel(log.action_type).toLowerCase();
         const detailValues = Object.values(log.details || {}).map(v => {
           if (typeof v === 'string') return (resolveId(v) || v).toLowerCase();
@@ -2382,14 +2938,14 @@ const AdminPage = () => {
               <InputGroup size="sm">
                 <InputGroup.Text><Search size={14} /></InputGroup.Text>
                 <Form.Control
-                  placeholder={currentLang === 'ru' ? 'Поиск...' : 'Search...'}
+                  placeholder={t('common.search_placeholder')}
                   value={auditSearch}
                   onChange={e => { setAuditSearch(e.target.value); setAuditPage(1); }}
                 />
               </InputGroup>
             </div>
             <Form.Select size="sm" style={{ width: 'auto' }} value={auditActionFilter} onChange={e => { setAuditActionFilter(e.target.value); setAuditPage(1); }}>
-              <option value="all">{currentLang === 'ru' ? 'Все действия' : 'All actions'}</option>
+              <option value="all">{t('common.all_actions')}</option>
               {allActions.map(a => (
                 <option key={a} value={a}>{auditActionLabel(a)}</option>
               ))}
@@ -2411,8 +2967,9 @@ const AdminPage = () => {
               </thead>
               <tbody>
                 {pageItems.map(log => {
-                  const performer = users.find(u => u.id === log.performer_id);
-                  const performerName = performer ? (performer.nickname || (isRootAdmin ? performer.email : '***')) : 'Unknown User';
+                  const performerName = log.performerNickname
+                    || users.find(u => u.id === log.performer_id)?.nickname
+                    || 'Unknown User';
 
                   return (
                     <tr key={log.id} className="align-middle">
@@ -2463,7 +3020,7 @@ const AdminPage = () => {
                                 );
                               })}
                             <Button variant="link" size="sm" className="p-0 text-decoration-none text-muted" onClick={() => setSelectedAuditLog(log)}>
-                              {currentLang === 'ru' ? 'Подробнее...' : 'View details...'}
+                              {t('admin.audit.view_details')}
                             </Button>
                           </div>
                         ) : <span className="opacity-50">—</span>}
@@ -2482,8 +3039,8 @@ const AdminPage = () => {
 
           <div className="d-flex flex-wrap justify-content-between align-items-center mt-3 gap-2">
             <div className="small text-muted">
-              {currentLang === 'ru' ? `Записей: ${filtered.length}` : `Entries: ${filtered.length}`}
-              {auditSearch || auditActionFilter !== 'all' ? ` (${currentLang === 'ru' ? 'фильтр)' : 'filtered)'}` : ''}
+              {t('admin.audit.entries_count', { count: filtered.length })}
+              {auditSearch || auditActionFilter !== 'all' ? ` (${t('admin.audit.filtered_label')})` : ''}
             </div>
             <ForumPagination
               currentPage={correctedPage}
@@ -2495,7 +3052,7 @@ const AdminPage = () => {
           {hasMoreAudit && (
             <div className="text-center mt-2">
               <Button variant="link" size="sm" onClick={handleLoadMoreAudit} disabled={loadingAudit}>
-                {loadingAudit ? t('common.loading') : (currentLang === 'ru' ? 'Загрузить еще...' : 'Load more entries...')}
+                {loadingAudit ? t('common.loading') : t('admin.audit.load_more')}
               </Button>
             </div>
           )}
@@ -2505,27 +3062,43 @@ const AdminPage = () => {
   };
 
   return (
-    <div id="admin-page" className="admin-page py-4">
-      <div id="admin-breadcrumbs" className="admin-breadcrumbs mb-3">
-        <ForumBreadcrumbs
-          items={[{ label: t('nav.admin'), active: true }]}
-        />
-      </div>
+    <div className="admin-dashboard-layout">
+      {/* Sidebar with Desktop Sticky and Mobile Offcanvas */}
+      <AdminSidebar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+      />
 
-      <header id="admin-header" className="admin-header mb-4">
-        <h1 className="admin-page-title">{t('admin.dashboard')}</h1>
-      </header>
+      {/* Main Content Area */}
+      <div className="admin-dashboard-content">
+        {/* Mobile top toggle bar (visible only on < lg screens) */}
+        <div className="admin-mobile-toggle-bar d-lg-none">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label="Open admin navigation"
+          >
+            <Menu size={18} className="me-2" />
+            <span>{t('admin.dashboard')}</span>
+          </Button>
+          <span className="text-muted small ms-auto fw-medium">
+            {t(`admin.tabs.${activeTab}`)}
+          </span>
+        </div>
 
-      <div className="row admin-layout">
-        <Col lg={3} className="admin-sidebar-column">
-          <AdminSidebar
-            groups={visibleNavGroups}
-            activeTab={activeTab}
-            onSelect={setActiveTab}
+        <div className="admin-dashboard-body p-3 p-md-4">
+          <ForumBreadcrumbs
+            items={[
+              { label: t('nav.admin'), active: false, link: '/admin' },
+              { label: t(`admin.tabs.${activeTab}`), active: true }
+            ]}
           />
-        </Col>
 
-        <Col lg={9} className="admin-content" id="admin-content">
           {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_FORUM) && renderSettings()}
           {activeTab === 'designs' && hasPermission(PERMISSIONS.MANAGE_DESIGNS) && (
             <DesignsTab
@@ -2539,7 +3112,7 @@ const AdminPage = () => {
           {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && renderRoles()}
           {activeTab === 'categories' && hasPermission(PERMISSIONS.MANAGE_CATEGORIES) && renderCategories()}
           {activeTab === 'audit' && hasPermission(PERMISSIONS.VIEW_AUDIT_LOG) && renderAuditLog()}
-        </Col>
+        </div>
       </div>
 
       {/* Role Modal */}
@@ -2917,21 +3490,21 @@ const AdminPage = () => {
                     className={`p-2 rounded d-flex align-items-center mb-1 cursor-pointer role-radio-container`}
                     style={{
                       border: '1px solid',
-                      borderColor: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
-                      background: userForm.role_id === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
+                      borderColor: userForm.role === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
+                      background: userForm.role === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
                       transition: 'all 0.15s ease-in-out',
-                      opacity: userForm.role_id === r.id ? 1 : 0.8
+                      opacity: userForm.role === r.id ? 1 : 0.8
                     }}
-                    onClick={() => setUserForm({ ...userForm, role_id: r.id })}
+                    onClick={() => setUserForm({ ...userForm, role: r.id })}
                     onMouseEnter={(e) => {
-                      if (userForm.role_id !== r.id) {
+                      if (userForm.role !== r.id) {
                         e.currentTarget.style.borderColor = 'rgba(var(--primary-rgb), 0.25)';
                         e.currentTarget.style.opacity = '1';
                         e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.03)';
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (userForm.role_id !== r.id) {
+                      if (userForm.role !== r.id) {
                         e.currentTarget.style.borderColor = 'rgba(var(--primary-rgb), 0.12)';
                         e.currentTarget.style.opacity = '0.8';
                         e.currentTarget.style.background = 'transparent';
@@ -2942,8 +3515,8 @@ const AdminPage = () => {
                       type="radio"
                       id={`role-radio-${r.id}`}
                       name="userRole"
-                      checked={userForm.role_id === r.id}
-                      onChange={() => setUserForm({ ...userForm, role_id: r.id })}
+                      checked={userForm.role === r.id}
+                      onChange={() => setUserForm({ ...userForm, role: r.id })}
                       className="mb-0 me-2"
                     />
                     <label htmlFor={`role-radio-${r.id}`} className="mb-0 cursor-pointer flex-grow-1">
@@ -2966,6 +3539,151 @@ const AdminPage = () => {
               />
             </Form.Group>
           </Form>
+        )}
+      </ForumModal>
+
+      {/* Bulk action confirmation modal — shows every selected nickname and lets
+         the viewer drop anyone they accidentally picked before confirming. */}
+      <ForumModal
+        show={bulkModalOpen}
+        onHide={handleCloseBulkModal}
+        title={bulkAction ? bulkModalTitle() : t('common.confirm_title')}
+        footer={
+          <>
+            <Button
+              variant="outline-secondary"
+              onClick={handleCloseBulkModal}
+              disabled={bulkPending}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleBulkConfirm}
+              disabled={bulkPending || (bulkAction === 'role' && !bulkRoleId) || effectiveBulkIds.length > adminBulkMaxIds}
+            >
+              {bulkPending ? t('common.loading') : t('admin.users.bulk_do')}
+            </Button>
+          </>
+        }
+      >
+        <div className="mb-3">
+          <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">
+            {t('admin.users.bulk_modal_users_label')}
+          </Form.Label>
+          <div className="d-flex flex-wrap gap-2" style={{ maxHeight: '260px', overflowY: 'auto', border: '1px solid rgba(var(--bs-gray-rgb),0.2)', padding: '8px', borderRadius: '6px', background: 'rgba(var(--bs-gray-rgb),0.03)' }}>
+            {effectiveBulkIds.map(id => {
+              // The row may not be on the CURRENT page (selection persists
+              // across pages, §8.2) — the snapshot keeps it visible and
+              // removable here regardless.
+              const u = bulkSelectionSnap[id] || users.find(x => x.id === id);
+              if (!u) return null;
+              return (
+                <div key={id} className="d-flex align-items-center gap-2 px-2 py-1 rounded border shadow-sm" style={{ background: 'rgba(var(--bs-gray-rgb), 0.08)' }}>
+                  <img
+                    src={identityAvatar({ name: u.nickname, avatar: u.avatar_url, size: 24 })}
+                    alt=""
+                    className="rounded-circle"
+                    style={{ width: '24px', height: '24px', objectFit: 'cover' }}
+                  />
+                  <span className="small">{u.nickname || t('admin.users.unnamed', 'Без имени')}</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0 text-danger opacity-60 hover-opacity-100"
+                    onClick={() => handleRemoveFromBulkSelection(id)}
+                    aria-label={t('admin.users.bulk_modal_remove_user')}
+                  >
+                    <span className="visually-hidden">{t('admin.users.bulk_modal_remove_user')}</span>
+                    &times;
+                  </Button>
+                </div>
+              );
+            })}
+            {effectiveBulkIds.length === 0 && (
+              <span className="text-muted small">{t('admin.users.bulk_modal_none_left', 'Никто не выбран')}</span>
+            )}
+          </div>
+        </div>
+
+        {effectiveBulkIds.length > adminBulkMaxIds && (
+          <div className="small text-danger mb-2">
+            {t('admin.users.bulk_modal_too_many', { count: effectiveBulkIds.length })}
+          </div>
+        )}
+
+        {bulkAction === 'role' && (
+          <>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-bold text-secondary small text-uppercase letter-spacing-1">
+                {t('admin.users.bulk_modal_role_label')}
+              </Form.Label>
+              <div className="d-flex flex-column gap-1">
+                {assignableRoles.map(r => (
+                  <div
+                    key={r.id}
+                    className={`p-2 rounded d-flex align-items-center mb-1 cursor-pointer role-radio-container`}
+                    style={{
+                      border: '1px solid',
+                      borderColor: bulkRoleId === r.id ? 'rgba(var(--primary-rgb), 0.4)' : 'rgba(var(--primary-rgb), 0.12)',
+                      background: bulkRoleId === r.id ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
+                      transition: 'all 0.15s ease-in-out',
+                      opacity: bulkRoleId === r.id ? 1 : 0.8
+                    }}
+                    onClick={() => setBulkRoleId(r.id)}
+                  >
+                    <Form.Check
+                      type="radio"
+                      id={`bulk-role-radio-${r.id}`}
+                      name="bulkUserRole"
+                      checked={bulkRoleId === r.id}
+                      onChange={() => setBulkRoleId(r.id)}
+                      className="mb-0 me-2"
+                    />
+                    <label htmlFor={`bulk-role-radio-${r.id}`} className="mb-0 cursor-pointer flex-grow-1">
+                      <Badge bg={r.color || 'primary'} className={`role-badge px-3 ${['warning', 'light', 'management'].includes(r.color) ? 'text-dark' : 'text-white'}`} style={{ fontSize: '0.85rem' }}>
+                        {r.name}
+                      </Badge>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </Form.Group>
+            <Form.Group className="mb-0">
+              <Form.Check
+                type="checkbox"
+                id="bulk-modal-notify-role-change"
+                label={t('admin.users.notify_role_change_label')}
+                checked={bulkRoleNotifyChange !== false}
+                onChange={(e) => setBulkRoleNotifyChange(e.target.checked)}
+              />
+            </Form.Group>
+          </>
+        )}
+
+        {bulkAction === 'delete' && (
+          <Form.Group className="mb-1">
+            <Form.Check
+              type="checkbox"
+              id="bulk-modal-delete-posts"
+              label={t('admin.users.bulk_modal_delete_posts')}
+              checked={bulkDeletePosts}
+              onChange={(e) => setBulkDeletePosts(e.target.checked)}
+            />
+          </Form.Group>
+        )}
+
+        {bulkAction === 'delete' && bulkDeletePosts && (
+          <div className="small text-danger">{t('admin.users.bulk_modal_delete_warning')}</div>
+        )}
+        {bulkAction === 'delete' && bulkDeletePosts && (
+          <div className={bulkContentCountLoading || !bulkContentCount ? 'text-muted small' : 'small text-danger'}>
+            {bulkContentCountLoading
+              ? t('admin.users.delete_posts_counting')
+              : bulkContentCount
+                ? t('admin.users.bulk_delete_posts_count', { topics: bulkContentCount.topics, posts: bulkContentCount.posts })
+                : null}
+          </div>
         )}
       </ForumModal>
 
@@ -3000,6 +3718,15 @@ const AdminPage = () => {
             <p className="text-muted small mb-0">
               {t('admin.users.delete_posts_hint')}
             </p>
+              {deleteUserPosts && (
+                <p className={deleteContentCountLoading || !deleteContentCount ? 'text-muted small mb-0' : 'small text-danger mb-0'}>
+                  {deleteContentCountLoading
+                    ? t('admin.users.delete_posts_counting')
+                    : deleteContentCount
+                      ? t('admin.users.delete_posts_count', { topics: deleteContentCount.topics, posts: deleteContentCount.posts })
+                      : null}
+                </p>
+              )}
           </>
         )}
       </ConfirmModal>
@@ -3013,13 +3740,11 @@ const AdminPage = () => {
         onConfirm={() => { }}
         hideConfirm
         confirmText=""
-        cancelText={currentLang === 'ru' ? 'Понятно' : 'Got it'}
-        title={currentLang === 'ru' ? 'Удаление невозможно' : 'Cannot delete'}
+        cancelText={t('common.got_it')}
+        title={t('common.cannot_delete')}
         message={blockedDelete?.summary || (
           blockedDelete?.kind === 'group'
-            ? (currentLang === 'ru'
-              ? `В группе «${blockedDelete?.name}» ещё есть категории. Удалите их или перенесите в другую группу — после этого группу можно будет удалить.`
-              : `The group “${blockedDelete?.name}” still holds categories. Delete them or move them to another group, then the group can be removed.`)
+            ? t('admin.categories.group_still_holds_categories', { name: blockedDelete?.name })
             : ''
         )}
       >
@@ -3054,23 +3779,27 @@ const AdminPage = () => {
                 <strong>{t('admin.audit.table_date')}:</strong> {selectedAuditLog.created_at ? <Timestamp date={selectedAuditLog.created_at} /> : '...'}
               </div>
 
-              <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
-                <div className="mb-1 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
+              <div className="p-3 rounded border border-secondary border-opacity-25" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-color)' }}>
+                <div className="mb-1 fw-bold" style={{ color: 'var(--text-color)', textTransform: 'uppercase', fontSize: '0.7rem' }}>
                   {t('admin.audit.table_performer')}
                 </div>
                 <div>
                   {(() => {
+                    // Server-carried nickname first (every audit row now has
+                    // one), then the staff page for rows it happens to hold.
                     const p = users.find(u => u.id === selectedAuditLog.performer_id);
-                    return p ? `${p.nickname || (isRootAdmin ? p.email : '***')}` : 'Unknown User';
+                    return selectedAuditLog.performerNickname
+                      || (p ? `${p.nickname || (isRootAdmin ? p.email : '***')}` : '')
+                      || 'Unknown User';
                   })()}
                 </div>
-                <div className="text-muted" style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                <div style={{ color: 'var(--secondary-color)', fontSize: '0.75rem', fontFamily: 'monospace' }}>
                   ID: {selectedAuditLog.performer_id}
                 </div>
               </div>
 
-              <div className="p-3 bg-light rounded border border-secondary border-opacity-25">
-                <div className="mb-2 text-muted fw-bold" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
+              <div className="p-3 rounded border border-secondary border-opacity-25" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text-color)' }}>
+                <div className="mb-2 fw-bold" style={{ color: 'var(--text-color)', textTransform: 'uppercase', fontSize: '0.7rem' }}>
                   Raw Details
                 </div>
                 {Object.entries(selectedAuditLog.details || {}).map(([k, v]) => {
@@ -3081,11 +3810,16 @@ const AdminPage = () => {
                   if (v && typeof v === 'string' && v.length > 20) {
                     const tgt = users.find(u => u.id === v);
                     if (tgt) resolvedName = tgt.nickname || (isRootAdmin ? tgt.email : '***');
+                    // Not on the current staff page: the trail itself named
+                    // most targets twice (id and nickname).
+                    if (!resolvedName && auditNicknameIndex[v]) {
+                      resolvedName = auditNicknameIndex[v];
+                    }
                   }
 
                   return (
                     <div key={k} className="mb-2 last-child-mb-0">
-                      <div className="fw-bold">{label} {k !== label && <span className="text-muted fw-normal">({k})</span>}:</div>
+                      <div className="fw-bold" style={{ color: 'var(--text-color)' }}>{label} {k !== label && <span style={{ color: 'var(--secondary-color)' }} className="fw-normal">({k})</span>}:</div>
                       <div className="ms-2">
                         {k === 'changes' && typeof v === 'object' ? (
                           <div className="d-flex flex-column gap-1 mt-1">
@@ -3093,8 +3827,8 @@ const AdminPage = () => {
                               const cLabel = t(`admin.audit.fields.${ck}`) || ck;
                               const renderValue = (val) => typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val);
                               return (
-                                <div key={ck} className="p-2 rounded bg-white border border-secondary border-opacity-10">
-                                  <div className="fw-bold small">{cLabel}:</div>
+                                <div key={ck} className="p-2 rounded border border-secondary border-opacity-10" style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-color)' }}>
+                                  <div className="fw-bold small" style={{ color: 'var(--text-color)' }}>{cLabel}:</div>
                                   <div className="d-flex align-items-center gap-2 small flex-wrap">
                                     <span className="text-danger text-decoration-line-through opacity-75">{renderValue(cv.from)}</span>
                                     <ArrowRightLeft size={10} className="text-muted" />
@@ -3107,7 +3841,7 @@ const AdminPage = () => {
                         ) : (
                           <>
                             {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
-                            {resolvedName && <span className="text-muted ms-2">({resolvedName})</span>}
+                            {resolvedName && <span style={{ color: 'var(--secondary-color)' }} className="ms-2">({resolvedName})</span>}
                           </>
                         )}
                       </div>
@@ -3116,7 +3850,7 @@ const AdminPage = () => {
                 })}
               </div>
 
-              <div className="text-muted text-end" style={{ fontSize: '0.65rem', fontFamily: 'monospace' }}>
+              <div style={{ color: 'var(--secondary-color)', fontSize: '0.65rem', fontFamily: 'monospace', textAlign: 'right' }}>
                 Log ID: {selectedAuditLog.id}
               </div>
             </div>
@@ -3188,9 +3922,9 @@ const AdminPage = () => {
       <TransferRootModal
         show={showTransferRoot}
         onHide={() => setShowTransferRoot(false)}
-        candidates={users}
+        candidates={transferCandidates}
         onConfirm={handleTransferRoot}
-        busy={transferring}
+        busy={transferring || transferLoading}
         currentNickname={user?.displayName || user?.name || ''}
         currentUserId={user?.uid || ''}
         onReauthWithGoogle={handleReauthForTransfer}
